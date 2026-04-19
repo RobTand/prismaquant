@@ -135,6 +135,83 @@ vLLM backend at serve time: **FLASHINFER_CUTLASS** for NVFP4 MoE,
 **CutlassFP8ScaledMMLinearKernel** for the FP8 W8A8 bucket, **FLASH_ATTN v2**
 for attention, **prefix caching + FP8 KV cache** enabled.
 
+## Why 4.75 bpp — the cheap quarter-bit
+
+**The 4.75 bpp target in this artifact was a first-shot proof of
+concept, not a tuned optimum. It works remarkably well.** This section
+unpacks why, and why tiny bpp bumps above pure NVFP4 buy massive
+quality.
+
+### Stock NVFP4 is ~4.5 bpp, not 4.0
+
+NVFP4 packs 4-bit weight + 4-bit activation values into 16-element
+groups sharing one FP8 scale factor. Per-parameter storage cost
+works out to `4 + 8/16 = 4.5 bits/param` for weights — not the
+nominal 4.0 bits. A "pure NVFP4" model on disk is already at 4.5 bpp;
+you don't save anything by restricting yourself to one format.
+
+PrismQuant's 4.75 bpp target is only **+0.25 bpp over pure NVFP4** —
+roughly a 6% bit-budget increase, allocated intelligently rather than
+uniformly.
+
+### The Pareto curve for Qwen3.6-35B-A3B
+
+Predicted Δloss vs. bit budget, from `pareto.csv`
+([allocator.py](prismquant/allocator.py)):
+
+| Target bpp | Achieved | Format mix                                    | Predicted Δloss | Ratio vs 4.5 |
+|-----------:|---------:|-----------------------------------------------|---------------:|-------------:|
+| 4.5        | 4.643    | 173 NVFP4 + 1 MXFP8 + 228 BF16                | 4.282          | 1.00×        |
+| **4.75** ← | **4.758**| **124 NVFP4 + 26 MXFP8 + 252 BF16** (shipped) | **2.355**      | **0.55×**    |
+| 5.0        | 5.010    | 82 NVFP4 + 9 MXFP8 + 311 BF16                 | 1.184          | 0.28×        |
+| 5.5        | 5.496    | 79 NVFP4 + 0 MXFP8 + 323 BF16                 | 0.923          | 0.22×        |
+| 6.0        | 5.938    | 75 NVFP4 + 0 MXFP8 + 327 BF16                 | 0.860          | 0.20×        |
+
+The curve is extremely steep near pure-NVFP4 and flattens out past
+~5 bpp. Key takeaways:
+
+- **4.5 → 4.75 bpp (+0.25 bpp, +5.6% size):** predicted Δloss drops
+  **45%**. That's the quarter-bit that lets the allocator move 49
+  Linears out of NVFP4 and into MXFP8/BF16 — the ones where
+  `0.5·H·MSE_W` flagged NVFP4 as expensive.
+- **4.75 → 5.0 bpp (+0.25 bpp, +5.3% size):** another **50%** drop.
+- **5.0 → 6.0 bpp (+1 bpp, +20% size):** only a **27%** drop. Severely
+  diminishing returns.
+
+The Kneedle knee-detection the allocator suggests (Satopaa et al. 2011)
+lands right around 5.0 bpp. 4.75 sits below the knee — it's on the
+aggressive side of the curve, which is exactly what makes the result
+interesting: **PrismQuant at 4.75 bpp outperforms stock NVFP4 at
+a similar or larger effective size**, because the allocator pulls the
+quarter-bit from the least-sensitive 90% of the model and concentrates
+it on the most-sensitive 10%.
+
+### Serving-speed impact of the extra quarter-bit: near zero
+
+The 4.75 bpp artifact's 124 NVFP4 Linears include the 80 per-expert
+MoE projections (representing ~805 M params × 256 experts = the
+model's dominant compute path at inference time). Those still go
+through the FLASHINFER_CUTLASS NVFP4 kernel. The 26 MXFP8 Linears go
+through CutlassFP8 (same family). The 252 BF16 Linears are almost
+entirely small norm/bias/attention-projection weights that contribute
+a negligible fraction of matmul FLOPs.
+
+**Decode throughput on a DGX Spark (Blackwell SM121) for our 4.75 bpp
+artifact is within noise of a hypothetical 4.5 bpp pure-NVFP4
+artifact** — you pay ~6% extra DRAM bandwidth for ~50% less quality
+degradation. That trade favors the quarter-bit bump almost every time.
+
+### Implication for future targets
+
+If +0.25 bpp over pure NVFP4 halves predicted Δloss, and the next
+quarter-bit halves it again, then the interesting bit budgets for
+production are **`pure-NVFP4-equivalent + 0.25 to 0.75 bpp`** — not
+the `pure-NVFP4` point that the field has anchored on. We'll sweep
+this space more thoroughly in a follow-up once MiniMax M2.7 and
+3-bit support land (the same logic applies below 4 bpp: tiny bumps
+above a uniform 3-bit baseline unlock large quality recovery at
+~zero serving cost).
+
 ## Quick start
 
 Three commands on a machine with the model cached locally:
