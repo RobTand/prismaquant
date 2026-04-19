@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prismquant"
+version = "0.1.0"
+description = "Mixed-precision quantization allocator for LLMs: every layer refracts into a different format based on its sensitivity."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Rob Tand" },
+]
+keywords = ["llm", "quantization", "nvfp4", "mxfp8", "fisher", "moe", "mtp", "compressed-tensors", "vllm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.6",
+    "numpy>=1.26",
+    "safetensors>=0.4",
+    "transformers>=5.0",
+    "datasets>=3.0",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+serve = ["vllm>=0.19"]
+test = ["pytest>=8"]
+
+[project.urls]
+Repository = "https://github.com/RobTand/PrismQuant"
+
+[tool.setuptools.packages.find]
+include = ["prismquant*"]
+
+[tool.setuptools.package-data]
+prismquant = ["*.sh"]
