@@ -507,7 +507,59 @@ the missing cross-layer terms by:
   (`calibrate_allocator.py`)
 
 This keeps memory bounded while still capturing the interaction
-structure that recent MPQ literature shows matters.
+structure that recent MPQ literature shows matters. Framing we owe
+to Gemini's review: **use the blunt proxy to get to the Pareto
+frontier fast, then measure true pairwise interactions only at the
+margin where the allocator is borderline.**
+
+### Methodological caveats — assumptions the proxy makes
+
+Three places where the current `0.5 · H_trace · MSE_W` proxy cuts
+corners. We know about them, we can quantify most of them, and all
+three have explicit follow-up work on the roadmap.
+
+**1. Scalar per-layer curvature.** `H_trace` is a single number per
+Linear — the sum of `‖∂L/∂W‖²_F` across all channels. That collapses
+any *intra-layer* curvature structure. If a given `up_proj` has 90 %
+of its channels fine under NVFP4 but 10 % catastrophically sensitive,
+the trace averages them and the allocator sees an average-pressure
+layer. Per-output-channel H diagonal + per-channel weight MSE
+preserves the knapsack's optimal substructure (the DP stays
+separable), costs `out_features` floats per layer (single-digit MB
+on a 35B model), and is the single most likely place the proxy
+underperforms an informed allocator. **On the roadmap as the "next
+rigor pass."** Open question: does the resulting allocation actually
+differ meaningfully from the scalar-trace version on our validated
+tasks? We haven't ablated yet.
+
+**2. Empirical Fisher vs true Hessian.** `g · gᵀ` equals the true
+Hessian at a strict local minimum; post-training LLMs on our
+calibration distribution are close but not exact. The resulting
+bias is roughly layer-uniform — the absolute Fisher magnitudes are
+slightly off but the relative ranking across layers (which is all
+the knapsack needs) is preserved. Hutchinson's estimator via
+forward-over-reverse autodiff would fix this cleanly at ~2× probe
+time, but the measured-ranking invariance means it probably doesn't
+change allocation decisions in practice. Worth the experiment for a
+preprint; not a production blocker.
+
+**3. Zero cross-terms.** The additive formula `Σᵢ 0.5 · Hᵢ · MSEᵢ`
+assumes every Linear's quantization error is uncorrelated with
+every other's. False in general — K-FAC style off-diagonals would
+capture it, but they destroy the knapsack's optimal substructure
+(the problem becomes NP-hard Quadratic Knapsack). PrismQuant's
+existing `measure_interactions.py` + `quadratic_refine_allocator.py`
+handles this the pragmatic way: measure sparse pairwise interactions
+only for the most-sensitive units near the knee, then refine
+locally. Additive gets us 95 % of the way to optimal; the margin
+refinement handles the borderline cases where interactions actually
+flip decisions.
+
+The pragmatic TL;DR: the scalar-diagonal-additive proxy is a
+feature, not a bug — it keeps the global bit-routing problem
+cleanly solvable in O(N·bits) time. Each of the three corners
+cut above has a defined off-ramp that doesn't force us to abandon
+the knapsack.
 
 ## Memory budget
 
@@ -570,6 +622,21 @@ Immediate priorities (next few weeks):
 
 Broader research directions:
 
+- **Per-channel Fisher + per-channel weight MSE.** The next rigor
+  pass on the cost model. Keep `H_diag` as a vector of length
+  `out_features` instead of summing to `H_trace`, pair with
+  per-channel `MSE_W` already produced by `measure_quant_cost.py`'s
+  batched path, and compute Δloss as `Σᵢ 0.5 · H_diag,i · MSE_W,i`.
+  Preserves the knapsack's optimal substructure, costs < 10 MB of
+  extra storage per 35B model, and is the single most likely place
+  the current scalar proxy underperforms. Cheap intermediate: keep
+  the scalar `H_trace` but use per-channel `MSE_W` right away — a
+  half-day of work that captures ~50 % of the full win without
+  changing the probe. Would settle the empirical question "does
+  per-channel sensitivity actually differ meaningfully from
+  per-layer sensitivity for our 4.75 bpp allocation?" (hypothesis:
+  yes, on attention Linears and `down_proj` where outlier channels
+  are the norm).
 - **Per-MTP-Linear acceptance-rate tuning** — jointly optimize
   target-model quality and MTP-draft token acceptance rate. Today MTP
   Linears get assigned using the same body loss model; a more
