@@ -216,6 +216,65 @@ class ModelProfile(ABC):
         Default: identity. Multimodal architectures override."""
         return model_qname
 
+    def live_to_recipe_name(self, live_qname: str) -> str:
+        """Map a live HF-module qname (from `named_modules()` on the
+        loaded export-time model) to the allocator-recipe qname (from
+        the probe's text-only staged model).
+
+        Multimodal architectures where AutoModelForCausalLM returns
+        the `ForConditionalGeneration` sibling class get live names
+        like `model.language_model.layers.X.*`, but the probe ran
+        on a text-only staging that produced recipe keys like
+        `model.layers.X.*`. This method strips the language_model
+        infix so the allocator's assignment dict lookups succeed.
+
+        Default: identity. Multimodal architectures override."""
+        return live_qname
+
+    def on_disk_expert_qname(self, live_hf_qname: str) -> str:
+        """Reserved for future profile-specific expert-tensor name
+        rewrites. Default: identity. Currently unused by the export
+        path (vLLM's architecture-specific weight-loaders handle
+        `.moe.` insertion themselves via substring remaps in their
+        own `load_weights` code), but kept as an extension point for
+        architectures where vLLM's own remap is absent."""
+        return live_hf_qname
+
+    def split_packed_experts_for_format(self, fmt: str) -> bool:
+        """Whether to split packed MoE experts into per-expert
+        per-projection 2D tensors on disk for the given format.
+
+        vLLM's MoE weight loaders vary:
+
+          - Qwen 3.5/3.6 + compressed-tensors NVFP4: expects per-expert
+            per-projection 2D tensors with compressed suffixes
+            (`experts.0.gate_proj.weight_packed` etc.). We must split.
+
+          - Gemma 4 + BF16: expects 3D packed checkpoint tensors
+            (`experts.gate_up_proj`, `experts.down_proj`) and its own
+            `_weight_iterator` explodes them into per-expert shards
+            for FusedMoE. We must NOT split — a pre-split checkpoint
+            lands under a name (`...experts.0.gate_proj`) that vLLM's
+            remap turns into `...moe.experts.0.gate_proj`, which then
+            misses the 3D-only explode path and fails to route onto
+            the fused `w13_weight` / `w2_weight` params.
+
+        Default: split for every non-BF16 format (NVFP4, MXFP8, etc.)
+        and keep packed for BF16. Profiles can override when their
+        vLLM loader has different expectations — for instance, Qwen
+        3.5/3.6 would be free to split even at BF16, though there's
+        no known quality or compatibility reason to.
+
+        When False, the exporter emits a single 3D tensor named by
+        the packed param's live HF qname (e.g.
+        `model.language_model.layers.0.experts.gate_up_proj`). vLLM's
+        own remap inserts `.moe.` and explodes.
+
+        When True, the exporter splits along the row dim (gate/up
+        halves for `gate_up_proj`) and emits per-expert 2D tensors
+        named `<parent>.{expert_id}.{proj_name}.weight[.suffix]`."""
+        return fmt != "BF16"
+
     # ------------------------------------------------------------
     # Source passthrough + text-only staging
     # ------------------------------------------------------------
@@ -230,6 +289,30 @@ class ModelProfile(ABC):
         config for probe/cost model loading (e.g. `vision_config` on
         multimodal models so `AutoModelForCausalLM` can load)."""
         return ("vision_config", "audio_config", "speech_config")
+
+    def stage_text_only_promote_inner_model_type(self) -> bool:
+        """When lifting `text_config` keys to top-level during
+        text-only staging, should `text_config.model_type` (e.g.
+        `gemma4_text`) shadow the outer `model_type` (e.g. `gemma4`)?
+
+        This depends on which HF config class the family's
+        `<Arch>ForCausalLM` expects:
+
+        - Gemma 4: `Gemma4ForCausalLM.config: Gemma4TextConfig` — the
+          text-specific config class. We must promote `gemma4_text`
+          so `AutoConfig` loads `Gemma4TextConfig` and the flat text
+          schema's `hidden_size` / `num_hidden_layers` etc. all line
+          up with the text checkpoint tensors.
+
+        - Qwen 3.5 MoE: `Qwen3_5MoeForCausalLM.config: Qwen3_5MoeConfig`
+          — the multimodal-umbrella config class (with nested
+          `text_config`). We must KEEP the outer `qwen3_5_moe` so
+          `AutoConfig` loads `Qwen3_5MoeConfig` and the nested
+          text_config gets wired in normally.
+
+        Default False (Qwen-like). Families that take a standalone
+        text config class override to True."""
+        return False
 
     # ------------------------------------------------------------
     # Extended shard regexes (incremental_probe)

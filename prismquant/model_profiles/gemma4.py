@@ -53,13 +53,13 @@ class Gemma4Profile(ModelProfile):
 
     def per_expert_moe_regex(self) -> str | None:
         # vLLM constructs per-expert Linears under
-        # language_model.model.layers.X.mlp.experts.Y.{gate|up|down}_proj
-        # — same convention as Qwen3.5 MoE. Dense Gemma 4 variants
-        # (31b-it) simply won't have any MoE tensors, so this regex
-        # matches nothing on disk and the allocator produces a single
-        # format group.
+        # language_model.model.layers.X.moe.experts.Y.{gate|up|down}_proj
+        # — Gemma 4 uses `moe` as the MoE block name (not `mlp.experts`
+        # like Qwen3.5). Dense Gemma 4 variants (31b-it) simply won't
+        # have any MoE tensors, so this regex matches nothing on disk
+        # and the allocator produces a single format group.
         return (r"re:^language_model[.]model[.]layers[.][0-9]+"
-                r"[.]mlp[.]experts[.][0-9]+[.](gate|up|down)_proj$")
+                r"[.]moe[.]experts[.][0-9]+[.](gate|up|down)_proj$")
 
     # ------------------------------------------------------------
     # Source passthrough (multimodal towers stay BF16 for v1)
@@ -81,6 +81,42 @@ class Gemma4Profile(ModelProfile):
 
     def visual_config_key(self) -> str:
         return "vision_config"
+
+    # `on_disk_expert_qname` intentionally NOT overridden: vLLM's
+    # `Gemma4TextModel.load_weights` already runs a substring remap
+    # `.experts.{id}.{proj}` → `.moe.experts.{id}.{proj}` (see
+    # `vllm.model_executor.models.gemma4.py:1554`). Emitting the HF
+    # naming (no `.moe.`) lets vLLM's own remap path land the per-expert
+    # tensors correctly on `FusedMoE.w13_weight` / `w2_weight`.
+    # Overriding to inject `.moe.` ourselves produces a double `.moe.`
+    # after vLLM's remap runs — verified experimentally.
+
+    def live_to_recipe_name(self, live_qname: str) -> str:
+        """Gemma 4 loads as Gemma4ForConditionalGeneration at export
+        time (multimodal) with body Linears at
+        `model.language_model.layers.X.*`. The probe-time recipe uses
+        flat `model.layers.X.*` from text-only staging.
+
+        Additionally, the live multimodal model wraps MoE experts
+        in a `moe.` submodule (`...layers.X.moe.experts.Y.*`) while
+        the HF text-only class exposes them directly
+        (`...layers.X.experts.Y.*`). Strip both prefixes to match the
+        recipe keys."""
+        if live_qname.startswith("model.language_model."):
+            live_qname = "model." + live_qname[len("model.language_model."):]
+        # Collapse `...layers.X.moe.experts...` → `...layers.X.experts...`
+        # to match the text-only probe's module tree.
+        import re as _re
+        live_qname = _re.sub(r"(\.layers\.\d+)\.moe\.experts",
+                             r"\1.experts", live_qname)
+        return live_qname
+
+    def stage_text_only_promote_inner_model_type(self) -> bool:
+        # `Gemma4ForCausalLM.config: Gemma4TextConfig`. We need
+        # `model_type: gemma4_text` on the staged config so AutoConfig
+        # picks Gemma4TextConfig (and its flat schema matches the
+        # text-only checkpoint tensors' shapes).
+        return True
 
     def visual_layer_prefix(self) -> str:
         # Gemma 4's vision tower uses the HF naming

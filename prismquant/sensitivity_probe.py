@@ -86,21 +86,47 @@ def stage_text_only(model_path: str) -> str:
                ("vision_config", "text_config", "audio_config", "speech_config")):
         return str(src)
 
+    # Profile-driven: ask the registered ModelProfile which config keys
+    # to strip and whether to promote `text_config.model_type`.
+    try:
+        from .model_profiles import detect_profile
+        profile = detect_profile(str(src))
+    except Exception:
+        profile = None
+    strip_keys = (list(profile.stage_text_only_strip_keys())
+                  if profile is not None
+                  else ["vision_config", "audio_config", "speech_config",
+                        "image_token_id", "video_token_id",
+                        "vision_start_token_id", "vision_end_token_id"])
+    promote_inner_mt = (profile.stage_text_only_promote_inner_model_type()
+                        if profile is not None else False)
+
     import tempfile
-    for k in ["vision_config", "audio_config", "speech_config",
-              "image_token_id", "video_token_id",
-              "vision_start_token_id", "vision_end_token_id"]:
+    for k in strip_keys:
         cfg.pop(k, None)
     if "text_config" in cfg:
         tc = cfg.pop("text_config")
         for k, v in tc.items():
             if k == "model_type":
-                # Don't shadow the top-level model_type with the inner
-                # sub-schema name (e.g. qwen3_5_moe_text). The outer
-                # model_type is what AutoModel registries match against.
+                # Some families (Gemma 4) want the inner model_type
+                # (e.g. gemma4_text) to take over so AutoConfig
+                # resolves to the text-specific config class. Others
+                # (Qwen 3.5 MoE) want the outer model_type to stay
+                # because the ForCausalLM class is annotated with the
+                # multimodal-umbrella config. Profile decides.
+                if promote_inner_mt:
+                    cfg[k] = v
                 continue
-            if k not in cfg:
-                cfg[k] = v
+            # text_config OVERRIDES top-level for the text-only staged
+            # model. Multimodal models (Gemma 4, some Qwen variants)
+            # carry their multimodal-combined hidden_size / num_layers /
+            # head_dim at the top level and the text-specific values in
+            # text_config. Loading weights needs the text_config values
+            # since that's what the text checkpoint tensors were trained
+            # with. If we didn't override, the loader sees mismatched
+            # shapes ([2304] top-level vs [2816] actual weights) and
+            # either raises or silently zero-inits the mismatched params.
+            cfg[k] = v
     archs = cfg.get("architectures", [])
     if archs:
         cfg["architectures"] = [
@@ -902,7 +928,16 @@ def load_calibration(tokenizer, source: str, n_samples: int,
             try:
                 texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
             except Exception:
-                continue
+                # Tokenizer has no chat template (base / pt models).
+                # Join plain message contents — good enough as calibration.
+                parts = []
+                for m in msgs:
+                    if isinstance(m, dict):
+                        c = m.get("content")
+                        if isinstance(c, str) and c:
+                            parts.append(c)
+                if parts:
+                    texts.append("\n\n".join(parts))
             if len(texts) >= n_samples * 8:
                 break
     else:
@@ -952,7 +987,19 @@ def load_calibration(tokenizer, source: str, n_samples: int,
                 try:
                     texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
                 except Exception:
-                    continue
+                    # Tokenizer has no chat template (base / pt models)
+                    # or the template rejects this message shape.
+                    # Fall back to concatenating the message contents —
+                    # good enough as calibration text, decouples the
+                    # probe from the tokenizer's chat-template state.
+                    parts = []
+                    for m in msgs:
+                        if isinstance(m, dict):
+                            c = m.get("content")
+                            if isinstance(c, str) and c:
+                                parts.append(c)
+                    if parts:
+                        texts.append("\n\n".join(parts))
             else:
                 v = row.get(schema)
                 if isinstance(v, str) and v.strip():

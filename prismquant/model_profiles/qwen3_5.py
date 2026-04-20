@@ -146,6 +146,15 @@ class Qwen3_5Profile(ModelProfile):
     # ------------------------------------------------------------
     # Naming remap for compressed-tensors scheme dispatch
     # ------------------------------------------------------------
+    def live_to_recipe_name(self, live_qname: str) -> str:
+        """Qwen 3.5/3.6 loads as `Qwen3_5MoeForConditionalGeneration`
+        which exposes body Linears as `model.language_model.layers.X.*`.
+        The allocator's recipe keys come from the text-only probe so
+        they're `model.layers.X.*`. Strip the `language_model.` infix."""
+        if live_qname.startswith("model.language_model."):
+            return "model." + live_qname[len("model.language_model."):]
+        return live_qname
+
     def to_vllm_internal_name(self, name: str) -> str:
         """Apply vLLM's HF→vLLM name remap (`hf_to_vllm_mapper`) for
         body/visual/lm_head, with two arch-specific overrides:
