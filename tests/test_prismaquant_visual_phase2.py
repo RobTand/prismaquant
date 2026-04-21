@@ -119,11 +119,15 @@ class TestSyntheticMultimodalCalibration(unittest.TestCase):
     shape triples without needing a real processor."""
 
     def test_synthetic_returns_n_triples_with_pixel_and_ids(self):
-        triples = _synthetic_multimodal_calibration_samples(
+        samples = _synthetic_multimodal_calibration_samples(
             processor=None, n_samples=4, max_text_len=16,
         )
-        self.assertEqual(len(triples), 4)
-        for pixel_values, input_ids, labels in triples:
+        self.assertEqual(len(samples), 4)
+        for sample in samples:
+            self.assertIsInstance(sample, dict)
+            pixel_values = sample["pixel_values"]
+            input_ids = sample["input_ids"]
+            labels = sample["labels"]
             self.assertEqual(pixel_values.dim(), 4)
             self.assertEqual(pixel_values.shape[0], 1)   # batch
             self.assertEqual(pixel_values.shape[1], 3)   # RGB

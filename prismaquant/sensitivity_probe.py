@@ -196,9 +196,35 @@ def stage_multimodal(model_path: str) -> str:
 # ---------------------------------------------------------------------------
 # Multimodal calibration loader — Phase 2 visual Fisher
 # ---------------------------------------------------------------------------
+def _samples_from_encoding(
+    enc: dict,
+    max_text_len: int,
+) -> dict | None:
+    """Turn a processor(...) output dict into a forward-kwargs dict
+    suitable for `model(**sample)`. Preserves every tensor the processor
+    emitted (including vision-specific keys like `image_grid_thw`,
+    `video_grid_thw`, `attention_mask`) and adds `labels` = `input_ids`.
+
+    Returns None on malformed encodings (missing `pixel_values` or
+    `input_ids`).
+    """
+    pixel_values = enc.get("pixel_values")
+    input_ids = enc.get("input_ids")
+    if pixel_values is None or input_ids is None:
+        return None
+    if input_ids.size(-1) > max_text_len:
+        input_ids = input_ids[..., :max_text_len]
+    sample: dict = {}
+    for k, v in dict(enc).items():
+        if isinstance(v, torch.Tensor):
+            sample[k] = v[..., :max_text_len] if k == "input_ids" else v
+    sample["labels"] = input_ids.clone()
+    return sample
+
+
 def _synthetic_multimodal_calibration_samples(
     processor, n_samples: int, max_text_len: int,
-) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+) -> list[dict]:
     """Offline synthetic fallback: n small PIL images + short captions
     fed through the processor. Exercises the visual Fisher path without
     needing network access. Real COCO/HF datasets replace this when
@@ -207,6 +233,13 @@ def _synthetic_multimodal_calibration_samples(
     Each sample is a 224x224 RGB image with a deterministic flat color
     (enough to make patch-embed + attention gradients non-trivial) and
     a short caption matched to its index.
+
+    Returns a list of `dict` — each contains every tensor the processor
+    emitted (`pixel_values`, `input_ids`, `attention_mask`, `image_grid_thw`,
+    etc. — schema-dependent) plus a `labels` key. Caller unpacks as
+    `model(**sample)`. Was originally a `(pixel_values, input_ids, labels)`
+    tuple, which lost vision-specific kwargs; Qwen3.6's multimodal
+    forward requires `image_grid_thw`.
     """
     try:
         from PIL import Image
@@ -222,7 +255,7 @@ def _synthetic_multimodal_calibration_samples(
         "a mountain lake reflecting tall peaks",
         "a busy city street at night",
     ]
-    out: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    out: list[dict] = []
     for i in range(n_samples):
         size = 224
         img = Image.new("RGB", (size, size),
@@ -232,46 +265,52 @@ def _synthetic_multimodal_calibration_samples(
         caption = captions[i % len(captions)]
         prompt = f"<|image|>Describe: {caption}"
         # Processor may be None (e.g. tests without a real processor) —
-        # in that case we build the triple directly as a rank-4 pixel
-        # tensor + a random integer id sequence. This keeps the
-        # calibration shape + dtype contract intact for unit tests.
+        # in that case we build the sample directly as a rank-4 pixel
+        # tensor + a random integer id sequence.  No vision-specific
+        # kwargs (this path is only exercised by unit tests, not by
+        # real multimodal Fisher probes).
         if processor is None:
             import torch as _t
             pixel_values = _t.rand(1, 3, size, size, dtype=_t.float32)
-            # Tiny fake id sequence (ids in [1, 100] so both labels and
-            # vocab-index masking behave sensibly even without a real
-            # tokenizer).
             input_ids = _t.randint(1, 100, (1, min(max_text_len, 16)),
                                    dtype=_t.long)
-            out.append((pixel_values, input_ids, input_ids.clone()))
+            out.append({
+                "pixel_values": pixel_values,
+                "input_ids": input_ids,
+                "labels": input_ids.clone(),
+            })
             continue
+        # Prefer apply_chat_template — it inserts the correct
+        # number of image-placeholder tokens to match what the vision
+        # tower will emit (critical for Qwen3.5/3.6, MiniMax VL,
+        # Gemma-3 VL: they use `<|vision_start|>...<|vision_end|>` or
+        # similar markers that a literal `<|image|>` prompt doesn't
+        # produce, leading to "Image features and image tokens do not
+        # match" errors at forward time). Fall back to raw
+        # `processor(text=, images=)` only if chat template isn't
+        # implemented on this processor.
         enc = None
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image", "image": img},
+                {"type": "text", "text": f"Describe: {caption}"},
+            ],
+        }]
         try:
-            enc = processor(text=prompt, images=img, return_tensors="pt")
+            enc = processor.apply_chat_template(
+                messages, add_generation_prompt=False,
+                tokenize=True, return_dict=True, return_tensors="pt")
         except Exception:
-            # Some processors need chat-template messages. Try that shape.
             try:
-                messages = [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": img},
-                        {"type": "text", "text": f"Describe: {caption}"},
-                    ],
-                }]
-                enc = processor.apply_chat_template(
-                    messages, add_generation_prompt=False,
-                    tokenize=True, return_dict=True, return_tensors="pt")
+                enc = processor(text=prompt, images=img, return_tensors="pt")
             except Exception:
                 continue
         if enc is None:
             continue
-        pixel_values = enc.get("pixel_values")
-        input_ids = enc.get("input_ids")
-        if pixel_values is None or input_ids is None:
-            continue
-        if input_ids.size(1) > max_text_len:
-            input_ids = input_ids[:, :max_text_len]
-        out.append((pixel_values, input_ids, input_ids.clone()))
+        sample = _samples_from_encoding(enc, max_text_len)
+        if sample is not None:
+            out.append(sample)
     return out
 
 
@@ -280,9 +319,9 @@ def load_multimodal_calibration(
     dataset_name: str,
     n_samples: int,
     max_text_len: int,
-) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-    """Build a list of (pixel_values, input_ids, labels) triples for
-    multimodal Fisher calibration.
+) -> list[dict]:
+    """Build a list of forward-kwargs dicts for multimodal Fisher
+    calibration.
 
     `processor` is an `AutoProcessor` — usually loaded via
     `AutoProcessor.from_pretrained(model_path, trust_remote_code=True)`.
@@ -298,12 +337,17 @@ def load_multimodal_calibration(
         stub on any load failure (offline, rate-limited, schema
         mismatch, etc.) so the probe always makes forward progress.
 
+    Each returned sample is a `dict` of tensors suitable for
+    `model(**sample)`. Contains every tensor the processor emitted
+    (pixel_values, input_ids, image_grid_thw, attention_mask, ...)
+    plus a `labels` key. Caller pops `labels` before unpacking.
+
     Labels default to `input_ids.clone()` (teacher-forced CE on the
     joint image+text sequence). Processors that emit `-100` sentinel
     ids for masked positions are handled by the probe's CE backward —
     not by this loader.
     """
-    triples: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    triples: list[dict] = []
     if dataset_name == "synthetic":
         return _synthetic_multimodal_calibration_samples(
             processor, n_samples, max_text_len)
@@ -328,13 +372,10 @@ def load_multimodal_calibration(
                 enc = processor(text=prompt, images=img, return_tensors="pt")
             except Exception:
                 continue
-            pixel_values = enc.get("pixel_values")
-            input_ids = enc.get("input_ids")
-            if pixel_values is None or input_ids is None:
+            sample = _samples_from_encoding(enc, max_text_len)
+            if sample is None:
                 continue
-            if input_ids.size(1) > max_text_len:
-                input_ids = input_ids[:, :max_text_len]
-            triples.append((pixel_values, input_ids, input_ids.clone()))
+            triples.append(sample)
             if len(triples) >= n_samples:
                 break
     except Exception as e:
@@ -1659,15 +1700,22 @@ def run_multimodal_visual_probe_pass(
 
     model.train()
     t_fwd = t_bwd = 0.0
-    for i, (pixel_values, input_ids, labels) in enumerate(triples):
-        pixel_values = pixel_values.to(exec_device, dtype=dtype)
-        input_ids = input_ids.to(exec_device)
-        labels = labels.to(exec_device)
+    for i, sample in enumerate(triples):
+        # Move every tensor to exec_device; pixel_values specifically
+        # gets cast to `dtype` (bf16 / fp16) because vision backbones
+        # are mixed-precision-friendly. Labels stay as long ids.
+        kwargs: dict[str, torch.Tensor] = {}
+        for k, v in sample.items():
+            if not isinstance(v, torch.Tensor):
+                continue
+            target_dtype = dtype if k == "pixel_values" else None
+            kwargs[k] = (v.to(exec_device, dtype=target_dtype)
+                         if target_dtype is not None
+                         else v.to(exec_device))
+        labels = kwargs.pop("labels", kwargs.get("input_ids"))
         t0 = time.time()
         try:
-            out = model(pixel_values=pixel_values,
-                        input_ids=input_ids,
-                        labels=labels)
+            out = model(**kwargs, labels=labels)
         except Exception as e:
             print(f"[probe/mm] sample {i}: forward raised {type(e).__name__}: "
                   f"{e}; skipping", flush=True)
