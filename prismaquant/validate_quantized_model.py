@@ -34,6 +34,25 @@ Use from CI or pre-ship hook:
 Exit 0 = all checks passed. Exit 1 = at least one check failed
 (prints a report to stdout + writes `--report` markdown).
 
+**Workflow for artifacts with speculative decoding (MTP / Eagle):**
+run the validator twice, against two different serves.
+
+  1. Serve WITHOUT `--speculative-config`, run validator → the
+     perplexity check produces target-model NLL and a meaningful
+     verdict. MTP acceptance is skipped because no drafts fire.
+
+  2. Re-serve WITH `--speculative-config`, run validator → the
+     perplexity check will refuse to run (it detects spec-decode
+     via /metrics and fails with a diagnostic rather than silently
+     return draft-model NLL). MTP acceptance runs and reports
+     position-0 accept rate.
+
+The model is "ship-ready" only if both passes succeed. This is
+awkward but honest: vLLM offers no target-model logprob path
+while spec-decode is active, and faking perplexity from the draft
+model has already burned one false-FAIL in the session that spawned
+this file.
+
 Design notes:
   - We use vLLM's OpenAI API for logprobs via /v1/completions
     with `echo=True`, which echoes the prompt tokens with their
@@ -148,6 +167,27 @@ def _health_ok(base_url: str) -> bool:
         return False
 
 
+def _spec_decode_on(base_url: str) -> bool:
+    """True iff the vLLM serve was launched with --speculative-config.
+
+    Detection: vLLM registers the `vllm:spec_decode_*` Prometheus
+    counters + gauges at startup whenever spec-decode is configured,
+    even before any drafts run. Their literal presence in /metrics is
+    a config-time signal.
+
+    Critical for the perplexity check: with spec-decode on, vLLM
+    routes /v1/completions echo+logprobs through the DRAFT model, so
+    the NLL values returned are the 1-layer MTP head's logprobs,
+    NOT the target model's. Those are not usable for target-model
+    perplexity measurement. Detecting the condition lets the
+    validator refuse to silently mis-report."""
+    try:
+        text = _get_text(f"{base_url}/metrics")
+    except Exception:
+        return False
+    return "vllm:spec_decode" in text
+
+
 def wait_for_ready(base_url: str, max_seconds: float = 900.0,
                    poll_interval: float = 5.0) -> bool:
     """Block until the vLLM server responds to /health with 200."""
@@ -224,7 +264,29 @@ def check_perplexity(base_url: str, model_name: str,
     has "quality pockets" (see 27B session: 2/10 prompts normal, 8/10
     catastrophic at NLL~10). Mean alone would have flagged, but p99
     is the more diagnostic signal.
+
+    **Hard-fails with a diagnostic if spec-decode is detected on the
+    serve.** vLLM routes /v1/completions echo+logprobs through the
+    draft model when speculative decoding is configured — the NLL
+    numbers you'd get back are the 1-layer MTP head's logprobs, not
+    the target model's. Running perplexity checks against those is
+    like measuring a book's quality by its typos in the copyright
+    page. The only reliable fix today is a separate vLLM serve
+    without --speculative-config; see the module docstring for the
+    standard two-serve workflow.
     """
+    if _spec_decode_on(base_url):
+        return CheckResult(
+            name="perplexity",
+            passed=False,
+            detail=("spec-decode is configured on this vLLM serve — /v1/"
+                    "completions echo+logprobs would return DRAFT model "
+                    "NLL, not target. Re-serve WITHOUT --speculative-config "
+                    "for the perplexity check (use a second serve for MTP "
+                    "acceptance). Reports from a spec-decode-on eval have "
+                    "false-failed healthy models in the past."),
+            metrics={"spec_decode_detected": True, "skipped": True},
+        )
     per_prompt_avg_nll: list[float] = []
     total_tokens = 0
     total_nll = 0.0

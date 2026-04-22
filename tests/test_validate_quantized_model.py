@@ -194,19 +194,95 @@ def test_mtp_acceptance_skipped_when_no_drafts(fake_server):
 
 
 # ----------------------------------------------------------------
+# Spec-decode detection (prevents the "validator returns draft-model
+# NLL and false-fails a healthy model" trap).
+# ----------------------------------------------------------------
+
+def test_perplexity_refuses_to_run_when_spec_decode_detected(fake_server):
+    """If spec-decode is on, /v1/completions echo+logprobs returns
+    draft-model logprobs, not target. The validator must refuse to
+    produce a verdict on those numbers — it must fail with a clear
+    instruction rather than silently mis-reporting."""
+    # Healthy logprobs under the hood — the validator should NOT even
+    # consult them, because spec-decode detection short-circuits.
+    _FakeVLLMHandler.mode = "healthy"
+    _FakeVLLMHandler.metrics_payload = (
+        '# HELP vllm:spec_decode_num_drafts_total ...\n'
+        'vllm:spec_decode_num_drafts_total{engine="0"} 42.0\n'
+    )
+    r = check_perplexity(fake_server, "any", max_ppl=25, max_p99_nll=6,
+                         max_mean_nll=3)
+    assert not r.passed, "spec-decode on must fail the perplexity check"
+    assert "spec-decode" in r.detail.lower() or "speculative" in r.detail.lower()
+    assert r.metrics.get("spec_decode_detected") is True
+
+
+def test_perplexity_runs_normally_without_spec_decode(fake_server):
+    """Sanity: when /metrics has no vllm:spec_decode_* entries, the
+    perplexity check runs its usual logic (healthy data passes)."""
+    _FakeVLLMHandler.mode = "healthy"
+    _FakeVLLMHandler.metrics_payload = (
+        '# some other vllm metric\n'
+        'vllm:request_success_total 10.0\n'
+    )
+    r = check_perplexity(fake_server, "any", max_ppl=25, max_p99_nll=6,
+                         max_mean_nll=3)
+    assert r.passed, f"healthy+no-spec-decode should pass: {r.detail}"
+
+
+def test_perplexity_refuses_even_when_metrics_mostly_empty(fake_server):
+    """Just the /metrics endpoint containing a single spec_decode
+    counter is enough to suspend the check — don't require non-zero
+    values or any other context."""
+    _FakeVLLMHandler.mode = "healthy"
+    _FakeVLLMHandler.metrics_payload = (
+        'vllm:spec_decode_num_drafts_created{engine="0"} 1776869756.0\n'
+    )
+    r = check_perplexity(fake_server, "any", max_ppl=25, max_p99_nll=6,
+                         max_mean_nll=3)
+    assert not r.passed
+
+
+# ----------------------------------------------------------------
 # End-to-end
 # ----------------------------------------------------------------
 
-def test_end_to_end_healthy_report(fake_server):
+def test_end_to_end_healthy_report_no_spec_decode(fake_server):
+    """The no-spec-decode pass: perplexity check runs + passes,
+    mtp_acceptance is cleanly skipped (no drafts recorded)."""
+    _FakeVLLMHandler.mode = "healthy"
+    _FakeVLLMHandler.metrics_payload = (
+        '# healthy serve without spec-decode\n'
+        'vllm:request_success_total 0.0\n'
+    )
+    rep = run_validation(fake_server, "any", wait_seconds=5)
+    assert rep.passed
+    names = [c.name for c in rep.checks]
+    assert "perplexity" in names and "mtp_acceptance" in names
+    # Spec-decode check skipped cleanly
+    mtp = next(c for c in rep.checks if c.name == "mtp_acceptance")
+    assert mtp.passed and "skipping" in mtp.detail.lower()
+
+
+def test_end_to_end_spec_decode_forces_perplexity_skip(fake_server):
+    """The spec-decode pass: perplexity check refuses with a
+    diagnostic (it'd return draft-model NLL), but mtp_acceptance
+    runs normally. Caller is expected to have run the no-spec-decode
+    pass separately for perplexity."""
     _FakeVLLMHandler.mode = "healthy"
     _FakeVLLMHandler.metrics_payload = (
         'vllm:spec_decode_num_drafts_total{engine="0"} 100.0\n'
         'vllm:spec_decode_num_accepted_tokens_per_pos_total{position="0"} 85.0\n'
     )
     rep = run_validation(fake_server, "any", wait_seconds=5)
-    assert rep.passed
-    names = [c.name for c in rep.checks]
-    assert "perplexity" in names and "mtp_acceptance" in names
+    # Perplexity SHOULD fail because spec-decode was detected.
+    assert not rep.passed
+    ppl = next(c for c in rep.checks if c.name == "perplexity")
+    assert not ppl.passed
+    assert ppl.metrics.get("spec_decode_detected") is True
+    # MTP acceptance still runs and passes.
+    mtp = next(c for c in rep.checks if c.name == "mtp_acceptance")
+    assert mtp.passed
 
 
 def test_end_to_end_bimodal_fails(fake_server):
