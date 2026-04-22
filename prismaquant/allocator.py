@@ -129,29 +129,49 @@ def fused_siblings(name: str, profile=None) -> tuple[tuple[str, ...], str] | Non
 
 def promote_moe_pair(assignment: dict[str, str],
                      format_rank: dict[str, int]) -> dict[str, str]:
-    """Couple MoE packed-expert projections within a layer to share a format.
+    """Couple MoE expert projections within a layer to share a format.
 
-    vLLM's FusedMoE layer requires `experts.gate_up_proj` and
-    `experts.down_proj` to use identical quantization schemes — it
-    raises 'All MoE projections need to have same quantization scheme
-    but found multiple' at load time otherwise. The per-layer MoE
-    super-candidate aggregation (`_aggregate_packed_moe_experts`) picks
-    them independently, so the allocator can end up with L46 gate_up=
-    NVFP4 / L46 down=BF16 and produce an unservable artifact.
+    vLLM's FusedMoE layer requires that all projections it fuses share
+    one quantization scheme, else `get_moe_method` raises 'All MoE
+    projections need to have same quantization scheme but found
+    multiple' at load time. Two naming conventions show up in
+    practice and both need promotion:
 
-    This post-pass groups `(layer_prefix, "experts")` across both
-    projections and promotes the lower-rank sibling to match the
-    higher. Idempotent; safe to stack with `promote_fused`."""
+    1. Post-fusion form (Qwen3 and similar): `experts.gate_up_proj` +
+       `experts.down_proj` — a single pair per layer.
+    2. Per-expert pre-fusion form (MiniMax, Mixtral-style): each
+       expert keeps its own `experts.N.w1`, `experts.N.w2`,
+       `experts.N.w3` (or `gate_proj` / `up_proj` / `down_proj`) — one
+       triple per (layer, expert) pair, thousands per model.
+
+    Pattern (1) is detected via a projection-name match at the leaf
+    (`gate_up_proj|down_proj`). Pattern (2) is detected via the
+    `\\.experts\\.\\d+\\.(w[123]|gate_proj|up_proj|down_proj)$` shape,
+    which groups by `(layer_prefix, expert_idx)`. Both patterns are
+    promoted to the highest-rank format in each group. Idempotent;
+    safe to stack with `promote_fused`."""
     out = dict(assignment)
-    # Group by (everything up to .experts., projection-family) so
-    # gate_up_proj and down_proj of the same layer end up together.
-    groups: dict[str, list[str]] = {}
+    groups: dict[tuple[str, str], list[str]] = {}
+
+    # Pattern 1: post-fusion (.experts.gate_up_proj / .experts.down_proj)
+    post_fused_re = re.compile(r"^(.+\.experts)\.(gate_up_proj|down_proj)$")
+    # Pattern 2: per-expert pre-fusion (.experts.N.<leaf>)
+    per_expert_re = re.compile(
+        r"^(.+\.experts)\.(\d+)\.(w1|w2|w3|gate_proj|up_proj|down_proj)$"
+    )
+
     for name in assignment:
-        m = re.search(r"^(.+\.experts)\.(gate_up_proj|down_proj)$", name)
-        if not m:
+        m = post_fused_re.match(name)
+        if m:
+            groups.setdefault((m.group(1), "__post__"), []).append(name)
             continue
-        prefix = m.group(1)
-        groups.setdefault(prefix, []).append(name)
+        m = per_expert_re.match(name)
+        if m:
+            # One group per (experts-prefix, expert_idx). Collapsing
+            # across expert indices would over-promote; each expert's
+            # triple is an independent fused unit.
+            groups.setdefault((m.group(1), m.group(2)), []).append(name)
+
     for members in groups.values():
         if len(members) < 2:
             continue
@@ -226,7 +246,9 @@ def solve_with_promotion(
     *,
     no_fused_promote: bool = False,
     overshoot_tolerance: float = 0.01,
-    max_iters: int = 6,
+    max_iters: int = 40,
+    stall_threshold: float = 1e-4,
+    stall_grace: int = 3,
     profile=None,
 ) -> tuple[dict[str, str] | None, float]:
     """Solve the allocation, promote fused siblings, and re-solve with a
@@ -238,7 +260,21 @@ def solve_with_promotion(
     is to reserve some headroom in the DP for promotion. We make this
     explicit and adaptive: if promotion overshoots the requested target
     by more than `overshoot_tolerance` bits/param, halve the overshoot
-    by tightening the next solve, and repeat up to `max_iters` times.
+    by tightening the next solve, and repeat.
+
+    The loop exits when ANY of:
+      * overshoot ≤ `overshoot_tolerance` (success — budget respected)
+      * `stall_grace` consecutive iterations with |Δovershoot| < `stall_threshold`
+        (no meaningful progress — further iteration can't help)
+      * `max_iters` hard cap
+      * DP returns infeasible (target tightened below achievable floor)
+
+    Stall detection lets us iterate "as long as each step is buying
+    something" rather than giving up after a fixed count. On dense
+    models the naive halving converges quickly (2-5 iters); on
+    highly-coupled MoE models it sometimes oscillates and needs
+    patience. The stall guard prevents infinite loops when the
+    coupling structure makes the target unreachable.
 
     Returns (assignment, achieved_bits). Assignment is None if even the
     untightened solve was infeasible.
@@ -246,7 +282,9 @@ def solve_with_promotion(
     tightened = float(target_bits)
     last_assign: dict[str, str] | None = None
     last_achieved = float("nan")
-    for _ in range(max_iters):
+    prev_overshoot = float("inf")
+    stall_count = 0
+    for iteration in range(max_iters):
         assign = solve_allocation(stats, candidates, tightened, bit_precision)
         if assign is None:
             return last_assign, last_achieved
@@ -264,8 +302,21 @@ def solve_with_promotion(
         overshoot = achieved - target_bits
         if overshoot <= overshoot_tolerance:
             return assign, achieved
-        # Tighten by half the overshoot. This converges geometrically:
-        # if the first solve overshot by 0.1b, second by ~0.05b, etc.
+
+        # Stall detection: if two consecutive iterations make
+        # <stall_threshold bpp of progress on overshoot, we've hit the
+        # structural floor (usually promotion coupling). Further
+        # tightening just churns.
+        if abs(prev_overshoot - overshoot) < stall_threshold:
+            stall_count += 1
+            if stall_count >= stall_grace:
+                return assign, achieved
+        else:
+            stall_count = 0
+        prev_overshoot = overshoot
+
+        # Tighten by half the overshoot. Converges geometrically on
+        # well-behaved problems.
         tightened -= overshoot / 2.0
         if tightened <= 0:
             break
@@ -586,6 +637,169 @@ def expand_moe_assignment(assignment: dict[str, str],
             members = stats_ext[name].get("_fused_members", [])
             for m_ in members:
                 out[m_] = fmt
+        else:
+            out[name] = fmt
+    return out
+
+
+_FUSED_SIBLING_MARKER = ".__siblings__."
+
+
+def aggregate_fused_siblings(
+    stats: dict,
+    costs: dict,
+    formats: list[fr.FormatSpec],
+    candidates: dict[str, list[Candidate]],
+    profile,
+    calibrated_gains: dict[str, float] | None = None,
+) -> tuple[dict, dict, dict]:
+    """Pre-aggregate fused-sibling groups (qkv_proj, gate_up_proj, etc.)
+    into single DP items so the knapsack sees the coupling constraint
+    directly.
+
+    vLLM's fused-tensor loader requires q/k/v (and gate/up) to share one
+    quantization scheme. Historically PrismaQuant solved per-Linear then
+    ran `promote_fused` as a post-pass — which inflates achieved bits
+    whenever the DP picked different formats for siblings, and needed a
+    tightening retry loop to chase the budget. Aggregating siblings at
+    build time eliminates the inflation entirely: the DP just can't pick
+    mixed-sibling solutions because the option doesn't exist.
+
+    Mirrors `aggregate_moe_candidates` numerically — the super-Linear's
+    summed Δloss at format f equals Σ_i predicted_dloss(h_i, mse_{i,f}).
+    Inverting via `effective_mse = sum_pred / (0.5 · sum_h)` lets
+    build_candidates' closed-form formula reproduce sum_pred exactly.
+
+    Single-member groups (Linears that don't fuse with anything — o_proj,
+    down_proj, norms, lm_head) pass through unchanged.
+
+    Returns (stats_ext, costs_ext, candidates_ext). MoE expert aggregation
+    is expected to have run FIRST so this only sees non-expert candidates.
+    """
+    if profile is None:
+        return stats, costs, candidates
+
+    gains = calibrated_gains or {}
+
+    # Partition candidate keys by their fused-sibling group key.
+    grouped: dict[str, list[str]] = {}
+    ungrouped: list[str] = []
+    for name in candidates:
+        # Already-aggregated MoE super-Linears use `.__fused__.` and must
+        # NOT be re-grouped. Pass them through.
+        if ".__fused__." in name:
+            ungrouped.append(name)
+            continue
+        try:
+            key = profile.fused_sibling_group(name)
+        except Exception:
+            key = None
+        if key is None:
+            ungrouped.append(name)
+            continue
+        grouped.setdefault(key, []).append(name)
+
+    # Single-member "groups" also pass through — aggregating one Linear
+    # into a super-Linear buys nothing.
+    for key in list(grouped.keys()):
+        if len(grouped[key]) < 2:
+            ungrouped.extend(grouped.pop(key))
+
+    if not grouped:
+        return stats, costs, candidates
+
+    stats_ext = {n: stats[n] for n in ungrouped}
+    costs_ext = {n: costs.get(n, {}) for n in ungrouped}
+    candidates_ext = {n: candidates[n] for n in ungrouped}
+
+    for key, members in grouped.items():
+        members = sorted(members)
+        # `key` is a string like "model.layers.3.self_attn.qkv_proj" or
+        # "mtp.layers.0.mlp.gate_up_proj" — use it as the super-Linear name
+        # with a disambiguator so we can recognize it at expansion time.
+        safe_key = key.replace(".", "__")
+        super_name = f"{members[0].rsplit('.', 1)[0]}{_FUSED_SIBLING_MARKER}{safe_key}"
+
+        # Summed statistics.
+        n_params = sum(stats[m]["n_params"] for m in members)
+        sum_h = sum(stats[m]["h_trace"] for m in members)
+        d_out = int(stats[members[0]].get("out_features", 0) or 0)
+        d_in = int(stats[members[0]].get("in_features", 0) or 0)
+
+        stats_ext[super_name] = {
+            "h_trace": sum_h,
+            "h_trace_raw": sum(stats[m].get("h_trace_raw", 0.0) for m in members),
+            "h_w2_sum": sum(stats[m].get("h_w2_sum", 0.0) for m in members),
+            "w_max_abs": max(stats[m].get("w_max_abs", 0.0) for m in members),
+            "w_norm_sq": sum(stats[m].get("w_norm_sq", 0.0) for m in members),
+            "n_params": n_params,
+            "in_features": d_in,
+            "out_features": d_out,
+            "n_tokens_seen": sum(stats[m].get("n_tokens_seen", 0) for m in members),
+            "_fused_siblings": members,
+            "_memory_bytes_by_format": {},
+        }
+
+        # Per-format: sum_pred = Σ predicted_dloss(h_i, mse_{i,f}).
+        super_cost = {}
+        for spec in formats:
+            missing = [m for m in members
+                       if spec.name not in costs.get(m, {})
+                       or "error" in costs.get(m, {}).get(spec.name, {})]
+            if missing:
+                super_cost[spec.name] = {"error": "partial"}
+                continue
+            sum_pred = 0.0
+            for m in members:
+                c = costs[m][spec.name]
+                if "predicted_dloss" in c:
+                    sum_pred += float(c["predicted_dloss"])
+                else:
+                    h_i = stats[m]["h_trace"]
+                    sum_pred += 0.5 * h_i * float(c.get("weight_mse", 0.0))
+            effective_mse = sum_pred / (0.5 * sum_h) if sum_h > 0 else 0.0
+            super_cost[spec.name] = {
+                "weight_mse": effective_mse,
+                "predicted_dloss": sum_pred,
+            }
+        costs_ext[super_name] = super_cost
+
+        # Candidate list for the super-Linear.
+        cands = []
+        for spec in formats:
+            entry = super_cost.get(spec.name)
+            if entry is None or "error" in entry:
+                continue
+            total_bytes = 0
+            for m in members:
+                shape = _shape_from_stats(stats[m])
+                total_bytes += spec.memory_bytes_for_shape(shape)
+            bits_per_param = 8.0 * total_bytes / max(n_params, 1)
+            stats_ext[super_name]["_memory_bytes_by_format"][spec.name] = total_bytes
+            gain = float(gains.get(spec.name, 1.0))
+            predicted = entry["predicted_dloss"] * gain
+            cands.append(Candidate(
+                fmt=spec.name,
+                bits_per_param=bits_per_param,
+                memory_bytes=total_bytes,
+                predicted_dloss=max(predicted, 0.0),
+            ))
+        if cands:
+            candidates_ext[super_name] = cands
+
+    return stats_ext, costs_ext, candidates_ext
+
+
+def expand_fused_sibling_assignment(assignment: dict[str, str],
+                                    stats_ext: dict) -> dict[str, str]:
+    """Replace `.__siblings__.` super-Linear assignments with per-member
+    assignments (all members sharing the super-Linear's format)."""
+    out = {}
+    for name, fmt in assignment.items():
+        if _FUSED_SIBLING_MARKER in name:
+            members = stats_ext[name].get("_fused_siblings", [])
+            for m in members:
+                out[m] = fmt
         else:
             out[name] = fmt
     return out
@@ -918,6 +1132,14 @@ def main():
     ap.add_argument("--pareto-csv", required=True, help="Output Pareto CSV")
     ap.add_argument("--no-fused-promote", action="store_true",
                     help="Skip fused-projection sibling promotion")
+    ap.add_argument("--no-fused-aggregation", action="store_true",
+                    help="Disable pre-DP aggregation of fused siblings "
+                         "(qkv_proj / gate_up_proj). Falls back to the "
+                         "legacy promote_fused post-pass with tightening "
+                         "retries. Pre-aggregation is strictly better "
+                         "for hitting the target bit budget exactly on "
+                         "dense models; use this flag only for "
+                         "back-compat experiments.")
     ap.add_argument("--enforce-family-coherence", action="store_true",
                     help="Error (instead of warn) if the format set contains "
                          "multiple candidates for the same bit tier (e.g. "
@@ -1089,6 +1311,20 @@ def main():
         moe_groups = sum(1 for n in candidates if ".__fused__." in n)
         print(f"[alloc] MoE aggregation: {moe_groups} fused-expert super-Linears")
 
+    # Pre-aggregate fused siblings (qkv_proj, gate_up_proj, ...) into
+    # single DP items. The DP can't pick mixed-sibling solutions because
+    # there's only one item per group — so promote_fused becomes a no-op
+    # on aggregated items and the overshoot-tightening loop collapses to
+    # a single pass on well-behaved models. Must run AFTER the MoE
+    # aggregation (it skips `.__fused__.` entries explicitly).
+    if not args.no_fused_aggregation:
+        stats, costs, candidates = aggregate_fused_siblings(
+            stats, costs, specs_sorted, candidates, profile=model_profile,
+            calibrated_gains=calibrated_gains)
+        sib_groups = sum(1 for n in candidates if _FUSED_SIBLING_MARKER in n)
+        print(f"[alloc] fused-sibling aggregation: {sib_groups} groups "
+              f"(qkv_proj / gate_up_proj / ...)")
+
     candidates = filter_candidates_for_profile(candidates, args.target_profile)
 
     # Pareto sweep
@@ -1176,6 +1412,29 @@ def main():
         assignment_expanded = expand_moe_assignment(assignment, stats)
     else:
         assignment_expanded = assignment
+
+    # Expand fused-sibling super-Linears (qkv_proj / gate_up_proj).
+    # Complementary to the MoE expansion above — the MoE path handles
+    # `.__fused__.` markers; the sibling path handles `.__siblings__.`
+    # markers. Running both is idempotent on any assignment that doesn't
+    # contain the relevant marker.
+    if not args.no_fused_aggregation:
+        assignment_expanded = expand_fused_sibling_assignment(
+            assignment_expanded, stats)
+
+    # Post-expansion MoE unity promotion. The super-Linear solver picks
+    # a format per (layer, projection); expansion propagates that to
+    # all per-expert leaves with the same projection. But vLLM's
+    # FusedMoE requires ALL projections (gate+up+down) of the SAME
+    # expert to share one scheme — so when the solver picks e.g.
+    # w1=MXFP8 and w2=NVFP4 for layer L, every (L, expert_i) triple
+    # would disagree and the serve-time dispatch raises 'All MoE
+    # projections need same scheme'. This pass groups expanded leaves
+    # by (experts-prefix, expert-idx) and bumps the lower-rank
+    # projections to match the highest. Costs a little bpp on layers
+    # where gate/up/down really wanted different formats, but that
+    # cost is the ticket for serveability.
+    assignment_expanded = promote_moe_pair(assignment_expanded, format_rank)
 
     # Visual-encoder Linear handling. Two paths:
     #
