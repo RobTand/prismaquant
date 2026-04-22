@@ -27,6 +27,7 @@ dependencies = [
     "safetensors>=0.4",
     "transformers>=5.0",
     "datasets>=3.0",
+    "accelerate>=0.30",
     "tqdm",
 ]
 

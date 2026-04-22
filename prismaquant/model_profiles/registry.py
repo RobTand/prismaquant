@@ -68,4 +68,4 @@ def detect_profile(model_path: str) -> ModelProfile:
                 return cls()
         except Exception:
             continue
-    return DefaultProfile()
+    return DefaultProfile(architectures=archs)
