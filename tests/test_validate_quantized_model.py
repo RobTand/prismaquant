@@ -1,0 +1,218 @@
+"""Tests for the pre-ship quality validator.
+
+Goal: pin the bimodal-failure detection logic. The 27B shipped with
+mean NLL below threshold but p99 (max per-prompt avg NLL) was ~9 —
+threshold catches it.
+
+Uses an inline HTTPServer so we can script fake vLLM responses and
+assert both pass- and fail-paths end-to-end without a real 35B load.
+"""
+from __future__ import annotations
+
+import json
+import math
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import pytest
+
+from prismaquant.validate_quantized_model import (
+    check_generation_sanity,
+    check_perplexity,
+    check_mtp_acceptance,
+    run_validation,
+    EVAL_PROMPTS,
+)
+
+
+class _FakeVLLMHandler(BaseHTTPRequestHandler):
+    # Class-level state so the test can configure per-test.
+    mode: str = "healthy"       # "healthy" | "bimodal" | "broken" | "nan"
+    metrics_payload: str = ""
+
+    def log_message(self, *a, **kw):
+        pass  # silence
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.end_headers()
+            return
+        if self.path == "/metrics":
+            payload = self.metrics_payload.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(n)
+        req = json.loads(raw)
+        prompt = req.get("prompt", "")
+
+        if self.path == "/v1/completions":
+            mt = int(req.get("max_tokens") or 1)
+            echo = bool(req.get("echo", False))
+            want_logprobs = req.get("logprobs") is not None
+
+            if echo and want_logprobs:
+                # Fake logprobs: pretend every token had logprob -1.5
+                # (healthy) or -10 on 80% of prompts (bimodal broken).
+                n_tokens = max(1, min(64, len(prompt.split())))
+                if self.mode == "healthy":
+                    per_tok = -1.5
+                elif self.mode == "bimodal":
+                    # 2 of every 10 prompts get healthy logprobs, rest broken
+                    idx = EVAL_PROMPTS.index(prompt) if prompt in EVAL_PROMPTS else 0
+                    per_tok = -1.5 if idx in (3, 7) else -9.5
+                elif self.mode == "broken":
+                    per_tok = -12.0
+                else:
+                    per_tok = float("nan")
+                token_logprobs = [None] + [per_tok] * n_tokens
+                body = {
+                    "choices": [{
+                        "text": "",
+                        "logprobs": {"token_logprobs": token_logprobs},
+                    }]
+                }
+            else:
+                # Plain generation request: return a short stub completion.
+                txt = ("Pretend this is a coherent completion about the topic "
+                       "that goes on for enough characters.")
+                body = {"choices": [{"text": txt}]}
+
+            out = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(out)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+
+@pytest.fixture
+def fake_server():
+    srv = HTTPServer(("127.0.0.1", 0), _FakeVLLMHandler)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    yield f"http://127.0.0.1:{port}"
+    srv.shutdown()
+
+
+# ----------------------------------------------------------------
+# Perplexity check — bimodal failure detection
+# ----------------------------------------------------------------
+
+def test_perplexity_healthy_passes(fake_server):
+    _FakeVLLMHandler.mode = "healthy"
+    r = check_perplexity(fake_server, "any", max_ppl=25, max_p99_nll=6, max_mean_nll=3)
+    assert r.passed, f"healthy artifact should pass: {r.detail}"
+    assert r.metrics["perplexity"] < 25
+
+
+def test_perplexity_catches_uniformly_broken(fake_server):
+    _FakeVLLMHandler.mode = "broken"
+    r = check_perplexity(fake_server, "any", max_ppl=25, max_p99_nll=6, max_mean_nll=3)
+    assert not r.passed
+    # Any of the threshold violations is acceptable reason — but expect mean.
+    assert "mean_nll" in r.detail or "ppl" in r.detail
+
+
+def test_perplexity_catches_bimodal_broken(fake_server):
+    """The 27B failure mode: 2/10 prompts normal, rest catastrophic.
+    Mean NLL can fall under threshold but the p99 (max per-prompt avg NLL)
+    must flag the bimodality."""
+    _FakeVLLMHandler.mode = "bimodal"
+    r = check_perplexity(fake_server, "any", max_ppl=1000, max_p99_nll=6,
+                         max_mean_nll=100)
+    assert not r.passed, (
+        f"bimodal failure must trip p99 even when mean / ppl slack: {r.detail}"
+    )
+    assert "bimodal" in r.detail or "p99" in r.detail or "max(per-prompt" in r.detail
+
+
+def test_perplexity_generous_thresholds_passes_bimodal(fake_server):
+    """If thresholds are deliberately generous, bimodal data passes
+    through. Confirms threshold wiring works both directions."""
+    _FakeVLLMHandler.mode = "bimodal"
+    r = check_perplexity(fake_server, "any", max_ppl=1e9, max_p99_nll=100,
+                         max_mean_nll=100)
+    assert r.passed
+
+
+# ----------------------------------------------------------------
+# Generation sanity
+# ----------------------------------------------------------------
+
+def test_generation_sanity_passes_when_outputs_long_enough(fake_server):
+    _FakeVLLMHandler.mode = "healthy"
+    r = check_generation_sanity(fake_server, "any", min_gen_len=30)
+    assert r.passed
+
+
+# ----------------------------------------------------------------
+# MTP acceptance
+# ----------------------------------------------------------------
+
+def test_mtp_acceptance_passes_above_threshold(fake_server):
+    _FakeVLLMHandler.metrics_payload = (
+        '# HELP vllm:spec_decode_num_drafts_total\n'
+        'vllm:spec_decode_num_drafts_total{engine="0"} 100.0\n'
+        '# HELP vllm:spec_decode_num_accepted_tokens_per_pos_total\n'
+        'vllm:spec_decode_num_accepted_tokens_per_pos_total{position="0"} 80.0\n'
+    )
+    r = check_mtp_acceptance(fake_server, min_p0=0.6)
+    assert r.passed
+    assert r.metrics["accept_rate_p0"] == 0.8
+
+
+def test_mtp_acceptance_fails_below_threshold(fake_server):
+    _FakeVLLMHandler.metrics_payload = (
+        'vllm:spec_decode_num_drafts_total{engine="0"} 100.0\n'
+        'vllm:spec_decode_num_accepted_tokens_per_pos_total{position="0"} 30.0\n'
+    )
+    r = check_mtp_acceptance(fake_server, min_p0=0.6)
+    assert not r.passed
+
+
+def test_mtp_acceptance_skipped_when_no_drafts(fake_server):
+    """Model without spec-decode should pass with 'skipped' rather
+    than fail — the validator shouldn't force spec-decode on every run."""
+    _FakeVLLMHandler.metrics_payload = (
+        'vllm:spec_decode_num_drafts_total{engine="0"} 0.0\n'
+    )
+    r = check_mtp_acceptance(fake_server, min_p0=0.6)
+    assert r.passed
+    assert "skipping" in r.detail.lower()
+
+
+# ----------------------------------------------------------------
+# End-to-end
+# ----------------------------------------------------------------
+
+def test_end_to_end_healthy_report(fake_server):
+    _FakeVLLMHandler.mode = "healthy"
+    _FakeVLLMHandler.metrics_payload = (
+        'vllm:spec_decode_num_drafts_total{engine="0"} 100.0\n'
+        'vllm:spec_decode_num_accepted_tokens_per_pos_total{position="0"} 85.0\n'
+    )
+    rep = run_validation(fake_server, "any", wait_seconds=5)
+    assert rep.passed
+    names = [c.name for c in rep.checks]
+    assert "perplexity" in names and "mtp_acceptance" in names
+
+
+def test_end_to_end_bimodal_fails(fake_server):
+    _FakeVLLMHandler.mode = "bimodal"
+    _FakeVLLMHandler.metrics_payload = ""
+    rep = run_validation(fake_server, "any", wait_seconds=5)
+    assert not rep.passed
+    ppl_check = next(c for c in rep.checks if c.name == "perplexity")
+    assert not ppl_check.passed
