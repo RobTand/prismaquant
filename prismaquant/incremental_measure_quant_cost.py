@@ -688,7 +688,8 @@ def main():
     ap.add_argument("--swap-grow-limit-mb", type=int, default=256)
     ap.add_argument("--min-mem-available-mb", type=int, default=2048)
     ap.add_argument("--no-watchdog", action="store_true")
-    ap.add_argument("--layers-per-shard", type=int, default=1)
+    ap.add_argument("--layers-per-shard", default="1",
+                    help='Int, or "auto" to derive from available RAM + model size.')
     ap.add_argument("--start-layer", type=int, default=0)
     ap.add_argument("--end-layer", type=int, default=None)
     ap.add_argument("--include-mtp", action="store_true", default=True,
@@ -717,6 +718,21 @@ def main():
     end = n_layers if args.end_layer is None else min(args.end_layer, n_layers)
     if start >= end:
         raise SystemExit(f"empty layer range: start={start} end={end}")
+
+    # Resolve --layers-per-shard: int literal or "auto" (hardware-adaptive).
+    lps_arg = str(args.layers_per_shard).strip()
+    if lps_arg.lower() in ("auto", ""):
+        from .autoscale import pick_layers_per_shard
+        lps, lps_diag = pick_layers_per_shard(
+            args.model, nsamples=args.nsamples, seqlen=args.seqlen,
+        )
+        print(f"[cost] layers_per_shard=auto -> {lps} "
+              f"(available={lps_diag.get('available_gb',0):.1f} GB, "
+              f"per_layer_active={lps_diag.get('per_layer_active_gb',0):.2f} GB)",
+              flush=True)
+        args.layers_per_shard = lps
+    else:
+        args.layers_per_shard = int(lps_arg)
 
     body_regexes = build_layer_shard_regexes(
         n_layers, args.layers_per_shard, layer_prefix="model.layers")

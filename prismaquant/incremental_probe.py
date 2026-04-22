@@ -1276,7 +1276,8 @@ def main():
     ap.add_argument("--activation-cache-dir", required=True)
     ap.add_argument("--work-dir", required=True,
                     help="Stores shard logs/pickles; safe to resume.")
-    ap.add_argument("--layers-per-shard", type=int, default=1)
+    ap.add_argument("--layers-per-shard", default="1",
+                    help='Int, or "auto" to derive from available RAM + model size.')
     ap.add_argument("--start-layer", type=int, default=0)
     ap.add_argument("--end-layer", type=int, default=None)
     ap.add_argument("--gradient-checkpointing", action="store_true", default=True)
@@ -1341,6 +1342,24 @@ def main():
     end = n_layers if args.end_layer is None else min(args.end_layer, n_layers)
     if start >= end:
         raise SystemExit(f"empty layer range: start={start} end={end}")
+
+    # Resolve --layers-per-shard: int literal or "auto" (hardware-adaptive).
+    lps_arg = str(args.layers_per_shard).strip()
+    if lps_arg.lower() in ("auto", ""):
+        from .autoscale import pick_layers_per_shard
+        lps, lps_diag = pick_layers_per_shard(
+            args.model, nsamples=args.nsamples, seqlen=args.seqlen,
+        )
+        print(f"[incremental] layers_per_shard=auto -> {lps} "
+              f"(available={lps_diag.get('available_gb',0):.1f} GB, "
+              f"per_layer_weight={lps_diag.get('per_layer_weight_gb',0):.2f} GB, "
+              f"per_layer_active={lps_diag.get('per_layer_active_gb',0):.2f} GB, "
+              f"cache_reserve={lps_diag.get('cache_reserve_gb',0):.1f} GB, "
+              f"shard_budget={lps_diag.get('shard_budget_gb',0):.1f} GB)",
+              flush=True)
+        args.layers_per_shard = lps
+    else:
+        args.layers_per_shard = int(lps_arg)
 
     body_regexes = build_layer_shard_regexes(
         n_layers, args.layers_per_shard, layer_prefix="model.layers")

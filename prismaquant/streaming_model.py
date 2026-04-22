@@ -201,7 +201,7 @@ def _find_visual_module(model) -> tuple[Any | None, str]:
 def _build_streaming_context(model_path: str, *,
                              device: torch.device, dtype: torch.dtype,
                              offload_folder: str,
-                             cache_headroom_gb: float = 75.0,
+                             cache_headroom_gb: float | None = None,
                              log_prefix: str = "[streaming]",
                              multimodal: bool = False,
                              visual_requires_grad: bool = False,
@@ -363,11 +363,38 @@ def _build_streaming_context(model_path: str, *,
           f"{num_layers} layers in {time.time()-t_res:.1f}s", flush=True)
 
     free_bytes = psutil.virtual_memory().available
-    cache_bytes = max(int(free_bytes) - int(cache_headroom_gb * 1024 ** 3),
+    # Resolve headroom: env override > explicit arg > autoscale > legacy 75 GB default.
+    resolved_headroom_gb = cache_headroom_gb
+    autoscale_diag = None
+    if resolved_headroom_gb is None:
+        env_val = os.environ.get("CACHE_HEADROOM_GB")
+        if env_val not in (None, "", "auto", "AUTO"):
+            resolved_headroom_gb = float(env_val)
+        else:
+            try:
+                from .autoscale import pick_cache_headroom_gb
+                resolved_headroom_gb, autoscale_diag = pick_cache_headroom_gb(
+                    model_path,
+                    layers_per_shard=int(os.environ.get("LAYERS_PER_SHARD", "1") or 1)
+                        if str(os.environ.get("LAYERS_PER_SHARD", "")).isdigit() else 1,
+                    nsamples=int(os.environ.get("NSAMPLES", "32")),
+                    seqlen=int(os.environ.get("SEQLEN", "1024")),
+                )
+            except Exception as e:
+                print(f"{log_prefix} autoscale failed ({e!r}); falling back to 75 GB headroom",
+                      flush=True)
+                resolved_headroom_gb = 75.0
+    cache_bytes = max(int(free_bytes) - int(resolved_headroom_gb * 1024 ** 3),
                       8 * 1024 ** 3)
     layer_cache = LayerCache(max_bytes=cache_bytes)
+    src = "explicit" if autoscale_diag is None else "autoscaled"
     print(f"{log_prefix} layer cache budget={cache_bytes/(1024**3):.1f} GB "
-          f"(free={free_bytes/(1024**3):.1f} GB)", flush=True)
+          f"(free={free_bytes/(1024**3):.1f} GB, headroom={resolved_headroom_gb:.1f} GB, {src})",
+          flush=True)
+    if autoscale_diag is not None:
+        print(f"{log_prefix}   autoscale: shard_working={autoscale_diag['shard_working_gb']:.1f} GB "
+              f"+ safety={autoscale_diag['safety_gb']:.1f} GB "
+              f"(lps={autoscale_diag['layers_per_shard']})", flush=True)
 
     # Modern NVMe handles concurrent queue depth well; 3 workers saturate
     # the drive and eliminate prefetcher-stall windows where main's compute

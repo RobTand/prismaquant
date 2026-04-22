@@ -50,7 +50,16 @@ set -euo pipefail
 # linear time cost in probe wall-time. Override for faster iteration.
 : "${NSAMPLES:=32}"
 : "${SEQLEN:=1024}"
-: "${LAYERS_PER_SHARD:=2}"
+# LAYERS_PER_SHARD controls how many decoder layers share one reverse
+# sweep for Fisher accumulation. Larger = fewer sweeps = faster probe,
+# but each shard needs more gradient + retained-activation memory.
+# Default `auto` asks prismaquant.autoscale to pick from available RAM +
+# model size. Set to an int (e.g. `2`) to override.
+: "${LAYERS_PER_SHARD:=auto}"
+# CACHE_HEADROOM_GB controls the streaming layer-cache budget
+# (cache = free_RAM - headroom). Default `auto` picks from model +
+# LAYERS_PER_SHARD. Set to a float to override.
+: "${CACHE_HEADROOM_GB:=auto}"
 : "${DATASET:=ultrachat_200k}"
 : "${DEVICE:=cuda}"
 : "${EXPORT_DEVICE:=cuda}"   # CUDA ~10× faster than CPU on NVFP4 packing
