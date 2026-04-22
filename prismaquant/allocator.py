@@ -922,9 +922,12 @@ def main():
                     help="Error (instead of warn) if the format set contains "
                          "multiple candidates for the same bit tier (e.g. "
                          "NVFP4 and MXFP4 both at 4 bits)")
-    ap.add_argument("--bit-precision", type=float, default=0.001,
+    ap.add_argument("--bit-precision", type=float, default=0.0001,
                     help="Knapsack bit-bin granularity in avg-bits/param "
-                         "(smaller = slower; default 0.001 → ~5000 bins)")
+                         "(smaller = slower; default 0.0001 → ~50000 bins). "
+                         "Measured on MiniMax-M2.7: going from 0.001 to 0.0001 "
+                         "cuts predicted Δloss ~10% at the same bit budget. "
+                         "Coarser values (0.01) leave 40% on the table.")
     ap.add_argument("--threads", type=int, default=0,
                     help="OMP/numpy threads for DP (0 = default)")
     ap.add_argument("--expert-granularity", choices=["layer", "expert"],
