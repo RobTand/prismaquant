@@ -1601,6 +1601,14 @@ def main():
                         },
                     }, f)
             annotate_probe_shard(shard_path, expected_meta)
+            # Force-reclaim per-shard Python state (activation snapshot lists,
+            # merged_stats dicts, autograd graph leaves) before the next shard
+            # allocates its own. Without this, refcount-only cleanup leaves
+            # ~12-20 GB of stale refs alive across iterations — empty_cache
+            # alone can't release the underlying CUDA blocks because Python
+            # still holds references. gc.collect() first breaks any cycles,
+            # then empty_cache reclaims the CUDA caching allocator's free list.
+            gc.collect()
             if exec_device.type == "cuda":
                 torch.cuda.empty_cache()
     finally:
