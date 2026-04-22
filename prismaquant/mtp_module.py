@@ -57,24 +57,40 @@ def _build_single_layer_config(text_config):
 
 class MtpModule(nn.Module):
     """Mirrors `vllm.model_executor.models.qwen3_5_mtp.Qwen3_5MultiTokenPredictor`
-    but built on HF primitives so Fisher hooks and autograd work normally."""
+    but built on HF primitives so Fisher hooks and autograd work normally.
+
+    Dense vs MoE is selected from the config at construction time:
+    `Qwen3_5MoeDecoderLayer.__init__` eagerly reads `num_experts_per_tok`,
+    which dense configs don't define, so we must route to
+    `Qwen3_5DecoderLayer` for Qwen3.5/3.6 dense checkpoints."""
 
     def __init__(self, text_config):
         super().__init__()
-        # Lazy import: the HF module path changes when the container is rebuilt.
-        from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import (
-            Qwen3_5MoeDecoderLayer,
-            Qwen3_5MoeRMSNorm,
-        )
         mtp_cfg = _build_single_layer_config(text_config)
         hidden = mtp_cfg.hidden_size
         eps = mtp_cfg.rms_norm_eps
 
+        is_moe = (
+            getattr(mtp_cfg, "num_experts", 0)
+            or getattr(mtp_cfg, "num_local_experts", 0)
+            or getattr(mtp_cfg, "num_experts_per_tok", 0)
+        )
+        if is_moe:
+            from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import (
+                Qwen3_5MoeDecoderLayer as _DecoderLayer,
+                Qwen3_5MoeRMSNorm as _RMSNorm,
+            )
+        else:
+            from transformers.models.qwen3_5.modeling_qwen3_5 import (
+                Qwen3_5DecoderLayer as _DecoderLayer,
+                Qwen3_5RMSNorm as _RMSNorm,
+            )
+
         self.fc = nn.Linear(hidden * 2, hidden, bias=False)
-        self.layers = nn.ModuleList([Qwen3_5MoeDecoderLayer(mtp_cfg, layer_idx=0)])
-        self.norm = Qwen3_5MoeRMSNorm(hidden, eps=eps)
-        self.pre_fc_norm_hidden = Qwen3_5MoeRMSNorm(hidden, eps=eps)
-        self.pre_fc_norm_embedding = Qwen3_5MoeRMSNorm(hidden, eps=eps)
+        self.layers = nn.ModuleList([_DecoderLayer(mtp_cfg, layer_idx=0)])
+        self.norm = _RMSNorm(hidden, eps=eps)
+        self.pre_fc_norm_hidden = _RMSNorm(hidden, eps=eps)
+        self.pre_fc_norm_embedding = _RMSNorm(hidden, eps=eps)
 
     def forward(self,
                 inputs_embeds: torch.Tensor,
