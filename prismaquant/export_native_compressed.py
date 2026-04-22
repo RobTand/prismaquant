@@ -1135,6 +1135,20 @@ def canonicalize_format(scheme_dict: dict | str | int) -> str:
             return "BF16"
         if dt == "fp8_e4m3" and bits == 8:
             return "MXFP8"  # collapse plain FP8 onto the MX bucket for now
+        # Low-bit NVINT / NVFP3 (load-time dequant to NVFP4 at serve time).
+        # Emit the low-bit name here so downstream packer writes the
+        # narrow payload; the vLLM loader expands to NVFP4 on load.
+        if dt == "int" and bits == 2:
+            return "NVINT2"
+        if dt == "int" and bits == 3:
+            return "NVINT3"
+        if dt == "fp3_e2m0" and bits == 3:
+            return "NVFP3"
+        # MXFP6 variants (load-time dequant to MXFP8).
+        if dt in ("mx_fp", "fp6_e3m2") and bits == 6:
+            return "MXFP6_E3M2"
+        if dt == "fp6_e2m3" and bits == 6:
+            return "MXFP6_E2M3"
         raise ValueError(f"unsupported scheme: {scheme_dict!r}")
     if isinstance(scheme_dict, str):
         s = scheme_dict.lower()
