@@ -192,6 +192,7 @@ _ACT_AWARE_FLAGS: dict[str, bool] = {
     "awq": False,
     "gptq": False,
     "awq_round": False,
+    "scale_sweep": False,
 }
 
 # Proper-AWQ fold scales: maps target Linear recipe name -> float32 1D
@@ -808,6 +809,124 @@ def _activation_weighted_round_nvfp4(
     return W_dq
 
 
+def _scale_sweep_nvfp4(
+    weight: torch.Tensor, activations: torch.Tensor,
+    group_size: int = 16,
+    global_real_override: torch.Tensor | None = None,
+    grid: int = 32,
+    span: tuple[float, float] = (0.5, 1.5),
+    reference_weight: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Per-group joint (scale, rounding) closed-form polish.
+
+    For each NVFP4 group, sweep `grid` candidate scales spanning
+    `[span[0]·s0, span[1]·s0]`, where s0 is the default max-abs scale
+    derived from the pre-pass weight. For each candidate scale, run RTN
+    on the NVFP4 codebook and compute the activation-weighted MSE
+    `sum_j a_j²·(w_orig,j - w_q,j)²` against the ORIGINAL (pre-pass)
+    weight. Keep the configuration minimizing MSE per group, with an
+    improve-or-keep gate against whatever `weight` is coming in (which
+    may already be post-GPTQ / post-awq_round).
+
+    `reference_weight`: the pre-pass (float32) weight used to measure
+    MSE. Defaults to `weight` (the post-pass state) when not supplied
+    — in that case the gate degenerates to "improve over no-op" which
+    is not useful. Callers who want the gate to work should pass the
+    original weight explicitly.
+
+    Closed-form analog of AutoRound's SGD on per-weight V offsets:
+    AutoRound searches a continuous relaxation; we enumerate the
+    discrete scale dimension directly. Per-weight rounding at each
+    scale is RTN (optimal conditional on the scale).
+
+    Output is a dequantized tensor on valid NVFP4 grid points under the
+    new per-group scales — the downstream packer re-derives fp8_scale
+    from `max_abs(W_dq) / NVFP4_MAX` per group, which recovers the
+    swept scales losslessly.
+    """
+    W_in = weight.to(torch.float32).contiguous()
+    W_ref = (reference_weight if reference_weight is not None else W_in
+             ).to(torch.float32).contiguous()
+    if W_in.shape != W_ref.shape:
+        raise ValueError(
+            f"scale-sweep: weight shape {tuple(W_in.shape)} != "
+            f"reference_weight shape {tuple(W_ref.shape)}")
+    rows, cols = W_in.shape
+    if cols % group_size != 0:
+        raise ValueError(f"scale-sweep requires group_size={group_size} ∤ {cols}")
+
+    a = activations.detach().to(torch.float32).reshape(-1, cols)
+    col_importance = a.pow(2).mean(dim=0).clamp_min(1e-12)  # [in]
+
+    # Use the REFERENCE weight to set the default per-group scale (s0)
+    # and to measure MSE against.
+    ref_grouped = W_ref.reshape(rows, cols // group_size, group_size)
+    in_grouped = W_in.reshape(rows, cols // group_size, group_size)
+    max_abs = ref_grouped.abs().amax(dim=-1).clamp_min(1e-12)  # [rows, n_g]
+    s_g_real = max_abs / NVFP4_MAX
+    if global_real_override is not None:
+        global_real = global_real_override.to(W_in.device).clamp_min(1e-12).float()
+    else:
+        global_real = (s_g_real.amax() / FP8_E4M3_MAX).clamp_min(1e-12)
+    fp8_scale_real = (s_g_real / global_real).clamp(0, FP8_E4M3_MAX)
+    eff_scale0 = (fp8_scale_real * global_real).unsqueeze(-1).clamp_min(1e-12)
+
+    # Full NVFP4 symmetric codebook (15 levels; duplicated 0 is harmless).
+    cb_pos = _nvfp4_codebook(W_in.device, dtype=torch.float32)  # [8] non-neg
+    cb = torch.cat([-cb_pos.flip(0), cb_pos[1:]], dim=0)  # [15] signed
+    col_imp = col_importance.reshape(1, cols // group_size, group_size)  # [1, n_g, gs]
+
+    # Incoming per-group MSE against reference.
+    init_mse = (col_imp * (ref_grouped - in_grouped).pow(2)).sum(dim=-1)  # [rows, n_g]
+
+    # Sweep scales. The full intermediate tensor
+    # [rows, n_g, grid, gs, 15] would peak at >70 GB for a 12288-row
+    # Linear × 192 groups × 32 scales × 16 weights × 15 codes × 4 B.
+    # Chunk over rows so peak memory stays bounded regardless of size.
+    mults = torch.linspace(span[0], span[1], grid,
+                           device=W_in.device, dtype=torch.float32)  # [grid]
+
+    # Target per-chunk intermediate budget: ~2 GB max on the biggest
+    # tensor `d = [chunk, n_g, grid, gs, len(cb)]` (float32).
+    n_g = cols // group_size
+    bytes_per_row = n_g * grid * group_size * cb.numel() * 4
+    chunk_target = max(1, (2 * 1024 * 1024 * 1024) // max(1, bytes_per_row))
+    row_chunk = min(rows, int(chunk_target))
+
+    result_groups = torch.empty_like(ref_grouped)
+    for r0 in range(0, rows, row_chunk):
+        r1 = min(r0 + row_chunk, rows)
+        scales_c = eff_scale0[r0:r1].squeeze(-1).unsqueeze(-1) * mults  # [c, n_g, grid]
+        ref_c = ref_grouped[r0:r1]
+        in_c = in_grouped[r0:r1]
+        init_mse_c = init_mse[r0:r1]
+
+        gexp = ref_c.unsqueeze(2)                   # [c, n_g, 1, gs]
+        sexp = scales_c.unsqueeze(3)                # [c, n_g, grid, 1]
+        v = gexp / sexp                             # [c, n_g, grid, gs]
+        d = (v.unsqueeze(-1) - cb).abs()            # [c, n_g, grid, gs, 15]
+        idx = d.argmin(dim=-1)                      # [c, n_g, grid, gs]
+        del d, v
+        Wq_cand = cb[idx] * sexp                    # [c, n_g, grid, gs]
+        del idx
+        err = col_imp.unsqueeze(2) * (gexp - Wq_cand).pow(2)  # [c, n_g, grid, gs]
+        mse = err.sum(dim=-1)                        # [c, n_g, grid]
+        del err
+        best = mse.argmin(dim=-1)                    # [c, n_g]
+        bidx = best.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, group_size)
+        chosen_Wq = Wq_cand.gather(2, bidx).squeeze(2)           # [c, n_g, gs]
+        chosen_mse = mse.gather(2, best.unsqueeze(-1)).squeeze(-1)  # [c, n_g]
+        del Wq_cand, mse, best, bidx
+
+        use_new = chosen_mse < init_mse_c
+        result_groups[r0:r1] = torch.where(
+            use_new.unsqueeze(-1).expand(-1, -1, group_size),
+            chosen_Wq,
+            in_c,
+        )
+    return result_groups.reshape(rows, cols)
+
+
 def compute_nvfp4_global_real(weight: torch.Tensor, group_size: int = 16
                               ) -> torch.Tensor:
     """Return the per-tensor `global_real` that NVFP4 packing would
@@ -1158,6 +1277,7 @@ def _quantize_2d(
     awq_enabled: bool = False,
     gptq_enabled: bool = False,
     awq_round_enabled: bool = False,
+    scale_sweep_enabled: bool = False,
     cached_activations: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Compress a 2D Linear weight under format `fmt`.
@@ -1213,10 +1333,11 @@ def _quantize_2d(
     # were explicitly enabled via kwargs — lets main() turn them on
     # once without threading through every call site. Kwargs still
     # win when any is set True (unit tests pass them explicitly).
-    if not (awq_enabled or gptq_enabled or awq_round_enabled):
+    if not (awq_enabled or gptq_enabled or awq_round_enabled or scale_sweep_enabled):
         awq_enabled = bool(_ACT_AWARE_FLAGS.get("awq"))
         gptq_enabled = bool(_ACT_AWARE_FLAGS.get("gptq"))
         awq_round_enabled = bool(_ACT_AWARE_FLAGS.get("awq_round"))
+        scale_sweep_enabled = bool(_ACT_AWARE_FLAGS.get("scale_sweep"))
 
     if fmt == "NVFP4":
         w_work = weight.to(torch.float32)
@@ -1270,9 +1391,10 @@ def _quantize_2d(
                     global_real_override=nvfp4_global_real_override,
                 )
 
-        # Step 3: activation-weighted rounding polish. If GPTQ already
-        # placed every weight on the grid this is a no-op; otherwise
-        # it's the cheap closed-form refinement.
+        # Step 3: activation-weighted rounding polish. Measured to be
+        # a no-op-at-best / GPTQ-undo-at-worst in the permutation
+        # bake-off (see PrismaQuant repo notes). Off by default; leave
+        # the code path here for A/B testing.
         if awq_round_enabled and not skip_awq:
             acts_work = _acts_for_error_passes()
             if acts_work is not None:
@@ -1281,9 +1403,24 @@ def _quantize_2d(
                     global_real_override=nvfp4_global_real_override,
                 )
 
+        # Step 3b: closed-form per-group scale sweep. Joint (scale,
+        # rounding-set) search on the NVFP4 codebook, activation-
+        # weighted MSE against the ORIGINAL pre-pass weight, with an
+        # improve-or-keep gate against the current w_work. Recovers
+        # most of AutoRound's benefit without its 200-iter SGD.
+        if scale_sweep_enabled and not skip_awq:
+            acts_work = _acts_for_error_passes()
+            if acts_work is not None:
+                w_work = _scale_sweep_nvfp4(
+                    w_work, acts_work, group_size=16,
+                    global_real_override=nvfp4_global_real_override,
+                    reference_weight=weight.to(torch.float32),
+                )
+
         # Step 4: final NVFP4 pack. `w_work` is the post-AWQ,
-        # post-GPTQ, post-act-round weight. Store it as-is — the fold
-        # pass preserved the matmul identity externally.
+        # post-GPTQ, post-act-round, post-scale-sweep weight. Store it
+        # as-is — the fold pass preserved the matmul identity
+        # externally.
         wp, ws, wg = quantize_dequantize_nvfp4(
             w_work, group_size=16,
             global_real_override=nvfp4_global_real_override,
@@ -1529,7 +1666,20 @@ def materialize_tensors_streaming(
 
     def _emit_head_param(full_qname: str, param: nn.Parameter):
         recipe_key = profile.live_to_recipe_name(full_qname)
+        # Recipe keys are module qnames (e.g. "lm_head"), not parameter
+        # qnames ("lm_head.weight"). Strip the trailing `.weight` so the
+        # assignment lookup hits — otherwise head params always fall
+        # through to BF16 passthrough regardless of what the allocator
+        # chose for them.
+        if recipe_key.endswith(".weight"):
+            recipe_key = recipe_key[:-len(".weight")]
         fmt = assignment.get(recipe_key)
+        # Respect the passthrough set (e.g. `--ignore lm_head`) even if
+        # the allocator assigned NVFP4/MXFP8 to this head module. See
+        # the --ignore docstring for why lm_head is passthrough by
+        # default despite vLLM rejecting quantized ParallelLMHead.
+        if recipe_key in bf16_passthrough:
+            fmt = "BF16"
         if fmt is not None and fmt != "BF16":
             joint = None
             compressed = _quantize_2d(
@@ -2331,7 +2481,24 @@ def main():
                          "sibling of output).")
     ap.add_argument("--ignore", nargs="*", default=["lm_head"],
                     help="Module qnames to keep at bf16 even if the "
-                         "allocator assigned another format.")
+                         "allocator assigned another format. "
+                         "lm_head is ignored by default because vLLM's "
+                         "ParallelLMHead module only accepts a single "
+                         "`weight` parameter — it does not support the "
+                         "compressed-tensors NVFP4/MXFP8 layout "
+                         "(weight_packed + weight_scale + global_scales). "
+                         "Quantizing lm_head here produces a valid recipe "
+                         "but vLLM rejects it at load time with "
+                         "'There is no module or parameter named "
+                         "lm_head.input_global_scale in "
+                         "<ForCausalLM>'. This is a RUNTIME limitation, "
+                         "not an allocator choice — the probe + cost "
+                         "stages measure lm_head's sensitivity correctly "
+                         "and the allocator will happily place NVFP4 for "
+                         "it (saving ~0.7 GB on 35B / ~1.1 GB on 122B). "
+                         "Remove this default only if you're exporting "
+                         "for a runtime that supports quantized "
+                         "ParallelLMHead or patches vLLM's registration.")
     ap.add_argument("--activation-cache-dir", default=None,
                     help="Probe's activation cache directory. When "
                          "supplied, per-Linear input_global_scale is "
@@ -2371,9 +2538,21 @@ def main():
     ap.add_argument("--act-weighted-round", dest="awq_round", default=None,
                     action=argparse.BooleanOptionalAction,
                     help="Activation-weighted rounding polish on NVFP4 "
-                         "(closed-form Δw²·E[a²] minimization). Auto-on "
-                         "when --activation-cache-dir is supplied. "
-                         "Measured -1.8% PPL on Qwen3.6-35B.")
+                         "(per-weight Δw²·E[a²] minimization at fixed "
+                         "group scale). OFF by default — permutation "
+                         "bake-off showed it undoes most of GPTQ's "
+                         "benefit (geomean out_mse ratio: GPTQ=0.41, "
+                         "GPTQ+act_round=0.99 ≈ RTN). Pass "
+                         "--act-weighted-round to opt in.")
+    ap.add_argument("--scale-sweep", dest="scale_sweep", default=None,
+                    action=argparse.BooleanOptionalAction,
+                    help="Per-group 1-D scale sweep with RTN rounding on "
+                         "NVFP4 — closed-form analog of AutoRound's SGD. "
+                         "Auto-on when --activation-cache-dir is supplied. "
+                         "Measured best-in-bake-off when composed after "
+                         "GPTQ: geomean out_mse ratio = 0.33 vs GPTQ-only "
+                         "0.41 vs RTN 1.0, on Qwen3.6-35B visual+MTP "
+                         "Linears.")
     args = ap.parse_args()
 
     from .model_profiles import detect_profile
@@ -2385,11 +2564,15 @@ def main():
     # AWQ: OFF unless explicitly requested. Incompatible with NVFP4
     # group_size=16 (see long comment on the argparse definition).
     awq_enabled = bool(args.awq) if args.awq is not None else False
-    # GPTQ + act-weighted rounding: ON iff activation cache supplied.
+    # GPTQ + scale-sweep: ON iff activation cache supplied.
     gptq_enabled = args.gptq if args.gptq is not None else cache_supplied
-    awq_round_enabled = (args.awq_round if args.awq_round is not None
-                         else cache_supplied)
-    act_passes_any = awq_enabled or gptq_enabled or awq_round_enabled
+    # act_round: OFF by default (bake-off showed it reverts GPTQ to RTN).
+    awq_round_enabled = bool(args.awq_round) if args.awq_round is not None else False
+    # scale_sweep: ON iff activation cache supplied.
+    scale_sweep_enabled = (args.scale_sweep if args.scale_sweep is not None
+                           else cache_supplied)
+    act_passes_any = (awq_enabled or gptq_enabled or awq_round_enabled
+                      or scale_sweep_enabled)
     # The activation-aware passes need the actual activations, not just
     # the scale summary. We only load raw activations when at least one
     # pass is enabled.
@@ -2397,15 +2580,18 @@ def main():
         print("[export-stream] WARN activation-aware passes requested "
               "but no --activation-cache-dir; disabling.", flush=True)
         awq_enabled = gptq_enabled = awq_round_enabled = False
+        scale_sweep_enabled = False
         act_passes_any = False
     print(f"[export-stream] act-aware passes: awq={awq_enabled} "
-          f"gptq={gptq_enabled} awq_round={awq_round_enabled}", flush=True)
+          f"gptq={gptq_enabled} awq_round={awq_round_enabled} "
+          f"scale_sweep={scale_sweep_enabled}", flush=True)
     # Publish to the module-level config so `_quantize_2d` picks them
     # up from every call site without needing the flags threaded
     # through `materialize_tensors_streaming` + MTP helpers.
     _ACT_AWARE_FLAGS["awq"] = awq_enabled
     _ACT_AWARE_FLAGS["gptq"] = gptq_enabled
     _ACT_AWARE_FLAGS["awq_round"] = awq_round_enabled
+    _ACT_AWARE_FLAGS["scale_sweep"] = scale_sweep_enabled
 
     # Populate the module-level input-global-scale cache (used by
     # `_quantize_2d` for NVFP4 linears) from cached activations.

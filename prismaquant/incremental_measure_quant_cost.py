@@ -113,7 +113,8 @@ def _expected_cost_shard_meta(*,
                               mode: str,
                               chunk_size: int,
                               h_detail_dir: str | None,
-                              formats: list[str]) -> dict[str, Any]:
+                              formats: list[str],
+                              n_linears_expected: int = 0) -> dict[str, Any]:
     return {
         "model": model,
         "probe": str(probe_path),
@@ -124,6 +125,7 @@ def _expected_cost_shard_meta(*,
         "h_detail_dir": str(Path(h_detail_dir)) if h_detail_dir else None,
         "shard_idx": shard_idx,
         "formats": list(formats),
+        "n_linears_expected": int(n_linears_expected),
     }
 
 
@@ -138,13 +140,20 @@ def cost_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
         return False
     if not isinstance(data["costs"], dict):
         return False
+    # Empty-costs guard: a shard whose target regex is known to match at
+    # least one probed Linear but produced zero entries is the signature
+    # of an earlier buggy run (pre-fix lm_head / stale meta). Force a
+    # recompute so the merge doesn't silently carry forward the hole.
+    expected_n = expected_meta.get("n_linears_expected")
+    if expected_n is not None and expected_n > 0 and len(data["costs"]) == 0:
+        return False
     meta = dict(data.get("meta", {}))
     meta.update(meta.get("incremental_shard", {}))
     actual_formats = data.get("formats", [])
     if list(actual_formats) != list(expected_meta.get("formats", [])):
         return False
     for key, expected in expected_meta.items():
-        if key == "formats":
+        if key in ("formats", "n_linears_expected"):
             continue
         if meta.get(key) != expected:
             return False
@@ -775,6 +784,9 @@ def main():
             chunk_size=args.chunk_size,
             h_detail_dir=args.h_detail_dir,
             formats=[s.name for s in specs],
+            n_linears_expected=sum(
+                1 for n in stats if re.search(linear_include, n)
+            ),
         )
         for i, linear_include in enumerate(shard_regexes)
     ]

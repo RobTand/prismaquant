@@ -875,9 +875,26 @@ def discover_visual_linears_from_source(model_path: str) -> list[str]:
 
     # Only rank-2 weights are Linear-like; conv1d / norms / biases are
     # kept at BF16 passthrough regardless of --visual-format.
+    # Additionally, blacklist known rank-2 tensors that live in
+    # `nn.Parameter` / `nn.Embedding` modules (NOT `nn.Linear`), which
+    # the compressed-tensors loader in vLLM cannot consume. Example:
+    # `model.visual.pos_embed.weight` is an Embedding-like learned
+    # parameter with shape (num_pos, hidden) — rank-2 but NOT a Linear.
+    # Quantizing it produces `pos_embed.input_global_scale` etc. which
+    # vLLM's VL runtime rejects with `KeyError: pos_embed.input_global_scale`
+    # because its `model.visual.pos_embed` is a bare Parameter, not a
+    # quantizable Linear module.
+    _NON_LINEAR_RE = re.compile(
+        r"(?:^|\.)("
+        r"pos_embed"            # positional embedding (nn.Parameter/Embedding)
+        r"|rotary_emb"          # rotary pos embed cache
+        r")(?:\.|$)"
+    )
     out: list[str] = []
     for name, shape in candidates:
         if len(shape) != 2:
+            continue
+        if _NON_LINEAR_RE.search(name):
             continue
         out.append(name[:-len(".weight")] if name.endswith(".weight") else name)
     return sorted(set(out))
