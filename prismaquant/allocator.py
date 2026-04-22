@@ -405,10 +405,17 @@ def _format_kernel_supports_shape(fmt_name: str, in_features: int,
 
     # Layer 2: hand-curated tile-alignment fallback.
     if fmt_name.startswith("MXFP8"):
-        # CUTLASS mm_mxfp8: N ≥ 128, K ≥ 128, K % 32 (MX block size).
+        # CUTLASS mm_mxfp8 (SM100/121 Blackwell):
+        #   - N ≥ 128, K ≥ 128 (generic check)
+        #   - K % 32 (MX block size)
+        #   - N % 128 (TMA tile alignment). Example miss: (1152, 4304)
+        #     where 4304 % 128 = 80 — caught empirically on DGX Spark
+        #     SM121 with vLLM's cutlass-MXFP8 kernel.
         if out_features < 128 or in_features < 128:
             return False
         if in_features % 32 != 0:
+            return False
+        if out_features % 128 != 0:
             return False
         return True
     if fmt_name.startswith("NVFP4"):
