@@ -32,11 +32,16 @@ import os
 from pathlib import Path
 
 
-DEFAULT_SAFETY_GB = 30.0     # slack for CUDA allocator spikes, HF transformers
-                             # overhead (~5-10 GB), tokenizer caches, OS, prefetch
-                             # buffers. 20 GB underestimated on Qwen3.6-27B dense —
-                             # hit ~9 GB swap; 30 GB absorbs the observed overshoot.
-DEFAULT_ACT_MULT = 8         # rough K in (N*T*hidden*dtype*K) per layer
+DEFAULT_SAFETY_GB = 40.0     # slack for CUDA allocator spikes, HF transformers
+                             # overhead, tokenizer caches, OS, prefetch buffers.
+                             # 20 GB triggered OOM on Qwen3.6-27B dense (hit 9 GB
+                             # swap before SIGKILL); 40 GB has proven absorbent.
+                             # NEVER rely on swap — kernel OOM-kills BEFORE swap
+                             # fills on many Linux configs.
+DEFAULT_ACT_MULT = 12        # multiplier in (N*T*hidden*dtype*K) per layer.
+                             # 8 models steady-state activation retention; backward
+                             # passes transiently allocate ~50% more scratch tensors
+                             # that the caching allocator holds. 12 covers the peak.
 DEFAULT_DTYPE_BYTES = 2      # bf16
 
 
