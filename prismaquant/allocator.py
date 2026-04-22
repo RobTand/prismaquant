@@ -377,6 +377,89 @@ def predicted_dloss(h_trace: float, weight_mse: float,
     return 0.5 * float(h_trace) * float(weight_mse) * float(gain)
 
 
+def _format_kernel_supports_shape(fmt_name: str, in_features: int,
+                                  out_features: int) -> bool:
+    """Return True iff the runtime GEMM kernel for `fmt_name` can handle
+    a Linear with (in_features, out_features).
+
+    Two-layer dispatch:
+
+    1. **Prefer the kernel's own check function** when exposed (e.g.
+       FlashInfer's `_check_mm_mxfp8_problem_size`). Running the real
+       kernel's validator keeps us in sync with kernel updates
+       automatically — when FlashInfer relaxes or tightens the rules,
+       we inherit the change for free.
+
+    2. **Hand-curated fallback** when no check function is exposed, or
+       when flashinfer isn't installed (allocator runs on CPU-only
+       hosts without CUDA). Tile-alignment rules for modern FP8/FP4
+       tensor-core kernels cluster around 128 (TMA tile) × 32 (MX
+       block) × 16 (NVFP group). These are the documented minimums.
+
+    Unknown formats default to True — allocator-time should not
+    silently drop experimental formats that haven't been profiled.
+    """
+    # Layer 1: try the kernel's authoritative validator.
+    if _flashinfer_kernel_accepts(fmt_name, in_features, out_features) is not None:
+        return _flashinfer_kernel_accepts(fmt_name, in_features, out_features)
+
+    # Layer 2: hand-curated tile-alignment fallback.
+    if fmt_name.startswith("MXFP8"):
+        # CUTLASS mm_mxfp8: N ≥ 128, K ≥ 128, K % 32 (MX block size).
+        if out_features < 128 or in_features < 128:
+            return False
+        if in_features % 32 != 0:
+            return False
+        return True
+    if fmt_name.startswith("NVFP4"):
+        # CUTLASS mm_nvfp4: K must be a multiple of the 16-wide group.
+        return in_features % 16 == 0
+    # BF16 and unknown: pass through.
+    return True
+
+
+def _flashinfer_kernel_accepts(fmt_name: str, in_features: int,
+                               out_features: int) -> bool | None:
+    """Ask FlashInfer's own problem-size check for `fmt_name`.
+
+    Returns True/False if the kernel exposes a check function we can
+    invoke with zero-element tensor stubs; None if no validator is
+    available (caller falls back to hand-curated rules).
+
+    This is cheap — FlashInfer's checks only inspect shapes/dtypes,
+    they don't allocate CUDA memory or compile. Import is lazy so the
+    allocator still works on CPU-only hosts where flashinfer is absent.
+    """
+    try:
+        if fmt_name.startswith("MXFP8"):
+            from flashinfer.gemm.gemm_base import _check_mm_mxfp8_problem_size
+            import torch
+            # Zero-element fp8 stubs with the right shape metadata.
+            a = torch.empty((1, in_features), dtype=torch.float8_e4m3fn)
+            b = torch.empty((in_features, out_features),
+                            dtype=torch.float8_e4m3fn)
+            # Match the swizzled-1d scale layout the runtime uses.
+            from flashinfer.gemm.gemm_base import _mxfp8_swizzled_scale_len
+            from flashinfer.gemm.gemm_base import SfLayout
+            a_desc_len = _mxfp8_swizzled_scale_len(
+                a.shape[0], a.shape[1], SfLayout.layout_8x4)
+            b_desc_len = _mxfp8_swizzled_scale_len(
+                b.shape[1], b.shape[0], SfLayout.layout_8x4)
+            a_desc = torch.empty((a_desc_len,), dtype=torch.uint8)
+            b_desc = torch.empty((b_desc_len,), dtype=torch.uint8)
+            try:
+                return _check_mm_mxfp8_problem_size(a, b, a_desc, b_desc) is True
+            except Exception:
+                return False
+        # NVFP4 / BF16 / others: no flashinfer check exposed today —
+        # caller will use hand-curated rules.
+        return None
+    except Exception:
+        # flashinfer not installed, or an internal import failed — the
+        # hand-curated fallback is authoritative in that case.
+        return None
+
+
 def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      calibrated_gains: dict[str, float] | None = None
                      ) -> dict[str, list[Candidate]]:
@@ -385,18 +468,35 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     Per-(layer, format) predicted Δloss uses the closed-form
     diagonal-Fisher term `0.5 · h_trace · weight_mse` (see module
     docstring), optionally scaled by per-format calibrated_gains[fmt].
+
+    Format candidates are gated on kernel shape support: a Linear
+    whose (in_features, out_features) violates the runtime GEMM's
+    alignment rules (e.g., CUTLASS MXFP8's N ≥ 128) drops that format
+    from its candidate list — the knapsack can't pick an unservable
+    option. Dropping these at candidate-build time is cleaner than
+    waiting for serve-time kernel dispatch failures.
     """
     gains = calibrated_gains or {}
     out: dict[str, list[Candidate]] = {}
+    masked_by_shape: dict[str, list[str]] = {}
     for name, s in stats.items():
         if name not in costs:
             continue
         h_trace = s["h_trace"]
         shape = _shape_from_stats(s)
+        in_features = int(s.get("in_features", 0) or 0)
+        out_features = int(s.get("out_features", 0) or 0)
         cands = []
         for spec in formats:
             entry = costs[name].get(spec.name)
             if entry is None or "error" in entry:
+                continue
+            # Kernel shape check — skip formats whose runtime GEMM
+            # can't handle this Linear's (in, out).
+            if in_features and out_features and not _format_kernel_supports_shape(
+                spec.name, in_features, out_features
+            ):
+                masked_by_shape.setdefault(spec.name, []).append(name)
                 continue
             gain = float(gains.get(spec.name, 1.0))
             # Prefer the full per-weight Δloss `0.5 · <H_full, MSE_W_full>`
@@ -418,6 +518,10 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             ))
         if cands:
             out[name] = cands
+    if masked_by_shape:
+        for fmt, names in masked_by_shape.items():
+            print(f"[alloc] kernel shape-mask: {len(names)} Linear(s) "
+                  f"dropped {fmt} (sample: {names[:3]})", flush=True)
     return out
 
 

@@ -1325,6 +1325,54 @@ def _fused_dense_group(name: str) -> tuple[str, tuple[str, ...]] | None:
     return None
 
 
+def _unify_input_global_scales_across_fused_siblings(
+    scales: dict[str, float],
+) -> dict[str, float]:
+    """Post-process per-Linear input_global_scale values so fused-
+    sibling groups share one scale.
+
+    vLLM concatenates q/k/v (and gate/up) into a single fused Linear
+    at load time and applies ONE input_global_scale to the forward
+    pass. If the siblings' scales don't match, vLLM warns and reduces
+    accuracy.
+
+    Siblings receive the same upstream activation, so their max/6
+    values are theoretically identical — but capture + subsampling
+    order introduces float-precision drift in practice. Taking the
+    max over the group picks the conservative value (every sibling's
+    quantization range is at-or-above the computed max, so the fused
+    Linear never truncates any sibling's activations). Siblings that
+    weren't NVFP4-assigned pass through unchanged.
+    """
+    # Bucket siblings by fused group.
+    groups: dict[tuple[str, tuple[str, ...]], list[str]] = {}
+    for name in scales:
+        g = _fused_dense_group(name)
+        if g is None:
+            continue
+        groups.setdefault(g, []).append(name)
+
+    out = dict(scales)
+    n_unified = 0
+    max_drift = 0.0
+    for key, members in groups.items():
+        members = [m for m in members if m in scales]
+        if len(members) < 2:
+            continue
+        vals = [scales[m] for m in members]
+        joint = max(vals)
+        drift = max(abs(joint - v) for v in vals)
+        max_drift = max(max_drift, drift)
+        for m in members:
+            out[m] = joint
+        n_unified += 1
+    if n_unified:
+        print(f"[export-stream] unified input_global_scale across "
+              f"{n_unified} fused-sibling groups "
+              f"(max pre-unify drift: {max_drift:.3e})", flush=True)
+    return out
+
+
 def _compute_nvfp4_joint_global(
     model: nn.Module, assignment: dict[str, str],
 ) -> dict[str, torch.Tensor]:
@@ -2255,8 +2303,12 @@ MXFP8_SCHEME = {
 # loader scheme (CompressedTensorsW{2,3}A16Nvint) decodes to NVFP4 at
 # load time and serves through the existing NVFP4 GEMM kernel. No
 # activation quantization (W{2,3}A16) — activations stay BF16.
+# Use the generic "pack-quantized" format string so compressed-tensors'
+# format whitelist accepts the group. The actual NVINT decode is picked
+# by vLLM's dispatcher based on weight args (type=int, num_bits=2/3,
+# strategy=tensor_group, scale_dtype=fp8_e4m3fn).
 NVINT2_SCHEME = {
-    "format": "nvint2-pack-quantized",
+    "format": "pack-quantized",
     "weights": {
         "num_bits": 2, "type": "int", "strategy": "tensor_group",
         "group_size": 16, "symmetric": True, "dynamic": False,
@@ -2266,7 +2318,7 @@ NVINT2_SCHEME = {
     },
 }
 NVINT3_SCHEME = {
-    "format": "nvint3-pack-quantized",
+    "format": "pack-quantized",
     "weights": {
         "num_bits": 3, "type": "int", "strategy": "tensor_group",
         "group_size": 16, "symmetric": True, "dynamic": False,
@@ -2798,6 +2850,20 @@ def main():
                 except Exception as e:
                     print(f"[export-stream] WARN could not load "
                           f"activations for {name}: {e}", flush=True)
+            # Unify input_global_scale across fused-sibling groups.
+            # vLLM's fused Linear loader concatenates q/k/v (and gate/up)
+            # into a single tensor and applies ONE input scale at
+            # forward time. If q/k/v scales differ the warning
+            #   "global scale for input or weight are different for
+            #    parallel layers (e.g. q_proj, k_proj, v_proj). This
+            #    will likely result in reduced accuracy."
+            # fires at vLLM load. q/k/v siblings receive the same
+            # upstream activation in principle, but captured per-
+            # Linear from different shard subsamples, so the computed
+            # max/6 values can drift by a float-precision tick. Take
+            # the max over the group so vLLM runs on the conservative
+            # (larger) scale for every sibling.
+            scales = _unify_input_global_scales_across_fused_siblings(scales)
             _INPUT_GLOBAL_SCALES = scales
             if act_passes_any:
                 _CACHED_ACTIVATIONS = raw_cache
