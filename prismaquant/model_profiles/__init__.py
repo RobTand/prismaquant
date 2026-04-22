@@ -12,12 +12,14 @@ from .base import ModelProfile
 from .default import DefaultProfile
 from .gemma4 import Gemma4Profile
 from .qwen3_5 import Qwen3_5Profile
+from .qwen3_5_dense import Qwen3_5DenseProfile
 from .registry import detect_profile, register_profile
 
 __all__ = [
     "ModelProfile",
     "DefaultProfile",
     "Qwen3_5Profile",
+    "Qwen3_5DenseProfile",
     "Gemma4Profile",
     "detect_profile",
     "register_profile",
