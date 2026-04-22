@@ -1261,6 +1261,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--probe", required=True, help="sensitivity_probe pickle")
     ap.add_argument("--costs", required=True, help="measure_quant_cost pickle")
+    ap.add_argument("--model-override", default=None,
+                    help="Override the model path stored in probe.pkl's meta. "
+                         "Useful when re-running allocator against a probe "
+                         "whose container-side paths no longer exist (e.g., "
+                         "the original source was at /src/qwen36 in a prior "
+                         "container run but is now only accessible via a "
+                         "different mount). Overrides both profile detection "
+                         "and visual-Linear source discovery.")
     ap.add_argument("--target-bits", type=float, default=4.75)
     ap.add_argument("--formats", default="",
                     help="Comma-separated format names to consider; empty=all")
@@ -1361,6 +1369,9 @@ def main():
         _probe_peek = pickle.load(f)
     probe_model_path = _probe_peek.get("meta", {}).get("model")
     del _probe_peek
+    if args.model_override:
+        probe_model_path = args.model_override
+        print(f"[alloc] model-override: {probe_model_path}", flush=True)
     if probe_model_path:
         model_profile = detect_profile(probe_model_path)
         print(f"[alloc] model profile: {model_profile.name} "
