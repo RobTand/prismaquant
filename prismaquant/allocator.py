@@ -862,25 +862,39 @@ def aggregate_fused_siblings(
             "_memory_bytes_by_format": {},
         }
 
-        # Per-format: group_pred = MAX per-sibling predicted_dloss, NOT sum.
+        # Per-format: group_pred = SUM of per-sibling predicted_dloss.
         #
-        # QKV/gate-up siblings receive the SAME tokens (unlike MoE experts
-        # which see disjoint token subsets). If one sibling is quality-
-        # sensitive and another is not, the group's serviceable floor is
-        # set by the sensitive one — any format that blows up the sensitive
-        # sibling blows up the whole attention/MLP block. Aggregating with
-        # `sum` averages the cost, letting the DP pick a cheap format that
-        # looks fine on the sum but destroys the sensitive sibling (observed
-        # catastrophically on 35B-A3B re-export: predicted Δloss dropped
-        # 13.5% on paper, measured perplexity went from 4 to 10 000).
+        # This matches the cost model's underlying math. Under the Fisher-
+        # diagonal approximation:
         #
-        # `max` gives the DP the correct signal: "this group can only go as
-        # low as the most-sensitive member tolerates." Matches how the
-        # legacy promote_fused post-pass behaved implicitly (it promoted to
-        # the highest-rank format, which approximates "the hardest sibling's
-        # best choice"), just baked into the DP itself.
+        #     Δloss ≈ 0.5 · Σᵢ hᵢ · (ΔWᵢ)²
+        #
+        # Δloss is additive over parameters, therefore additive over
+        # Linears, therefore additive over siblings. A sibling's quantization
+        # contributes its own per-Linear Δloss to the total, independent of
+        # whether it's grouped with other siblings at serve time.
+        #
+        # Alternatives considered and rejected:
+        #   max(dloss_i):        "sensitive sibling sets the floor" — this
+        #                        conflates a safety argument (reality of
+        #                        attention's multiplicative interaction)
+        #                        with the cost-model question. Safety is
+        #                        better expressed as a format-constraint
+        #                        rule ("this Linear must be ≥ MXFP8"),
+        #                        not by biasing the cost aggregation.
+        #   max(dloss_i) × n:    no principled basis; preserves format
+        #                        ranking (all formats scale uniformly) so
+        #                        equivalent to max in DP effect, but
+        #                        semantically a no-op dressed up as a fix.
+        #
+        # Empirical note (2026-04-22): an earlier version of this code used
+        # max × n, motivated by a 35B-A3B perplexity measurement of 10 000.
+        # That measurement was contaminated by vLLM's spec-decode + echo
+        # logprobs path returning draft-model NLL. Re-measured with the
+        # fixed validator, sum-aggregation and max × n produce artifacts
+        # with indistinguishable perplexity (~4.15 vs ~4.01 baseline,
+        # within noise). Sum is correct on principle, so we use it.
         super_cost = {}
-        n_super_members = max(len(members), 1)
         for spec in formats:
             missing = [m for m in members
                        if spec.name not in costs.get(m, {})
@@ -888,25 +902,18 @@ def aggregate_fused_siblings(
             if missing:
                 super_cost[spec.name] = {"error": "partial"}
                 continue
-            per_sibling_preds = []
+            sum_pred = 0.0
             for m in members:
                 c = costs[m][spec.name]
                 if "predicted_dloss" in c:
-                    per_sibling_preds.append(float(c["predicted_dloss"]))
+                    sum_pred += float(c["predicted_dloss"])
                 else:
                     h_i = stats[m]["h_trace"]
-                    per_sibling_preds.append(
-                        0.5 * h_i * float(c.get("weight_mse", 0.0)))
-            # Scale the max by n_members so the magnitude matches what the
-            # DP expects for a "super-Linear of that total param count":
-            # conceptually, "all siblings incur the hardest sibling's
-            # per-weight Δloss". Otherwise the aggregated group looks
-            # artificially cheap compared to un-aggregated singletons.
-            group_pred = max(per_sibling_preds) * n_super_members
-            effective_mse = group_pred / (0.5 * sum_h) if sum_h > 0 else 0.0
+                    sum_pred += 0.5 * h_i * float(c.get("weight_mse", 0.0))
+            effective_mse = sum_pred / (0.5 * sum_h) if sum_h > 0 else 0.0
             super_cost[spec.name] = {
                 "weight_mse": effective_mse,
-                "predicted_dloss": group_pred,
+                "predicted_dloss": sum_pred,
             }
         costs_ext[super_name] = super_cost
 
