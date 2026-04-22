@@ -134,6 +134,89 @@ def _round_to_codebook(values_in_grid: torch.Tensor) -> torch.Tensor:
     return abs_idx + sign_bit                # [..., shape]; values 0-15
 
 
+NVINT2_MAX = 1   # symmetric: codes in {-2, -1, 0, 1} from (1<<(2-1))-1
+NVINT3_MAX = 3   # symmetric: codes in {-4, ..., 3}
+
+
+def pack_nvint2(signed: torch.Tensor, last_dim: int) -> torch.Tensor:
+    """Pack signed 2-bit ints ({-2,-1,0,1}) into uint8, 4 values per byte.
+
+    Storage layout: LSB-first within each byte. Value i occupies bits
+    [2i, 2i+1] of its byte. Value is stored as two's-complement-2bit
+    (the sign bit is bit 1).
+    """
+    if last_dim % 4 != 0:
+        raise ValueError(f"NVINT2 pack requires last dim divisible by 4; got {last_dim}")
+    # Map signed -> unsigned 2-bit (two's complement: -2->0b10, -1->0b11, 0->0b00, 1->0b01).
+    u = (signed.to(torch.int32) & 0b11).to(torch.uint8)
+    q = u.reshape(*signed.shape[:-1], last_dim // 4, 4)
+    return (q[..., 0] | (q[..., 1] << 2) | (q[..., 2] << 4) | (q[..., 3] << 6)).to(torch.uint8)
+
+
+def pack_nvint3(signed: torch.Tensor, last_dim: int) -> torch.Tensor:
+    """Pack signed 3-bit ints ({-4..3}) into uint8, 8 values per 3 bytes.
+
+    Bitstream LSB-first: value i occupies bits [3i, 3i+2] of the
+    flattened bitstream. Last dim must be divisible by 8 for clean
+    byte-aligned packing (3 * 8 = 24 bits = 3 bytes per group of 8).
+    """
+    if last_dim % 8 != 0:
+        raise ValueError(f"NVINT3 pack requires last dim divisible by 8; got {last_dim}")
+    # 3-bit two's-complement (int range [-4, 3]; we store 0b000..0b111).
+    u = (signed.to(torch.int32) & 0b111).to(torch.int32)
+    leading = signed.shape[:-1]
+    groups = u.reshape(*leading, last_dim // 8, 8).to(torch.int32)
+    b0 = (groups[..., 0] | (groups[..., 1] << 3) | ((groups[..., 2] & 0b011) << 6)).to(torch.uint8)
+    b1 = (((groups[..., 2] >> 2) & 0b001) | (groups[..., 3] << 1) | (groups[..., 4] << 4)
+          | ((groups[..., 5] & 0b001) << 7)).to(torch.uint8)
+    b2 = (((groups[..., 5] >> 1) & 0b011) | (groups[..., 6] << 2) | (groups[..., 7] << 5)).to(torch.uint8)
+    # Stack the three bytes per group into the packed byte stream, last-dim first.
+    packed = torch.stack([b0, b1, b2], dim=-1).reshape(*leading, last_dim * 3 // 8)
+    return packed.to(torch.uint8)
+
+
+def quantize_dequantize_nvint(
+    weight: torch.Tensor, bits: int, group_size: int = 16,
+    global_real_override: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Symmetric-int quantizer with the NVFP4-style scale envelope.
+
+    Returns `(weight_packed, weight_scale_fp8, weight_global_scale)`:
+      - weight_packed: uint8, bit-packed signed ints (2 or 3 bits each)
+      - weight_scale_fp8: fp8_e4m3fn per-group, shape [rows, n_groups]
+      - weight_global_scale: fp32 scalar (divisor convention, 1/global_real)
+
+    vLLM loader reconstructs: w_fp32[g,i] ≈ code[g,i] * scale_fp8[g] * global_real.
+    The decode-to-NVFP4 path then re-rounds those fp32 values to the
+    NVFP4 E2M1 grid and runs the existing NVFP4 GEMM kernel.
+    """
+    if bits not in (2, 3):
+        raise ValueError(f"NVINT only supports bits=2 or 3; got {bits}")
+    rows, cols = weight.shape
+    if cols % group_size != 0:
+        raise ValueError(f"NVINT{bits} group_size={group_size} ∤ {cols}")
+    int_max = NVINT2_MAX if bits == 2 else NVINT3_MAX
+    int_min = -(int_max + 1)
+    n_groups = cols // group_size
+    grouped = weight.float().reshape(rows, n_groups, group_size)
+    max_abs = grouped.abs().amax(dim=-1).clamp_min(1e-12)
+    s_g_real = max_abs / int_max
+    if global_real_override is not None:
+        global_real = global_real_override.to(weight.device).clamp_min(1e-12)
+    else:
+        global_real = (s_g_real.amax() / FP8_E4M3_MAX).clamp_min(1e-12)
+    fp8_scale_real = (s_g_real / global_real).clamp(0, FP8_E4M3_MAX)
+    q = torch.round(grouped / s_g_real.unsqueeze(-1).clamp_min(1e-12)).clamp(int_min, int_max)
+    q = q.to(torch.int8)
+    packer = pack_nvint2 if bits == 2 else pack_nvint3
+    weight_packed = packer(q.reshape(rows, cols), cols)
+    return (
+        weight_packed,
+        fp8_scale_real.to(torch.float8_e4m3fn),
+        (1.0 / global_real).to(torch.float32).reshape(1),
+    )
+
+
 def pack_fp4_indices(fp4_indices: torch.Tensor, last_dim: int) -> torch.Tensor:
     """Pack a tensor of 4-bit indices (final dim must be even) into
     uint8, two indices per byte. Preserves leading dimensions.
@@ -1469,7 +1552,54 @@ def _quantize_2d(
         return {"weight": w, "weight_scale": ws}
     if fmt == "BF16":
         return {"weight": weight.to(torch.bfloat16)}
+    if fmt in ("NVINT2", "NVINT3"):
+        # Low-bit symmetric-int with NVFP4-style scale envelope.
+        # Stored as bit-packed uint8 + fp8 per-group scale + fp32 global.
+        # vLLM loader decodes to NVFP4 at process_weights_after_loading
+        # and runs the NVFP4 GEMM kernel unchanged.
+        w_work = weight.to(torch.float32)
+        # Act-aware passes are noisy at 2/3-bit — keep RTN only.
+        bits = 2 if fmt == "NVINT2" else 3
+        wp, ws, wg = quantize_dequantize_nvint(
+            w_work, bits=bits, group_size=16,
+            global_real_override=nvfp4_global_real_override,
+        )
+        return {
+            "weight_packed": wp,
+            "weight_scale": ws,
+            "weight_global_scale": wg,
+        }
     raise ValueError(f"unsupported format: {fmt}")
+
+
+def _quantize_nvint_packed(packed: torch.Tensor, fmt: str) -> dict[str, torch.Tensor]:
+    """Per-expert NVINT2/NVINT3 packing for a 3D `[E, M, N]` tensor.
+
+    Each expert gets its own global scale (so weight_global_scale has
+    shape [E]). Mirrors `quantize_dequantize_nvfp4_packed` structure.
+    """
+    bits = 2 if fmt == "NVINT2" else 3
+    int_max = NVINT2_MAX if bits == 2 else NVINT3_MAX
+    int_min = -(int_max + 1)
+    group_size = 16
+    E, M, N = packed.shape
+    if N % group_size != 0:
+        raise ValueError(f"{fmt} group_size={group_size} ∤ {N}")
+    n_groups = N // group_size
+    grouped = packed.float().reshape(E, M, n_groups, group_size)
+    max_abs = grouped.abs().amax(dim=-1).clamp_min(1e-12)
+    s_g_real = max_abs / int_max
+    global_real = (s_g_real.amax(dim=(-2, -1)) / FP8_E4M3_MAX).clamp_min(1e-12)  # [E]
+    fp8_scale_real = (s_g_real / global_real.view(E, 1, 1)).clamp(0, FP8_E4M3_MAX)
+    q = torch.round(grouped / s_g_real.unsqueeze(-1).clamp_min(1e-12)).clamp(int_min, int_max)
+    q = q.to(torch.int8).reshape(E, M, N)
+    packer = pack_nvint2 if bits == 2 else pack_nvint3
+    weight_packed = packer(q, N)  # [E, M, packed_cols]
+    return {
+        "weight_packed": weight_packed,
+        "weight_scale": fp8_scale_real.to(torch.float8_e4m3fn),
+        "weight_global_scale": (1.0 / global_real).to(torch.float32),
+    }
 
 
 def _quantize_3d_packed(packed: torch.Tensor, fmt: str) -> dict[str, torch.Tensor]:
@@ -1493,6 +1623,8 @@ def _quantize_3d_packed(packed: torch.Tensor, fmt: str) -> dict[str, torch.Tenso
     if fmt == "MXFP8":
         w, ws = quantize_dequantize_mxfp8_packed(packed, group_size=32)
         return {"weight": w, "weight_scale": ws}
+    if fmt in ("NVINT2", "NVINT3"):
+        return _quantize_nvint_packed(packed, fmt)
     raise ValueError(f"unsupported format for packed-MoE: {fmt}")
 
 
@@ -2118,6 +2250,31 @@ MXFP8_SCHEME = {
         "zp_dtype": "torch.uint8",
     },
 }
+# NVINT2 / NVINT3: symmetric-int weights with the NVFP4 scale envelope
+# (group=16, FP8 per-group scale, FP32 per-tensor global). vLLM's
+# loader scheme (CompressedTensorsW{2,3}A16Nvint) decodes to NVFP4 at
+# load time and serves through the existing NVFP4 GEMM kernel. No
+# activation quantization (W{2,3}A16) — activations stay BF16.
+NVINT2_SCHEME = {
+    "format": "nvint2-pack-quantized",
+    "weights": {
+        "num_bits": 2, "type": "int", "strategy": "tensor_group",
+        "group_size": 16, "symmetric": True, "dynamic": False,
+        "scale_dtype": "torch.float8_e4m3fn",
+        "zp_dtype": "torch.float8_e4m3fn",
+        "observer": "memoryless_minmax",
+    },
+}
+NVINT3_SCHEME = {
+    "format": "nvint3-pack-quantized",
+    "weights": {
+        "num_bits": 3, "type": "int", "strategy": "tensor_group",
+        "group_size": 16, "symmetric": True, "dynamic": False,
+        "scale_dtype": "torch.float8_e4m3fn",
+        "zp_dtype": "torch.float8_e4m3fn",
+        "observer": "memoryless_minmax",
+    },
+}
 def _bf16_packed_expert_ignore_regex(
         recipe_key: str,
         profile,
@@ -2203,6 +2360,8 @@ def _bf16_packed_expert_ignore_regex(
 FORMAT_SCHEME = {
     "NVFP4": NVFP4_SCHEME,
     "MXFP8": MXFP8_SCHEME,
+    "NVINT2": NVINT2_SCHEME,
+    "NVINT3": NVINT3_SCHEME,
 }
 
 
