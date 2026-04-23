@@ -357,40 +357,60 @@ def _read_layer_to_device(prefix: str,
     """Read all tensors under `prefix` from safetensors and place them
     on `device`. Returns {model_name: device_tensor}.
 
-    When `fp8_scale_inv_map` is provided, every fp8-sourced weight gets
-    its 128x128 block `weight_scale_inv` applied inline so `mod.weight`
-    holds the TRUE dequanted weight on install. Without this, the
-    plain `.to(bfloat16)` cast leaves raw fp8 codes (range ±448)
-    interpreted as bf16, which silently breaks every downstream pass
-    that reads `mod.weight` — Fisher probe, RTN cost measurement, and
-    non-FP8_SOURCE export paths all treated codes as weights.
-
-    On a UMA system like Spark's GB10 the `.to(device)` call here is
-    still a torch-level memcpy (CPU ↔ CUDA allocators are logically
-    distinct even when the underlying memory is one pool), but we pay
-    it in the prefetch worker thread — overlapped with GPU compute —
-    rather than on the main thread's critical path. The resulting
-    cache holds device-resident tensors, so `_fast_install`'s hot path
-    does a pure `.data =` swap with zero copies."""
+    When `fp8_scale_inv_map` is provided, native-FP8 block-scaled
+    weights are dequanted on the CPU side *before* the device transfer
+    — fp8 and its paired `.weight_scale_inv` live together in the same
+    source shard, so we read both via one `safe_open`, fuse on CPU,
+    and ship a single bf16 tensor to `device`. This is specifically
+    tuned for unified-memory hosts (Spark GB10) where CUDA kernel
+    dispatch has overhead but memory access is free; issuing 700+
+    tiny CUDA multiplies per layer-load was saturating the prefetch
+    thread's CPU and starving the main-thread backward pass."""
     by_shard: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for model_name, shard in model_to_shard.items():
         if model_name.startswith(prefix):
             by_shard[shard].append((model_name, model_to_ckpt[model_name]))
+    # Group fp8-scaled weights so we can fuse weight + scale reads per
+    # shard in one `safe_open` pass. Scale shards usually equal weight
+    # shards (checkpoint writers colocate the pair), but we index
+    # generally to handle cross-shard cases.
+    scale_by_shard: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    if fp8_scale_inv_map:
+        for name, shard in list(model_to_shard.items()):
+            if not name.startswith(prefix):
+                continue
+            entry = fp8_scale_inv_map.get(name)
+            if entry is None:
+                continue
+            sshard, scale_key = entry
+            scale_by_shard[sshard].append((name, scale_key))
+
+    # Pre-read every scale tensor once, grouped by shard.
+    loaded_scales: dict[str, torch.Tensor] = {}
+    for sshard, reads in scale_by_shard.items():
+        with safe_open(sshard, framework="pt") as f:
+            for name, scale_key in reads:
+                loaded_scales[name] = f.get_tensor(scale_key)
+
     out: dict[str, torch.Tensor] = {}
     for shard, pairs in by_shard.items():
         with safe_open(shard, framework="pt") as f:
             for model_name, ckpt_name in pairs:
                 t = f.get_tensor(ckpt_name)
-                if t.is_floating_point():
+                scale = loaded_scales.pop(model_name, None)
+                if scale is not None:
+                    # CPU-side dequant: fp8 → fp (per-code lookup is
+                    # fast on CPU), block-reshape + broadcast multiply
+                    # in bf16, then one `.to(device)` for the final
+                    # tensor. Avoids 3+ separate CUDA dispatches per
+                    # weight.
+                    t = _dequant_fp8_block_weight(t, scale)
+                elif t.is_floating_point():
                     t = t.to(dtype)
                 t = t.to(device, non_blocking=True)
-                # Safetensors tensors are usually already contiguous; only
-                # pay for a second cuda allocation when they aren't.
                 if not t.is_contiguous():
                     t = t.contiguous()
                 out[model_name] = t
-    if fp8_scale_inv_map:
-        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device)
     return out
 
 
