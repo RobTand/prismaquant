@@ -80,33 +80,40 @@ class TestLazyActivationCache(unittest.TestCase):
 
 
 class TestGroupedExportQuantization(unittest.TestCase):
-    def test_grouped_nvint_matches_scalar_export(self):
+    def test_grouped_rtn_formats_match_scalar_export(self):
         from prismaquant.export_native_compressed import (
             _quantize_2d,
             _quantize_2d_group_same_shape,
         )
 
         torch.manual_seed(0)
-        weights = torch.randn(3, 4, 16)
-        for fmt in ("NVINT2", "NVINT3"):
+        weights = torch.randn(3, 4, 32)
+        for fmt in ("NVINT2", "NVINT3", "MXFP8"):
             grouped = _quantize_2d_group_same_shape(weights, fmt)
             for i in range(weights.shape[0]):
                 scalar = _quantize_2d(weights[i], fmt)
-                self.assertTrue(
-                    torch.equal(grouped["weight_packed"][i], scalar["weight_packed"]),
-                    msg=f"{fmt} weight_packed[{i}]",
-                )
-                self.assertTrue(
-                    torch.equal(grouped["weight_scale"][i], scalar["weight_scale"]),
-                    msg=f"{fmt} weight_scale[{i}]",
-                )
-                self.assertTrue(
-                    torch.allclose(
-                        grouped["weight_global_scale"][i].reshape(1),
-                        scalar["weight_global_scale"],
-                    ),
-                    msg=f"{fmt} weight_global_scale[{i}]",
-                )
+                for key, scalar_tensor in scalar.items():
+                    grouped_tensor = grouped[key][i]
+                    if key == "weight_global_scale":
+                        grouped_tensor = grouped_tensor.reshape(1)
+                    if scalar_tensor.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                        self.assertTrue(
+                            torch.allclose(
+                                grouped_tensor.to(torch.float32),
+                                scalar_tensor.to(torch.float32),
+                            ),
+                            msg=f"{fmt} {key}[{i}]",
+                        )
+                    elif scalar_tensor.dtype.is_floating_point:
+                        self.assertTrue(
+                            torch.allclose(grouped_tensor, scalar_tensor),
+                            msg=f"{fmt} {key}[{i}]",
+                        )
+                    else:
+                        self.assertTrue(
+                            torch.equal(grouped_tensor, scalar_tensor),
+                            msg=f"{fmt} {key}[{i}]",
+                        )
 
 
 def _nvfp4_dequantize(weight_packed, weight_scale_fp8, weight_global_scale_divisor):
