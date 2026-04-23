@@ -3620,6 +3620,17 @@ def _copy_tokenizer(src_model: str, out_dir: Path) -> None:
         p = src / name
         if p.exists():
             shutil.copy2(p, out_dir / name)
+    # Custom architecture modules (trust_remote_code). MiniMax-M2 ships
+    # `configuration_minimax_m2.py` + `modeling_minimax_m2.py`;
+    # DeepSeek-V3 and similar use the same pattern. vLLM's config loader
+    # re-reads these via `get_class_from_dynamic_module` when the
+    # exported config's `auto_map` still references them, so they must
+    # travel with the checkpoint. Copy every `.py` at the source root
+    # (there's only ever a handful — the custom modules and occasionally
+    # a `modular_*.py` generator; the autogen header warns not to ship
+    # both but copying is harmless).
+    for py in src.glob("*.py"):
+        shutil.copy2(py, out_dir / py.name)
 
 
 def _source_has_prefixed_weights(src_model: str, prefix: str) -> bool:
