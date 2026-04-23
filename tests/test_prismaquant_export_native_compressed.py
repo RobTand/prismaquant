@@ -49,6 +49,36 @@ class _IdentityProfile:
         return live_qname
 
 
+class TestLazyActivationCache(unittest.TestCase):
+    def test_get_loads_existing_tensor_on_demand(self):
+        from prismaquant.export_native_compressed import _LazyActivationCache
+
+        class FakeIndex:
+            def __init__(self):
+                self.load_count = 0
+                self.values = {"layer.q_proj": torch.ones(2, 3, dtype=torch.bfloat16)}
+
+            def __contains__(self, name):
+                return name in self.values
+
+            def load(self, name):
+                self.load_count += 1
+                return self.values[name]
+
+        index = FakeIndex()
+        cache = _LazyActivationCache(index)
+
+        self.assertEqual(index.load_count, 0)
+        self.assertIsNone(cache.get("missing"))
+        self.assertEqual(index.load_count, 0)
+
+        value = cache.get("layer.q_proj")
+        self.assertEqual(index.load_count, 1)
+        self.assertEqual(cache.loads, 1)
+        self.assertEqual(value.dtype, torch.float32)
+        self.assertTrue(torch.equal(value, torch.ones(2, 3, dtype=torch.float32)))
+
+
 def _nvfp4_dequantize(weight_packed, weight_scale_fp8, weight_global_scale_divisor):
     """Reproduce vLLM's NVFP4 dequant convention to verify round-trip.
     The on-disk `weight_global_scale` is `1/global_real`; vLLM inverts

@@ -638,30 +638,43 @@ def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                     dloss_per = None
                     if h_stacked is not None:
                         dloss_per = 0.5 * (h_stacked * err.pow(2)).sum(dim=(1, 2))
-                    # Unpack per-item into results dict
-                    for i, name in enumerate(names):
-                        dloss_val = float(dloss_per[i].item()) if dloss_per is not None else None
+                    # Move all scalar metrics back to the host in one shot.
+                    # Calling `.item()` per Linear forces a CUDA sync for each
+                    # row and turns the batched path back into serialized work.
+                    metrics = torch.stack(
+                        (weight_mse, output_mse, rel_mse), dim=1
+                    ).detach().cpu().tolist()
+                    if dloss_per is not None:
+                        dloss_values = dloss_per.detach().cpu().tolist()
+                    else:
+                        dloss_values = [None] * N
+
+                    # Unpack per-item into results dict after the single sync.
+                    for name, (w_mse, out_mse, rel), dloss_val in zip(
+                        names, metrics, dloss_values
+                    ):
                         _accumulate_result(
                             accum,
                             name,
                             spec.name,
-                            float(weight_mse[i].item()),
-                            float(output_mse[i].item()),
-                            float(rel_mse[i].item()),
-                            predicted_dloss=dloss_val,
+                            float(w_mse),
+                            float(out_mse),
+                            float(rel),
+                            predicted_dloss=(
+                                float(dloss_val)
+                                if dloss_val is not None
+                                else None
+                            ),
                         )
                     del W_hat, X_hat, err, y_q, weight_mse, output_mse, rel_mse
+                    del metrics, dloss_values
                     if dloss_per is not None:
                         del dloss_per
-                    if dev.type == "cuda":
-                        torch.cuda.empty_cache()
                 except Exception as e:
                     for name in names:
                         accum.setdefault(name, {})[spec.name] = {"error": str(e)}
 
             del W, X, y_ref, ref_energy
-            if dev.type == "cuda":
-                torch.cuda.empty_cache()
             processed += N
             if processed % (chunk_size * 4) == 0 or processed == total_linears:
                 elapsed = time.time() - tstart
