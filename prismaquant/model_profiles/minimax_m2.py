@@ -138,14 +138,18 @@ class MiniMaxM2Profile(ModelProfile):
         # No multimodal umbrella. Recipe/live names align.
         return live_qname
 
-    def stage_text_only_strip_keys(self) -> tuple[str, ...]:
-        # MiniMax-M2.7 ships as FP8 (quant_method=fp8,
-        # fmt=float8_e4m3fn, 128x128 block scales). transformers 5.x's
-        # fine-grained-FP8 integration has multiple structural bugs
-        # on MiniMax's config shape (num_experts vs num_local_experts
-        # mismatch; set_submodule('...experts.0') path failure).
-        # Strip the quantization_config entirely so transformers
-        # loads the raw safetensors with torch_dtype=bfloat16 casting;
-        # for any layer prismaquant wants to keep at 8 bits we emit
-        # the source FP8 tensors on the export side (no re-quant).
-        return ("quantization_config",) + super().stage_text_only_strip_keys()
+    # Keep `quantization_config` in the staged config so transformers'
+    # fine-grained-FP8 quantizer owns the source dequant on the probe
+    # and cost paths — otherwise the streaming loader would cast raw
+    # fp8_e4m3fn bytes to bfloat16 WITHOUT multiplying by the 128×128
+    # `weight_scale_inv` block, producing bogus weight values for every
+    # Linear the probe inspects. transformers 4.57.5's FP8 integration
+    # handles MiniMax correctly; the polyfills in prismaquant/__init__.py
+    # cover the 5.x regressions (validate_environment disk-device-map
+    # rejection, eager `num_experts` fallback).
+    #
+    # On the EXPORT side, FP8-sourced Linears we're keeping at 8 bits
+    # bypass the dequanted BF16 view entirely — the FP8_SOURCE branch
+    # in export_native_compressed opens the source safetensors directly
+    # and copies `.weight` + `.weight_scale_inv` verbatim. See the
+    # passthrough-integrity filter in allocator.py for the gating.
