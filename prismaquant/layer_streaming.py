@@ -370,47 +370,19 @@ def _read_layer_to_device(prefix: str,
     for model_name, shard in model_to_shard.items():
         if model_name.startswith(prefix):
             by_shard[shard].append((model_name, model_to_ckpt[model_name]))
-    # Group fp8-scaled weights so we can fuse weight + scale reads per
-    # shard in one `safe_open` pass. Scale shards usually equal weight
-    # shards (checkpoint writers colocate the pair), but we index
-    # generally to handle cross-shard cases.
-    scale_by_shard: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    if fp8_scale_inv_map:
-        for name, shard in list(model_to_shard.items()):
-            if not name.startswith(prefix):
-                continue
-            entry = fp8_scale_inv_map.get(name)
-            if entry is None:
-                continue
-            sshard, scale_key = entry
-            scale_by_shard[sshard].append((name, scale_key))
-
-    # Pre-read every scale tensor once, grouped by shard.
-    loaded_scales: dict[str, torch.Tensor] = {}
-    for sshard, reads in scale_by_shard.items():
-        with safe_open(sshard, framework="pt") as f:
-            for name, scale_key in reads:
-                loaded_scales[name] = f.get_tensor(scale_key)
-
     out: dict[str, torch.Tensor] = {}
     for shard, pairs in by_shard.items():
         with safe_open(shard, framework="pt") as f:
             for model_name, ckpt_name in pairs:
                 t = f.get_tensor(ckpt_name)
-                scale = loaded_scales.pop(model_name, None)
-                if scale is not None:
-                    # CPU-side dequant: fp8 → fp (per-code lookup is
-                    # fast on CPU), block-reshape + broadcast multiply
-                    # in bf16, then one `.to(device)` for the final
-                    # tensor. Avoids 3+ separate CUDA dispatches per
-                    # weight.
-                    t = _dequant_fp8_block_weight(t, scale)
-                elif t.is_floating_point():
+                if t.is_floating_point():
                     t = t.to(dtype)
                 t = t.to(device, non_blocking=True)
                 if not t.is_contiguous():
                     t = t.contiguous()
                 out[model_name] = t
+    if fp8_scale_inv_map:
+        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device)
     return out
 
 
