@@ -88,6 +88,61 @@ from . import format_registry as fr
 
 
 # ---------------------------------------------------------------------------
+# Passthrough formats
+# ---------------------------------------------------------------------------
+# A "passthrough" format is one whose exporter path copies the source
+# tensor(s) verbatim rather than running RTN / AutoRound. Passthrough is
+# legal only when the source checkpoint already holds the Linear's
+# weight at the exact precision that format represents — otherwise the
+# exporter has no source bytes to copy and the allocator would be
+# synthesizing new values that it claimed were passthrough.
+#
+# The principle is source-driven, not format-specific: for ANY Linear
+# we decide not to re-quantize, we pass through whatever is on disk,
+# and the output format name follows from the source dtype. This table
+# makes that explicit — add a new row when a new source-quantization
+# format becomes a supported passthrough target.
+#
+# Format name            Required source dtype (per `_scan_source_dtype_manifest`)
+PASSTHROUGH_SOURCE_REQUIREMENTS: dict[str, str] = {
+    "FP8_SOURCE": "fp8",   # MiniMax-M2/M2.7, DeepSeek V3, NVIDIA FP8 releases
+    "BF16":       "bf16",  # plain unquantized weights on BF16-native checkpoints
+}
+
+
+def _is_passthrough_format(format_name: str) -> bool:
+    """True when `format_name` is a passthrough-only format (exporter
+    copies source bytes verbatim, no RTN)."""
+    return format_name in PASSTHROUGH_SOURCE_REQUIREMENTS
+
+
+def _passthrough_source_ok(
+    format_name: str,
+    source_kind: str | None,
+) -> bool:
+    """Return True when the allocator may legally assign `format_name`
+    to a Linear whose source has the given `source_kind`.
+
+    - Non-passthrough formats (MXFP8, NVFP4, NVINT3, ...) are always
+      legal — they re-quantize from the probe's BF16 view.
+    - Passthrough formats require the source to already be at the
+      exact precision they represent (see
+      PASSTHROUGH_SOURCE_REQUIREMENTS).
+    - `source_kind=None` means "unknown" (e.g. manifest skipped the
+      Linear because profile remap didn't recognize it) — treat as
+      permissive so we don't accidentally disallow valid assignments.
+      Callers who want strict behavior should ensure the manifest is
+      complete.
+    """
+    required = PASSTHROUGH_SOURCE_REQUIREMENTS.get(format_name)
+    if required is None:
+        return True
+    if source_kind is None:
+        return True
+    return source_kind == required
+
+
+# ---------------------------------------------------------------------------
 # Fused-projection sibling detection
 # ---------------------------------------------------------------------------
 # Profile-driven: we group Linears by the key returned by
@@ -479,7 +534,8 @@ def _flashinfer_kernel_accepts(fmt_name: str, in_features: int,
 
 
 def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
-                     calibrated_gains: dict[str, float] | None = None
+                     calibrated_gains: dict[str, float] | None = None,
+                     source_manifest: dict[str, str] | None = None,
                      ) -> dict[str, list[Candidate]]:
     """For each Linear, build its candidate list (one per format).
 
@@ -493,10 +549,22 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     from its candidate list — the knapsack can't pick an unservable
     option. Dropping these at candidate-build time is cleaner than
     waiting for serve-time kernel dispatch failures.
+
+    Passthrough-integrity: any format in
+    `PASSTHROUGH_SOURCE_REQUIREMENTS` is a passthrough-only format
+    whose `quantize_dequantize` is identity, so it registers zero RTN
+    error on every Linear regardless of actual source. When
+    `source_manifest` is provided (mapping stats-name → source-dtype
+    per `_scan_source_dtype_manifest`), drop any passthrough format
+    candidate whose source-dtype requirement doesn't match — the
+    exporter has no source bytes to copy in that case, and the
+    allocator would otherwise be synthesizing new values under the
+    guise of passthrough.
     """
     gains = calibrated_gains or {}
     out: dict[str, list[Candidate]] = {}
     masked_by_shape: dict[str, list[str]] = {}
+    masked_by_passthrough: dict[str, list[str]] = {}
     for name, s in stats.items():
         if name not in costs:
             continue
@@ -504,10 +572,19 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
         shape = _shape_from_stats(s)
         in_features = int(s.get("in_features", 0) or 0)
         out_features = int(s.get("out_features", 0) or 0)
+        source_kind = (source_manifest or {}).get(name)
         cands = []
         for spec in formats:
             entry = costs[name].get(spec.name)
             if entry is None or "error" in entry:
+                continue
+            # Passthrough-integrity: drop mismatched passthrough-only
+            # formats. See PASSTHROUGH_SOURCE_REQUIREMENTS for the
+            # registry of (format → required source dtype).
+            if (source_kind is not None
+                    and _is_passthrough_format(spec.name)
+                    and not _passthrough_source_ok(spec.name, source_kind)):
+                masked_by_passthrough.setdefault(spec.name, []).append(name)
                 continue
             # Kernel shape check — skip formats whose runtime GEMM
             # can't handle this Linear's (in, out).
@@ -540,6 +617,11 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
         for fmt, names in masked_by_shape.items():
             print(f"[alloc] kernel shape-mask: {len(names)} Linear(s) "
                   f"dropped {fmt} (sample: {names[:3]})", flush=True)
+    if masked_by_passthrough:
+        for fmt, names in masked_by_passthrough.items():
+            print(f"[alloc] passthrough-integrity: {len(names)} Linear(s) "
+                  f"dropped {fmt} (source dtype mismatch; "
+                  f"sample: {names[:3]})", flush=True)
     return out
 
 
@@ -1285,6 +1367,77 @@ def discover_visual_linears_from_source(model_path: str) -> list[str]:
     return sorted(set(out))
 
 
+def _scan_source_dtype_manifest(
+    model_path: str,
+    profile,
+) -> dict[str, str]:
+    """Classify each source `.weight` tensor as 'fp8' or 'bf16' and return
+    a mapping keyed by the vLLM-internal (stats-dict) name.
+
+    Classification rule (index-only, no shard reads needed):
+      - `<base>.weight` + `<base>.weight_scale_inv` both present  → 'fp8'
+        (FP8 block-scaled; the scale_inv sibling is how native-FP8
+        exporters like MiniMax and DeepSeek V3 record the 128×128
+        block scale)
+      - `<base>.weight` alone  → 'bf16' (plain unquantized weight)
+
+    This drives passthrough-integrity in `build_candidates`:
+      - 'fp8' Linears may receive FP8_SOURCE;  may NOT receive BF16.
+      - 'bf16' Linears may receive BF16;  may NOT receive FP8_SOURCE.
+
+    Without this filter both BF16 and FP8_SOURCE register zero RTN
+    error (their quantize_dequantize is identity against the probe's
+    BF16 view), so the allocator would happily pick either one
+    regardless of whether the source supports the passthrough — which
+    wastes bpp (BF16 over an FP8 source synthesizes a new BF16 tensor
+    encoding only 8 bpp of real information) or breaks the export
+    (FP8_SOURCE over a BF16 source: there are no fp8 bytes to copy).
+
+    Keys use the profile's HF → vLLM name rewrite so callers can look
+    up directly by stats-dict names (e.g. MiniMax per-expert leaves
+    come back as `...mlp.experts.Y.gate_proj`, matching the probe's
+    key space, not the HF `...block_sparse_moe.experts.Y.w1` form).
+    """
+    src = Path(model_path)
+    idx_path = src / "model.safetensors.index.json"
+    if not idx_path.exists():
+        return {}
+    try:
+        with open(idx_path) as f:
+            weight_map = json.load(f).get("weight_map", {})
+    except Exception:
+        return {}
+    # Group keys by base name. Order matters: `.weight_scale_inv` must
+    # be matched before `.weight` — the latter is a strict prefix match
+    # on the former via `endswith` semantics only because `.weight` ends
+    # the string, so we check the longer suffix first to be safe.
+    bases: dict[str, set[str]] = {}
+    for key in weight_map:
+        matched = False
+        for suffix in (".weight_scale_inv", ".weight"):
+            if key.endswith(suffix):
+                base = key[: -len(suffix)]
+                bases.setdefault(base, set()).add(suffix[1:])
+                matched = True
+                break
+        if not matched:
+            continue
+    manifest: dict[str, str] = {}
+    for base, suffixes in bases.items():
+        if "weight" not in suffixes:
+            continue
+        source_kind = "fp8" if "weight_scale_inv" in suffixes else "bf16"
+        if profile is not None:
+            try:
+                stats_name = profile.to_vllm_internal_name(base)
+            except Exception:
+                stats_name = base
+        else:
+            stats_name = base
+        manifest[stats_name] = source_kind
+    return manifest
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1477,7 +1630,24 @@ def main():
             print(f"[alloc] WARNING: {args.calibration} has no usable "
                   f"calibrated_gains; running uncalibrated", flush=True)
 
-    candidates = build_candidates(stats, costs, specs_sorted, calibrated_gains)
+    # Source-dtype manifest drives passthrough-integrity filtering in
+    # build_candidates. None when model path is unknown — candidates
+    # fall back to cost-pickle-only gating (pre-passthrough behavior).
+    source_manifest: dict[str, str] | None = None
+    if probe_model_path:
+        source_manifest = _scan_source_dtype_manifest(
+            probe_model_path, model_profile)
+        if source_manifest:
+            n_fp8 = sum(1 for v in source_manifest.values() if v == "fp8")
+            n_bf16 = sum(1 for v in source_manifest.values() if v == "bf16")
+            print(f"[alloc] source-dtype manifest: {n_fp8} fp8, "
+                  f"{n_bf16} bf16 (gates FP8_SOURCE/BF16 per source)",
+                  flush=True)
+
+    candidates = build_candidates(
+        stats, costs, specs_sorted, calibrated_gains,
+        source_manifest=source_manifest,
+    )
     print(f"[alloc] candidates built for {len(candidates)} Linears")
 
     if args.target_profile == "vllm_qwen3_5_packed_moe":
@@ -1683,6 +1853,42 @@ def main():
             print(f"[alloc] --visual-format={visual_format}: no visual "
                   f"Linears found in source checkpoint — override is a "
                   f"no-op", flush=True)
+
+    # Passthrough-integrity belt-and-suspenders. The filter in
+    # build_candidates drops mismatched FP8_SOURCE / BF16 per-Linear
+    # candidate, but downstream aggregation + promotion (fused
+    # siblings, MoE expert-unity) can in principle push a format onto
+    # a group whose members have heterogeneous source dtypes. On
+    # modern checkpoints this doesn't happen (siblings share source
+    # dtype), but if it ever does we want a loud early failure rather
+    # than a broken export artifact.
+    if source_manifest:
+        violations: list[tuple[str, str, str]] = []
+        for name, fmt in assignment_expanded.items():
+            if not _is_passthrough_format(fmt):
+                continue
+            kind = source_manifest.get(name)
+            if kind is None:
+                # Not in manifest — likely a visual Linear stamped via
+                # --visual-format (bypasses the manifest by design) or
+                # a name the profile rewrite didn't map. Skip.
+                continue
+            if not _passthrough_source_ok(fmt, kind):
+                violations.append((name, fmt, kind))
+        if violations:
+            head = "\n  ".join(
+                f"{n}: picked {f} but source is {k} "
+                f"(requires {PASSTHROUGH_SOURCE_REQUIREMENTS[f]})"
+                for n, f, k in violations[:10]
+            )
+            raise SystemExit(
+                f"[alloc] passthrough-integrity violation: "
+                f"{len(violations)} Linears have a passthrough format "
+                f"picked over a mismatched source dtype. Sample:\n"
+                f"  {head}\n"
+                "The per-Linear filter should have excluded these — "
+                "investigate fused-sibling / MoE-unity promotion."
+            )
 
     layer_cfg = {}
     for name, fmt in assignment_expanded.items():

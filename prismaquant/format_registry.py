@@ -512,6 +512,34 @@ register_format(FormatSpec(
     activation_quantize_dequantize=lambda x: x.clone(),
 ))
 
+# Source-FP8 passthrough — for models that ship FP8-quantized (MiniMax
+# M2/M2.7, DeepSeek V3, several NVIDIA releases). When the allocator
+# picks this format for a Linear, the exporter copies the SOURCE FP8
+# tensor (+ its weight_scale_inv block-scale tensor) verbatim into the
+# output checkpoint — no dequant/requant round-trip. That preserves
+# bit-exact the value the probe's BF16 view was dequanted from.
+#
+# quantize_dequantize is identity: given the probe's BF16 weight (which
+# IS the lossless dequant of the source FP8 — every E4M3 code is
+# exactly representable in bfloat16), re-quantizing to FP8_SOURCE gives
+# back the SAME BF16 view. Cost is zero Δloss, as it should be.
+#
+# effective_bits = 8 + 32 / (128*128) ≈ 8.002 bpp (scale_inv is fp32
+# at the 128×128 block granularity MiniMax ships; smaller than MXFP8's
+# 8.25 because the block is 128×128 not group-of-32).
+register_format(FormatSpec(
+    name="FP8_SOURCE",
+    weight_bits=8, group_size=128, scale_bits=32, scale_dtype_name="fp32",
+    weight_element_dtype="fp8_e4m3",
+    act_bits=None,
+    family="fp", min_capability_sm=89,
+    autoround_config=lambda: dict(bits=8, group_size=128,
+                                   data_type="fp8_e4m3", sym=True,
+                                   act_bits=16, act_data_type="float"),
+    quantize_dequantize=lambda w: w.clone(),
+    activation_quantize_dequantize=lambda x: x.clone(),
+))
+
 
 def list_formats(family: str | None = None) -> list[FormatSpec]:
     if family is None:
