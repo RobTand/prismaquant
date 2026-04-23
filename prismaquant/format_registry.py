@@ -36,6 +36,7 @@ class FormatSpec:
     scale_bits: int          # bits per scale element
     scale_dtype_name: str    # "fp8_e4m3", "uint8_e8m0", "fp32", ...
     weight_element_dtype: str   # "fp4_e2m1", "fp8_e4m3", "fp6_e3m2", "int4", ...
+    scale_block_shape: tuple[int, int] | None = None
     act_bits: int | None = None   # None = no activation quant (W8A16)
     act_dtype_name: str | None = None
     act_group_size: int | None = None
@@ -64,6 +65,9 @@ class FormatSpec:
             # fallback here so older code doesn't crash, but new allocation code
             # should call effective_bits_for_shape().
             return float(self.weight_bits) + 0.02
+        if self.scale_block_shape is not None:
+            rows, cols = self.scale_block_shape
+            return float(self.weight_bits) + float(self.scale_bits) / (rows * cols)
         return float(self.weight_bits) + float(self.scale_bits) / self.group_size
 
     def scale_count_for_shape(self, shape: tuple[int, ...]) -> int:
@@ -79,6 +83,18 @@ class FormatSpec:
             return 0
         if self.scale_bits == 0:
             return 0
+        if self.scale_block_shape is not None:
+            if len(shape) < 2:
+                n_params = int(shape[0])
+                rows, cols = self.scale_block_shape
+                return math.ceil(n_params / (rows * cols))
+            rows, cols = self.scale_block_shape
+            outer = int(math.prod(shape[:-2])) if len(shape) > 2 else 1
+            return (
+                outer
+                * math.ceil(int(shape[-2]) / rows)
+                * math.ceil(int(shape[-1]) / cols)
+            )
         if self.group_size == 0:
             return int(shape[0]) if len(shape) >= 1 else 1
         if len(shape) == 1:
@@ -101,11 +117,26 @@ class FormatSpec:
 
 
 REGISTRY: dict[str, FormatSpec] = {}
+FORMAT_ALIASES: dict[str, str] = {
+    "NVINT2": "INT2",
+    "NVINT3": "INT3",
+}
 
 
 def register_format(spec: FormatSpec) -> FormatSpec:
     REGISTRY[spec.name] = spec
     return spec
+
+
+def canonical_format_name(name: str) -> str:
+    return FORMAT_ALIASES.get(name, name)
+
+
+def aliases_for(name: str) -> tuple[str, ...]:
+    canonical = canonical_format_name(name)
+    aliases = [alias for alias, target in FORMAT_ALIASES.items()
+               if target == canonical]
+    return (canonical, *aliases)
 
 
 # -----------------------------------------------------------------------
@@ -442,13 +473,15 @@ register_format(FormatSpec(
     activation_quantize_dequantize=_make_rtn("fp8_e5m2", 0),
 ))
 
-# Low-bit Nvidia-flavored int quantization (block=16, FP8 scale — matches
-# NVFP4's envelope for easy dequant-to-NVFP4 at serve time). These are our
-# own formats; no hardware tensor-core op exists for them, so the serving
-# path dequantizes to NVFP4 on load and runs unchanged NVFP4 GEMMs.
+# Low-bit symmetric int quantization (block=16, FP8 scale — matches
+# NVFP4's envelope for easy dequant-to-NVFP4 at serve time). These are
+# our own formats; no hardware tensor-core op exists for them, so the
+# serving path dequantizes to NVFP4 on load and runs unchanged NVFP4
+# GEMMs. Historical configs may still spell these as NVINT2/NVINT3;
+# get_format() accepts those as aliases.
 # Storage savings: INT3 saves 25% vs NVFP4, INT2 saves 50%.
 register_format(FormatSpec(
-    name="NVINT3",
+    name="INT3",
     weight_bits=3, group_size=16, scale_bits=8, scale_dtype_name="fp8_e4m3",
     weight_element_dtype="int3", act_bits=None,
     family="nv", min_capability_sm=100,
@@ -457,7 +490,7 @@ register_format(FormatSpec(
     activation_quantize_dequantize=lambda x: x,
 ))
 register_format(FormatSpec(
-    name="NVINT2",
+    name="INT2",
     weight_bits=2, group_size=16, scale_bits=8, scale_dtype_name="fp8_e4m3",
     weight_element_dtype="int2", act_bits=None,
     family="nv", min_capability_sm=100,
@@ -531,6 +564,7 @@ register_format(FormatSpec(
     name="FP8_SOURCE",
     weight_bits=8, group_size=128, scale_bits=32, scale_dtype_name="fp32",
     weight_element_dtype="fp8_e4m3",
+    scale_block_shape=(128, 128),
     act_bits=None,
     family="fp", min_capability_sm=89,
     autoround_config=lambda: dict(bits=8, group_size=128,
@@ -549,7 +583,8 @@ def list_formats(family: str | None = None) -> list[FormatSpec]:
 
 
 def get_format(name: str) -> FormatSpec:
-    if name not in REGISTRY:
+    canonical = canonical_format_name(name)
+    if canonical not in REGISTRY:
         raise KeyError(f"Unknown format '{name}'. Available: "
-                       f"{sorted(REGISTRY.keys())}")
-    return REGISTRY[name]
+                       f"{sorted((*REGISTRY.keys(), *FORMAT_ALIASES.keys()))}")
+    return REGISTRY[canonical]

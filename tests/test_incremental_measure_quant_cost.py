@@ -51,7 +51,7 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
         model.b = nn.Linear(16, 4, bias=False)
         model.c = nn.Linear(16, 4, bias=False)
         target_names = {"a", "b", "c"}
-        specs = [fr.get_format("BF16"), fr.get_format("NVINT3")]
+        specs = [fr.get_format("BF16"), fr.get_format("INT3")]
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

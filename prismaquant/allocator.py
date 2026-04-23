@@ -123,7 +123,7 @@ def _passthrough_source_ok(
     """Return True when the allocator may legally assign `format_name`
     to a Linear whose source has the given `source_kind`.
 
-    - Non-passthrough formats (MXFP8, NVFP4, NVINT3, ...) are always
+    - Non-passthrough formats (MXFP8, NVFP4, INT3, ...) are always
       legal — they re-quantize from the probe's BF16 view.
     - Passthrough formats require the source to already be at the
       exact precision they represent (see
@@ -484,6 +484,8 @@ def _format_kernel_supports_shape(fmt_name: str, in_features: int,
         if out_features % 128 != 0:
             return False
         return True
+    if fmt_name in ("INT2", "INT3", "NVINT2", "NVINT3"):
+        return in_features % 16 == 0
     if fmt_name.startswith("NVFP4"):
         # CUTLASS mm_nvfp4: K must be a multiple of the 16-wide group.
         return in_features % 16 == 0
@@ -575,7 +577,13 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
         source_kind = (source_manifest or {}).get(name)
         cands = []
         for spec in formats:
-            entry = costs[name].get(spec.name)
+            entry = None
+            entry_fmt = spec.name
+            for candidate_name in fr.aliases_for(spec.name):
+                if candidate_name in costs[name]:
+                    entry = costs[name][candidate_name]
+                    entry_fmt = candidate_name
+                    break
             if entry is None or "error" in entry:
                 continue
             # Passthrough-integrity: drop mismatched passthrough-only
@@ -593,7 +601,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             ):
                 masked_by_shape.setdefault(spec.name, []).append(name)
                 continue
-            gain = float(gains.get(spec.name, 1.0))
+            gain = float(gains.get(spec.name, gains.get(entry_fmt, 1.0)))
             # Prefer the full per-weight Δloss `0.5 · <H_full, MSE_W_full>`
             # emitted by measure_quant_cost when h_detail was available.
             # Falls back to the scalar proxy `0.5 · h_trace · weight_mse`

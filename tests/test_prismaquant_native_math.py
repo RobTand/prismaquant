@@ -13,9 +13,31 @@ class TestPrismaQuantFormatRegistry(unittest.TestCase):
     def test_block_formats_have_expected_shape_aware_bits(self):
         shape = (128, 128)
         self.assertAlmostEqual(fr.get_format("NVFP4").effective_bits_for_shape(shape), 4.5)
+        self.assertAlmostEqual(fr.get_format("INT2").effective_bits_for_shape(shape), 2.5)
+        self.assertAlmostEqual(fr.get_format("INT3").effective_bits_for_shape(shape), 3.5)
         self.assertAlmostEqual(fr.get_format("MXFP4").effective_bits_for_shape(shape), 4.25)
         self.assertAlmostEqual(fr.get_format("MXFP8").effective_bits_for_shape(shape), 8.25)
+        self.assertAlmostEqual(fr.get_format("FP8_SOURCE").effective_bits_for_shape(shape), 8.001953125)
         self.assertAlmostEqual(fr.get_format("BF16").effective_bits_for_shape(shape), 16.0)
+
+    def test_legacy_nvint_names_are_aliases(self):
+        self.assertIs(fr.get_format("NVINT2"), fr.get_format("INT2"))
+        self.assertIs(fr.get_format("NVINT3"), fr.get_format("INT3"))
+        self.assertEqual(fr.canonical_format_name("NVINT2"), "INT2")
+        self.assertEqual(fr.aliases_for("INT3"), ("INT3", "NVINT3"))
+
+    def test_source_fp8_uses_2d_scale_blocks(self):
+        spec = fr.get_format("FP8_SOURCE")
+        shape = (256, 256)
+        expected_bytes = 256 * 256 + 4 * 4  # fp8 weights + four fp32 128x128 scales
+
+        self.assertAlmostEqual(spec.effective_bits, 8.001953125)
+        self.assertEqual(spec.scale_count_for_shape(shape), 4)
+        self.assertEqual(spec.memory_bytes_for_shape(shape), expected_bytes)
+        self.assertAlmostEqual(
+            spec.effective_bits_for_shape(shape),
+            8.0 * expected_bytes / (256 * 256),
+        )
 
     def test_per_channel_formats_use_row_scale_count(self):
         shape = (5, 7)
@@ -68,6 +90,33 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
         )
         self.assertAlmostEqual(by_fmt["FP8_E4M3"].predicted_dloss, 0.5 * 2.0 * 0.10)
         self.assertAlmostEqual(by_fmt["BF16"].predicted_dloss, 0.0)
+
+    def test_build_candidates_prices_source_fp8_below_mxfp8(self):
+        stats = {
+            "layer.weight": {
+                "h_trace": 2.0,
+                "out_features": 128,
+                "in_features": 128,
+                "n_params": 128 * 128,
+            }
+        }
+        costs = {
+            "layer.weight": {
+                "FP8_SOURCE": {"weight_mse": 0.0},
+                "MXFP8": {"weight_mse": 0.01},
+            }
+        }
+        cands = build_candidates(
+            stats,
+            costs,
+            [fr.get_format("FP8_SOURCE"), fr.get_format("MXFP8")],
+        )
+        by_fmt = {cand.fmt: cand for cand in cands["layer.weight"]}
+
+        self.assertLess(by_fmt["FP8_SOURCE"].bits_per_param, by_fmt["MXFP8"].bits_per_param)
+        self.assertEqual(by_fmt["FP8_SOURCE"].memory_bytes, 128 * 128 + 4)
+        self.assertAlmostEqual(by_fmt["FP8_SOURCE"].bits_per_param, 8.001953125)
+        self.assertAlmostEqual(by_fmt["MXFP8"].bits_per_param, 8.25)
 
     def test_build_candidates_applies_calibrated_gains(self):
         stats = {
