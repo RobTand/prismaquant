@@ -138,15 +138,13 @@ class MiniMaxM2Profile(ModelProfile):
         # No multimodal umbrella. Recipe/live names align.
         return live_qname
 
-    # Keep `quantization_config` in the staged config so transformers'
-    # fine-grained-FP8 quantizer owns the source dequant on the probe
-    # and cost paths — otherwise the streaming loader would cast raw
-    # fp8_e4m3fn bytes to bfloat16 WITHOUT multiplying by the 128×128
-    # `weight_scale_inv` block, producing bogus weight values for every
-    # Linear the probe inspects. transformers 4.57.5's FP8 integration
-    # handles MiniMax correctly; the polyfills in prismaquant/__init__.py
-    # cover the 5.x regressions (validate_environment disk-device-map
-    # rejection, eager `num_experts` fallback).
+    # Streaming probe/cost bypass transformers' FP8 module rewrite for
+    # MiniMax under transformers 5.x: HF replaces the ModuleList experts
+    # with FP8Experts, then attempts to set `experts.0.w1`, which is not
+    # valid on that container. PrismaQuant instead reads source FP8
+    # bytes directly and applies each 128×128 `weight_scale_inv` block in
+    # `_read_layer_to_device`, so the live Linear still receives true
+    # dequanted bf16 values for Fisher/cost math.
     #
     # On the EXPORT side, FP8-sourced Linears we're keeping at 8 bits
     # bypass the dequanted BF16 view entirely — the FP8_SOURCE branch

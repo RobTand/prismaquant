@@ -60,6 +60,10 @@ set -euo pipefail
 # (cache = free_RAM - headroom). Default `auto` picks from model +
 # LAYERS_PER_SHARD. Set to a float to override.
 : "${CACHE_HEADROOM_GB:=auto}"
+: "${PREFETCH_LOOKAHEAD:=auto}"
+: "${PREFETCH_WORKERS:=auto}"
+: "${PREFETCH_MIN_AVAILABLE_GB:=auto}"
+: "${ACTIVATION_ROWS_LIMIT:=256}"
 : "${DATASET:=ultrachat_200k}"
 : "${DEVICE:=cuda}"
 : "${EXPORT_DEVICE:=cuda}"   # CUDA ~10× faster than CPU on NVFP4 packing
@@ -90,6 +94,8 @@ echo "  MODEL_PATH=$MODEL_PATH"
 echo "  WORK_DIR=$WORK_DIR"
 echo "  FORMATS=$FORMATS  TARGET_BITS=$TARGET_BITS"
 echo "  NSAMPLES=$NSAMPLES SEQLEN=$SEQLEN LAYERS_PER_SHARD=$LAYERS_PER_SHARD"
+echo "  PREFETCH_LOOKAHEAD=$PREFETCH_LOOKAHEAD PREFETCH_WORKERS=$PREFETCH_WORKERS"
+echo "  ACTIVATION_ROWS_LIMIT=$ACTIVATION_ROWS_LIMIT"
 echo "  VISUAL_FORMAT=$VISUAL_FORMAT"
 echo "  CALIBRATION_MODALITY=$CALIBRATION_MODALITY  MM_DATASET=$MM_DATASET"
 echo
@@ -109,6 +115,10 @@ if [[ ! -f "${PROBE_PATH}" ]]; then
     --activation-cache-dir "${WORK_DIR}/act" \
     --work-dir "${WORK_DIR}/work" \
     --layers-per-shard "$LAYERS_PER_SHARD" \
+    --prefetch-lookahead "$PREFETCH_LOOKAHEAD" \
+    --prefetch-workers "$PREFETCH_WORKERS" \
+    --prefetch-min-available-gb "$PREFETCH_MIN_AVAILABLE_GB" \
+    --activation-rows-limit "$ACTIVATION_ROWS_LIMIT" \
     --calibration-modality "$CALIBRATION_MODALITY" \
     --mm-dataset "$MM_DATASET" \
     --mm-nsamples 8 --mm-max-text-len 128 \

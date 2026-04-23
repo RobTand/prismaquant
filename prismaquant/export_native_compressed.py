@@ -265,7 +265,33 @@ _INPUT_GLOBAL_SCALES: dict[str, float] | None = None
 # by recipe name; values are 2D `[N, in_features]` float32 tensors
 # (lazily upcast from the on-disk bfloat16 for numerical stability
 # during Hessian + per-channel stats). None means "not loaded".
-_CACHED_ACTIVATIONS: dict[str, torch.Tensor] | None = None
+_CACHED_ACTIVATIONS: object | None = None
+
+
+class _LazyActivationCache:
+    """ActivationIndex-backed mapping with a dict-like `.get()`.
+
+    Export only needs a Linear's calibration rows while quantizing that
+    one Linear. Preloading every activation tensor as float32 keeps
+    tens of GiB resident for the entire export and OOMs large MoE
+    checkpoints before the sharded writer runs. Keep scale calibration
+    eager, but make raw activation reads demand-driven.
+
+    TODO(perf): this whole probe -> cost -> export activation flow needs
+    a larger redesign. Thousands of tiny `.pt` activation files plus
+    late whole-checkpoint materialization are avoidable; use per-layer
+    activation bundles and streaming safetensors writes.
+    """
+
+    def __init__(self, index):
+        self.index = index
+        self.loads = 0
+
+    def get(self, name: str):
+        if name not in self.index:
+            return None
+        self.loads += 1
+        return self.index.load(name).to(torch.float32)
 
 # Module-level flag bundle that controls which activation-aware
 # passes run when `_quantize_2d` is invoked from main()'s streaming
@@ -3129,16 +3155,10 @@ def main():
                 _recipe_names = list(json.load(_lc).keys())
             idx = ActivationIndex(cache_dir, _recipe_names)
             scales: dict[str, float] = {}
-            raw_cache: dict[str, torch.Tensor] = {}
             for name in idx.names():
                 try:
                     acts = idx.load(name)
                     scales[name] = compute_nvfp4_input_global_scale(acts)
-                    if act_passes_any:
-                        # Store as CPU float32 for numerical stability
-                        # in H = X^T X and |a|² stats. The _quantize_2d
-                        # entrypoint moves to GPU as needed.
-                        raw_cache[name] = acts.to(torch.float32)
                 except Exception as e:
                     print(f"[export-stream] WARN could not load "
                           f"activations for {name}: {e}", flush=True)
@@ -3158,10 +3178,11 @@ def main():
             scales = _unify_input_global_scales_across_fused_siblings(scales)
             _INPUT_GLOBAL_SCALES = scales
             if act_passes_any:
-                _CACHED_ACTIVATIONS = raw_cache
-                print(f"[export-stream] raw activations loaded for "
-                      f"{len(raw_cache)}/{len(_recipe_names)} Linears "
-                      f"(for AWQ/GPTQ/round passes)", flush=True)
+                _CACHED_ACTIVATIONS = _LazyActivationCache(idx)
+                print(f"[export-stream] raw activations will be loaded "
+                      f"lazily for AWQ/GPTQ/round passes "
+                      f"({len(idx)}/{len(_recipe_names)} Linears indexed)",
+                      flush=True)
             print(f"[export-stream] input_global_scale calibrated for "
                   f"{len(scales)}/{len(_recipe_names)} Linears from "
                   f"{cache_dir}", flush=True)

@@ -27,6 +27,7 @@ import os
 import pickle
 import re
 import time
+import types
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,144 @@ from .streaming_model import (
     _build_streaming_context,
     _classify_shard,
 )
+
+
+# ---------------------------------------------------------------------------
+# MiniMax-M2 fast MoE replay
+# ---------------------------------------------------------------------------
+# HF MiniMax-M2 represents the 256 experts as a ModuleList and its
+# `MiniMaxM2Experts.forward` loops over every hit expert in Python:
+#   torch.where(...) -> expert MLP -> index_add_
+# With 4 x 256 tokens and top-k=8, almost every expert is hit, so one
+# layer replay issues ~256 tiny expert MLPs. The GPU stays mostly idle
+# while CPU burns time launching thousands of small ops.
+#
+# During Phase-3 only the shard's target layers need nn.Linear hooks.
+# Non-target layers merely propagate grad_out backward to earlier
+# activations, so we can replace the ModuleList loop with chunked batched
+# expert matmuls for those layers. Target layers keep the original module
+# path so per-expert Linear hooks still fire exactly as before.
+# ---------------------------------------------------------------------------
+
+
+def _is_minimax_m2_experts_module(module: nn.Module) -> bool:
+    return (
+        type(module).__name__ == "MiniMaxM2Experts"
+        and hasattr(module, "num_experts")
+        and hasattr(module, "top_k")
+        and len(module) > 0
+        and all(hasattr(module[0], n) for n in ("w1", "w2", "w3", "act_fn"))
+    )
+
+
+def _minimax_fast_experts_forward(
+    self,
+    hidden_states: torch.Tensor,
+    top_k_index: torch.Tensor,
+    top_k_weights: torch.Tensor,
+) -> torch.Tensor:
+    original = getattr(self, "_pq_original_forward")
+    if not getattr(self, "_pq_fast_moe_enabled", False):
+        return original(hidden_states, top_k_index, top_k_weights)
+
+    if hidden_states.numel() == 0:
+        return torch.zeros_like(hidden_states)
+
+    device = hidden_states.device
+    n_tokens, hidden_dim = hidden_states.shape
+    top_k = int(top_k_index.shape[-1])
+    n_experts = int(self.num_experts)
+    chunk_size = max(1, int(getattr(self, "_pq_fast_moe_chunk_size", 32)))
+
+    flat_experts = top_k_index.reshape(-1).to(torch.long)
+    flat_weights = top_k_weights.reshape(-1).to(hidden_states.dtype)
+    token_ids = torch.arange(n_tokens, device=device).repeat_interleave(top_k)
+
+    order = torch.argsort(flat_experts)
+    experts_sorted = flat_experts.index_select(0, order)
+    tokens_sorted = token_ids.index_select(0, order)
+    weights_sorted = flat_weights.index_select(0, order)
+
+    counts = torch.bincount(experts_sorted, minlength=n_experts)
+    active = torch.nonzero(counts, as_tuple=False).flatten()
+    if active.numel() == 0:
+        return torch.zeros_like(hidden_states)
+
+    offsets = torch.empty(n_experts + 1, device=device, dtype=torch.long)
+    offsets[0] = 0
+    offsets[1:] = torch.cumsum(counts, dim=0)
+
+    final_hidden_states = torch.zeros_like(hidden_states)
+    act_fn = self[0].act_fn
+
+    for experts in active.split(chunk_size):
+        expert_list = [int(e) for e in experts.tolist()]
+        chunk_counts = counts.index_select(0, experts)
+        max_count = int(chunk_counts.max().item())
+        if max_count == 0:
+            continue
+
+        start = int(offsets[int(experts[0])].item())
+        end = int(offsets[int(experts[-1]) + 1].item())
+        sl = slice(start, end)
+        experts_sl = experts_sorted[sl]
+        tokens_sl = tokens_sorted[sl]
+        weights_sl = weights_sorted[sl]
+        n_assign = int(tokens_sl.numel())
+        if n_assign == 0:
+            continue
+
+        expert_to_compact = torch.empty(n_experts, device=device, dtype=torch.long)
+        expert_to_compact.index_copy_(
+            0, experts, torch.arange(experts.numel(), device=device)
+        )
+        compact = expert_to_compact.index_select(0, experts_sl)
+        rank = torch.arange(start, end, device=device) - offsets.index_select(
+            0, experts_sl
+        )
+
+        x_padded = hidden_states.new_zeros(
+            int(experts.numel()), max_count, hidden_dim)
+        x_padded.index_put_((compact, rank), hidden_states.index_select(0, tokens_sl))
+
+        w1 = torch.stack([self[e].w1.weight for e in expert_list], dim=0)
+        w3 = torch.stack([self[e].w3.weight for e in expert_list], dim=0)
+        w2 = torch.stack([self[e].w2.weight for e in expert_list], dim=0)
+
+        h1 = torch.bmm(x_padded, w1.transpose(1, 2))
+        h3 = torch.bmm(x_padded, w3.transpose(1, 2))
+        h_mid = act_fn(h1) * h3
+        y_padded = torch.bmm(h_mid, w2.transpose(1, 2))
+
+        y_valid = y_padded[compact, rank] * weights_sl.reshape(n_assign, 1)
+        final_hidden_states.index_add_(0, tokens_sl, y_valid.to(hidden_states.dtype))
+
+    return final_hidden_states
+
+
+def _set_minimax_fast_moe(
+    layer: nn.Module,
+    enabled: bool,
+    *,
+    chunk_size: int = 32,
+) -> int:
+    """Enable/disable chunked batched MiniMax-M2 expert replay on a layer.
+
+    Returns the number of MiniMax expert containers patched under `layer`.
+    The patch is instance-local and falls back to the original forward
+    whenever `_pq_fast_moe_enabled` is False.
+    """
+    patched = 0
+    for module in layer.modules():
+        if not _is_minimax_m2_experts_module(module):
+            continue
+        if not hasattr(module, "_pq_original_forward"):
+            module._pq_original_forward = module.forward
+            module.forward = types.MethodType(_minimax_fast_experts_forward, module)
+        module._pq_fast_moe_enabled = bool(enabled)
+        module._pq_fast_moe_chunk_size = int(chunk_size)
+        patched += 1
+    return patched
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +633,8 @@ def _compute_global_precompute(
     calib: torch.Tensor,
     importance_weighting: bool,
     prefetch_lookahead: int,
+    minimax_fast_moe: bool,
+    minimax_fast_moe_chunk_size: int,
     resident_include_union: str,
     resident_exclude: str,
     activation_cache_dir: str | None,
@@ -537,6 +678,9 @@ def _compute_global_precompute(
         src = ctx.install(L)
         ctx.schedule_prefetch(L + prefetch_depth)
         load_s = time.time() - load_t0
+        if minimax_fast_moe:
+            _set_minimax_fast_moe(
+                layers[L], True, chunk_size=minimax_fast_moe_chunk_size)
         fwd_t0 = time.time()
         with torch.no_grad():
             out = _call_layer(
@@ -781,6 +925,9 @@ def _run_body_streaming_shard(
     seqlen: int,
     model_path: str,
     prefetch_lookahead: int = 3,
+    minimax_fast_moe: bool = True,
+    minimax_fast_moe_chunk_size: int = 32,
+    activation_rows_limit: int = 256,
     precomputed: GlobalPrecompute | None = None,
 ):
     if precomputed is None:
@@ -901,10 +1048,24 @@ def _run_body_streaming_shard(
     # Linears; resident snaps were populated during Phase-2 hooks above).
     activation_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
     activation_rows: dict[str, int] = defaultdict(int)
-    input_rows_limit = 256
+    input_rows_limit = max(1, int(activation_rows_limit))
     cache_dir = Path(activation_cache_dir) if activation_cache_dir else None
     if cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
+    act_fname_sub = re.compile(r"[^A-Za-z0-9_-]")
+
+    def flush_activation_snapshots(snaps_by_name: dict[str, list[torch.Tensor]]):
+        if cache_dir is None:
+            return
+        for name in list(snaps_by_name.keys()):
+            snaps = snaps_by_name.pop(name)
+            if not snaps:
+                continue
+            X = torch.cat(snaps, dim=0).to(torch.bfloat16).contiguous()
+            fname = act_fname_sub.sub("__", name) + ".pt"
+            torch.save({"inputs": X, "name": name}, cache_dir / fname)
+
+    collect_h_full = h_detail_dir is not None
     packed_act_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
     packed_act_rows: dict[str, int] = defaultdict(int)
 
@@ -924,6 +1085,10 @@ def _run_body_streaming_shard(
     else:
         # ---- Phase 3: reverse sweep, Fisher collection only on tracked Linears ----
         t_phase = time.time()
+        phase_load_s = 0.0
+        phase_bwd_s = 0.0
+        load_by_src: dict[str, float] = defaultdict(float)
+        count_by_src: dict[str, int] = defaultdict(int)
         grad_out = grad_at_tail
         for d in range(prefetch_depth):
             ctx.schedule_prefetch(num_layers - 1 - d)
@@ -933,6 +1098,9 @@ def _run_body_streaming_shard(
             src = ctx.install(L)
             ctx.schedule_prefetch(L - prefetch_depth)
             load_s = time.time() - load_t0
+            phase_load_s += load_s
+            load_by_src[src] += load_s
+            count_by_src[src] += 1
 
             tracked_here = layer_linear_names[L]
             acc_h_full: dict[str, torch.Tensor] = {}
@@ -965,13 +1133,14 @@ def _run_body_streaming_shard(
                     x2 = x.reshape(-1, x.size(-1))
                     grad_w = gy2.t() @ x2
                     grad_w_sq = grad_w.pow(2)
-                    acc = acc_h_full.get(name)
-                    if acc is None:
-                        acc = torch.zeros(
-                            grad_w.shape[0], grad_w.shape[1],
-                            dtype=torch.float32, device="cpu")
-                        acc_h_full[name] = acc
-                    acc.add_(grad_w_sq.float().to("cpu"))
+                    if collect_h_full:
+                        acc = acc_h_full.get(name)
+                        if acc is None:
+                            acc = torch.zeros(
+                                grad_w.shape[0], grad_w.shape[1],
+                                dtype=torch.float32, device="cpu")
+                            acc_h_full[name] = acc
+                        acc.add_(grad_w_sq.float().to("cpu"))
                     acc_stats[name]["h_trace_raw"] += float(grad_w_sq.sum().item())
                     w = mod_ref.weight
                     if w is not None and not w.is_meta:
@@ -1014,6 +1183,16 @@ def _run_body_streaming_shard(
             # + stats merge when L is out-of-scope; backward still flows.
             layer_in_scope = bool(tracked_here) or bool(
                 inc.search(f"{layers_prefix}{L}."))
+            # Fast-path only layers whose Linear hooks are NOT needed
+            # for this shard. In-scope MiniMax layers must run the
+            # original ModuleList expert loop so per-expert nn.Linear
+            # hooks collect Fisher exactly as before.
+            if minimax_fast_moe:
+                _set_minimax_fast_moe(
+                    layers[L],
+                    enabled=not layer_in_scope,
+                    chunk_size=minimax_fast_moe_chunk_size,
+                )
             packed_meta = install_packed_expert_hooks(
                 layers[L], accumulator=packed_grad_acc,
                 full_accumulator=packed_full_acc,
@@ -1064,6 +1243,7 @@ def _run_body_streaming_shard(
             )
             out.backward(grad_out.to(device))
             bwd_s = time.time() - bwd_t0
+            phase_bwd_s += bwd_s
 
             for local_key, raw in packed_grad_acc.items():
                 full_key = f"{layer_prefix}{local_key}"
@@ -1086,11 +1266,12 @@ def _run_body_streaming_shard(
                     prev["h_trace_raw"] += s.get("h_trace_raw", 0.0)
                     prev["h_w2_sum_raw"] += s.get("h_w2_sum_raw", 0.0)
                     prev["n_tokens_seen"] += s.get("n_tokens_seen", 0)
-            for fqn, h in acc_h_full.items():
-                if fqn in merged_h_full:
-                    merged_h_full[fqn].add_(h)
-                else:
-                    merged_h_full[fqn] = h.clone()
+            if collect_h_full:
+                for fqn, h in acc_h_full.items():
+                    if fqn in merged_h_full:
+                        merged_h_full[fqn].add_(h)
+                    else:
+                        merged_h_full[fqn] = h.clone()
             if packed_full_acc:
                 detail_dir = Path(h_detail_dir)
                 detail_dir.mkdir(parents=True, exist_ok=True)
@@ -1100,6 +1281,13 @@ def _run_body_streaming_shard(
                     torch.save({"H": tensor, "name": full_key},
                                detail_dir / fname)
                 packed_full_acc.clear()
+            # Body layer FQNs are unique within the shard, so activation
+            # snapshots can be flushed as soon as that layer has run.
+            # Holding every target expert's sampled inputs until shard
+            # finalization adds several GB of avoidable host pressure on
+            # MiniMax's 256-expert layers.
+            flush_activation_snapshots(activation_snaps)
+            flush_activation_snapshots(packed_act_snaps)
 
             ctx.unload(L)
             # The `del` above drops all per-layer refs; CPython ref counting
@@ -1113,8 +1301,15 @@ def _run_body_streaming_shard(
                 print(f"[incremental] bwd L{L:02d}  src={src}  load={load_s:.2f}s  "
                       f"bwd={bwd_s:.2f}s", flush=True)
 
+        load_parts = ", ".join(
+            f"{k}:{load_by_src[k]:.1f}s/{count_by_src[k]}"
+            for k in sorted(load_by_src)
+        )
         print(f"[incremental] phase-3 reverse sweep: {time.time()-t_phase:.1f}s  "
-              f"{ctx.layer_cache.summary()}", flush=True)
+              f"load={phase_load_s:.1f}s bwd={phase_bwd_s:.1f}s "
+              f"load_by_src=[{load_parts}]  "
+              f"{ctx.layer_cache.summary()}  {ctx.prefetch_summary()}",
+              flush=True)
 
         # `activations_cpu` is a shared reference into the global
         # precompute; do not free it here — the caller reuses across
@@ -1136,24 +1331,13 @@ def _run_body_streaming_shard(
 
     # Flush activation snapshots.
     if cache_dir is not None:
-        sub = re.compile(r"[^A-Za-z0-9_-]")
-        for name, snaps in activation_snaps.items():
-            if not snaps:
-                continue
-            X = torch.cat(snaps, dim=0).to(torch.bfloat16).contiguous()
-            fname = sub.sub("__", name) + ".pt"
-            torch.save({"inputs": X, "name": name}, cache_dir / fname)
-        for experts_qname, snaps in packed_act_snaps.items():
-            if not snaps:
-                continue
-            X = torch.cat(snaps, dim=0).to(torch.bfloat16).contiguous()
-            fname = sub.sub("__", experts_qname) + ".pt"
-            torch.save({"inputs": X, "name": experts_qname}, cache_dir / fname)
+        flush_activation_snapshots(activation_snaps)
+        flush_activation_snapshots(packed_act_snaps)
         for name, snaps in resident_act_snaps.items():
             if not snaps:
                 continue
             X = torch.cat(snaps, dim=0).to(torch.bfloat16).contiguous()
-            fname = sub.sub("__", name) + ".pt"
+            fname = act_fname_sub.sub("__", name) + ".pt"
             torch.save({"inputs": X, "name": name}, cache_dir / fname)
 
     out_path = Path(output_path)
@@ -1422,10 +1606,36 @@ def main():
                          "per-weight delta loss = 0.5 * <H, MSE_W> instead "
                          "of the scalar proxy. Omit to keep the legacy "
                          "scalar path.")
-    ap.add_argument("--prefetch-lookahead", type=int, default=3,
+    ap.add_argument("--prefetch-lookahead",
+                    default=os.environ.get("PREFETCH_LOOKAHEAD", "auto"),
                     help="Number of layers to queue ahead in the disk "
-                         "prefetch pool. Bump up when per-layer compute "
-                         "time >> per-layer disk read time (e.g. batch>=32).")
+                         "prefetch pool, or 'auto' to bound lookahead by "
+                         "the layer-cache budget and estimated layer size.")
+    ap.add_argument("--prefetch-workers",
+                    default=os.environ.get("PREFETCH_WORKERS", "auto"),
+                    help="Number of concurrent layer prefetch workers, or "
+                         "'auto' to derive from cache budget and layer size.")
+    ap.add_argument("--prefetch-min-available-gb",
+                    default=os.environ.get("PREFETCH_MIN_AVAILABLE_GB", "auto"),
+                    help="Pause scheduling new prefetches below this "
+                         "available-memory floor, or 'auto' for two "
+                         "estimated layers with an 8 GiB minimum.")
+    ap.add_argument("--minimax-fast-moe", default=True,
+                    action=argparse.BooleanOptionalAction,
+                    help="Use chunked batched MiniMax-M2 expert replay for "
+                         "non-measured layers during the probe reverse "
+                         "sweep. Target layers still use the original "
+                         "ModuleList path so per-Linear Fisher hooks fire.")
+    ap.add_argument("--minimax-fast-moe-chunk-size", type=int, default=32,
+                    help="Number of MiniMax experts to stack per batched "
+                         "fast-MoE chunk. Larger chunks launch fewer "
+                         "kernels but duplicate more expert weights "
+                         "transiently on GPU/UMA memory.")
+    ap.add_argument("--activation-rows-limit", type=int,
+                    default=int(os.environ.get("ACTIVATION_ROWS_LIMIT", "256")),
+                    help="Maximum sampled activation rows to keep per Linear "
+                         "for the cost stage. Lower values are useful for "
+                         "debug runs on very wide MoE checkpoints.")
     ap.add_argument("--calibration-modality",
                     choices=["text-only", "multimodal"],
                     default="text-only",
@@ -1480,6 +1690,12 @@ def main():
     else:
         args.layers_per_shard = int(lps_arg)
 
+    print("[incremental] minimax_fast_moe="
+          f"{bool(args.minimax_fast_moe)} "
+          f"chunk_size={args.minimax_fast_moe_chunk_size} "
+          f"activation_rows_limit={args.activation_rows_limit}",
+          flush=True)
+
     body_regexes = build_layer_shard_regexes(
         n_layers, args.layers_per_shard, layer_prefix="model.layers")
     first_shard = start // args.layers_per_shard
@@ -1532,6 +1748,7 @@ def main():
     ctx: StreamingContext | None = None
     tokenizer = None
     calib: torch.Tensor | None = None
+    resolved_prefetch_lookahead: int | None = None
 
     def _ensure_ready():
         nonlocal ctx, tokenizer, calib
@@ -1548,8 +1765,28 @@ def main():
             device=device,
             dtype=dtype,
             offload_folder=offload_folder,
+            prefetch_workers=args.prefetch_workers,
+            prefetch_min_available_gb=args.prefetch_min_available_gb,
             log_prefix="[incremental]",
         )
+
+    def _prefetch_lookahead() -> int:
+        nonlocal resolved_prefetch_lookahead
+        if resolved_prefetch_lookahead is not None:
+            return resolved_prefetch_lookahead
+        _ensure_ready()
+        raw = str(args.prefetch_lookahead).strip().lower()
+        if raw in ("", "auto"):
+            resolved_prefetch_lookahead = ctx.suggest_prefetch_lookahead()
+            print(f"[incremental] prefetch_lookahead=auto -> "
+                  f"{resolved_prefetch_lookahead} "
+                  f"({ctx.prefetch_summary()})", flush=True)
+        else:
+            resolved_prefetch_lookahead = max(1, int(raw))
+            print(f"[incremental] prefetch_lookahead="
+                  f"{resolved_prefetch_lookahead} (explicit)",
+                  flush=True)
+        return resolved_prefetch_lookahead
 
     # Union of all shard regexes — used for the global Phase-2 resident
     # Fisher hooks. We install hooks on every resident linear that ANY
@@ -1595,7 +1832,9 @@ def main():
             ctx,
             calib=calib,
             importance_weighting=args.importance_weighting,
-            prefetch_lookahead=args.prefetch_lookahead,
+            prefetch_lookahead=_prefetch_lookahead(),
+            minimax_fast_moe=args.minimax_fast_moe,
+            minimax_fast_moe_chunk_size=args.minimax_fast_moe_chunk_size,
             resident_include_union=resident_include_union,
             resident_exclude=linear_exclude,
             activation_cache_dir=args.activation_cache_dir,
@@ -1689,7 +1928,10 @@ def main():
                     dtype_name=args.dtype,
                     seqlen=args.seqlen,
                     model_path=args.model,
-                    prefetch_lookahead=args.prefetch_lookahead,
+                    prefetch_lookahead=_prefetch_lookahead(),
+                    minimax_fast_moe=args.minimax_fast_moe,
+                    minimax_fast_moe_chunk_size=args.minimax_fast_moe_chunk_size,
+                    activation_rows_limit=args.activation_rows_limit,
                     precomputed=pre,
                 )
             elif kind == "mtp":
@@ -1706,7 +1948,7 @@ def main():
                     dtype_name=args.dtype,
                     seqlen=args.seqlen,
                     model_path=args.model,
-                    prefetch_lookahead=args.prefetch_lookahead,
+                    prefetch_lookahead=_prefetch_lookahead(),
                     precomputed=pre,
                 )
             elif kind == "lm_head":
@@ -1730,7 +1972,7 @@ def main():
                     dtype_name=args.dtype,
                     seqlen=args.seqlen,
                     model_path=args.model,
-                    prefetch_lookahead=args.prefetch_lookahead,
+                    prefetch_lookahead=_prefetch_lookahead(),
                     precomputed=pre,
                 )
             else:

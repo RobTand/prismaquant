@@ -29,6 +29,7 @@ stable public API that both sides share.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
@@ -37,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import torch
+from safetensors import safe_open
 
 from .layer_streaming import (
     _build_fp8_scale_inv_map,
@@ -45,10 +47,150 @@ from .layer_streaming import (
     _build_weight_map,
     _fast_install,
     _get_layer_list,
+    _get_rotary,
+    _head_prefixes,
+    _materialize,
     _read_layer_to_device,
     _resolve_base_prefix,
     _unload,
 )
+
+
+def _minimax_native_fp8_checkpoint(model_path: str) -> bool:
+    """True for MiniMax native-FP8 checkpoints with block scales.
+
+    MiniMax-M2/M2.7 exposes 256 experts as a ModuleList. Transformers
+    5.x's FP8 pre-load rewrite currently replaces that ModuleList with
+    FP8Experts, then tries to set `experts.0.w1`, which fails because
+    FP8Experts is not integer-indexable. The streaming path does not
+    need HF's module rewrite: `_read_layer_to_device` reads the source
+    fp8 bytes and applies `.weight_scale_inv` inline.
+    """
+    try:
+        with open(os.path.join(model_path, "config.json")) as f:
+            cfg = json.load(f)
+    except Exception:
+        return False
+    model_type = str(cfg.get("model_type", "")).replace("-", "_").lower()
+    archs = [str(a) for a in cfg.get("architectures", [])]
+    qc = cfg.get("quantization_config") or {}
+    return (
+        model_type.startswith("minimax_m2")
+        or any(a.startswith("MiniMaxM2") for a in archs)
+    ) and qc.get("quant_method") == "fp8" and "weight_block_size" in qc
+
+
+def _init_rotary_inplace(base_model: nn.Module, device: torch.device,
+                         dtype: torch.dtype) -> None:
+    """Populate deterministic rotary buffers on a meta-built skeleton."""
+    rotary = _get_rotary(base_model)
+    if rotary is None:
+        return
+    cfg = getattr(rotary, "config", None)
+    if cfg is None:
+        return
+    try:
+        rope_init_fn = rotary.compute_default_rope_parameters
+    except AttributeError:
+        return
+    inv_freq, attention_scaling = rope_init_fn(cfg, device)
+    rotary.register_buffer("inv_freq", inv_freq.to(
+        dtype=torch.float32, device=device), persistent=False)
+    if hasattr(rotary, "original_inv_freq"):
+        rotary.register_buffer(
+            "original_inv_freq",
+            inv_freq.to(dtype=torch.float32, device=device).clone(),
+            persistent=False,
+        )
+    rotary.attention_scaling = attention_scaling
+
+
+def _safetensors_cache_dtype_bytes(dtype_name: str,
+                                   target_dtype: torch.dtype) -> int:
+    """Bytes a safetensors tensor will occupy in the layer cache."""
+    dtype_name = str(dtype_name).upper()
+    # Floating checkpoint tensors are cast to the requested execution
+    # dtype by `_read_layer_to_device` before caching. Native FP8 source
+    # weights therefore cache as bf16/fp16/fp32 after block dequant.
+    if dtype_name.startswith("F") or dtype_name == "BF16":
+        return torch.empty((), dtype=target_dtype).element_size()
+    return {
+        "BOOL": 1,
+        "U8": 1, "I8": 1,
+        "U16": 2, "I16": 2,
+        "U32": 4, "I32": 4,
+        "U64": 8, "I64": 8,
+    }.get(dtype_name, 1)
+
+
+def _estimate_layer_cache_bytes(
+    *,
+    weight_shard: dict[str, str],
+    weight_ckpt: dict[str, str],
+    layers_prefix: str,
+    num_layers: int,
+    target_dtype: torch.dtype,
+) -> tuple[int, list[int]]:
+    """Estimate dequanted cache bytes per decoder layer without loading data."""
+    pat = re.compile(rf"^{re.escape(layers_prefix)}(?P<idx>\d+)\.")
+    by_shard: dict[str, list[tuple[int, str]]] = {}
+    for model_name, shard in weight_shard.items():
+        m = pat.match(model_name)
+        if m is None:
+            continue
+        idx = int(m.group("idx"))
+        if idx < 0 or idx >= num_layers:
+            continue
+        by_shard.setdefault(shard, []).append((idx, weight_ckpt[model_name]))
+
+    sizes = [0 for _ in range(num_layers)]
+    try:
+        for shard, pairs in by_shard.items():
+            with safe_open(shard, framework="pt") as f:
+                for idx, ckpt_name in pairs:
+                    sl = f.get_slice(ckpt_name)
+                    n = 1
+                    for dim in sl.get_shape():
+                        n *= int(dim)
+                    sizes[idx] += n * _safetensors_cache_dtype_bytes(
+                        sl.get_dtype(), target_dtype)
+    except Exception:
+        return 0, sizes
+    nonzero = [s for s in sizes if s > 0]
+    return (max(nonzero) if nonzero else 0), sizes
+
+
+def _auto_prefetch_workers(cache_bytes: int, layer_bytes: int,
+                           requested: Any = None) -> tuple[int, str]:
+    raw = requested
+    if raw is None:
+        raw = os.environ.get("PREFETCH_WORKERS", "auto")
+    if str(raw).strip().lower() not in ("", "auto"):
+        return max(1, int(raw)), "explicit"
+    if layer_bytes <= 0:
+        return 3, "auto-fallback"
+    cache_slots = max(1, int(cache_bytes // layer_bytes))
+    # Each active worker can hold one not-yet-cached layer in addition to
+    # the cache itself. Bound concurrency by cache slots so prefetch does
+    # not double memory pressure on small-memory runs.
+    workers = min(4, max(1, cache_slots))
+    return workers, "auto"
+
+
+def _auto_prefetch_min_available_bytes(layer_bytes: int,
+                                       requested: Any = None) -> tuple[int, str]:
+    raw = requested
+    if raw is None:
+        raw = os.environ.get("PREFETCH_MIN_AVAILABLE_GB", "auto")
+    if str(raw).strip().lower() not in ("", "auto"):
+        return int(float(raw) * 1024 ** 3), "explicit"
+    # Keep enough slack for at least two full dequanted layers plus a
+    # fixed floor. On UMA systems this guards both CPU RAM and CUDA
+    # allocations, since they share the same physical memory.
+    floor = 8 * 1024 ** 3
+    if layer_bytes <= 0:
+        return floor, "auto-fallback"
+    return max(floor, int(2 * layer_bytes)), "auto"
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +232,10 @@ class StreamingContext:
                  visual_module: Any | None = None,
                  visual_prefix: str | None = None,
                  multimodal: bool = False,
-                 fp8_scale_inv_map: dict[str, tuple[str, str]] | None = None):
+                 fp8_scale_inv_map: dict[str, tuple[str, str]] | None = None,
+                 estimated_layer_bytes: int = 0,
+                 prefetch_workers: int = 3,
+                 prefetch_min_available_bytes: int = 0):
         self.model = model
         self.base_model = base_model
         self.layers = layers
@@ -113,6 +258,10 @@ class StreamingContext:
         self.visual_module = visual_module
         self.visual_prefix = visual_prefix
         self.multimodal = multimodal
+        self.estimated_layer_bytes = int(estimated_layer_bytes or 0)
+        self.prefetch_workers = int(prefetch_workers)
+        self.prefetch_min_available_bytes = int(prefetch_min_available_bytes or 0)
+        self.prefetch_memory_skips = 0
         # Native-FP8 checkpoint dequant map: `{live_weight_key:
         # (shard_path, scale_inv_ckpt_key)}`. When non-empty, every
         # per-layer reload via `_read_layer_to_device` applies the
@@ -138,6 +287,14 @@ class StreamingContext:
             return None
         if self.layer_cache.peek(L):
             return None
+        if self.prefetch_min_available_bytes > 0:
+            try:
+                import psutil
+                if psutil.virtual_memory().available < self.prefetch_min_available_bytes:
+                    self.prefetch_memory_skips += 1
+                    return None
+            except Exception:
+                pass
         with self._inflight_lock:
             if L in self._inflight:
                 return self._inflight[L]
@@ -166,6 +323,11 @@ class StreamingContext:
     def install(self, L: int):
         tensors, src = self.ensure_loaded(L)
         _fast_install(self.install_resolvers[L], tensors, self.device, model=self.model)
+        # This run is a one-way layer stream. Once the tensors are
+        # installed, the model owns them until `unload`; keeping a cache
+        # reference would make the current layer MRU and cause prefetch
+        # churn to evict the next layer we are about to need.
+        self.layer_cache.discard(L)
         return src
 
     def unload(self, L: int):
@@ -173,6 +335,29 @@ class StreamingContext:
 
     def shutdown(self):
         self.prefetch_pool.shutdown(wait=True)
+
+    def suggest_prefetch_lookahead(self) -> int:
+        if self.estimated_layer_bytes <= 0:
+            return 3
+        cache_slots = max(
+            1, int(self.layer_cache.max_bytes // self.estimated_layer_bytes))
+        # Queue at most what the cache can plausibly retain. More than
+        # this tends to turn prefetch into churn on memory-constrained
+        # runs, especially when backward has become fast.
+        # Leave one cache slot for the currently installed layer's live
+        # tensors. `install()` drops cache ownership, but the model still
+        # owns that layer until the caller unloads it after forward/bwd.
+        return max(1, min(12, cache_slots - 1))
+
+    def prefetch_summary(self) -> str:
+        with self._inflight_lock:
+            inflight = len(self._inflight)
+        est_gb = self.estimated_layer_bytes / (1024 ** 3)
+        min_gb = self.prefetch_min_available_bytes / (1024 ** 3)
+        return (f"Prefetch: workers={self.prefetch_workers} "
+                f"inflight={inflight} est_layer={est_gb:.1f}GB "
+                f"min_avail={min_gb:.1f}GB "
+                f"mem_skips={self.prefetch_memory_skips}")
 
 
 def _resolve_declared_model_cls(config, default_cls):
@@ -213,25 +398,24 @@ def _build_streaming_context(model_path: str, *,
                              device: torch.device, dtype: torch.dtype,
                              offload_folder: str,
                              cache_headroom_gb: float | None = None,
+                             prefetch_workers: int | str | None = None,
+                             prefetch_min_available_gb: float | str | None = None,
                              log_prefix: str = "[streaming]",
                              multimodal: bool = False,
                              visual_requires_grad: bool = False,
                              ) -> StreamingContext:
-    """One-time setup: AutoConfig + empty skeleton, from_pretrained with an
-    explicit device_map that pins the head resident and every decoder layer
-    to disk, then strip accelerate's auto-load hooks and unload each layer
-    back to meta so WE own materialization from this point on.
+    """One-time setup: AutoConfig + empty skeleton, then manually
+    materialize only the always-resident head pieces. Decoder layers
+    stay on meta until PrismaQuant streams them from safetensors.
 
     When `multimodal=True`:
       - Stages via `stage_multimodal` (preserves vision_config).
       - Instantiates via `config.architectures[0]` (declared arch) so the
         visual tower actually materializes — bypasses
         AutoModelForCausalLM's silent text-only downgrade.
-      - Maps the decoder layers to `"disk"` as usual; the visual tower
-        and head pieces stay resident.
-      - After the skeleton is built, FULLY materializes the visual tower
-        onto `device` (small — 2-3 GB even at 122B scale). Body still
-        streams.
+      - After the skeleton is built, materializes the head and visual
+        tower onto `device` (small — 2-3 GB even at 122B scale). Body
+        still streams.
       - If `visual_requires_grad=True`, flips `.requires_grad_(True)` on
         every visual Linear's weight so Fisher backward hooks fire when
         `run_multimodal_visual_probe_pass` drives the combined forward
@@ -244,10 +428,16 @@ def _build_streaming_context(model_path: str, *,
 
     from .sensitivity_probe import stage_multimodal, stage_text_only
 
+    bypass_hf_fp8_rewrite = False
     if multimodal:
         staged = stage_multimodal(model_path)
     else:
+        bypass_hf_fp8_rewrite = _minimax_native_fp8_checkpoint(model_path)
         staged = stage_text_only(model_path)
+        if bypass_hf_fp8_rewrite:
+            print(f"{log_prefix} manual meta streaming load avoids HF fp8 "
+                  "module rewrite; PrismaQuant will apply weight_scale_inv "
+                  "during layer loads", flush=True)
     config = AutoConfig.from_pretrained(staged, trust_remote_code=True)
 
     if multimodal:
@@ -269,26 +459,10 @@ def _build_streaming_context(model_path: str, *,
     # keep resident in device_map. We rebuild these after `from_pretrained`
     # on the real model anyway — skeleton lookup only tells us the path.
     _skel_visual, skel_visual_prefix = _find_visual_module(skeleton)
-    del skeleton, skel_base, skel_layers
 
     layers_prefix = f"{base_prefix}.layers." if base_prefix else "layers."
 
-    base = base_prefix if base_prefix else ""
-    device_map: dict[str, object] = {}
     resident_device = 0 if device.type == "cuda" else "cpu"
-    for pfx in (f"{base}.embed_tokens" if base else "embed_tokens",
-                f"{base}.norm" if base else "norm",
-                f"{base}.rotary_emb" if base else "rotary_emb",
-                "lm_head"):
-        device_map[pfx] = resident_device
-    for L in range(num_layers):
-        device_map[f"{base}.layers.{L}" if base else f"layers.{L}"] = "disk"
-
-    # In multimodal mode, keep the entire visual tower resident so the
-    # Fisher probe's backward sweep can flow gradients into visual
-    # Linears. Visual weights are small (2-3 GB even at 122B scale).
-    if multimodal and skel_visual_prefix:
-        device_map[skel_visual_prefix] = resident_device
 
     os.makedirs(offload_folder, exist_ok=True)
     t0 = time.time()
@@ -297,24 +471,11 @@ def _build_streaming_context(model_path: str, *,
           f"multimodal={multimodal}  visual_prefix={skel_visual_prefix or 'n/a'}",
           flush=True)
 
-    model = model_cls.from_pretrained(
-        staged,
-        torch_dtype=dtype,
-        device_map=device_map,
-        trust_remote_code=True,
-        low_cpu_mem_usage=True,
-        offload_folder=offload_folder,
-        offload_buffers=True,
-    )
+    model = skeleton
     model.eval()
     for p in model.parameters():
         p.requires_grad_(False)
     base_model, layers = _get_layer_list(model)
-
-    for L in range(num_layers):
-        remove_hook_from_module(layers[L], recurse=True)
-    for L in range(num_layers):
-        _unload(model, [f"{layers_prefix}{L}."])
 
     weight_shard, weight_ckpt = _build_weight_map(model_path, multimodal=multimodal)
     # Native-FP8 source dequant map. Populated only for checkpoints that
@@ -332,25 +493,29 @@ def _build_streaming_context(model_path: str, *,
               f"weights will be dequanted inline at layer-load",
               flush=True)
 
-    # Locate the actual visual module on the real (post-from_pretrained)
-    # model. When multimodal is set, fully materialize the visual tower
-    # onto `device`: accelerate pinned it to resident_device in the
-    # device_map, but via the `offload_folder` path it may still be
-    # on meta for tensors the loader didn't find in the index. Our
-    # own `_read_layer_to_device` + `_fast_install`-style load catches
-    # any strays reliably.
+    head_pfxs = _head_prefixes(model, base_prefix)
+    loaded_head = _materialize(
+        model,
+        head_pfxs,
+        weight_shard,
+        weight_ckpt,
+        device,
+        dtype,
+        fp8_scale_inv_map=fp8_scale_inv_map,
+    )
+    _init_rotary_inplace(base_model, device, dtype)
+    print(f"{log_prefix} head materialized ({loaded_head} tensors, "
+          f"rotary re-init) in {time.time()-t0:.1f}s", flush=True)
+
+    # Locate the visual module on the meta skeleton. When multimodal is
+    # set, fully materialize the visual tower onto `device`; body
+    # layers remain meta and stream per shard.
     visual_module = None
     visual_prefix: str | None = None
     if multimodal:
         visual_module, visual_prefix = _find_visual_module(model)
         if visual_module is not None and visual_prefix:
-            # Strip accelerate hooks off the visual tower so we own its
-            # materialization (same hygiene as the decoder layers).
             remove_hook_from_module(visual_module, recurse=True)
-            # Count how many visual tensors already ended up on meta
-            # (they shouldn't if device_map pinned them resident, but
-            # HF/accelerate can still miss offload_buffers entries).
-            # Install any that are on meta using our streaming primitive.
             vis_keys = [k for k in weight_shard if k.startswith(visual_prefix + ".")]
             # Load all visual tensors from safetensors onto device.
             tensors = _read_layer_to_device(
@@ -422,12 +587,34 @@ def _build_streaming_context(model_path: str, *,
               f"+ safety={autoscale_diag['safety_gb']:.1f} GB "
               f"(lps={autoscale_diag['layers_per_shard']})", flush=True)
 
-    # Modern NVMe handles concurrent queue depth well; 3 workers saturate
-    # the drive and eliminate prefetcher-stall windows where main's compute
-    # drains the ahead-queue faster than a single reader can refill it.
-    # Going higher (>3) sees diminishing returns and risks cache thrash.
+    estimated_layer_bytes, layer_bytes = _estimate_layer_cache_bytes(
+        weight_shard=weight_shard,
+        weight_ckpt=weight_ckpt,
+        layers_prefix=layers_prefix,
+        num_layers=num_layers,
+        target_dtype=dtype,
+    )
+    worker_count, worker_src = _auto_prefetch_workers(
+        cache_bytes, estimated_layer_bytes, requested=prefetch_workers)
+    min_available_bytes, min_available_src = _auto_prefetch_min_available_bytes(
+        estimated_layer_bytes, requested=prefetch_min_available_gb)
+    cache_slots = (
+        int(cache_bytes // estimated_layer_bytes)
+        if estimated_layer_bytes > 0 else 0
+    )
+    memory_slots = 0
+    if estimated_layer_bytes > 0:
+        memory_slots = max(
+            0, int((free_bytes - min_available_bytes) // estimated_layer_bytes))
+    print(f"{log_prefix} prefetch auto: workers={worker_count} "
+          f"({worker_src}), cache_slots={cache_slots}, "
+          f"memory_slots={memory_slots}, "
+          f"est_layer={estimated_layer_bytes/(1024**3):.1f} GB, "
+          f"min_avail={min_available_bytes/(1024**3):.1f} GB "
+          f"({min_available_src})", flush=True)
+
     prefetch_pool = ThreadPoolExecutor(
-        max_workers=3, thread_name_prefix="prefetch")
+        max_workers=worker_count, thread_name_prefix="prefetch")
 
     return StreamingContext(
         model=model, base_model=base_model, layers=layers,
@@ -440,4 +627,7 @@ def _build_streaming_context(model_path: str, *,
         visual_prefix=visual_prefix,
         multimodal=multimodal,
         fp8_scale_inv_map=fp8_scale_inv_map,
+        estimated_layer_bytes=estimated_layer_bytes,
+        prefetch_workers=worker_count,
+        prefetch_min_available_bytes=min_available_bytes,
     )

@@ -198,21 +198,31 @@ def _dequant_fp8_block_weight(
     out_dim, in_dim = weight.shape
     block_r, block_c = block
     target_dtype = torch.bfloat16
+    target_device = (scale_inv.device if scale_inv.device.type != "cpu"
+                     else weight.device)
     if out_dim % block_r != 0 or in_dim % block_c != 0:
         # Unaligned tail: fall back to the expanded-scale path. Shouldn't
         # hit in practice on MiniMax/DeepSeek — both ship weights that
         # are exact multiples of 128 along both dims.
-        scale = scale_inv.to(device=weight.device, dtype=target_dtype)
+        scale = scale_inv.to(device=target_device, dtype=target_dtype)
         expanded = scale.repeat_interleave(block_r, dim=0)[:out_dim]
         expanded = expanded.repeat_interleave(block_c, dim=1)[:, :in_dim]
-        return (weight.to(target_dtype) * expanded)
+        return (weight.to(device=target_device, dtype=target_dtype)
+                * expanded)
     out_blocks = out_dim // block_r
     in_blocks = in_dim // block_c
-    scale_bf16 = scale_inv.to(device=weight.device, dtype=target_dtype)
+    scale_bf16 = scale_inv.to(device=target_device, dtype=target_dtype)
     scale_view = scale_bf16.reshape(out_blocks, 1, in_blocks, 1)
-    w_bf16 = weight.to(target_dtype)
+    w_bf16 = weight.to(device=target_device, dtype=target_dtype)
     w4 = w_bf16.reshape(out_blocks, block_r, in_blocks, block_c)
     return (w4 * scale_view).reshape(out_dim, in_dim)
+
+
+def _is_fp8_scaled_tensor(
+    model_name: str,
+    fp8_scale_inv_map: dict[str, tuple[str, str]] | None,
+) -> bool:
+    return fp8_scale_inv_map is not None and model_name in fp8_scale_inv_map
 
 
 def _apply_fp8_dequant_inplace(
@@ -279,9 +289,11 @@ def _apply_fp8_dequant_inplace(
         out_blocks = out_dim // block_r
         in_blocks = in_dim // block_c
         E = len(names)
-        # Stack weights: (E, out, in) bf16
+        # Stack weights: (E, out, in) bf16 on the execution device.
+        # Native FP8 source tensors stay compressed until this point so
+        # CPU-side reads and H2D/UMA traffic remain 1 byte/element.
         w_stack = torch.stack([out[n] for n in names], dim=0).to(
-            torch.bfloat16)
+            device=device, dtype=torch.bfloat16)
         # Stack scales: (E, out_blocks, in_blocks) bf16 on device
         s_stack = torch.stack(
             [loaded_scales[n] for n in names], dim=0
@@ -334,7 +346,9 @@ def _materialize(model: nn.Module, prefixes: list[str],
         with safe_open(shard, framework="pt") as f:
             for model_name, ckpt_name in pairs:
                 t = f.get_tensor(ckpt_name)
-                if t.is_floating_point():
+                if (t.is_floating_point()
+                        and not _is_fp8_scaled_tensor(
+                            model_name, fp8_scale_inv_map)):
                     t = t.to(dtype)
                 out[model_name] = t
     if fp8_scale_inv_map:
@@ -358,14 +372,10 @@ def _read_layer_to_device(prefix: str,
     on `device`. Returns {model_name: device_tensor}.
 
     When `fp8_scale_inv_map` is provided, native-FP8 block-scaled
-    weights are dequanted on the CPU side *before* the device transfer
-    — fp8 and its paired `.weight_scale_inv` live together in the same
-    source shard, so we read both via one `safe_open`, fuse on CPU,
-    and ship a single bf16 tensor to `device`. This is specifically
-    tuned for unified-memory hosts (Spark GB10) where CUDA kernel
-    dispatch has overhead but memory access is free; issuing 700+
-    tiny CUDA multiplies per layer-load was saturating the prefetch
-    thread's CPU and starving the main-thread backward pass."""
+    weights are kept compressed through the host-side read and moved to
+    `device` before the 128x128 block dequant. That avoids CPU-side
+    FP8→BF16 expansion and cuts the transfer/cache traffic for those
+    tensors to the source checkpoint size until the final GPU multiply."""
     by_shard: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for model_name, shard in model_to_shard.items():
         if model_name.startswith(prefix):
@@ -375,7 +385,9 @@ def _read_layer_to_device(prefix: str,
         with safe_open(shard, framework="pt") as f:
             for model_name, ckpt_name in pairs:
                 t = f.get_tensor(ckpt_name)
-                if t.is_floating_point():
+                if (t.is_floating_point()
+                        and not _is_fp8_scaled_tensor(
+                            model_name, fp8_scale_inv_map)):
                     t = t.to(dtype)
                 t = t.to(device, non_blocking=True)
                 if not t.is_contiguous():
@@ -548,6 +560,19 @@ class LayerCache:
         # the shared LPDDR5X pool. Force a release after each eviction.
         if evicted and torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+    def discard(self, layer_idx: int):
+        """Drop cache ownership for a layer that has been installed.
+
+        Installed parameters/buffers keep tensor references alive until
+        the model layer is unloaded. Removing the cache reference here
+        prevents one-pass streaming from treating the just-consumed
+        layer as MRU and evicting the next layer that prefetch prepared.
+        """
+        tensors = self._cache.pop(layer_idx, None)
+        if tensors is None:
+            return
+        self.total_bytes -= self._bytes.pop(layer_idx, 0)
 
     def clear(self):
         self._cache.clear()
