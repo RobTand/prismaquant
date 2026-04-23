@@ -1954,6 +1954,7 @@ def materialize_tensors_streaming(
     from transformers import AutoConfig, AutoModelForCausalLM
 
     from .layer_streaming import (
+        _build_fp8_scale_inv_map,
         _build_install_resolver,
         _build_weight_map,
         _fast_install,
@@ -1994,18 +1995,27 @@ def materialize_tensors_streaming(
     layers_prefix = f"{base_prefix}.layers." if base_prefix else "layers."
 
     weight_shard, weight_ckpt = _build_weight_map(model_path)
+    # Native-FP8 dequant map, keyed by live weight-qname. Passed to
+    # every `_read_layer_to_device` / `_materialize` call so fp8 source
+    # weights land on the module as TRUE dequanted bf16 — not raw fp8
+    # codes (range ±448) cast to bf16. Every downstream pass
+    # (_quantize_2d for non-passthrough formats, probe Fisher, cost
+    # RTN) then operates on the real weight values instead of scaled-
+    # by-hidden-factor codes. Empty dict for BF16-native checkpoints.
+    fp8_scale_inv_map = _build_fp8_scale_inv_map(model_path)
+    if fp8_scale_inv_map:
+        print(f"[export-stream] fp8 scale_inv map: "
+              f"{len(fp8_scale_inv_map)} weights will be dequanted "
+              f"inline at layer-load", flush=True)
 
-    # FP8_SOURCE passthrough map: for each Linear whose source has a
-    # `.weight_scale_inv` sibling (i.e., native FP8 block-scaled), record
-    # the shard + ckpt key for the scale tensor. Consumed by the Linear
-    # emit branch when the allocator assigns FP8_SOURCE. Empty dict when
-    # source has no FP8 tensors — FP8_SOURCE is then inert (allocator's
-    # passthrough-integrity filter drops it from every candidate set).
+    # FP8_SOURCE passthrough-emit map: keyed by live base name (no
+    # `.weight` suffix), used by the `fmt == 'FP8_SOURCE'` emit branch
+    # to copy source fp8 + scale_inv bytes verbatim into the output.
+    # Distinct key format from the loader-side dequant map above.
     fp8_source_map = _build_fp8_source_map(model_path)
     if fp8_source_map:
-        print(f"[export-stream] fp8 source map: {len(fp8_source_map)} "
-              f"Linears with `.weight_scale_inv` siblings (FP8_SOURCE "
-              f"passthrough candidates)", flush=True)
+        print(f"[export-stream] fp8 source-emit map: {len(fp8_source_map)} "
+              f"Linears available for FP8_SOURCE passthrough", flush=True)
 
     # Materialize head (embed + norm + lm_head). These are in the
     # safetensors and get populated via `set_module_tensor_to_device`.
@@ -2014,7 +2024,8 @@ def materialize_tensors_streaming(
     t0 = time.time()
     head_pfxs = _head_prefixes(None, base_prefix)
     loaded_n = _materialize(model, head_pfxs, weight_shard, weight_ckpt,
-                            device, dtype)
+                            device, dtype,
+                            fp8_scale_inv_map=fp8_scale_inv_map)
 
     # Rotary's `inv_freq` isn't in the state_dict — compute from config.
     _init_rotary_inplace(base_model, device, dtype)
@@ -2102,62 +2113,14 @@ def materialize_tensors_streaming(
         if layer_qname.endswith("."):
             layer_qname = layer_qname[:-1]
 
-        # 3a. Load layer from safetensors (direct to device).
+        # 3a. Load layer from safetensors (direct to device). When
+        # `fp8_scale_inv_map` is non-empty, the loader applies the
+        # 128x128 block dequant inline, so `mod.weight` receives the
+        # true dequanted weight rather than raw fp8 codes cast to bf16.
         load_t0 = time.time()
         tensors = _read_layer_to_device(
-            f"{layers_prefix}{L}.", weight_shard, weight_ckpt, dtype, device)
-        # Dequant FP8-sourced weights before install. `_read_layer_to_device`
-        # casts fp8_e4m3fn → bf16 via a plain float-to-float conversion that
-        # does NOT multiply by the source's `.weight_scale_inv` block scale —
-        # so the loaded tensor is the raw FP8 code (range ±448) interpreted
-        # as bf16, not the true dequanted weight. Applying the scale here
-        # makes `mod.weight` represent the actual weight values, so every
-        # downstream `_quantize_2d(mod.weight.float(), fmt)` call sees real
-        # numbers instead of unscaled codes. FP8_SOURCE passthrough Linears
-        # don't read mod.weight at all (they go directly to the source
-        # safetensors via fp8_source_map), so they're unaffected either way.
-        #
-        # MiniMax-M2/M2.7 + DeepSeek-V3 store `.weight_scale_inv` as fp32
-        # with a 128×128 block structure over the weight's (out, in) dims.
-        # We expand it to the full weight shape via two `repeat_interleave`
-        # calls and multiply in float32 for numerical safety before casting
-        # back to bf16.
-        if fp8_source_map:
-            from safetensors import safe_open
-            # Group scale reads by shard to keep `safe_open` handle reuse.
-            scale_by_shard: dict[str, list[tuple[str, str]]] = {}
-            for model_name in tensors:
-                if not model_name.endswith(".weight"):
-                    continue
-                base = model_name[: -len(".weight")]
-                scale_entry = fp8_source_map.get(base)
-                if scale_entry is None:
-                    continue
-                shard, ckpt_scale_key = scale_entry
-                scale_by_shard.setdefault(shard, []).append(
-                    (model_name, ckpt_scale_key))
-            n_dequanted = 0
-            for shard, entries in scale_by_shard.items():
-                with safe_open(shard, framework="pt") as sf:
-                    for model_name, scale_key in entries:
-                        w = tensors[model_name]
-                        if w.shape.__len__() != 2:
-                            continue
-                        out_dim, in_dim = w.shape[0], w.shape[1]
-                        scale = sf.get_tensor(scale_key).to(
-                            device=w.device, dtype=torch.float32)
-                        # scale shape: (ceil(out/128), ceil(in/128))
-                        expanded = scale.repeat_interleave(128, dim=0)[:out_dim]
-                        expanded = expanded.repeat_interleave(128, dim=1)[:, :in_dim]
-                        tensors[model_name] = (
-                            w.to(torch.float32) * expanded
-                        ).to(torch.bfloat16).contiguous()
-                        del scale, expanded
-                        n_dequanted += 1
-            if L == 0 and n_dequanted:
-                print(f"[export-stream] layer 0: dequanted {n_dequanted} "
-                      f"fp8 weights via block_scale_inv before install "
-                      f"(same treatment applies to every layer)", flush=True)
+            f"{layers_prefix}{L}.", weight_shard, weight_ckpt, dtype, device,
+            fp8_scale_inv_map=fp8_scale_inv_map)
         resolver = _build_install_resolver(model, layer_qname)
         _fast_install(resolver, tensors, device, model=model)
         load_s = time.time() - load_t0

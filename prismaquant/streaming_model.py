@@ -39,6 +39,7 @@ from typing import Any
 import torch
 
 from .layer_streaming import (
+    _build_fp8_scale_inv_map,
     LayerCache,
     _build_install_resolver,
     _build_weight_map,
@@ -88,7 +89,8 @@ class StreamingContext:
                  device: torch.device, dtype: torch.dtype, offload_folder: str,
                  visual_module: Any | None = None,
                  visual_prefix: str | None = None,
-                 multimodal: bool = False):
+                 multimodal: bool = False,
+                 fp8_scale_inv_map: dict[str, tuple[str, str]] | None = None):
         self.model = model
         self.base_model = base_model
         self.layers = layers
@@ -111,13 +113,21 @@ class StreamingContext:
         self.visual_module = visual_module
         self.visual_prefix = visual_prefix
         self.multimodal = multimodal
+        # Native-FP8 checkpoint dequant map: `{live_weight_key:
+        # (shard_path, scale_inv_ckpt_key)}`. When non-empty, every
+        # per-layer reload via `_read_layer_to_device` applies the
+        # 128x128 block dequant inline so `mod.weight` holds true
+        # dequanted weights, not raw fp8 codes cast to bf16. Empty dict
+        # for BF16-native checkpoints — loader path is unchanged.
+        self.fp8_scale_inv_map = fp8_scale_inv_map or {}
         self._inflight: dict[int, Any] = {}
         self._inflight_lock = threading.Lock()
 
     def _prefetch_worker(self, L: int):
         prefix = f"{self.layers_prefix}{L}."
         tensors = _read_layer_to_device(
-            prefix, self.weight_shard, self.weight_ckpt, self.dtype, self.device)
+            prefix, self.weight_shard, self.weight_ckpt, self.dtype,
+            self.device, fp8_scale_inv_map=self.fp8_scale_inv_map)
         self.layer_cache.put(L, tensors)
         with self._inflight_lock:
             self._inflight.pop(L, None)
@@ -148,7 +158,8 @@ class StreamingContext:
                 return cached, "wait"
         prefix = f"{self.layers_prefix}{L}."
         tensors = _read_layer_to_device(
-            prefix, self.weight_shard, self.weight_ckpt, self.dtype, self.device)
+            prefix, self.weight_shard, self.weight_ckpt, self.dtype,
+            self.device, fp8_scale_inv_map=self.fp8_scale_inv_map)
         self.layer_cache.put(L, tensors)
         return tensors, "cold"
 
@@ -306,6 +317,20 @@ def _build_streaming_context(model_path: str, *,
         _unload(model, [f"{layers_prefix}{L}."])
 
     weight_shard, weight_ckpt = _build_weight_map(model_path, multimodal=multimodal)
+    # Native-FP8 source dequant map. Populated only for checkpoints that
+    # ship `.weight_scale_inv` siblings (MiniMax-M2/M2.7, DeepSeek-V3).
+    # Empty dict for plain BF16 checkpoints — `_read_layer_to_device`
+    # then skips the dequant pass entirely. This map is THE fix for the
+    # probe/cost/export mismatch where the streaming loader previously
+    # cast fp8 codes to bf16 without applying the 128x128 block scale,
+    # leaving every downstream pass operating on raw codes (range ±448)
+    # instead of true weights (range ±0.2).
+    fp8_scale_inv_map = _build_fp8_scale_inv_map(
+        model_path, multimodal=multimodal)
+    if fp8_scale_inv_map:
+        print(f"{log_prefix} fp8 scale_inv map: {len(fp8_scale_inv_map)} "
+              f"weights will be dequanted inline at layer-load",
+              flush=True)
 
     # Locate the actual visual module on the real (post-from_pretrained)
     # model. When multimodal is set, fully materialize the visual tower
@@ -330,7 +355,8 @@ def _build_streaming_context(model_path: str, *,
             # Load all visual tensors from safetensors onto device.
             tensors = _read_layer_to_device(
                 visual_prefix + ".",
-                weight_shard, weight_ckpt, dtype, device)
+                weight_shard, weight_ckpt, dtype, device,
+                fp8_scale_inv_map=fp8_scale_inv_map)
             print(f"{log_prefix} materializing visual tower: "
                   f"{len(tensors)}/{len(vis_keys)} tensors -> {device}", flush=True)
             from accelerate.utils.modeling import set_module_tensor_to_device
@@ -413,4 +439,5 @@ def _build_streaming_context(model_path: str, *,
         visual_module=visual_module,
         visual_prefix=visual_prefix,
         multimodal=multimodal,
+        fp8_scale_inv_map=fp8_scale_inv_map,
     )

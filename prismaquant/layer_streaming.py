@@ -52,10 +52,13 @@ def _build_weight_map(model_path: str, *,
         # Prefix renames mirroring vLLM's `hf_to_vllm_mapper` for the
         # multimodal → text-only body remap. Order matters: more
         # specific rules first.
-        # FP8-source artifacts (MiniMax-M2.*, DeepSeek-V3 FP8) — the
-        # dequant already happened during the streaming cost/probe
-        # pass, so these input-scale buffers are orphans we must not
-        # try to install onto the re-declared bf16 Linear modules.
+        # `.weight_scale_inv` is the native-FP8 per-128x128-block scale
+        # that pairs with a `.weight` fp8_e4m3fn tensor (MiniMax-M2/M2.7,
+        # DeepSeek-V3, any natively-FP8 checkpoint). Drop it from the
+        # primary weight map so callers that install by model-qname
+        # don't try to install it onto the redeclared Linear; fp8-aware
+        # loaders pick it up from `_build_fp8_scale_inv_map` instead
+        # and apply the scale during load.
         if k.endswith(".weight_scale_inv"):
             return None
         if k.startswith("model.visual.") or k.startswith("model.audio_tower.") \
@@ -103,29 +106,171 @@ def _build_weight_map(model_path: str, *,
     return model_to_shard, model_to_ckpt
 
 
+def _build_fp8_scale_inv_map(model_path: str, *,
+                             multimodal: bool = False
+                             ) -> dict[str, tuple[str, str]]:
+    """Return `{model_weight_key: (scale_shard_path, scale_ckpt_key)}`
+    for every native-FP8 weight tensor (fp8_e4m3fn + paired
+    `.weight_scale_inv` fp32 block scale).
+
+    The key space matches what `_build_weight_map` returns — i.e., the
+    live model qname for the weight (`...something.weight`). Callers
+    pair it with `_read_layer_to_device(..., fp8_scale_inv_map=...)`
+    to apply the 128x128 block dequant inline at load.
+
+    Returns `{}` for checkpoints that have no `.weight_scale_inv`
+    tensors — load-time dequant is then a no-op and callers behave
+    exactly as they did before this function existed.
+    """
+    # Same rename table as `_build_weight_map`, but we KEEP
+    # `.weight_scale_inv` and rewrite the same body-vs-multimodal
+    # remap so lookup keys line up with the weight map.
+    def _rename_text_only(k: str) -> str | None:
+        if (k.startswith("model.visual.")
+                or k.startswith("model.audio_tower.")
+                or k.startswith("model.vision_tower.")
+                or k.startswith("model.embed_vision.")
+                or k.startswith("model.embed_audio.")
+                or k.startswith("mtp.")):
+            return None
+        if k.startswith("model.language_model."):
+            return "model." + k[len("model.language_model."):]
+        return k
+
+    def _rename_multimodal(k: str) -> str | None:
+        if k.startswith("mtp."):
+            return None
+        return k
+
+    _rename = _rename_multimodal if multimodal else _rename_text_only
+
+    index_file = os.path.join(model_path, "model.safetensors.index.json")
+    if os.path.exists(index_file):
+        with open(index_file) as f:
+            raw = json.load(f)["weight_map"]
+    else:
+        single = os.path.join(model_path, "model.safetensors")
+        if not os.path.exists(single):
+            return {}
+        with safe_open(single, framework="pt") as f:
+            raw = {k: single for k in f.keys()}
+
+    out: dict[str, tuple[str, str]] = {}
+    for ck_key, shard in raw.items():
+        if not ck_key.endswith(".weight_scale_inv"):
+            continue
+        renamed = _rename(ck_key)
+        if renamed is None:
+            continue
+        # Key the map by the WEIGHT name (drop `_scale_inv`, leaving
+        # `...something.weight`) so callers can look up by the same
+        # model_key they use in `_build_weight_map`.
+        assert renamed.endswith(".weight_scale_inv"), renamed
+        weight_key = renamed[: -len("_scale_inv")]
+        out[weight_key] = (os.path.join(model_path, shard), ck_key)
+    return out
+
+
+def _dequant_fp8_block_weight(
+    weight_fp8: torch.Tensor,
+    scale_inv_fp32: torch.Tensor,
+    block: tuple[int, int] = (128, 128),
+) -> torch.Tensor:
+    """Expand the (ceil(out/128), ceil(in/128)) fp32 block scale to the
+    full weight shape and dequant to bf16. Used by the fp8-aware
+    streaming loader for native-FP8 checkpoints (MiniMax-M2/M2.7,
+    DeepSeek-V3) where `.weight` is stored as fp8_e4m3fn and the true
+    weight = fp8_code * weight_scale_inv[block_row, block_col]. Without
+    this the streaming loader's plain `.to(bfloat16)` cast leaves
+    `mod.weight` as raw fp8 codes (range ±448) rather than true
+    dequanted weights (range ±0.2), which breaks every downstream pass
+    that reads `mod.weight` (probe Fisher, cost RTN, export quantize).
+    """
+    out_dim, in_dim = weight_fp8.shape
+    block_r, block_c = block
+    expanded = scale_inv_fp32.repeat_interleave(block_r, dim=0)[:out_dim]
+    expanded = expanded.repeat_interleave(block_c, dim=1)[:, :in_dim]
+    return (weight_fp8.to(torch.float32)
+            * expanded.to(device=weight_fp8.device, dtype=torch.float32)
+            ).to(torch.bfloat16)
+
+
+def _apply_fp8_dequant_inplace(
+    out: dict[str, torch.Tensor],
+    fp8_scale_inv_map: dict[str, tuple[str, str]],
+    device: torch.device,
+) -> int:
+    """For each tensor in `out` whose key matches a `fp8_scale_inv_map`
+    entry, open the scale shard, read the scale_inv, apply the block
+    dequant, replace the loaded tensor with the dequanted bf16
+    weight. Returns the number of tensors dequanted.
+
+    Groups scale reads by shard so we hit each shard with a single
+    `safe_open` even for large layers.
+    """
+    if not fp8_scale_inv_map:
+        return 0
+    scale_reads: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for model_name in list(out.keys()):
+        entry = fp8_scale_inv_map.get(model_name)
+        if entry is None:
+            continue
+        shard, scale_key = entry
+        scale_reads[shard].append((model_name, scale_key))
+    dequanted = 0
+    for shard, reads in scale_reads.items():
+        with safe_open(shard, framework="pt") as f:
+            for model_name, scale_key in reads:
+                w = out[model_name]
+                # Weight was already cast from fp8 → bf16 by the caller.
+                # Read the scale_inv fp32 tensor and re-dequant. We need
+                # the pre-cast fp8 codes, but we kept them as bf16
+                # values (each fp8 code → its float equivalent, range
+                # ±448). Float-multiplying by the expanded scale
+                # recovers the true weight exactly up to bf16 rounding.
+                scale = f.get_tensor(scale_key).to(
+                    device=device, dtype=torch.float32)
+                out[model_name] = _dequant_fp8_block_weight(w, scale)
+                del scale
+                dequanted += 1
+    return dequanted
+
+
 def _materialize(model: nn.Module, prefixes: list[str],
                  model_to_shard: dict[str, str],
                  model_to_ckpt: dict[str, str],
-                 device: torch.device, dtype: torch.dtype) -> int:
+                 device: torch.device, dtype: torch.dtype,
+                 fp8_scale_inv_map: dict[str, tuple[str, str]] | None = None,
+                 ) -> int:
     """Load all tensors whose model-side name starts with any prefix in
     `prefixes` onto `device` as `dtype`. Uses the checkpoint-side key to
     read from safetensors but assigns to the model-side name.
+
+    When `fp8_scale_inv_map` is provided, fp8-sourced weights get their
+    128x128 block `weight_scale_inv` applied inline so the installed
+    parameter holds the true dequanted weight, not the raw fp8 codes
+    cast to bf16. See `_dequant_fp8_block_weight`.
 
     Returns count of tensors loaded."""
     by_shard: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for model_name, shard in model_to_shard.items():
         if any(model_name.startswith(p) for p in prefixes):
             by_shard[shard].append((model_name, model_to_ckpt[model_name]))
-    loaded = 0
+    # Collect loaded tensors first so we can batch the scale-read pass.
+    out: dict[str, torch.Tensor] = {}
     for shard, pairs in by_shard.items():
         with safe_open(shard, framework="pt") as f:
             for model_name, ckpt_name in pairs:
                 t = f.get_tensor(ckpt_name)
                 if t.is_floating_point():
                     t = t.to(dtype)
-                set_module_tensor_to_device(model, model_name, device, value=t)
-                loaded += 1
-                del t
+                out[model_name] = t
+    if fp8_scale_inv_map:
+        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device)
+    loaded = 0
+    for model_name, t in out.items():
+        set_module_tensor_to_device(model, model_name, device, value=t)
+        loaded += 1
     return loaded
 
 
@@ -133,9 +278,20 @@ def _read_layer_to_device(prefix: str,
                           model_to_shard: dict[str, str],
                           model_to_ckpt: dict[str, str],
                           dtype: torch.dtype,
-                          device: torch.device) -> dict[str, torch.Tensor]:
+                          device: torch.device,
+                          fp8_scale_inv_map: dict[str, tuple[str, str]]
+                              | None = None,
+                          ) -> dict[str, torch.Tensor]:
     """Read all tensors under `prefix` from safetensors and place them
     on `device`. Returns {model_name: device_tensor}.
+
+    When `fp8_scale_inv_map` is provided, every fp8-sourced weight gets
+    its 128x128 block `weight_scale_inv` applied inline so `mod.weight`
+    holds the TRUE dequanted weight on install. Without this, the
+    plain `.to(bfloat16)` cast leaves raw fp8 codes (range ±448)
+    interpreted as bf16, which silently breaks every downstream pass
+    that reads `mod.weight` — Fisher probe, RTN cost measurement, and
+    non-FP8_SOURCE export paths all treated codes as weights.
 
     On a UMA system like Spark's GB10 the `.to(device)` call here is
     still a torch-level memcpy (CPU ↔ CUDA allocators are logically
@@ -161,6 +317,8 @@ def _read_layer_to_device(prefix: str,
                 if not t.is_contiguous():
                     t = t.contiguous()
                 out[model_name] = t
+    if fp8_scale_inv_map:
+        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device)
     return out
 
 
