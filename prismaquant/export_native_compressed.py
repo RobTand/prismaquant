@@ -2641,8 +2641,14 @@ FP8_SOURCE_SCHEME = {
         "symmetric": True, "dynamic": False,
         "observer": "memoryless_minmax",
     },
+    # Per-tensor dynamic activation scaling (NOT per-token). vLLM's
+    # FP8 MoE path `fp8_w8a8_moe_quant_config` asserts
+    # `not per_act_token_quant` whenever weight `block_structure` is
+    # set — block-scaled weight + per-token act isn't wired. This
+    # matches MiniMax's native-serving `activation_scheme: dynamic`,
+    # which is per-tensor dynamic in DeepSeek / MiniMax conventions.
     "input_activations": {
-        "num_bits": 8, "type": "float", "strategy": "token",
+        "num_bits": 8, "type": "float", "strategy": "tensor",
         "symmetric": True, "dynamic": True,
         "observer": "memoryless_minmax",
     },
