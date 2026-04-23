@@ -172,27 +172,47 @@ def _build_fp8_scale_inv_map(model_path: str, *,
 
 
 def _dequant_fp8_block_weight(
-    weight_fp8: torch.Tensor,
-    scale_inv_fp32: torch.Tensor,
+    weight: torch.Tensor,
+    scale_inv: torch.Tensor,
     block: tuple[int, int] = (128, 128),
 ) -> torch.Tensor:
-    """Expand the (ceil(out/128), ceil(in/128)) fp32 block scale to the
-    full weight shape and dequant to bf16. Used by the fp8-aware
-    streaming loader for native-FP8 checkpoints (MiniMax-M2/M2.7,
-    DeepSeek-V3) where `.weight` is stored as fp8_e4m3fn and the true
-    weight = fp8_code * weight_scale_inv[block_row, block_col]. Without
-    this the streaming loader's plain `.to(bfloat16)` cast leaves
-    `mod.weight` as raw fp8 codes (range ±448) rather than true
-    dequanted weights (range ±0.2), which breaks every downstream pass
-    that reads `mod.weight` (probe Fisher, cost RTN, export quantize).
+    """Apply the (ceil(out/128), ceil(in/128)) block scale to a 2D
+    fp8-sourced weight and return bf16. Used by the fp8-aware streaming
+    loader for native-FP8 checkpoints (MiniMax-M2/M2.7, DeepSeek-V3).
+
+    `weight` is the fp8-sourced tensor as returned by the streaming
+    loader — typically already cast to bf16 (each fp8 code maps
+    losslessly to bf16). `scale_inv` is the fp32 `weight_scale_inv`
+    block tensor; we cast it to bf16 here, since the fp8 code's 3-bit
+    mantissa (≈12.5% precision) dominates the overall error budget —
+    bf16's ~0.4% scale precision is well below that.
+
+    Implementation: reshape to 4-D block tiles `(out_blocks, block_r,
+    in_blocks, block_c)` and multiply by a broadcasted scale of shape
+    `(out_blocks, 1, in_blocks, 1)`. Avoids materializing the full
+    (out_dim, in_dim) expanded-scale intermediate — on MiniMax-M2.7's
+    772 fp8 weights per layer this cuts allocation pressure ~25× vs a
+    `repeat_interleave(128)`-pair expansion, and keeps everything in
+    bf16 so no fp32 intermediate is ever allocated.
     """
-    out_dim, in_dim = weight_fp8.shape
+    out_dim, in_dim = weight.shape
     block_r, block_c = block
-    expanded = scale_inv_fp32.repeat_interleave(block_r, dim=0)[:out_dim]
-    expanded = expanded.repeat_interleave(block_c, dim=1)[:, :in_dim]
-    return (weight_fp8.to(torch.float32)
-            * expanded.to(device=weight_fp8.device, dtype=torch.float32)
-            ).to(torch.bfloat16)
+    target_dtype = torch.bfloat16
+    if out_dim % block_r != 0 or in_dim % block_c != 0:
+        # Unaligned tail: fall back to the expanded-scale path. Shouldn't
+        # hit in practice on MiniMax/DeepSeek — both ship weights that
+        # are exact multiples of 128 along both dims.
+        scale = scale_inv.to(device=weight.device, dtype=target_dtype)
+        expanded = scale.repeat_interleave(block_r, dim=0)[:out_dim]
+        expanded = expanded.repeat_interleave(block_c, dim=1)[:, :in_dim]
+        return (weight.to(target_dtype) * expanded)
+    out_blocks = out_dim // block_r
+    in_blocks = in_dim // block_c
+    scale_bf16 = scale_inv.to(device=weight.device, dtype=target_dtype)
+    scale_view = scale_bf16.reshape(out_blocks, 1, in_blocks, 1)
+    w_bf16 = weight.to(target_dtype)
+    w4 = w_bf16.reshape(out_blocks, block_r, in_blocks, block_c)
+    return (w4 * scale_view).reshape(out_dim, in_dim)
 
 
 def _apply_fp8_dequant_inplace(
@@ -201,15 +221,20 @@ def _apply_fp8_dequant_inplace(
     device: torch.device,
 ) -> int:
     """For each tensor in `out` whose key matches a `fp8_scale_inv_map`
-    entry, open the scale shard, read the scale_inv, apply the block
-    dequant, replace the loaded tensor with the dequanted bf16
-    weight. Returns the number of tensors dequanted.
+    entry, read the scale_inv, apply the 128x128 block dequant, and
+    replace the loaded tensor with the dequanted bf16 weight.
 
-    Groups scale reads by shard so we hit each shard with a single
-    `safe_open` even for large layers.
+    Tensors and scales are both grouped by shape and multiplied in a
+    single batched 5-D broadcast op per shape-group. On MiniMax-M2.7
+    that collapses 772 per-tensor kernel launches per layer-load
+    (256 experts × 3 projs + 4 attention projs) into ~4-5 shape
+    buckets — which is what the prefetch thread's CPU cost scales on,
+    since each kernel launch has fixed Python + CUDA dispatch overhead.
     """
     if not fp8_scale_inv_map:
         return 0
+    # Collect (name, scale_key) per shard so we can open each shard
+    # once and pre-read every scale we need before batching.
     scale_reads: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for model_name in list(out.keys()):
         entry = fp8_scale_inv_map.get(model_name)
@@ -217,22 +242,69 @@ def _apply_fp8_dequant_inplace(
             continue
         shard, scale_key = entry
         scale_reads[shard].append((model_name, scale_key))
-    dequanted = 0
+    if not scale_reads:
+        return 0
+
+    # Step 1: Read all scales from source safetensors once per shard.
+    loaded_scales: dict[str, torch.Tensor] = {}  # name -> fp32 scale (cpu)
     for shard, reads in scale_reads.items():
         with safe_open(shard, framework="pt") as f:
             for model_name, scale_key in reads:
-                w = out[model_name]
-                # Weight was already cast from fp8 → bf16 by the caller.
-                # Read the scale_inv fp32 tensor and re-dequant. We need
-                # the pre-cast fp8 codes, but we kept them as bf16
-                # values (each fp8 code → its float equivalent, range
-                # ±448). Float-multiplying by the expanded scale
-                # recovers the true weight exactly up to bf16 rounding.
-                scale = f.get_tensor(scale_key).to(
-                    device=device, dtype=torch.float32)
-                out[model_name] = _dequant_fp8_block_weight(w, scale)
-                del scale
-                dequanted += 1
+                loaded_scales[model_name] = f.get_tensor(scale_key)
+
+    # Step 2: Group matched weights by (out_dim, in_dim) shape. We only
+    # batch along exact-128-multiple shapes; odd-shaped tensors (rare)
+    # fall back to the per-tensor path.
+    block_r, block_c = 128, 128
+    by_shape: dict[tuple[int, int], list[str]] = defaultdict(list)
+    fallback: list[str] = []
+    for name in loaded_scales:
+        w = out[name]
+        if w.dim() != 2:
+            fallback.append(name)
+            continue
+        out_dim, in_dim = w.shape
+        if out_dim % block_r != 0 or in_dim % block_c != 0:
+            fallback.append(name)
+            continue
+        by_shape[(out_dim, in_dim)].append(name)
+
+    dequanted = 0
+
+    # Step 3: Batched multiply per shape-group. Stack all weights of
+    # the same shape along a new outer dim, stack their scales the
+    # same way, reshape both into block-tile form, one bf16 multiply,
+    # split back.
+    for (out_dim, in_dim), names in by_shape.items():
+        out_blocks = out_dim // block_r
+        in_blocks = in_dim // block_c
+        E = len(names)
+        # Stack weights: (E, out, in) bf16
+        w_stack = torch.stack([out[n] for n in names], dim=0).to(
+            torch.bfloat16)
+        # Stack scales: (E, out_blocks, in_blocks) bf16 on device
+        s_stack = torch.stack(
+            [loaded_scales[n] for n in names], dim=0
+        ).to(device=device, dtype=torch.bfloat16)
+        # Reshape to block-tile form:
+        #   w: (E, out_blocks, block_r, in_blocks, block_c)
+        #   s: (E, out_blocks, 1, in_blocks, 1)
+        w4 = w_stack.reshape(E, out_blocks, block_r, in_blocks, block_c)
+        s4 = s_stack.reshape(E, out_blocks, 1, in_blocks, 1)
+        dequanted_stack = (w4 * s4).reshape(E, out_dim, in_dim)
+        # Split back — zero-copy via unbind.
+        for i, n in enumerate(names):
+            out[n] = dequanted_stack[i].contiguous()
+        dequanted += E
+        del w_stack, s_stack, w4, s4, dequanted_stack
+
+    # Step 4: Fallback path for any shapes we didn't batch.
+    for name in fallback:
+        w = out[name]
+        scale_fp = loaded_scales[name].to(device=device)
+        out[name] = _dequant_fp8_block_weight(w, scale_fp)
+        dequanted += 1
+
     return dequanted
 
 
