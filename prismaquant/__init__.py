@@ -52,6 +52,26 @@ def _polyfill_transformers() -> None:
     except Exception:
         pass
     try:
+        # Transformers 5.x's fine-grained-FP8 quantizer's
+        # `validate_environment` has an operator-precedence bug —
+        # the `"disk" in device_map.values()` check is not gated on
+        # `pre_quantized`, so it rejects disk-device-map loads even
+        # for pre-quantized checkpoints. Override with a bypass:
+        # prismaquant's streaming loader (for probe/cost) REQUIRES
+        # disk-device-map to offload body layers, and our caller
+        # guarantees the checkpoint is pre-quantized (it's the
+        # source on disk) so this rejection is a false positive.
+        from transformers.quantizers.quantizer_finegrained_fp8 import (
+            FineGrainedFP8HfQuantizer as _FP8Q,
+        )
+        if not getattr(_FP8Q, "_prismaquant_validator_bypass", False):
+            def _bypass_validate(self, *a, **kw):
+                return None
+            _FP8Q.validate_environment = _bypass_validate
+            _FP8Q._prismaquant_validator_bypass = True
+    except Exception:
+        pass
+    try:
         # ROPE_INIT_FUNCTIONS['default'] was removed in transformers 5.x
         # (renamed to 'linear', which takes a 'factor' kwarg the old
         # default never needed). Remote modeling files from older

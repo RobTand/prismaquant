@@ -95,15 +95,20 @@ def stage_text_only(model_path: str) -> str:
                         "image_token_id", "video_token_id",
                         "vision_start_token_id", "vision_end_token_id"])
     # Run staging when either (a) the model is multimodal (has a
-    # config section that must be stripped for text-only load), or
-    # (b) any of the profile-declared strip_keys is present. The
-    # second trigger covers text-only profiles that still need to
-    # edit the staged config (e.g. strip a stale `auto_map` that
-    # points at a remote modeling file incompatible with the
-    # current transformers version).
+    # config section that must be stripped for text-only load),
+    # (b) any of the profile-declared strip_keys is present, or
+    # (c) the config declares `num_local_experts` — we need to
+    # alias it as `num_experts` for transformers 5.x's FP8 MoE
+    # integration, which does `getattr(cfg, "num_local_experts",
+    # cfg.num_experts)` with the fallback arg eagerly evaluated and
+    # raises on the attribute access when only the long-form name
+    # is defined.
+    needs_num_experts_alias = (
+        "num_local_experts" in cfg and "num_experts" not in cfg)
     if not any(k in cfg for k in
                ("vision_config", "text_config", "audio_config", "speech_config")) \
-            and not any(k in cfg for k in strip_keys):
+            and not any(k in cfg for k in strip_keys) \
+            and not needs_num_experts_alias:
         return str(src)
     promote_inner_mt = (profile.stage_text_only_promote_inner_model_type()
                         if profile is not None else False)
@@ -111,6 +116,15 @@ def stage_text_only(model_path: str) -> str:
     import tempfile
     for k in strip_keys:
         cfg.pop(k, None)
+
+    # Transformers 5.x's `integrations/finegrained_fp8.py:__init__`
+    # does `getattr(config, "num_local_experts", config.num_experts)` —
+    # the fallback is evaluated eagerly and raises on MoE configs that
+    # only declare `num_local_experts` (e.g. MiniMax M2). Alias both
+    # names so the attribute access always succeeds.
+    if "num_local_experts" in cfg and "num_experts" not in cfg:
+        cfg["num_experts"] = cfg["num_local_experts"]
+
     if "text_config" in cfg:
         tc = cfg.pop("text_config")
         for k, v in tc.items():

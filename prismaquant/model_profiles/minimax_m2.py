@@ -137,3 +137,15 @@ class MiniMaxM2Profile(ModelProfile):
     def live_to_recipe_name(self, live_qname: str) -> str:
         # No multimodal umbrella. Recipe/live names align.
         return live_qname
+
+    def stage_text_only_strip_keys(self) -> tuple[str, ...]:
+        # MiniMax-M2.7 ships as FP8 (quant_method=fp8,
+        # fmt=float8_e4m3fn, 128x128 block scales). transformers 5.x's
+        # fine-grained-FP8 integration has multiple structural bugs
+        # on MiniMax's config shape (num_experts vs num_local_experts
+        # mismatch; set_submodule('...experts.0') path failure).
+        # Strip the quantization_config entirely so transformers
+        # loads the raw safetensors with torch_dtype=bfloat16 casting;
+        # for any layer prismaquant wants to keep at 8 bits we emit
+        # the source FP8 tensors on the export side (no re-quant).
+        return ("quantization_config",) + super().stage_text_only_strip_keys()
