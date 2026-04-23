@@ -1778,6 +1778,79 @@ def _quantize_3d_packed(packed: torch.Tensor, fmt: str) -> dict[str, torch.Tenso
     raise ValueError(f"unsupported format for packed-MoE: {fmt}")
 
 
+def _quantize_2d_group_same_shape(
+    stacked_weights: torch.Tensor,
+    fmt: str,
+) -> dict[str, torch.Tensor]:
+    """Compress a batch of same-shape 2D weights in one vectorized op.
+
+    `stacked_weights` is `[B, out, in]`. Returned tensors keep the leading
+    batch dimension so the caller can split them back to per-Linear keys.
+    This is deliberately limited to RTN-only formats: activation-aware NVFP4
+    remains scalar until its GPTQ/scale-sweep passes are vectorized too.
+    """
+    if stacked_weights.dim() != 3:
+        raise ValueError(
+            "same-shape export grouping expects [B, out, in] weights; "
+            f"got shape={tuple(stacked_weights.shape)}"
+        )
+    if fmt in ("NVINT2", "NVINT3"):
+        return _quantize_nvint_packed(stacked_weights.to(torch.float32), fmt)
+    if fmt == "MXFP8":
+        w, ws = quantize_dequantize_mxfp8_packed(
+            stacked_weights.to(torch.float32), group_size=32,
+        )
+        return {"weight": w, "weight_scale": ws}
+    raise ValueError(f"unsupported grouped 2D export format: {fmt}")
+
+
+def _host_mem_available_bytes() -> int:
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return 1 << 30
+
+
+def _export_vector_chunk_len(
+    shape: tuple[int, int],
+    max_items: int,
+    device: torch.device,
+) -> int:
+    """Choose a conservative grouped-export chunk size.
+
+    `PQ_EXPORT_VECTOR_CHUNK=<int>` pins the upper bound. The default `auto`
+    keeps one path for all model sizes while scaling down when available
+    memory is tight.
+    """
+    env = os.getenv("PQ_EXPORT_VECTOR_CHUNK", "auto").strip().lower()
+    if env and env != "auto":
+        try:
+            cap = max(1, int(env))
+        except ValueError:
+            cap = 128
+    else:
+        cap = 128
+
+    if device.type == "cuda":
+        try:
+            free_bytes, _ = torch.cuda.mem_get_info(device)
+        except RuntimeError:
+            free_bytes = _host_mem_available_bytes()
+    else:
+        free_bytes = _host_mem_available_bytes()
+
+    # Quantization creates grouped float32 views, integer code tensors, scale
+    # tensors, and packed outputs. Budget for several live copies per item.
+    per_item = max(1, int(math.prod(shape)) * 4)
+    budget = max(16 << 20, min(int(free_bytes * 0.08), 2 << 30))
+    by_mem = max(1, budget // max(per_item * 6, 1))
+    return max(1, min(max_items, cap, by_mem))
+
+
 # ---------------------------------------------------------------------------
 # Fused-sibling joint NVFP4 scale (per-layer scope, used by the streaming
 # materializer below). The whole-model variant `_compute_nvfp4_joint_global`
@@ -2186,6 +2259,9 @@ def materialize_tensors_streaming(
         # 3c. Emit Linears.
         covered: set[str] = set()
         linear_count = 0
+        grouped_linears: dict[
+            tuple[str, tuple[int, int]], list[tuple[str, str, nn.Linear]]
+        ] = defaultdict(list)
         for sub_name, mod in layer_mod.named_modules():
             if not isinstance(mod, nn.Linear):
                 continue
@@ -2261,6 +2337,11 @@ def materialize_tensors_streaming(
                 covered.add(full)
                 continue
 
+            if fmt in ("NVINT2", "NVINT3", "MXFP8") and mod.weight.dim() == 2:
+                shape = (int(mod.weight.shape[0]), int(mod.weight.shape[1]))
+                grouped_linears[(fmt, shape)].append((full, recipe_key, mod))
+                continue
+
             override = joint_globals.get(recipe_key) if fmt == "NVFP4" else None
             compressed = _quantize_2d(
                 mod.weight.detach().float(), fmt,
@@ -2273,6 +2354,34 @@ def materialize_tensors_streaming(
                 out[f"{full}.bias"] = mod.bias.detach().to(torch.bfloat16).cpu()
             hist[("linear", fmt)] += 1
             covered.add(full)
+
+        # RTN-only formats can be emitted in same-shape batches. MiniMax has
+        # hundreds of expert Linears per layer with identical shapes; doing
+        # those one at a time keeps the export CPU/Python-bound even though the
+        # math itself is vectorized.
+        export_dev = torch.device(device)
+        for (fmt, shape), items in grouped_linears.items():
+            chunk_len = _export_vector_chunk_len(shape, len(items), export_dev)
+            for start in range(0, len(items), chunk_len):
+                chunk = items[start:start + chunk_len]
+                stacked = torch.stack(
+                    [mod.weight.detach().to(torch.float32) for _, _, mod in chunk],
+                    dim=0,
+                )
+                compressed_batch = _quantize_2d_group_same_shape(stacked, fmt)
+                del stacked
+                for i, (full, _recipe_key, mod) in enumerate(chunk):
+                    for suffix, tensor in compressed_batch.items():
+                        piece = tensor[i]
+                        if suffix == "weight_global_scale":
+                            piece = piece.reshape(1)
+                        out[f"{full}.{suffix}"] = piece.cpu()
+                    if mod.bias is not None:
+                        out[f"{full}.bias"] = mod.bias.detach().to(
+                            torch.bfloat16).cpu()
+                    hist[("linear", fmt)] += 1
+                    covered.add(full)
+                del compressed_batch
 
         # 3d. Emit packed MoE experts, scoped to this layer.
         packed_count = 0

@@ -79,6 +79,36 @@ class TestLazyActivationCache(unittest.TestCase):
         self.assertTrue(torch.equal(value, torch.ones(2, 3, dtype=torch.float32)))
 
 
+class TestGroupedExportQuantization(unittest.TestCase):
+    def test_grouped_nvint_matches_scalar_export(self):
+        from prismaquant.export_native_compressed import (
+            _quantize_2d,
+            _quantize_2d_group_same_shape,
+        )
+
+        torch.manual_seed(0)
+        weights = torch.randn(3, 4, 16)
+        for fmt in ("NVINT2", "NVINT3"):
+            grouped = _quantize_2d_group_same_shape(weights, fmt)
+            for i in range(weights.shape[0]):
+                scalar = _quantize_2d(weights[i], fmt)
+                self.assertTrue(
+                    torch.equal(grouped["weight_packed"][i], scalar["weight_packed"]),
+                    msg=f"{fmt} weight_packed[{i}]",
+                )
+                self.assertTrue(
+                    torch.equal(grouped["weight_scale"][i], scalar["weight_scale"]),
+                    msg=f"{fmt} weight_scale[{i}]",
+                )
+                self.assertTrue(
+                    torch.allclose(
+                        grouped["weight_global_scale"][i].reshape(1),
+                        scalar["weight_global_scale"],
+                    ),
+                    msg=f"{fmt} weight_global_scale[{i}]",
+                )
+
+
 def _nvfp4_dequantize(weight_packed, weight_scale_fp8, weight_global_scale_divisor):
     """Reproduce vLLM's NVFP4 dequant convention to verify round-trip.
     The on-disk `weight_global_scale` is `1/global_real`; vLLM inverts
