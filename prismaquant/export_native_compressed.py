@@ -55,6 +55,7 @@ import argparse
 import gc
 import json
 import math
+import os
 import re
 import shutil
 import time
@@ -1842,6 +1843,87 @@ def _init_rotary_inplace(base_model: nn.Module, device: torch.device,
     rotary.attention_scaling = attention_scaling
 
 
+def _build_fp8_source_map(
+    model_path: str, *, multimodal: bool = False,
+) -> dict[str, tuple[str, str]]:
+    """Scan the source safetensors index for native-FP8 block-scaled
+    Linears and return `{live_base_name: (shard_path, ckpt_scale_inv_key)}`.
+
+    A tensor qualifies as FP8-sourced when `<base>.weight` has a sibling
+    `<base>.weight_scale_inv` in the index (the 128×128 block-scale
+    convention MiniMax-M2, DeepSeek-V3, and NVIDIA FP8 checkpoints use).
+    The returned keys are the LIVE-MODEL attribute paths (i.e., the same
+    form as `full` in the per-layer loop), obtained by applying the same
+    source → live name rewrite that `layer_streaming._build_weight_map`
+    performs for the `.weight` tensors — so the exporter can look up
+    directly by `live_base` without re-running the rewrite.
+
+    `multimodal` must match what was passed to `_build_weight_map`:
+    text-only path strips `model.language_model.` prefix; multimodal
+    preserves it. (MiniMax-M2 is text-only; set False.)
+
+    Returns `{}` when the source has no `.weight_scale_inv` sibling for
+    any `.weight` — i.e., the source is not FP8-block quantized. In that
+    case the FP8_SOURCE format is inert (allocator's passthrough-
+    integrity filter drops it from every Linear's candidate set).
+    """
+    idx_path = os.path.join(model_path, "model.safetensors.index.json")
+    if not os.path.exists(idx_path):
+        single = os.path.join(model_path, "model.safetensors")
+        if not os.path.exists(single):
+            return {}
+        from safetensors import safe_open
+        with safe_open(single, framework="pt") as f:
+            raw = {k: single for k in f.keys()}
+    else:
+        with open(idx_path) as f:
+            raw = json.load(f)["weight_map"]
+
+    def _rename(k: str) -> str | None:
+        # Mirror `layer_streaming._rename_text_only`, but WITHOUT the
+        # `.weight_scale_inv` drop — we need those keys preserved.
+        if not multimodal:
+            if (k.startswith("model.visual.")
+                    or k.startswith("model.audio_tower.")
+                    or k.startswith("model.vision_tower.")
+                    or k.startswith("model.embed_vision.")
+                    or k.startswith("model.embed_audio.")
+                    or k.startswith("mtp.")):
+                return None
+            if k.startswith("model.language_model."):
+                return "model." + k[len("model.language_model."):]
+            return k
+        # multimodal umbrella
+        if k.startswith("mtp."):
+            return None
+        return k
+
+    # Group by `<live_base>`: the live-model qname without `.weight` /
+    # `.weight_scale_inv` suffix.
+    bases: dict[str, dict[str, tuple[str, str]]] = {}
+    for ck_key, shard in raw.items():
+        for suffix in (".weight_scale_inv", ".weight"):
+            if ck_key.endswith(suffix):
+                ck_base = ck_key[: -len(suffix)]
+                live_base = _rename(ck_base)
+                if live_base is None:
+                    break
+                bases.setdefault(live_base, {})[suffix[1:]] = (
+                    os.path.join(model_path, shard), ck_key,
+                )
+                break
+
+    out: dict[str, tuple[str, str]] = {}
+    for live_base, kinds in bases.items():
+        if "weight" in kinds and "weight_scale_inv" in kinds:
+            # Only the scale_inv half is new information — the `.weight`
+            # shard+ckpt_key is already in `weight_ckpt` from the main
+            # loader. Callers combine the two.
+            shard, ckpt_scale_inv_key = kinds["weight_scale_inv"]
+            out[live_base] = (shard, ckpt_scale_inv_key)
+    return out
+
+
 def materialize_tensors_streaming(
     model_path: str,
     assignment: dict[str, str],
@@ -1903,6 +1985,18 @@ def materialize_tensors_streaming(
 
     weight_shard, weight_ckpt = _build_weight_map(model_path)
 
+    # FP8_SOURCE passthrough map: for each Linear whose source has a
+    # `.weight_scale_inv` sibling (i.e., native FP8 block-scaled), record
+    # the shard + ckpt key for the scale tensor. Consumed by the Linear
+    # emit branch when the allocator assigns FP8_SOURCE. Empty dict when
+    # source has no FP8 tensors — FP8_SOURCE is then inert (allocator's
+    # passthrough-integrity filter drops it from every candidate set).
+    fp8_source_map = _build_fp8_source_map(model_path)
+    if fp8_source_map:
+        print(f"[export-stream] fp8 source map: {len(fp8_source_map)} "
+              f"Linears with `.weight_scale_inv` siblings (FP8_SOURCE "
+              f"passthrough candidates)", flush=True)
+
     # Materialize head (embed + norm + lm_head). These are in the
     # safetensors and get populated via `set_module_tensor_to_device`.
     print(f"[export-stream] base_prefix={base_prefix!r}  layers={num_layers}",
@@ -1942,6 +2036,14 @@ def materialize_tensors_streaming(
         # default despite vLLM rejecting quantized ParallelLMHead.
         if recipe_key in bf16_passthrough:
             fmt = "BF16"
+        if fmt == "FP8_SOURCE":
+            raise NotImplementedError(
+                f"[export-stream] FP8_SOURCE not wired for head params "
+                f"(at {full_qname}). Native-FP8 checkpoints (MiniMax, "
+                f"DeepSeek) keep lm_head/embed/norm in BF16 — the "
+                f"allocator's passthrough-integrity filter should reject "
+                f"FP8_SOURCE for these. If a future model ships FP8 "
+                f"head weights, add the passthrough path here.")
         if fmt is not None and fmt != "BF16":
             joint = None
             compressed = _quantize_2d(
@@ -2058,6 +2160,56 @@ def materialize_tensors_streaming(
                 covered.add(full)
                 continue
 
+            if fmt == "FP8_SOURCE":
+                # Passthrough: copy source `.weight` (fp8_e4m3fn) and
+                # `.weight_scale_inv` (fp32, 128×128 block) verbatim.
+                # The live model holds a BF16 dequant of the source
+                # tensor — skip it and go back to the safetensors.
+                scale_entry = fp8_source_map.get(full)
+                weight_ckpt_key = weight_ckpt.get(f"{full}.weight")
+                weight_shard_path = weight_shard.get(f"{full}.weight")
+                if (scale_entry is None or weight_ckpt_key is None
+                        or weight_shard_path is None):
+                    raise RuntimeError(
+                        f"[export-stream] FP8_SOURCE assigned to {full} "
+                        f"but source is missing `.weight_scale_inv` "
+                        f"(scale={scale_entry}, weight_shard="
+                        f"{weight_shard_path}). The allocator's "
+                        f"passthrough-integrity filter should have "
+                        f"prevented this — source manifest is out of "
+                        f"sync with the actual checkpoint.")
+                scale_shard, scale_ckpt_key = scale_entry
+                from safetensors import safe_open
+                with safe_open(weight_shard_path, framework="pt") as sf:
+                    w_fp8 = sf.get_tensor(weight_ckpt_key)
+                    # Common case: scale lives in the same shard. Avoid
+                    # a second `safe_open` when we can satisfy both
+                    # reads from one file handle.
+                    if scale_shard == weight_shard_path:
+                        w_scale = sf.get_tensor(scale_ckpt_key)
+                    else:
+                        w_scale = None
+                if w_scale is None:
+                    with safe_open(scale_shard, framework="pt") as sf:
+                        w_scale = sf.get_tensor(scale_ckpt_key)
+                # Sanity check: source dtype must be fp8_e4m3fn; scale
+                # must be fp32. Any deviation means the FP8_SOURCE
+                # format is being misapplied.
+                if w_fp8.dtype != torch.float8_e4m3fn:
+                    raise RuntimeError(
+                        f"[export-stream] FP8_SOURCE: expected "
+                        f"fp8_e4m3fn at {weight_ckpt_key}, got "
+                        f"{w_fp8.dtype}")
+                out[f"{full}.weight"] = w_fp8.cpu().contiguous()
+                out[f"{full}.weight_scale"] = w_scale.to(
+                    torch.float32).cpu().contiguous()
+                if mod.bias is not None and not mod.bias.is_meta:
+                    out[f"{full}.bias"] = mod.bias.detach().to(
+                        torch.bfloat16).cpu()
+                hist[("linear", "FP8_SOURCE")] += 1
+                covered.add(full)
+                continue
+
             override = joint_globals.get(recipe_key) if fmt == "NVFP4" else None
             compressed = _quantize_2d(
                 mod.weight.detach().float(), fmt,
@@ -2086,6 +2238,18 @@ def materialize_tensors_streaming(
                 if fmt is None:
                     unmapped_keys.append(full)
                     continue
+                if fmt == "FP8_SOURCE":
+                    raise NotImplementedError(
+                        f"[export-stream] FP8_SOURCE not wired for "
+                        f"packed-MoE tensors (at {full}). MiniMax-M2/M2.7 "
+                        f"— the only natively-FP8 MoE today — uses "
+                        f"per-expert `nn.Linear`s, so its experts go "
+                        f"through the Linear emit path above, not here. "
+                        f"If a new FP8-native MoE arch ships with a "
+                        f"packed-expert live module, extend this branch "
+                        f"to read per-expert `.weight` + "
+                        f"`.weight_scale_inv` from source and emit the "
+                        f"per-expert compressed-tensors pairs.")
                 packed_param = getattr(mod, pn).detach().float()
                 E, M, N = packed_param.shape
                 if pn == "gate_up_proj":
@@ -2395,6 +2559,32 @@ NVINT3_SCHEME = {
         "observer": "memoryless_minmax",
     },
 }
+# Source-FP8 passthrough. Emitted for Linears whose source checkpoint
+# already stores `.weight` as fp8_e4m3fn + `.weight_scale_inv` fp32 at
+# 128×128 block granularity (MiniMax-M2/M2.7, DeepSeek V3, several
+# NVIDIA FP8 releases). vLLM's compressed-tensors dispatcher routes
+# this scheme to `_is_fp8_w8a8` which accepts BLOCK-strategy symmetric
+# static FP8 weights with dynamic FP8 activations — matching the
+# native MiniMax inference configuration.
+#
+# Compressed-tensors' `weight_scale` (forward-direction dequant scale:
+# `w_bf16 = w_fp8 * weight_scale`) is semantically identical to
+# MiniMax's `weight_scale_inv`; the tensor bytes are copied verbatim
+# and only the suffix is renamed on export. No _quantize_2d pass runs.
+FP8_SOURCE_SCHEME = {
+    "format": "float-quantized",
+    "weights": {
+        "num_bits": 8, "type": "float", "strategy": "block",
+        "block_structure": [128, 128],
+        "symmetric": True, "dynamic": False,
+        "observer": "memoryless_minmax",
+    },
+    "input_activations": {
+        "num_bits": 8, "type": "float", "strategy": "token",
+        "symmetric": True, "dynamic": True,
+        "observer": "memoryless_minmax",
+    },
+}
 def _bf16_packed_expert_ignore_regex(
         recipe_key: str,
         profile,
@@ -2482,6 +2672,7 @@ FORMAT_SCHEME = {
     "MXFP8": MXFP8_SCHEME,
     "NVINT2": NVINT2_SCHEME,
     "NVINT3": NVINT3_SCHEME,
+    "FP8_SOURCE": FP8_SOURCE_SCHEME,
 }
 
 

@@ -1369,7 +1369,7 @@ def discover_visual_linears_from_source(model_path: str) -> list[str]:
 
 def _scan_source_dtype_manifest(
     model_path: str,
-    profile,
+    profile=None,  # kept for call-site compat; no longer consulted
 ) -> dict[str, str]:
     """Classify each source `.weight` tensor as 'fp8' or 'bf16' and return
     a mapping keyed by the vLLM-internal (stats-dict) name.
@@ -1393,10 +1393,16 @@ def _scan_source_dtype_manifest(
     encoding only 8 bpp of real information) or breaks the export
     (FP8_SOURCE over a BF16 source: there are no fp8 bytes to copy).
 
-    Keys use the profile's HF → vLLM name rewrite so callers can look
-    up directly by stats-dict names (e.g. MiniMax per-expert leaves
-    come back as `...mlp.experts.Y.gate_proj`, matching the probe's
-    key space, not the HF `...block_sparse_moe.experts.Y.w1` form).
+    Keys match the probe's stats-dict name space — i.e., the LIVE
+    attribute path on the text-only staged model. The only rewrite
+    applied is stripping `model.language_model.` to `model.`, which
+    mirrors the same rename `layer_streaming._build_weight_map` does
+    when loading source safetensors into the staged text-only body.
+    Per-expert MoE leaves keep their HF attribute names (e.g. MiniMax
+    `...block_sparse_moe.experts.Y.w1`, Qwen3.5 `...experts.Y.gate_proj`)
+    — those are the names `model.named_modules()` yields at probe time.
+    `to_vllm_internal_name` is NOT applied here: that remap is for
+    scheme-dispatch targets at export time, not for stats lookups.
     """
     src = Path(model_path)
     idx_path = src / "model.safetensors.index.json"
@@ -1413,28 +1419,32 @@ def _scan_source_dtype_manifest(
     # the string, so we check the longer suffix first to be safe.
     bases: dict[str, set[str]] = {}
     for key in weight_map:
-        matched = False
         for suffix in (".weight_scale_inv", ".weight"):
             if key.endswith(suffix):
                 base = key[: -len(suffix)]
                 bases.setdefault(base, set()).add(suffix[1:])
-                matched = True
                 break
-        if not matched:
-            continue
+    def _to_live_name(ck_base: str) -> str:
+        # Skip non-body branches that the text-only probe never sees.
+        if (ck_base.startswith("model.visual.")
+                or ck_base.startswith("model.audio_tower.")
+                or ck_base.startswith("model.vision_tower.")
+                or ck_base.startswith("model.embed_vision.")
+                or ck_base.startswith("model.embed_audio.")
+                or ck_base.startswith("mtp.")):
+            return ""
+        if ck_base.startswith("model.language_model."):
+            return "model." + ck_base[len("model.language_model."):]
+        return ck_base
     manifest: dict[str, str] = {}
     for base, suffixes in bases.items():
         if "weight" not in suffixes:
             continue
         source_kind = "fp8" if "weight_scale_inv" in suffixes else "bf16"
-        if profile is not None:
-            try:
-                stats_name = profile.to_vllm_internal_name(base)
-            except Exception:
-                stats_name = base
-        else:
-            stats_name = base
-        manifest[stats_name] = source_kind
+        live_name = _to_live_name(base)
+        if not live_name:
+            continue
+        manifest[live_name] = source_kind
     return manifest
 
 
