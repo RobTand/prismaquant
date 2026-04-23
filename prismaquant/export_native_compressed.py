@@ -1259,6 +1259,71 @@ def _explicit_regex(name: str) -> str:
     return f"re:^{name.replace('.', '[.]')}$"
 
 
+# Matches a vLLM-internal per-expert Linear qname, e.g.
+#   model.layers.10.mlp.experts.0.gate_proj
+# (Qwen3.5 / MiniMax / Gemma4 layouts all normalize to this form via the
+# profile's `to_vllm_internal_name`.)
+_PER_EXPERT_LINEAR_RE = re.compile(
+    r"^(?P<prefix>.*[.])layers[.](?P<L>\d+)[.](?P<inner>.*mlp)[.]"
+    r"experts[.](?P<E>\d+)[.](?P<proj>gate|up|down)_proj$"
+)
+
+
+def _build_target_list(vllm_names: list[str]) -> list[str]:
+    """Emit compressed-tensors regex targets with per-expert Linears
+    collapsed from 1-per-expert enumerations to one compact regex per
+    (layer-prefix, projection) pair.
+
+    Why: without collapsing, a 256-expert / 62-layer MoE produces ~47k
+    explicit regex targets in config_groups. vLLM's
+    `find_matched_target` does an O(n²) per-Linear walk through this
+    list with Python's built-in `re.match` LRU cache (bounded to ~512
+    distinct patterns), so the cache thrashes and scheme dispatch
+    takes hours. Collapsing shrinks that to ~(layers × projs × active
+    formats) regexes — typically a few hundred — and scheme dispatch
+    completes in seconds.
+
+    Names that aren't per-expert Linears pass through as explicit
+    `re:^...$` regexes (same output as before).
+
+    Within a (layer, proj) bucket, if every expert index 0..N-1 is
+    present we emit a `[0-9]+` regex; sparse subsets get an enumerated
+    alternation.
+    """
+    from collections import defaultdict
+
+    bucketed: dict[tuple[str, int, str, str], set[int]] = defaultdict(set)
+    passthrough: list[str] = []
+    for n in vllm_names:
+        m = _PER_EXPERT_LINEAR_RE.match(n)
+        if not m:
+            passthrough.append(n)
+            continue
+        prefix = m.group("prefix")
+        L = int(m.group("L"))
+        inner = m.group("inner")
+        proj = m.group("proj")
+        E = int(m.group("E"))
+        bucketed[(prefix, L, inner, proj)].add(E)
+
+    collapsed: list[str] = []
+    for (prefix, L, inner, proj), experts in sorted(bucketed.items()):
+        n = max(experts) + 1
+        prefix_r = prefix.replace(".", "[.]")
+        inner_r = inner.replace(".", "[.]")
+        if experts == set(range(n)):
+            expr = "[0-9]+"
+        else:
+            expr = "(" + "|".join(str(e) for e in sorted(experts)) + ")"
+        collapsed.append(
+            f"re:^{prefix_r}layers[.]{L}[.]{inner_r}[.]experts[.]{expr}"
+            f"[.]{proj}_proj$"
+        )
+
+    out = [_explicit_regex(n) for n in sorted(passthrough)] + sorted(collapsed)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Module / parameter discovery — mirrors what install_packed_expert_hooks
 # detects, so the export sees the same units as the probe.
@@ -2581,7 +2646,7 @@ def build_quantization_config(
         if fmt == catchall:
             continue
         scheme = deepcopy(FORMAT_SCHEME[fmt])
-        scheme["targets"] = [_explicit_regex(n) for n in sorted(names)]
+        scheme["targets"] = _build_target_list(names)
         config_groups[f"group_{idx}"] = scheme
         idx += 1
     if catchall is not None:
@@ -2592,16 +2657,18 @@ def build_quantization_config(
         # and short-circuits vLLM's fused-layer regex resolution, which
         # is needed to route the explicit per-component MXFP8 targets
         # to vLLM's fused parameter (in_proj_qkvz, qkv_proj, etc.).
-        # We additionally add architecture-specific per-expert regexes
-        # from the profile so ~30k per-expert MoE entries don't need
-        # explicit enumeration.
-        explicit = sorted(by_fmt[catchall])
+        # `_build_target_list` collapses per-expert enumerations into
+        # compact regexes so a 256-expert / 62-layer MoE emits
+        # a few hundred targets instead of ~47k. The profile's
+        # per-expert regexes remain as a safety-net for any
+        # per-expert Linear not captured by the collapse (e.g.
+        # stray experts the recipe didn't enumerate).
         expert_regexes = []
         if (r := profile.per_expert_moe_regex()) is not None:
             expert_regexes.append(r)
         if (r := profile.per_expert_mtp_regex()) is not None:
             expert_regexes.append(r)
-        scheme["targets"] = [_explicit_regex(n) for n in explicit] + expert_regexes
+        scheme["targets"] = _build_target_list(by_fmt[catchall]) + expert_regexes
         config_groups[f"group_{idx}"] = scheme
 
     return {
