@@ -409,6 +409,10 @@ class Candidate:
     bits_per_param: float
     memory_bytes: int
     predicted_dloss: float
+    # For expert-pruning candidates: which expert ids this choice drops.
+    # Empty for non-prune candidates (weights of all experts preserved).
+    # Only populated on MoE super-Linears; no-op for dense Linears.
+    pruned_expert_ids: tuple[int, ...] = ()
 
 
 def _shape_from_stats(entry: dict) -> tuple[int, ...]:
@@ -663,11 +667,72 @@ def _aggregate_candidate_memory_bits(
     return total_bytes, bits_per_param
 
 
+def _expert_ids_in_group(
+    members: list[str],
+    expert_info: dict[str, tuple[str, str]],
+) -> tuple[str | None, dict[int, str]]:
+    """For one MoE expert-group (= super-Linear members list), return the
+    router qname (shared across the group) and a {expert_id: member_qname}
+    map. When a super-Linear is per-projection (`granularity='projection'`)
+    the map has at most one member per eid. Returns `(None, {})` if no
+    member has an expert_info entry (e.g. dense layers that slipped in).
+    """
+    router_qname: str | None = None
+    by_eid: dict[int, str] = {}
+    for m_ in members:
+        info = expert_info.get(m_)
+        if info is None:
+            continue
+        rq, eid_str = info
+        if router_qname is None:
+            router_qname = rq
+        try:
+            eid = int(eid_str)
+        except (TypeError, ValueError):
+            continue
+        by_eid[eid] = m_
+    return router_qname, by_eid
+
+
+def _prune_cost_per_expert(
+    saliency: float,
+    h_trace: float,
+    n_params: int,
+    alpha: float,
+) -> float:
+    """Per-expert predicted Δloss from DROP'ing a single expert.
+
+    Matches the form of quantization Δloss used elsewhere in the
+    allocator (``0.5 · h_trace · weight_mse``) so the DP can compare
+    prune and quant candidates in the same units. For pruning the
+    per-element "perturbation squared" term is substituted by
+    ``S_j²`` — the saliency that REAP measures is the mean
+    ``g_j · ||f_j||`` contribution to the layer output, so
+    ``S_j²`` has the same (output-magnitude²) units as ``weight_mse``
+    does per-weight.
+
+    The mapping from S_j² to weight_mse-space uses the per-weight
+    average of h_trace, giving:
+        Δloss_prune ≈ α · (h_trace / n_params) · S_j²
+
+    α is a global calibration scalar (CLI-exposed) that puts prune
+    costs on the same relative footing as quant costs. Default: 0.5
+    mirrors the 0.5 in ``predicted_dloss(h, mse, …)``.
+    """
+    if n_params <= 0 or h_trace <= 0 or saliency <= 0:
+        return 0.0
+    return float(alpha) * (float(h_trace) / float(n_params)) * float(saliency) ** 2
+
+
 def aggregate_moe_candidates(
     stats: dict, costs: dict, formats: list[fr.FormatSpec],
     candidates: dict[str, list[Candidate]],
     granularity: str = "projection",
     calibrated_gains: dict[str, float] | None = None,
+    expert_saliency: dict[str, dict[int, float]] | None = None,
+    expert_info: dict[str, tuple[str, str]] | None = None,
+    prune_ratios: tuple[float, ...] = (),
+    prune_alpha: float = 0.5,
 ) -> tuple[dict, dict, dict]:
     """Aggregate per-expert Linears into per-layer MoE super-candidates.
 
@@ -815,23 +880,135 @@ def aggregate_moe_candidates(
             }
         costs_ext[super_name] = super_cost
 
+        # Joint prune+quant candidates require both the REAP-style
+        # saliency (observer output) AND the per-member mapping back to
+        # expert ids. When either is absent the block below emits only
+        # the usual format-only candidates (no DROP options).
+        router_qname_for_grp, eid_to_member = (
+            _expert_ids_in_group(members, expert_info or {})
+        )
+        saliency_map = (
+            (expert_saliency or {}).get(router_qname_for_grp, {})
+            if router_qname_for_grp is not None
+            else {}
+        )
+        # Effective prune ratios: always include 0.0 (the no-prune
+        # baseline) so the DP can choose "keep every expert," then
+        # append any caller-provided positive ratios when saliency is
+        # available. This preserves the existing allocator's behavior
+        # bit-identically when `prune_ratios=()` — only a single
+        # ratio=0 candidate is emitted per (super-Linear, format).
+        if prune_ratios and saliency_map:
+            effective_prune_ratios = tuple(
+                sorted({0.0, *(r for r in prune_ratios if r > 0.0)})
+            )
+        else:
+            effective_prune_ratios = (0.0,)
+
+        # Per-expert prune cost (evaluated once per expert; cheap).
+        # Missing saliency entries default to 0 → dropping that expert
+        # is "free" by this metric, which will usually not be the
+        # allocator's pick since we also add the format-quant savings
+        # of kept experts, but it protects against observer gaps.
+        prune_dloss_by_eid: dict[int, float] = {}
+        for eid, member in eid_to_member.items():
+            s_j = float(saliency_map.get(eid, 0.0))
+            h_j = float(stats[member].get("h_trace", 0.0))
+            np_j = int(stats[member].get("n_params", 0) or 0)
+            prune_dloss_by_eid[eid] = _prune_cost_per_expert(
+                s_j, h_j, np_j, prune_alpha,
+            )
+
+        # Drop-order: experts sorted by prune cost ascending (cheapest
+        # to drop first). Fixed-ratio pruning always drops the
+        # prefix of this list.
+        drop_order = sorted(prune_dloss_by_eid, key=prune_dloss_by_eid.get)
+        num_experts_total = len(drop_order)
+
         cands = []
         for spec in formats:
             entry = super_cost.get(spec.name)
             if entry is None or "error" in entry:
                 continue
             gain = float(gains.get(spec.name, 1.0))
-            predicted = predicted_dloss(sum_h, entry["weight_mse"], gain=gain)
-            memory_bytes, bits_per_param = _aggregate_candidate_memory_bits(
+            # Pre-compute per-member base quant Δloss (at this format)
+            # so each prune candidate can recompute sum-over-kept
+            # without re-running costs lookup.
+            per_member_dloss: dict[str, float] = {}
+            for m_ in members:
+                c = costs.get(m_, {}).get(spec.name)
+                if c is None or "error" in c:
+                    # Missing cost → use the super-Linear's effective
+                    # mse for this Linear as a fallback. This matches
+                    # the super_cost construction above.
+                    fb_weight_mse = entry["weight_mse"]
+                    per_member_dloss[m_] = (
+                        0.5 * float(stats[m_]["h_trace"]) * fb_weight_mse * gain
+                    )
+                else:
+                    if "predicted_dloss" in c:
+                        per_member_dloss[m_] = float(c["predicted_dloss"]) * gain
+                    else:
+                        per_member_dloss[m_] = (
+                            0.5 * float(stats[m_]["h_trace"])
+                            * float(c["weight_mse"]) * gain
+                        )
+
+            base_memory_bytes, base_bits_per_param = _aggregate_candidate_memory_bits(
                 members, spec, stats
             )
-            stats_ext[super_name]["_memory_bytes_by_format"][spec.name] = memory_bytes
-            cands.append(Candidate(
-                fmt=spec.name,
-                bits_per_param=bits_per_param,
-                memory_bytes=memory_bytes,
-                predicted_dloss=max(predicted, 0.0),
-            ))
+            if spec.name not in stats_ext[super_name]["_memory_bytes_by_format"]:
+                stats_ext[super_name]["_memory_bytes_by_format"][spec.name] = base_memory_bytes
+
+            for ratio in effective_prune_ratios:
+                if ratio <= 0.0 or num_experts_total == 0:
+                    # Non-prune candidate — same code path as the original.
+                    predicted = predicted_dloss(sum_h, entry["weight_mse"], gain=gain)
+                    cands.append(Candidate(
+                        fmt=spec.name,
+                        bits_per_param=base_bits_per_param,
+                        memory_bytes=base_memory_bytes,
+                        predicted_dloss=max(predicted, 0.0),
+                        pruned_expert_ids=(),
+                    ))
+                    continue
+
+                n_drop = min(num_experts_total, int(round(num_experts_total * ratio)))
+                if n_drop == 0:
+                    continue  # ratio floored to 0 — skip duplicate
+                dropped_eids = tuple(sorted(drop_order[:n_drop]))
+                kept_eids = set(drop_order[n_drop:])
+
+                # Sum quant Δloss only over kept experts; add prune Δloss
+                # for dropped ones. Members not mapped to an eid (shouldn't
+                # happen for well-formed MoE groups) stay in the quant sum
+                # to be safe.
+                pred_total = 0.0
+                for m_, d in per_member_dloss.items():
+                    info = (expert_info or {}).get(m_)
+                    if info is None:
+                        pred_total += d
+                        continue
+                    try:
+                        eid = int(info[1])
+                    except (TypeError, ValueError):
+                        pred_total += d
+                        continue
+                    if eid in kept_eids:
+                        pred_total += d
+                for eid in dropped_eids:
+                    pred_total += prune_dloss_by_eid.get(eid, 0.0)
+
+                kept_frac = 1.0 - float(n_drop) / float(num_experts_total)
+                prune_memory = int(base_memory_bytes * kept_frac)
+                cands.append(Candidate(
+                    fmt=spec.name,
+                    bits_per_param=base_bits_per_param,
+                    memory_bytes=prune_memory,
+                    predicted_dloss=max(pred_total, 0.0),
+                    pruned_expert_ids=dropped_eids,
+                ))
+
         if cands:
             candidates_ext[super_name] = cands
 
@@ -1511,6 +1688,29 @@ def main():
                          "TensorRT-LLM). 'expert' allows per-expert mixing but "
                          "forces slower sequential serving and is noise-floor "
                          "limited at typical calibration budgets.")
+    ap.add_argument("--enable-expert-prune", action="store_true",
+                    help="Joint REAP prune + quant optimization. When set, "
+                         "the allocator generates DROP-variant candidates per "
+                         "MoE super-Linear at each ratio in --prune-ratios, "
+                         "and the DP picks the best (format, prune_ratio) "
+                         "combination per layer under the bpp budget. Requires "
+                         "expert saliency in the probe pickle (emitted "
+                         "automatically since 2026-04-24; older probes have "
+                         "no-op empty saliency). The exporter drops the "
+                         "selected expert ids + shrinks the router output dim.")
+    ap.add_argument("--prune-ratios",
+                    default="0.0,0.125,0.25,0.375,0.5",
+                    help="Comma-separated candidate prune ratios per MoE "
+                         "super-Linear. Each ratio R triggers dropping the "
+                         "floor(R · num_experts) lowest-saliency experts. "
+                         "0.0 always included implicitly (no-prune candidate).")
+    ap.add_argument("--prune-alpha", type=float, default=0.5,
+                    help="Scalar calibration on the prune Δloss formula "
+                         "α · (h_trace / n_params) · S_j². Smaller α makes "
+                         "pruning cheaper (the DP prunes more aggressively); "
+                         "larger α protects experts. Default 0.5 mirrors "
+                         "the 0.5 factor in the quant-cost formula so prune "
+                         "and quant costs are on a comparable scale.")
     ap.add_argument("--target-profile",
                     choices=["research", "vllm_qwen3_5_packed_moe"],
                     default="research",
@@ -1668,16 +1868,41 @@ def main():
     )
     print(f"[alloc] candidates built for {len(candidates)} Linears")
 
+    # Joint REAP-prune + quant: ingest the observer-collected saliency
+    # and expert_info from the probe pickle. Both are empty dicts for
+    # dense models or legacy probes; the aggregator falls through to
+    # format-only candidates when either is empty.
+    probe_expert_saliency = probe.get("expert_saliency", {}) if args.enable_expert_prune else {}
+    probe_expert_info = probe.get("expert_info", {}) if args.enable_expert_prune else {}
+    prune_ratios_arg = tuple(
+        float(x) for x in args.prune_ratios.split(",")
+        if x.strip() and float(x) > 0.0
+    ) if args.enable_expert_prune else ()
+    if args.enable_expert_prune:
+        n_routers_with_saliency = sum(
+            1 for r in probe_expert_saliency.values() if r
+        )
+        print(f"[alloc] expert-prune ENABLED: saliency routers={n_routers_with_saliency}, "
+              f"ratios={prune_ratios_arg}, alpha={args.prune_alpha}", flush=True)
+
     if args.target_profile == "vllm_qwen3_5_packed_moe":
         stats, costs, candidates = aggregate_moe_candidates(
             stats, costs, specs_sorted, candidates, granularity="layer",
-            calibrated_gains=calibrated_gains)
+            calibrated_gains=calibrated_gains,
+            expert_saliency=probe_expert_saliency,
+            expert_info=probe_expert_info,
+            prune_ratios=prune_ratios_arg,
+            prune_alpha=args.prune_alpha)
         moe_groups = sum(1 for n in candidates if ".__fused__." in n)
         print(f"[alloc] packed-MoE serving aggregation: {moe_groups} fused MoE blocks")
     elif args.expert_granularity == "layer":
         stats, costs, candidates = aggregate_moe_candidates(
             stats, costs, specs_sorted, candidates, granularity="projection",
-            calibrated_gains=calibrated_gains)
+            calibrated_gains=calibrated_gains,
+            expert_saliency=probe_expert_saliency,
+            expert_info=probe_expert_info,
+            prune_ratios=prune_ratios_arg,
+            prune_alpha=args.prune_alpha)
         moe_groups = sum(1 for n in candidates if ".__fused__." in n)
         print(f"[alloc] MoE aggregation: {moe_groups} fused-expert super-Linears")
 
