@@ -1250,6 +1250,12 @@ def _run_body_streaming_shard(
                 handles.append(mod.register_full_backward_hook(make_bwd(fqn, mod)))
 
             packed_grad_acc: dict[str, float] = {}
+            # Per-expert per-channel Fisher [E, M] — enables per-expert
+            # h_trace decomposition for the allocator's packed-3D prune
+            # cost without re-measuring cost per expert. Always enabled
+            # here; the accumulator's memory is ~1 MB per packed param
+            # at 128 experts × 5760 channels, negligible on 121 GB RAM.
+            packed_channel_acc: dict[str, torch.Tensor] = {}
             packed_full_acc: dict[str, torch.Tensor] | None = (
                 {} if h_detail_dir is not None else None)
             # Reverse-sweep visits every layer (gradient chain-rule needs
@@ -1270,6 +1276,7 @@ def _run_body_streaming_shard(
                 )
             packed_meta = install_packed_expert_hooks(
                 layers[L], accumulator=packed_grad_acc,
+                channel_accumulator=packed_channel_acc,
                 full_accumulator=packed_full_acc,
             ) if layer_in_scope else {}
             layer_prefix = f"{layers_prefix}{L}."
@@ -1326,6 +1333,26 @@ def _run_body_streaming_shard(
                     acc_stats[full_key]["h_trace_raw"] += float(raw)
                     acc_stats[full_key]["n_tokens_seen"] = \
                         acc_stats[full_key].get("n_tokens_seen", 0) + x_in.size(0) * x_in.size(1)
+            # Per-expert Fisher trace decomposition. channel_acc[key] is
+            # [E, M] (grad² summed over the in-feature dim); summing over
+            # M collapses to [E] — per-expert Fisher trace. Stored as a
+            # float list in the stat entry so it survives pickle + merge
+            # without torch-device round-trips, and the allocator's
+            # add_packed_prune_candidates reads it directly.
+            for local_key, per_ch in packed_channel_acc.items():
+                full_key = f"{layer_prefix}{local_key}"
+                if full_key not in acc_stats:
+                    continue
+                # per_ch is on CPU fp32; summing over the last dim gives
+                # per-expert trace without a device sync.
+                per_expert_trace = per_ch.sum(dim=-1).to(torch.float64)
+                prev = acc_stats[full_key].get("h_trace_per_expert_raw")
+                if prev is None:
+                    acc_stats[full_key]["h_trace_per_expert_raw"] = per_expert_trace.tolist()
+                else:
+                    summed = [p + float(q) for p, q in zip(prev, per_expert_trace.tolist())]
+                    acc_stats[full_key]["h_trace_per_expert_raw"] = summed
+            packed_channel_acc.clear()
 
             grad_out = x_in.grad.detach().clone().cpu()
 
@@ -1341,6 +1368,17 @@ def _run_body_streaming_shard(
                     prev["h_trace_raw"] += s.get("h_trace_raw", 0.0)
                     prev["h_w2_sum_raw"] += s.get("h_w2_sum_raw", 0.0)
                     prev["n_tokens_seen"] += s.get("n_tokens_seen", 0)
+                    # Per-expert Fisher is a list of floats on the packed
+                    # stat entry; sum element-wise across shard splits.
+                    per_prev = prev.get("h_trace_per_expert_raw")
+                    per_new = s.get("h_trace_per_expert_raw")
+                    if per_new is not None:
+                        if per_prev is None:
+                            prev["h_trace_per_expert_raw"] = list(per_new)
+                        else:
+                            prev["h_trace_per_expert_raw"] = [
+                                a + b for a, b in zip(per_prev, per_new)
+                            ]
             if collect_h_full:
                 for fqn, h in acc_h_full.items():
                     if fqn in merged_h_full:
@@ -1396,6 +1434,12 @@ def _run_body_streaming_shard(
         tokens = max(s.get("n_tokens_seen", 1), 1)
         s["h_trace"] = s.get("h_trace_raw", 0.0) / tokens
         s["h_w2_sum"] = s.get("h_w2_sum_raw", 0.0) / tokens
+        # Per-expert Fisher trace (only present on packed-3D stat entries;
+        # dense Linears have no per-expert dimension). Normalize by the
+        # same token count so it shares units with `h_trace`.
+        per = s.get("h_trace_per_expert_raw")
+        if per is not None:
+            s["h_trace_per_expert"] = [float(v) / tokens for v in per]
 
     detail_dir = Path(h_detail_dir) if h_detail_dir else None
     if detail_dir is not None:

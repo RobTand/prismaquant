@@ -1105,8 +1105,16 @@ def add_packed_prune_candidates(
         n_total = int(s.get("n_params", 0) or 0)
         if h_total <= 0.0 or n_total <= 0:
             continue
-        h_per_expert = h_total / E
         n_per_expert = max(1, n_total // E)
+        # Per-expert Fisher trace if the probe decomposed it
+        # (channel-accumulator path). Falls back to uniform
+        # `total / E` otherwise — useful for legacy probes that
+        # predate the decomposition.
+        h_per_expert_list = s.get("h_trace_per_expert")
+        if isinstance(h_per_expert_list, (list, tuple)) and len(h_per_expert_list) == E:
+            per_expert_h = [float(v) for v in h_per_expert_list]
+        else:
+            per_expert_h = [h_total / E] * E
 
         # Drop order: experts by prune cost ascending (cheapest to drop
         # first). Ties broken by eid for determinism.
@@ -1114,7 +1122,7 @@ def add_packed_prune_candidates(
         for eid in range(E):
             s_j = float(saliency_map.get(eid, 0.0))
             prune_dloss_by_eid[eid] = _prune_cost_per_expert(
-                s_j, h_per_expert, n_per_expert, prune_alpha,
+                s_j, per_expert_h[eid], n_per_expert, prune_alpha,
             )
         drop_order = sorted(
             range(E), key=lambda e: (prune_dloss_by_eid[e], e)

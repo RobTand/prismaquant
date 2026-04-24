@@ -428,6 +428,44 @@ def test_add_packed_prune_ignores_non_packed_entries():
     assert len(candidates[super_name]) == 1  # untouched
 
 
+def test_add_packed_prune_uses_per_expert_fisher_when_available():
+    """When the probe decomposed h_trace per expert, the prune-cost
+    computation must use it (not the uniform h_total/E fallback).
+    Verify via a skewed per-expert Fisher that reverses the drop order
+    that uniform-Fisher would pick on the same saliencies."""
+    name = "model.layers.0.mlp.experts.gate_up_proj"
+    router = "model.layers.0.mlp.gate"
+    # Equal saliencies → uniform-Fisher path ties on eid order; skewed
+    # per-expert Fisher should break the tie by picking the largest
+    # per-expert h (cost-expensive to drop) LAST. Equivalently, smallest
+    # per-expert h gets dropped first.
+    stats = {
+        name: {
+            "h_trace": 4.0,
+            "n_params": 400,
+            "num_experts": 4,
+            "in_features": 8,
+            "out_features": 10,
+            # Per-expert Fisher: expert 2 has the smallest trace → it
+            # should be the cheapest to drop. All saliencies equal so
+            # Fisher is the tiebreaker.
+            "h_trace_per_expert": [1.0, 1.0, 0.1, 1.0],
+        }
+    }
+    sal = {router: {e: 1.0 for e in range(4)}}
+    base = Candidate("NVFP4", 4.25, 1000, 0.01)
+    candidates = {name: [base]}
+    add_packed_prune_candidates(
+        candidates, stats, expert_saliency=sal,
+        prune_ratios=(0.25,), prune_alpha=0.5,
+    )
+    # One prune candidate (25% = drop 1 of 4). The dropped eid must be
+    # 2 (smallest per-expert h, so cheapest prune Δloss).
+    prune_v = [c for c in candidates[name] if c.pruned_expert_ids]
+    assert len(prune_v) == 1
+    assert prune_v[0].pruned_expert_ids == (2,), prune_v[0]
+
+
 def test_build_prune_manifest_resolves_packed_entries():
     """Packed-entry pruned_map entries (no `_fused_members`) must
     still produce a router-keyed manifest by stripping the qname."""
