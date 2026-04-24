@@ -42,9 +42,13 @@ the prismaquant probe machinery (single-threaded streaming).
 
 ### Storage
 
-Accumulators live on CPU (`float64` for numeric stability on long
-calibration runs), so a 256-expert × 64-layer model costs ~128 KB
-of RAM — negligible. GPU memory is untouched.
+Accumulators live on the hook's firing device (`float64` for numeric
+stability on long calibration runs). On unified-memory systems (GB10)
+this avoids duplicating tensors across CPU/GPU pools — both are the
+same physical RAM but torch's allocator treats them as separate, so
+`.cpu()` inside a hook would double-allocate. We harvest to CPU once
+in `saliency()`. A 256-expert × 64-layer model costs ~128 KB total —
+negligible on either device.
 """
 from __future__ import annotations
 
@@ -104,16 +108,17 @@ class ExpertSaliencyTracker:
         self.softmax_dtype = softmax_dtype
 
         self._handles: list = []
-        # Per-(router, expert) accumulators live on CPU in fp64.
-        # `sum_g_norm` / `count` feed the mean-contribution saliency
-        # (REAP's published formula). `max_g_norm` feeds an alternative
-        # niche-protecting saliency that prefers experts with a few
-        # large-magnitude contributions over many small ones — useful
-        # when the allocator wants to avoid dropping rare-but-critical
-        # experts (e.g., a "closing-code-block" expert that fires on
-        # <1% of tokens but contributes an outsized norm when it does).
-        # Both reductions are derived from the same per-token-per-active
-        # contribution sample so they cost the same single forward pass.
+        # Per-(router, expert) accumulators in fp64. Lazily allocated on
+        # the hook's firing device (first time the router's forward runs
+        # after materialization). `sum_g_norm` / `count` feed the mean-
+        # contribution saliency (REAP's published formula); `max_g_norm`
+        # feeds the niche-protecting saliency that prefers experts with
+        # a few large-magnitude contributions. Device-local storage
+        # avoids CPU↔GPU duplication on unified-memory systems and
+        # lets the hot-path accumulation stay sync-free (no .item()
+        # per expert per forward).
+        # Shape: [num_experts] per router. Storage cost is trivial.
+        self._num_experts_by_router: dict[str, int] = {}
         self.sum_g_norm: dict[str, torch.Tensor] = {}
         self.count: dict[str, torch.Tensor] = {}
         self.max_g_norm: dict[str, torch.Tensor] = {}
@@ -142,10 +147,11 @@ class ExpertSaliencyTracker:
             )
             added_any_expert = False
 
-            if router_qname not in self.sum_g_norm:
-                self.sum_g_norm[router_qname] = torch.zeros(num_experts, dtype=torch.float64)
-                self.count[router_qname] = torch.zeros(num_experts, dtype=torch.int64)
-                self.max_g_norm[router_qname] = torch.zeros(num_experts, dtype=torch.float64)
+            # Record expected num_experts so saliency() can return
+            # dead routers (never fired) with shape-correct zeros.
+            # Actual allocation is deferred to the first hook fire via
+            # `_ensure_accumulators`, on the hook's device.
+            self._num_experts_by_router[router_qname] = num_experts
 
             for eid in expert_ids:
                 expert_qname = (
@@ -166,10 +172,10 @@ class ExpertSaliencyTracker:
                 self._handles.append(router_handle)
             else:
                 router_handle.remove()
-                # Drop the accumulator for a router we couldn't attach
-                # to; otherwise saliency() would report phantom zeros.
-                self.sum_g_norm.pop(router_qname, None)
-                self.count.pop(router_qname, None)
+                # Drop the expected-count entry for a router we couldn't
+                # attach to; otherwise saliency() would report phantom
+                # zeros for a router that never fires.
+                self._num_experts_by_router.pop(router_qname, None)
 
     # -- hook factories -----------------------------------------------------
 
@@ -181,6 +187,29 @@ class ExpertSaliencyTracker:
         if isinstance(w, torch.Tensor) and w.ndim >= 1:
             return int(w.shape[0])
         return None
+
+    def _ensure_accumulators(self, router_qname: str, device: torch.device) -> None:
+        """Lazily allocate per-router accumulators on the hook's firing
+        device. No-op once allocated; safe to call every hook.
+
+        On unified-memory systems (GB10) we put them on the same device
+        as the forward so the hot-path accumulations stay on-device
+        without .cpu() transfers or .item() syncs.
+        """
+        if router_qname in self.sum_g_norm:
+            return
+        num = self._num_experts_by_router.get(router_qname)
+        if num is None:
+            return
+        self.sum_g_norm[router_qname] = torch.zeros(
+            num, dtype=torch.float64, device=device,
+        )
+        self.count[router_qname] = torch.zeros(
+            num, dtype=torch.int64, device=device,
+        )
+        self.max_g_norm[router_qname] = torch.zeros(
+            num, dtype=torch.float64, device=device,
+        )
 
     def _make_router_hook(self, router_qname: str) -> Callable:
         softmax_dtype = self.softmax_dtype
@@ -194,11 +223,11 @@ class ExpertSaliencyTracker:
             k = min(top_k, int(flat.size(-1)))
             topk_v, topk_i = flat.topk(k, dim=-1)
             probs = F.softmax(topk_v.to(softmax_dtype), dim=-1)
-            # Store on CPU. Expert hook fires later in the same
-            # forward and reads these; moving to CPU early lets us
-            # free the GPU-side tensor promptly.
-            self._last_topk_probs[router_qname] = probs.detach().cpu()
-            self._last_topk_ids[router_qname] = topk_i.detach().cpu().to(torch.int64)
+            # Stay on the forward's device. Expert hooks that fire later
+            # in the same layer read these directly without a GPU→CPU
+            # hop. topk_i is already int64 on the device; no cast needed.
+            self._last_topk_probs[router_qname] = probs.detach()
+            self._last_topk_ids[router_qname] = topk_i.detach()
 
         return hook
 
@@ -210,13 +239,6 @@ class ExpertSaliencyTracker:
                 expert_out = out[0]
             if not isinstance(expert_out, torch.Tensor):
                 return
-            # ||f_j(t)||_2 along the hidden dim — expert_out is
-            # [num_tokens_routed_to_this_expert, hidden_size] in the
-            # HF-reference MoE dispatch. Compute the norm in fp64 on
-            # the source device so the result is numerically identical
-            # to a pure-fp64 reference; the norm tensor is tiny
-            # (num_tokens scalars) so cost is negligible.
-            norms = expert_out.detach().to(torch.float64).norm(dim=-1).cpu()
 
             tk_ids = self._last_topk_ids.get(router_qname)
             tk_probs = self._last_topk_probs.get(router_qname)
@@ -225,47 +247,74 @@ class ExpertSaliencyTracker:
                 # skip rather than corrupt stats.
                 return
 
-            # For each token in tk_ids, find whether expert_idx appears
-            # in its top-k. When it does, `gate_vals_per_token` holds
-            # the softmax probability assigned to this expert; when it
-            # doesn't, the entry is 0 (a masked sum).
-            mask = (tk_ids == expert_idx)                       # [tokens, k]
-            gate_vals_per_token = (
-                tk_probs.to(torch.float64) * mask.to(torch.float64)
-            ).sum(dim=-1)                                       # [tokens]
-            active = gate_vals_per_token > 0
-            active_gates = gate_vals_per_token[active]          # [n_active]
-
-            # Match expert-output norms to active tokens. Two dispatch
-            # layouts exist in the wild:
-            #   (a) HF reference: each expert receives ONLY its active
-            #       tokens' inputs. len(norms) == n_active.
-            #   (b) Broadcast: expert sees every token, masked
-            #       internally. len(norms) == len(tk_ids).
-            # We handle both and safely skip shape mismatches.
-            n_active = int(active_gates.numel())
-            n_all = int(tk_ids.size(0))
-            if norms.numel() == n_active:
-                use_norms = norms
-            elif norms.numel() == n_all:
-                use_norms = norms[active]
-            else:
-                return
-
-            contribution = active_gates * use_norms
+            device = expert_out.device
+            self._ensure_accumulators(router_qname, device)
             acc_sum = self.sum_g_norm.get(router_qname)
             acc_count = self.count.get(router_qname)
             acc_max = self.max_g_norm.get(router_qname)
             if acc_sum is None or acc_count is None or acc_max is None:
                 return
-            acc_sum[expert_idx] += float(contribution.sum().item())
-            acc_count[expert_idx] += n_active
-            # Running max — updated against the per-token-per-active-expert
-            # contribution distribution, not a batch aggregate. Captures
-            # rare-but-strong activations that the mean dilutes.
-            batch_max = float(contribution.max().item())
-            if batch_max > float(acc_max[expert_idx].item()):
-                acc_max[expert_idx] = batch_max
+
+            # ||f_j(t)||_2 along the hidden dim — expert_out is
+            # [num_tokens_routed_to_this_expert, hidden_size] in the
+            # HF-reference MoE dispatch. fp64 norm stays on-device;
+            # tensor is tiny (num_tokens scalars).
+            norms = expert_out.detach().to(torch.float64).norm(dim=-1)
+
+            # For each token in tk_ids, gate_vals[t] is the softmax
+            # probability this expert received on token t (0 when the
+            # expert wasn't in t's top-k).
+            mask = (tk_ids == expert_idx)                       # [tokens, k]
+            gate_vals = (
+                tk_probs.to(torch.float64) * mask.to(torch.float64)
+            ).sum(dim=-1)                                       # [tokens]
+            active = gate_vals > 0
+            n_all = int(tk_ids.shape[0])  # python int, no sync
+
+            # Match expert-output norms to active tokens. Two dispatch
+            # layouts exist in the wild:
+            #   (a) HF reference: each expert receives ONLY its active
+            #       tokens' inputs. norms.shape[0] == n_active.
+            #   (b) Broadcast: expert sees every token, masked
+            #       internally. norms.shape[0] == n_all.
+            # Both layouts' norms.shape[0] is a static shape attr — no
+            # sync. The n_active path still needs one sync for the
+            # boolean-select; the n_all path stays fully sync-free.
+            nshape0 = int(norms.shape[0])
+            if nshape0 == n_all:
+                # Broadcast layout: keep full-shape, mask via `where`
+                # so max/sum reductions don't see stale negative data.
+                zero = torch.zeros((), dtype=torch.float64, device=device)
+                contribution_full = torch.where(active, gate_vals * norms, zero)
+                contrib_sum = contribution_full.sum()
+                # active positions contain a >=0 product; inactive
+                # positions are exactly 0. Max over the full tensor
+                # equals max over active positions provided any active
+                # contribution is >= 0 (which they are — norm and prob
+                # are both non-negative).
+                contrib_max = contribution_full.max()
+                n_active_inc = active.to(torch.int64).sum()
+            else:
+                # Assume HF layout (expert saw only active tokens). The
+                # boolean select below produces a data-dependent shape
+                # that forces one sync; unavoidable for this layout.
+                active_gates = gate_vals[active]
+                if active_gates.numel() != nshape0:
+                    # Layout mismatch (neither broadcast nor HF) — skip
+                    # rather than corrupt stats.
+                    return
+                contribution = active_gates * norms
+                contrib_sum = contribution.sum()
+                contrib_max = (
+                    contribution.max() if contribution.numel() > 0
+                    else torch.zeros((), dtype=torch.float64, device=device)
+                )
+                n_active_inc = torch.tensor(nshape0, dtype=torch.int64, device=device)
+
+            # In-place accumulate on device — no sync, no host round-trip.
+            acc_sum[expert_idx] += contrib_sum
+            acc_count[expert_idx] += n_active_inc
+            acc_max[expert_idx] = torch.maximum(acc_max[expert_idx], contrib_max)
 
         return hook
 
@@ -305,14 +354,34 @@ class ExpertSaliencyTracker:
         if reduction not in ("mean", "max", "max_mean_geomean"):
             raise ValueError(f"unknown reduction {reduction!r}")
         out: dict[str, dict[int, float]] = {}
-        for qname, s in self.sum_g_norm.items():
-            c = self.count[qname]
-            m = self.max_g_norm[qname]
+        # Cover dead routers (no hook fires → no accumulators allocated)
+        # with their expected-count zeros so the allocator gets a
+        # shape-complete saliency dict.
+        qnames = set(self._num_experts_by_router) | set(self.sum_g_norm)
+        for qname in qnames:
+            s = self.sum_g_norm.get(qname)
+            c = self.count.get(qname)
+            m = self.max_g_norm.get(qname)
+            num_experts = self._num_experts_by_router.get(
+                qname, s.numel() if s is not None else 0,
+            )
+            # Single bulk sync per router — harvest accumulators to CPU
+            # once and do the fp64 Python extraction from CPU tensors.
+            # Compared to the previous N-experts × 3 `.item()` calls,
+            # this collapses to one device→host transfer per router.
+            if s is None:
+                s_cpu = torch.zeros(num_experts, dtype=torch.float64)
+                c_cpu = torch.zeros(num_experts, dtype=torch.int64)
+                m_cpu = torch.zeros(num_experts, dtype=torch.float64)
+            else:
+                s_cpu = s.detach().to("cpu")
+                c_cpu = c.detach().to("cpu")
+                m_cpu = m.detach().to("cpu")
             slc: dict[int, float] = {}
-            for e in range(s.numel()):
-                c_e = int(c[e].item())
-                mean_val = float(s[e].item()) / c_e if c_e > 0 else 0.0
-                max_val = float(m[e].item())
+            for e in range(num_experts):
+                c_e = int(c_cpu[e].item())
+                mean_val = float(s_cpu[e].item()) / c_e if c_e > 0 else 0.0
+                max_val = float(m_cpu[e].item())
                 if reduction == "mean":
                     slc[int(e)] = mean_val
                 elif reduction == "max":
