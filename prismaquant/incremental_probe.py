@@ -754,7 +754,11 @@ def _compute_global_precompute(
     # free the hook handles proactively so there's no chance of ghost
     # accumulation during downstream forward passes in the same session).
     if saliency_tracker is not None:
-        phase1_expert_saliency = saliency_tracker.saliency()
+        # Harvest as REAP dropout loss (Δ L_j ≈ (1/T) Σ g·||f||²).
+        # Units match the allocator's Fisher·weight-MSE Δloss terms,
+        # so the packed-prune path can use this directly as per-expert
+        # prune cost with no α/h/n scaling.
+        phase1_expert_saliency = saliency_tracker.saliency(reduction="reap_dropout")
         saliency_tracker.remove_hooks()
         nonzero_counts = sum(
             1 for rq_saliencies in phase1_expert_saliency.values()

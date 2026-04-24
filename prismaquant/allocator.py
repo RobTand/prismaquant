@@ -1101,29 +1101,17 @@ def add_packed_prune_candidates(
         E = int(s.get("num_experts") or len(saliency_map))
         if E <= 0:
             continue
-        h_total = float(s.get("h_trace", 0.0))
-        n_total = int(s.get("n_params", 0) or 0)
-        if h_total <= 0.0 or n_total <= 0:
-            continue
-        n_per_expert = max(1, n_total // E)
-        # Per-expert Fisher trace if the probe decomposed it
-        # (channel-accumulator path). Falls back to uniform
-        # `total / E` otherwise — useful for legacy probes that
-        # predate the decomposition.
-        h_per_expert_list = s.get("h_trace_per_expert")
-        if isinstance(h_per_expert_list, (list, tuple)) and len(h_per_expert_list) == E:
-            per_expert_h = [float(v) for v in h_per_expert_list]
-        else:
-            per_expert_h = [h_total / E] * E
-
-        # Drop order: experts by prune cost ascending (cheapest to drop
-        # first). Ties broken by eid for determinism.
-        prune_dloss_by_eid: dict[int, float] = {}
-        for eid in range(E):
-            s_j = float(saliency_map.get(eid, 0.0))
-            prune_dloss_by_eid[eid] = _prune_cost_per_expert(
-                s_j, per_expert_h[eid], n_per_expert, prune_alpha,
-            )
+        # Per-expert prune cost comes directly from the REAP dropout-
+        # loss formula ((1/T) Σ g·||f||²) that the observer emitted
+        # under `saliency(reduction="reap_dropout")`. Units already
+        # match the allocator's Fisher·weight-MSE Δloss terms, so no
+        # further rescaling is needed. `prune_alpha` remains as a
+        # global knob for pushing prune decisions toward / away from
+        # the budget edge — default 1.0.
+        prune_dloss_by_eid: dict[int, float] = {
+            eid: prune_alpha * float(saliency_map.get(eid, 0.0))
+            for eid in range(E)
+        }
         drop_order = sorted(
             range(E), key=lambda e: (prune_dloss_by_eid[e], e)
         )

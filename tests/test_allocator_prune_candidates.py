@@ -428,17 +428,13 @@ def test_add_packed_prune_ignores_non_packed_entries():
     assert len(candidates[super_name]) == 1  # untouched
 
 
-def test_add_packed_prune_uses_per_expert_fisher_when_available():
-    """When the probe decomposed h_trace per expert, the prune-cost
-    computation must use it (not the uniform h_total/E fallback).
-    Verify via a skewed per-expert Fisher that reverses the drop order
-    that uniform-Fisher would pick on the same saliencies."""
+def test_add_packed_prune_uses_reap_saliency_directly_as_drop_cost():
+    """Under the REAP-direct formula the per-expert Fisher is NOT used
+    for prune cost; saliency alone ranks experts. Verify the drop order
+    follows saliency magnitude (lowest S → first to drop) and ignores
+    per-expert Fisher."""
     name = "model.layers.0.mlp.experts.gate_up_proj"
     router = "model.layers.0.mlp.gate"
-    # Equal saliencies → uniform-Fisher path ties on eid order; skewed
-    # per-expert Fisher should break the tie by picking the largest
-    # per-expert h (cost-expensive to drop) LAST. Equivalently, smallest
-    # per-expert h gets dropped first.
     stats = {
         name: {
             "h_trace": 4.0,
@@ -446,23 +442,21 @@ def test_add_packed_prune_uses_per_expert_fisher_when_available():
             "num_experts": 4,
             "in_features": 8,
             "out_features": 10,
-            # Per-expert Fisher: expert 2 has the smallest trace → it
-            # should be the cheapest to drop. All saliencies equal so
-            # Fisher is the tiebreaker.
-            "h_trace_per_expert": [1.0, 1.0, 0.1, 1.0],
+            # Skew per-expert Fisher WAY off — REAP formula ignores it.
+            "h_trace_per_expert": [100.0, 0.001, 100.0, 100.0],
         }
     }
-    sal = {router: {e: 1.0 for e in range(4)}}
+    # Saliencies differ: expert 2 has lowest S → should be dropped first.
+    sal = {router: {0: 0.9, 1: 0.5, 2: 0.01, 3: 0.8}}
     base = Candidate("NVFP4", 4.25, 1000, 0.01)
     candidates = {name: [base]}
     add_packed_prune_candidates(
         candidates, stats, expert_saliency=sal,
-        prune_ratios=(0.25,), prune_alpha=0.5,
+        prune_ratios=(0.25,), prune_alpha=1.0,
     )
-    # One prune candidate (25% = drop 1 of 4). The dropped eid must be
-    # 2 (smallest per-expert h, so cheapest prune Δloss).
     prune_v = [c for c in candidates[name] if c.pruned_expert_ids]
     assert len(prune_v) == 1
+    # Lowest-saliency expert (2) dropped first, not the low-Fisher one (1).
     assert prune_v[0].pruned_expert_ids == (2,), prune_v[0]
 
 

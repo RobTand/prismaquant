@@ -164,6 +164,18 @@ class ExpertSaliencyTracker:
         self.sum_g_norm: dict[str, torch.Tensor] = {}
         self.count: dict[str, torch.Tensor] = {}
         self.max_g_norm: dict[str, torch.Tensor] = {}
+        # `sum_g_norm_sq[router][j]` accumulates Σ_t g_j(t) · ||f_j(t)||²
+        # over active tokens — REAP's "dropout loss" per expert, before
+        # normalization. Divided by total tokens seen in `saliency(
+        # reduction="reap_dropout")` to produce Δ L_j in units directly
+        # comparable to the allocator's weight-MSE·Fisher Δloss terms.
+        self.sum_g_norm_sq: dict[str, torch.Tensor] = {}
+        # `total_tokens_by_router[router]` is the batch-size × seq-len
+        # count of tokens across all calibration forwards on this
+        # router — the normalizer for the REAP dropout formula. Not
+        # per-expert; every token contributes to the router's total
+        # regardless of which top-k set included a given expert.
+        self.total_tokens_by_router: dict[str, torch.Tensor] = {}
         # Transient per-forward cache. Populated by the router hook,
         # consumed by each expert's hook that fires afterward in the
         # same layer's forward.
@@ -305,6 +317,12 @@ class ExpertSaliencyTracker:
         self.max_g_norm[router_qname] = torch.zeros(
             num, dtype=torch.float64, device=device,
         )
+        self.sum_g_norm_sq[router_qname] = torch.zeros(
+            num, dtype=torch.float64, device=device,
+        )
+        self.total_tokens_by_router[router_qname] = torch.zeros(
+            (), dtype=torch.int64, device=device,
+        )
 
     def _make_router_hook(self, router_qname: str) -> Callable:
         softmax_dtype = self.softmax_dtype
@@ -323,6 +341,14 @@ class ExpertSaliencyTracker:
             # hop. topk_i is already int64 on the device; no cast needed.
             self._last_topk_probs[router_qname] = probs.detach()
             self._last_topk_ids[router_qname] = topk_i.detach()
+            # Accumulate the router's total-tokens-seen for REAP's
+            # dropout-loss normalizer (Δ L_j = Σ g·||f||² / T_cal). The
+            # router fires exactly once per forward, so this counts
+            # each token exactly once regardless of top-k.
+            self._ensure_accumulators(router_qname, flat.device)
+            acc_total = self.total_tokens_by_router.get(router_qname)
+            if acc_total is not None:
+                acc_total += flat.size(0)
 
         return hook
 
@@ -347,7 +373,10 @@ class ExpertSaliencyTracker:
             acc_sum = self.sum_g_norm.get(router_qname)
             acc_count = self.count.get(router_qname)
             acc_max = self.max_g_norm.get(router_qname)
-            if acc_sum is None or acc_count is None or acc_max is None:
+            acc_sum_sq = self.sum_g_norm_sq.get(router_qname)
+            acc_total = self.total_tokens_by_router.get(router_qname)
+            if (acc_sum is None or acc_count is None or acc_max is None
+                    or acc_sum_sq is None or acc_total is None):
                 return
 
             # ||f_j(t)||_2 along the hidden dim — expert_out is
@@ -388,6 +417,13 @@ class ExpertSaliencyTracker:
                 # contribution is >= 0 (which they are — norm and prob
                 # are both non-negative).
                 contrib_max = contribution_full.max()
+                # REAP dropout loss contribution per token: g·||f||²
+                # (not (g·||f||)²). Zero on inactive tokens by the
+                # gate mask.
+                contribution_sq = torch.where(
+                    active, gate_vals * norms.pow(2), zero,
+                )
+                contrib_sum_sq = contribution_sq.sum()
                 n_active_inc = active.to(torch.int64).sum()
             else:
                 # Assume HF layout (expert saw only active tokens). The
@@ -404,12 +440,17 @@ class ExpertSaliencyTracker:
                     contribution.max() if contribution.numel() > 0
                     else torch.zeros((), dtype=torch.float64, device=device)
                 )
+                contrib_sum_sq = (active_gates * norms.pow(2)).sum()
                 n_active_inc = torch.tensor(nshape0, dtype=torch.int64, device=device)
 
             # In-place accumulate on device — no sync, no host round-trip.
             acc_sum[expert_idx] += contrib_sum
             acc_count[expert_idx] += n_active_inc
             acc_max[expert_idx] = torch.maximum(acc_max[expert_idx], contrib_max)
+            acc_sum_sq[expert_idx] += contrib_sum_sq
+            # Token-total accumulation happens in the router hook, not
+            # here — router fires exactly once per forward regardless
+            # of which experts are active.
 
         return hook
 
@@ -451,9 +492,9 @@ class ExpertSaliencyTracker:
 
         Args:
           reduction:
-            - ``"mean"`` (REAP's published formula): average of
-              `g_j · ||f_j||_2` over tokens that activated expert j. Best
-              when an expert's importance correlates with typical
+            - ``"mean"``: average of ``g_j · ||f_j||_2`` over tokens
+              that activated expert j — a ranking signal, not a Δloss.
+              Best when an expert's importance correlates with typical
               contribution magnitude.
             - ``"max"``: running max over the same contributions. Niche
               experts that contribute a large norm on a few tokens get a
@@ -462,11 +503,17 @@ class ExpertSaliencyTracker:
             - ``"max_mean_geomean"``: geometric mean of max and mean —
               a mid-point that punishes "tiny-mean but tiny-max" experts
               harder than mean alone while still weighting frequency.
+            - ``"reap_dropout"`` (REAP paper Eq. 11): the direct
+              per-expert DROPOUT LOSS
+              ``Δ L_j ≈ (1/T_cal) Σ_t g_j(t) · ||f_j(t)||²``. Units
+              match the allocator's other Δloss terms (weight-MSE ·
+              Fisher), so no scalar recalibration is needed — the
+              allocator consumes this directly as prune-cost.
 
         Experts that never activated during calibration get a saliency
         of 0.0 — the allocator can treat them as "safe to drop" directly.
         """
-        if reduction not in ("mean", "max", "max_mean_geomean"):
+        if reduction not in ("mean", "max", "max_mean_geomean", "reap_dropout"):
             raise ValueError(f"unknown reduction {reduction!r}")
         out: dict[str, dict[int, float]] = {}
         # Cover dead routers (no hook fires → no accumulators allocated)
@@ -484,14 +531,21 @@ class ExpertSaliencyTracker:
             # once and do the fp64 Python extraction from CPU tensors.
             # Compared to the previous N-experts × 3 `.item()` calls,
             # this collapses to one device→host transfer per router.
+            sq = self.sum_g_norm_sq.get(qname)
+            tt = self.total_tokens_by_router.get(qname)
             if s is None:
                 s_cpu = torch.zeros(num_experts, dtype=torch.float64)
                 c_cpu = torch.zeros(num_experts, dtype=torch.int64)
                 m_cpu = torch.zeros(num_experts, dtype=torch.float64)
+                sq_cpu = torch.zeros(num_experts, dtype=torch.float64)
+                tt_val = 0
             else:
                 s_cpu = s.detach().to("cpu")
                 c_cpu = c.detach().to("cpu")
                 m_cpu = m.detach().to("cpu")
+                sq_cpu = sq.detach().to("cpu") if sq is not None else torch.zeros(
+                    num_experts, dtype=torch.float64)
+                tt_val = int(tt.detach().to("cpu").item()) if tt is not None else 0
             slc: dict[int, float] = {}
             for e in range(num_experts):
                 c_e = int(c_cpu[e].item())
@@ -501,8 +555,12 @@ class ExpertSaliencyTracker:
                     slc[int(e)] = mean_val
                 elif reduction == "max":
                     slc[int(e)] = max_val
-                else:  # max_mean_geomean
+                elif reduction == "max_mean_geomean":
                     slc[int(e)] = float((mean_val * max_val) ** 0.5)
+                else:  # reap_dropout
+                    slc[int(e)] = (
+                        float(sq_cpu[e].item()) / tt_val if tt_val > 0 else 0.0
+                    )
             out[qname] = slc
         return out
 
@@ -553,8 +611,15 @@ def _qwen3_5_moe_experts_saliency_forward(
         acc_sum = tracker.sum_g_norm.get(router_qname)
         acc_count = tracker.count.get(router_qname)
         acc_max = tracker.max_g_norm.get(router_qname)
+        acc_sum_sq = tracker.sum_g_norm_sq.get(router_qname)
+        acc_total = tracker.total_tokens_by_router.get(router_qname)
+        # For the packed path we hook the experts module directly — no
+        # router hook fires for us. Increment the token total here,
+        # once per forward.
+        if acc_total is not None:
+            acc_total += hidden_states.shape[0]
     else:
-        acc_sum = acc_count = acc_max = None
+        acc_sum = acc_count = acc_max = acc_sum_sq = None
 
     final_hidden_states = torch.zeros_like(hidden_states)
     with torch.no_grad():
@@ -580,13 +645,15 @@ def _qwen3_5_moe_experts_saliency_forward(
         # REAP saliency: f_j BEFORE routing-weight multiply, weighted
         # by the top-k prob that routed each token to this expert.
         if acc_sum is not None:
-            gate_vals = top_k_weights[token_idx, top_k_pos]  # [n_active]
+            gate_vals = top_k_weights[token_idx, top_k_pos].to(torch.float64)
             norms = expert_out.to(torch.float64).norm(dim=-1)
-            contribution = gate_vals.to(torch.float64) * norms
+            contribution = gate_vals * norms                   # g·||f||
+            contribution_sq = gate_vals * norms.pow(2)         # g·||f||² (REAP)
             acc_sum[e_int] += contribution.sum()
             acc_count[e_int] += norms.numel()
             if norms.numel() > 0:
                 acc_max[e_int] = torch.maximum(acc_max[e_int], contribution.max())
+            acc_sum_sq[e_int] += contribution_sq.sum()
 
         # Finish the layer's own compute.
         routed = expert_out * top_k_weights[token_idx, top_k_pos, None]
