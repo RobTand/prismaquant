@@ -98,6 +98,25 @@ class Qwen3_5Profile(ModelProfile):
         return (r"re:^language_model[.]model[.]layers[.][0-9]+"
                 r"[.]mlp[.]experts[.][0-9]+[.](gate|up|down)_proj$")
 
+    def split_packed_experts_for_format(self, fmt: str) -> bool:
+        # Qwen3.5's vLLM load_weights has a latching is_fused_expert
+        # flag: the first tensor name containing `experts.gate_up_proj`
+        # or `experts.down_proj` (the UNSPLIT packed form) flips the
+        # flag to True permanently for the rest of weight iteration,
+        # dropping `expert_params_mapping` down to a 2-entry fused
+        # form that only matches packed names. Any per-expert split
+        # tensors encountered afterwards (which is the form our
+        # quantized NVFP4/MXFP8 MoE layers use) fail the substring
+        # test and silently skip loading → broken model.
+        #
+        # Mixed recipes (NVFP4 MoE layers + BF16 MoE layers in the
+        # same artifact) can hit this: the BF16 layers would default
+        # to packed under the base profile, then trip the flag mid-
+        # iteration. Force split for EVERY format on Qwen3.5 so the
+        # artifact has a uniform per-expert form and the latching bug
+        # never triggers.
+        return True
+
     # ------------------------------------------------------------
     # MTP
     # ------------------------------------------------------------
