@@ -22,10 +22,12 @@ import pytest
 
 from prismaquant.allocator import (
     Candidate,
+    add_packed_prune_candidates,
     aggregate_moe_candidates,
     apply_consensus_prune,
     build_prune_manifest,
     expand_moe_assignment,
+    _packed_entry_router_qname,
     _prune_cost_per_expert,
     _expert_ids_in_group,
 )
@@ -310,3 +312,136 @@ def test_empty_prune_map_is_noop():
     expanded = expand_moe_assignment(assignment, stats_ext_single)
     assert set(expanded) == set(mg)
     assert all(expanded[m] == "NVFP4" for m in mg)
+
+
+# ---------------------------------------------------------------------------
+# Packed-3D prune (Qwen3.5-style single packed entry per projection)
+# ---------------------------------------------------------------------------
+def test_packed_entry_router_qname():
+    assert (
+        _packed_entry_router_qname("model.layers.0.mlp.experts.gate_up_proj")
+        == "model.layers.0.mlp.gate"
+    )
+    assert (
+        _packed_entry_router_qname("model.layers.3.mlp.experts.down_proj")
+        == "model.layers.3.mlp.gate"
+    )
+    # Not a packed pattern:
+    assert _packed_entry_router_qname(
+        "model.layers.0.mlp.experts.0.gate_proj"
+    ) is None
+    assert _packed_entry_router_qname("lm_head.weight") is None
+
+
+def _packed_stat_fixture():
+    """One packed entry with 4 experts, same params/Fisher as real Qwen3.5."""
+    name = "model.layers.0.mlp.experts.gate_up_proj"
+    stats = {
+        name: {
+            "h_trace": 4.0,          # per-expert after split: 1.0
+            "n_params": 400,         # per-expert: 100
+            "num_experts": 4,
+            "in_features": 8,
+            "out_features": 10,
+            "w_max_abs": 1.0,
+            "w_norm_sq": 4.0,
+        }
+    }
+    router = "model.layers.0.mlp.gate"
+    saliencies = {router: {0: 1.0, 1: 0.1, 2: 0.5, 3: 0.0}}
+    return name, stats, router, saliencies
+
+
+def test_add_packed_prune_candidates_emits_variants():
+    name, stats, router, sal = _packed_stat_fixture()
+    # Single baseline candidate per format.
+    base_nvfp4 = Candidate(
+        fmt="NVFP4", bits_per_param=4.25, memory_bytes=1000,
+        predicted_dloss=0.010,
+    )
+    candidates = {name: [base_nvfp4]}
+    n_ext = add_packed_prune_candidates(
+        candidates, stats,
+        expert_saliency=sal, prune_ratios=(0.25, 0.5), prune_alpha=0.5,
+    )
+    assert n_ext == 1
+    cands = candidates[name]
+    # baseline + 2 prune-variants.
+    assert len(cands) == 3
+    no_prune = [c for c in cands if c.pruned_expert_ids == ()]
+    prune_vars = [c for c in cands if c.pruned_expert_ids != ()]
+    assert len(no_prune) == 1 and no_prune[0] is base_nvfp4
+    assert len(prune_vars) == 2
+    # Drop-order: lowest-saliency first. Sal = {0:1.0, 1:0.1, 2:0.5, 3:0.0}
+    # → order by prune-cost ascending = [3 (S=0), 1 (S=0.1), 2 (S=0.5), 0 (S=1.0)]
+    # 25% of 4 = 1 drop → {3}.
+    # 50% of 4 = 2 drops → {3, 1} (sorted).
+    ratios_found = {c.pruned_expert_ids: c for c in prune_vars}
+    assert (3,) in ratios_found
+    assert (1, 3) in ratios_found
+    # Memory scales with kept_frac.
+    assert ratios_found[(3,)].memory_bytes == 750, ratios_found[(3,)]
+    assert ratios_found[(1, 3)].memory_bytes == 500, ratios_found[(1, 3)]
+
+
+def test_add_packed_prune_noop_without_saliency():
+    name, stats, _router, _sal = _packed_stat_fixture()
+    base = Candidate(fmt="NVFP4", bits_per_param=4.25, memory_bytes=1000,
+                     predicted_dloss=0.01)
+    candidates = {name: [base]}
+    # No saliency → no extension.
+    n_ext = add_packed_prune_candidates(
+        candidates, stats, expert_saliency={},
+        prune_ratios=(0.25,), prune_alpha=0.5,
+    )
+    assert n_ext == 0
+    assert candidates[name] == [base]
+
+
+def test_add_packed_prune_ignores_non_packed_entries():
+    # Mix in a dense-Linear and a super-Linear alongside a packed entry.
+    packed = "model.layers.0.mlp.experts.gate_up_proj"
+    dense = "model.layers.0.self_attn.q_proj"
+    super_name = "model.layers.0.mlp.experts.__fused__.gate_proj"
+    stats = {
+        packed: {"h_trace": 4.0, "n_params": 400, "num_experts": 4,
+                 "in_features": 8, "out_features": 10,
+                 "w_max_abs": 1.0, "w_norm_sq": 4.0},
+        dense:  {"h_trace": 1.0, "n_params": 100, "in_features": 10,
+                 "out_features": 10, "w_max_abs": 1.0, "w_norm_sq": 1.0},
+        super_name: {"h_trace": 2.0, "n_params": 200,
+                     "_fused_members": ["a", "b"]},
+    }
+    candidates = {
+        packed: [Candidate("NVFP4", 4.25, 1000, 0.01)],
+        dense:  [Candidate("NVFP4", 4.25, 100, 0.001)],
+        super_name: [Candidate("NVFP4", 4.25, 200, 0.002)],
+    }
+    sal = {"model.layers.0.mlp.gate": {0: 0.1, 1: 0.2, 2: 0.3, 3: 0.4}}
+    n_ext = add_packed_prune_candidates(
+        candidates, stats, expert_saliency=sal,
+        prune_ratios=(0.25,), prune_alpha=0.5,
+    )
+    assert n_ext == 1  # only the packed entry
+    assert len(candidates[packed]) == 2
+    assert len(candidates[dense]) == 1  # untouched
+    assert len(candidates[super_name]) == 1  # untouched
+
+
+def test_build_prune_manifest_resolves_packed_entries():
+    """Packed-entry pruned_map entries (no `_fused_members`) must
+    still produce a router-keyed manifest by stripping the qname."""
+    stats_ext = {
+        "model.layers.0.mlp.experts.gate_up_proj": {"num_experts": 4},
+        "model.layers.0.mlp.experts.down_proj":    {"num_experts": 4},
+    }
+    pruned_map = {
+        "model.layers.0.mlp.experts.gate_up_proj": (1, 3),
+        "model.layers.0.mlp.experts.down_proj":    (1, 3),
+    }
+    manifest, warnings = build_prune_manifest(pruned_map, stats_ext, expert_info={})
+    assert warnings == []
+    entry = manifest["model.layers.0.mlp.gate"]
+    assert entry["num_experts_orig"] == 4
+    assert entry["pruned_expert_ids"] == [1, 3]
+    assert entry["kept_expert_ids"] == [0, 2]

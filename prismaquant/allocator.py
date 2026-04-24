@@ -1035,6 +1035,120 @@ def aggregate_moe_candidates(
     return stats_ext, costs_ext, candidates_ext
 
 
+_PACKED_EXPERTS_PROJ_RE = re.compile(
+    r"^(?P<parent>.+)\.experts\.(?P<proj>[A-Za-z_][A-Za-z0-9_]*)$"
+)
+
+
+def _packed_entry_router_qname(name: str) -> str | None:
+    """For a packed-3D stat name like
+    ``model.layers.L.mlp.experts.gate_up_proj`` return the conventional
+    router qname (``model.layers.L.mlp.gate``). Returns None when the
+    name doesn't match the packed pattern.
+    """
+    m = _PACKED_EXPERTS_PROJ_RE.match(name)
+    if m is None:
+        return None
+    # The regex already stripped `.experts.<proj>`, so `parent` captures
+    # the MoE-block qname directly (`model.layers.L.mlp`).
+    moe_block = m.group("parent")
+    if not moe_block:
+        return None
+    return f"{moe_block}.gate"
+
+
+def add_packed_prune_candidates(
+    candidates: dict[str, list[Candidate]],
+    stats: dict,
+    expert_saliency: dict[str, dict[int, float]],
+    prune_ratios: tuple[float, ...],
+    prune_alpha: float = 0.5,
+) -> int:
+    """Extend candidate lists for packed-3D entries with prune-variants.
+
+    A "packed entry" is a stat qname of the form
+    ``<prefix>.experts.<proj>`` (no per-expert eid suffix). These come
+    out of ``install_packed_expert_hooks`` and represent a layer's
+    entire expert tensor as one DP item. For prune, we keep the single
+    DP item but add variants that drop the lowest-saliency K experts;
+    memory shrinks by kept_frac and per-expert quant cost is
+    approximated uniformly (``total_h_trace / E``, ``total_n_params /
+    E``). This is an approximation — a probe-side per-expert Fisher
+    decomposition would tighten it — but it lets the Pareto sweep see
+    prune effects on packed MoE architectures today.
+
+    Returns the number of packed entries extended. No-op when
+    ``expert_saliency`` is empty or ``prune_ratios`` contains only 0.
+    """
+    positive_ratios = tuple(sorted(
+        {float(r) for r in prune_ratios if float(r) > 0.0}
+    ))
+    if not expert_saliency or not positive_ratios:
+        return 0
+
+    n_extended = 0
+    for name, cs in list(candidates.items()):
+        router_qname = _packed_entry_router_qname(name)
+        if router_qname is None:
+            continue
+        saliency_map = expert_saliency.get(router_qname)
+        if not saliency_map:
+            continue
+        # Infer num_experts from the stat entry (set by
+        # install_packed_expert_hooks) or fall back to the saliency map's
+        # length. The former is authoritative when present.
+        s = stats.get(name, {})
+        E = int(s.get("num_experts") or len(saliency_map))
+        if E <= 0:
+            continue
+        h_total = float(s.get("h_trace", 0.0))
+        n_total = int(s.get("n_params", 0) or 0)
+        if h_total <= 0.0 or n_total <= 0:
+            continue
+        h_per_expert = h_total / E
+        n_per_expert = max(1, n_total // E)
+
+        # Drop order: experts by prune cost ascending (cheapest to drop
+        # first). Ties broken by eid for determinism.
+        prune_dloss_by_eid: dict[int, float] = {}
+        for eid in range(E):
+            s_j = float(saliency_map.get(eid, 0.0))
+            prune_dloss_by_eid[eid] = _prune_cost_per_expert(
+                s_j, h_per_expert, n_per_expert, prune_alpha,
+            )
+        drop_order = sorted(
+            range(E), key=lambda e: (prune_dloss_by_eid[e], e)
+        )
+
+        extended: list[Candidate] = list(cs)
+        for baseline_c in cs:
+            for ratio in positive_ratios:
+                n_drop = min(E, int(round(E * ratio)))
+                if n_drop == 0:
+                    continue
+                dropped = tuple(sorted(drop_order[:n_drop]))
+                kept_frac = 1.0 - float(n_drop) / float(E)
+                # Per-expert quant cost ≈ baseline_dloss / E; kept cost
+                # is that × (E-K). Prune cost is sum of dropped experts'
+                # α·(h/n)·S_j² terms.
+                kept_quant_dloss = baseline_c.predicted_dloss * kept_frac
+                prune_dloss_total = sum(
+                    prune_dloss_by_eid[eid] for eid in dropped
+                )
+                extended.append(Candidate(
+                    fmt=baseline_c.fmt,
+                    bits_per_param=baseline_c.bits_per_param * kept_frac,
+                    memory_bytes=int(baseline_c.memory_bytes * kept_frac),
+                    predicted_dloss=max(
+                        kept_quant_dloss + prune_dloss_total, 0.0,
+                    ),
+                    pruned_expert_ids=dropped,
+                ))
+        candidates[name] = extended
+        n_extended += 1
+    return n_extended
+
+
 def expand_moe_assignment(
     assignment: dict[str, str],
     stats_ext: dict,
@@ -1109,27 +1223,41 @@ def build_prune_manifest(
     if not pruned_map:
         return {}, []
 
-    # router → {super_name: set_of_dropped_eids}
+    # router → {source_name: set_of_dropped_eids}
     by_router: dict[str, dict[str, set[int]]] = {}
-    # router → set of all eids ever seen across its super-Linears
+    # router → set of all eids ever seen across its sources
     all_eids_by_router: dict[str, set[int]] = {}
-    for super_name, dropped in pruned_map.items():
-        members = stats_ext.get(super_name, {}).get("_fused_members", [])
+    for source_name, dropped in pruned_map.items():
+        # Resolve (router_qname, known eids) via two paths:
+        # 1. Super-Linears: walk `_fused_members` → expert_info.
+        # 2. Packed-3D entries: qname matches `<prefix>.experts.<proj>`,
+        #    router = `<moe_block>.gate`; eids = range(num_experts) from
+        #    the stat entry's `num_experts` field.
+        members = stats_ext.get(source_name, {}).get("_fused_members", [])
         eids_here: set[int] = set()
         router: str | None = None
-        for m_ in members:
-            info = expert_info.get(m_)
-            if info is None:
-                continue
-            r, eid_str = info
-            router = router or r
-            try:
-                eids_here.add(int(eid_str))
-            except (TypeError, ValueError):
-                pass
+        if members:
+            for m_ in members:
+                info = expert_info.get(m_)
+                if info is None:
+                    continue
+                r, eid_str = info
+                router = router or r
+                try:
+                    eids_here.add(int(eid_str))
+                except (TypeError, ValueError):
+                    pass
+        else:
+            # Packed path.
+            router = _packed_entry_router_qname(source_name)
+            num_experts = int(
+                stats_ext.get(source_name, {}).get("num_experts", 0) or 0
+            )
+            if router and num_experts > 0:
+                eids_here = set(range(num_experts))
         if router is None:
             continue
-        by_router.setdefault(router, {})[super_name] = set(dropped)
+        by_router.setdefault(router, {})[source_name] = set(dropped)
         all_eids_by_router.setdefault(router, set()).update(eids_here)
 
     manifest: dict[str, dict] = {}
@@ -1174,25 +1302,29 @@ def apply_consensus_prune(
     if not manifest:
         return pruned_map
     out: dict[str, tuple[int, ...]] = {}
-    for super_name, dropped in pruned_map.items():
-        members = stats_ext.get(super_name, {}).get("_fused_members", [])
+    for source_name, dropped in pruned_map.items():
+        members = stats_ext.get(source_name, {}).get("_fused_members", [])
         router: str | None = None
-        for m_ in members:
-            info = expert_info.get(m_)
-            if info is None:
-                continue
-            router = info[0]
-            break
+        if members:
+            for m_ in members:
+                info = expert_info.get(m_)
+                if info is None:
+                    continue
+                router = info[0]
+                break
+        else:
+            # Packed-3D path
+            router = _packed_entry_router_qname(source_name)
         if router is None:
-            out[super_name] = dropped
+            out[source_name] = dropped
             continue
         entry = manifest.get(router)
         if entry is None:
-            out[super_name] = dropped
+            out[source_name] = dropped
             continue
         consensus = tuple(entry["pruned_expert_ids"])
         if consensus:
-            out[super_name] = consensus
+            out[source_name] = consensus
     return out
 
 
@@ -2056,6 +2188,27 @@ def main():
         )
         print(f"[alloc] expert-prune ENABLED: saliency routers={n_routers_with_saliency}, "
               f"ratios={prune_ratios_arg}, alpha={args.prune_alpha}", flush=True)
+
+    # Packed-3D MoE prune: Qwen3.5/3.6 and similar archs expose experts
+    # as one packed stat entry per (layer, projection) — not per-expert.
+    # `aggregate_moe_candidates` doesn't fire on them, so we extend
+    # their candidate list directly here with prune-variants that use
+    # per-expert saliency from the observer. Per-expert Fisher is
+    # approximated uniformly (total/E); a probe-side per-expert
+    # decomposition would tighten this estimate.
+    if args.enable_expert_prune and probe_expert_saliency:
+        n_packed_extended = add_packed_prune_candidates(
+            candidates, stats,
+            expert_saliency=probe_expert_saliency,
+            prune_ratios=prune_ratios_arg,
+            prune_alpha=args.prune_alpha,
+        )
+        if n_packed_extended:
+            print(
+                f"[alloc] packed-MoE prune: extended {n_packed_extended} "
+                f"packed entries with prune-variant candidates",
+                flush=True,
+            )
 
     if args.target_profile == "vllm_qwen3_5_packed_moe":
         stats, costs, candidates = aggregate_moe_candidates(
