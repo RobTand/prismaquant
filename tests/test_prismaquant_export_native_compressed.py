@@ -408,6 +408,40 @@ class TestBuildQuantizationConfig(unittest.TestCase):
                 t.endswith("mlp[.]experts[.]down_proj$"),
                 f"packed tensor name leaked: {t}")
 
+    def test_bf16_mtp_ignore_does_not_taint_body_layer(self):
+        """A BF16 MTP `mtp.layers.N.mlp.experts.*` assignment must emit
+        an `mtp.*`-prefixed ignore regex, NOT a body `language_model.
+        model.layers.N.*` regex. Otherwise the body's NVFP4 MoE at
+        layer N is accidentally ignored → scheme dispatch fails →
+        load_weights KeyErrors on `w2_input_global_scale`."""
+        import re as _re
+        profile = Qwen3_5Profile()
+        assignment = {
+            "model.layers.0.mlp.experts.gate_up_proj": "NVFP4",
+            "model.layers.0.mlp.experts.down_proj":    "NVFP4",
+            "mtp.layers.0.mlp.experts.gate_up_proj":   "BF16",
+            "mtp.layers.0.mlp.experts.down_proj":      "BF16",
+        }
+        qc = build_quantization_config(
+            assignment, bf16_passthrough=set(), profile=profile,
+        )
+        # Body layer 0 per-expert form MUST NOT match any ignore regex.
+        body_ln = "language_model.model.layers.0.mlp.experts.0.gate_proj"
+        hits = [
+            i for i in qc["ignore"]
+            if i.startswith("re:") and _re.match(i[3:], body_ln)
+        ]
+        self.assertEqual(hits, [],
+                         f"BF16 MTP leaked into body-layer ignore: {hits}")
+        # MTP layer 0 per-expert form SHOULD match an mtp-prefixed regex.
+        mtp_ln = "mtp.layers.0.mlp.experts.0.gate_proj"
+        mtp_hits = [
+            i for i in qc["ignore"]
+            if i.startswith("re:^mtp[.]") and _re.match(i[3:], mtp_ln)
+        ]
+        self.assertGreater(len(mtp_hits), 0,
+                           f"missing MTP-prefixed ignore regex for MTP layer")
+
     def test_packed_moe_mixed_format_rejected(self):
         """Different formats on gate_up_proj and down_proj of the same
         FusedMoE is a promote_moe_pair bug — we loud-crash rather than

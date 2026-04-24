@@ -3102,6 +3102,11 @@ def _bf16_packed_expert_ignore_regex(
     # The profile's `per_expert_moe_regex` already encodes the live
     # form; we narrow it to this specific layer by pinning the layer
     # index.
+    # Distinguish MTP (`mtp.layers.N.*`) from body (`model.layers.N.*`)
+    # — both can have layer index N but they're DIFFERENT layers, and
+    # emitting a body-prefixed regex for a BF16 MTP assignment
+    # accidentally ignores the body's NVFP4 experts at that layer idx.
+    is_mtp = recipe_key.startswith("mtp.")
     layer_idx = None
     lm = _re.search(r"\.layers\.(\d+)\.", recipe_key)
     if lm:
@@ -3118,6 +3123,29 @@ def _bf16_packed_expert_ignore_regex(
     # Use the profile's own regex as the base; swap its `(gate|up|down)_proj`
     # group with the exact projections we emit, and constrain to this
     # layer.
+    # MTP layers live under a `mtp.layers.N.*` prefix — separate
+    # layer-index namespace from the body. Use the profile's dedicated
+    # per_expert_mtp_regex (if any) instead of the body one.
+    if is_mtp:
+        mtp_base = profile.per_expert_mtp_regex() if profile else None
+        if mtp_base and mtp_base.startswith("re:"):
+            body = mtp_base[len("re:"):]
+            pinned = _re.sub(
+                r"layers\[\.\]\[0-9\]\+", f"layers[.]{layer_idx}",
+                body, count=1,
+            )
+            pinned = pinned.replace(
+                "(gate|up|down)_proj", f"({proj_options})",
+            )
+            return [f"re:{pinned}"]
+        # Fallback: emit an `mtp.layers.N.*` regex directly.
+        if layer_idx is None:
+            return []
+        return [
+            rf"re:^mtp[.]layers[.]{layer_idx}[.]"
+            rf"(?:moe[.])?experts[.][0-9]+[.]({proj_options})$"
+        ]
+
     base = profile.per_expert_moe_regex() if profile else None
     if not base or not base.startswith("re:"):
         # No profile regex — emit a conservative default spanning
