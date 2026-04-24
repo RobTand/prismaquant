@@ -377,11 +377,20 @@ def test_apply_global_prune_ratio_replaces_candidates():
     assert len(candidates[name]) == 2
     for c in candidates[name]:
         assert c.pruned_expert_ids == (1, 3), c
-    # Memory + bpp shrunk by kept_frac (0.5).
+    # Memory is computed from first principles:
+    #   pruned_mem = bits_per_param × n_params_total × kept_frac / 8
+    # n_params_total=400 (fixture), kept_frac=0.5
+    # NVFP4: 4.25 * 400 * 0.5 / 8 = 106.25 → int(106)
+    # MXFP8: 8.25 * 400 * 0.5 / 8 = 206.25 → int(206)
+    # This replaces the (wrong) per-expert memory_bytes from
+    # build_candidates for packed entries. bpp field still shrinks
+    # linearly with kept_frac.
     nv = next(c for c in candidates[name] if c.fmt == "NVFP4")
     mx = next(c for c in candidates[name] if c.fmt == "MXFP8")
-    assert nv.memory_bytes == 500 and nv.bits_per_param == pytest.approx(2.125)
-    assert mx.memory_bytes == 1000 and mx.bits_per_param == pytest.approx(4.125)
+    assert nv.memory_bytes == 106, nv
+    assert nv.bits_per_param == pytest.approx(2.125)
+    assert mx.memory_bytes == 206, mx
+    assert mx.bits_per_param == pytest.approx(4.125)
 
 
 def test_apply_global_prune_ratio_noop_without_saliency():

@@ -1121,21 +1121,45 @@ def apply_global_prune_ratio(
         prune_dloss_total = sum(prune_dloss_by_eid[e] for e in dropped)
         kept_frac = 1.0 - float(n_drop) / float(E)
 
+        # For packed entries, `Candidate.memory_bytes` from
+        # build_candidates was computed off the 2D shape in
+        # `_shape_from_stats` — i.e. one expert's footprint, not the
+        # full 256-expert tensor. The DP works fine with that because
+        # it budgets via `bits_per_param * fraction` (fraction =
+        # n_params / total, where n_params DOES count all experts),
+        # but `compute_achieved`'s `_memory_bytes_by_format` branch
+        # multiplies by 8 directly and would under-count wildly.
+        # Compute pruned memory from first principles:
+        #    bytes = bpp * n_params_total * kept_frac / 8
+        n_params_total = int(s.get("n_params", 0) or 0)
         variants: list[Candidate] = []
+        mem_by_fmt: dict[str, int] = {}
         for baseline_c in cs:
+            pruned_mem = int(
+                baseline_c.bits_per_param * n_params_total * kept_frac / 8.0
+            )
             variants.append(Candidate(
                 fmt=baseline_c.fmt,
                 bits_per_param=baseline_c.bits_per_param * kept_frac,
-                memory_bytes=int(baseline_c.memory_bytes * kept_frac),
+                memory_bytes=pruned_mem,
                 predicted_dloss=max(
                     baseline_c.predicted_dloss * kept_frac + prune_dloss_total,
                     0.0,
                 ),
                 pruned_expert_ids=dropped,
             ))
+            mem_by_fmt[baseline_c.fmt] = pruned_mem
         # REPLACE (not append) so DP can't pick no-prune → uniform
         # kept count across all packed entries by construction.
         candidates[name] = variants
+        # Sync the stat's `_memory_bytes_by_format` map so
+        # `compute_achieved` reports the shrunken memory (not the base
+        # packed-3D size) when it looks up this (name, fmt) pair.
+        # Without this the DP picks aggressive prune for low Δloss but
+        # achieved_bits is computed off the pre-prune memory and
+        # reports budget blow-ups for what is really a compliant
+        # assignment.
+        s["_memory_bytes_by_format"] = mem_by_fmt
         n_rewritten += 1
     return n_rewritten
 
@@ -2382,6 +2406,15 @@ def main():
         """Solve the DP at a single (ratio, target_bits) combination.
         Returns (assignment, pruned_map, achieved, total_dloss) or
         (None, {}, nan, inf) if infeasible."""
+        # Clear any lingering packed-entry memory maps from a previous
+        # R's apply_global_prune_ratio — otherwise R=0 would pick up
+        # the last non-zero ratio's shrunk bytes from stats. Safe to
+        # pop unconditionally; apply_global_prune_ratio repopulates
+        # when R > 0.
+        for name, s in stats.items():
+            if (_packed_entry_router_qname(name) is not None
+                    and isinstance(s, dict)):
+                s.pop("_memory_bytes_by_format", None)
         if R > 0.0 and probe_expert_saliency:
             c = _copy.deepcopy(candidates)
             apply_global_prune_ratio(
