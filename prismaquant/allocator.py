@@ -837,12 +837,25 @@ def aggregate_moe_candidates(
         # the super-Linear use the same closed-form predicted_dloss as
         # any other Linear. The α_f gain is canceled in the inversion so
         # build_candidates re-applies it cleanly.
+        #
+        # Cost lookups honor format aliases (canonical ↔ legacy names,
+        # e.g. INT2 ↔ NVINT2) so cost pickles generated before the
+        # rename still resolve. Without this, an older cost.pkl with
+        # NVINT2/NVINT3 keys silently drops those formats from the
+        # super-Linear candidate list, forcing the DP up to NVFP4+ and
+        # inflating Δloss.
+        def _member_cost(m_: str, fmt: str) -> dict | None:
+            m_costs = costs.get(m_, {})
+            for alias in fr.aliases_for(fmt):
+                entry = m_costs.get(alias)
+                if entry is not None and "error" not in entry:
+                    return entry
+            return None
+
         super_cost = {}
         for spec in formats:
             available_members = [
-                m_ for m_ in members
-                if spec.name in costs.get(m_, {})
-                and "error" not in costs.get(m_, {}).get(spec.name, {})
+                m_ for m_ in members if _member_cost(m_, spec.name) is not None
             ]
             if not available_members:
                 super_cost[spec.name] = {"error": "partial"}
@@ -854,11 +867,12 @@ def aggregate_moe_candidates(
             sum_params_avail = 0
             for m_ in available_members:
                 p_i = stats[m_]["n_params"]
-                sum_weight_mse_x_params += costs[m_][spec.name]["weight_mse"] * p_i
+                sum_weight_mse_x_params += _member_cost(m_, spec.name)["weight_mse"] * p_i
                 sum_params_avail += p_i
             mean_weight_mse = sum_weight_mse_x_params / max(sum_params_avail, 1)
             mean_output_mse = sum(
-                costs[m_][spec.name]["output_mse"] for m_ in available_members
+                _member_cost(m_, spec.name)["output_mse"]
+                for m_ in available_members
             ) / len(available_members)
 
             # True summed Δloss across all members at format f. Uses the
@@ -867,8 +881,8 @@ def aggregate_moe_candidates(
             # `0.5 · h_trace · weight_mse` for legacy cost pickles.
             sum_pred = 0.0
             for m_ in members:
-                c = costs.get(m_, {}).get(spec.name)
-                if c is None or "error" in c:
+                c = _member_cost(m_, spec.name)
+                if c is None:
                     c = {"weight_mse": mean_weight_mse,
                          "output_mse": mean_output_mse}
                 if "predicted_dloss" in c:
@@ -948,8 +962,8 @@ def aggregate_moe_candidates(
             # without re-running costs lookup.
             per_member_dloss: dict[str, float] = {}
             for m_ in members:
-                c = costs.get(m_, {}).get(spec.name)
-                if c is None or "error" in c:
+                c = _member_cost(m_, spec.name)
+                if c is None:
                     # Missing cost → use the super-Linear's effective
                     # mse for this Linear as a fallback. This matches
                     # the super_cost construction above.
