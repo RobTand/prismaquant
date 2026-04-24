@@ -100,10 +100,11 @@ def build_curve(stats: dict, costs: dict, specs_sorted, targets: list[float], bi
 
     curve = []
     for t in targets:
-        assignment = solve_allocation(stats_alloc, candidates, t, bit_precision)
-        if assignment is None:
+        result = solve_allocation(stats_alloc, candidates, t, bit_precision)
+        if result is None:
             curve.append({"target_bits": t, "feasible": False})
             continue
+        assignment, _chosen = result
         if not no_fused_promote:
             assignment = promote_fused(assignment, format_rank)
         achieved, _ = compute_achieved(stats_alloc, assignment, format_specs)

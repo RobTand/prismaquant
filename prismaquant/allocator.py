@@ -305,7 +305,7 @@ def solve_with_promotion(
     stall_threshold: float = 1e-4,
     stall_grace: int = 3,
     profile=None,
-) -> tuple[dict[str, str] | None, float]:
+) -> tuple[dict[str, str] | None, dict[str, tuple[int, ...]], float]:
     """Solve the allocation, promote fused siblings, and re-solve with a
     tightened target if promotion blew past the budget.
 
@@ -331,18 +331,29 @@ def solve_with_promotion(
     patience. The stall guard prevents infinite loops when the
     coupling structure makes the target unreachable.
 
-    Returns (assignment, achieved_bits). Assignment is None if even the
-    untightened solve was infeasible.
+    Returns (assignment, pruned_map, achieved_bits), where pruned_map is
+    {super_linear_name: dropped_expert_ids} for winning candidates that
+    chose a non-empty prune variant — promotions only ever bump the
+    fmt string, never touch `.__fused__.` super-Linear names, so the
+    pruned_ids latched from the DP's choice stay valid through promote.
+    Assignment is None if even the untightened solve was infeasible.
     """
     tightened = float(target_bits)
     last_assign: dict[str, str] | None = None
+    last_pruned: dict[str, tuple[int, ...]] = {}
     last_achieved = float("nan")
     prev_overshoot = float("inf")
     stall_count = 0
     for iteration in range(max_iters):
-        assign = solve_allocation(stats, candidates, tightened, bit_precision)
-        if assign is None:
-            return last_assign, last_achieved
+        result = solve_allocation(stats, candidates, tightened, bit_precision)
+        if result is None:
+            return last_assign, last_pruned, last_achieved
+        assign, chosen_cands = result
+        pruned_map = {
+            n: c.pruned_expert_ids
+            for n, c in chosen_cands.items()
+            if c.pruned_expert_ids
+        }
         if not no_fused_promote:
             assign = promote_fused(assign, format_rank, profile=profile)
         # MoE pair coupling: gate_up_proj + down_proj within the same
@@ -353,10 +364,11 @@ def solve_with_promotion(
         assign = promote_moe_pair(assign, format_rank)
         achieved, _ = compute_achieved(stats, assign, format_specs)
         last_assign = assign
+        last_pruned = pruned_map
         last_achieved = achieved
         overshoot = achieved - target_bits
         if overshoot <= overshoot_tolerance:
-            return assign, achieved
+            return assign, pruned_map, achieved
 
         # Stall detection: if two consecutive iterations make
         # <stall_threshold bpp of progress on overshoot, we've hit the
@@ -365,7 +377,7 @@ def solve_with_promotion(
         if abs(prev_overshoot - overshoot) < stall_threshold:
             stall_count += 1
             if stall_count >= stall_grace:
-                return assign, achieved
+                return assign, pruned_map, achieved
         else:
             stall_count = 0
         prev_overshoot = overshoot
@@ -375,7 +387,7 @@ def solve_with_promotion(
         tightened -= overshoot / 2.0
         if tightened <= 0:
             break
-    return last_assign, last_achieved
+    return last_assign, last_pruned, last_achieved
 
 
 # ---------------------------------------------------------------------------
@@ -1001,9 +1013,17 @@ def aggregate_moe_candidates(
 
                 kept_frac = 1.0 - float(n_drop) / float(num_experts_total)
                 prune_memory = int(base_memory_bytes * kept_frac)
+                # `bits_per_param` is how the knapsack DP measures a
+                # candidate's budget footprint against the super-Linear's
+                # fixed n_params. For a prune candidate we physically
+                # store fewer experts, so the effective average drops
+                # by `kept_frac` — must scale so the DP credits the
+                # memory savings (else prune candidates look as costly
+                # as the no-prune baseline and the DP never picks them).
+                prune_bits_per_param = base_bits_per_param * kept_frac
                 cands.append(Candidate(
                     fmt=spec.name,
-                    bits_per_param=base_bits_per_param,
+                    bits_per_param=prune_bits_per_param,
                     memory_bytes=prune_memory,
                     predicted_dloss=max(pred_total, 0.0),
                     pruned_expert_ids=dropped_eids,
@@ -1015,19 +1035,164 @@ def aggregate_moe_candidates(
     return stats_ext, costs_ext, candidates_ext
 
 
-def expand_moe_assignment(assignment: dict[str, str],
-                          stats_ext: dict) -> dict[str, str]:
+def expand_moe_assignment(
+    assignment: dict[str, str],
+    stats_ext: dict,
+    pruned_map: dict[str, tuple[int, ...]] | None = None,
+    expert_info: dict[str, tuple[str, str]] | None = None,
+) -> dict[str, str]:
     """Replace `.__fused__.` super-Linear assignments with the per-expert
     assignments needed by AutoRound's layer_config (one entry per
-    individual expert Linear, all sharing the super-Linear's format)."""
+    individual expert Linear, all sharing the super-Linear's format).
+
+    When `pruned_map` is provided, the expert Linears whose expert_info
+    eid is listed as dropped are OMITTED from the output — they won't
+    appear in layer_config.json and the exporter won't emit their
+    weights. The exporter separately consumes a prune sidecar to drop
+    the router row + reindex.
+    """
     out = {}
+    pm = pruned_map or {}
+    einfo = expert_info or {}
     for name, fmt in assignment.items():
         if ".__fused__." in name:
             members = stats_ext[name].get("_fused_members", [])
+            dropped = set(pm.get(name, ()))
             for m_ in members:
+                if dropped:
+                    info = einfo.get(m_)
+                    if info is not None:
+                        try:
+                            eid = int(info[1])
+                        except (TypeError, ValueError):
+                            eid = None
+                        if eid is not None and eid in dropped:
+                            continue
                 out[m_] = fmt
         else:
             out[name] = fmt
+    return out
+
+
+def build_prune_manifest(
+    pruned_map: dict[str, tuple[int, ...]],
+    stats_ext: dict,
+    expert_info: dict[str, tuple[str, str]],
+) -> tuple[dict[str, dict], list[str]]:
+    """Build a router-keyed prune manifest the exporter can consume.
+
+    Groups super-Linear decisions by their shared router. When multiple
+    super-Linears share a router (projection-granularity: one super
+    per gate_proj / up_proj / down_proj), they may independently pick
+    different drop sets since the DP treats each as an independent
+    optimization. All projections of a single expert must be dropped
+    together (an expert is a 3-projection unit) — so we take the
+    **intersection** of drop sets as the safe consensus: drop only
+    experts every projection independently agreed to drop.
+
+    Intersection under-prunes relative to each projection's individual
+    choice, but matches the DP's assumption that non-dropped experts
+    remain at their chosen quant format. We surface a warning listing
+    super-Linears that wanted to drop more than the consensus so the
+    user can see the budget tightness.
+
+    Returns (manifest, warnings) where:
+      manifest: {router_qname: {
+          "num_experts_orig": N,
+          "num_experts_kept": K,
+          "pruned_expert_ids": sorted list of dropped eids (consensus),
+          "kept_expert_ids":   sorted list of remaining eids,
+          "orig_to_new_eid":   {orig: new_dense_idx} for kept experts,
+      }}
+      warnings: list of human-readable disagreement messages.
+    """
+    if not pruned_map:
+        return {}, []
+
+    # router → {super_name: set_of_dropped_eids}
+    by_router: dict[str, dict[str, set[int]]] = {}
+    # router → set of all eids ever seen across its super-Linears
+    all_eids_by_router: dict[str, set[int]] = {}
+    for super_name, dropped in pruned_map.items():
+        members = stats_ext.get(super_name, {}).get("_fused_members", [])
+        eids_here: set[int] = set()
+        router: str | None = None
+        for m_ in members:
+            info = expert_info.get(m_)
+            if info is None:
+                continue
+            r, eid_str = info
+            router = router or r
+            try:
+                eids_here.add(int(eid_str))
+            except (TypeError, ValueError):
+                pass
+        if router is None:
+            continue
+        by_router.setdefault(router, {})[super_name] = set(dropped)
+        all_eids_by_router.setdefault(router, set()).update(eids_here)
+
+    manifest: dict[str, dict] = {}
+    warnings: list[str] = []
+    for router, super_to_dropped in by_router.items():
+        sets = list(super_to_dropped.values())
+        consensus = set.intersection(*sets) if sets else set()
+        union = set.union(*sets) if sets else set()
+        if union != consensus:
+            disagree = union - consensus
+            warnings.append(
+                f"{router}: prune-set disagreement across projections; "
+                f"consensus={sorted(consensus)}, additional-wanted="
+                f"{sorted(disagree)} — honoring consensus only."
+            )
+        all_eids = all_eids_by_router.get(router, set())
+        sorted_all = sorted(all_eids)
+        kept = [eid for eid in sorted_all if eid not in consensus]
+        orig_to_new = {eid: i for i, eid in enumerate(kept)}
+        manifest[router] = {
+            "num_experts_orig": len(sorted_all),
+            "num_experts_kept": len(kept),
+            "pruned_expert_ids": sorted(consensus),
+            "kept_expert_ids": kept,
+            "orig_to_new_eid": {str(k): v for k, v in orig_to_new.items()},
+        }
+    return manifest, warnings
+
+
+def apply_consensus_prune(
+    pruned_map: dict[str, tuple[int, ...]],
+    manifest: dict[str, dict],
+    stats_ext: dict,
+    expert_info: dict[str, tuple[str, str]],
+) -> dict[str, tuple[int, ...]]:
+    """Coerce each super-Linear's pruned_expert_ids to the router's
+    consensus drop set, so expansion and the sidecar agree.
+
+    Called after `build_prune_manifest` to ensure `expand_moe_assignment`
+    uses the same (consensus) decision the exporter sees.
+    """
+    if not manifest:
+        return pruned_map
+    out: dict[str, tuple[int, ...]] = {}
+    for super_name, dropped in pruned_map.items():
+        members = stats_ext.get(super_name, {}).get("_fused_members", [])
+        router: str | None = None
+        for m_ in members:
+            info = expert_info.get(m_)
+            if info is None:
+                continue
+            router = info[0]
+            break
+        if router is None:
+            out[super_name] = dropped
+            continue
+        entry = manifest.get(router)
+        if entry is None:
+            out[super_name] = dropped
+            continue
+        consensus = tuple(entry["pruned_expert_ids"])
+        if consensus:
+            out[super_name] = consensus
     return out
 
 
@@ -1245,7 +1410,7 @@ def expand_fused_sibling_assignment(assignment: dict[str, str],
 
 def solve_allocation(stats: dict, candidates: dict[str, list[Candidate]],
                      target_bits: float, bit_precision: float = 0.001
-                     ) -> dict[str, str] | None:
+                     ) -> tuple[dict[str, str], dict[str, Candidate]] | None:
     """Solve multi-choice knapsack via DP, working in avg-bits-per-param units.
 
     The budget is expressed as an average bits-per-parameter target; we
@@ -1256,7 +1421,11 @@ def solve_allocation(stats: dict, candidates: dict[str, list[Candidate]],
     Total DP budget ~= (target - baseline) / bit_precision, typically
     under 10 000 bins regardless of model size.
 
-    Returns {linear_name: chosen_format_name}, or None if infeasible.
+    Returns (assignment, chosen_candidates) where assignment maps
+    linear_name → chosen_format_name, and chosen_candidates preserves
+    the full Candidate object (including pruned_expert_ids) so callers
+    can recover prune decisions that the fmt string alone hides. Returns
+    None if infeasible.
     """
     import numpy as np
 
@@ -1334,7 +1503,8 @@ def solve_allocation(stats: dict, candidates: dict[str, list[Candidate]],
     best_b = int(np.argmax(dp))
 
     # Backtrack
-    assignment = {}
+    assignment: dict[str, str] = {}
+    chosen_cands: dict[str, Candidate] = {}
     cur = best_b
     for layer_idx in range(len(names) - 1, -1, -1):
         idx_chosen = int(choice[layer_idx][cur])
@@ -1342,16 +1512,18 @@ def solve_allocation(stats: dict, candidates: dict[str, list[Candidate]],
         cs = candidates[name]
         if idx_chosen < 0:
             idx_chosen = 0
-        assignment[name] = cs[idx_chosen].fmt
+        chosen = cs[idx_chosen]
+        assignment[name] = chosen.fmt
+        chosen_cands[name] = chosen
         baseline = baselines[name]
         params = stats[name]["n_params"]
         fraction = params / total_params
-        d_avg_bits = (cs[idx_chosen].bits_per_param
+        d_avg_bits = (chosen.bits_per_param
                       - baseline.bits_per_param) * fraction
         cur -= int(round(d_avg_bits / bit_precision))
         if cur < 0:
             cur = 0
-    return assignment
+    return assignment, chosen_cands
 
 
 def compute_achieved(stats: dict, assignment: dict[str, str],
@@ -1926,7 +2098,7 @@ def main():
     targets = [float(x) for x in args.pareto_targets.split(",")]
     curve = []
     for t in targets:
-        assignment, achieved = solve_with_promotion(
+        assignment, _pareto_pruned, achieved = solve_with_promotion(
             stats, candidates, t, format_specs, format_rank,
             args.bit_precision,
             no_fused_promote=args.no_fused_promote,
@@ -1988,7 +2160,7 @@ def main():
               f"{row['predicted_dloss']:>14.4e}   {fmt_str}")
 
     # Emit chosen layer_config for target_bits
-    assignment, achieved = solve_with_promotion(
+    assignment, pruned_map, achieved = solve_with_promotion(
         stats, candidates, args.target_bits, format_specs, format_rank,
         args.bit_precision,
         no_fused_promote=args.no_fused_promote,
@@ -2000,13 +2172,43 @@ def main():
             f"Infeasible at target_bits={args.target_bits}. "
             "Consider raising the target or widening the format set.")
 
+    # Build the prune manifest (router-keyed, consensus-intersected)
+    # from the DP's winning candidates. Empty when prune is disabled or
+    # saliency is absent. Coerce each super-Linear's dropped set to the
+    # router consensus so expansion and the sidecar agree.
+    prune_manifest: dict[str, dict] = {}
+    prune_warnings: list[str] = []
+    if pruned_map and probe_expert_info:
+        prune_manifest, prune_warnings = build_prune_manifest(
+            pruned_map, stats, probe_expert_info,
+        )
+        pruned_map = apply_consensus_prune(
+            pruned_map, prune_manifest, stats, probe_expert_info,
+        )
+        for w in prune_warnings:
+            print(f"[alloc] prune-consensus: {w}", flush=True)
+        total_orig = sum(r["num_experts_orig"] for r in prune_manifest.values())
+        total_kept = sum(r["num_experts_kept"] for r in prune_manifest.values())
+        print(
+            f"[alloc] prune: {len(prune_manifest)} MoE layers, "
+            f"{total_orig - total_kept}/{total_orig} experts dropped "
+            f"(kept {total_kept})",
+            flush=True,
+        )
+
     # Expand MoE super-Linears back to per-expert entries before writing
     # the AutoRound layer_config (which expects one entry per individual
-    # nn.Linear module name).
+    # nn.Linear module name). When prune is active, dropped experts are
+    # omitted from the expanded assignment — their leaves won't appear
+    # in layer_config.json and the exporter won't quantize/export them.
     if args.expert_granularity == "layer":
-        assignment_expanded = expand_moe_assignment(assignment, stats)
+        assignment_expanded = expand_moe_assignment(
+            assignment, stats,
+            pruned_map=pruned_map,
+            expert_info=probe_expert_info,
+        )
     else:
-        assignment_expanded = assignment
+        assignment_expanded = dict(assignment)
 
     # Expand fused-sibling super-Linears (qkv_proj / gate_up_proj).
     # Complementary to the MoE expansion above — the MoE path handles
@@ -2147,6 +2349,21 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
         json.dump(layer_cfg, f, indent=2)
+
+    # Prune sidecar: emitted alongside layer_config.json when any MoE
+    # layer had experts dropped. Exporter reads this to drop the router
+    # rows, reindex kept experts to dense 0..K-1, and update
+    # config.json's num_experts. Absent sidecar => no pruning happened
+    # and the exporter uses its pre-prune code path.
+    prune_sidecar_path = out.with_suffix(out.suffix + ".prune.json")
+    if prune_manifest:
+        with open(prune_sidecar_path, "w") as f:
+            json.dump(prune_manifest, f, indent=2, sort_keys=True)
+        print(f"Prune manifest → {prune_sidecar_path}")
+    elif prune_sidecar_path.exists():
+        # Stale sidecar from an earlier prune run would silently taint
+        # a subsequent non-prune run. Remove it.
+        prune_sidecar_path.unlink()
 
     counts = defaultdict(int)
     for fmt in assignment.values():

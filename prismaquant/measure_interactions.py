@@ -124,9 +124,10 @@ def main():
             stats, costs, specs_sorted, candidates
         )
 
-    assignment = solve_allocation(stats_alloc, candidates, args.target_bits, args.bit_precision)
-    if assignment is None:
+    result = solve_allocation(stats_alloc, candidates, args.target_bits, args.bit_precision)
+    if result is None:
         raise SystemExit("no feasible assignment at requested target")
+    assignment, _chosen = result
     if not args.no_fused_promote:
         assignment = promote_fused(assignment, format_rank)
 

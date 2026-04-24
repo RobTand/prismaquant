@@ -23,6 +23,9 @@ import pytest
 from prismaquant.allocator import (
     Candidate,
     aggregate_moe_candidates,
+    apply_consensus_prune,
+    build_prune_manifest,
+    expand_moe_assignment,
     _prune_cost_per_expert,
     _expert_ids_in_group,
 )
@@ -188,3 +191,122 @@ def test_unit_prune_cost_formula():
     assert _prune_cost_per_expert(0.0, 0.1, 100, 0.5) == 0.0
     assert _prune_cost_per_expert(0.5, 0.0, 100, 0.5) == 0.0
     assert _prune_cost_per_expert(0.5, 0.1, 0, 0.5) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Manifest + expansion (the handoff from allocator to exporter)
+# ---------------------------------------------------------------------------
+def _four_expert_fixture():
+    """4-expert MoE, 3 projections each (gate/up/down). Same router."""
+    members_gate = [f"model.layers.0.mlp.experts.{i}.gate_proj" for i in range(4)]
+    members_up = [f"model.layers.0.mlp.experts.{i}.up_proj" for i in range(4)]
+    members_down = [f"model.layers.0.mlp.experts.{i}.down_proj" for i in range(4)]
+    stats_ext = {
+        "model.layers.0.mlp.experts.__fused__.gate_proj": {"_fused_members": members_gate},
+        "model.layers.0.mlp.experts.__fused__.up_proj": {"_fused_members": members_up},
+        "model.layers.0.mlp.experts.__fused__.down_proj": {"_fused_members": members_down},
+    }
+    expert_info = {}
+    for proj_members in (members_gate, members_up, members_down):
+        for i, m in enumerate(proj_members):
+            expert_info[m] = ("model.layers.0.mlp.gate", str(i))
+    return stats_ext, expert_info, members_gate, members_up, members_down
+
+
+def test_manifest_single_projection_layer_granularity():
+    """At layer granularity there's one super-Linear per router — the
+    manifest is trivially the DP's decision."""
+    stats_ext, einfo, mg, mu, md = _four_expert_fixture()
+    # Fuse everything into one super-Linear (layer-granularity).
+    stats_ext = {
+        "model.layers.0.mlp.experts.__fused__.__all__": {
+            "_fused_members": mg + mu + md
+        }
+    }
+    pruned_map = {
+        "model.layers.0.mlp.experts.__fused__.__all__": (1, 3),
+    }
+    manifest, warnings = build_prune_manifest(pruned_map, stats_ext, einfo)
+    assert warnings == []
+    entry = manifest["model.layers.0.mlp.gate"]
+    assert entry["num_experts_orig"] == 4
+    assert entry["num_experts_kept"] == 2
+    assert entry["pruned_expert_ids"] == [1, 3]
+    assert entry["kept_expert_ids"] == [0, 2]
+    assert entry["orig_to_new_eid"] == {"0": 0, "2": 1}
+
+
+def test_manifest_projection_granularity_intersection():
+    """With 3 super-Linears per router disagreeing on the drop set, the
+    consensus is their intersection; a warning lists the disagreement."""
+    stats_ext, einfo, *_ = _four_expert_fixture()
+    # gate wants {1, 2}, up wants {1, 3}, down wants {1} → intersection = {1}
+    pruned_map = {
+        "model.layers.0.mlp.experts.__fused__.gate_proj": (1, 2),
+        "model.layers.0.mlp.experts.__fused__.up_proj": (1, 3),
+        "model.layers.0.mlp.experts.__fused__.down_proj": (1,),
+    }
+    manifest, warnings = build_prune_manifest(pruned_map, stats_ext, einfo)
+    entry = manifest["model.layers.0.mlp.gate"]
+    assert entry["pruned_expert_ids"] == [1]
+    assert entry["kept_expert_ids"] == [0, 2, 3]
+    assert entry["orig_to_new_eid"] == {"0": 0, "2": 1, "3": 2}
+    assert len(warnings) == 1
+    assert "additional-wanted=[2, 3]" in warnings[0]
+
+
+def test_apply_consensus_prune_rewrites_drops():
+    """After manifest build, each super-Linear's pruned_expert_ids must
+    be coerced to the consensus so expansion + sidecar match."""
+    stats_ext, einfo, *_ = _four_expert_fixture()
+    pruned_map = {
+        "model.layers.0.mlp.experts.__fused__.gate_proj": (1, 2),
+        "model.layers.0.mlp.experts.__fused__.up_proj": (1, 3),
+        "model.layers.0.mlp.experts.__fused__.down_proj": (1,),
+    }
+    manifest, _ = build_prune_manifest(pruned_map, stats_ext, einfo)
+    coerced = apply_consensus_prune(pruned_map, manifest, stats_ext, einfo)
+    for super_name, dropped in coerced.items():
+        assert dropped == (1,), (super_name, dropped)
+
+
+def test_expand_moe_assignment_drops_pruned_leaves():
+    """expand_moe_assignment must omit per-expert leaves whose eid is
+    in the super-Linear's pruned_expert_ids — those weights shouldn't
+    appear in layer_config.json at all."""
+    stats_ext, einfo, mg, mu, md = _four_expert_fixture()
+    assignment = {
+        "model.layers.0.mlp.experts.__fused__.gate_proj": "NVFP4",
+        "model.layers.0.mlp.experts.__fused__.up_proj": "NVFP4",
+        "model.layers.0.mlp.experts.__fused__.down_proj": "NVFP4",
+        "model.layers.0.self_attn.q_proj": "MXFP8",  # non-MoE — untouched
+    }
+    pruned_map = {
+        "model.layers.0.mlp.experts.__fused__.gate_proj": (1, 3),
+        "model.layers.0.mlp.experts.__fused__.up_proj": (1, 3),
+        "model.layers.0.mlp.experts.__fused__.down_proj": (1, 3),
+    }
+    expanded = expand_moe_assignment(
+        assignment, stats_ext, pruned_map=pruned_map, expert_info=einfo,
+    )
+    # Non-MoE entry survives unchanged.
+    assert expanded["model.layers.0.self_attn.q_proj"] == "MXFP8"
+    # Dropped expert leaves are absent from the expanded dict.
+    for proj_members in (mg, mu, md):
+        assert proj_members[0] in expanded
+        assert proj_members[2] in expanded
+        assert proj_members[1] not in expanded, expanded
+        assert proj_members[3] not in expanded, expanded
+
+
+def test_empty_prune_map_is_noop():
+    """With no pruned_map, expand behaves exactly as before — all
+    members retained under the super-Linear's format."""
+    stats_ext, einfo, mg, _mu, _md = _four_expert_fixture()
+    stats_ext_single = {
+        "model.layers.0.mlp.experts.__fused__.gate_proj": {"_fused_members": mg},
+    }
+    assignment = {"model.layers.0.mlp.experts.__fused__.gate_proj": "NVFP4"}
+    expanded = expand_moe_assignment(assignment, stats_ext_single)
+    assert set(expanded) == set(mg)
+    assert all(expanded[m] == "NVFP4" for m in mg)

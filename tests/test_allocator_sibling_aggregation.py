@@ -293,7 +293,7 @@ def test_pre_aggregation_respects_budget_without_overshoot():
     format_rank = {"NVFP4": 0, "BF16": 1}
 
     target = 8.0  # something mid-range between NVFP4 (~4.5) and BF16 (16)
-    assignment, achieved = solve_with_promotion(
+    assignment, _pruned, achieved = solve_with_promotion(
         stats_ext, cands_ext, target,
         format_specs, format_rank,
         bit_precision=0.001,
@@ -326,7 +326,7 @@ def test_solve_with_promotion_stops_on_stall():
     # BF16 if the DP picks mixed formats, overshooting; tightening can
     # only push until we hit the floor. The stall guard caps iteration.
     target = 4.6
-    assignment, achieved = solve_with_promotion(
+    assignment, _pruned, achieved = solve_with_promotion(
         stats, cands, target, format_specs, format_rank,
         bit_precision=0.001,
         stall_threshold=1e-3,

@@ -437,9 +437,10 @@ def main():
     if args.expert_granularity == "layer":
         stats_alloc, costs, candidates = aggregate_moe_candidates(stats, costs, specs_sorted, candidates)
     format_rank = {s.name: i for i, s in enumerate(specs_sorted)}
-    assignment = solve_allocation(stats_alloc, candidates, args.target_bits, 0.001)
-    if assignment is None:
+    result = solve_allocation(stats_alloc, candidates, args.target_bits, 0.001)
+    if result is None:
         raise SystemExit("no feasible assignment at requested target")
+    assignment, _chosen = result
     assignment = promote_fused(assignment, format_rank)
     units = build_refinement_units(stats_alloc, candidates, assignment, unit_scope=args.unit_scope)
     critical = select_critical_units(units, args.top_units)
