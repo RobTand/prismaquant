@@ -2335,7 +2335,10 @@ def main():
     # router consensus so expansion and the sidecar agree.
     prune_manifest: dict[str, dict] = {}
     prune_warnings: list[str] = []
-    if pruned_map and probe_expert_info:
+    if pruned_map:
+        # expert_info may be empty for packed-3D models (no per-expert
+        # leaves to discover). build_prune_manifest handles that via
+        # _packed_entry_router_qname; no gating on expert_info here.
         prune_manifest, prune_warnings = build_prune_manifest(
             pruned_map, stats, probe_expert_info,
         )
