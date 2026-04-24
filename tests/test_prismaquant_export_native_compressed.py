@@ -359,12 +359,14 @@ class TestBuildQuantizationConfig(unittest.TestCase):
         self.assertIn(
             "language_model.model.layers.0.mlp.gate", ignore)
 
-    def test_packed_moe_collapses_to_fused_module_target(self):
-        """Qwen3.5/3.6 packed-3D MoE loads as FusedMoE; scheme dispatch
-        matches against the FusedMoE module qname, not per-packed-tensor
-        names. Both projections of a layer must collapse into ONE target
-        at the FusedMoE qname (`...experts`), stripped of `.gate_up_proj`
-        / `.down_proj`."""
+    def test_packed_moe_collapses_to_per_expert_regex(self):
+        """Qwen3.5/3.6 packed-3D MoE loads as FusedMoE; vLLM's
+        `get_moe_method` dispatches by building synthetic per-expert-0
+        layer names (``<moe_prefix>.0.gate_proj`` / .up_proj / .down_proj)
+        and calling `find_matched_target` on each. The packed-tensor
+        qnames we emit don't match that form — we must emit a regex
+        pinned to this layer's FusedMoE that covers the per-expert
+        projection forms so scheme dispatch fires."""
         profile = Qwen3_5Profile()
         assignment = {
             "model.layers.0.mlp.experts.gate_up_proj": "NVFP4",
@@ -380,20 +382,31 @@ class TestBuildQuantizationConfig(unittest.TestCase):
         nvfp4 = next(g for g in qc["config_groups"].values()
                      if g["weights"]["num_bits"] == 4)
         targets = nvfp4["targets"]
-        # FusedMoE target for layer 0
-        fused_target = (
-            "re:^language_model[.]model[.]layers[.]0[.]mlp[.]experts$"
+        # Per-expert regex for layer 0's FusedMoE — matches the
+        # "unfused" per-expert layer_name form vLLM builds at
+        # scheme-dispatch time.
+        expected = (
+            r"re:^language_model\[\.\]model\[\.\]layers\[\.\]0\[\.\]mlp\[\.\]"
+            r"experts\[\.\]\[0\-9\]\+\[\.\]\(gate_proj\|up_proj\|down_proj\)\$"
         )
-        self.assertIn(fused_target, targets,
-                      f"missing FusedMoE target; got {targets}")
-        # No packed-tensor-name target should remain
+        # Looser match: just check the shape rather than exact string
+        # (the re.escape() inside _per_expert_regex_for adds backslashes).
+        has_per_expert = any(
+            t.startswith("re:^")
+            and "mlp[.]experts[.][0-9]+[.]" in t
+            and "(gate_proj|up_proj|down_proj)$" in t
+            for t in targets
+        )
+        self.assertTrue(has_per_expert,
+                        f"missing per-expert MoE target; got {targets}")
+        # No packed-tensor-name target should leak in.
         for t in targets:
             self.assertFalse(
                 t.endswith("mlp[.]experts[.]gate_up_proj$"),
-                f"packed tensor name leaked into targets: {t}")
+                f"packed tensor name leaked: {t}")
             self.assertFalse(
                 t.endswith("mlp[.]experts[.]down_proj$"),
-                f"packed tensor name leaked into targets: {t}")
+                f"packed tensor name leaked: {t}")
 
     def test_packed_moe_mixed_format_rejected(self):
         """Different formats on gate_up_proj and down_proj of the same
