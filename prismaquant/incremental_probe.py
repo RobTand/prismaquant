@@ -1468,9 +1468,37 @@ def _run_body_streaming_shard(
         k: v for k, v in precomputed.expert_info.items() if k in all_tracked
     }
     # expert_saliency is keyed by router_qname, not expert linear qname.
-    # A router belongs to this shard iff at least one of its expert
-    # Linears is tracked here.
-    shard_routers_in_scope = {rq for (rq, _eid) in shard_expert_info.values()}
+    # Two layouts coexist:
+    #   (a) nested — each expert is an nn.Module leaf, so we can test
+    #       "router's experts are tracked in this shard" via expert_info.
+    #   (b) packed-3D — no per-expert leaves, so expert_info has no
+    #       entry for the router. Check whether any of the shard's
+    #       tracked names belong to this router's layer prefix
+    #       (strip `.gate` → MoE-block qname → `.mlp.experts.*`
+    #       packed stat lives under its layer).
+    shard_routers_in_scope: set[str] = {
+        rq for (rq, _eid) in shard_expert_info.values()
+    }
+    # Packed path: walk every router in the precompute and admit it when
+    # the shard tracks a stat rooted at the same MoE-block qname prefix.
+    # This is O(routers · tracked) but both are tiny (40 × ~40).
+    for rq in precomputed.expert_saliency:
+        if rq in shard_routers_in_scope:
+            continue
+        # router_qname conventionally ends in ".gate"; stripping that
+        # gives the MoE-block qname. Admit the router when the shard
+        # tracks ANY nn.Linear under the same MoE block (e.g. the
+        # shared_expert's gate_proj lives at
+        # "<block>.shared_expert.gate_proj" and IS tracked). The packed
+        # experts 3D param isn't a Linear and so won't appear in
+        # all_tracked directly.
+        if not rq.endswith(".gate"):
+            continue
+        block_prefix = rq[: -len(".gate")] + "."
+        for tracked in all_tracked:
+            if tracked.startswith(block_prefix):
+                shard_routers_in_scope.add(rq)
+                break
     shard_expert_saliency = {
         rq: per_expert_map
         for rq, per_expert_map in precomputed.expert_saliency.items()
