@@ -2098,7 +2098,7 @@ def main():
     targets = [float(x) for x in args.pareto_targets.split(",")]
     curve = []
     for t in targets:
-        assignment, _pareto_pruned, achieved = solve_with_promotion(
+        assignment, pareto_pruned, achieved = solve_with_promotion(
             stats, candidates, t, format_specs, format_rank,
             args.bit_precision,
             no_fused_promote=args.no_fused_promote,
@@ -2119,11 +2119,19 @@ def main():
             )
             format_counts[fmt] += 1
             format_params[fmt] += stats[name]["n_params"]
+        # Prune stats: non-empty entries in pareto_pruned indicate super-
+        # Linears where the DP picked a DROP-variant candidate. When
+        # prune is disabled (or saliency missing) this dict is empty and
+        # both columns are 0, so the CSV is comparable across runs.
+        n_layers_pruned = len(pareto_pruned)
+        n_experts_dropped = sum(len(v) for v in pareto_pruned.values())
         curve.append({
             "target_bits": t,
             "feasible": True,
             "achieved_bits": achieved,
             "predicted_dloss": total_dloss,
+            "n_layers_pruned": n_layers_pruned,
+            "n_experts_dropped": n_experts_dropped,
             **{f"layers_{k}": v for k, v in format_counts.items()},
             **{f"params_{k}": v for k, v in format_params.items()},
         })
