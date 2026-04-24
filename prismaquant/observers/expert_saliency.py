@@ -23,14 +23,26 @@ Low-saliency experts get pruned first by the allocator.
 
 ### Supported model layouts
 
-This observer works for MoE layouts where `discover_moe_structure`
-returns a nested tree — i.e. where each expert is a Python module
-(`mlp.experts.{eid}`) with its own forward method. Qwen3.5 / 3.6,
-Mixtral, GPT-OSS, and the transformers reference Deepseek-V3 layout
-are all nested. The packed-3D-tensor layouts (MiniMax pre-unfuse,
-certain Kimi checkpoints) are not supported and will silently skip
-those layers — the caller should unfuse first via the existing
-`_set_minimax_fast_moe` utility or equivalent profile hook.
+Two layouts, both handled via the same `ExpertSaliencyTracker`:
+
+1. **Nested** (per-expert `nn.Module`): `mlp.experts.{eid}` is a module
+   with its own forward method. Mixtral, GPT-OSS, and the HF-reference
+   Deepseek-V3 implementations are nested. Each expert module gets a
+   forward hook; the router's hook stashes top-k probs/ids for the
+   same-layer expert hooks to consume.
+
+2. **Packed-3D** (batched expert tensors): `mlp.experts.gate_up_proj`
+   is a `[num_experts, 2*inter, hidden]` nn.Parameter — there's no
+   per-expert nn.Module to hook. Qwen3.5 / Qwen3.6 MoE use this
+   layout in the HF reference code. We instance-level monkey-patch the
+   packed-experts module's forward to replicate its per-expert compute
+   while accumulating S_j inside the same loop; the patch is reversed
+   in `remove_hooks()` and is zero-overhead (shares the real forward's
+   matmuls, not a duplicate pass).
+
+Callers drive layout selection by populating either the
+`routers_and_experts` list (layout 1) or the `packed_moe_blocks` list
+(layout 2). Both can coexist on the same tracker instance.
 
 ### Thread safety / reentrancy
 
@@ -53,6 +65,7 @@ negligible on either device.
 from __future__ import annotations
 
 import re
+import types
 from collections import defaultdict
 from typing import Callable
 
@@ -61,7 +74,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-__all__ = ["ExpertSaliencyTracker", "saliency_from_moe_structure"]
+__all__ = [
+    "ExpertSaliencyTracker",
+    "saliency_from_moe_structure",
+    "saliency_from_packed_moe",
+]
+
+
+# Attribute names commonly used on packed-experts modules for the
+# gate/up fusion and the down projection. Detection is additive — a
+# module is "packed" when any of these is a 3D nn.Parameter.
+_PACKED_GATE_UP_NAMES = ("gate_up_proj",)
+_PACKED_DOWN_NAMES = ("down_proj",)
+_PACKED_ALL_NAMES = _PACKED_GATE_UP_NAMES + _PACKED_DOWN_NAMES + ("w1", "w2", "w3")
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +111,7 @@ class ExpertSaliencyTracker:
         routers_and_experts: list[tuple[str, str, list[int]]],
         top_k: int,
         softmax_dtype: torch.dtype = torch.float32,
+        packed_moe_blocks: list[dict] | None = None,
     ):
         """
         Args:
@@ -103,11 +129,27 @@ class ExpertSaliencyTracker:
           softmax_dtype: dtype in which to compute the router softmax.
               bf16 routers can overflow their own softmax on pathological
               logit magnitudes; fp32 is the safe default.
+          packed_moe_blocks: list of dicts from
+              ``saliency_from_packed_moe`` for MoE blocks whose experts
+              are stored as packed 3D tensors (no per-expert module to
+              hook). Each entry holds ``{"router_qname",
+              "experts_qname", "num_experts"}``. For these blocks we
+              install an instance-level monkey-patch on the experts
+              module's forward that replicates its own per-expert loop
+              while emitting S_j contributions along the way — the
+              patch is reverted by ``remove_hooks()``. Currently
+              specialized to the Qwen3.5/3.6 ``Qwen3_5MoeExperts``
+              compute (gate_up_proj + act + down_proj), which is the
+              only packed-3D layout in the supported model set.
         """
         self.top_k = int(top_k)
         self.softmax_dtype = softmax_dtype
 
         self._handles: list = []
+        # Instance-level monkey-patched experts modules (packed-3D path).
+        # Populated by `_install_packed_experts_patch`; reverted by
+        # `remove_hooks`.
+        self._patched_packed_modules: list[nn.Module] = []
         # Per-(router, expert) accumulators in fp64. Lazily allocated on
         # the hook's firing device (first time the router's forward runs
         # after materialization). `sum_g_norm` / `count` feed the mean-
@@ -176,6 +218,59 @@ class ExpertSaliencyTracker:
                 # attach to; otherwise saliency() would report phantom
                 # zeros for a router that never fires.
                 self._num_experts_by_router.pop(router_qname, None)
+
+        # Packed-3D path: for each block, monkey-patch the packed
+        # experts module's forward to accumulate S_j alongside its own
+        # per-expert compute. No duplicate matmuls, no forward hooks
+        # (the patch replaces the method entirely).
+        for entry in packed_moe_blocks or []:
+            self._install_packed_experts_patch(model, entry)
+
+    def _install_packed_experts_patch(
+        self,
+        model: nn.Module,
+        entry: dict,
+    ) -> bool:
+        """Swap `experts_mod.forward` for a wrapper that replicates its
+        own per-expert compute and writes S_j into the tracker. Returns
+        True on success, False if the module layout isn't recognized
+        or is already patched.
+        """
+        router_qname = entry.get("router_qname")
+        experts_qname = entry.get("experts_qname")
+        num_experts = entry.get("num_experts")
+        if not (router_qname and experts_qname and num_experts):
+            return False
+        try:
+            experts_mod = model.get_submodule(experts_qname)
+        except AttributeError:
+            return False
+        # Require the Qwen3_5MoeExperts-shaped API: `gate_up_proj`,
+        # `down_proj`, and `act_fn` attributes. Other packed layouts
+        # (Mixtral w1/w2/w3, MiniMax) can be added via sibling
+        # implementations if they enter the supported set.
+        gate_up = getattr(experts_mod, "gate_up_proj", None)
+        down = getattr(experts_mod, "down_proj", None)
+        act_fn = getattr(experts_mod, "act_fn", None)
+        if not (isinstance(gate_up, nn.Parameter) and gate_up.dim() == 3):
+            return False
+        if not (isinstance(down, nn.Parameter) and down.dim() == 3):
+            return False
+        if act_fn is None:
+            return False
+        if hasattr(experts_mod, "_pq_saliency_patched"):
+            return False  # idempotent
+        experts_mod._pq_saliency_patched = True
+        experts_mod._pq_saliency_tracker = self
+        experts_mod._pq_saliency_router = router_qname
+        experts_mod._pq_saliency_original_forward = experts_mod.forward
+        experts_mod.forward = types.MethodType(
+            _qwen3_5_moe_experts_saliency_forward, experts_mod,
+        )
+        self._patched_packed_modules.append(experts_mod)
+        self._num_experts_by_router[router_qname] = int(num_experts)
+        self._registered[router_qname].update(range(int(num_experts)))
+        return True
 
     # -- hook factories -----------------------------------------------------
 
@@ -327,6 +422,26 @@ class ExpertSaliencyTracker:
             except Exception:
                 pass
         self._handles.clear()
+        # Revert packed-3D monkey-patches.
+        for mod in self._patched_packed_modules:
+            orig = getattr(mod, "_pq_saliency_original_forward", None)
+            if orig is not None:
+                try:
+                    mod.forward = orig
+                except Exception:
+                    pass
+            for attr in (
+                "_pq_saliency_patched",
+                "_pq_saliency_tracker",
+                "_pq_saliency_router",
+                "_pq_saliency_original_forward",
+            ):
+                if hasattr(mod, attr):
+                    try:
+                        delattr(mod, attr)
+                    except Exception:
+                        pass
+        self._patched_packed_modules.clear()
 
     def saliency(
         self,
@@ -416,6 +531,73 @@ class ExpertSaliencyTracker:
 
 
 # ---------------------------------------------------------------------------
+# Packed-3D patched forward (Qwen3_5MoeExperts shape)
+# ---------------------------------------------------------------------------
+def _qwen3_5_moe_experts_saliency_forward(
+    self: nn.Module,
+    hidden_states: torch.Tensor,
+    top_k_index: torch.Tensor,
+    top_k_weights: torch.Tensor,
+) -> torch.Tensor:
+    """Instance-level replacement for ``Qwen3_5MoeExperts.forward``.
+
+    Bit-identical output semantics to the upstream implementation; the
+    only addition is REAP saliency accumulation inside the per-expert
+    loop. ``self._pq_saliency_tracker`` and ``self._pq_saliency_router``
+    are set by ``ExpertSaliencyTracker._install_packed_experts_patch``.
+    """
+    tracker = getattr(self, "_pq_saliency_tracker", None)
+    router_qname = getattr(self, "_pq_saliency_router", None)
+    if tracker is not None and router_qname is not None:
+        tracker._ensure_accumulators(router_qname, hidden_states.device)
+        acc_sum = tracker.sum_g_norm.get(router_qname)
+        acc_count = tracker.count.get(router_qname)
+        acc_max = tracker.max_g_norm.get(router_qname)
+    else:
+        acc_sum = acc_count = acc_max = None
+
+    final_hidden_states = torch.zeros_like(hidden_states)
+    with torch.no_grad():
+        expert_mask = F.one_hot(top_k_index, num_classes=self.num_experts)
+        expert_mask = expert_mask.permute(2, 1, 0)
+        # One sync per forward (amortized across all experts in this
+        # block) — convert the "which experts got hit" tensor to a
+        # Python list once, not once per iteration.
+        expert_hit_ints = (
+            torch.greater(expert_mask.sum(dim=(-1, -2)), 0)
+            .nonzero().flatten().tolist()
+        )
+
+    for e_int in expert_hit_ints:
+        if e_int == self.num_experts:
+            continue
+        top_k_pos, token_idx = torch.where(expert_mask[e_int])
+        current_state = hidden_states[token_idx]
+        gate, up = F.linear(current_state, self.gate_up_proj[e_int]).chunk(2, dim=-1)
+        inter = self.act_fn(gate) * up
+        expert_out = F.linear(inter, self.down_proj[e_int])
+
+        # REAP saliency: f_j BEFORE routing-weight multiply, weighted
+        # by the top-k prob that routed each token to this expert.
+        if acc_sum is not None:
+            gate_vals = top_k_weights[token_idx, top_k_pos]  # [n_active]
+            norms = expert_out.to(torch.float64).norm(dim=-1)
+            contribution = gate_vals.to(torch.float64) * norms
+            acc_sum[e_int] += contribution.sum()
+            acc_count[e_int] += norms.numel()
+            if norms.numel() > 0:
+                acc_max[e_int] = torch.maximum(acc_max[e_int], contribution.max())
+
+        # Finish the layer's own compute.
+        routed = expert_out * top_k_weights[token_idx, top_k_pos, None]
+        final_hidden_states.index_add_(
+            0, token_idx, routed.to(final_hidden_states.dtype),
+        )
+
+    return final_hidden_states
+
+
+# ---------------------------------------------------------------------------
 # Helper: build the (router, experts_parent, ids) list from prismaquant's
 # existing MoE discovery output
 # ---------------------------------------------------------------------------
@@ -473,3 +655,59 @@ def saliency_from_moe_structure(
         (router_qname, experts_parent, sorted(eids))
         for (router_qname, experts_parent), eids in by_router.items()
     ]
+
+
+# ---------------------------------------------------------------------------
+# Helper: discover packed-3D MoE blocks (Qwen3.5/3.6 style)
+# ---------------------------------------------------------------------------
+def saliency_from_packed_moe(model: nn.Module) -> list[dict]:
+    """Walk ``model`` and return one entry per packed-3D MoE block —
+    blocks where the experts container holds ``gate_up_proj`` and
+    ``down_proj`` as 3D ``nn.Parameter`` instead of a ``ModuleList`` of
+    per-expert modules.
+
+    Returns a list of dicts with keys ``router_qname``,
+    ``experts_qname``, and ``num_experts`` ready to pass to
+    ``ExpertSaliencyTracker(__init__, ..., packed_moe_blocks=...)``.
+
+    Dense models and nested-MoE models return an empty list.
+    """
+    results: list[dict] = []
+    for parent_qname, parent in model.named_modules():
+        # Find a sibling pair: (router, experts-container).
+        # Typical Qwen3.5 layout: parent has `gate` (TopKRouter) and
+        # `experts` (packed). Parent is the SparseMoeBlock.
+        gate = getattr(parent, "gate", None)
+        experts = getattr(parent, "experts", None)
+        if gate is None or experts is None:
+            continue
+        if not isinstance(experts, nn.Module):
+            continue
+        # Packed-3D detection: at least one 3D nn.Parameter matching
+        # one of the known packed-param names.
+        has_packed = False
+        for pn in _PACKED_ALL_NAMES:
+            p = getattr(experts, pn, None)
+            if isinstance(p, nn.Parameter) and p.dim() == 3:
+                has_packed = True
+                break
+        if not has_packed:
+            continue
+        # Infer num_experts from the router. Qwen3_5MoeTopKRouter stores
+        # its weight directly as a Parameter of shape [num_experts, D];
+        # nn.Linear routers expose out_features.
+        if isinstance(gate, nn.Linear):
+            num_experts = int(gate.out_features)
+        else:
+            w = getattr(gate, "weight", None)
+            if not isinstance(w, torch.Tensor) or w.ndim < 1:
+                continue
+            num_experts = int(w.shape[0])
+        router_qname = f"{parent_qname}.gate" if parent_qname else "gate"
+        experts_qname = f"{parent_qname}.experts" if parent_qname else "experts"
+        results.append({
+            "router_qname": router_qname,
+            "experts_qname": experts_qname,
+            "num_experts": num_experts,
+        })
+    return results

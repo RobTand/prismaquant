@@ -12,6 +12,14 @@ Current observers:
     the allocator.
 """
 
-from .expert_saliency import ExpertSaliencyTracker, saliency_from_moe_structure
+from .expert_saliency import (
+    ExpertSaliencyTracker,
+    saliency_from_moe_structure,
+    saliency_from_packed_moe,
+)
 
-__all__ = ["ExpertSaliencyTracker", "saliency_from_moe_structure"]
+__all__ = [
+    "ExpertSaliencyTracker",
+    "saliency_from_moe_structure",
+    "saliency_from_packed_moe",
+]

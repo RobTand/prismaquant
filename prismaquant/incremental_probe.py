@@ -50,6 +50,7 @@ from .layer_streaming import (
 from .observers import (
     ExpertSaliencyTracker,
     saliency_from_moe_structure,
+    saliency_from_packed_moe,
 )
 from .sensitivity_probe import (
     FisherAccumulator,
@@ -695,13 +696,20 @@ def _compute_global_precompute(
     phase1_expert_info = discover_moe_structure(model)
     _saliency_top_k = read_top_k(model, default=2)
     _saliency_triples = saliency_from_moe_structure(phase1_expert_info)
-    saliency_tracker = ExpertSaliencyTracker(
-        model, _saliency_triples, top_k=_saliency_top_k
-    ) if _saliency_triples else None
+    _packed_moe_blocks = saliency_from_packed_moe(model)
+    saliency_tracker = (
+        ExpertSaliencyTracker(
+            model, _saliency_triples, top_k=_saliency_top_k,
+            packed_moe_blocks=_packed_moe_blocks,
+        )
+        if (_saliency_triples or _packed_moe_blocks) else None
+    )
     if saliency_tracker is not None:
         n_hooked = sum(len(v) for v in saliency_tracker.registered_experts().values())
         print(f"[incremental/global] expert-saliency tracker hooked "
-              f"{n_hooked} experts across {len(_saliency_triples)} routers "
+              f"{n_hooked} experts across "
+              f"{len(_saliency_triples)} nested routers + "
+              f"{len(_packed_moe_blocks)} packed-3D routers "
               f"(top_k={_saliency_top_k})", flush=True)
 
     t_phase = time.time()
