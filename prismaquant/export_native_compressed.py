@@ -3238,6 +3238,62 @@ def build_quantization_config(
                     ignore.append(vllm_name)
                     bf16_name_set.add(vllm_name)
 
+    # Packed-3D MoE target collapse. vLLM's Qwen3_5/3_6 MoE loads as
+    # FusedMoE — a single nn.Module at qname `<block>.experts` that
+    # owns the 3D packed expert tensors internally. Scheme dispatch
+    # matches against that module's qname, NOT against the per-packed
+    # -tensor names we emit in the safetensors (`<block>.experts.
+    # gate_up_proj`, `<block>.experts.down_proj`). Without collapse,
+    # `find_matched_target` never fires on FusedMoE, the NVFP4 scheme
+    # never registers `w2_input_global_scale` on the layer, and
+    # load_weights KeyErrors when vLLM remaps our per-expert input
+    # scale keys to the unregistered FusedMoE param name.
+    #
+    # Collapse: find entries in by_fmt / ignore whose name ends in
+    # `.experts.gate_up_proj` or `.experts.down_proj`, remove them,
+    # and add the FusedMoE qname (`<block>.experts`) ONCE per layer
+    # to the format both projections share. `promote_moe_pair`
+    # guarantees both projections land in the same bucket — we crash
+    # loud if they don't.
+    _packed_moe_re = re.compile(r"^(.+\.experts)\.(gate_up_proj|down_proj)$")
+    packed_fused_states: dict[str, set[str]] = {}
+    for fmt, names in list(by_fmt.items()):
+        kept = []
+        for vname in names:
+            m = _packed_moe_re.match(vname)
+            if m:
+                packed_fused_states.setdefault(m.group(1), set()).add(fmt)
+            else:
+                kept.append(vname)
+        by_fmt[fmt] = kept
+    ignore_kept = []
+    for vname in ignore:
+        # Skip regex-prefixed ignores (our _bf16_packed_expert_ignore_regex
+        # emits those); they're fine to leave alone as they match the
+        # per-expert leaf tensor keys vLLM's safetensors iterator walks.
+        if vname.startswith("re:"):
+            ignore_kept.append(vname)
+            continue
+        m = _packed_moe_re.match(vname)
+        if m:
+            packed_fused_states.setdefault(m.group(1), set()).add("IGNORE")
+        else:
+            ignore_kept.append(vname)
+    ignore = ignore_kept
+    for fused_qname, states in packed_fused_states.items():
+        if len(states) > 1:
+            raise RuntimeError(
+                f"[export-stream] FusedMoE at {fused_qname!r} has mixed "
+                f"states across projections {states}; promote_moe_pair "
+                f"should have forced gate_up_proj and down_proj to share "
+                f"a scheme before this point."
+            )
+        state = next(iter(states))
+        if state == "IGNORE":
+            ignore.append(fused_qname)
+        else:
+            by_fmt.setdefault(state, []).append(fused_qname)
+
     # Fused-linear target emission. vLLM's model-loading time fuses
     # siblings from `packed_modules_mapping` into a single packed Linear
     # (e.g. Qwen3.5 DeltaNet's `in_proj_qkv + in_proj_z → in_proj_qkvz`,

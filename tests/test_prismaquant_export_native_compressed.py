@@ -359,6 +359,56 @@ class TestBuildQuantizationConfig(unittest.TestCase):
         self.assertIn(
             "language_model.model.layers.0.mlp.gate", ignore)
 
+    def test_packed_moe_collapses_to_fused_module_target(self):
+        """Qwen3.5/3.6 packed-3D MoE loads as FusedMoE; scheme dispatch
+        matches against the FusedMoE module qname, not per-packed-tensor
+        names. Both projections of a layer must collapse into ONE target
+        at the FusedMoE qname (`...experts`), stripped of `.gate_up_proj`
+        / `.down_proj`."""
+        profile = Qwen3_5Profile()
+        assignment = {
+            "model.layers.0.mlp.experts.gate_up_proj": "NVFP4",
+            "model.layers.0.mlp.experts.down_proj":    "NVFP4",
+            # Padding with non-experts so by_fmt isn't empty and the
+            # catch-all path runs normally.
+            "model.layers.0.self_attn.q_proj":         "NVFP4",
+        }
+        qc = build_quantization_config(
+            assignment, bf16_passthrough=set(), profile=profile,
+        )
+        # Find the NVFP4 group
+        nvfp4 = next(g for g in qc["config_groups"].values()
+                     if g["weights"]["num_bits"] == 4)
+        targets = nvfp4["targets"]
+        # FusedMoE target for layer 0
+        fused_target = (
+            "re:^language_model[.]model[.]layers[.]0[.]mlp[.]experts$"
+        )
+        self.assertIn(fused_target, targets,
+                      f"missing FusedMoE target; got {targets}")
+        # No packed-tensor-name target should remain
+        for t in targets:
+            self.assertFalse(
+                t.endswith("mlp[.]experts[.]gate_up_proj$"),
+                f"packed tensor name leaked into targets: {t}")
+            self.assertFalse(
+                t.endswith("mlp[.]experts[.]down_proj$"),
+                f"packed tensor name leaked into targets: {t}")
+
+    def test_packed_moe_mixed_format_rejected(self):
+        """Different formats on gate_up_proj and down_proj of the same
+        FusedMoE is a promote_moe_pair bug — we loud-crash rather than
+        emit a malformed config."""
+        profile = Qwen3_5Profile()
+        assignment = {
+            "model.layers.0.mlp.experts.gate_up_proj": "NVFP4",
+            "model.layers.0.mlp.experts.down_proj":    "MXFP8",
+        }
+        with self.assertRaises(RuntimeError):
+            build_quantization_config(
+                assignment, bf16_passthrough=set(), profile=profile,
+            )
+
     def test_no_class_name_catchall_target(self):
         # The class-name catch-all "Linear" short-circuits vLLM's
         # fused-layer match path and was the bug that produced wrong
