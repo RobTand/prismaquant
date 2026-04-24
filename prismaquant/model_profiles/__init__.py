@@ -6,14 +6,14 @@ Exports:
   - Qwen3Profile: covers Qwen3 dense (0.6B-32B)
   - Qwen3_5Profile: covers Qwen3.5 and Qwen3.6 MoE (w/ MTP)
   - Gemma4Profile: covers Gemma 4 dense + MoE multimodal
-  - MiniMaxM2Profile: covers MiniMax M2 / M2.7 MoE
   - detect_profile(model_path): auto-detect profile from HF config
   - register_profile(cls): register a custom profile at runtime
+
+MiniMaxM2Profile was archived 2026-04-24; see archive/minimax_m2p7/README.md.
 """
 from .base import ModelProfile
 from .default import DefaultProfile
 from .gemma4 import Gemma4Profile
-from .minimax_m2 import MiniMaxM2Profile
 from .qwen3 import Qwen3Profile
 from .qwen3_5 import Qwen3_5Profile
 from .qwen3_5_dense import Qwen3_5DenseProfile
@@ -26,7 +26,6 @@ __all__ = [
     "Qwen3_5Profile",
     "Qwen3_5DenseProfile",
     "Gemma4Profile",
-    "MiniMaxM2Profile",
     "detect_profile",
     "register_profile",
 ]

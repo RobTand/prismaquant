@@ -27,10 +27,17 @@ from pathlib import Path
 from .base import ModelProfile
 from .default import DefaultProfile
 from .gemma4 import Gemma4Profile
-from .minimax_m2 import MiniMaxM2Profile
 from .qwen3 import Qwen3Profile
 from .qwen3_5 import Qwen3_5Profile
 from .qwen3_5_dense import Qwen3_5DenseProfile
+
+# MiniMaxM2Profile has been archived — see archive/minimax_m2p7/README.md.
+# The NVINT custom-kernel path it depended on was superseded by the joint
+# REAP-saliency + quantization allocator; any MoE model can now be
+# handled end-to-end with stock vLLM formats (NVFP4 + MXFP8 + FP8_SOURCE +
+# BF16) via the joint optimizer without a custom kernel. Restore by copying
+# archive/minimax_m2p7/minimax_m2.py back to model_profiles/ and re-adding
+# the import + _REGISTERED entry below.
 
 
 _REGISTERED: list[type[ModelProfile]] = [
@@ -38,7 +45,6 @@ _REGISTERED: list[type[ModelProfile]] = [
     Qwen3_5Profile,
     Qwen3Profile,  # original Qwen3 (dense, no MoE, no MTP) — after the 3.5 siblings
     Gemma4Profile,
-    MiniMaxM2Profile,
 ]
 
 
