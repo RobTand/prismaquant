@@ -1401,6 +1401,160 @@ def _packed_experts_param_names(module: nn.Module) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Prune-manifest plumbing (REAP-style expert drop + reindex)
+# ---------------------------------------------------------------------------
+# Sidecar file written by the allocator next to `layer_config.json` as
+# `<layer_config>.prune.json`. One entry per MoE layer that had experts
+# dropped, keyed by router qname (e.g. `model.layers.0.mlp.gate`). Each
+# entry carries:
+#   num_experts_orig, num_experts_kept — the before/after counts
+#   pruned_expert_ids : list[int]      — original eids to drop
+#   kept_expert_ids   : list[int]      — original eids that survive
+#   orig_to_new_eid   : {str(orig): new_dense_idx}  — reindex map
+# The exporter uses this to (a) skip the pruned experts' tensors, (b)
+# reindex kept experts to a contiguous 0..K-1 range in the output keys
+# (vLLM's FusedMoE / ModuleList indexing requires dense), (c) shrink
+# the router weight's out-dim to K rows in kept-order, and (d) update
+# HF config num_experts fields.
+_EXPERT_IDX_IN_QNAME_RE = re.compile(
+    r"^(?P<parent>.+)\.experts\.(?P<eid>\d+)(?:\.(?P<rest>.+))?$"
+)
+
+
+def _load_prune_manifest(path: Path | str | None) -> dict[str, dict]:
+    """Load a prune-sidecar JSON. Returns an empty dict when the file
+    doesn't exist — non-prune exports are the default case."""
+    if path is None:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    with open(p) as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"[export-stream] prune manifest at {p} is not a JSON object"
+        )
+    return data
+
+
+def _index_prune_by_parent(manifest: dict[str, dict]) -> dict[str, dict]:
+    """Re-index the router-keyed manifest by the parent qname common to
+    both the router and the experts module (e.g. `model.layers.0.mlp`
+    for router `.mlp.gate` and experts container `.mlp.experts`).
+
+    Return dicts carry the router_qname alongside the entry so callers
+    can distinguish the router from its experts when they share a
+    parent.
+    """
+    by_parent: dict[str, dict] = {}
+    for router_qname, entry in manifest.items():
+        parent = router_qname.rsplit(".", 1)[0]
+        by_parent[parent] = {"router_qname": router_qname, **entry}
+    return by_parent
+
+
+def _resolve_linear_prune_action(
+    full_qname: str,
+    prune_by_parent: dict[str, dict],
+) -> tuple[str, dict] | None:
+    """Map a live nn.Linear's qname to a prune action.
+
+    Returns one of:
+      ("router", entry)  — this IS the gated router; shrink out-dim to
+                           kept_expert_ids (in order).
+      ("drop",   entry)  — this is a PRUNED per-expert Linear; skip it.
+      ("reindex", entry) — this is a KEPT per-expert Linear; emit under
+                           a reindexed qname. `entry["new_full"]` has
+                           the rewritten qname.
+      None               — not MoE-prune-relevant; fall through to the
+                           default code path.
+    """
+    if not prune_by_parent:
+        return None
+    # Router check: exact qname match.
+    parent = full_qname.rsplit(".", 1)[0]
+    entry = prune_by_parent.get(parent)
+    if entry is not None and entry["router_qname"] == full_qname:
+        return "router", entry
+    # Per-expert Linear: qname shape `<parent>.experts.<eid>.<rest>`.
+    m = _EXPERT_IDX_IN_QNAME_RE.match(full_qname)
+    if m is None:
+        return None
+    parent = m.group("parent")
+    entry = prune_by_parent.get(parent)
+    if entry is None:
+        return None
+    try:
+        eid = int(m.group("eid"))
+    except (TypeError, ValueError):
+        return None
+    if eid in set(entry["pruned_expert_ids"]):
+        return "drop", entry
+    new_eid = entry["orig_to_new_eid"].get(str(eid))
+    if new_eid is None:
+        return None
+    rest = m.group("rest")
+    new_full = (
+        f"{parent}.experts.{new_eid}.{rest}" if rest
+        else f"{parent}.experts.{new_eid}"
+    )
+    out_entry = dict(entry)
+    out_entry["new_full"] = new_full
+    out_entry["orig_eid"] = eid
+    out_entry["new_eid"] = int(new_eid)
+    return "reindex", out_entry
+
+
+def _resolve_packed_experts_prune(
+    experts_qname: str,
+    prune_by_parent: dict[str, dict],
+) -> dict | None:
+    """For a packed-experts module at `experts_qname` (e.g.
+    `model.layers.0.mlp.experts`), return the prune entry keyed by its
+    parent (`model.layers.0.mlp`) if this layer is pruned. Otherwise
+    None.
+    """
+    if not prune_by_parent:
+        return None
+    parent = experts_qname.rsplit(".", 1)[0]
+    return prune_by_parent.get(parent)
+
+
+def _shrink_router_weight(
+    mod: nn.Linear,
+    entry: dict,
+) -> torch.Tensor:
+    """Drop rows of the router's output dim, keeping `kept_expert_ids`
+    in order. Validates against `num_experts_orig` up-front — a size
+    mismatch means the manifest and the live router disagree and we
+    would emit a silently-broken artifact otherwise.
+    """
+    w = mod.weight.detach()
+    kept = entry["kept_expert_ids"]
+    n_orig = int(entry["num_experts_orig"])
+    if w.shape[0] != n_orig:
+        raise RuntimeError(
+            f"[export-stream] prune: router weight rows "
+            f"({w.shape[0]}) != manifest num_experts_orig "
+            f"({n_orig}). Manifest was built against a different "
+            f"model — refusing to shrink."
+        )
+    idx = torch.as_tensor(kept, dtype=torch.long, device=w.device)
+    return w.index_select(0, idx).contiguous()
+
+
+# HF config field names that hold the MoE expert count. Different
+# archs use different ones; we update whichever exist.
+_MOE_EXPERT_COUNT_FIELDS = (
+    "num_experts",
+    "num_local_experts",
+    "num_routed_experts",
+    "n_routed_experts",
+)
+
+
+# ---------------------------------------------------------------------------
 # Fused-sibling joint global_scale (for dense Linears)
 # ---------------------------------------------------------------------------
 # vLLM's compressed_tensors_w4a4_nvfp4.process_weights_after_loading warns
@@ -2055,6 +2209,7 @@ def materialize_tensors_streaming(
     dtype: torch.dtype = torch.bfloat16,
     device: torch.device = torch.device("cuda"),
     offload_folder: str | None = None,
+    prune_manifest: dict[str, dict] | None = None,
 ) -> tuple[dict[str, torch.Tensor], dict]:
     """Stream decoder layers through quantize → emit → unload. Never
     holds the full model in memory. Small models still exercise this
@@ -2125,6 +2280,17 @@ def materialize_tensors_streaming(
     # to copy source fp8 + scale_inv bytes verbatim into the output.
     # Distinct key format from the loader-side dequant map above.
     fp8_source_map = _build_fp8_source_map(model_path)
+    prune_by_parent = _index_prune_by_parent(prune_manifest or {})
+    if prune_by_parent:
+        n_pruned_total = sum(
+            e["num_experts_orig"] - e["num_experts_kept"]
+            for e in prune_by_parent.values()
+        )
+        print(
+            f"[export-stream] prune manifest: {len(prune_by_parent)} "
+            f"MoE layers, {n_pruned_total} experts dropped total",
+            flush=True,
+        )
     if fp8_source_map:
         print(f"[export-stream] fp8 source-emit map: {len(fp8_source_map)} "
               f"Linears available for FP8_SOURCE passthrough", flush=True)
@@ -2275,13 +2441,51 @@ def materialize_tensors_streaming(
         covered: set[str] = set()
         linear_count = 0
         grouped_linears: dict[
-            tuple[str, tuple[int, int]], list[tuple[str, str, nn.Linear]]
+            tuple[str, tuple[int, int]],
+            list[tuple[str, str, str, nn.Linear]]  # (full, emit_full, recipe_key, mod)
         ] = defaultdict(list)
         for sub_name, mod in layer_mod.named_modules():
             if not isinstance(mod, nn.Linear):
                 continue
             linear_count += 1
             full = f"{layer_qname}.{sub_name}"
+
+            # Prune-aware routing: resolve once per Linear. Actions:
+            #   "router"  → shrink output dim to kept experts + BF16-emit
+            #   "drop"    → pruned expert; do not emit this Linear at all
+            #   "reindex" → kept expert; rewrite qname eid and continue
+            #               through the normal emit path
+            prune_action = _resolve_linear_prune_action(full, prune_by_parent)
+            if prune_action is not None:
+                kind, p_entry = prune_action
+                if kind == "router":
+                    if not mod.weight.is_meta:
+                        w_shrunk = _shrink_router_weight(mod, p_entry)
+                        out[f"{full}.weight"] = w_shrunk.to(torch.bfloat16).cpu()
+                        if mod.bias is not None and not mod.bias.is_meta:
+                            b_idx = torch.as_tensor(
+                                p_entry["kept_expert_ids"], dtype=torch.long,
+                                device=mod.bias.device,
+                            )
+                            out[f"{full}.bias"] = (
+                                mod.bias.detach().index_select(0, b_idx)
+                                .to(torch.bfloat16).cpu()
+                            )
+                        hist[("linear", "BF16_router_shrunk")] += 1
+                        covered.add(full)
+                    continue
+                if kind == "drop":
+                    # Skip pruned expert entirely. Mark covered so the
+                    # residual-params loop doesn't re-emit its bias as
+                    # a leftover buffer.
+                    hist[("linear", "PRUNED")] += 1
+                    covered.add(full)
+                    continue
+                # kind == "reindex": emit under the reindexed qname.
+                emit_full = p_entry["new_full"]
+            else:
+                emit_full = full
+
             recipe_key = profile.live_to_recipe_name(full)
             fmt = assignment.get(recipe_key)
             if fmt is not None:
@@ -2289,17 +2493,17 @@ def materialize_tensors_streaming(
             if fmt is None:
                 # No assignment → BF16 passthrough.
                 if not mod.weight.is_meta:
-                    out[f"{full}.weight"] = mod.weight.detach().to(torch.bfloat16).cpu()
+                    out[f"{emit_full}.weight"] = mod.weight.detach().to(torch.bfloat16).cpu()
                     if mod.bias is not None and not mod.bias.is_meta:
-                        out[f"{full}.bias"] = mod.bias.detach().to(torch.bfloat16).cpu()
+                        out[f"{emit_full}.bias"] = mod.bias.detach().to(torch.bfloat16).cpu()
                     hist[("linear", "BF16")] += 1
                     covered.add(full)
                 continue
 
             if fmt == "BF16" or recipe_key in bf16_passthrough:
-                out[f"{full}.weight"] = mod.weight.detach().to(torch.bfloat16).cpu()
+                out[f"{emit_full}.weight"] = mod.weight.detach().to(torch.bfloat16).cpu()
                 if mod.bias is not None:
-                    out[f"{full}.bias"] = mod.bias.detach().to(torch.bfloat16).cpu()
+                    out[f"{emit_full}.bias"] = mod.bias.detach().to(torch.bfloat16).cpu()
                 hist[("linear", "BF16")] += 1
                 covered.add(full)
                 continue
@@ -2344,11 +2548,11 @@ def materialize_tensors_streaming(
                         f"[export-stream] FP8_SOURCE: expected "
                         f"fp8_e4m3fn at {weight_ckpt_key}, got "
                         f"{w_fp8.dtype}")
-                out[f"{full}.weight"] = w_fp8.cpu().contiguous()
-                out[f"{full}.weight_scale"] = w_scale.to(
+                out[f"{emit_full}.weight"] = w_fp8.cpu().contiguous()
+                out[f"{emit_full}.weight_scale"] = w_scale.to(
                     torch.float32).cpu().contiguous()
                 if mod.bias is not None and not mod.bias.is_meta:
-                    out[f"{full}.bias"] = mod.bias.detach().to(
+                    out[f"{emit_full}.bias"] = mod.bias.detach().to(
                         torch.bfloat16).cpu()
                 hist[("linear", "FP8_SOURCE")] += 1
                 covered.add(full)
@@ -2356,7 +2560,7 @@ def materialize_tensors_streaming(
 
             if fmt in ("INT2", "INT3", "MXFP8") and mod.weight.dim() == 2:
                 shape = (int(mod.weight.shape[0]), int(mod.weight.shape[1]))
-                grouped_linears[(fmt, shape)].append((full, recipe_key, mod))
+                grouped_linears[(fmt, shape)].append((full, emit_full, recipe_key, mod))
                 continue
 
             override = joint_globals.get(recipe_key) if fmt == "NVFP4" else None
@@ -2366,9 +2570,9 @@ def materialize_tensors_streaming(
                 linear_name=recipe_key,
             )
             for suffix, t in compressed.items():
-                out[f"{full}.{suffix}"] = t.cpu()
+                out[f"{emit_full}.{suffix}"] = t.cpu()
             if mod.bias is not None:
-                out[f"{full}.bias"] = mod.bias.detach().to(torch.bfloat16).cpu()
+                out[f"{emit_full}.bias"] = mod.bias.detach().to(torch.bfloat16).cpu()
             hist[("linear", fmt)] += 1
             covered.add(full)
 
@@ -2382,19 +2586,19 @@ def materialize_tensors_streaming(
             for start in range(0, len(items), chunk_len):
                 chunk = items[start:start + chunk_len]
                 stacked = torch.stack(
-                    [mod.weight.detach().to(torch.float32) for _, _, mod in chunk],
+                    [mod.weight.detach().to(torch.float32) for _, _, _, mod in chunk],
                     dim=0,
                 )
                 compressed_batch = _quantize_2d_group_same_shape(stacked, fmt)
                 del stacked
-                for i, (full, _recipe_key, mod) in enumerate(chunk):
+                for i, (full, emit_full, _recipe_key, mod) in enumerate(chunk):
                     for suffix, tensor in compressed_batch.items():
                         piece = tensor[i]
                         if suffix == "weight_global_scale":
                             piece = piece.reshape(1)
-                        out[f"{full}.{suffix}"] = piece.cpu()
+                        out[f"{emit_full}.{suffix}"] = piece.cpu()
                     if mod.bias is not None:
-                        out[f"{full}.bias"] = mod.bias.detach().to(
+                        out[f"{emit_full}.bias"] = mod.bias.detach().to(
                             torch.bfloat16).cpu()
                     hist[("linear", fmt)] += 1
                     covered.add(full)
@@ -2444,8 +2648,47 @@ def materialize_tensors_streaming(
                 disk_qname = profile.on_disk_expert_qname(experts_qname)
                 should_split = profile.split_packed_experts_for_format(fmt)
 
+                # Prune handling for this experts module. If the layer
+                # is pruned, `iter_experts` enumerates (orig_eid, new_eid)
+                # pairs — only kept experts appear. On the non-pruned
+                # path it's `((e, e) for e in range(E))`, preserving
+                # exact legacy behavior.
+                prune_entry = _resolve_packed_experts_prune(
+                    experts_qname, prune_by_parent,
+                )
+                if prune_entry is not None:
+                    if E != int(prune_entry["num_experts_orig"]):
+                        raise RuntimeError(
+                            f"[export-stream] prune: packed experts at "
+                            f"{experts_qname} have E={E} but manifest "
+                            f"has num_experts_orig="
+                            f"{prune_entry['num_experts_orig']}. "
+                            f"Manifest was built against a different "
+                            f"model — refusing to emit."
+                        )
+                    iter_experts = [
+                        (int(orig_s), int(new)) for orig_s, new in
+                        prune_entry["orig_to_new_eid"].items()
+                    ]
+                    # Sort by new_eid so the output tensor ordering is
+                    # dense 0..K-1 in a predictable order.
+                    iter_experts.sort(key=lambda x: x[1])
+                else:
+                    iter_experts = [(e, e) for e in range(E)]
+
                 if not should_split:
-                    out[f"{disk_qname}.{pn}"] = packed_param.to(torch.bfloat16).cpu()
+                    if prune_entry is not None:
+                        # Keep-packed path after prune: slice the 3D
+                        # tensor on dim 0 to kept experts in new-id
+                        # order, emit under the same unsliced name.
+                        kept_idx = torch.as_tensor(
+                            [o for o, _ in iter_experts],
+                            dtype=torch.long, device=packed_param.device,
+                        )
+                        shrunk = packed_param.index_select(0, kept_idx)
+                        out[f"{disk_qname}.{pn}"] = shrunk.to(torch.bfloat16).cpu()
+                    else:
+                        out[f"{disk_qname}.{pn}"] = packed_param.to(torch.bfloat16).cpu()
                     covered.add(full)
                     hist[("packed_moe", "BF16" if is_bf16 else fmt)] += 1
                     del packed_param
@@ -2454,25 +2697,24 @@ def materialize_tensors_streaming(
                 # Per-expert joint global scale when NVFP4 splits gate+up.
                 per_expert_joint: list[torch.Tensor | None] = [None] * E
                 if fmt == "NVFP4" and len(proj_split) > 1:
-                    for e in range(E):
+                    for orig_e, _ in iter_experts:
                         cands = [
-                            compute_nvfp4_global_real(sp[e].float(),
+                            compute_nvfp4_global_real(sp[orig_e].float(),
                                                       group_size=16)
                             for _, sp in proj_split
                         ]
-                        per_expert_joint[e] = torch.stack(cands).max()
+                        per_expert_joint[orig_e] = torch.stack(cands).max()
 
                 for proj_name, sub_packed in proj_split:
-                    E_p, Mp, Np = sub_packed.shape
-                    for e in range(E_p):
-                        expert_2d = sub_packed[e]
-                        base = f"{disk_qname}.{e}.{proj_name}"
+                    for orig_e, new_e in iter_experts:
+                        expert_2d = sub_packed[orig_e]
+                        base = f"{disk_qname}.{new_e}.{proj_name}"
                         if is_bf16:
                             out[f"{base}.weight"] = expert_2d.to(torch.bfloat16).cpu()
                         else:
                             compressed = _quantize_2d(
                                 expert_2d, fmt,
-                                nvfp4_global_real_override=per_expert_joint[e],
+                                nvfp4_global_real_override=per_expert_joint[orig_e],
                             )
                             for suffix, t in compressed.items():
                                 key = (base
@@ -2481,6 +2723,10 @@ def materialize_tensors_streaming(
                                 out[key] = t.cpu()
                 covered.add(full)
                 hist[("packed_moe_per_expert", "BF16" if is_bf16 else fmt)] += 1
+                if prune_entry is not None:
+                    hist[("packed_moe_pruned", "experts")] += (
+                        E - prune_entry["num_experts_kept"]
+                    )
                 del packed_param, proj_split
 
         # 3e. Remaining layer-scoped params (norms, conv1d, biases on
@@ -2493,6 +2739,21 @@ def materialize_tensors_streaming(
                 continue
             if param.is_meta:
                 continue
+            # Prune skip/reindex: pruned expert sub-params (e.g. a norm
+            # inside a dropped expert) must not leak through; kept
+            # experts' leftover params must be emitted under their new
+            # eid. The Linear path already marked pruned Linears as
+            # covered, but non-Linear params inside expert modules need
+            # a separate resolve.
+            leftover_action = _resolve_linear_prune_action(full, prune_by_parent)
+            if leftover_action is not None:
+                kind, p_entry = leftover_action
+                if kind == "drop":
+                    continue
+                if kind == "reindex":
+                    out[p_entry["new_full"]] = param.detach().to(torch.bfloat16).cpu()
+                    hist[("layer_passthrough", "BF16")] += 1
+                    continue
             out[full] = param.detach().to(torch.bfloat16).cpu()
             hist[("layer_passthrough", "BF16")] += 1
         for mod_name, mod in layer_mod.named_modules():
@@ -3144,6 +3405,18 @@ def main():
                     help="HF model dir (source safetensors + config.json)")
     ap.add_argument("--layer-config", required=True,
                     help="layer_config.json from allocator.py")
+    ap.add_argument("--prune-manifest", default=None,
+                    help="Optional path to an expert-prune sidecar JSON "
+                         "emitted by the allocator at "
+                         "`<layer_config>.prune.json`. When omitted, the "
+                         "exporter auto-detects that path and uses it if "
+                         "it exists; pass an empty string to force a "
+                         "non-prune export even when a sidecar is "
+                         "present. A non-empty manifest drops pruned "
+                         "experts' weights, reindexes kept experts to "
+                         "dense 0..K-1, shrinks the router weight's "
+                         "out-dim, and updates config.json's expert "
+                         "count fields.")
     ap.add_argument("--output", required=True,
                     help="Output directory for the compressed checkpoint")
     ap.add_argument("--shard-bytes", type=int, default=5 * 1024**3,
@@ -3329,6 +3602,18 @@ def main():
     print(f"[export-stream] recipe: {len(assignment)} entries  mix={dict(fmts)}",
           flush=True)
 
+    # Prune manifest: explicit path (empty string = opt-out), else
+    # auto-discover sidecar next to layer_config.json.
+    if args.prune_manifest is None:
+        default_sidecar = Path(args.layer_config + ".prune.json")
+        prune_manifest = _load_prune_manifest(
+            default_sidecar if default_sidecar.exists() else None
+        )
+    elif args.prune_manifest == "":
+        prune_manifest = {}
+    else:
+        prune_manifest = _load_prune_manifest(args.prune_manifest)
+
     dtype = torch.bfloat16
     device = torch.device(args.device)
     out_dir = Path(args.output)
@@ -3343,6 +3628,7 @@ def main():
         profile=profile, bf16_passthrough=bf16_passthrough,
         dtype=dtype, device=device,
         offload_folder=args.offload_folder,
+        prune_manifest=prune_manifest,
     )
     print(f"[export-stream] materialized {len(tensors)} tensors  hist={hist}",
           flush=True)
@@ -3467,8 +3753,26 @@ def main():
 
     write_config_with_quantization(
         args.model, out_dir, assignment, bf16_passthrough,
-        extra_ignore=extra_ignore)
+        extra_ignore=extra_ignore,
+        prune_manifest=prune_manifest)
     _copy_tokenizer(args.model, out_dir)
+
+    prune_summary: dict | None = None
+    if prune_manifest:
+        prune_summary = {
+            "n_layers_pruned": len(prune_manifest),
+            "n_experts_orig_total": sum(
+                int(e["num_experts_orig"]) for e in prune_manifest.values()
+            ),
+            "n_experts_kept_total": sum(
+                int(e["num_experts_kept"]) for e in prune_manifest.values()
+            ),
+            "manifest_file": "prune_manifest.json",
+        }
+        # Also persist the manifest into the output dir for traceability
+        # (the validator + any downstream re-export tooling can read it).
+        with open(out_dir / "prune_manifest.json", "w") as f:
+            json.dump(prune_manifest, f, indent=2, sort_keys=True)
 
     with open(out_dir / "mixed_native_manifest.json", "w") as f:
         json.dump({
@@ -3477,6 +3781,7 @@ def main():
             "format_histogram": {f"{k[0]}/{k[1]}": v for k, v in hist.items()},
             "n_assignment_entries": len(assignment),
             "ignore": sorted(bf16_passthrough),
+            "prune": prune_summary,
         }, f, indent=2)
 
     print(f"[export-stream] done. Serve with:\n"
@@ -3560,6 +3865,7 @@ def write_config_with_quantization(
     assignment: dict[str, str],
     bf16_passthrough: set[str],
     extra_ignore: Iterable[str] = (),
+    prune_manifest: dict[str, dict] | None = None,
 ) -> None:
     from .model_profiles import detect_profile
     profile = detect_profile(src_model)
@@ -3569,6 +3875,42 @@ def write_config_with_quantization(
                                    extra_ignore, profile=profile)
     if qc:
         cfg["quantization_config"] = qc
+
+    # Prune: shrink MoE expert counts in the config so vLLM / HF
+    # instantiate a ModuleList of the right size. We update every
+    # common HF field name that exists in the source config, so the
+    # loader finds the expected field regardless of arch convention.
+    # All manifest entries must agree on num_experts_kept (same arch)
+    # — mixing kept counts across layers isn't supported by the
+    # shared-config convention.
+    if prune_manifest:
+        kept_counts = {int(e["num_experts_kept"]) for e in prune_manifest.values()}
+        if len(kept_counts) != 1:
+            raise RuntimeError(
+                f"[export-stream] prune: manifest has inconsistent "
+                f"num_experts_kept across layers ({sorted(kept_counts)}). "
+                f"HF config carries a single scalar field — mixed "
+                f"per-layer counts need a schema change."
+            )
+        new_k = next(iter(kept_counts))
+        patched: list[tuple[str, int, int]] = []
+
+        def _patch_scalar(d: dict) -> None:
+            for field in _MOE_EXPERT_COUNT_FIELDS:
+                if field in d and isinstance(d[field], int):
+                    old = int(d[field])
+                    if old != new_k:
+                        d[field] = new_k
+                        patched.append((field, old, new_k))
+
+        _patch_scalar(cfg)
+        # Some multimodal configs nest the text config (e.g. Qwen3.5/3.6
+        # ConditionalGeneration). Patch there too if present.
+        if isinstance(cfg.get("text_config"), dict):
+            _patch_scalar(cfg["text_config"])
+        for field, old, new in patched:
+            print(f"[export-stream] config: {field} {old} → {new}", flush=True)
+
     with open(out_dir / "config.json", "w") as f:
         json.dump(cfg, f, indent=2)
 
