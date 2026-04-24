@@ -22,10 +22,11 @@ import pytest
 
 from prismaquant.allocator import (
     Candidate,
-    add_packed_prune_candidates,
     aggregate_moe_candidates,
     apply_consensus_prune,
+    apply_global_prune_ratio,
     build_prune_manifest,
+    compute_max_prune_ratio,
     expand_moe_assignment,
     _packed_entry_router_qname,
     _prune_cost_per_expert,
@@ -352,112 +353,106 @@ def _packed_stat_fixture():
     return name, stats, router, saliencies
 
 
-def test_add_packed_prune_candidates_emits_variants():
+def test_apply_global_prune_ratio_replaces_candidates():
+    """At the constrained single-ratio path every packed entry's
+    candidate list is REPLACED (not appended) — vLLM demands uniform
+    num_experts_kept, so the DP must be unable to pick 'no prune'."""
     name, stats, router, sal = _packed_stat_fixture()
-    # Single baseline candidate per format.
+    # Saliencies: 0→1.0, 1→0.1, 2→0.5, 3→0.0
+    # Ascending-cost drop order: 3, 1, 2, 0
     base_nvfp4 = Candidate(
         fmt="NVFP4", bits_per_param=4.25, memory_bytes=1000,
         predicted_dloss=0.010,
     )
-    candidates = {name: [base_nvfp4]}
-    n_ext = add_packed_prune_candidates(
-        candidates, stats,
-        expert_saliency=sal, prune_ratios=(0.25, 0.5), prune_alpha=0.5,
+    base_mxfp8 = Candidate(
+        fmt="MXFP8", bits_per_param=8.25, memory_bytes=2000,
+        predicted_dloss=0.003,
     )
-    assert n_ext == 1
-    cands = candidates[name]
-    # baseline + 2 prune-variants.
-    assert len(cands) == 3
-    no_prune = [c for c in cands if c.pruned_expert_ids == ()]
-    prune_vars = [c for c in cands if c.pruned_expert_ids != ()]
-    assert len(no_prune) == 1 and no_prune[0] is base_nvfp4
-    assert len(prune_vars) == 2
-    # Drop-order: lowest-saliency first. Sal = {0:1.0, 1:0.1, 2:0.5, 3:0.0}
-    # → order by prune-cost ascending = [3 (S=0), 1 (S=0.1), 2 (S=0.5), 0 (S=1.0)]
-    # 25% of 4 = 1 drop → {3}.
-    # 50% of 4 = 2 drops → {3, 1} (sorted).
-    ratios_found = {c.pruned_expert_ids: c for c in prune_vars}
-    assert (3,) in ratios_found
-    assert (1, 3) in ratios_found
-    # Memory scales with kept_frac.
-    assert ratios_found[(3,)].memory_bytes == 750, ratios_found[(3,)]
-    assert ratios_found[(1, 3)].memory_bytes == 500, ratios_found[(1, 3)]
+    candidates = {name: [base_nvfp4, base_mxfp8]}
+    n = apply_global_prune_ratio(
+        candidates, stats, sal, global_ratio=0.5, prune_alpha=1.0,
+    )
+    assert n == 1
+    # No baseline left — just 2 prune variants (one per format).
+    assert len(candidates[name]) == 2
+    for c in candidates[name]:
+        assert c.pruned_expert_ids == (1, 3), c
+    # Memory + bpp shrunk by kept_frac (0.5).
+    nv = next(c for c in candidates[name] if c.fmt == "NVFP4")
+    mx = next(c for c in candidates[name] if c.fmt == "MXFP8")
+    assert nv.memory_bytes == 500 and nv.bits_per_param == pytest.approx(2.125)
+    assert mx.memory_bytes == 1000 and mx.bits_per_param == pytest.approx(4.125)
 
 
-def test_add_packed_prune_noop_without_saliency():
+def test_apply_global_prune_ratio_noop_without_saliency():
     name, stats, _router, _sal = _packed_stat_fixture()
     base = Candidate(fmt="NVFP4", bits_per_param=4.25, memory_bytes=1000,
                      predicted_dloss=0.01)
     candidates = {name: [base]}
-    # No saliency → no extension.
-    n_ext = add_packed_prune_candidates(
+    n = apply_global_prune_ratio(
         candidates, stats, expert_saliency={},
-        prune_ratios=(0.25,), prune_alpha=0.5,
+        global_ratio=0.25, prune_alpha=1.0,
     )
-    assert n_ext == 0
+    assert n == 0
     assert candidates[name] == [base]
 
 
-def test_add_packed_prune_ignores_non_packed_entries():
-    # Mix in a dense-Linear and a super-Linear alongside a packed entry.
+def test_apply_global_prune_ratio_zero_is_noop():
+    name, stats, _router, sal = _packed_stat_fixture()
+    base = Candidate(fmt="NVFP4", bits_per_param=4.25, memory_bytes=1000,
+                     predicted_dloss=0.01)
+    candidates = {name: [base]}
+    n = apply_global_prune_ratio(
+        candidates, stats, sal, global_ratio=0.0, prune_alpha=1.0,
+    )
+    assert n == 0
+    assert candidates[name] == [base]
+
+
+def test_apply_global_prune_ratio_ignores_non_packed_entries():
     packed = "model.layers.0.mlp.experts.gate_up_proj"
     dense = "model.layers.0.self_attn.q_proj"
-    super_name = "model.layers.0.mlp.experts.__fused__.gate_proj"
     stats = {
         packed: {"h_trace": 4.0, "n_params": 400, "num_experts": 4,
                  "in_features": 8, "out_features": 10,
                  "w_max_abs": 1.0, "w_norm_sq": 4.0},
         dense:  {"h_trace": 1.0, "n_params": 100, "in_features": 10,
                  "out_features": 10, "w_max_abs": 1.0, "w_norm_sq": 1.0},
-        super_name: {"h_trace": 2.0, "n_params": 200,
-                     "_fused_members": ["a", "b"]},
     }
+    sal = {"model.layers.0.mlp.gate": {0: 0.1, 1: 0.2, 2: 0.3, 3: 0.4}}
     candidates = {
         packed: [Candidate("NVFP4", 4.25, 1000, 0.01)],
         dense:  [Candidate("NVFP4", 4.25, 100, 0.001)],
-        super_name: [Candidate("NVFP4", 4.25, 200, 0.002)],
     }
-    sal = {"model.layers.0.mlp.gate": {0: 0.1, 1: 0.2, 2: 0.3, 3: 0.4}}
-    n_ext = add_packed_prune_candidates(
-        candidates, stats, expert_saliency=sal,
-        prune_ratios=(0.25,), prune_alpha=0.5,
+    n = apply_global_prune_ratio(
+        candidates, stats, sal, global_ratio=0.25, prune_alpha=1.0,
     )
-    assert n_ext == 1  # only the packed entry
-    assert len(candidates[packed]) == 2
-    assert len(candidates[dense]) == 1  # untouched
-    assert len(candidates[super_name]) == 1  # untouched
+    assert n == 1  # only packed
+    # Dense untouched (same Candidate object identity).
+    assert candidates[dense][0] is candidates[dense][0]
+    assert len(candidates[dense]) == 1
+    # Packed now has prune variants, no baseline.
+    for c in candidates[packed]:
+        assert c.pruned_expert_ids != ()
 
 
-def test_add_packed_prune_uses_reap_saliency_directly_as_drop_cost():
-    """Under the REAP-direct formula the per-expert Fisher is NOT used
-    for prune cost; saliency alone ranks experts. Verify the drop order
-    follows saliency magnitude (lowest S → first to drop) and ignores
-    per-expert Fisher."""
-    name = "model.layers.0.mlp.experts.gate_up_proj"
-    router = "model.layers.0.mlp.gate"
+def test_compute_max_prune_ratio():
     stats = {
-        name: {
-            "h_trace": 4.0,
-            "n_params": 400,
-            "num_experts": 4,
-            "in_features": 8,
-            "out_features": 10,
-            # Skew per-expert Fisher WAY off — REAP formula ignores it.
-            "h_trace_per_expert": [100.0, 0.001, 100.0, 100.0],
-        }
+        "model.layers.0.mlp.experts.gate_up_proj": {"num_experts": 256},
+        "model.layers.1.mlp.experts.gate_up_proj": {"num_experts": 256},
+        # Dense Linears ignored.
+        "model.layers.0.self_attn.q_proj": {"n_params": 1000},
     }
-    # Saliencies differ: expert 2 has lowest S → should be dropped first.
-    sal = {router: {0: 0.9, 1: 0.5, 2: 0.01, 3: 0.8}}
-    base = Candidate("NVFP4", 4.25, 1000, 0.01)
-    candidates = {name: [base]}
-    add_packed_prune_candidates(
-        candidates, stats, expert_saliency=sal,
-        prune_ratios=(0.25,), prune_alpha=1.0,
-    )
-    prune_v = [c for c in candidates[name] if c.pruned_expert_ids]
-    assert len(prune_v) == 1
-    # Lowest-saliency expert (2) dropped first, not the low-Fisher one (1).
-    assert prune_v[0].pruned_expert_ids == (2,), prune_v[0]
+    # top_k=8, E=256 → max_r = (256-8)/256 = 0.96875
+    assert compute_max_prune_ratio(stats, top_k=8) == pytest.approx(0.96875)
+    # Tighter top_k squeezes max_r.
+    assert compute_max_prune_ratio(stats, top_k=200) == pytest.approx((256 - 200) / 256)
+
+
+def test_compute_max_prune_ratio_rejects_top_k_over_experts():
+    stats = {"model.layers.0.mlp.experts.gate_up_proj": {"num_experts": 4}}
+    with pytest.raises(ValueError, match="top_k=8"):
+        compute_max_prune_ratio(stats, top_k=8)
 
 
 def test_build_prune_manifest_resolves_packed_entries():

@@ -1057,36 +1057,44 @@ def _packed_entry_router_qname(name: str) -> str | None:
     return f"{moe_block}.gate"
 
 
-def add_packed_prune_candidates(
+def apply_global_prune_ratio(
     candidates: dict[str, list[Candidate]],
     stats: dict,
     expert_saliency: dict[str, dict[int, float]],
-    prune_ratios: tuple[float, ...],
-    prune_alpha: float = 0.5,
+    global_ratio: float,
+    prune_alpha: float = 1.0,
 ) -> int:
-    """Extend candidate lists for packed-3D entries with prune-variants.
+    """Rewrite packed-entry candidate lists at a single global prune
+    ratio, producing vLLM-compatible uniform ``num_experts_kept``.
 
-    A "packed entry" is a stat qname of the form
-    ``<prefix>.experts.<proj>`` (no per-expert eid suffix). These come
-    out of ``install_packed_expert_hooks`` and represent a layer's
-    entire expert tensor as one DP item. For prune, we keep the single
-    DP item but add variants that drop the lowest-saliency K experts;
-    memory shrinks by kept_frac and per-expert quant cost is
-    approximated uniformly (``total_h_trace / E``, ``total_n_params /
-    E``). This is an approximation — a probe-side per-expert Fisher
-    decomposition would tighten it — but it lets the Pareto sweep see
-    prune effects on packed MoE architectures today.
+    For each packed entry (qname like ``<prefix>.experts.<proj>``):
+      1. Rank experts by REAP dropout loss (saliency) ascending.
+      2. Drop the bottom ``floor(R · E)`` experts — same count every
+         layer, so config.num_experts is a single scalar.
+      3. Replace the candidate list with ONE Candidate per format,
+         encoding that global drop set. The DP picks a format but
+         has no per-layer choice to skip pruning.
 
-    Returns the number of packed entries extended. No-op when
-    ``expert_saliency`` is empty or ``prune_ratios`` contains only 0.
+    Why replace (not append)? vLLM requires num_experts uniform across
+    layers. Leaving the no-prune baseline in would let the DP pick
+    "no prune" on some layers and "R prune" on others → mixed kept
+    counts → config.json can't encode that. By collapsing to just
+    the R-variants, uniform-kept is true by construction — no
+    post-hoc coercion needed.
+
+    Δloss formula: ``baseline_quant_dloss × (1 - R) + Σ_dropped S_j``
+    where S_j is the expert's REAP dropout saliency from the
+    observer (units: Δ L per expert). ``prune_alpha`` scales the
+    prune term for budget-edge tuning.
+
+    Returns the number of packed entries rewritten. No-op when
+    ``expert_saliency`` is empty or ``global_ratio`` is 0.
     """
-    positive_ratios = tuple(sorted(
-        {float(r) for r in prune_ratios if float(r) > 0.0}
-    ))
-    if not expert_saliency or not positive_ratios:
+    R = float(global_ratio)
+    if R <= 0.0 or not expert_saliency:
         return 0
 
-    n_extended = 0
+    n_rewritten = 0
     for name, cs in list(candidates.items()):
         router_qname = _packed_entry_router_qname(name)
         if router_qname is None:
@@ -1094,55 +1102,69 @@ def add_packed_prune_candidates(
         saliency_map = expert_saliency.get(router_qname)
         if not saliency_map:
             continue
-        # Infer num_experts from the stat entry (set by
-        # install_packed_expert_hooks) or fall back to the saliency map's
-        # length. The former is authoritative when present.
         s = stats.get(name, {})
         E = int(s.get("num_experts") or len(saliency_map))
         if E <= 0:
             continue
-        # Per-expert prune cost comes directly from the REAP dropout-
-        # loss formula ((1/T) Σ g·||f||²) that the observer emitted
-        # under `saliency(reduction="reap_dropout")`. Units already
-        # match the allocator's Fisher·weight-MSE Δloss terms, so no
-        # further rescaling is needed. `prune_alpha` remains as a
-        # global knob for pushing prune decisions toward / away from
-        # the budget edge — default 1.0.
-        prune_dloss_by_eid: dict[int, float] = {
+        n_drop = int(round(E * R))
+        if n_drop <= 0:
+            continue
+        # REAP-direct drop cost per expert (units match Fisher·weight-MSE).
+        prune_dloss_by_eid = {
             eid: prune_alpha * float(saliency_map.get(eid, 0.0))
             for eid in range(E)
         }
         drop_order = sorted(
             range(E), key=lambda e: (prune_dloss_by_eid[e], e)
         )
+        dropped = tuple(sorted(drop_order[:n_drop]))
+        prune_dloss_total = sum(prune_dloss_by_eid[e] for e in dropped)
+        kept_frac = 1.0 - float(n_drop) / float(E)
 
-        extended: list[Candidate] = list(cs)
+        variants: list[Candidate] = []
         for baseline_c in cs:
-            for ratio in positive_ratios:
-                n_drop = min(E, int(round(E * ratio)))
-                if n_drop == 0:
-                    continue
-                dropped = tuple(sorted(drop_order[:n_drop]))
-                kept_frac = 1.0 - float(n_drop) / float(E)
-                # Per-expert quant cost ≈ baseline_dloss / E; kept cost
-                # is that × (E-K). Prune cost is sum of dropped experts'
-                # α·(h/n)·S_j² terms.
-                kept_quant_dloss = baseline_c.predicted_dloss * kept_frac
-                prune_dloss_total = sum(
-                    prune_dloss_by_eid[eid] for eid in dropped
-                )
-                extended.append(Candidate(
-                    fmt=baseline_c.fmt,
-                    bits_per_param=baseline_c.bits_per_param * kept_frac,
-                    memory_bytes=int(baseline_c.memory_bytes * kept_frac),
-                    predicted_dloss=max(
-                        kept_quant_dloss + prune_dloss_total, 0.0,
-                    ),
-                    pruned_expert_ids=dropped,
-                ))
-        candidates[name] = extended
-        n_extended += 1
-    return n_extended
+            variants.append(Candidate(
+                fmt=baseline_c.fmt,
+                bits_per_param=baseline_c.bits_per_param * kept_frac,
+                memory_bytes=int(baseline_c.memory_bytes * kept_frac),
+                predicted_dloss=max(
+                    baseline_c.predicted_dloss * kept_frac + prune_dloss_total,
+                    0.0,
+                ),
+                pruned_expert_ids=dropped,
+            ))
+        # REPLACE (not append) so DP can't pick no-prune → uniform
+        # kept count across all packed entries by construction.
+        candidates[name] = variants
+        n_rewritten += 1
+    return n_rewritten
+
+
+def compute_max_prune_ratio(
+    stats: dict,
+    top_k: int,
+) -> float:
+    """Return the largest prune ratio that leaves at least ``top_k``
+    experts kept in every packed-3D MoE layer. Routers with fewer
+    experts than ``top_k`` are impossible to prune — that's a
+    model-config bug the caller should surface.
+    """
+    min_kept_ratio = 1.0
+    for name, s in stats.items():
+        if _packed_entry_router_qname(name) is None:
+            continue
+        E = int(s.get("num_experts", 0) or 0)
+        if E <= 0:
+            continue
+        if E < top_k:
+            raise ValueError(
+                f"stat {name!r} has E={E} experts but top_k={top_k}; "
+                f"cannot prune without breaking routing."
+            )
+        max_r_here = (E - top_k) / E
+        if max_r_here < min_kept_ratio:
+            min_kept_ratio = max_r_here
+    return min_kept_ratio
 
 
 def expand_moe_assignment(
@@ -2267,45 +2289,58 @@ def main():
     # format-only candidates when either is empty.
     probe_expert_saliency = probe.get("expert_saliency", {}) if args.enable_expert_prune else {}
     probe_expert_info = probe.get("expert_info", {}) if args.enable_expert_prune else {}
-    prune_ratios_arg = tuple(
+    # Parse the user's ratio list as a SWEEP. For packed-3D models we
+    # couple every layer to the same ratio (below) to match vLLM's
+    # uniform-num_experts constraint — so "multi-ratio" means "try each
+    # of these values globally and pick the best per target_bits."
+    # For nested-MoE models we still hand the list down to
+    # `aggregate_moe_candidates`'s per-layer prune path.
+    user_prune_ratios = tuple(
         float(x) for x in args.prune_ratios.split(",")
         if x.strip() and float(x) > 0.0
     ) if args.enable_expert_prune else ()
-    if args.enable_expert_prune:
+    # Top-k safety floor: we must never drop below `top_k` experts
+    # kept per layer, else routing has fewer experts than it tries to
+    # select. Read top_k from the probe meta; default 8 for Qwen3.5.
+    top_k = 8
+    probe_meta = probe.get("meta", {}) if isinstance(probe.get("meta"), dict) else {}
+    if "top_k" in probe_meta:
+        top_k = int(probe_meta["top_k"])
+    # Filter ratios to those satisfying min-kept >= top_k.
+    global_ratio_sweep: list[float] = [0.0]
+    if args.enable_expert_prune and probe_expert_saliency:
+        try:
+            max_r = compute_max_prune_ratio(stats, top_k)
+        except ValueError as e:
+            raise SystemExit(f"[alloc] {e}")
+        above_floor = [r for r in user_prune_ratios if r > max_r]
+        valid = sorted({r for r in user_prune_ratios if 0 < r <= max_r})
+        if above_floor:
+            print(
+                f"[alloc] dropped prune ratios above kept>=top_k "
+                f"(top_k={top_k}, max_R={max_r:.3f}): "
+                f"{sorted(above_floor)}", flush=True,
+            )
+        global_ratio_sweep = [0.0] + valid
         n_routers_with_saliency = sum(
             1 for r in probe_expert_saliency.values() if r
         )
-        print(f"[alloc] expert-prune ENABLED: saliency routers={n_routers_with_saliency}, "
-              f"ratios={prune_ratios_arg}, alpha={args.prune_alpha}", flush=True)
-
-    # Packed-3D MoE prune: Qwen3.5/3.6 and similar archs expose experts
-    # as one packed stat entry per (layer, projection) — not per-expert.
-    # `aggregate_moe_candidates` doesn't fire on them, so we extend
-    # their candidate list directly here with prune-variants that use
-    # per-expert saliency from the observer. Per-expert Fisher is
-    # approximated uniformly (total/E); a probe-side per-expert
-    # decomposition would tighten this estimate.
-    if args.enable_expert_prune and probe_expert_saliency:
-        n_packed_extended = add_packed_prune_candidates(
-            candidates, stats,
-            expert_saliency=probe_expert_saliency,
-            prune_ratios=prune_ratios_arg,
-            prune_alpha=args.prune_alpha,
+        print(
+            f"[alloc] expert-prune ENABLED: saliency routers="
+            f"{n_routers_with_saliency}, sweep ratios={global_ratio_sweep}, "
+            f"top_k={top_k}, alpha={args.prune_alpha}", flush=True,
         )
-        if n_packed_extended:
-            print(
-                f"[alloc] packed-MoE prune: extended {n_packed_extended} "
-                f"packed entries with prune-variant candidates",
-                flush=True,
-            )
 
+    # Nested-MoE aggregation with per-layer prune variants (research
+    # path). For packed-3D models `aggregate_moe_candidates` is a
+    # no-op here because no super-Linears form.
     if args.target_profile == "vllm_qwen3_5_packed_moe":
         stats, costs, candidates = aggregate_moe_candidates(
             stats, costs, specs_sorted, candidates, granularity="layer",
             calibrated_gains=calibrated_gains,
             expert_saliency=probe_expert_saliency,
             expert_info=probe_expert_info,
-            prune_ratios=prune_ratios_arg,
+            prune_ratios=(),  # packed-3D path handles prune below
             prune_alpha=args.prune_alpha)
         moe_groups = sum(1 for n in candidates if ".__fused__." in n)
         print(f"[alloc] packed-MoE serving aggregation: {moe_groups} fused MoE blocks")
@@ -2315,7 +2350,7 @@ def main():
             calibrated_gains=calibrated_gains,
             expert_saliency=probe_expert_saliency,
             expert_info=probe_expert_info,
-            prune_ratios=prune_ratios_arg,
+            prune_ratios=user_prune_ratios,
             prune_alpha=args.prune_alpha)
         moe_groups = sum(1 for n in candidates if ".__fused__." in n)
         print(f"[alloc] MoE aggregation: {moe_groups} fused-expert super-Linears")
@@ -2336,42 +2371,77 @@ def main():
 
     candidates = filter_candidates_for_profile(candidates, args.target_profile)
 
-    # Pareto sweep
-    targets = [float(x) for x in args.pareto_targets.split(",")]
-    curve = []
-    for t in targets:
-        assignment, pareto_pruned, achieved = solve_with_promotion(
-            stats, candidates, t, format_specs, format_rank,
+    # `candidates` is now fully aggregated (MoE, fused siblings) and
+    # filtered. For the packed-3D prune sweep we clone it per ratio
+    # and rewrite the packed entries in place via
+    # `apply_global_prune_ratio`. The original is preserved as the
+    # R=0 baseline.
+    import copy as _copy
+
+    def _solve_for_ratio(R: float, target_bits: float):
+        """Solve the DP at a single (ratio, target_bits) combination.
+        Returns (assignment, pruned_map, achieved, total_dloss) or
+        (None, {}, nan, inf) if infeasible."""
+        if R > 0.0 and probe_expert_saliency:
+            c = _copy.deepcopy(candidates)
+            apply_global_prune_ratio(
+                c, stats, probe_expert_saliency,
+                global_ratio=R, prune_alpha=args.prune_alpha,
+            )
+        else:
+            c = candidates
+        assign, pruned_map_r, achieved_r = solve_with_promotion(
+            stats, c, target_bits, format_specs, format_rank,
             args.bit_precision,
             no_fused_promote=args.no_fused_promote,
             overshoot_tolerance=args.overshoot_tolerance,
             profile=model_profile,
         )
-        if assignment is None:
-            curve.append({"target_bits": t, "feasible": False})
-            continue
-        total_dloss = 0.0
-        format_counts = defaultdict(int)
-        format_params = defaultdict(int)
-        for name, fmt in assignment.items():
+        if assign is None:
+            return None, {}, float("nan"), float("inf")
+        total = 0.0
+        for name, fmt in assign.items():
             entry = costs[name].get(fmt, {})
             gain = float(calibrated_gains.get(fmt, 1.0))
-            total_dloss += predicted_dloss(
+            total += predicted_dloss(
                 stats[name]["h_trace"], entry.get("weight_mse", 0.0), gain=gain,
             )
+        return assign, pruned_map_r, achieved_r, total
+
+    # Pareto sweep: for each target_bits, pick the (R, assignment)
+    # with the lowest predicted Δloss among all ratios in the sweep.
+    targets = [float(x) for x in args.pareto_targets.split(",")]
+    curve = []
+    for t in targets:
+        best = None
+        for R in global_ratio_sweep:
+            assign, pruned_r, achieved, total = _solve_for_ratio(R, t)
+            if assign is None:
+                continue
+            if best is None or total < best["predicted_dloss"]:
+                best = {
+                    "ratio": R,
+                    "assignment": assign,
+                    "pruned_map": pruned_r,
+                    "achieved_bits": achieved,
+                    "predicted_dloss": total,
+                }
+        if best is None:
+            curve.append({"target_bits": t, "feasible": False})
+            continue
+        format_counts = defaultdict(int)
+        format_params = defaultdict(int)
+        for name, fmt in best["assignment"].items():
             format_counts[fmt] += 1
             format_params[fmt] += stats[name]["n_params"]
-        # Prune stats: non-empty entries in pareto_pruned indicate super-
-        # Linears where the DP picked a DROP-variant candidate. When
-        # prune is disabled (or saliency missing) this dict is empty and
-        # both columns are 0, so the CSV is comparable across runs.
-        n_layers_pruned = len(pareto_pruned)
-        n_experts_dropped = sum(len(v) for v in pareto_pruned.values())
+        n_layers_pruned = len(best["pruned_map"])
+        n_experts_dropped = sum(len(v) for v in best["pruned_map"].values())
         curve.append({
             "target_bits": t,
             "feasible": True,
-            "achieved_bits": achieved,
-            "predicted_dloss": total_dloss,
+            "achieved_bits": best["achieved_bits"],
+            "predicted_dloss": best["predicted_dloss"],
+            "global_prune_ratio": best["ratio"],
             "n_layers_pruned": n_layers_pruned,
             "n_experts_dropped": n_experts_dropped,
             **{f"layers_{k}": v for k, v in format_counts.items()},
@@ -2409,18 +2479,39 @@ def main():
         print(f"  {row['target_bits']:>6.3f}  {row['achieved_bits']:>7.3f}  "
               f"{row['predicted_dloss']:>14.4e}   {fmt_str}")
 
-    # Emit chosen layer_config for target_bits
-    assignment, pruned_map, achieved = solve_with_promotion(
-        stats, candidates, args.target_bits, format_specs, format_rank,
-        args.bit_precision,
-        no_fused_promote=args.no_fused_promote,
-        overshoot_tolerance=args.overshoot_tolerance,
-        profile=model_profile,
-    )
-    if assignment is None:
+    # Emit chosen layer_config for target_bits. Same outer-loop-over-R
+    # pattern as the Pareto sweep — pick the ratio that minimizes
+    # predicted Δloss at the requested target.
+    best_final = None
+    for R in global_ratio_sweep:
+        assign, pruned_r, achieved_r, total = _solve_for_ratio(
+            R, args.target_bits,
+        )
+        if assign is None:
+            continue
+        if best_final is None or total < best_final["predicted_dloss"]:
+            best_final = {
+                "ratio": R,
+                "assignment": assign,
+                "pruned_map": pruned_r,
+                "achieved_bits": achieved_r,
+                "predicted_dloss": total,
+            }
+    if best_final is None:
         raise SystemExit(
             f"Infeasible at target_bits={args.target_bits}. "
             "Consider raising the target or widening the format set.")
+    assignment = best_final["assignment"]
+    pruned_map = best_final["pruned_map"]
+    achieved = best_final["achieved_bits"]
+    chosen_ratio = best_final["ratio"]
+    if chosen_ratio > 0.0:
+        print(
+            f"[alloc] target_bits={args.target_bits}: picked global prune "
+            f"ratio R={chosen_ratio:.4f} (achieved_bits={achieved:.3f}, "
+            f"Δloss={best_final['predicted_dloss']:.3e})",
+            flush=True,
+        )
 
     # Build the prune manifest (router-keyed, consensus-intersected)
     # from the DP's winning candidates. Empty when prune is disabled or
