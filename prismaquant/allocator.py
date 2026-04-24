@@ -1188,6 +1188,8 @@ def build_prune_manifest(
     pruned_map: dict[str, tuple[int, ...]],
     stats_ext: dict,
     expert_info: dict[str, tuple[str, str]],
+    expert_saliency: dict[str, dict[int, float]] | None = None,
+    uniform_kept: bool = True,
 ) -> tuple[dict[str, dict], list[str]]:
     """Build a router-keyed prune manifest the exporter can consume.
 
@@ -1280,6 +1282,97 @@ def build_prune_manifest(
             "kept_expert_ids": kept,
             "orig_to_new_eid": {str(k): v for k, v in orig_to_new.items()},
         }
+
+    if uniform_kept and manifest:
+        # HF config.json carries a single scalar `num_experts` field, so
+        # vLLM instantiates one ModuleList of that size per MoE layer.
+        # All MoE layers (not just the DP-pruned ones) must land on
+        # the SAME num_experts_kept value. Two extensions needed:
+        #   1. Routers the DP DID prune but with kept > min_kept get
+        #      extra drops (lowest-saliency) to match.
+        #   2. Routers the DP DIDN'T prune at all but that share the
+        #      arch (all 40 MoE layers for Qwen3.5) need manifest
+        #      entries too — otherwise the exporter would see 30 of
+        #      40 layers with 192 experts and 10 untouched with 256,
+        #      and shrinking config.num_experts to 192 would mismatch
+        #      the un-shrunk tensors.
+        # We detect "all MoE layers" via the expert_saliency dict —
+        # one entry per hooked router. For each, we need num_experts
+        # from the stats; pull it via _packed_entry_router_qname
+        # reverse-lookup.
+        min_kept = min(int(e["num_experts_kept"]) for e in manifest.values())
+        sal = expert_saliency or {}
+        # Pad DP-pruned routers that chose a milder prune than min.
+        for router, entry in list(manifest.items()):
+            cur_kept = int(entry["num_experts_kept"])
+            if cur_kept <= min_kept:
+                continue
+            need_extra_drops = cur_kept - min_kept
+            kept_now = list(entry["kept_expert_ids"])
+            already_dropped = set(entry["pruned_expert_ids"])
+            router_sal = sal.get(router, {})
+            kept_ranked = sorted(
+                kept_now, key=lambda eid: (router_sal.get(eid, 0.0), eid)
+            )
+            extra = set(kept_ranked[:need_extra_drops])
+            new_dropped = sorted(already_dropped | extra)
+            new_kept = [eid for eid in entry["kept_expert_ids"] if eid not in extra]
+            entry["pruned_expert_ids"] = new_dropped
+            entry["kept_expert_ids"] = new_kept
+            entry["num_experts_kept"] = len(new_kept)
+            entry["orig_to_new_eid"] = {
+                str(eid): i for i, eid in enumerate(new_kept)
+            }
+            warnings.append(
+                f"{router}: padded drops from {cur_kept}→{len(new_kept)} kept "
+                f"(+{need_extra_drops} lowest-saliency) for uniform-kept "
+                f"config.json compatibility."
+            )
+        # Extend to every MoE router the observer found — this covers
+        # layers the DP chose NOT to prune at all, which would otherwise
+        # leave the exporter with a mixed-size ModuleList.
+        for router in sal:
+            if router in manifest:
+                continue
+            # Infer num_experts_orig from any packed stat entry under
+            # the same MoE block. `<router>` = `<block>.gate`; packed
+            # stats live at `<block>.experts.<proj>`.
+            if not router.endswith(".gate"):
+                continue
+            block = router[: -len(".gate")]
+            num_orig = None
+            for name, s in stats_ext.items():
+                if name.startswith(f"{block}.experts.") and isinstance(s, dict):
+                    n_e = int(s.get("num_experts", 0) or 0)
+                    if n_e > 0:
+                        num_orig = n_e
+                        break
+            if num_orig is None:
+                continue
+            router_sal = sal[router]
+            # Drop (num_orig - min_kept) lowest-saliency experts.
+            need_drops = num_orig - min_kept
+            if need_drops <= 0:
+                continue
+            all_eids = sorted(router_sal.keys())
+            ranked = sorted(
+                all_eids, key=lambda eid: (router_sal.get(eid, 0.0), eid)
+            )
+            dropped = sorted(ranked[:need_drops])
+            kept = [e for e in all_eids if e not in set(dropped)]
+            manifest[router] = {
+                "num_experts_orig": num_orig,
+                "num_experts_kept": len(kept),
+                "pruned_expert_ids": dropped,
+                "kept_expert_ids": kept,
+                "orig_to_new_eid": {str(e): i for i, e in enumerate(kept)},
+            }
+            warnings.append(
+                f"{router}: DP chose no prune; added {need_drops} "
+                f"lowest-saliency drops (→{len(kept)} kept) for "
+                f"uniform-kept config.json compatibility."
+            )
+
     return manifest, warnings
 
 
@@ -2339,8 +2432,13 @@ def main():
         # expert_info may be empty for packed-3D models (no per-expert
         # leaves to discover). build_prune_manifest handles that via
         # _packed_entry_router_qname; no gating on expert_info here.
+        # expert_saliency feeds the uniform-kept coercion pass
+        # (padding lighter-pruned layers to match the heaviest prune,
+        # using lowest-saliency experts as the extras).
         prune_manifest, prune_warnings = build_prune_manifest(
             pruned_map, stats, probe_expert_info,
+            expert_saliency=probe_expert_saliency,
+            uniform_kept=True,
         )
         pruned_map = apply_consensus_prune(
             pruned_map, prune_manifest, stats, probe_expert_info,
