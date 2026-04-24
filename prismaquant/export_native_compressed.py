@@ -2754,6 +2754,27 @@ def materialize_tensors_streaming(
                     out[p_entry["new_full"]] = param.detach().to(torch.bfloat16).cpu()
                     hist[("layer_passthrough", "BF16")] += 1
                     continue
+            # Router-weight shrink for non-Linear routers. Qwen3.5's
+            # `Qwen3_5MoeTopKRouter` is a bare nn.Module with a `.weight`
+            # Parameter — NOT an nn.Linear — so the Linear-loop's router
+            # path never sees it. Detect by stripping `.weight` and
+            # testing against prune_by_parent's router_qname.
+            if prune_by_parent and full.endswith(".weight"):
+                trimmed = full[: -len(".weight")]
+                parent_r = trimmed.rsplit(".", 1)[0]
+                entry_r = prune_by_parent.get(parent_r)
+                if (entry_r is not None
+                        and entry_r["router_qname"] == trimmed
+                        and param.dim() >= 1
+                        and int(param.shape[0]) == int(entry_r["num_experts_orig"])):
+                    idx = torch.as_tensor(
+                        entry_r["kept_expert_ids"], dtype=torch.long,
+                        device=param.device,
+                    )
+                    shrunk = param.detach().index_select(0, idx).contiguous()
+                    out[full] = shrunk.to(torch.bfloat16).cpu()
+                    hist[("router_weight_shrunk", "BF16")] += 1
+                    continue
             out[full] = param.detach().to(torch.bfloat16).cpu()
             hist[("layer_passthrough", "BF16")] += 1
         for mod_name, mod in layer_mod.named_modules():
