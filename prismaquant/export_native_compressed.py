@@ -62,7 +62,7 @@ import time
 from collections import Counter, defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import torch
 import torch.nn as nn
@@ -2220,6 +2220,7 @@ def materialize_tensors_streaming(
     device: torch.device = torch.device("cuda"),
     offload_folder: str | None = None,
     prune_manifest: dict[str, dict] | None = None,
+    tensor_sink: Callable[[dict[str, torch.Tensor]], None] | None = None,
 ) -> tuple[dict[str, torch.Tensor], dict]:
     """Stream decoder layers through quantize → emit → unload. Never
     holds the full model in memory. Small models still exercise this
@@ -2227,7 +2228,10 @@ def materialize_tensors_streaming(
     unload degenerates to a no-op.
 
     Output: `(out_tensors, hist)` matching the shape the monolithic
-    materialize used to return, ready for `write_sharded_safetensors`."""
+    materialize used to return, ready for `write_sharded_safetensors`.
+    When `tensor_sink` is supplied, each emitted head/layer batch is
+    passed to the sink and cleared immediately; the returned tensor dict
+    is then intentionally empty."""
     from transformers import AutoConfig, AutoModelForCausalLM
 
     from .layer_streaming import (
@@ -2394,10 +2398,15 @@ def materialize_tensors_streaming(
             hist[("head_buffer", "BF16")] += 1
     print(f"[export-stream] head+embed+norm+lm_head passthrough: "
           f"{time.time()-t_head:.1f}s  keys={len(out)}", flush=True)
+    if tensor_sink is not None:
+        tensor_sink(out)
+        out = {}
 
     # ----- 3. Per-layer streaming quantize loop -----
     t_layers = time.time()
     for L in range(num_layers):
+        if tensor_sink is not None:
+            out = {}
         layer_t0 = time.time()
         layer_qname = f"{layers_prefix}{L}".rstrip(".")
         if layer_qname.endswith("."):
@@ -2817,6 +2826,9 @@ def materialize_tensors_streaming(
             print(f"[export-stream] layer {L:02d}  linears={linear_count} "
                   f"packed={packed_count}  load={load_s:.2f}s  "
                   f"total={elapsed:.2f}s  out_keys={len(out)}", flush=True)
+        if tensor_sink is not None:
+            tensor_sink(out)
+            out = {}
 
     print(f"[export-stream] layer sweep: {time.time()-t_layers:.1f}s",
           flush=True)
@@ -3758,16 +3770,6 @@ def main():
     if args.offload_folder is None:
         args.offload_folder = str(out_dir / "_streaming_offload")
 
-    tensors, hist = materialize_tensors_streaming(
-        args.model, assignment,
-        profile=profile, bf16_passthrough=bf16_passthrough,
-        dtype=dtype, device=device,
-        offload_folder=args.offload_folder,
-        prune_manifest=prune_manifest,
-    )
-    print(f"[export-stream] materialized {len(tensors)} tensors  hist={hist}",
-          flush=True)
-
     # Rename body keys → `model.language_model.` on disk for multimodal-
     # umbrella arches (Qwen3.5/3.6 ConditionalGeneration, Gemma 4
     # ConditionalGeneration). Our streaming loop produces the text-only
@@ -3779,18 +3781,38 @@ def main():
         # Default: Qwen3.5/3.6 pattern. Profiles for non-multimodal
         # archs can return "" and we'll skip the rename.
         infix = "language_model." if profile.name.startswith("qwen3_5") else ""
-    if infix:
+
+    def _rename_body_batch(
+        batch: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        if not infix:
+            return batch
         renamed: dict[str, torch.Tensor] = {}
-        for k, v in tensors.items():
+        for k, v in batch.items():
             if (k.startswith("model.layers.")
                     or k.startswith("model.embed_tokens")
                     or k.startswith("model.norm")):
                 renamed[f"model.{infix}{k[len('model.'):]}"] = v
             else:
                 renamed[k] = v
-        tensors = renamed
-        print(f"[export-stream] renamed body → model.{infix}...",
+        return renamed
+
+    writer = IncrementalSafetensorsWriter(out_dir, args.shard_bytes)
+    if infix:
+        print(f"[export-stream] streaming body rename → model.{infix}...",
               flush=True)
+
+    tensors, hist = materialize_tensors_streaming(
+        args.model, assignment,
+        profile=profile, bf16_passthrough=bf16_passthrough,
+        dtype=dtype, device=device,
+        offload_folder=args.offload_folder,
+        prune_manifest=prune_manifest,
+        tensor_sink=lambda batch: writer.add_tensors(_rename_body_batch(batch)),
+    )
+    print(f"[export-stream] streamed materialization complete "
+          f"resident_tensors={len(tensors)}  hist={hist}",
+          flush=True)
 
     # MTP materialization if the profile has heads. Uses the in-memory
     # helper — MTP heads are small enough that full-model residency
@@ -3833,7 +3855,7 @@ def main():
         src_extra = {k: v for k, v in src_extra.items()
                      if k not in materialized_bases}
         for k in list(src_extra.keys()):
-            if k in tensors or k in mtp_tensors:
+            if k in writer.seen_keys or k in mtp_tensors:
                 del src_extra[k]
 
         # Phase 1 visual-encoder quant: when the allocator's recipe
@@ -3846,16 +3868,16 @@ def main():
         src_extra = _apply_visual_recipe_quant(
             src_extra, assignment, device=device)
 
-        tensors.update(mtp_tensors)
-        tensors.update(src_extra)
+        writer.add_tensors(mtp_tensors)
+        writer.add_tensors(src_extra)
         print(f"[export-stream] merged {len(src_extra)} source-passthrough + "
               f"{len(mtp_tensors)} MTP tensors", flush=True)
     else:
-        tensors.update(mtp_tensors)
+        writer.add_tensors(mtp_tensors)
 
-    print("[export-stream] writing safetensors shards ...", flush=True)
+    print("[export-stream] finalizing safetensors shards ...", flush=True)
     t_write = time.time()
-    write_sharded_safetensors(tensors, out_dir, args.shard_bytes)
+    writer.finalize()
     print(f"[export-stream] sharded write: {time.time()-t_write:.1f}s",
           flush=True)
 
@@ -3928,6 +3950,127 @@ def main():
 # Sharded safetensors writer (mirrors HF transformers' shard layout so
 # the index file is the same one transformers + vLLM expect).
 # ---------------------------------------------------------------------------
+def _clone_shared_storage_for_safetensors(
+    tensors: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    """Return a save-ready dict without same-file shared storage ties."""
+    out = dict(tensors)
+    seen_storage: dict[int, str] = {}
+    for k, t in list(out.items()):
+        try:
+            sid = t.untyped_storage().data_ptr()
+        except Exception:
+            continue
+        if sid in seen_storage:
+            # This tensor shares storage with an earlier one. Deep-copy
+            # so safetensors treats them independently.
+            out[k] = t.detach().clone().contiguous()
+        else:
+            seen_storage[sid] = k
+    return out
+
+
+class IncrementalSafetensorsWriter:
+    """Write HF-style safetensor shards while batches are produced.
+
+    The legacy writer receives the entire tensor dict and therefore needs
+    enough host RAM for the full compressed checkpoint. Large MoE exports
+    can exceed that before the final write phase. This writer keeps only
+    one output shard resident, writes temporary shard files as soon as
+    they reach the byte budget, then renames them to the final
+    `model-00001-of-000NN.safetensors` layout and writes the index once
+    the final shard count is known.
+    """
+
+    def __init__(self, out_dir: Path, shard_bytes: int):
+        self.out_dir = out_dir
+        self.shard_bytes = int(shard_bytes)
+        self.current: dict[str, torch.Tensor] = {}
+        self.current_size = 0
+        self.total_size = 0
+        self.tmp_shards: list[tuple[Path, list[str]]] = []
+        self.weight_map: dict[str, str] = {}
+        self.seen_keys: set[str] = set()
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _tensor_size(t: torch.Tensor) -> int:
+        return int(t.numel() * t.element_size())
+
+    def add_tensors(self, tensors: dict[str, torch.Tensor]) -> None:
+        if not tensors:
+            return
+        for key in sorted(tensors):
+            if key in self.seen_keys:
+                raise RuntimeError(
+                    f"duplicate tensor key emitted during export: {key}"
+                )
+            tensor = tensors[key].detach().cpu()
+            size = self._tensor_size(tensor)
+            if (self.current
+                    and self.current_size + size > self.shard_bytes):
+                self._flush_current()
+            self.current[key] = tensor
+            self.current_size += size
+            self.total_size += size
+            self.seen_keys.add(key)
+            # A single tensor can exceed the target shard size. Flush it
+            # immediately so the next shard starts cleanly.
+            if self.current_size >= self.shard_bytes:
+                self._flush_current()
+
+    def _flush_current(self) -> None:
+        if not self.current:
+            return
+        idx = len(self.tmp_shards) + 1
+        tmp_path = self.out_dir / f".model-{idx:05d}.safetensors.tmp"
+        save_file(
+            {k: v.contiguous() for k, v in
+             _clone_shared_storage_for_safetensors(self.current).items()},
+            str(tmp_path),
+            metadata={"format": "pt"},
+        )
+        self.tmp_shards.append((tmp_path, list(self.current.keys())))
+        print(
+            f"[export-stream] wrote temp shard {idx:05d} "
+            f"keys={len(self.current)} bytes={self.current_size}",
+            flush=True,
+        )
+        self.current = {}
+        self.current_size = 0
+        gc.collect()
+
+    def finalize(self) -> None:
+        self._flush_current()
+        if not self.tmp_shards:
+            raise RuntimeError("no tensors were written")
+
+        if len(self.tmp_shards) == 1:
+            tmp_path, keys = self.tmp_shards[0]
+            final_name = "model.safetensors"
+            os.replace(tmp_path, self.out_dir / final_name)
+            for key in keys:
+                self.weight_map[key] = final_name
+            print("[export-stream] finalized single safetensors shard",
+                  flush=True)
+            return
+
+        n = len(self.tmp_shards)
+        for i, (tmp_path, keys) in enumerate(self.tmp_shards, start=1):
+            final_name = f"model-{i:05d}-of-{n:05d}.safetensors"
+            os.replace(tmp_path, self.out_dir / final_name)
+            for key in keys:
+                self.weight_map[key] = final_name
+
+        with open(self.out_dir / "model.safetensors.index.json", "w") as f:
+            json.dump({
+                "metadata": {"total_size": self.total_size},
+                "weight_map": self.weight_map,
+            }, f, indent=2)
+        print(f"[export-stream] finalized {n} safetensors shards",
+              flush=True)
+
+
 def write_sharded_safetensors(
     tensors: dict[str, torch.Tensor],
     out_dir: Path,
@@ -3939,18 +4082,7 @@ def write_sharded_safetensors(
     # and any other view-ties produced by HF's
     # `_tied_weights_keys`. Cost: one extra copy of the embed matrix;
     # correctness: identical bytes on disk, no runtime semantic change.
-    seen_storage: dict[int, str] = {}
-    for k, t in list(tensors.items()):
-        try:
-            sid = t.untyped_storage().data_ptr()
-        except Exception:
-            continue
-        if sid in seen_storage:
-            # This tensor shares storage with an earlier one.
-            # Deep-copy so safetensors treats them independently.
-            tensors[k] = t.detach().clone().contiguous()
-        else:
-            seen_storage[sid] = k
+    tensors = _clone_shared_storage_for_safetensors(tensors)
 
     keys = sorted(tensors.keys())
     sizes = {k: tensors[k].numel() * tensors[k].element_size() for k in keys}

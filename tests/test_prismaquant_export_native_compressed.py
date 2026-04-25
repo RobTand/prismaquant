@@ -79,6 +79,51 @@ class TestLazyActivationCache(unittest.TestCase):
         self.assertTrue(torch.equal(value, torch.ones(2, 3, dtype=torch.float32)))
 
 
+class TestIncrementalSafetensorsWriter(unittest.TestCase):
+    def test_finalizes_multi_shard_index_without_temp_files(self):
+        from safetensors.torch import load_file
+
+        from prismaquant.export_native_compressed import (
+            IncrementalSafetensorsWriter,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            out_dir = Path(td)
+            writer = IncrementalSafetensorsWriter(out_dir, shard_bytes=32)
+            writer.add_tensors({
+                "b.weight": torch.ones(4, dtype=torch.float32),
+                "a.weight": torch.arange(8, dtype=torch.float32),
+            })
+            writer.add_tensors({
+                "c.weight": torch.arange(16, dtype=torch.int8),
+            })
+            writer.finalize()
+
+            self.assertFalse(list(out_dir.glob("*.tmp")))
+            idx_path = out_dir / "model.safetensors.index.json"
+            self.assertTrue(idx_path.exists())
+            with open(idx_path) as f:
+                index = json.load(f)
+            self.assertEqual(
+                set(index["weight_map"]),
+                {"a.weight", "b.weight", "c.weight"},
+            )
+            self.assertEqual(index["metadata"]["total_size"], 64)
+
+            loaded = {}
+            for shard_name in set(index["weight_map"].values()):
+                loaded.update(load_file(str(out_dir / shard_name)))
+            self.assertTrue(torch.equal(
+                loaded["a.weight"], torch.arange(8, dtype=torch.float32)
+            ))
+            self.assertTrue(torch.equal(
+                loaded["b.weight"], torch.ones(4, dtype=torch.float32)
+            ))
+            self.assertTrue(torch.equal(
+                loaded["c.weight"], torch.arange(16, dtype=torch.int8)
+            ))
+
+
 class TestGroupedExportQuantization(unittest.TestCase):
     def test_grouped_rtn_formats_match_scalar_export(self):
         from prismaquant.export_native_compressed import (
