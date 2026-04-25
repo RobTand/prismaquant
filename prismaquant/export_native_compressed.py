@@ -2382,6 +2382,8 @@ def materialize_tensors_streaming(
     for name, p in model.named_parameters():
         if p.is_meta:
             continue  # only head/embed/norm/lm_head resident here
+        if name.startswith(layers_prefix):
+            continue
         _emit_head_param(name, p)
 
     for mod_name, mod in model.named_modules():
@@ -2392,6 +2394,8 @@ def materialize_tensors_streaming(
             if buf.is_meta:
                 continue
             full = f"{mod_name}.{buf_name}" if mod_name else buf_name
+            if full.startswith(layers_prefix):
+                continue
             if full in out:
                 continue
             out[full] = buf.detach().to(torch.bfloat16).cpu()
