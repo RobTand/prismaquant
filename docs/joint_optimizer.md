@@ -79,6 +79,16 @@ If a packed entry has incomplete saliency, it is not rewritten for that ratio.
 The main allocator refuses to emit a uniform-kept sidecar if the manifest pass
 would need to add unscored drops afterward.
 
+### Nested MoE With Scalar Expert Count
+
+MiniMax-M2.7 stores experts as nested per-expert Linears, but its HF/vLLM
+config still carries a single scalar expert-count field. For that profile the
+allocator uses the same global-ratio discipline: after `aggregate_moe_candidates`
+emits DROP candidates, `apply_nested_global_prune_ratio` filters every MoE
+super-Linear to the ratio currently being swept. This keeps the DP honest:
+format choices remain per group, but expert-count choices are globally uniform
+and the manifest can be exported without post-hoc, unscored drops.
+
 ## Invariants
 
 These are correctness constraints, not style preferences:

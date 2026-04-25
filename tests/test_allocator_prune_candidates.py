@@ -26,6 +26,7 @@ from prismaquant.allocator import (
     aggregate_moe_candidates,
     apply_consensus_prune,
     apply_global_prune_ratio,
+    apply_nested_global_prune_ratio,
     build_prune_manifest,
     compute_achieved,
     compute_assignment_predicted_dloss,
@@ -121,6 +122,31 @@ def test_prune_drops_lowest_saliency_first():
         assert prune.pruned_expert_ids == (1,)
         # Pruning must halve memory (2 experts total, drop 1).
         assert prune.memory_bytes == no_prune.memory_bytes // 2, (fmt, prune, no_prune)
+
+
+def test_nested_global_prune_ratio_filters_superlinear_candidates():
+    stats, costs, c_in, e_info, sal, specs = _make_two_expert_fixture({0: 1.0, 1: 0.1})
+    stats_ext, _, c_out = aggregate_moe_candidates(
+        stats, costs, specs, c_in, granularity="projection",
+        expert_saliency=sal,
+        expert_info=e_info,
+        prune_ratios=(0.5,),
+        prune_alpha=0.5,
+    )
+
+    no_prune, warnings = apply_nested_global_prune_ratio(c_out, stats_ext, 0.0)
+    assert warnings == []
+    assert no_prune is not None
+    assert all(c.pruned_expert_ids == () for c in no_prune[SUPER_NAME])
+
+    half_prune, warnings = apply_nested_global_prune_ratio(c_out, stats_ext, 0.5)
+    assert warnings == []
+    assert half_prune is not None
+    assert {c.pruned_expert_ids for c in half_prune[SUPER_NAME]} == {(1,)}
+
+    infeasible, warnings = apply_nested_global_prune_ratio(c_out, stats_ext, 1.0)
+    assert infeasible is None
+    assert warnings
 
 
 def test_prune_ratio_uses_floor_not_round():

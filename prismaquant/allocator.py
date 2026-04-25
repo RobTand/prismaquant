@@ -121,6 +121,7 @@ from .allocator_prune import (
     aggregate_moe_candidates,
     apply_consensus_prune,
     apply_global_prune_ratio,
+    apply_nested_global_prune_ratio,
     build_prune_manifest,
     compute_max_prune_ratio,
     expand_moe_assignment,
@@ -645,6 +646,20 @@ def main():
         moe_groups = sum(1 for n in candidates if ".__fused__." in n)
         print(f"[alloc] MoE aggregation: {moe_groups} fused-expert super-Linears")
 
+    # MiniMax-style nested MoE exports also carry one scalar expert-count
+    # field in config.json. They therefore need the same global-ratio
+    # discipline as packed-3D MoE: the DP may choose quant formats per
+    # group, but not independently choose each layer's prune ratio.
+    nested_global_prune = (
+        args.enable_expert_prune
+        and args.expert_granularity == "layer"
+        and args.target_profile == "research"
+        and getattr(model_profile, "name", "") in {"minimax_m2"}
+    )
+    if nested_global_prune:
+        print("[alloc] nested-MoE global prune sweep enabled "
+              f"(profile={model_profile.name})", flush=True)
+
     # Pre-aggregate fused siblings (qkv_proj, gate_up_proj, ...) into
     # single DP items. The DP can't pick mixed-sibling solutions because
     # there's only one item per group — so promote_fused becomes a no-op
@@ -689,6 +704,17 @@ def main():
             )
         else:
             c = candidates
+        if nested_global_prune:
+            filtered, filter_warnings = apply_nested_global_prune_ratio(
+                c, stats, global_ratio=R,
+            )
+            if filtered is None:
+                if filter_warnings:
+                    print("[alloc] nested-MoE global prune ratio "
+                          f"R={R:.6g} infeasible: {filter_warnings[0]}",
+                          flush=True)
+                return None, {}, float("nan"), float("inf")
+            c = filtered
         assign, pruned_map_r, achieved_r = solve_with_promotion(
             stats, c, target_bits, format_specs, format_rank,
             args.bit_precision,
@@ -819,7 +845,10 @@ def main():
         # expert_saliency feeds the uniform-kept coercion pass
         # (padding lighter-pruned layers to match the heaviest prune,
         # using lowest-saliency experts as the extras).
-        uniform_kept = args.target_profile == "vllm_qwen3_5_packed_moe"
+        uniform_kept = (
+            args.target_profile == "vllm_qwen3_5_packed_moe"
+            or nested_global_prune
+        )
         prune_manifest, prune_warnings = build_prune_manifest(
             pruned_map, stats, probe_expert_info,
             expert_saliency=probe_expert_saliency,

@@ -228,6 +228,7 @@ def aggregate_moe_candidates(
 
         drop_order = sorted(prune_dloss_by_eid, key=prune_dloss_by_eid.get)
         num_experts_total = len(drop_order)
+        stats_ext[super_name]["_num_experts_total"] = num_experts_total
 
         member_format_sets = [
             {c.fmt for c in candidates.get(m_, [])} for m_ in members
@@ -327,6 +328,51 @@ def aggregate_moe_candidates(
             candidates_ext[super_name] = cands
 
     return stats_ext, costs_ext, candidates_ext
+
+
+def apply_nested_global_prune_ratio(
+    candidates: dict[str, list[Candidate]],
+    stats: dict,
+    global_ratio: float,
+) -> tuple[dict[str, list[Candidate]] | None, list[str]]:
+    """Filter nested-MoE super-Linears to one global prune ratio.
+
+    ``aggregate_moe_candidates`` emits all caller-provided prune ratios per
+    MoE super-Linear. That is useful for research recipes, but not for
+    exportable MiniMax-style configs whose HF/vLLM config carries one scalar
+    expert count. In that case every router must keep the same number of
+    experts, so the outer allocator sweep must constrain every MoE
+    super-Linear to the current global ratio before solving the DP.
+
+    Returns ``(filtered_candidates, warnings)``. ``filtered_candidates`` is
+    ``None`` when a required super-Linear has no exact candidate for the
+    requested ratio, making that global ratio infeasible.
+    """
+    R = float(global_ratio)
+    out: dict[str, list[Candidate]] = {}
+    warnings: list[str] = []
+    for name, cs in candidates.items():
+        s = stats.get(name, {})
+        E = int(s.get("_num_experts_total", 0) or 0)
+        if ".__fused__." not in name or E <= 0:
+            out[name] = cs
+            continue
+        n_drop = min(E, int(math.floor(E * R)))
+        if n_drop == 0:
+            kept = [c for c in cs if not c.pruned_expert_ids]
+        else:
+            kept = [
+                c for c in cs
+                if len(tuple(c.pruned_expert_ids)) == n_drop
+            ]
+        if not kept:
+            warnings.append(
+                f"{name}: no candidate for global prune ratio {R:.6g} "
+                f"(expected {n_drop}/{E} drops)"
+            )
+            return None, warnings
+        out[name] = kept
+    return out, warnings
 
 
 _PACKED_EXPERTS_PROJ_RE = re.compile(
