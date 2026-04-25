@@ -70,6 +70,7 @@ from accelerate import init_empty_weights
 from safetensors.torch import save_file
 
 from .model_profiles.qwen3_5 import Qwen3_5Profile
+from .schemas import validate_layer_config_payload, validate_prune_manifest_payload
 
 # ---------------------------------------------------------------------------
 # NVFP4 packing (inlined from compressed-tensors fp4_quantized.py to avoid
@@ -1443,10 +1444,7 @@ def _load_prune_manifest(path: Path | str | None) -> dict[str, dict]:
         return {}
     with open(p) as f:
         data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"[export-stream] prune manifest at {p} is not a JSON object"
-        )
+    validate_prune_manifest_payload(data, str(p))
     return data
 
 
@@ -3693,7 +3691,9 @@ def main():
             # Pull candidate names from the recipe — ActivationIndex
             # only loads for names that actually have a cached file.
             with open(args.layer_config) as _lc:
-                _recipe_names = list(json.load(_lc).keys())
+                _recipe_payload = json.load(_lc)
+            validate_layer_config_payload(_recipe_payload, args.layer_config)
+            _recipe_names = list(_recipe_payload.keys())
             idx = ActivationIndex(cache_dir, _recipe_names)
             scales: dict[str, float] = {}
             for name in idx.names():
@@ -3730,6 +3730,7 @@ def main():
 
     with open(args.layer_config) as f:
         raw_recipe = json.load(f)
+    validate_layer_config_payload(raw_recipe, args.layer_config)
     assignment = _canonicalize_assignment(raw_recipe)
     validate_mtp_assignment_coverage(args.model, assignment, profile)
     fmts = Counter(assignment.values())

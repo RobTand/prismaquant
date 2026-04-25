@@ -50,6 +50,7 @@ from prismaquant.allocator import (
     promote_fused,
     solve_allocation,
 )
+from prismaquant.schemas import validate_cost_payload, validate_probe_payload
 
 
 def load_inputs(probe_path: Path, costs_path: Path, fmt_names: list[str]):
@@ -59,6 +60,8 @@ def load_inputs(probe_path: Path, costs_path: Path, fmt_names: list[str]):
         probe = pickle.load(f)
     with open(costs_path, "rb") as f:
         cost_data = pickle.load(f)
+    validate_probe_payload(probe, str(probe_path))
+    validate_cost_payload(cost_data, str(costs_path))
 
     stats = probe["stats"]
     costs = cost_data["costs"]

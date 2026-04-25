@@ -2,9 +2,19 @@
 
 This note describes the current PrismaQuant joint optimizer: the code path
 that composes expert pruning with mixed-precision allocation. It is meant to
-be read before changing `prismaquant/allocator.py`,
-`prismaquant/observers/expert_saliency.py`, or the prune sidecar handling in
-`prismaquant/export_native_compressed.py`.
+be read before changing the allocator modules:
+
+- `prismaquant/allocator.py`: CLI orchestration and backwards-compatible
+  re-exports.
+- `prismaquant/allocator_solver.py`: candidate type, DP solver, achieved-bit
+  accounting, and fused-format promotion.
+- `prismaquant/allocator_candidates.py`: per-Linear candidate construction,
+  passthrough-source gating, source dtype scanning, and fused-sibling
+  aggregation.
+- `prismaquant/allocator_prune.py`: MoE aggregation, prune candidates, global
+  packed-MoE ratio rewrites, assignment expansion, and prune manifests.
+- `prismaquant/schemas.py`: validation for probe, cost, layer_config, and
+  prune-manifest handoff files.
 
 ## Objective
 
@@ -94,7 +104,9 @@ Fast loop:
 
 ```bash
 python3 -m pytest -q \
+  tests/test_schema_validation.py \
   tests/test_allocator_prune_candidates.py \
+  tests/test_allocator_sibling_aggregation.py \
   tests/test_expert_saliency_observer.py \
   tests/test_incremental_probe.py \
   tests/test_exporter_prune.py
