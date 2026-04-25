@@ -19,7 +19,15 @@ The score measures the average output magnitude an expert adds to a
 layer, weighted by how strongly the router selected it. High-saliency
 experts handle either many tokens OR a few tokens with large-norm
 outputs (niche experts) — both patterns are correctly protected.
-Low-saliency experts get pruned first by the allocator.
+Low-saliency experts get pruned first by the allocator. For the
+joint prune+quant optimizer, callers should use
+`saliency(reduction="reap_dropout")`, which returns REAP's direct
+dropout-loss estimate:
+
+    Δ L_j ≈ (1/T_cal) · Σ_t g_j(t) · ||f_j(t)||_2²
+
+That value is already in the same loss units as the allocator's
+quantization Δloss candidates and is consumed as α · Δ L_j.
 
 ### Supported model layouts
 
@@ -224,6 +232,22 @@ class ExpertSaliencyTracker:
 
             if added_any_expert:
                 self._handles.append(router_handle)
+                # Attach tracker pointers to the experts parent so paths
+                # that bypass per-expert nn.Module forward (e.g. MiniMax
+                # fast-MoE chunked replay in `incremental_probe.py`) can
+                # accumulate saliency inline. Per-expert hooks remain
+                # the primary path; this is a fallback the chunked
+                # forward reads when present. Idempotent: re-running
+                # init overwrites the same attrs.
+                if experts_parent_qname:
+                    try:
+                        experts_parent_mod = model.get_submodule(experts_parent_qname)
+                    except AttributeError:
+                        experts_parent_mod = None
+                    if experts_parent_mod is not None:
+                        experts_parent_mod._pq_saliency_tracker = self
+                        experts_parent_mod._pq_saliency_router = router_qname
+                        self._patched_packed_modules.append(experts_parent_mod)
             else:
                 router_handle.remove()
                 # Drop the expected-count entry for a router we couldn't

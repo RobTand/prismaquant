@@ -8,8 +8,9 @@ Verifies:
      (ratio > 0) candidates; each prune candidate has shrunken
      memory_bytes (proportional to kept experts) and drops the
      lowest-saliency expert ids first.
-  3. The prune Δloss formula is α · (h / n_params) · S_j² per dropped
-     expert, matching `_prune_cost_per_expert`.
+  3. The prune Δloss formula is α · S_j per dropped expert, where S_j
+     is the probe's REAP dropout-loss estimate, matching
+     `_prune_cost_per_expert`.
   4. The DP's existing numerical invariants (ordering by cost) still
      hold — the allocator's downstream DP is format-agnostic about
      where candidates come from.
@@ -26,6 +27,8 @@ from prismaquant.allocator import (
     apply_consensus_prune,
     apply_global_prune_ratio,
     build_prune_manifest,
+    compute_achieved,
+    compute_assignment_predicted_dloss,
     compute_max_prune_ratio,
     expand_moe_assignment,
     _packed_entry_router_qname,
@@ -120,6 +123,39 @@ def test_prune_drops_lowest_saliency_first():
         assert prune.memory_bytes == no_prune.memory_bytes // 2, (fmt, prune, no_prune)
 
 
+def test_prune_ratio_uses_floor_not_round():
+    """Ratios are user caps. R=0.375 over four experts should drop one
+    expert, not round 1.5 up to two."""
+    stats, costs, c_in, e_info, sal, specs = _four_expert_projection_cost_fixture()
+    _, _, c_out = aggregate_moe_candidates(
+        stats, costs, specs, c_in, granularity="projection",
+        expert_saliency=sal,
+        expert_info=e_info,
+        prune_ratios=(0.375,),
+        prune_alpha=1.0,
+    )
+    prune = next(
+        c for c in c_out["model.layers.0.mlp.experts.__fused__.gate_proj"]
+        if c.fmt == "NVFP4" and c.pruned_expert_ids
+    )
+    assert prune.pruned_expert_ids == (3,)
+
+
+def test_partial_saliency_disables_projection_prune_variants():
+    """Missing saliency means observer coverage is incomplete, not that
+    the missing expert is zero-cost to drop."""
+    stats, costs, c_in, e_info, _sal, specs = _make_two_expert_fixture({0: 1.0})
+    partial = {"model.layers.0.mlp.gate": {0: 1.0}}  # expert 1 missing
+    _, _, c_out = aggregate_moe_candidates(
+        stats, costs, specs, c_in, granularity="projection",
+        expert_saliency=partial,
+        expert_info=e_info,
+        prune_ratios=(0.5,),
+        prune_alpha=0.5,
+    )
+    assert all(c.pruned_expert_ids == () for c in c_out[SUPER_NAME])
+
+
 def test_prune_cost_matches_formula():
     """Δloss of the prune candidate should equal
     per_member_dloss[kept] + _prune_cost_per_expert(dropped)."""
@@ -165,7 +201,7 @@ def test_dead_expert_pruned_nearly_free():
         if c.fmt == "NVFP4" and c.pruned_expert_ids == (1,)
     )
     kept_dloss = costs["model.layers.0.mlp.experts.0.gate_proj"]["NVFP4"]["predicted_dloss"]
-    # Prune cost of dead expert = α · (h/n) · 0² = 0; total Δloss = kept_dloss only.
+    # Prune cost of dead expert = α · 0 = 0; total Δloss = kept_dloss only.
     assert cand.predicted_dloss == pytest.approx(kept_dloss, rel=1e-12)
 
 
@@ -187,13 +223,14 @@ def test_expert_ids_in_group_helper():
 
 
 def test_unit_prune_cost_formula():
-    # α=0.5, h=0.1, n=100, S=0.5 → 0.5 · 0.001 · 0.25 = 0.000125
+    # Saliency is already REAP dropout loss units, so α=0.5, S=0.5 → 0.25.
     got = _prune_cost_per_expert(saliency=0.5, h_trace=0.1, n_params=100, alpha=0.5)
-    assert got == pytest.approx(0.000125, rel=1e-12)
+    assert got == pytest.approx(0.25, rel=1e-12)
     # Degenerate cases
     assert _prune_cost_per_expert(0.0, 0.1, 100, 0.5) == 0.0
-    assert _prune_cost_per_expert(0.5, 0.0, 100, 0.5) == 0.0
-    assert _prune_cost_per_expert(0.5, 0.1, 0, 0.5) == 0.0
+    # h_trace and n_params are intentionally ignored by the current formula.
+    assert _prune_cost_per_expert(0.5, 0.0, 100, 0.5) == pytest.approx(0.25)
+    assert _prune_cost_per_expert(0.5, 0.1, 0, 0.5) == pytest.approx(0.25)
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +251,39 @@ def _four_expert_fixture():
         for i, m in enumerate(proj_members):
             expert_info[m] = ("model.layers.0.mlp.gate", str(i))
     return stats_ext, expert_info, members_gate, members_up, members_down
+
+
+def _four_expert_projection_cost_fixture():
+    members = [f"model.layers.0.mlp.experts.{i}.gate_proj" for i in range(4)]
+    stats = {
+        m: {
+            "h_trace": 0.1,
+            "w_max_abs": 1.0,
+            "w_norm_sq": 1.0,
+            "n_params": 100,
+            "in_features": 10,
+            "out_features": 10,
+            "h_trace_raw": 0.1,
+            "h_w2_sum": 0.1,
+        }
+        for m in members
+    }
+    costs = {
+        m: {
+            "NVFP4": {"weight_mse": 0.01, "output_mse": 0.01, "predicted_dloss": 0.001},
+        }
+        for m in members
+    }
+    candidates = {
+        m: [Candidate("NVFP4", 4.25, 100, 0.001)]
+        for m in members
+    }
+    expert_info = {
+        m: ("model.layers.0.mlp.gate", str(i))
+        for i, m in enumerate(members)
+    }
+    saliency = {"model.layers.0.mlp.gate": {0: 10.0, 1: 5.0, 2: 1.0, 3: 0.0}}
+    return stats, costs, candidates, expert_info, saliency, [fr.get_format("NVFP4")]
 
 
 def test_manifest_single_projection_layer_granularity():
@@ -393,6 +463,65 @@ def test_apply_global_prune_ratio_replaces_candidates():
     assert mx.bits_per_param == pytest.approx(4.125)
 
 
+def test_apply_global_prune_ratio_uses_floor_not_round():
+    name, stats, _router, sal = _packed_stat_fixture()
+    candidates = {
+        name: [Candidate("NVFP4", 4.25, 1000, 0.010)]
+    }
+    n = apply_global_prune_ratio(
+        candidates, stats, sal, global_ratio=0.375, prune_alpha=1.0,
+    )
+    assert n == 1
+    # floor(4 * 0.375) = 1, so only the lowest-saliency expert is dropped.
+    assert candidates[name][0].pruned_expert_ids == (3,)
+
+
+def test_apply_global_prune_ratio_requires_complete_saliency():
+    """A partial saliency map is an observer/cache gap, not evidence that
+    missing experts are dead. The packed global-prune path must skip
+    such entries instead of treating missing saliency as zero-cost."""
+    name, stats, router, sal = _packed_stat_fixture()
+    sal[router] = {0: 1.0, 1: 0.1}  # experts 2 and 3 missing
+    base = Candidate(
+        fmt="NVFP4", bits_per_param=4.25, memory_bytes=1000,
+        predicted_dloss=0.010,
+    )
+    candidates = {name: [base]}
+    n = apply_global_prune_ratio(
+        candidates, stats, sal, global_ratio=0.5, prune_alpha=1.0,
+    )
+    assert n == 0
+    assert candidates[name] == [base]
+
+
+def test_compute_achieved_uses_exact_pruned_candidate_memory():
+    """Regression: achieved bits for a prune-aware assignment must use
+    the chosen Candidate's shrunken memory, not the no-prune format map."""
+    name = "model.layers.0.mlp.experts.gate_up_proj"
+    stats = {
+        name: {
+            "n_params": 400,
+            "in_features": 8,
+            "out_features": 10,
+            "_memory_bytes_by_format": {"NVFP4": 213},  # no-prune footprint
+        }
+    }
+    candidates = {
+        name: [
+            Candidate("NVFP4", 4.25, 213, 0.010, ()),
+            Candidate("NVFP4", 2.125, 106, 0.020, (1, 3)),
+        ]
+    }
+    achieved, _ = compute_achieved(
+        stats,
+        {name: "NVFP4"},
+        {"NVFP4": fr.get_format("NVFP4")},
+        candidates=candidates,
+        pruned_map={name: (1, 3)},
+    )
+    assert achieved == pytest.approx(8.0 * 106 / 400)
+
+
 def test_apply_global_prune_ratio_noop_without_saliency():
     name, stats, _router, _sal = _packed_stat_fixture()
     base = Candidate(fmt="NVFP4", bits_per_param=4.25, memory_bytes=1000,
@@ -481,3 +610,67 @@ def test_build_prune_manifest_resolves_packed_entries():
     assert entry["num_experts_orig"] == 4
     assert entry["pruned_expert_ids"] == [1, 3]
     assert entry["kept_expert_ids"] == [0, 2]
+
+
+def test_build_prune_manifest_uniform_kept_is_opt_in():
+    """Default manifest construction must not add unscored drops for
+    routers the DP did not prune. The packed serving path may request
+    uniform_kept=True, but that behavior is explicit and auditable."""
+    stats_ext = {
+        "model.layers.0.mlp.experts.gate_up_proj": {"num_experts": 4},
+        "model.layers.1.mlp.experts.gate_up_proj": {"num_experts": 4},
+    }
+    sal = {
+        "model.layers.0.mlp.gate": {0: 1.0, 1: 0.1, 2: 0.5, 3: 0.0},
+        "model.layers.1.mlp.gate": {0: 0.0, 1: 0.2, 2: 0.4, 3: 0.6},
+    }
+    pruned_map = {"model.layers.0.mlp.experts.gate_up_proj": (1, 3)}
+
+    manifest, warnings = build_prune_manifest(
+        pruned_map, stats_ext, expert_info={}, expert_saliency=sal,
+    )
+    assert warnings == []
+    assert set(manifest) == {"model.layers.0.mlp.gate"}
+
+    manifest_u, warnings_u = build_prune_manifest(
+        pruned_map, stats_ext, expert_info={}, expert_saliency=sal,
+        uniform_kept=True,
+    )
+    assert set(manifest_u) == {
+        "model.layers.0.mlp.gate",
+        "model.layers.1.mlp.gate",
+    }
+    assert any("DP chose no prune" in w for w in warnings_u)
+
+
+def test_compute_assignment_predicted_dloss_uses_exact_pruned_candidate():
+    name = "model.layers.0.mlp.experts.gate_up_proj"
+    candidates = {
+        name: [
+            Candidate("NVFP4", 4.25, 213, 1.0, ()),
+            Candidate("NVFP4", 2.125, 106, 3.5, (1, 3)),
+        ]
+    }
+    got = compute_assignment_predicted_dloss(
+        {name: "NVFP4"}, candidates, {name: (1, 3)},
+    )
+    assert got == pytest.approx(3.5)
+
+
+def test_pruned_assignment_without_exact_candidate_is_invariant_failure():
+    name = "model.layers.0.mlp.experts.gate_up_proj"
+    candidates = {
+        name: [Candidate("NVFP4", 4.25, 213, 1.0, ())],
+    }
+    with pytest.raises(AssertionError, match="no exact candidate"):
+        compute_assignment_predicted_dloss(
+            {name: "NVFP4"}, candidates, {name: (1, 3)},
+        )
+    with pytest.raises(AssertionError, match="no exact candidate"):
+        compute_achieved(
+            {name: {"n_params": 400, "in_features": 8, "out_features": 10}},
+            {name: "NVFP4"},
+            {"NVFP4": fr.get_format("NVFP4")},
+            candidates=candidates,
+            pruned_map={name: (1, 3)},
+        )

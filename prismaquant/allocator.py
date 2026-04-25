@@ -362,7 +362,10 @@ def solve_with_promotion(
         # because it's a hard correctness constraint, not an
         # optimization; the unservable artifact is silent otherwise.
         assign = promote_moe_pair(assign, format_rank)
-        achieved, _ = compute_achieved(stats, assign, format_specs)
+        achieved, _ = compute_achieved(
+            stats, assign, format_specs,
+            candidates=candidates, pruned_map=pruned_map,
+        )
         last_assign = assign
         last_pruned = pruned_map
         last_achieved = achieved
@@ -714,26 +717,53 @@ def _prune_cost_per_expert(
 ) -> float:
     """Per-expert predicted Δloss from DROP'ing a single expert.
 
-    Matches the form of quantization Δloss used elsewhere in the
-    allocator (``0.5 · h_trace · weight_mse``) so the DP can compare
-    prune and quant candidates in the same units. For pruning the
-    per-element "perturbation squared" term is substituted by
-    ``S_j²`` — the saliency that REAP measures is the mean
-    ``g_j · ||f_j||`` contribution to the layer output, so
-    ``S_j²`` has the same (output-magnitude²) units as ``weight_mse``
-    does per-weight.
+    The probe emits saliency as REAP's per-expert dropout loss
+    ``Δ L_j ≈ (1/T_cal) · Σ_t g_j(t) · ||f_j(t)||²``, which is already
+    in Δloss units (output-magnitude² scaled by the cumulative gate
+    weight). It can be summed directly with the quantization Δloss
+    terms the DP compares against — no further h_trace/n_params or
+    squaring needed.
 
-    The mapping from S_j² to weight_mse-space uses the per-weight
-    average of h_trace, giving:
-        Δloss_prune ≈ α · (h_trace / n_params) · S_j²
+    α is a global calibration scalar that scales the prune Δloss
+    relative to quant Δloss. α=1.0 reproduces REAP's published cost;
+    smaller α makes pruning cheaper in the DP (more willing to drop
+    experts), larger α protects experts.
 
-    α is a global calibration scalar (CLI-exposed) that puts prune
-    costs on the same relative footing as quant costs. Default: 0.5
-    mirrors the 0.5 in ``predicted_dloss(h, mse, …)``.
+    h_trace and n_params are kept as parameters for forward-compat
+    with the prior ``α · (h/n) · S²`` formula and aren't used in the
+    current closed form.
     """
-    if n_params <= 0 or h_trace <= 0 or saliency <= 0:
+    del h_trace, n_params  # see docstring
+    if saliency <= 0:
         return 0.0
-    return float(alpha) * (float(h_trace) / float(n_params)) * float(saliency) ** 2
+    return float(alpha) * float(saliency)
+
+
+def _saliency_has_eid(saliency_map: dict, eid: int) -> bool:
+    """Return True when `saliency_map` carries an explicit value for eid.
+
+    Probe pickles normally use integer keys. JSON round-trips and ad-hoc
+    tooling can stringify keys, so tolerate both spellings.
+    """
+    return eid in saliency_map or str(eid) in saliency_map
+
+
+def _saliency_lookup(
+    saliency_map: dict,
+    eid: int,
+    default: float = 0.0,
+) -> float:
+    if eid in saliency_map:
+        return float(saliency_map[eid])
+    s_eid = str(eid)
+    if s_eid in saliency_map:
+        return float(saliency_map[s_eid])
+    return float(default)
+
+
+def _saliency_complete_for_eids(saliency_map: dict, eids) -> bool:
+    expected = [int(e) for e in eids]
+    return bool(expected) and all(_saliency_has_eid(saliency_map, e) for e in expected)
 
 
 def aggregate_moe_candidates(
@@ -745,6 +775,7 @@ def aggregate_moe_candidates(
     expert_info: dict[str, tuple[str, str]] | None = None,
     prune_ratios: tuple[float, ...] = (),
     prune_alpha: float = 0.5,
+    source_manifest: dict[str, str] | None = None,
 ) -> tuple[dict, dict, dict]:
     """Aggregate per-expert Linears into per-layer MoE super-candidates.
 
@@ -920,11 +951,14 @@ def aggregate_moe_candidates(
         )
         # Effective prune ratios: always include 0.0 (the no-prune
         # baseline) so the DP can choose "keep every expert," then
-        # append any caller-provided positive ratios when saliency is
-        # available. This preserves the existing allocator's behavior
-        # bit-identically when `prune_ratios=()` — only a single
-        # ratio=0 candidate is emitted per (super-Linear, format).
-        if prune_ratios and saliency_map:
+        # append caller-provided positive ratios only when saliency is
+        # complete for every expert in this group. Missing saliency is
+        # an observer/cache gap, not proof that an expert is dead; dead
+        # experts must appear explicitly with value 0.0.
+        saliency_complete = _saliency_complete_for_eids(
+            saliency_map, eid_to_member.keys(),
+        )
+        if prune_ratios and saliency_map and saliency_complete:
             effective_prune_ratios = tuple(
                 sorted({0.0, *(r for r in prune_ratios if r > 0.0)})
             )
@@ -932,13 +966,12 @@ def aggregate_moe_candidates(
             effective_prune_ratios = (0.0,)
 
         # Per-expert prune cost (evaluated once per expert; cheap).
-        # Missing saliency entries default to 0 → dropping that expert
-        # is "free" by this metric, which will usually not be the
-        # allocator's pick since we also add the format-quant savings
-        # of kept experts, but it protects against observer gaps.
+        # Saliency maps must be complete before positive prune ratios
+        # are enabled above. A true dead expert is represented by an
+        # explicit 0.0 value.
         prune_dloss_by_eid: dict[int, float] = {}
         for eid, member in eid_to_member.items():
-            s_j = float(saliency_map.get(eid, 0.0))
+            s_j = _saliency_lookup(saliency_map, eid, 0.0)
             h_j = float(stats[member].get("h_trace", 0.0))
             np_j = int(stats[member].get("n_params", 0) or 0)
             prune_dloss_by_eid[eid] = _prune_cost_per_expert(
@@ -951,10 +984,54 @@ def aggregate_moe_candidates(
         drop_order = sorted(prune_dloss_by_eid, key=prune_dloss_by_eid.get)
         num_experts_total = len(drop_order)
 
+        # Propagate per-Linear filters (passthrough-integrity, kernel
+        # shape mask) through the MoE aggregation. A super-Linear can
+        # only legally pick format f if EVERY member that has a
+        # candidate list ALSO includes f — otherwise expand_moe_assignment
+        # fans the super-Linear's pick back to a member that the
+        # per-Linear filter had already excluded (e.g. assigning BF16
+        # to an fp8-source expert), and the post-pass passthrough-
+        # integrity check trips on it.
+        #
+        # Members with EMPTY candidate lists (e.g. cost-data cache miss
+        # for that specific expert during the cost step) are skipped
+        # in the intersection. They get the super-Linear's pick
+        # unconditionally — there's no per-Linear filter result for them
+        # to violate. Without this skip, a single missing-cost expert
+        # would silently drop its entire super-Linear from the
+        # assignment, losing tens of GB of params from the optimization.
+        member_format_sets = [
+            {c.fmt for c in candidates.get(m_, [])} for m_ in members
+            if candidates.get(m_)
+        ]
+        if member_format_sets:
+            allowed_member_formats = set.intersection(*member_format_sets)
+        else:
+            allowed_member_formats = {spec.name for spec in formats}
+
         cands = []
+        # Passthrough-integrity at the super-Linear level: a fused MoE
+        # assignment propagates one format to ALL member experts at
+        # export time, so the super-Linear can only use a passthrough
+        # format (BF16 / FP8_SOURCE) if EVERY member's source dtype
+        # supports it. Without this filter, the DP can pick BF16 for
+        # a super-Linear whose members are fp8 source, violating the
+        # per-Linear filter that ran earlier in `build_candidates`.
+        # Manifest absent → fall back to permissive (matches legacy).
+        member_source_kinds: set[str | None] = set()
+        if source_manifest is not None:
+            for m_ in members:
+                member_source_kinds.add(source_manifest.get(m_))
         for spec in formats:
             entry = super_cost.get(spec.name)
             if entry is None or "error" in entry:
+                continue
+            if member_source_kinds and not all(
+                _passthrough_source_ok(spec.name, sk)
+                for sk in member_source_kinds
+            ):
+                continue
+            if spec.name not in allowed_member_formats:
                 continue
             gain = float(gains.get(spec.name, 1.0))
             # Pre-compute per-member base quant Δloss (at this format)
@@ -999,7 +1076,7 @@ def aggregate_moe_candidates(
                     ))
                     continue
 
-                n_drop = min(num_experts_total, int(round(num_experts_total * ratio)))
+                n_drop = min(num_experts_total, int(math.floor(num_experts_total * ratio)))
                 if n_drop == 0:
                     continue  # ratio floored to 0 — skip duplicate
                 dropped_eids = tuple(sorted(drop_order[:n_drop]))
@@ -1102,7 +1179,8 @@ def apply_global_prune_ratio(
     prune term for budget-edge tuning.
 
     Returns the number of packed entries rewritten. No-op when
-    ``expert_saliency`` is empty or ``global_ratio`` is 0.
+    ``expert_saliency`` is empty, incomplete for the packed entry's
+    expected expert ids, or ``global_ratio`` is 0.
     """
     R = float(global_ratio)
     if R <= 0.0 or not expert_saliency:
@@ -1120,12 +1198,14 @@ def apply_global_prune_ratio(
         E = int(s.get("num_experts") or len(saliency_map))
         if E <= 0:
             continue
-        n_drop = int(round(E * R))
+        if not _saliency_complete_for_eids(saliency_map, range(E)):
+            continue
+        n_drop = int(math.floor(E * R))
         if n_drop <= 0:
             continue
         # REAP-direct drop cost per expert (units match Fisher·weight-MSE).
         prune_dloss_by_eid = {
-            eid: prune_alpha * float(saliency_map.get(eid, 0.0))
+            eid: prune_alpha * _saliency_lookup(saliency_map, eid, 0.0)
             for eid in range(E)
         }
         drop_order = sorted(
@@ -1249,7 +1329,7 @@ def build_prune_manifest(
     stats_ext: dict,
     expert_info: dict[str, tuple[str, str]],
     expert_saliency: dict[str, dict[int, float]] | None = None,
-    uniform_kept: bool = True,
+    uniform_kept: bool = False,
 ) -> tuple[dict[str, dict], list[str]]:
     """Build a router-keyed prune manifest the exporter can consume.
 
@@ -1356,6 +1436,12 @@ def build_prune_manifest(
         #      40 layers with 192 experts and 10 untouched with 256,
         #      and shrinking config.num_experts to 192 would mismatch
         #      the un-shrunk tensors.
+        #
+        # This is intentionally opt-in. Adding drops here changes the
+        # plan after the knapsack has scored it. The vLLM packed-MoE
+        # path already builds a global-ratio candidate set, so this pass
+        # should be a no-op there; callers should treat any padding
+        # warning as a plan-construction bug, not a harmless adjustment.
         # We detect "all MoE layers" via the expert_saliency dict —
         # one entry per hooked router. For each, we need num_experts
         # from the stats; pull it via _packed_entry_router_qname
@@ -1372,7 +1458,8 @@ def build_prune_manifest(
             already_dropped = set(entry["pruned_expert_ids"])
             router_sal = sal.get(router, {})
             kept_ranked = sorted(
-                kept_now, key=lambda eid: (router_sal.get(eid, 0.0), eid)
+                kept_now,
+                key=lambda eid: (_saliency_lookup(router_sal, eid, float("inf")), eid),
             )
             extra = set(kept_ranked[:need_extra_drops])
             new_dropped = sorted(already_dropped | extra)
@@ -1414,9 +1501,10 @@ def build_prune_manifest(
             need_drops = num_orig - min_kept
             if need_drops <= 0:
                 continue
-            all_eids = sorted(router_sal.keys())
+            all_eids = list(range(num_orig))
             ranked = sorted(
-                all_eids, key=lambda eid: (router_sal.get(eid, 0.0), eid)
+                all_eids,
+                key=lambda eid: (_saliency_lookup(router_sal, eid, float("inf")), eid),
             )
             dropped = sorted(ranked[:need_drops])
             kept = [e for e in all_eids if e not in set(dropped)]
@@ -1807,22 +1895,120 @@ def solve_allocation(stats: dict, candidates: dict[str, list[Candidate]],
     return assignment, chosen_cands
 
 
+def _candidate_for_assignment(
+    name: str,
+    fmt: str,
+    candidates: dict[str, list[Candidate]],
+    pruned_map: dict[str, tuple[int, ...]] | None = None,
+) -> Candidate | None:
+    """Resolve the scored Candidate for one assignment entry.
+
+    Format strings alone are not enough once expert pruning is enabled:
+    `NVFP4` with no dropped experts and `NVFP4` dropping 64 experts have
+    different memory and different Δloss. Any pruned assignment must
+    therefore match a candidate by BOTH format and exact dropped-expert
+    set. Falling back to a format-only candidate for a pruned entry is a
+    correctness bug, not an approximation.
+
+    Non-pruned entries may use a format-only match for compatibility
+    with older callers that do not carry `pruned_map`.
+    """
+    cands_for_name = candidates.get(name, [])
+    target_drops = tuple(sorted((pruned_map or {}).get(name, ())))
+    for cand in cands_for_name:
+        if cand.fmt == fmt and tuple(sorted(cand.pruned_expert_ids)) == target_drops:
+            return cand
+    if target_drops:
+        available = [
+            (c.fmt, tuple(sorted(c.pruned_expert_ids)))
+            for c in cands_for_name
+        ]
+        raise AssertionError(
+            f"assignment {name!r} picked fmt={fmt!r} with pruned_expert_ids="
+            f"{target_drops}, but no exact candidate exists. Available "
+            f"candidates: {available[:8]}"
+        )
+    for cand in cands_for_name:
+        if cand.fmt == fmt:
+            return cand
+    return None
+
+
 def compute_achieved(stats: dict, assignment: dict[str, str],
-                     format_specs: dict[str, fr.FormatSpec]) -> tuple[float, float]:
-    """Return (avg_bits, total_predicted_dloss)."""
+                     format_specs: dict[str, fr.FormatSpec],
+                     candidates: dict[str, list[Candidate]] | None = None,
+                     pruned_map: dict[str, tuple[int, ...]] | None = None,
+                     ) -> tuple[float, float]:
+    """Return (avg_bits, total_predicted_dloss).
+
+    `candidates` and `pruned_map` are optional but **strongly recommended**
+    when the assignment came from a prune-aware DP run: without them, the
+    function falls back to `stats[n]["_memory_bytes_by_format"]` which
+    stores ONLY the no-prune super-Linear memory. That under-counts the
+    savings from any chosen prune candidate, inflating the reported
+    achieved-bits and tricking `solve_with_promotion`'s tightening loop
+    into chasing a phantom overshoot — landing it on a worse-dloss plan
+    at looser budgets than at tighter ones (the spikes in the pareto).
+
+    Lookup priority for each Linear:
+      1. `candidates[n]` entry matching both `assignment[n]` (format)
+         AND `pruned_map.get(n)` (drop set) → use that Candidate's
+         `memory_bytes`. Exact bytes for the chosen plan. A pruned
+         assignment with no exact candidate raises immediately.
+      2. Format-only match in `candidates[n]` for non-pruned entries.
+      3. `stats[n]["_memory_bytes_by_format"][assignment[n]]` → the
+         no-prune super-Linear memory at this format. Correct only
+         when `pruned_map.get(n)` is empty.
+      4. `format_specs[assignment[n]].effective_bits_for_shape(shape)`
+         × n_params. Used for plain Linears with neither cached
+         memory map nor a candidate list.
+    """
     total_params = sum(stats[n]["n_params"] for n in assignment)
     total_bits = 0.0
+    pm = pruned_map or {}
+    cs = candidates or {}
     for n in assignment:
+        fmt = assignment[n]
+        chosen_cand = _candidate_for_assignment(n, fmt, cs, pm)
+        if chosen_cand is not None:
+            total_bits += 8.0 * chosen_cand.memory_bytes
+            continue
         memory_map = stats[n].get("_memory_bytes_by_format")
-        if memory_map is not None and assignment[n] in memory_map:
-            total_bits += 8.0 * memory_map[assignment[n]]
+        if memory_map is not None and fmt in memory_map:
+            total_bits += 8.0 * memory_map[fmt]
         else:
             shape = _shape_from_stats(stats[n])
             total_bits += (
-                format_specs[assignment[n]].effective_bits_for_shape(shape)
+                format_specs[fmt].effective_bits_for_shape(shape)
                 * stats[n]["n_params"]
             )
     return total_bits / max(total_params, 1), 0.0  # dloss recomputed separately
+
+
+def compute_assignment_predicted_dloss(
+    assignment: dict[str, str],
+    candidates: dict[str, list[Candidate]],
+    pruned_map: dict[str, tuple[int, ...]] | None = None,
+) -> float:
+    """Sum predicted Δloss for a concrete assignment.
+
+    This is the Δloss analogue of `compute_achieved`: it resolves the
+    exact Candidate for every `(name, format, drop-set)` decision and
+    sums the values the DP actually optimized. It deliberately does not
+    rederive costs from `stats × weight_mse`, because prune candidates
+    change both the kept-expert quantization term and add a prune term.
+    """
+    total = 0.0
+    pm = pruned_map or {}
+    for name, fmt in assignment.items():
+        chosen = _candidate_for_assignment(name, fmt, candidates, pm)
+        if chosen is None:
+            raise AssertionError(
+                f"assignment {name!r} picked fmt={fmt!r}, but no candidate "
+                "exists to price its predicted Δloss"
+            )
+        total += chosen.predicted_dloss
+    return total
 
 
 def _allowed_format(target_profile: str, name: str, fmt: str) -> bool:
@@ -2159,11 +2345,10 @@ def main():
                          "0.0 always included implicitly (no-prune candidate).")
     ap.add_argument("--prune-alpha", type=float, default=0.5,
                     help="Scalar calibration on the prune Δloss formula "
-                         "α · (h_trace / n_params) · S_j². Smaller α makes "
+                         "α · S_j, where S_j is the probe's REAP dropout-"
+                         "loss estimate for the expert. Smaller α makes "
                          "pruning cheaper (the DP prunes more aggressively); "
-                         "larger α protects experts. Default 0.5 mirrors "
-                         "the 0.5 factor in the quant-cost formula so prune "
-                         "and quant costs are on a comparable scale.")
+                         "larger α protects experts.")
     ap.add_argument("--target-profile",
                     choices=["research", "vllm_qwen3_5_packed_moe"],
                     default="research",
@@ -2379,7 +2564,8 @@ def main():
             expert_saliency=probe_expert_saliency,
             expert_info=probe_expert_info,
             prune_ratios=(),  # packed-3D path handles prune below
-            prune_alpha=args.prune_alpha)
+            prune_alpha=args.prune_alpha,
+            source_manifest=source_manifest)
         moe_groups = sum(1 for n in candidates if ".__fused__." in n)
         print(f"[alloc] packed-MoE serving aggregation: {moe_groups} fused MoE blocks")
     elif args.expert_granularity == "layer":
@@ -2389,7 +2575,8 @@ def main():
             expert_saliency=probe_expert_saliency,
             expert_info=probe_expert_info,
             prune_ratios=user_prune_ratios,
-            prune_alpha=args.prune_alpha)
+            prune_alpha=args.prune_alpha,
+            source_manifest=source_manifest)
         moe_groups = sum(1 for n in candidates if ".__fused__." in n)
         print(f"[alloc] MoE aggregation: {moe_groups} fused-expert super-Linears")
 
@@ -2446,13 +2633,7 @@ def main():
         )
         if assign is None:
             return None, {}, float("nan"), float("inf")
-        total = 0.0
-        for name, fmt in assign.items():
-            entry = costs[name].get(fmt, {})
-            gain = float(calibrated_gains.get(fmt, 1.0))
-            total += predicted_dloss(
-                stats[name]["h_trace"], entry.get("weight_mse", 0.0), gain=gain,
-            )
+        total = compute_assignment_predicted_dloss(assign, c, pruned_map_r)
         return assign, pruned_map_r, achieved_r, total
 
     # Pareto sweep: for each target_bits, pick the (R, assignment)
@@ -2573,16 +2754,45 @@ def main():
         # expert_saliency feeds the uniform-kept coercion pass
         # (padding lighter-pruned layers to match the heaviest prune,
         # using lowest-saliency experts as the extras).
+        uniform_kept = args.target_profile == "vllm_qwen3_5_packed_moe"
         prune_manifest, prune_warnings = build_prune_manifest(
             pruned_map, stats, probe_expert_info,
             expert_saliency=probe_expert_saliency,
-            uniform_kept=True,
+            uniform_kept=uniform_kept,
         )
+        if uniform_kept:
+            post_dp_warnings = [
+                w for w in prune_warnings
+                if "padded drops" in w or "DP chose no prune" in w
+            ]
+            if post_dp_warnings:
+                sample = "\n  ".join(post_dp_warnings[:5])
+                raise SystemExit(
+                    "[alloc] prune uniform-kept would add unscored drops "
+                    "after the DP. This means the packed global-ratio "
+                    "candidate set did not cover every saliency router. "
+                    f"Refusing to emit a sidecar that differs from the "
+                    f"scored plan. Sample:\n  {sample}"
+                )
         pruned_map = apply_consensus_prune(
             pruned_map, prune_manifest, stats, probe_expert_info,
         )
         for w in prune_warnings:
             print(f"[alloc] prune-consensus: {w}", flush=True)
+        if not uniform_kept and prune_manifest:
+            kept_counts = {
+                int(e["num_experts_kept"]) for e in prune_manifest.values()
+            }
+            if len(kept_counts) > 1:
+                print(
+                    "[alloc] WARNING: prune manifest has mixed "
+                    f"num_experts_kept values {sorted(kept_counts)}. "
+                    "The exporter will reject this for HF/vLLM configs "
+                    "with a single scalar expert-count field; use a "
+                    "global packed-MoE prune ratio for serveable uniform "
+                    "expert counts.",
+                    flush=True,
+                )
         total_orig = sum(r["num_experts_orig"] for r in prune_manifest.values())
         total_kept = sum(r["num_experts_kept"] for r in prune_manifest.values())
         print(

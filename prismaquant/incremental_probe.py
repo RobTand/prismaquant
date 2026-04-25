@@ -179,7 +179,38 @@ def _minimax_fast_experts_forward(
         h_mid = act_fn(h1) * h3
         y_padded = torch.bmm(h_mid, w2.transpose(1, 2))
 
-        y_valid = y_padded[compact, rank] * weights_sl.reshape(n_assign, 1)
+        # REAP saliency accumulation (fast-MoE path). The chunked compute
+        # above bypasses per-expert nn.Module forward, so the tracker's
+        # per-expert forward_hooks never fire. Accumulate inline here:
+        # `y_pre_gate` is the expert output BEFORE gate-weight multiply
+        # (matches the per-expert-hook semantics in the slow path), and
+        # `experts_sl` / `weights_sl` give (expert_id, gate) per token
+        # assignment.
+        y_pre_gate = y_padded[compact, rank]
+        tracker = getattr(self, "_pq_saliency_tracker", None)
+        router_qname = getattr(self, "_pq_saliency_router", None)
+        if tracker is not None and router_qname is not None:
+            tracker._ensure_accumulators(router_qname, hidden_states.device)
+            acc_sum = tracker.sum_g_norm.get(router_qname)
+            acc_count = tracker.count.get(router_qname)
+            acc_max = tracker.max_g_norm.get(router_qname)
+            acc_sum_sq = tracker.sum_g_norm_sq.get(router_qname)
+            if (acc_sum is not None and acc_count is not None
+                    and acc_max is not None and acc_sum_sq is not None):
+                norms = y_pre_gate.to(torch.float64).norm(dim=-1)  # [n_assign]
+                gates64 = weights_sl.to(torch.float64)              # [n_assign]
+                contribution = gates64 * norms                      # g·||f||
+                contribution_sq = gates64 * norms.pow(2)            # g·||f||² (REAP)
+                ones_assign = torch.ones_like(experts_sl, dtype=torch.int64)
+                acc_sum.index_add_(0, experts_sl, contribution)
+                acc_sum_sq.index_add_(0, experts_sl, contribution_sq)
+                acc_count.index_add_(0, experts_sl, ones_assign)
+                acc_max.scatter_reduce_(
+                    0, experts_sl, contribution,
+                    reduce="amax", include_self=True,
+                )
+
+        y_valid = y_pre_gate * weights_sl.reshape(n_assign, 1)
         final_hidden_states.index_add_(0, tokens_sl, y_valid.to(hidden_states.dtype))
 
     return final_hidden_states
@@ -629,11 +660,12 @@ class GlobalPrecompute:
       runner filters these dicts to its own include regex.
     - `resident_act_snaps` holds (per-fqn) CPU activation snapshots for
       resident linears, used by the cost stage's ActivationIndex.
-    - `expert_saliency` is the REAP-style router-weighted expert
-      activation score per (router_qname, expert_id). Populated by the
-      ExpertSaliencyTracker during Phase-1 forward. Empty dict for
-      dense models. See `prismaquant.observers.expert_saliency` for
-      the S_j = mean[g_j · ||f_j||_2] formula.
+    - `expert_saliency` is the REAP dropout-loss estimate per
+      (router_qname, expert_id), harvested via
+      `ExpertSaliencyTracker.saliency(reduction="reap_dropout")`.
+      It is populated during Phase-1 forward and empty for dense
+      models. See `prismaquant.observers.expert_saliency` for both
+      the ranking reductions and the dropout-loss formula.
     - `expert_info` mirrors `sensitivity_probe.discover_moe_structure`'s
       output (Linear qname -> (router_qname, expert_id_str)); the
       allocator uses it to map per-Linear quantization decisions back to
@@ -688,11 +720,11 @@ def _compute_global_precompute(
     #
     # Alongside the forward we install an ExpertSaliencyTracker whose hooks
     # fire whenever any MoE router/expert module is called. The tracker
-    # accumulates REAP saliency (S_j = mean[g_j · ||f_j||_2]) per expert —
-    # consumed later by the allocator's DROP-candidate logic. Hooks remain
-    # registered across the streaming install/unload cycle because they're
-    # bound to Python module objects, not to weight tensors. Dense models
-    # get an empty saliency dict at no cost.
+    # accumulates REAP dropout-loss saliency per expert — consumed later
+    # by the allocator's DROP-candidate logic. Hooks remain registered
+    # across the streaming install/unload cycle because they're bound to
+    # Python module objects, not to weight tensors. Dense models get an
+    # empty saliency dict at no cost.
     phase1_expert_info = discover_moe_structure(model)
     _saliency_top_k = read_top_k(model, default=2)
     _saliency_triples = saliency_from_moe_structure(phase1_expert_info)

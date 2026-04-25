@@ -177,6 +177,49 @@ def test_saliency_geomean_blend():
         assert geo[e] == pytest.approx(expected, abs=1e-9, rel=1e-8), (e, geo[e], expected)
 
 
+def test_saliency_reap_dropout_matches_reference():
+    torch.manual_seed(11)
+    dim, inter, n_experts, top_k = 24, 48, 5, 2
+    layer = _DummyMoeLayer(dim, inter, n_experts, top_k)
+    parent = nn.Module()
+    parent.mlp = layer  # type: ignore[attr-defined]
+
+    tracker = ExpertSaliencyTracker(
+        parent,
+        routers_and_experts=[("mlp.gate", "mlp.experts", list(range(n_experts)))],
+        top_k=top_k,
+    )
+    x = torch.randn(37, dim)
+    with torch.no_grad():
+        _ = layer(x)
+
+    logits = layer.gate(x)
+    topk_v, topk_i = logits.topk(layer.top_k, dim=-1)
+    probs = F.softmax(topk_v, dim=-1)
+    expected = {}
+    for e in range(layer.num_experts):
+        gate_e = torch.zeros(x.size(0), dtype=probs.dtype)
+        for k in range(layer.top_k):
+            gate_e = torch.where(topk_i[:, k] == e, probs[:, k], gate_e)
+        active = gate_e > 0
+        if not active.any():
+            expected[e] = 0.0
+            continue
+        f_e = layer.experts[e](x[active])
+        norms = f_e.to(torch.float64).norm(dim=-1)
+        expected[e] = float(
+            (gate_e[active].to(torch.float64) * norms.pow(2)).sum().item()
+            / x.shape[0]
+        )
+
+    got = tracker.saliency(reduction="reap_dropout")["mlp.gate"]
+    for e in range(n_experts):
+        assert got[e] == pytest.approx(expected[e], abs=1e-10, rel=1e-8), (
+            e, got[e], expected[e]
+        )
+    tracker.remove_hooks()
+
+
 def test_dead_experts_get_zero_saliency():
     # Force all top_k routing weight onto expert 0 by rigging the gate
     # matrix. Experts 1..N-1 never activate → all reductions should be 0.

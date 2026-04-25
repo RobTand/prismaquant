@@ -122,9 +122,9 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
         stats = {
             "layer.weight": {
                 "h_trace": 2.0,
-                "out_features": 4,
-                "in_features": 4,
-                "n_params": 16,
+                "out_features": 128,
+                "in_features": 128,
+                "n_params": 128 * 128,
             }
         }
         costs = {

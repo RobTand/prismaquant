@@ -574,6 +574,15 @@ kernels land.
 
 ## Method notes
 
+### Joint expert pruning + quantization
+
+The joint optimizer treats an MoE choice as `(format, dropped_expert_ids)`
+and prices it in the same Δloss/memory knapsack as dense quantization.
+The implementation contract and failure-mode checks live in
+[`docs/joint_optimizer.md`](docs/joint_optimizer.md). Read that note
+before changing prune saliency, candidate construction, or the export
+sidecar.
+
 ### This is not gradient descent
 
 `requires_grad_(False)` on all parameters. Backward runs only to push
