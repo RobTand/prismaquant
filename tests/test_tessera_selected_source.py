@@ -231,7 +231,7 @@ def test_native_bounded_encoder_memo_keeps_wire_and_price_bytes(tmp_path, monkey
         path.write_text(json.dumps(dict(measurements=measurements, wire_and_price_parity=True), indent=2)+'\n')
 
 
-def test_selected_capture_cli_reaches_existing_streamed_source(monkeypatch, tmp_path):
+def test_selected_capture_cli_refuses_missing_capture_before_streamed_source(monkeypatch, tmp_path):
     from test_tessera_campaign_resume import _main_fixture
     from prismaquant import cost_streaming
     from prismaquant.autoscale import BOUNDED_CAPTURE_ENV
@@ -242,15 +242,11 @@ def test_selected_capture_cli_reaches_existing_streamed_source(monkeypatch, tmp_
     for name, value in BOUNDED_CAPTURE_ENV.items():
         monkeypatch.setenv(name, value)
 
-    class SelectedSourceReached(Exception):
-        pass
-
     def build(*args, **kwargs):
-        assert kwargs['require_prefetched_residency'] is True
-        raise SelectedSourceReached
+        pytest.fail('source construction preceded complete-capture authentication')
 
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', build)
-    with pytest.raises(SelectedSourceReached):
+    with pytest.raises(FileNotFoundError, match='capture_manifest.json'):
         campaign.main([*argv, '--streaming', '--units', str(tmp_path/'units.json'),
             '--calibration-census', str(tmp_path/'census.json'),
             '--calibration-cache', str(tmp_path/'capture_manifest.json'),

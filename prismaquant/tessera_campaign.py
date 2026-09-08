@@ -2971,7 +2971,7 @@ def _require_campaign_population(model, profile, layer_stride: int) -> ExpertPop
 def _project_expert_population(population: ExpertPopulation, *, weights, menus,
                                model_path, cache_dir: Path, measured=None,
                                projection=None, resource_check=None,
-                               release_source_pages=False) -> tuple[dict, dict]:
+                               release_source_pages=False, source_authentication=None) -> tuple[dict, dict]:
     """Ask the producer to project every in-scope stack; bind it; check the bytes.
 
     Each request covers the whole campaign (the producer hashes the checkpoint
@@ -3027,7 +3027,8 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
             bound, weights=weights, model_path=model_path,
             source=carried["producer"]["source"],
             measured=measured, resource_check=resource_check,
-            release_source_pages=release_source_pages)
+            release_source_pages=release_source_pages,
+            **({'source_authentication': source_authentication} if source_authentication is not None else {}))
 
     ladders: dict[str, list[tuple[str, int]]] = {}
     for stack, units in sorted(population.declared.items()):
@@ -3105,12 +3106,13 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
     return carried, _checked_projected_units(
         bound, weights=weights, model_path=model_path,
         source=answer["source"], measured=measured,
-        resource_check=resource_check, release_source_pages=release_source_pages)
+        resource_check=resource_check, release_source_pages=release_source_pages,
+        **({'source_authentication': source_authentication} if source_authentication is not None else {}))
 
 
 def _checked_projected_units(bound, *, weights, model_path, source,
                              measured=None, resource_check=None,
-                             release_source_pages=False) -> dict[str, dict]:
+                             release_source_pages=False, source_authentication=None) -> dict[str, dict]:
     """The producer's unit records for the units this run prices, bytes checked.
 
     Each unit's source tensor is read from the shard the producer hashed and
@@ -3135,8 +3137,10 @@ def _checked_projected_units(bound, *, weights, model_path, source,
             try:
                 if release_source_pages:
                     path = Path(model_path)/source['tensors'][unit['source_tensor']]
-                    source_stats.setdefault(str(path), path.stat())
-                weight = source_unit_weight(model_path, source, unit)
+                    source_stats.setdefault(str(path), path.stat() if source_authentication is None
+                                            else source_authentication.file_stat(path))
+                weight = source_unit_weight(model_path, source, unit,
+                    **({'source_authentication': source_authentication} if source_authentication is not None else {}))
             except ExpertProjectionError as exc:
                 raise RuntimeError(
                     f"Tessera campaign cannot read the producer's source tensor for "
@@ -3166,7 +3170,8 @@ def _checked_projected_units(bound, *, weights, model_path, source,
     if release_source_pages:
         from .layer_streaming import _advise_consumed_safetensors_pages
         for path, keys in consumed.items():
-            _advise_consumed_safetensors_pages(path, keys, source_stats[path])
+            _advise_consumed_safetensors_pages(path if source_authentication is None
+                else source_authentication.descriptor_path(path), keys, source_stats[path])
     return projected
 
 
@@ -3686,6 +3691,12 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
 
 
 def main(argv: "Sequence[str] | None" = None) -> int:
+    from contextlib import ExitStack
+    with ExitStack() as source_scope:
+        return _main(argv, source_scope=source_scope)
+
+
+def _main(argv, *, source_scope) -> int:
     import torch
 
     from . import format_registry as fr
@@ -3878,9 +3889,28 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         Path(args.out).with_suffix(".anchors.json")
     )
 
+    source_authentication = None
+    selected_guard = None
+    if selected_source:
+        from . import tessera_calibration_cache as calibration_store
+        if device == 'cuda':
+            from .memory_management import CaptureMemoryGuard
+            selected_guard = CaptureMemoryGuard(device)
+        source_authentication = source_scope.enter_context(
+            calibration_store.authenticate_selected_capture_source(
+                args.calibration_census, args.calibration_cache,
+                expected_sha256=args.calibration_cache_sha256, model=args.model,
+                max_act_rows=args.max_act_rows, attention_implementation=args.attention_implementation,
+                calibration_parameters=dict(nsamples=args.nsamples, seqlen=args.seqlen, seed=args.seed),
+                resource_check=None if selected_guard is None else selected_guard.check,
+                release_read_pages=True))
+
     from .model_profiles import detect_profile
     profile = detect_profile(args.model)
     runner = None
+    if source_authentication is not None:
+        # Drain any failed preparation before the descriptor owner closes.
+        source_scope.callback(lambda: runner.shutdown() if runner is not None else None)
     if args.streaming:
         from .cost_streaming import build_streamed_causal_lm
         runner = build_streamed_causal_lm(args.model, device=torch.device(device), dtype=torch.bfloat16,
@@ -3890,7 +3920,8 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             cache_headroom_gb=args.streaming_cache_headroom_gb,
             prefetch_min_available_gb=args.streaming_cache_headroom_gb,
             prefetch_lookahead=args.streaming_cache_slots-1, require_prefetched_residency=True,
-            attn_implementation=args.attention_implementation)
+            attn_implementation=args.attention_implementation,
+            **({'source_authentication': source_authentication} if source_authentication is not None else {}))
         model = runner.model
     else:
         from transformers import AutoModelForCausalLM
@@ -4028,7 +4059,6 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     capture_identity = None
     selected_source_preparation = None
     selected_weights = None
-    selected_guard = None
     if census is not None:
         # Validate the whole scope before a selected unit's artifact is read.
         if (set(census["counts"]) != set(census_targets) or
@@ -4064,8 +4094,6 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             headroom_gb=args.streaming_cache_headroom_gb,
             anchor_batch_size=args.anchor_batch_size)
         if device == 'cuda':
-            from .memory_management import CaptureMemoryGuard
-            selected_guard = CaptureMemoryGuard(device)
             if selected_resources['memory_bytes'] > selected_guard.cap_bytes:
                 raise RuntimeError('selected anchor cgroup budget is smaller than its checked phase plan')
             selected_guard.check('before_selected_capture_identity')
@@ -4082,6 +4110,7 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             args.calibration_census, calibration=bound_calibration,
             max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
             attention_implementation=attention_implementation,
+            **({'source_authentication': source_authentication} if source_authentication is not None else {}),
             **(dict(resource_check=None if selected_guard is None else selected_guard.check,
                     release_read_pages=True) if selected_source else {}))
     if selected_source:
@@ -4248,9 +4277,14 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             measured=set(expert_targets),
             projection=(None if census is None else census.get("expert_projection")),
             **(dict(resource_check=None if selected_guard is None else selected_guard.check,
-                    release_source_pages=True) if selected_source else {}))
+                    release_source_pages=True, source_authentication=source_authentication)
+               if selected_source else {}))
         print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
               f"{len(projected_units)} expert units priced here", flush=True)
+
+    if source_authentication is not None:
+        selected_source_preparation['source_authentication'] = source_authentication.receipt()
+        source_authentication.close()
 
     if census_only:
         payload = calibration_census(
