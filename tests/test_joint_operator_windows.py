@@ -136,3 +136,26 @@ def test_shared_cotangent_forks_preserve_multi_consumer_probe_sums(tmp_path, mon
             assert actual['costs'][name][fmt]['signed_per_probe'] == pytest.approx(
                 row['signed_per_probe'], rel=3e-5, abs=3e-8)
     assert actual['provenance']['streamed_boundary_storage']['telemetry']['peak_shared_cotangent_reservation_bytes'] > 0
+
+
+def test_campaign_admits_only_explicit_candidate_windows_and_checks_later_donor(tmp_path):
+    from types import SimpleNamespace
+    from prismaquant.tessera_joint_aura import _admit_candidate_phase
+    small = tmp_path/'small'; small.write_bytes(b'1'*64)
+    large = tmp_path/'large'; large.write_bytes(b'2'*256)
+    data = SimpleNamespace(cells={('a','fmt'): {'render': str(small)},
+                                  ('b','fmt'): {'render': str(large)}})
+    config = {'execution': {}, 'max_render_bytes': 256}
+    with pytest.raises(ValueError, match='largest measured candidate layer'):
+        _admit_candidate_phase('run', config, data, {0: 320})
+    window = policy(); window['max_render_resident_bytes'] = 256; window['max_load_buffer_bytes'] = 256
+    config['execution'].update(operator_windows=window, boundary_storage={'explicit': 'owner'})
+    assert _admit_candidate_phase('run', config, data, {0: 320}) == window
+    with pytest.raises(ValueError, match='largest measured candidate layer'):
+        _admit_candidate_phase('prepare', config, data, {0: 320})
+    window['max_load_buffer_bytes'] = 128
+    with pytest.raises(ValueError, match='read buffer budget'):
+        _admit_candidate_phase('run', config, data, {0: 320})
+    del config['execution']['boundary_storage']
+    with pytest.raises(ValueError, match='exact boundary'):
+        _admit_candidate_phase('run', config, data, {0: 320})

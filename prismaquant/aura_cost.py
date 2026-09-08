@@ -1927,7 +1927,7 @@ def compute_aura_cost_streamed(
     if operator_windows is not None:
         if not joint_activation or production_cache is None or anchor_renderer is not None:
             raise ValueError('joint operator windows require joint AURA with a materialized PWC')
-        if runner.model.training:
+        if any(module.training for module in runner.model.modules()):
             raise ValueError('joint operator replay requires an eval source')
         operator_guard = operator_window_guard(runner.device)
     if source_transition is not None:

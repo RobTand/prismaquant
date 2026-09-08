@@ -25,6 +25,12 @@ is unchanged. Gates include dense/packed FP64 residual oracles, exact replay
 cotangents, shared-state forks, PWC file/alias ownership and interrupted resume
 in `tests/test_joint_operator_windows.py`. Native end-to-end profiling and full
 GLM fit remain pending; this CPU gate alone establishes neither.
+The joint campaign's `execution.operator_windows` carries the same closed
+policy into cost execution, requires exact boundary storage and keeps its PWC
+cap within campaign admission. It replaces whole-layer candidate admission
+only for that explicit run policy, checking every donor's read bound first.
+Preparation retains its independent qualification policy. No other stage or
+legacy configuration inherits the new mode.
 
 Re-stamped (2026-09-08, `feat/joint-operator-windows`) for sealed operator
 diagnostics (#392). The statistics lease reduces each complete FP32 GW sum

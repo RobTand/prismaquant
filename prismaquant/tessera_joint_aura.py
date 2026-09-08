@@ -522,6 +522,29 @@ def _source_prefetch(config):
     return dict(prefetch)
 
 
+def _operator_window_policy(config):
+    from .joint_statistics_replay import normalize_operator_windows
+    policy = normalize_operator_windows(config['execution'].get('operator_windows'))
+    if policy is not None:
+        _require(config['execution'].get('boundary_storage') is not None,
+                 'operator-window campaign requires explicit exact boundary storage')
+        _require(policy['max_render_resident_bytes'] <= config['max_render_bytes'],
+                 'operator-window PWC cap exceeds campaign render admission')
+    return policy
+
+
+def _admit_candidate_phase(command, config, data, layer_bytes):
+    """Keep legacy whole-layer admission; explicit windows admit each donor."""
+    policy = _operator_window_policy(config)
+    if command == 'run' and policy is not None:
+        _prepare_file_read_bound(data, max_render_bytes=min(
+            policy['max_render_resident_bytes'], policy['max_load_buffer_bytes']))
+    elif command != 'prepare' or config.get('qualification_window') is None:
+        _require(max(layer_bytes.values()) <= config['max_render_bytes'],
+                 'largest measured candidate layer exceeds explicit PWC budget')
+    return policy
+
+
 def _load_plan(path, digest):
     path = _bound({"path": str(path), "sha256": digest}, "joint anchor plan")
     config = json.loads(path.read_text())
@@ -533,6 +556,7 @@ def _load_plan(path, digest):
     normalize_projection_backend(execution.get("projection_backend"))
     from .cost_streaming import normalize_boundary_storage
     normalize_boundary_storage(execution.get("boundary_storage"))
+    _operator_window_policy(config)
     _require(type(config.get("file_hash_workers", 1)) is int and config.get("file_hash_workers", 1) > 0,
              "positive file_hash_workers required")
     for name, minimum in (("n_calib_samples", 1), ("calib_seqlen", 1),
@@ -649,9 +673,10 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                                                identity_cache_path=root / "source-identity.json")
         source_execution = source_execution_identity(runner.model)
         layer_bytes = data.layer_render_bytes(runner.layer_index_for_qname)
-        if command != "prepare" or config.get("qualification_window") is None:
-            _require(max(layer_bytes.values()) <= config["max_render_bytes"],
-                     "largest measured candidate layer exceeds explicit PWC budget")
+        operator_policy = _admit_candidate_phase(command, config, data, layer_bytes)
+        if operator_policy is not None:
+            _require(operator_policy['prefetch_workers'] <= len(os.sched_getaffinity(0)),
+                     'operator-window prefetch workers exceed PB-assigned CPU affinity')
         result.update(source_model_identity=source, source_execution=source_execution,
                       units=len(data.formats_by_qname), measured_cells=len(data.cells),
                       layer_render_bytes=layer_bytes)
@@ -713,6 +738,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                 production_cache=cache, require_production_cache=True, joint_activation=True,
                 joint_projection_backend=projection_backend,
                 boundary_storage=execution.get("boundary_storage"),
+                **({"operator_windows": operator_policy} if operator_policy is not None else {}),
                 **({"source_transition": source_transition} if source_transition is not None else {}),
                 include_routed_experts=True, include_lm_head=False, dw_dtype="float32",
                 min_free_gib=config["min_free_gib"], formats_by_qname=data.formats_by_qname,
