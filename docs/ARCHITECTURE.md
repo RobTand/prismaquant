@@ -19,6 +19,30 @@ establish a full GLM fit or change an exact anchor quantum.
 Gates: `tests/test_bounded_hessian_sidecar.py`, existing capture byte/identity
 checks, and before/after native writer memory traces with both Sparks' Netdata.
 
+Re-stamped (2026-09-08, `research/joint-operator-statistics`) for the explicit
+one-probe `JointOperatorStatisticsLease` (issue #374). It extends the existing
+joint-AURA source hooks and packed Linear observers. A finite matrix budget
+admits one FP32 sum(G.T@X) per target and one sum(G.T@dX) per distinct nonidentity
+activation group. After all backwards finish, an observation seal contracts
+activation terms against unchanged source weights and releases this lease's
+source references. Caller-prefetched candidate dW quanta then produce the three
+signed components; each quantum must fit a finite complete-backing-storage
+budget. Unknown, repeated, incomplete, stale-source and nonfinite results
+refuse. A failed backward poisons the lease; even a caught error cannot be retried
+into a successful seal. Completed hooks release their input/source captures,
+and abort clears pending observer captures. Matrix and candidate owners expire
+at their explicit phase boundaries.
+Matrix accumulation has its own arithmetic identity. The original signed
+per-invocation lease and pipeline defaults remain unchanged. This primitive
+does not schedule source/cache transfers or certify full-model physical
+residency, GPU saturation, KL, bpp or serving quality. Production integration
+requires separate phase admission and numerical/performance qualification.
+Gate: `tests/test_joint_operator_statistics.py` and existing joint lease/oracle
+and packed-source tests.
+The [primitive measurement](measurements/joint-operator-statistics-2026-09-08.md)
+records the synthetic native before/after profiles and explicit integration limits.
+
+
 Re-stamped (2026-09-08, `fix/selected-source-anchors`) for bounded selected
 encoder-factor ownership (#370). The existing `(unit, scale_plane)` memo in a
 selected-source row retains at most `--anchor-batch-size` entries. Evicted
@@ -63,6 +87,7 @@ rows whose deterministic union covers all 36,423 units. Its 42 routed-stack
 groups each contain 864 logical units. The current planner cannot subdivide an
 exact full-stack group into smaller independently measured rows; statistical
 stack sampling is a different contract and does not fill that gap.
+
 
 Re-stamped (2026-09-08, `fix/joint-boundary-residency`) for the explicit
 `prismaquant.aura.boundary_storage.v1` policy (#373). Streamed AURA can store
