@@ -177,11 +177,17 @@ another's would defeat the current gate.
    derive a peak. Persistent bytes, activation bytes, scratch and KV may not
    reuse one physical extent in the same interval.
 
-For a scalar adapter, the existing conservative expression is retained:
+For a scalar adapter, the existing conservative measured composition is:
 
 `fixed_resident + sum(candidate_resident) + fixed_activation + max(candidate_activation) + fixed_scratch + max(candidate_scratch) + fixed_KV`.
 
-This can exceed the measured instantaneous peak because independent maxima
+`evaluate_measured_assignment` additionally adds the caller's explicit
+`slos.kv_bytes` and `slos.peak_scratch_bytes` reserves. Those reserves must
+represent extra capacity beyond the measured terms; labeling an already
+charged fixed allocation as a caller reserve does not establish disjoint
+ownership.
+
+The measured composition can exceed the measured instantaneous peak because independent maxima
 need not coincide. That is disclosed composition conservatism, not permission
 to duplicate physical ownership. Allocation reservation slack and supported
 context/external backings require their own disjoint observed charge before
