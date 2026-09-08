@@ -517,9 +517,9 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
         # The existing PWC entry is already disk-backed. Completed anchor
         # files must not accumulate an unbounded page-cache owner across rungs.
-        # The bytes were sealed in memory before the write, and the release
-        # helper checks the entry's identity, fsyncs and advises it from its
-        # own descriptor: nothing here reads the entry back.
+        # The release helper checks the entry's identity, fsyncs and advises
+        # it from its own descriptor. No verification consumes a second hash
+        # of these completed files here.
         from .perturbed_x_cache import release_activation_cache_file_pages
         rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
         for path in (rendered_path, wire_path):
