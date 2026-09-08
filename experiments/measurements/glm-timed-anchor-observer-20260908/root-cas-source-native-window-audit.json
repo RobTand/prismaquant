@@ -1,0 +1,116 @@
+{
+  "actions": [
+    {
+      "key": "71a6cc64040533c781b1b5a02d8673e79efa68315fe98b16919a5be7a518aa23",
+      "terminal_sha256": "c86ebd63305ad40b0c3d3cec05f8b70a431dd45e04cd5cf48f162624b37f0efb",
+      "returncode": 1,
+      "cleanup_complete": true,
+      "snapshot": {
+        "commit": "901f8c7e9974141d08803d342b5a1e8e3521754a",
+        "input": {
+          "bytes": 27369021,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "5c6bdd240fcde760a0ca7971cf3c1afd091ca3c175c9d57250a19b7b9ccae06b"
+        },
+        "parent": "9e9222a2870530074d071974178b5f834192457e",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "published": [],
+      "actual_failure_output": "FFFFFFFF                                                                 [100%]\n=================================== FAILURES ===================================\n____ test_timed_cuda_window_stops_collection_while_original_call_continues _____\n\ntmp_path = PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3860/test_timed_cuda_window_stops_c0')\ncontrolled = []\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7c4a835553a0>\n\n    def test_timed_cuda_window_stops_collection_while_original_call_continues(\n            tmp_path, controlled, monkeypatch):\n        stopped = threading.Event()\n        toggles = []\n        def toggle(self, enabled, activities):\n            toggles.append((enabled, activities))\n            stopped.set()\n        monkeypatch.setattr(FakeProfiler, 'toggle_collection_dynamic', toggle, raising=False)\n>       obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,\n            command=selected(), cuda_only=True, window_seconds=.01)\nE       TypeError: AnchorObserver.__init__() got an unexpected keyword argument 'window_seconds'\n\ntests/test_glm_selected_anchor_profile.py:316: TypeError\n___________ test_timed_collection_failure_preserves_original_success ___________\n\ntmp_path = PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3860/test_timed_collection_failure_0')\ncontrolled = []\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7c4a835555b0>\n\n    def test_timed_collection_failure_preserves_original_success(tmp_path, controlled, monkeypatch):\n        attempted = threading.Event()\n        def toggle(self, *_):\n            attempted.set()\n            raise RuntimeError('controlled CUDA toggle failure')\n        monkeypatch.setattr(FakeProfiler, 'toggle_collection_dynamic', toggle, raising=False)\n>       obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,\n            command=selected(), cuda_only=True, window_seconds=.01)\nE       TypeError: AnchorObserver.__init__() got an unexpected keyword argument 'window_seconds'\n\ntests/test_glm_selected_anchor_profile.py:338: TypeError\n________________ test_timed_window_refuses_invalid_duration[0] _________________\n\ntmp_path = PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3860/test_timed_window_refuses_inva0')\nseconds = 0\n\n    @pytest.mark.parametrize('seconds', [0, -1, float('nan'), float('inf'), True])\n    def test_timed_window_refuses_invalid_duration(tmp_path, seconds):\n        with pytest.raises(ValueError, match='window'):\n>           observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,\n                command=selected(), cuda_only=True, window_seconds=seconds)\nE           TypeError: AnchorObserver.__init__() got an unexpected keyword argument 'window_seconds'\n\ntests/test_glm_selected_anchor_profile.py:354: TypeError\n________________ test_timed_window_refuses_invalid_duration[-1] ________________\n\ntmp_path = PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3860/test_timed_window_refuses_inva1')\nseconds = -1\n\n    @pytest.mark.parametrize('seconds', [0, -1, float('nan'), float('inf'), True])\n    def test_timed_window_refuses_invalid_duration(tmp_path, seconds):\n        with pytest.raises(ValueError, match='window'):\n>           observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,\n                command=selected(), cuda_only=True, window_seconds=seconds)\nE           TypeError: AnchorObserver.__init__() got an unexpected keyword argument 'window_seconds'\n\ntests/test_glm_selected_anchor_profile.py:354: TypeError\n_______________ test_timed_window_refuses_invalid_duration[nan] ________________\n\ntmp_path = PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3860/test_timed_window_refuses_inva2')\nseconds = nan\n\n    @pytest.mark.parametrize('seconds', [0, -1, float('nan'), float('inf'), True])\n    def test_timed_window_refuses_invalid_duration(tmp_path, seconds):\n        with pytest.raises(ValueError, match='window'):\n>           observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,\n                command=selected(), cuda_only=True, window_seconds=seconds)\nE           TypeError: AnchorObserver.__init__() got an unexpected keyword argument 'window_seconds'\n\ntests/test_glm_selected_anchor_profile.py:354: TypeError\n_______________ test_timed_window_refuses_invalid_duration[inf] ________________\n\ntmp_path = PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3860/test_timed_window_refuses_inva3')\nseconds = inf\n\n    @pytest.mark.parametrize('seconds', [0, -1, float('nan'), float('inf'), True])\n    def test_timed_window_refuses_invalid_duration(tmp_path, seconds):\n        with pytest.raises(ValueError, match='window'):\n>           observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,\n                command=selected(), cuda_only=True, window_seconds=seconds)\nE           TypeError: AnchorObserver.__init__() got an unexpected keyword argument 'window_seconds'\n\ntests/test_glm_selected_anchor_profile.py:354: TypeError\n_______________ test_timed_window_refuses_invalid_duration[True] _______________\n\ntmp_path = PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3860/test_timed_window_refuses_inva4')\nseconds = True\n\n    @pytest.mark.parametrize('seconds', [0, -1, float('nan'), float('inf'), True])\n    def test_timed_window_refuses_invalid_duration(tmp_path, seconds):\n        with pytest.raises(ValueError, match='window'):\n>           observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,\n                command=selected(), cuda_only=True, window_seconds=seconds)\nE           TypeError: AnchorObserver.__init__() got an unexpected keyword argument 'window_seconds'\n\ntests/test_glm_selected_anchor_profile.py:354: TypeError\n_____________________ test_timed_window_requires_cuda_only _____________________\n\ntmp_path = PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3860/test_timed_window_requires_cud0')\n\n    def test_timed_window_requires_cuda_only(tmp_path):\n        with pytest.raises(ValueError, match='CUDA-only'):\n>           observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,\n                command=selected(), window_seconds=.01)\nE           TypeError: AnchorObserver.__init__() got an unexpected keyword argument 'window_seconds'\n\ntests/test_glm_selected_anchor_profile.py:360: TypeError\n=============================== warnings summary ===============================\ntests/test_glm_selected_anchor_profile.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_glm_selected_anchor_profile.py::test_timed_cuda_window_stops_collection_while_original_call_continues\nFAILED tests/test_glm_selected_anchor_profile.py::test_timed_collection_failure_preserves_original_success\nFAILED tests/test_glm_selected_anchor_profile.py::test_timed_window_refuses_invalid_duration[0]\nFAILED tests/test_glm_selected_anchor_profile.py::test_timed_window_refuses_invalid_duration[-1]\nFAILED tests/test_glm_selected_anchor_profile.py::test_timed_window_refuses_invalid_duration[nan]\nFAILED tests/test_glm_selected_anchor_profile.py::test_timed_window_refuses_invalid_duration[inf]\nFAILED tests/test_glm_selected_anchor_profile.py::test_timed_window_refuses_invalid_duration[True]\nFAILED tests/test_glm_selected_anchor_profile.py::test_timed_window_requires_cuda_only\n8 failed, 24 deselected, 14 warnings in 4.88s\n",
+      "source_diff": "A\t.pbrun-closure.ee084a25b1c657e3.json\n"
+    },
+    {
+      "key": "3812cc133ecebc02d023b2bb22374a68fddcbf43b06844bbc3a14f6939248b88",
+      "terminal_sha256": "7c5b0db47d9f934fc8ae3327fbc607ece0e921ab6b5853b5b2e039e60cf9ad0d",
+      "returncode": 0,
+      "cleanup_complete": true,
+      "snapshot": {
+        "commit": "c41fd2d2451f48ac132d895048c77d8804259e4e",
+        "input": {
+          "bytes": 27371114,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "077658c41582065ba3400b00e397891207652f67394030067849cdaad0d8f82b"
+        },
+        "parent": "d0a891b258e0a7d6ba81611eaa1e9b0bd0d1b9aa",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "published": [
+        {
+          "receipt_sha256": "753d78f8ff74d0928f1a614672872fd54f980f057ce44d98fa61a86a72bd11e7",
+          "result": {
+            "bytes": 547,
+            "sha256": "74c2cfcc921639eabd8208df6f2075d9f050bfa093c08f4b44cb163d31cc1558"
+          },
+          "actual_output": ".......................s........s                                        [100%]\n=============================== warnings summary ===============================\ntests/test_glm_selected_anchor_profile.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n31 passed, 2 skipped, 14 warnings in 5.45s\n"
+        }
+      ],
+      "actual_failure_output": null,
+      "source_diff": "A\t.pbrun-closure.483392cc4385f871.json\n"
+    },
+    {
+      "key": "def003ee7dbd68035dd400326bc31f794ed94a7bec04092e8149e2c9d3456465",
+      "terminal_sha256": "7dd3cc476af06d98d0e274f5cf9fd23292b4a7bf215c6632c51dc3da39cc7527",
+      "returncode": 0,
+      "cleanup_complete": true,
+      "snapshot": {
+        "commit": "638b1b97695f942aa84e9e1737550f66a9af687e",
+        "input": {
+          "bytes": 27371111,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "33d11b55c109b342ac5ba822f877241dd4bfa837e3d94bb547475db552536439"
+        },
+        "parent": "d0a891b258e0a7d6ba81611eaa1e9b0bd0d1b9aa",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "published": [
+        {
+          "receipt_sha256": "e7fc3cbb4b77f82df4375504bc194f7423d0eb5792f3ba9a38b1e30bc5c4d9bd",
+          "result": {
+            "bytes": 1346,
+            "sha256": "67cd9f9672eb989f0dc5ab5f2de5e2b4cbbb2d2062b742d9a7788183ec09e2c5"
+          },
+          "actual_output": "{\"schema\": \"prismaquant.tessera_campaign_container.v1\", \"requested_image\": \"prismaquant-glm-producer:content-qualified-20260908\", \"image_id\": \"sha256:9f9b9f05b17531399ba66dc6415b054cf5d68c82270626d0e9150e75c808435f\", \"image_content_sha256\": \"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\", \"declared_content_sha256\": \"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\", \"uid\": 1000, \"gid\": 1000}\n.............................................                            [100%]\n=============================== warnings summary ===============================\n../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: 14 warnings\n  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\ntests/test_glm_full_capture_profile.py::test_observer_keeps_exact_cuda_capture_and_original_batch_order\n  /usr/local/lib/python3.12/dist-packages/torch/profiler/profiler.py:300: UserWarning: Warning: Profiler clears events at the end of each cycle. Only events from the current cycle will be reported. To keep events across cycles, set acc_events=True.\n    _warn_once(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n45 passed, 15 warnings in 8.82s\n"
+        }
+      ],
+      "actual_failure_output": null,
+      "source_diff": "A\t.pbrun-closure.a191fffd4e0582ee.json\n"
+    }
+  ],
+  "native_proof": [
+    {
+      "result": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/native-pytest-01/test_native_timed_cuda_window_0/attempt-4778195e75b04ed98f9c8af0a2b0288c/result.json",
+      "result_sha256": "4dfd2999685e32f4086e7921856766c28d358ff2f8901c077ee98f49836ddc06",
+      "record": {
+        "call_index": 0,
+        "qname": null,
+        "format_name": "window-test",
+        "started_unix": 1788909947.5776477,
+        "status": "complete",
+        "cuda_events": 1,
+        "qnames": [
+          "a",
+          "b"
+        ],
+        "batch_size": 2,
+        "collection_window": {
+          "requested_seconds": 0.25,
+          "stopped_by": "deadline",
+          "elapsed_seconds": 0.2507593049958814
+        },
+        "trace": {
+          "path": "anchor-000000.trace.json",
+          "bytes": 12584,
+          "sha256": "dd5be3ce6931f03d05af4f6b7c43608adefb351441e786d9e56014f0e89217b3"
+        },
+        "finished_unix": 1788909947.8358772
+      },
+      "native_kernels": 1
+    }
+  ]
+}
