@@ -321,6 +321,9 @@ class GraphObserver:
             original_row=self.row, statistics=primary_stats, identity=primary))
         if primary_stats['nonfinite']:
             raise RuntimeError('original prefix output contains nonfinite elements')
+        reference = self.result.get('original_output_reference')
+        if reference is not None and layer == 0 and self.row == 0 and primary != reference['identity']:
+            raise RuntimeError('corrected native layer0 forward differs from the bound original output')
         incoming = tensor_identity(hidden)
         self.in_replay = True
         try:
@@ -360,6 +363,10 @@ class GraphObserver:
         for row, tokens in zip(self.rows, self.tokens):
             self.row = row
             forward_batch(tokens)
+        if self.result.get('source_derivative') is not None:
+            from prismaquant.joint_aura import source_execution_identity
+            if source_execution_identity(self.runner.model) != self.result['source_execution']:
+                raise RuntimeError('corrected source execution changed during a prefix layer')
         self.result['progress'] = dict(phase='prefix_layer_completed', layer=layer,
             backward_calls=len(self.result['backwards']), time_unix=time.time())
         write_json(self.out/'progress.json', self.result)
@@ -482,13 +489,33 @@ def main(argv=None):
     parser.add_argument('--cpu-preflight', action='store_true')
     parser.add_argument('--diagnostic-layer0', action='store_true',
         help='One original row0/layer0/seed7000 backward with transparent tensor hooks; not qualification')
+    parser.add_argument('--source-derivative', type=json.loads,
+        help='Closed explicit corrected derivative policy; requires its separate reviewed image')
+    parser.add_argument('--original-layer0-reference', type=Path)
+    parser.add_argument('--original-layer0-reference-sha256')
     args = parser.parse_args(argv)
+    from prismaquant.glm_source_derivative import normalize_source_derivative, bound_json
+    args.source_derivative = normalize_source_derivative(args.source_derivative)
+    if bool(args.original_layer0_reference) != bool(args.original_layer0_reference_sha256):
+        parser.error('original layer0 reference path and SHA256 must be supplied together')
+    if bool(args.source_derivative) != bool(args.original_layer0_reference):
+        parser.error('corrected derivative and original layer0 reference are required together')
     args.out.mkdir(parents=True, exist_ok=False)
     plan = json.loads(PLAN.read_text())
     manifest = checked_json(plan['source_files']['path'], plan['source_files']['sha256'])
     result = dict(schema='prismaquant.glm_original_graph_qualification.v1', status='running',
         scope=plan['limits'], backwards=[], telemetry_errors=[], cpu_preflight=args.cpu_preflight,
         mode='layer0_diagnostic_not_qualification' if args.diagnostic_layer0 else 'bounded_prefix_qualification')
+    if args.source_derivative is not None:
+        bound_json(args.source_derivative['image_build'], 'corrected image build')
+        reference = checked_json(args.original_layer0_reference, args.original_layer0_reference_sha256)
+        outputs = reference.get('primary_outputs', [])
+        if (reference.get('mode') != 'layer0_diagnostic_not_qualification' or len(outputs) != 1 or
+                outputs[0]['layer'] != 0 or outputs[0]['original_row'] != 0 or outputs[0]['statistics']['nonfinite']):
+            raise RuntimeError('original native reference lacks one finite layer0 row0 output')
+        result['original_output_reference'] = dict(path=str(args.original_layer0_reference),
+            sha256=args.original_layer0_reference_sha256, identity=outputs[0]['identity'])
+        result['execution'] = 'corrected_source_derivative_not_original_runtime'
     source = AuthenticatedSourceInputs(plan['model'], manifest)
     try:
         with source:
@@ -513,8 +540,13 @@ def run_native(args, plan, source, profile, tokens, shards, result):
     from prismaquant.memory_management import CaptureMemoryGuard
     from transformers.models.glm5_next import modeling_glm5_next
     require_bounded_capture_environment(os.environ)
-    if sha(modeling_glm5_next.__file__) != plan['image']['modeling_file_sha256']:
+    from prismaquant.glm_source_derivative import CORRECTED_MODELING_SHA256, bind_source_derivative
+    expected_source = (plan['image']['modeling_file_sha256'] if args.source_derivative is None else
+                       CORRECTED_MODELING_SHA256)
+    if sha(modeling_glm5_next.__file__) != expected_source:
         raise RuntimeError('native original model code differs from pinned qualified image')
+    result['runtime_modeling_sha256'] = expected_source
+    result['runtime_image_content_sha256'] = os.environ.get('PRISMAQUANT_CONTAINER_CONTENT_SHA256')
     if not torch.cuda.is_available() or torch.is_inference_mode_enabled():
         raise RuntimeError('native graph gate requires CUDA outside inference_mode')
     torch.set_num_threads(1)
@@ -576,8 +608,13 @@ def run_native(args, plan, source, profile, tokens, shards, result):
                 dtype=torch.bfloat16, offload_folder=str(args.out/'offload'), profile=profile,
                 max_cache_slots=2, prefetch_workers=1, prefetch_min_available_gb=24,
                 cache_headroom_gb=24, prefetch_lookahead=1,
+                **({'source_derivative': args.source_derivative} if args.source_derivative is not None else {}),
                 require_prefetched_residency=True, attn_implementation='eager')
             runner.model.eval().requires_grad_(False)
+            if args.source_derivative is not None:
+                from prismaquant.joint_aura import source_execution_identity
+                result['source_derivative'] = bind_source_derivative(runner.model, profile, args.source_derivative)
+                result['source_execution'] = source_execution_identity(runner.model)
             # Observe actual reads after the existing prepare_for_load eviction.
             from prismaquant import streaming_model
             original_read = streaming_model._read_layer_to_device
@@ -601,6 +638,10 @@ def run_native(args, plan, source, profile, tokens, shards, result):
                 if future is None or future.result() is None:
                     raise RuntimeError('original graph measurement needs existing forward lookahead residency')
                 source.require_unchanged()
+                if result.get('source_derivative') is not None:
+                    from prismaquant.joint_aura import source_execution_identity
+                    if source_execution_identity(runner.model) != result['source_execution']:
+                        raise RuntimeError('corrected source execution changed before native replay')
                 check('settled_original_graph_workspace', reserve_bytes=16*GIB)
                 result.setdefault('source_residency', []).append(dict(layer=layer,
                     row=observer.row, snapshot=runner.context.source_residency_snapshot([layer, layer+1])))

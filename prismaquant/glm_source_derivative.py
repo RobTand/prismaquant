@@ -7,6 +7,7 @@ import json
 import marshal
 import math
 import os
+import sys
 from pathlib import Path
 import types
 import weakref
@@ -16,6 +17,8 @@ SCHEMA = 'prismaquant.glm_source_derivative.v1'
 ORIGINAL_MODELING_SHA256 = '2092bbb4efa2a8087b74f4a4da37635c503fe1df9ae73f1e6e8342af8b4b8e8b'
 CORRECTED_MODELING_SHA256 = '416bd6168b3c42858c0e22622dd2e85ff04e9460703eadf64e5abef84aac24a3'
 ORIGINAL_IMAGE_CONTENT_SHA256 = 'eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd'
+CORRECTED_IMAGE_CONTENT_SHA256 = 'd0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026'
+ORIGINAL_HUB_KERNELS_SHA256 = 'fa5143bbbc6a928c70f7e05580b358caae16e88f53f49059c7002f0d01f6c832'
 ORIGINAL_EXPRESSION = '(g.unsqueeze(-2) - g.unsqueeze(-3)).exp().float()'
 CORRECTED_EXPRESSION = '(g.unsqueeze(-2) - g.unsqueeze(-3)).masked_fill(mask.triu(diagonal=1).unsqueeze(-1), 0).exp().float()'
 _BINDINGS = weakref.WeakKeyDictionary()
@@ -43,6 +46,7 @@ def declaration():
                 original_modeling_sha256=ORIGINAL_MODELING_SHA256,
                 corrected_modeling_sha256=CORRECTED_MODELING_SHA256,
                 original_image_content_sha256=ORIGINAL_IMAGE_CONTENT_SHA256,
+                corrected_image_content_sha256=CORRECTED_IMAGE_CONTENT_SHA256,
                 transform='strict_upper_triangle_zero_before_exp_preserve_diagonal',
                 dispatch='original_decorated_torch_fallback')
 
@@ -64,6 +68,25 @@ def corrected_source(raw):
     result = raw.replace(old, new, 1)
     _require(hashlib.sha256(result).hexdigest() == CORRECTED_MODELING_SHA256, 'corrected source differs')
     return result
+
+
+def validate_image_build(build):
+    from tools.container_runtime_identity import image_content_sha256
+    _require(build.get('schema') == 'prismaquant.glm_derivative_image_build.v1' and build.get('status') == 'complete',
+             'complete corrected image build required')
+    _require(build.get('original_image_content_sha256') == ORIGINAL_IMAGE_CONTENT_SHA256 and
+             build.get('corrected_image_content_sha256') == CORRECTED_IMAGE_CONTENT_SHA256 and
+             build.get('hub_kernels_sha256') == ORIGINAL_HUB_KERNELS_SHA256 and
+             build.get('original_modeling_sha256') == ORIGINAL_MODELING_SHA256 and
+             build.get('corrected_modeling_sha256') == CORRECTED_MODELING_SHA256 and
+             build.get('changed_payload_files') == [build.get('modeling_path')], 'unreviewed image change')
+    before, after = build['original_image'], build['corrected_image']
+    _require(image_content_sha256(before) == ORIGINAL_IMAGE_CONTENT_SHA256 and
+             image_content_sha256(after) == CORRECTED_IMAGE_CONTENT_SHA256 and
+             before['Config'] == after['Config'] and before['RootFS']['Layers'] == after['RootFS']['Layers'][:-1] and
+             after['RootFS']['Layers'][-1] == 'sha256:' + build['added_layer_sha256'],
+             'image build config or layer content differs')
+    return build
 
 
 def _code_at(root, names):
@@ -133,15 +156,10 @@ def bind_source_derivative(model, profile, value):
     policy = normalize_source_derivative(value)
     if policy is None:
         _require(model not in _BINDINGS, 'cannot remove a live derivative binding')
+        _reject_unbound_corrected_runtime(model)
         return None
     _require(profile.source_derivative_contract() == declaration(), 'profile does not declare this correction')
-    build = bound_json(policy['image_build'], 'image build')
-    _require(build.get('schema') == 'prismaquant.glm_derivative_image_build.v1' and build.get('status') == 'complete',
-             'complete corrected image build required')
-    _require(build.get('original_image_content_sha256') == ORIGINAL_IMAGE_CONTENT_SHA256 and
-             build.get('original_modeling_sha256') == ORIGINAL_MODELING_SHA256 and
-             build.get('corrected_modeling_sha256') == CORRECTED_MODELING_SHA256 and
-             build.get('changed_payload_files') == [build.get('modeling_path')], 'unreviewed image change')
+    build = validate_image_build(bound_json(policy['image_build'], 'image build'))
     _require(os.environ.get('PRISMAQUANT_CONTAINER_CONTENT_SHA256') == build['corrected_image_content_sha256'],
              'actual container image content differs from build')
     observed = _observe(model, build)
@@ -152,12 +170,27 @@ def bind_source_derivative(model, profile, value):
     return json.loads(json.dumps(identity))
 
 
+def _reject_unbound_corrected_runtime(model):
+    seen = set()
+    for _name, module in model.named_modules():
+        name = type(module).__module__
+        if not name.startswith('transformers.models.glm5_next.') or name in seen:
+            continue
+        seen.add(name)
+        loaded = sys.modules.get(name)
+        path = getattr(loaded, '__file__', None)
+        _require(path is not None, 'actual GLM source module is unavailable')
+        _require(sha256(path) != CORRECTED_MODELING_SHA256,
+                 'corrected GLM runtime requires an explicit derivative binding')
+
+
 def source_derivative_identity(model):
     try:
         binding = _BINDINGS.get(model)
     except TypeError:
-        return None  # Legacy identity accepts lightweight non-weakrefable model fixtures.
+        binding = None  # Legacy identity accepts lightweight non-weakrefable model fixtures.
     if binding is None:
+        _reject_unbound_corrected_runtime(model)
         return None
     build = bound_json(binding['policy']['image_build'], 'image build')
     _require(build == binding['build'], 'image build changed after binding')

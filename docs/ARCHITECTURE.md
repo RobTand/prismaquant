@@ -10,6 +10,17 @@ does not activate it. Binding verifies a separate image build, the actual
 decorated Torch fallback and live nonpositive gate configuration. Corrected
 models emit `source_execution.v2` with the derivative identity, and every
 identity reread checks that binding. Unbound callers retain exact v1 identity.
+The existing streamed builder accepts the explicit policy and refuses the
+recognized corrected runtime when it is omitted. The joint preparation and
+resume paths bind the policy before source/probe identity, require a separate
+original-capture compatibility receipt, and preserve the original capture's
+exact completeness, source and runtime validation. Receipt issuance requires
+the original completed PB capture action, canonical CAS/producer digests and
+snapshot input, actual image/config/layer evidence, the original modeling
+source, core/final-state CPU equivalence, original/corrected native layer0
+equality and the corrected 72-call bounded graph gate. The native layer0 check
+is not a full-model forward A/B; the closed causal-expression transform and
+observed gate configuration supply the broader equivalence argument.
 The original image and canonical capture remain separate producer artifacts;
 no compatibility or native correction qualification follows from CPU numerical
 evidence. This remains research-only and introduces no serving or format gate.

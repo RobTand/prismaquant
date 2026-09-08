@@ -188,7 +188,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     monkeypatch.setattr(bridge, 'load_measured_anchor_input', lambda *_args, **_kwargs: data)
     monkeypatch.setattr(calibration_data, 'load_calibration_input', lambda *_args, **_kwargs:
         (torch.zeros((512, 512), dtype=torch.int64), calibration))
-    runner = SimpleNamespace(model=object(), layer_index_for_qname=lambda _: 0, shutdown=lambda: None)
+    runner = SimpleNamespace(model=torch.nn.Module(), layer_index_for_qname=lambda _: 0, shutdown=lambda: None)
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *_args, **_kwargs: runner)
     monkeypatch.setattr(cost_streaming, 'build_streamed_model_identity', lambda *_args, **_kwargs: source)
     monkeypatch.setattr(joint_aura, 'source_execution_identity', lambda _: execution)

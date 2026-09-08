@@ -345,7 +345,7 @@ def _qualification_capture_sizes(data, identity, policy):
 
 
 def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
-                  qualification_window=None):
+                  qualification_window=None, source_capture_compatibility=None):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
@@ -374,6 +374,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     stamped_capture = data.payload["provenance"].get("calibration_cache")
     _same(capture, stamped_capture, "priced canonical capture")
     manifest = cc.require_capture_contract(capture_path, expected_sha256=capture["sha256"])
+    from .glm_capture_compatibility import require_capture_compatibility
+    require_capture_compatibility(source_capture_compatibility, capture=capture, model=runner.model)
     recorded = manifest["identity"]
     # This verifies recorded canonical capture provenance plus current source
     # bytes/runtime. It does not pretend a from-config streaming skeleton is an
@@ -551,6 +553,8 @@ def _load_plan(path, digest):
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
     _source_prefetch(config)
     execution = config["execution"]
+    from .glm_source_derivative import normalize_source_derivative
+    normalize_source_derivative(execution.get('source_derivative'))
     normalize_qualification_window(config.get("qualification_window"))
     from .joint_projection_backend import normalize_projection_backend
     normalize_projection_backend(execution.get("projection_backend"))
@@ -667,7 +671,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         runner = build_streamed_causal_lm(config["model"], device=torch.device("cuda"),
             dtype=torch.bfloat16, offload_folder=str(root / "offload"),
             profile=detect_profile(config["model"]), attn_implementation="eager",
+            **({'source_derivative': execution['source_derivative']} if execution.get('source_derivative') is not None else {}),
             **source_prefetch)
+        from .glm_capture_compatibility import require_capture_compatibility
+        require_capture_compatibility(config.get('source_capture_compatibility'),
+                                      capture=config['canonical_capture'], model=runner.model)
         result["source_prefetch"] = source_prefetch
         source = build_streamed_model_identity(runner, config["model"],
                                                identity_cache_path=root / "source-identity.json")
@@ -691,7 +699,9 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             cache = prepare_cache(runner, data, capture=config["canonical_capture"],
                                   max_render_bytes=config["max_render_bytes"], reader=reader,
                                   file_load_workers=file_hash_workers,
-                                  qualification_window=config.get("qualification_window"))
+                                  qualification_window=config.get("qualification_window"),
+                                  **({'source_capture_compatibility': config['source_capture_compatibility']}
+                                     if config.get('source_capture_compatibility') is not None else {}))
             cache.metadata.update(plan_sha256=plan_sha256, source_model_identity=source,
                                   source_execution=source_execution, implementation_sha256=implementation,
                                   projection_backend=projection_backend.identity)

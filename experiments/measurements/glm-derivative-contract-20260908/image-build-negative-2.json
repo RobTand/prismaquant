@@ -1,0 +1,167 @@
+{
+  "action_key": "a48fcb5bea21793823d6cdfa9e40d3e6049db3f343960e5e5b6c3ee90101768d",
+  "returncode": 1,
+  "terminal": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/a48fcb5bea21793823d6cdfa9e40d3e6049db3f343960e5e5b6c3ee90101768d.json",
+    "sha256": "16adf956f4319654c2a2abf4a9940e741f9ef4e3bd4c2a310cf30acccc8b2ad9"
+  },
+  "source_snapshot": {
+    "commit": "37ffab126f263b68dddf6b14d8fde6ccf119559a",
+    "input": {
+      "bytes": 26636619,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "bd44c1bcd5e943c4b1be8cde00bde88aa235b2f63679d11bcf0d70e8782fa87a"
+    },
+    "parent": "3e733567937b58ba8cdd8fec44870495cc6b5705",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff": "A\t.pbrun-closure.3d05de08c97c2a25.json\n",
+  "build_source_checks": {
+    "tools/build_glm_derivative_image.py": "fa6b3ba72ffb56fcf2e92e772018eca392f74c40f95590ac652cf8d36d3dcf15",
+    "prismaquant/glm_source_derivative.py": "53f5cda21162232f1f5623ce4019c8ebde984430ce5f50ea95d9ed41dbc742d6"
+  },
+  "cleanup": {
+    "checked_unix": 1788882750.669269,
+    "complete": true,
+    "nonce": "b63736f97d904e038a01afed27907dc8",
+    "released": {
+      "ok": true,
+      "scope_id": "prismabuild-job2a94583e35ac5646a5b5beeed1bef2fe.slice",
+      "stop_reason": "failed",
+      "stopped_unix": 1788882750.4951875
+    },
+    "telemetry": {
+      "action_key": "a48fcb5bea21793823d6cdfa9e40d3e6049db3f343960e5e5b6c3ee90101768d",
+      "complete": true,
+      "cpu_seconds": 33.78259,
+      "cpu_system_seconds": 32.949504,
+      "cpu_user_seconds": 0.833086,
+      "errors": [],
+      "gpu_memory_max_bytes": 8589934592,
+      "host": "sparklina",
+      "memory_current_bytes": 8490663936,
+      "memory_max_bytes": 8589934592,
+      "memory_peak_bytes": 8589934592,
+      "nonce": "b63736f97d904e038a01afed27907dc8",
+      "oom_kill": 0,
+      "oom_local": 0,
+      "process_io": {
+        "live": {},
+        "members": [
+          1659647,
+          1659681,
+          1659682,
+          1659683,
+          1659783
+        ],
+        "processes_live": 0,
+        "processes_observed": 5,
+        "processes_unreadable": 0,
+        "rchar": 46808882,
+        "read_bytes": 4096,
+        "retired": {
+          "rchar": 46808882,
+          "read_bytes": 4096,
+          "syscr": 2241,
+          "syscw": 16,
+          "wchar": 904,
+          "write_bytes": 12288
+        },
+        "source": "proc_io",
+        "syscr": 2241,
+        "syscw": 16,
+        "wchar": 904,
+        "write_bytes": 12288
+      },
+      "sampled_unix": 1788882750.6500623,
+      "scope_unit": "prismabuild-job2a94583e35ac5646a5b5beeed1bef2fe.slice",
+      "shape_key": "1b1b6949f594b98041b192426e11df444e3a43e9bf059907c44a95956636542c",
+      "termination_reason": "failed",
+      "wall_seconds": 107.82090043701464
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 9.120565019819823,
+        "busy_percent_peak": 21.721313000000002,
+        "psi_some_avg10_max": 0.59,
+        "psi_some_avg10_samples": 111,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 111,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788882750.3674839,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.031285714285714285,
+        "power_reference_scope": "soc_tdp",
+        "power_reference_source": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html",
+        "power_reference_w": 140.0,
+        "power_w_mean": 4.150599078341013,
+        "power_w_peak": 4.38,
+        "samples": 217,
+        "source": "pqteld",
+        "temperature_c_peak": 44.0,
+        "utilization_percent_mean": 0.0,
+        "utilization_percent_peak": 0.0,
+        "utilization_samples": 217,
+        "uvm_residual_bytes_peak": 5154873344,
+        "uvm_residual_samples": 217
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 19.9,
+        "psi_mem_full_avg10_max": 36.22,
+        "samples": 217,
+        "source": "pqteld",
+        "unified_available_bytes_min": 122474762240,
+        "unified_total_bytes": 130595991552,
+        "unified_used_bytes_peak": 8121229312
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1788882641.8920646
+    },
+    "finished_unix": 1788882750.3674839,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 5,
+      "processes_unreadable": 0,
+      "rchar": 46808882,
+      "read_bytes": 4096,
+      "source": "proc_io",
+      "syscr": 2241,
+      "syscw": 16,
+      "wchar": 904,
+      "write_bytes": 12288
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 3,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 104845312,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.018761000000000028,
+      "user_seconds": 0.04245900000000091,
+      "voluntary_context_switches": 21
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 33.78259,
+      "cpu_system_seconds": 32.949504,
+      "cpu_user_seconds": 0.833086,
+      "memory_current_bytes": 8490835968,
+      "memory_peak_bytes": 8589934592,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788882641.8920646,
+    "wall_seconds": 108.47541928291321
+  },
+  "stdout": "Traceback (most recent call last):\n  File \"<frozen runpy>\", line 198, in _run_module_as_main\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/rob/tmp/prismabuild-checkouts/a48fcb5bea21.1wkosf2p/checkout/tools/build_glm_derivative_image.py\", line 139, in <module>\n    main()\n  File \"/home/rob/tmp/prismabuild-checkouts/a48fcb5bea21.1wkosf2p/checkout/tools/build_glm_derivative_image.py\", line 60, in main\n    assert original_archive.stat().st_size <= disk_bound // 2\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n"
+}

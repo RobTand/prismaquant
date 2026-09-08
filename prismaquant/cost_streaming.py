@@ -855,6 +855,7 @@ def build_streamed_causal_lm(
     prefetch_lookahead: int = 2,
     require_prefetched_residency: bool = False,
     attn_implementation: str | None = None,
+    source_derivative=None,
 ) -> StreamedCausalLM:
     """Build the repository's existing streaming context and wrap it."""
     from prismaquant.streaming_model import _build_streaming_context
@@ -877,12 +878,19 @@ def build_streamed_causal_lm(
             effective_lookahead,
             max(0, context.max_cache_slots - 1),
         )
-    return StreamedCausalLM(
+    runner = StreamedCausalLM(
         context,
         profile,
         prefetch_lookahead=effective_lookahead,
         require_prefetched_residency=require_prefetched_residency,
     )
+    from .glm_source_derivative import bind_source_derivative
+    try:
+        bind_source_derivative(runner.model, profile, source_derivative)
+    except BaseException:
+        runner.shutdown()
+        raise
+    return runner
 
 
 def _file_sha256(path: Path) -> str:
