@@ -402,6 +402,10 @@ class StreamedCausalLM:
         self.prefetch_lookahead = max(0, int(prefetch_lookahead))
         self.require_prefetched_residency = require_prefetched_residency
         self._pinned_layer: int | None = None
+        # Layers whose pre-install re-assert had to issue a fresh source read
+        # during the last exact layer-major traversal (#403). Empty when every
+        # speculative prefetch was still held by the runner at install time.
+        self.layer_major_prefetch_retries: tuple[int, ...] = ()
 
     def layer_index_for_qname(self, qname: str) -> int:
         match = re.match(
@@ -739,12 +743,29 @@ class StreamedCausalLM:
                     shared_extra=[state[2] for batch, state in zip(batches, states)
                                   if batch.shared_pass_state is None])
 
-        scheduled = set()
-        def prefetch(layer):
-            if 0 <= layer < self.num_layers and layer not in scheduled:
-                self.context.schedule_prefetch(layer)
-                scheduled.add(layer)
+        # The runner owns residency; this visitor keeps no residency state of
+        # its own. `schedule_prefetch` is idempotent: it returns None for a hot
+        # layer, the same future for a read it already holds (in flight or
+        # delivered and unclaimed), and submits a fresh read only when nothing
+        # is held. Each layer is speculated once ahead of its turn and
+        # re-asserted once immediately before its install, so a speculation
+        # the runner no longer holds (the layer was hot and then evicted, or
+        # the pressure floor refused the read) gets one bounded retry and the
+        # `require_prefetched` refusal stays fail-closed for anything else (#403).
+        speculated: dict[int, object] = {}
+        retried: list[int] = []
 
+        def speculate(layer):
+            if 0 <= layer < self.num_layers and layer not in speculated:
+                speculated[layer] = self.context.schedule_prefetch(layer)
+
+        def reassert(layer):
+            held = self.context.schedule_prefetch(layer)
+            if layer in speculated and held is not None and held is not speculated[layer]:
+                retried.append(layer)
+
+        if exact:
+            self.layer_major_prefetch_retries = ()
         try:
             with torch.no_grad():
                 for batch_index, input_ids in enumerate(input_batches):
@@ -766,20 +787,20 @@ class StreamedCausalLM:
                     raise ValueError("layer-batch traversal requires calibration batches")
                 if exact:
                     for depth in range(min(self.num_layers, max(1, self.prefetch_lookahead))):
-                        prefetch(depth)
+                        speculate(depth)
                 else:
                     for depth in range(min(self.num_layers, self.prefetch_lookahead + 1)):
                         self.context.schedule_prefetch(depth)
                 for layer in range(self.num_layers):
                     if exact:
                         check_state()
-                        prefetch(layer)
+                        reassert(layer)
                         self.context.install(layer, require_prefetched=True, prefetch_following=False)
                     else:
                         self.context.install(layer, require_prefetched=self.require_prefetched_residency)
                     try:
                         if exact:
-                            prefetch(layer + self.prefetch_lookahead)
+                            speculate(layer + self.prefetch_lookahead)
                         else:
                             self.context.schedule_prefetch(layer + self.prefetch_lookahead)
                         next_batch = 0
@@ -839,6 +860,8 @@ class StreamedCausalLM:
                         output_consumer(index, self.tail_logits(batch, hidden))
         finally:
             states.clear()
+            if exact:
+                self.layer_major_prefetch_retries = tuple(retried)
 
 
 def build_streamed_causal_lm(
