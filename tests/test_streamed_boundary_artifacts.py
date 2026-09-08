@@ -271,7 +271,7 @@ def test_rank_four_boundaries_keep_all_residual_streams_and_original_dtype(tmp_p
                 del restored
 
 
-def _shared_run(path, *, aux=1 << 20):
+def _shared_run(path, *, aux=1 << 20, layer_major=False):
     from types import SimpleNamespace
     from test_kv_cotangent_path import _ToyModel, SHARED_SPECS
     from test_streamed_cost_checkpoints import _FakeStreamingContext
@@ -285,6 +285,16 @@ def _shared_run(path, *, aux=1 << 20):
     model.lm_head = toy.lm_head
     context = _FakeStreamingContext(model)
     runner = StreamedCausalLM(context, Gemma4Profile())
+    storage_policy = None if path is None else _policy(path, cap=4096, aux=aux)
+    if layer_major:
+        from prismaquant.cost_streaming import LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
+        model.eval()
+        runner.require_prefetched_residency = True
+        runner.prefetch_lookahead = 1
+        install = context.install
+        context.install = lambda layer, *, require_prefetched=False, prefetch_following=True: install(
+            layer, require_prefetched=require_prefetched)
+        storage_policy.update(schema=LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA, capture_order='layer_major')
     weights = {(name, "NVFP4A16"): module.weight.detach().clone() + 0.03125
                for name, module in model.named_modules()
                if isinstance(module, torch.nn.Linear) and ".layers." in name}
@@ -294,7 +304,7 @@ def _shared_run(path, *, aux=1 << 20):
         ["NVFP4A16", "BF16"], n_probes=4, probe_microbatch=1, seed_base=7000,
         min_free_gib=0, joint_activation=True, production_cache=cache,
         model_identity=_model_identity("shared-source"),
-        boundary_storage=None if path is None else _policy(path, cap=4096, aux=aux))
+        boundary_storage=storage_policy)
     return result
 
 

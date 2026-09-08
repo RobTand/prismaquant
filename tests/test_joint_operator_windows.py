@@ -136,3 +136,114 @@ def test_shared_cotangent_forks_preserve_multi_consumer_probe_sums(tmp_path, mon
             assert actual['costs'][name][fmt]['signed_per_probe'] == pytest.approx(
                 row['signed_per_probe'], rel=3e-5, abs=3e-8)
     assert actual['provenance']['streamed_boundary_storage']['telemetry']['peak_shared_cotangent_reservation_bytes'] > 0
+
+
+def test_campaign_admits_only_explicit_candidate_windows_and_checks_later_donor(tmp_path):
+    from types import SimpleNamespace
+    from prismaquant.tessera_joint_aura import _admit_candidate_phase
+    small = tmp_path/'small'; small.write_bytes(b'1'*64)
+    large = tmp_path/'large'; large.write_bytes(b'2'*256)
+    data = SimpleNamespace(cells={('a','fmt'): {'render': str(small)},
+                                  ('b','fmt'): {'render': str(large)}})
+    config = {'execution': {}, 'max_render_bytes': 256}
+    with pytest.raises(ValueError, match='largest measured candidate layer'):
+        _admit_candidate_phase('run', config, data, {0: 320})
+    window = policy(); window['max_render_resident_bytes'] = 256; window['max_load_buffer_bytes'] = 256
+    config['execution'].update(operator_windows=window, boundary_storage={'explicit': 'owner'})
+    assert _admit_candidate_phase('run', config, data, {0: 320}) == window
+    with pytest.raises(ValueError, match='largest measured candidate layer'):
+        _admit_candidate_phase('prepare', config, data, {0: 320})
+    window['max_load_buffer_bytes'] = 128
+    with pytest.raises(ValueError, match='read buffer budget'):
+        _admit_candidate_phase('run', config, data, {0: 320})
+    del config['execution']['boundary_storage']
+    with pytest.raises(ValueError, match='exact boundary'):
+        _admit_candidate_phase('run', config, data, {0: 320})
+
+
+def test_passthrough_only_target_refuses_instead_of_emitting_unmeasured_diagnostics():
+    from test_streamed_cost_checkpoints import _model_identity
+    _, context, runner, cache = _fixture()
+    with pytest.raises(ValueError, match='measured candidate for every target'):
+        aura.compute_aura_cost_streamed(runner, torch.tensor([[1,2,3,4]]), ['BF16'],
+            n_probes=3, min_free_gib=0, joint_activation=True, production_cache=cache,
+            model_identity=_model_identity('joint-source'), operator_windows=policy(),
+            collect_col_energy=True)
+    assert context.install_calls == 0
+
+
+def test_guarded_operator_phases_release_inactive_allocator_reservation(tmp_path, monkeypatch):
+    """Retired CUDA blocks must not consume the next phase's future budget."""
+    import prismaquant.joint_statistics_replay as replay
+    import prismaquant.memory_management as memory
+    scope = tmp_path/'job'; scope.mkdir()
+    cap = 4*1024**3
+    (scope/'memory.max').write_text(str(cap))
+    (scope/'memory.current').write_text(str(1024**3))
+    membership = tmp_path/'membership'; membership.write_text('0::/job\n')
+    guard = memory.CaptureMemoryGuard('cuda:0', cgroup_root=tmp_path, membership=membership)
+    state = {'inactive': 2*1024**3, 'releases': 0}
+    labels = []
+    monkeypatch.setattr(memory, '_host_memory_info', lambda: (32*1024**3, 64*1024**3))
+    monkeypatch.setattr(torch.cuda, 'memory_reserved', lambda device: state['inactive'])
+    monkeypatch.setattr(torch.cuda, 'synchronize', lambda device: None)
+    def empty_cache():
+        state['inactive'] = 0
+        state['releases'] += 1
+    monkeypatch.setattr(torch.cuda, 'empty_cache', empty_cache)
+    checked = guard.check
+    def check(label, *, reserve_bytes=0):
+        result = checked(label, reserve_bytes=reserve_bytes)
+        labels.append(label)
+        # Model the just-completed phase leaving only inactive CUDA blocks.
+        state['inactive'] = 2*1024**3
+        return result
+    monkeypatch.setattr(guard, 'check', check)
+    monkeypatch.setattr(replay, 'operator_window_guard', lambda device: guard)
+    _, _, runner, cache = _fixture()
+    result = _run(runner, cache, operator_windows=policy())
+    assert result['costs']
+    assert {'before_joint_statistics_window', 'before_joint_candidate_load',
+            'before_joint_window_backward'} <= set(labels)
+    assert state['releases'] >= len(labels)
+
+
+def test_operator_reverse_owns_exact_lookahead_when_cache_has_extra_slots(monkeypatch):
+    import copy
+    model, context, runner, cache = _fixture()
+    model.model.layers.extend([copy.deepcopy(model.model.layers[0]) for _ in range(2)])
+    context.num_layers = runner.num_layers = 4
+    runner.prefetch_lookahead = 1
+    for layer in (2, 3):
+        name = f'model.layers.{layer}.proj'
+        cache.activation_max_abs[name] = 1.0
+        for fmt in ('FP8_E4M3', 'NVFP4A16'):
+            cache.weights[name, fmt] = model.model.layers[layer].proj.weight.detach().clone()+0.03125
+    original = context.install
+    state = {'previous': -1, 'reverse': False}
+    futures = set()
+    settled = []
+    def install(layer, *, require_prefetched=False, prefetch_following=True):
+        if layer <= state['previous']:
+            state['reverse'] = True
+        state['previous'] = layer
+        futures.discard(layer)
+        if state['reverse'] and prefetch_following:
+            # An adaptive three-slot cache can enqueue two successors while
+            # this runner's explicitly budgeted reverse lookahead is one.
+            futures.update(range(max(0, layer-2), layer))
+        return original(layer, require_prefetched=require_prefetched)
+    def schedule(layer):
+        if state['reverse']:
+            futures.add(layer)
+    def settle(indices):
+        expected = set(indices)
+        if futures != expected:
+            raise RuntimeError(f'unexpected source owners: {futures} != {expected}')
+        settled.append(expected)
+    monkeypatch.setattr(context, 'install', install)
+    monkeypatch.setattr(context, 'schedule_prefetch', schedule)
+    monkeypatch.setattr(context, 'settle_prefetched_layers', settle, raising=False)
+    result = _run(runner, cache, operator_windows=policy())
+    assert len(result['costs']) == 4
+    assert settled == [{2}, {1}, {0}, set()]

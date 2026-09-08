@@ -531,14 +531,15 @@ def _free_gib() -> float:
 
 
 def _release_streamed_anchor_allocator_cache(device: object) -> None:
-    """Return consumed production anchors to Spark unified memory.
+    """Return retired streamed CUDA allocations to Spark unified memory.
 
     Dropping the final tensor reference only moves its CUDA allocation into
     PyTorch's reusable cache.  On the single-GPU GB10 path that memory still
     overlaps the much larger FP32 adjoint deltas unless the cache is returned
-    to the unified host/device pool before backward begins.  This is once per
-    streamed layer, outside the probe loop; non-CUDA test/research paths stay a
-    no-op.
+    to the unified host/device pool before the next allocation phase. Anchor
+    execution calls this once per streamed layer; bounded operator replay also
+    calls it before reserving each phase. Live tensor owners remain intact.
+    Non-CUDA test/research paths stay a no-op.
     """
     resolved = torch.device(device)
     if resolved.type != "cuda":
@@ -1908,17 +1909,19 @@ def compute_aura_cost_streamed(
     partitions with versioned global-row probes. Local signed terms and weight
     gradients sum across all partitions before squaring; full-vocabulary GPU
     tensors are bounded by the partition. By default CPU boundaries and shared
-    pass state cover the full calibration. Explicit ``boundary_storage`` v1
+    pass state cover the full calibration. Explicit ``boundary_storage`` v1/v2
     stores exact snapshots and rolling cotangents through the existing
     activation artifact owner, leases bounded resident input windows, and caps
-    metadata/shared-state residency. It preserves the original traversal and
-    scalar projection arithmetic; candidate/gradient and source traffic bounds
+    metadata/shared-state residency. V2 uses layer-major baseline capture with
+    the original per-batch source sequence; v1 preserves batch-major capture.
+    Both preserve scalar projection arithmetic; candidate/gradient bounds
     remain separate admission requirements. Checkpoints bind the execution partition
     because floating-point kernels may round differently with batch shape.
     The resident :func:`compute_aura_cost` path is deliberately unchanged.
     """
     from prismaquant.joint_statistics_replay import (
         normalize_operator_windows, operator_window_guard, resident_candidates,
+        check_operator_allocation,
         observe_and_project_windows, statistics_arithmetic_identity,
     )
     operator_windows = normalize_operator_windows(operator_windows)
@@ -1927,7 +1930,7 @@ def compute_aura_cost_streamed(
     if operator_windows is not None:
         if not joint_activation or production_cache is None or anchor_renderer is not None:
             raise ValueError('joint operator windows require joint AURA with a materialized PWC')
-        if runner.model.training:
+        if any(module.training for module in runner.model.modules()):
             raise ValueError('joint operator replay requires an eval source')
         operator_guard = operator_window_guard(runner.device)
     if source_transition is not None:
@@ -2138,6 +2141,8 @@ def compute_aura_cost_streamed(
         )
         unit_formats[name] = tuple(planned)
         render_formats[name] = measured
+    if operator_windows is not None and any(not render_formats[name] for name in names):
+        raise ValueError('joint operator windows require a measured candidate for every target')
     nonzero_fmts = list(dict.fromkeys(
         fmt for name in names for fmt in render_formats[name]
     ))
@@ -2664,24 +2669,29 @@ def compute_aura_cost_streamed(
     batches = []
     if boundary_storage is not None:
         boundary_storage.watch_auxiliary(batches, [])
-    for batch_index, offset in enumerate(row_offsets):
-        available_gib = _free_gib()
-        if available_gib < min_free_gib:
-            raise RuntimeError(f"free UMA {available_gib:.1f} < floor {min_free_gib:.1f}; "
-                               f"abort before calibration row {offset}")
-        if boundary_storage is None:
-            batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows]))
-        else:
-            def write_boundary(depth, tensor):
-                return boundary_storage.write(tensor, batch_index=batch_index, boundary_index=depth)
+    if boundary_storage is not None and boundary_storage.config.get("capture_order") == "layer_major":
+        batches = runner.capture_layer_major_boundaries(
+            [calib_ids[offset:offset + batch_rows] for offset in row_offsets],
+            storage=boundary_storage)
+    else:
+        for batch_index, offset in enumerate(row_offsets):
+            available_gib = _free_gib()
+            if available_gib < min_free_gib:
+                raise RuntimeError(f"free UMA {available_gib:.1f} < floor {min_free_gib:.1f}; "
+                                   f"abort before calibration row {offset}")
+            if boundary_storage is None:
+                batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows]))
+            else:
+                def write_boundary(depth, tensor):
+                    return boundary_storage.write(tensor, batch_index=batch_index, boundary_index=depth)
 
-            def check_capture_state(current, state):
-                boundary_storage.check_auxiliary([*batches, current], extra=(state,),
-                    shared_extra=state if current.shared_pass_state is None else ())
+                def check_capture_state(current, state):
+                    boundary_storage.check_auxiliary([*batches, current], extra=(state,),
+                        shared_extra=state if current.shared_pass_state is None else ())
 
-            batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows],
-                boundary_writer=write_boundary, resource_check=check_capture_state))
-            boundary_storage.check_auxiliary(batches)
+                batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows],
+                    boundary_writer=write_boundary, resource_check=check_capture_state))
+                boundary_storage.check_auxiliary(batches)
     _log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} "
          f"min; starting {n_probes}-probe tail cotangents")
     device = runner.device
@@ -2736,6 +2746,7 @@ def compute_aura_cost_streamed(
         runner.context.install(
             layer,
             require_prefetched=runner.require_prefetched_residency,
+            **({'prefetch_following': False} if operator_windows is not None else {}),
         )
         _refresh_packed_layer_views(layer)
         # Forward boundary capture leaves the final lookahead window hot.
@@ -2744,11 +2755,17 @@ def compute_aura_cost_streamed(
         # while the current layer performs its expensive anchor render and
         # adjoint probes.  Without this call, every layer after the retained
         # tail window falls through ensure_loaded()'s synchronous cold path.
-        runner.schedule_reverse_prefetch(layer)
-        if operator_windows is not None:
+        if operator_windows is None:
+            runner.schedule_reverse_prefetch(layer)
+        else:
+            # The operator reservation covers exactly the explicit lookahead.
+            # Adaptive cache top-up can otherwise enqueue additional owners.
+            successors = range(max(0, layer-runner.prefetch_lookahead), layer)
+            for successor in reversed(successors):
+                runner.context.schedule_prefetch(successor)
             settle = getattr(runner.context, 'settle_prefetched_layers', None)
             if callable(settle):
-                settle(range(max(0, layer-runner.prefetch_lookahead), layer))
+                settle(successors)
             elif torch.device(runner.device).type == 'cuda':
                 raise RuntimeError('joint operator replay requires source prefetch settlement')
         pending = [
@@ -2998,7 +3015,7 @@ def compute_aura_cost_streamed(
                                     boundary_storage.check_auxiliary(batches, cotangents=cotangents,
                                         extra=() if final else owner.resident_tensors())
                                 if operator_guard is not None:
-                                    operator_guard.check('before_joint_window_backward', reserve_bytes=(
+                                    check_operator_allocation(operator_guard, 'before_joint_window_backward', reserve_bytes=(
                                         operator_windows['workspace_reserve_bytes'] +
                                         (0 if lease is None else lease.statistics_capacity_bytes - lease.resident_statistics_bytes)))
                                 if _free_gib() < min_free_gib:
@@ -3750,7 +3767,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "routed experts need an empirical/hybrid expert-cost "
                         "path, not silent omission.")
     p.add_argument("--boundary-storage-config", default=None,
-                   help="Explicit v1 JSON policy for exact streamed boundary/cotangent "
+                   help="Explicit v1/v2 JSON policy for exact streamed boundary/cotangent "
                         "artifacts and bounded resident windows; streaming only, default off.")
     p.add_argument(
         "--include-routed-experts",

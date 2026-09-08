@@ -44,6 +44,17 @@ def operator_window_guard(device):
     return guard
 
 
+def check_operator_allocation(guard, label, *, reserve_bytes):
+    """Release retired blocks before charging a phase's future allocations.
+
+    Live source, statistics and PWC owners remain intact. The existing physical
+    guard still charges their entire CUDA reservation and cgroup footprint.
+    """
+    from .aura_cost import _release_streamed_anchor_allocator_cache
+    _release_streamed_anchor_allocator_cache(guard.device)
+    return guard.check(label, reserve_bytes=reserve_bytes)
+
+
 @contextmanager
 def resident_candidates(cache, keys, policy, *, guard=None):
     """Use PWC's finite windows; borrowed renders must not escape the yield."""
@@ -60,7 +71,7 @@ def resident_candidates(cache, keys, policy, *, guard=None):
     def iterate():
         for keys in windows:
             if guard is not None:
-                guard.check('before_joint_candidate_load', reserve_bytes=(
+                check_operator_allocation(guard, 'before_joint_candidate_load', reserve_bytes=(
                     cap + policy['max_load_buffer_bytes'] + policy['max_candidate_bytes']
                     + policy['workspace_reserve_bytes']))
             with cache.resident_window(keys, max_resident_bytes=cap,
@@ -103,7 +114,7 @@ def observe_and_project_windows(modules, specs, cache, policy, *, backward,
         require_sources()
         selected = {name: modules[name] for name in names}
         if guard is not None:
-            guard.check('before_joint_statistics_window', reserve_bytes=(
+            check_operator_allocation(guard, 'before_joint_statistics_window', reserve_bytes=(
                 plan.window_statistics_bytes[index] + policy['workspace_reserve_bytes']
                 + policy['max_replay_cotangent_bytes']))
         with JointOperatorStatisticsLease(selected, {name: specs[name] for name in names},
