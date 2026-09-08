@@ -23,7 +23,9 @@ and neither limit claims a hard bound on live profiler memory.
 PB validation, with actual CAS payloads and source snapshots independently read:
 
 - Regression `71a6cc64040533c781b1b5a02d8673e79efa68315fe98b16919a5be7a518aa23`:
-  eight expected failures, 24 deselected before the implementation.
+  eight unsupported-option failures, 24 deselected before the implementation.
+  These establish the new option boundary; the failed dense action above is
+  the observed full-call defect.
 - CPU `3812cc133ecebc02d023b2bb22374a68fddcbf43b06844bbc3a14f6939248b88`:
   31 passed, two native CUDA skips.
 - Native GB10 `def003ee7dbd68035dd400326bc31f794ed94a7bec04092e8149e2c9d3456465`:
@@ -63,3 +65,8 @@ The observer recorded 228 main-thread samples and 46 Netdata samples for each
 host over 230.634 s. The earlier failed dense action ran on Sparky and this
 one ran on Sparklina: this is an instrument validation, not a controlled
 throughput A/B. The adjacent final audit seals actual traces and artifacts.
+
+Independent cost-row comparison found all 1,030 quality and byte-cost rows
+identical to the failed dense attempt. Only the fourteen measured
+`encode_seconds` fields differ; paths and run provenance also differ normally.
+The comparison is sealed in `priced-row-parity.json`.
