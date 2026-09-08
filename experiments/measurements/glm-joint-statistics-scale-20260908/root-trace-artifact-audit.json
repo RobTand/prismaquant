@@ -1,0 +1,20 @@
+{
+  "complete": true,
+  "traces": [
+    {
+      "index": 0,
+      "summary_sha256": "bd2aeeeefc49ed4becd77d74254d7c270e7b00dcf581a60a134df4b564d398d0",
+      "raw_trace_sha256": "5f19ca006c9221e389274981bb9dc8005ccf6f813822ec3e0a925eac1b11b3cc",
+      "kernel_count": 28473,
+      "kernel_us": 1754172.4650000252
+    },
+    {
+      "index": 1,
+      "summary_sha256": "48adc0fc9ff716e9bdddf1c096dec7c69c93bb32e6cdf32686e95bf359e83ed0",
+      "raw_trace_sha256": "b5ac02f8211f9728e39e2f56e7c251703660ce0916cc60b974109371da829220",
+      "kernel_count": 27849,
+      "kernel_us": 1689724.4629999928
+    }
+  ],
+  "scope": "Each immutable summary equals its canonical CAS payload and matches the native result trace identity; reviewed parser checks entire raw bytes before/after."
+}

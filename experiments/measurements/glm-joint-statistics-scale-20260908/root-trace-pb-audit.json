@@ -1,0 +1,22 @@
+[
+  {
+    "action": "eb4b4448a8f31ad33b5fad0d2b46251521f942d58d6374a6661dd2de2fe72a5b",
+    "receipt": "7f07f933cdd62bf86597d01d7b234b9718a8c2f0fef100b78496182e37ec60e4",
+    "payload_sha256": "add6308ce9b6563b7fd4f3bbd8e100610f28fec91709b0b2307c302a32aff3e6",
+    "snapshot": "ccb6f08715b76d0d6aab61b271162fee89f0676b",
+    "source_diff_from_commit": [
+      ".pbrun-closure.4b3b16937e923068.json"
+    ],
+    "stdout_tail": "<float, at::native::MaxNanFunctor<float> >, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::MaxNanFunctor<float> >, unsigned int, float, 4, 4>)\", 2745.7229999999886], [\"void at::native::vectorized_elementwise_kernel<4, at::native::(anonymous namespace)::launch_clamp_scalar(at::TensorIteratorBase&, c10::Scalar, c10::Scalar, at::native::detail::ClampLimits)::{lambda()#1}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::(anonymous namespace)::launch_clamp_scalar(at::TensorIteratorBase&, c10::Scalar, c10::Scalar, at::native::detail::ClampLimits)::{lambda()#1}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>)\", 2461.2449999999785], [\"triton_poi_fused__to_copy_abs_clamp_max_clamp_min_div_index_lt_mul_sub_view_where_2\", 2343.358999999992]], \"top_cpu_op_total_us\": [[\"dynamo\", 2549128.427], [\"entire_frame_compile\", 2548157.309], [\"_compile.compile_inner (dynamo_timed)\", 2548125.645], [\"compile_attempt_0\", 2504227.179], [\"compile_attempt_0 (dynamo_timed)\", 2504199.323], [\"backend_compile\", 2169940.017], [\"OutputGraph.call_user_compiler (dynamo_timed)\", 2169878.513], [\"autograd::engine::evaluate_function: MmBackward0\", 1661714.2309999983], [\"aten::mm\", 1500945.4080000024], [\"create_aot_dispatcher_function\", 1487614.122], [\"create_aot_dispatcher_function (dynamo_timed)\", 1487515.514], [\"aten::matmul\", 1455445.1119999997], [\"compile_fx.<locals>.fw_compiler_base\", 1364321.518], [\"compile_fx.<locals>.fw_compiler_base (dynamo_timed)\", 1364092.43], [\"aten::item\", 1337330.624999999]], \"scope\": \"Durations are summed trace events; nested CPU events overlap and are not self time. No GPU annotation is counted as a kernel.\"}\n"
+  },
+  {
+    "action": "6ce5bb83e5222e903e5186169fb8fb2517620904bb9344b20720e2fd17b071c5",
+    "receipt": "3b95a39116412ee8fb67587f957dcfa76fec3697a1dda6af53905b2399049b17",
+    "payload_sha256": "1a94b2073df341788b5abd409effac0d8dddb0d1f2a125e80829635cb554175d",
+    "snapshot": "b0c7da15b025641e11ebdfc03969419035429024",
+    "source_diff_from_commit": [
+      ".pbrun-closure.46635a445ac455db.json"
+    ],
+    "stdout_tail": "::OpaqueType<2> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<2> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1}>(long, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<2> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<2> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1})\", 2258.7159999999963], [\"triton_red_fused__to_copy_abs_amax_bucketize_clamp_min_div_view_1\", 2126.880000000001]], \"top_cpu_op_total_us\": [[\"autograd::engine::evaluate_function: MmBackward0\", 1500318.5400000005], [\"aten::item\", 1330781.2709999986], [\"aten::_local_scalar_dense\", 1329007.1799999927], [\"aten::mm\", 1041186.8019999994], [\"aten::matmul\", 1012611.3030000005], [\"aten::to\", 214174.30599999253], [\"aten::_to_copy\", 206135.3839999985], [\"aten::copy_\", 187851.55099999812], [\"Torch-Compiled Region: 0/0\", 100254.06599999998], [\"aten::sum\", 75542.55900000008], [\"## Call CompiledFxGraph f37qd7lbsbxrfogzrrgsjearspgf6pqylfs5wmmy35fprf2shp6f ##\", 64934.68799999999], [\"MmBackward0\", 45655.911000000015], [\"aten::index\", 24610.98300000005], [\"aten::mul\", 22885.661000000073], [\"aten::abs\", 21764.873000000003]], \"scope\": \"Durations are summed trace events; nested CPU events overlap and are not self time. No GPU annotation is counted as a kernel.\"}\n"
+  }
+]

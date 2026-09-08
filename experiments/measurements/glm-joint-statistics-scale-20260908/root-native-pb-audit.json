@@ -1,0 +1,12 @@
+[
+  {
+    "action": "18ad980463cae0f7c11a3948c3dc5d623e17882aa7df56234d0bbf399bb49026",
+    "receipt": "f6f4c5e415de6e86e8ec7d54824aabaa3e192c9eef4972097c2ac1d1aeb2aa98",
+    "payload_sha256": "c298a75c79aa1acd3c8559fd01348d943132698d2f6735b0db8b8f97313b98f6",
+    "snapshot": "7fcd5cb33f8f45dc17076a6741ee2ade0d25c47e",
+    "source_diff_from_commit": [
+      ".pbrun-closure.0572d5101e3b589d.json"
+    ],
+    "stdout_tail": "{\"schema\": \"prismaquant.tessera_campaign_container.v1\", \"requested_image\": \"prismaquant-glm-producer:content-qualified-20260908\", \"image_id\": \"sha256:9f9b9f05b17531399ba66dc6415b054cf5d68c82270626d0e9150e75c808435f\", \"image_content_sha256\": \"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\", \"declared_content_sha256\": \"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\", \"uid\": 1000, \"gid\": 1000}\nUSDT:2026-09-08 13:47:47 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\n/usr/local/lib/python3.12/dist-packages/torch/autograd/graph.py:979: UserWarning: Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context... (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/cuda/CublasHandlePool.cpp:408.)\n  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass\nUSDT:2026-09-08 13:47:54 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 13:47:56 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 13:48:00 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\n{\"status\": \"complete\", \"path\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/native-01/result.json\", \"sha256\": \"58e237a0d2df0864981fa94efbb8050a755bdbd0a9f18f49a51af2344a59f389\"}\n"
+  }
+]

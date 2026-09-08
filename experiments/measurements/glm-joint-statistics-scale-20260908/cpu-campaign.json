@@ -1,0 +1,49 @@
+[
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 2,
+      "mem_gb": 3
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 120,
+    "priority": -10,
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_joint_statistics_scale_profile.py"
+    ]
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 2,
+      "mem_gb": 3
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 120,
+    "priority": -10,
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "experiments.joint_statistics_scale_profile",
+      "--census",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/census.json",
+      "--census-sha256",
+      "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+      "--ledger",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/reuse-plan-01/resource-ledger.v2.json",
+      "--ledger-sha256",
+      "dfc21a3a9988ec89db74db0f0e3502279477abfcfe97ea9a26fb45ae5a989e0c",
+      "--out",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/cpu-plan-01",
+      "--plan-only"
+    ]
+  }
+]

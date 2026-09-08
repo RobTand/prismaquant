@@ -1,0 +1,63 @@
+{
+  "schema": "prismaquant.partial_capture_netdata_observation.v1",
+  "source": "full-capture-profile-03/netdata.jsonl",
+  "retained_path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/netdata-collections-0-3-4.jsonl",
+  "sha256": "209c922862284c2a4ddf79b7dcd275cb6bdddc7d7833eca71db2da98728be036",
+  "scope": "Both-host observations during complete collector intervals; CPU busy excludes idle/iowait/steal, power is coarse Netdata gauge. Continuous source is still live; only this fixed slice is hashed.",
+  "rows": [
+    {
+      "collection": 0,
+      "host": "sparky",
+      "samples": 10,
+      "cpu_busy_pct_mean": 21.67906013,
+      "cpu_iowait_pct_mean": 0.52955109,
+      "coarse_gpu_w_mean": 46.2,
+      "coarse_gpu_w_max": 51.0
+    },
+    {
+      "collection": 0,
+      "host": "sparklina",
+      "samples": 10,
+      "cpu_busy_pct_mean": 2.00726212,
+      "cpu_iowait_pct_mean": 0.85278936,
+      "coarse_gpu_w_mean": 3.8,
+      "coarse_gpu_w_max": 4.0
+    },
+    {
+      "collection": 3,
+      "host": "sparky",
+      "samples": 64,
+      "cpu_busy_pct_mean": 13.703821539062501,
+      "cpu_iowait_pct_mean": 0.549219325,
+      "coarse_gpu_w_mean": 40.375,
+      "coarse_gpu_w_max": 46.0
+    },
+    {
+      "collection": 3,
+      "host": "sparklina",
+      "samples": 64,
+      "cpu_busy_pct_mean": 2.4013918671875,
+      "cpu_iowait_pct_mean": 0.8687088390625,
+      "coarse_gpu_w_mean": 5.21875,
+      "coarse_gpu_w_max": 12.0
+    },
+    {
+      "collection": 4,
+      "host": "sparky",
+      "samples": 71,
+      "cpu_busy_pct_mean": 11.518176149295774,
+      "cpu_iowait_pct_mean": 0.4832511943661972,
+      "coarse_gpu_w_mean": 39.014084507042256,
+      "coarse_gpu_w_max": 46.0
+    },
+    {
+      "collection": 4,
+      "host": "sparklina",
+      "samples": 71,
+      "cpu_busy_pct_mean": 1.6024112323943662,
+      "cpu_iowait_pct_mean": 0.8163079098591549,
+      "coarse_gpu_w_mean": 4.845070422535211,
+      "coarse_gpu_w_max": 12.0
+    }
+  ]
+}
