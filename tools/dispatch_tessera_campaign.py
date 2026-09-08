@@ -218,17 +218,28 @@ def require_rows_fit(mem_gb: "list[int]", per_box: int, budget) -> int:
 
 def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int,
          module: str = "prismaquant.tessera_campaign") -> dict:
+    env = dict(spec['env'])
+    policy_flag = '--streaming-capture-policy'
+    bounded = (policy_flag+'=shared-inputs-bounded-v1' in argv or
+               (policy_flag in argv and
+                argv[argv.index(policy_flag)+1] == 'shared-inputs-bounded-v1'))
+    bounded = bounded or all(flag in argv for flag in
+        ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
+    if bounded:
+        from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
+        env = {**BOUNDED_CAPTURE_ENV, **env}
+        require_bounded_capture_environment(env)
     command = [spec["python"], "-u", "-m", module, *argv]
     if "container" in spec:
         validate_container(spec)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
-                   json.dumps({"container": spec["container"], "env": spec["env"]},
+                   json.dumps({"container": spec["container"], "env": env},
                               sort_keys=True), "--", *command]
     row = {
         "argv": command,
         "cwd": spec["cwd"],
         "demand": {"gpu": 1, "cpu": int(spec.get("cpus", 4)), "mem_gb": int(mem_gb)},
-        "env": dict(spec["env"]),
+        "env": env,
         "tags": list(spec.get("tags", ["gb10"])),
         "timeout_s": int(timeout_s),
         # A row is one memoized action and a retry re-runs the same argv over

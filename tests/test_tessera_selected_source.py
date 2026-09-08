@@ -124,6 +124,8 @@ def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monke
     assert dispatch.main([*common, '--calibration-cache', '/capture']) == 0
     rows = json.loads((tmp_path/'manifest.json').read_text())
     assert rows[0]['demand']['mem_gb'] == 3
+    assert rows[0]['env']['MIMALLOC_PURGE_DELAY'] == '0'
+    assert rows[0]['env']['PRISMAQUANT_RELEASE_SOURCE_PAGES'] == '1'
     assert '--calibration-cache-sha256' in rows[0]['argv']
     plan = json.loads((tmp_path/'plan.json').read_text())
     assert plan['rows'][0]['resources']['selected_layers'] == ['0']
