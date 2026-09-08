@@ -1,7 +1,43 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/capture-followups-20260908`. Stamps
+As of: 2026-09-08 · `triage/selected-row-shard-identity`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `triage/selected-row-shard-identity`) for selected
+rows that byte-verify only the shards they read (#388). A selected-source row
+(`--streaming` with `--units`) still recomputes the capture identity against
+the current source, but `tessera_campaign.prepare_selected_source` now passes
+`verify_shards` to `tessera_calibration_cache.capture_identity_with_verification`:
+every small file (`*.json`, `*.model`, `*.txt`, and whatever the roster seals
+that is not a shard) is hashed, and only the shards in the row's read set are
+read. The read set is `StreamedCausalLM.selected_source_shards`: every shard
+holding any tensor of a layer that holds a selected unit (whole-layer install)
+plus every shard holding a tensor outside the decoder layers, which the
+streamed model materialises at construction. `selected_source_read_set`
+cross-checks that set, tensor by tensor, against the census-sealed
+`expert_projection.producer.source.tensors` map and refuses on disagreement.
+Every other on-disk shard inherits its digest from `source.files`, so the
+identity equals the canonical manifest's; that equality remains the row's
+attestation, because the canonical capture byte-verified those digests. The
+row refuses when the roster is missing, a read shard is not on disk or not
+sealed, a read shard's bytes differ from the roster, or an on-disk shard is
+neither read nor sealed. The roster is absent whenever the census declares no
+packed expert projection (`expert_projection` is `null` for a dense-only
+model), so a dense-only streamed selected row refuses until its census carries
+a producer source roster. What each row verified is stamped into its payload,
+not its identity: `selected_source_preparation.source_verification` lists
+`byte_verified`, `inherited_from_census_roster`, `byte_verified_auxiliary`,
+`roster_origin`, `canonical_manifest_sha256`, `selected_layers`,
+`layer_shards` and `fixed_state_shards`. Unset `verify_shards` (the canonical
+capture, `tessera_materialization`, `tessera_joint_aura`) hashes exactly the
+previous file set and returns the same dict. Gates:
+`tests/test_selected_source_shard_identity.py` (default-path file set,
+inheritance, every refusal), `tests/test_selected_source_glm_row.py` (an
+instrumented selected row on a re-sharded tiny glm5_next checkpoint reads
+tensor data only from byte-verified shards; the same row hashed all three
+shards before this change), `tests/test_tessera_selected_source.py`. This
+establishes no at-scale measurement; the GLM before/after NFS read profile is
+a separate follow-up.
 
 Re-stamped (2026-09-08, `integrate/capture-followups-20260908`) for Hessian
 writer refusal and completed-file page release (#395, #396). A tensor-bearing
@@ -210,7 +246,9 @@ Re-stamped (2026-09-08, `fix/selected-source-anchors`) for selected Tessera
 anchor preparation from a complete canonical capture (#370). `--streaming`
 with `--units` requires the capture manifest and its expected SHA-256. Scope,
 geometry, calibration draw, runtime, initialization witness and current source
-hashes remain bound to the full census. The initialization witness describes
+hashes remain bound to the full census (since #388 a row byte-verifies only the
+shards it reads and inherits the rest from the sealed roster; see the
+`triage/selected-row-shard-identity` stamp). The initialization witness describes
 the historical capture; sparse preparation does not certify a new full-source
 forward. `StreamedCausalLM.snapshot_selected_weights` uses the existing layer
 cache and a finite selected-layer prefetch sequence, requires resident delivery,

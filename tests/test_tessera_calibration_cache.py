@@ -272,6 +272,12 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
     calibration = tc.th.calibration_identity(inputs['text'],inputs['tokens'],fit_tokens=4,
         source='wikitext-2-raw-v1/train',split_role='calibration',model=str(source),
         seed=0,nsamples=32,seqlen=512,fit_tokens_min=4)
+    if streamed_selection:
+        # A selected row inherits unread shard digests from the sealed roster (#388).
+        fields['expert_projection'] = dict(producer=dict(source=dict(
+            files={'model.safetensors': cc.sha256(source/'model.safetensors')},
+            auxiliary_sha256={}, config_sha256=cc.sha256(source/'config.json'),
+            tensors={UNIT+'.weight': 'model.safetensors'})))
     census = tc.calibration_census({UNIT:4},{UNIT:3.},args=SimpleNamespace(model=str(source),
         nsamples=32,seqlen=512,seed=0,layer_stride=1),groups={'u:'+UNIT:[UNIT]},
         dense_targets=[UNIT],expert_targets=[],shapes={UNIT:[32,256]},identity=calibration,**fields)
@@ -291,7 +297,9 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
             return {UNIT: model.model.layers[0].proj.weight.detach().clone()}, dict(
                 schema='prismaquant.selected_source_weights.v1', source_forward_count=0)
         runner = SimpleNamespace(model=model, snapshot_selected_weights=snapshot,
-            shutdown=lambda: source_calls.append('shutdown'))
+            shutdown=lambda: source_calls.append('shutdown'),
+            selected_source_shards=lambda names: dict(layers=[0], layer_shards=['model.safetensors'],
+                fixed_state_shards=[], tensors={UNIT+'.weight': 'model.safetensors'}))
         monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *a, **k: runner)
         monkeypatch.setattr(autoscale, 'selected_anchor_resources', lambda *a, **k: dict(
             memory_bytes=1024**3, selected_source_weight_bytes=32768,

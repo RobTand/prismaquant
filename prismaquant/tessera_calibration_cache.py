@@ -59,10 +59,41 @@ def _json(path, value):
                                               allow_nan=False) + '\n').encode())
 
 
+ROSTER_ORIGIN = 'expert_projection.producer.source'
+
+
 def capture_identity(census_path, *, calibration, max_act_rows,
                      model_load_contract, attention_implementation,
-                     resource_check=None, release_read_pages=False):
-    """Hash source bytes on every invocation; mtimes never authorize reuse."""
+                     resource_check=None, release_read_pages=False,
+                     verify_shards=None):
+    """Hash source bytes on every invocation; mtimes never authorize reuse.
+
+    ``verify_shards`` is opt-in for a selected-source row: see
+    :func:`capture_identity_with_verification`. Unset, every globbed file is
+    hashed and the returned identity is the canonical one.
+    """
+    return capture_identity_with_verification(census_path, calibration=calibration,
+        max_act_rows=max_act_rows, model_load_contract=model_load_contract,
+        attention_implementation=attention_implementation, resource_check=resource_check,
+        release_read_pages=release_read_pages, verify_shards=verify_shards)[0]
+
+
+def capture_identity_with_verification(census_path, *, calibration, max_act_rows,
+                                       model_load_contract, attention_implementation,
+                                       resource_check=None, release_read_pages=False,
+                                       verify_shards=None):
+    """Return ``(identity, verification)``; ``verification`` is None unless opted in.
+
+    With ``verify_shards`` set, every small file (``*.json``, ``*.model``,
+    ``*.txt`` and whatever the roster seals that is not a shard) is still
+    hashed, but only the named safetensors shards are read. Every other shard
+    on disk takes its digest from the census-sealed producer roster
+    ``expert_projection.producer.source.files`` so the identity equals the
+    canonical capture's; the caller's comparison against the canonical manifest
+    is what attests those inherited digests. It refuses when the roster is
+    missing, a named shard is not on disk or not sealed, a named shard's bytes
+    differ from the roster, or an on-disk shard is neither read nor sealed.
+    """
     import importlib.metadata
     import torch
     census_path = Path(census_path)
@@ -83,14 +114,43 @@ def capture_identity(census_path, *, calibration, max_act_rows,
                     *root.glob('*.model'), *root.glob('*.txt')})
     if not files or not (root / 'config.json').is_file():
         raise RuntimeError('calibration capture needs a complete local source checkpoint')
+    hashed = []
     def source_digest(path):
+        hashed.append(Path(path).name)
         return sha256(path, resource_check=resource_check, release_read_pages=release_read_pages)
-    source = {p.name:source_digest(p) for p in files if p.is_file()}
     # The census already seals the producer's complete source/auxiliary
     # roster (including non-JSON tokenizer assets such as chat_template.jinja).
     # Check those bytes too, without inventing another producer identity.
     producer = (census.get('expert_projection') or {}).get('producer') or {}
     declared = producer.get('source') or {}
+    verification = None
+    if verify_shards is None:
+        source = {p.name:source_digest(p) for p in files if p.is_file()}
+    else:
+        verify = {str(name) for name in verify_shards}
+        roster = declared.get('files')
+        if not isinstance(roster, dict) or not roster:
+            raise RuntimeError('selected source verification needs the census producer shard roster')
+        on_disk = {p.name for p in files if p.is_file() and p.name.endswith('.safetensors')}
+        missing = sorted(verify - on_disk)
+        if missing:
+            raise RuntimeError(f'selected source shards are not on disk: {missing[:8]}')
+        unsealed = sorted(verify - set(roster))
+        if unsealed:
+            raise RuntimeError('selected source shards are absent from the census producer '
+                               f'roster: {unsealed[:8]}')
+        orphaned = sorted(on_disk - verify - set(roster))
+        if orphaned:
+            raise RuntimeError('source shards are neither read nor sealed by the census '
+                               f'producer roster: {orphaned[:8]}')
+        source = {}
+        for p in files:
+            if not p.is_file():
+                continue
+            if p.name.endswith('.safetensors') and p.name not in verify:
+                source[p.name] = roster[p.name]
+            else:
+                source[p.name] = source_digest(p)
     expected = {**declared.get('files',{}),**declared.get('auxiliary_sha256',{})}
     if declared.get('config_sha256'):
         expected['config.json'] = declared['config_sha256']
@@ -100,12 +160,19 @@ def capture_identity(census_path, *, calibration, max_act_rows,
             raise RuntimeError(f'calibration source differs from census producer: {name}')
     if not any(name.endswith('.safetensors') for name in source):
         raise RuntimeError('calibration capture source has no safetensors weights')
-    return dict(schema=SCHEMA, model_load_contract=contract,
+    if verify_shards is not None:
+        verification = dict(byte_verified=sorted(verify),
+            inherited_from_census_roster=sorted(on_disk - verify),
+            byte_verified_auxiliary=sorted(name for name in set(hashed)
+                                           if not name.endswith('.safetensors')),
+            roster_origin=ROSTER_ORIGIN)
+    identity = dict(schema=SCHEMA, model_load_contract=contract,
                 attention_implementation=attention_implementation,
                 census_sha256=sha256(census_path),capture_runtime=runtime,
                 source_files=source, calibration=dict(calibration),
                 max_act_rows=int(max_act_rows), storage_source=SOURCE,
                 units={name:list(shape) for name,shape in sorted(census['unit_shapes'].items())})
+    return identity, verification
 
 
 def _validate_tensors(name, payload, census, max_rows):

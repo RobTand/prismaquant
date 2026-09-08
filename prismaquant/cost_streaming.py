@@ -420,6 +420,47 @@ class StreamedCausalLM:
             )
         return layer
 
+    def selected_source_shards(self, names):
+        """Shard basenames a selected-source row reads for ``names``.
+
+        Whole layers install through the StreamingContext, so the set holds
+        every shard carrying any tensor of a layer that holds a selected unit,
+        plus every shard carrying a tensor outside the decoder layers (embed,
+        final norm, lm_head, visual tower, ...) which the streamed model
+        materialises at construction. Derived from the runner's own weight map;
+        ``tensors`` maps each checkpoint tensor name in the read set to its
+        shard so the caller can cross-check the census-sealed roster.
+        """
+        names = tuple(names)
+        if not names or len(set(names)) != len(names):
+            raise ValueError("selected source requires unique nonempty unit names")
+        layers = sorted({self.layer_index_for_qname(name) for name in names})
+        wanted = set(layers)
+        pattern = re.compile(rf"^{re.escape(self.layers_prefix)}([0-9]+)\.")
+        layer_tensors: dict[int, dict[str, str]] = {layer: {} for layer in layers}
+        fixed_tensors: dict[str, str] = {}
+        for model_key, path in self.context.weight_shard.items():
+            checkpoint_key = self.context.weight_ckpt[model_key]
+            shard = Path(path).name
+            match = pattern.match(model_key)
+            if match is None:
+                fixed_tensors[checkpoint_key] = shard
+            elif int(match.group(1)) in wanted:
+                layer_tensors[int(match.group(1))][checkpoint_key] = shard
+        for layer in layers:
+            if not layer_tensors[layer]:
+                raise RuntimeError(f"no source tensors for selected layer {layer}")
+        tensors = dict(fixed_tensors)
+        for layer in layers:
+            tensors.update(layer_tensors[layer])
+        if len(tensors) != len(fixed_tensors) + sum(len(t) for t in layer_tensors.values()):
+            raise RuntimeError("selected source checkpoint tensor names collide across shards")
+        return dict(layers=layers,
+                    layer_shards=sorted({shard for per_layer in layer_tensors.values()
+                                         for shard in per_layer.values()}),
+                    fixed_state_shards=sorted(set(fixed_tensors.values())),
+                    tensors=tensors)
+
     def snapshot_selected_weights(self, names, *, max_resident_bytes: int,
                                   resource_check=None):
         """Copy selected source Linears from the existing resident layer cache.

@@ -3674,6 +3674,34 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     return 0
 
 
+SELECTED_SOURCE_ROSTER_ORIGIN = 'expert_projection.producer.source'
+
+
+def selected_source_read_set(runner, targets, *, census):
+    """The shards a selected row reads, cross-checked against the sealed roster.
+
+    The runner derives the set from its own weight map (whole selected layers
+    plus the fixed state materialised at construction). Every tensor in that
+    set must map to the same shard in the census-sealed
+    ``expert_projection.producer.source.tensors`` roster, and every shard must
+    be sealed in ``source.files``; any disagreement refuses before a byte is
+    hashed or installed.
+    """
+    derived = runner.selected_source_shards(targets)
+    source = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
+    sealed_tensors, sealed_files = source.get('tensors'), source.get('files')
+    if not isinstance(sealed_tensors, Mapping) or not sealed_tensors or \
+            not isinstance(sealed_files, Mapping) or not sealed_files:
+        raise RuntimeError('selected source requires the census-sealed producer source roster')
+    for tensor, shard in sorted(derived['tensors'].items()):
+        if sealed_tensors.get(tensor) != shard:
+            raise RuntimeError('selected source shard index disagrees with the census '
+                               f'producer roster: {tensor} -> {shard}')
+        if shard not in sealed_files:
+            raise RuntimeError(f'selected source shard is not sealed by the census producer roster: {shard}')
+    return derived
+
+
 def prepare_selected_source(runner, targets, *, census_path, calibration,
                             max_act_rows, model_load_contract,
                             attention_implementation, calibration_cache,
@@ -3682,16 +3710,26 @@ def prepare_selected_source(runner, targets, *, census_path, calibration,
     """Bind a selected-source row to the canonical capture and copy its weights.
 
     Returns ``(capture_identity, selected_weights, selected_source_preparation)``.
-    The identity is recomputed against the current source bytes and must equal
-    the pinned canonical manifest's identity before any selected layer installs.
-    ``runner`` is shut down once the selected weights are copied.
+    The row byte-verifies only the shards it reads (#388): the selected layers'
+    shards and the fixed-state shards, derived by :func:`selected_source_read_set`.
+    Every other shard's digest is inherited from the census-sealed roster, and
+    the recomputed identity must still equal the pinned canonical manifest's
+    identity before any selected layer installs; that equality is the
+    attestation that the canonical capture byte-verified the inherited digests.
+    ``selected_source_preparation['source_verification']`` records what this row
+    verified and what it inherited. ``runner`` is shut down once the selected
+    weights are copied.
     """
     from . import tessera_calibration_cache as calibration_store
-    capture_identity = calibration_store.capture_identity(
+    census = json.loads(Path(census_path).read_text())
+    read_set = selected_source_read_set(runner, targets, census=census)
+    verify_shards = frozenset(read_set['layer_shards']) | frozenset(read_set['fixed_state_shards'])
+    capture_identity, verification = calibration_store.capture_identity_with_verification(
         census_path, calibration=calibration,
         max_act_rows=max_act_rows, model_load_contract=model_load_contract,
         attention_implementation=attention_implementation,
-        resource_check=resource_check, release_read_pages=True)
+        resource_check=resource_check, release_read_pages=True,
+        verify_shards=verify_shards)
     manifest = calibration_store.require_capture_contract(calibration_cache,
         expected_sha256=calibration_cache_sha256)
     if manifest['identity'] != capture_identity:
@@ -3704,7 +3742,11 @@ def prepare_selected_source(runner, targets, *, census_path, calibration,
         runner.shutdown()
     selected_source_preparation.update(resources=selected_resources,
         initialization_witness_origin='complete-canonical-capture',
-        full_source_initialization_repeated=False)
+        full_source_initialization_repeated=False,
+        source_verification=dict(verification,
+            canonical_manifest_sha256=calibration_cache_sha256,
+            selected_layers=read_set['layers'], layer_shards=read_set['layer_shards'],
+            fixed_state_shards=read_set['fixed_state_shards']))
     return capture_identity, selected_weights, selected_source_preparation
 
 
