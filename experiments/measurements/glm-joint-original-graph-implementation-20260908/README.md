@@ -180,3 +180,82 @@ change. At this update it awaits root review and has not been submitted.
 (`e3c40be969bac23bf18b4e045c9c4f819b0216c9`), all 13 original frozen
 file-hash checks, terminal evidence, complete metadata result and Netdata
 identities. The raw failed result and log remain under the shared run directory.
+
+## Update: second native attempt reached backward and failed its cotangent gate
+
+After revised review, PB action
+`d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e`
+executed native invocation 02 on Sparklina and returned 1 after 87.7 seconds.
+The original layer-0 primary forward and first isolated baseline
+forward/backward ran. The combined `absent/nonfinite/zero` input-cotangent
+predicate refused that backward, so zero backwards were accepted. That
+predicate did not record which category failed. Output checksums alone had
+not established output finiteness. Neither the full prefix nor its source
+ownership gate passed.
+
+The revised cleanup preserved the original failure, the memory ring and final
+CUDA statistics, without reporting cleanup errors. Peak CUDA allocated and
+reserved bytes were 11,080,916,992 and 11,704,205,312 respectively. Source weak
+owners remained live in the failed exception stack; that is **not** successful
+in-process ownership qualification. PB independently completed process/scope
+cleanup without OOM kills. All 16 source files authenticated and descriptors
+closed without violations. The 512-row metadata result remained
+272,891,904 bytes with expired metadata owners. Both-host Netdata has 76
+samples per host.
+
+The first-baseline raw trace is 10,797,411 bytes with SHA256
+`69a0cf6fe1ec8f79c1d036f497008fd0c077cdb0cc45e5745e041207a596be4f`.
+Admitted CPU trace analysis (`e799e86a8524`) counted 31,804 events, including
+3,256 kernels with 427.139 ms of summed duration. A separately audited full
+name inventory (`f9bc428fd357`) found 88 kernel names, none matching
+`kda`, `delta`, `chunk`, `fla`, `causal` or `triton`. CPU events include 24
+`ExpBackward0`, nine `MaskedFillBackward0` and one `CumsumBackward0` calls.
+This is dispatch evidence consistent with the stock PyTorch fallback
+arithmetic; kernel names do not identify failing numerical values.
+
+A source-based hypothesis is that the stock chunk KDA fallback exponentiates
+the full cumulative-gate difference matrix before causal masking. Large
+upper-triangular differences could overflow while subsequent masking keeps
+the forward finite, then `0 * Inf` could contaminate backward. The observations
+above do not yet establish that this happened in the original run. No kernel
+substitution, reference implementation or weaker stimulus has been used to
+turn the failure into a pass.
+
+## Frozen one-backward diagnostic
+
+Commit `aa46075ce824ef8629824e5d07a1e580a9654e84` adds scalar presence,
+finite/nonfinite/NaN/positive-Inf/negative-Inf/zero counts and finite extrema
+for primary output, replay output and leaf cotangent before refusal. Primary
+and replay output identities are retained, and their exact equality is
+checked before backward. Optional diagnostic observers attach transparent
+tensor gradient hooks to original attention, HC and MLP inputs/outputs during
+the same actual backward. Module forward observers and tensor hooks both
+return None; there are no full-module backward hooks or replacement views.
+
+The explicit diagnostic mode selects only original layer 0, row 0, seed 7000
+and the isolated baseline arm. It skips the already measured 512-row metadata
+phase. The original 45-layer config is unchanged, and the existing cache still
+prefetches layer 1. Re-derived consumption is **402 keys in two payload files,
+9,531,639,384 bytes**, plus the authenticated config and index. Payloads will
+again be authenticated inside held descriptors on the native worker; CPU
+preflight reads none of their payload bytes. The 104/92-GiB admission,
+16-GiB graph-workspace reserve, image, source reader mechanism and BF16
+plus/minus-1/256 stimulus remain unchanged.
+
+Compile checks and **25 CPU tests passed** in 5.27 seconds under PB action
+`d7096b059aaff26d2b84875db6bf768716b87edfc7e233854014c8b632791c80`, with
+no skips or xfails. Actual diagnostic-input preflight passed under
+`b2739f6322304663fdd1b5479d901aa0ce55f8aa4ae225b69a4478b7b6d552a6`.
+Both have independently audited zero status, completed scope cleanup,
+canonical CAS/source receipts and closure-only snapshot changes. The new
+tests distinguish all three leaf-failure categories, reject nonfinite primary
+output before replay, verify one-case scheduling, and check that transparent
+tensor observers preserve actual CPU output and gradient bytes.
+
+`native-invocation-diagnostic-01.json` is frozen for root review and has not
+been submitted at this update. A successful diagnostic would still be labeled
+diagnostic-only, not full original graph qualification. The second failed
+attempt's source parent is `f7b617024f15727edb4b3c7308f757f0b4bc365b` and its
+actual PB snapshot is `dddf8c771a8acdd272c8c25703b062375485df79`;
+`native-negative-audit-02.json` verifies all 13 frozen source hashes and records
+the retained negative evidence.
