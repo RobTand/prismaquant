@@ -141,7 +141,9 @@ class CaptureObserver:
         self.result.update(finished_unix=time.time(),
             status='failed' if error or self.result['errors'] else 'complete',
             campaign_error=None if error is None else repr(error))
-        (self.out/'result.json').write_text(json.dumps(self.result, indent=2)+'\n')
+        final = json.dumps(self.result, indent=2)+'\n'
+        (self.out/'result.json').write_text(final)
+        (self.out/'progress.json').write_text(final)
         if error is None and self.result['errors']:
             raise RuntimeError('capture completed but required profiler evidence is incomplete')
 

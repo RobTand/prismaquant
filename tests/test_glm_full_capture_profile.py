@@ -52,3 +52,5 @@ def test_observer_preserves_forward_return_and_partial_failure(tmp_path):
     assert result['status'] == 'failed'
     assert result['collections'][0]['batches'] == 1
     assert 'original forward failure' in result['campaign_error']
+
+    assert json.loads((tmp_path/'partial/progress.json').read_text()) == result
