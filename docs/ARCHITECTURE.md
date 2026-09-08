@@ -40,11 +40,13 @@ Gates: `tests/test_tessera_selected_source.py` for the derived terms and the
 measured baseline, and the native GLM selected row in
 `tests/test_glm_campaign_streaming.py`, which pins declared headroom to zero,
 asserts the admission arithmetic against the cap less the measured baseline,
-and records the peak-over-baseline growth against the plan, reporting the full
-attribution when the plan does not cover it. This bounds attribution and
-admission arithmetic; it is not a full-GLM fit claim, and separating a
-steady-state per-anchor bracket from first-use runtime cost needs two anchors
-and per-occurrence checkpoint readings, which this does not carry.
+and runs two encode steps so the first-use charge and the steady state are
+separable. The campaign takes the anchor-batch bracket per occurrence and
+stamps one growth figure per step on the receipt; the row asserts that every
+step after the first fits the `resident_anchors` phase plan, so a forgotten
+term fails there rather than disappearing into headroom. This bounds
+attribution and admission arithmetic on a fixture roster; it is not a
+full-GLM fit claim, and it does not bound the first step.
 
 Re-stamped (2026-09-08, `codex/joint-operator-windows-profile`) for the opt-in
 GLM KDA derivative contract. The GLM profile declares a closed, source-pinned

@@ -269,15 +269,27 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
             pytest.fail('selected anchor reuse repeated calibration')
         monkeypatch.setattr(campaign, '_collect_activations', no_forward)
         original_menus = campaign.expand_menus_for_targets
-        def one_rung(weights, targets, **kwargs):
+        def two_rungs(weights, targets, **kwargs):
+            # TWO rungs, so the row runs two encode steps. One step cannot
+            # separate the runtime's one-time first-use cost from the
+            # steady-state cost the plan charges for; the second step can
+            # (RobTand/prismaquant#390).
             assert set(weights) == set(names)
             assert all(not value.is_meta for value in weights.values())
             menus = original_menus(weights, targets, **kwargs)
-            narrowed = {name: [row for row in rows
-                if row.format_name == 'TESSERA_E4M3_K1_R1024'] for name, rows in menus.items()}
-            assert all(narrowed.values()), 'native fixture must admit the measured rung'
+            narrowed = {}
+            for name, rows in menus.items():
+                measured = [row for row in rows
+                            if row.format_name == 'TESSERA_E4M3_K1_R1024']
+                other = [row for row in rows
+                         if row.format_name.startswith('TESSERA_E4M3_K1_R')
+                         and row.format_name != 'TESSERA_E4M3_K1_R1024']
+                assert measured and other, (
+                    'native fixture must admit two measured rungs', name,
+                    sorted({row.format_name for row in rows}))
+                narrowed[name] = [*measured, other[0]]
             return narrowed
-        monkeypatch.setattr(campaign, 'expand_menus_for_targets', one_rung)
+        monkeypatch.setattr(campaign, 'expand_menus_for_targets', two_rungs)
         selected_out = tmp_path/'selected-cost.pkl'
         selected_argv = [*common, '--out', str(selected_out),
             '--cache-dir', str(tmp_path/'selected-cache'), '--units', str(selection_path),
@@ -315,7 +327,6 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
         # (RobTand/prismaquant#390).
         selected_guard = receipt['memory_guard']
         baseline = receipt['baseline']
-        unpriced_growth = None
         if torch.cuda.is_available():
             assert baseline is not None and baseline['measured_in_process'] is True
             assert baseline['bytes'] > 0 and selected_guard['peak_checkpoint']
@@ -328,19 +339,24 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
             # the raw cap.
             assert plan['memory_bytes'] <= (
                 selected_guard['budget_bytes'] - baseline['bytes'])
-            growth = selected_guard['peak_conservative_bytes'] - baseline['bytes']
-            if growth > plan['memory_bytes']:
-                # Recorded, not covered. On this fixture the excess is the
-                # runtime's one-time first-use cost (the first CUDA
-                # factorisation and the first encode_linear), which no shape
-                # in the roster predicts, so there is no term to derive from
-                # it and a constant would be a multiplier by another name.
-                # The discriminating test wants two anchors and per-occurrence
-                # checkpoint readings, so the number travels in the receipt
-                # until then. A string, not a mapping: a repr is elided long
-                # before it reaches peak_by_checkpoint_prefix.
-                unpriced_growth = json.dumps(dict(growth=growth,
-                    guard=selected_guard, plan=plan), indent=2, sort_keys=True)
+            # The steady state, which the plan does charge for. The first
+            # encode step carries the runtime's one-time first-use cost (the
+            # first CUDA factorisation, the first encode_linear); every later
+            # step is the per-anchor cost the resident_anchors phase bounds,
+            # so THAT is what must fit, and a term someone forgets fails here
+            # rather than disappearing into headroom or into a whole-row
+            # figure the first batch dominates.
+            growths = receipt['anchor_batch_growth_bytes']
+            assert len(growths) >= 2, growths
+            resident = sum(plan['phases']['resident_anchors'].values())
+            # A string, not a mapping: a repr is elided long before it
+            # reaches peak_by_checkpoint_prefix.
+            evidence = json.dumps(dict(anchor_batch_growth_bytes=growths,
+                resident_anchors_bytes=resident,
+                whole_row_growth=selected_guard['peak_conservative_bytes']
+                                 - baseline['bytes'],
+                guard=selected_guard, plan=plan), indent=2, sort_keys=True)
+            assert max(growths[1:]) <= resident, evidence
         else:
             assert selected_guard is None and baseline is None
         assert receipt['source_forward_count'] == 0
@@ -354,8 +370,6 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
         with selected_out.open('rb') as handle:
             resumed = pickle.load(handle)
         assert selected['costs'] == resumed['costs']
-        if unpriced_growth is not None:
-            pytest.xfail(unpriced_growth)
 
 
 def test_streamed_bf16_keeps_hf_strict_fp32_source_slots(glm_checkpoint, tmp_path):

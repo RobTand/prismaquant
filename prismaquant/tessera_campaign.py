@@ -4701,6 +4701,13 @@ def _main(argv, *, source_scope) -> int:
             weights=weights, expert_members=expert_members,
             batch_size=args.anchor_batch_size)
         completed = 0
+        # One entry per encode step, in order, each the growth across that
+        # step's own bracket. The list is stamped on the selected receipt now
+        # and filled as the loop runs, so a reader gets the steady-state cost
+        # separately from the first batch's one-time runtime charge.
+        anchor_batch_growth = []
+        if selected_source and selected_source_preparation is not None:
+            selected_source_preparation['anchor_batch_growth_bytes'] = anchor_batch_growth
         for batch in batches:
             if out_of_time():
                 stopped_early = True
@@ -4709,12 +4716,18 @@ def _main(argv, *, source_scope) -> int:
             names = [item[0] for item in batch]
             family, rung = batch[0][1:]
             fmt = f"{family}_R{rung}"
+            batch_floor = None
             if selected_guard is not None:
                 # The lower bracket of the encode step. Without it the step's
                 # growth can only be read against whichever checkpoint
-                # happened to precede it, which is a different phase's charge
+                # happened to precede it, which is a different phase's charge,
+                # and the pair is taken PER OCCURRENCE because the first batch
+                # carries the runtime's one-time first-use cost while later
+                # batches are the steady state the plan actually charges for
                 # (RobTand/prismaquant#390).
                 selected_guard.check('before_selected_anchor_batch')
+                batch_floor = selected_guard.last[
+                    'conservative_cgroup_plus_cuda_reserved_bytes']
             try:
                 common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
                     activation_kwargs_for=(
@@ -4742,6 +4755,8 @@ def _main(argv, *, source_scope) -> int:
                 continue
             if selected_guard is not None:
                 selected_guard.check('after_selected_anchor_batch')
+                anchor_batch_growth.append(selected_guard.last[
+                    'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
             for anchor in anchors:
                 name = anchor.qname
                 identity = _checkpoint_anchor_identity(
