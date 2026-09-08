@@ -29,13 +29,16 @@ arithmetic is unchanged: its readings are already absolute. No pre-run baseline
 is invented for the dispatcher; `baseline_policy` records that declared
 headroom remains its only pre-run term.
 A third quantity is measured and reported rather than charged. On the
-streaming fixture the row's peak sat about 95 MB above its own measured
-baseline against a 10.3 MB plan, roughly 70 MB of it resident host pages and
-25 MB CUDA allocator segments, and the encode step's own bracket accounts for
-essentially all of it, the first CUDA factorisation taking about 31 MB of the
-total. That cost is one-time and follows no shape in the
-roster, so it is recorded in the guard telemetry and left uncharged; a
-constant would be a multiplier by another name.
+streaming fixture the first encode step grew 165.6 MB and the second grew
+2.7 MB against a 10.3 MB `resident_anchors` plan, and the row's peak sat
+157.8 MB above its own measured baseline, 73.9 MB of it resident host pages
+and 83.9 MB CUDA allocator segments. Nearly all of it is the first step:
+loading the CUDA factorisation path and building the encoder's working
+buffers once. The charge follows no shape in the roster and is not even
+fixed for one roster, since the same fixture grew 93.7 MB over its baseline
+with a one-rung menu and 157.8 MB with two, so it is recorded in the guard
+telemetry and left uncharged; a constant would be a multiplier by another
+name.
 Gates: `tests/test_tessera_selected_source.py` for the derived terms and the
 measured baseline, and the native GLM selected row in
 `tests/test_glm_campaign_streaming.py`, which pins declared headroom to zero,

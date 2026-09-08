@@ -342,14 +342,20 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     **A second charge this plan does not own.** A row's first CUDA
     factorisation and its first ``encode_linear`` load libraries and build
     working buffers once, and that cost is a property of the runtime rather
-    than of the roster: on the streaming fixture it measured about 95 MB of
-    growth over the row's own baseline, roughly 70 MB of it resident host
-    pages and 25 MB of CUDA allocator segments, against a plan of 10.3 MB,
-    with the exact figure moving a few MB between runs, and it does not scale
-    with any shape in ``unit_shapes``. It is one-time and
-    size-independent, so on a production roster it is inside the guard's
-    margin, while on a small roster it dominates. The native row records the
-    number rather than covering it (RobTand/prismaquant#390).
+    than of the roster. On the streaming fixture, with the anchor-batch
+    bracket taken per occurrence, the first encode step grew 165.6 MB while
+    the second grew 2.7 MB against a ``resident_anchors`` plan of 10.3 MB,
+    and the whole row's peak sat 157.8 MB above its own measured baseline,
+    73.9 MB of it resident host pages and 83.9 MB CUDA allocator segments.
+    (The first step's growth exceeds the row's because its own floor sits
+    about 10 MB below the baseline, which is read earlier, during the capture
+    hash.) It does not scale with any shape in ``unit_shapes``: the same
+    fixture, same roster, grew 93.7 MB over its baseline when its menu offered
+    one rung and 157.8 MB when it offered two, so the figure follows what the
+    encoder is asked to build, not the roster. It is one-time, so on a production roster it is
+    inside the guard's margin while on a small roster it dominates. The
+    native row records the number rather than covering it, and asserts the
+    steady-state step against the plan (RobTand/prismaquant#390).
     """
     import math
     if not unit_shapes or type(anchor_batch_size) is not int or anchor_batch_size < 1:
