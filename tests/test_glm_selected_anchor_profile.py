@@ -192,8 +192,8 @@ def selected():
 
 
 @pytest.mark.parametrize('extra', [
-    ['--anchor-batch-size', '2'], ['--capture-calibration-out', 'new'], ['--census-out', 'new']])
-def test_selected_mode_refuses_changed_capture_or_non_scalar_work(extra):
+    ['--anchor-batch-size', '0'], ['--capture-calibration-out', 'new'], ['--census-out', 'new']])
+def test_selected_mode_refuses_changed_capture_or_invalid_batch_work(extra):
     with pytest.raises(ValueError, match='selected canonical reuse'):
         observe.selected_anchor_command(selected()+extra)
 
@@ -218,3 +218,63 @@ def test_entrypoint_keeps_original_argv_and_restores_method(tmp_path, controlled
 def test_window_configuration_is_finite_and_has_first_call(tmp_path, calls):
     with pytest.raises(ValueError, match='at most four'):
         observer(tmp_path, calls=calls)
+
+
+def test_selected_mode_accepts_existing_compatible_batch_command():
+    observe.selected_anchor_command(selected()+['--anchor-batch-size', '8'])
+
+
+def test_batch_and_scalar_share_call_windows_and_preserve_outputs(tmp_path, controlled):
+    obs = observer(tmp_path, calls=(0, 2))
+    names = ['expert.0', 'expert.1']
+    weights, acts, outputs = [object(), object()], [object(), object()], [object(), object()]
+    seen = []
+    def batch(**kwargs):
+        seen.append(kwargs)
+        return outputs
+    batched = obs.wrap_anchor(batch)
+    scalar = obs.wrap_anchor(lambda **kwargs: outputs[0])
+    assert batched(qnames=names, weights=weights, activations=acts,
+                   format_name='E4M3') is outputs
+    assert scalar(qname='dense', format_name='BF16') is outputs[0]
+    assert batched(qnames=names, weights=weights, activations=acts,
+                   format_name='E4M3') is outputs
+    assert len(seen) == 2 and all(row['weights'] is weights for row in seen)
+    assert all(row['activations'] is acts for row in seen)
+    assert obs.result['anchor_calls'] == 3 and len(controlled) == 2
+    assert [row['qnames'] for row in obs.result['anchors']] == [names, names]
+    assert [row['batch_size'] for row in obs.result['anchors']] == [2, 2]
+
+
+def test_cuda_only_activity_keeps_native_event_requirement(tmp_path, controlled, monkeypatch):
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+                                 command=selected(), cuda_only=True)
+    monkeypatch.setattr(FakeProfiler, 'cuda', False)
+    output = object()
+    assert obs.wrap_anchor(lambda **_: output)(qname='u', format_name='f') is output
+    obs.validate_result()
+    assert controlled[0]['activities'] == [torch.profiler.ProfilerActivity.CUDA]
+    assert not obs.result['native_anchor_profiled']
+    assert obs.result['anchors'][0]['status'] == 'observation_failed'
+    assert obs.result['profile_activities'] == ['cuda']
+
+
+def test_entrypoint_wraps_batch_and_restores_both_after_campaign_error(
+        tmp_path, controlled, monkeypatch):
+    from prismaquant import tessera_campaign as campaign
+    scalar, batch = campaign._measure_anchor, campaign._measure_anchor_batch
+    command = selected()+['--anchor-batch-size', '8']
+    error = RuntimeError('original campaign error')
+    def main(args):
+        assert args == command
+        assert campaign._measure_anchor is not scalar
+        assert campaign._measure_anchor_batch is not batch
+        raise error
+    monkeypatch.setattr(campaign, 'main', main)
+    monkeypatch.setattr(observe.torch.cuda, 'is_available', lambda: True)
+    with pytest.raises(RuntimeError) as caught:
+        observe.main(['--evidence-out', str(tmp_path), '--selected-anchors',
+            '--anchor-profile-calls', '0', '--anchor-trace-max-bytes', '4096',
+            '--anchor-cuda-only', '--', *command])
+    assert caught.value is error
+    assert campaign._measure_anchor is scalar and campaign._measure_anchor_batch is batch
