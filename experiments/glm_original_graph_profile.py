@@ -252,6 +252,9 @@ class GraphObserver:
         for row, tokens in zip(ROWS, self.tokens):
             self.row = row
             forward_batch(tokens)
+        self.result['progress'] = dict(phase='prefix_layer_completed', layer=layer,
+            backward_calls=len(self.result['backwards']), time_unix=time.time())
+        write_json(self.out/'progress.json', self.result)
         if layer == 4:
             actual = [(r['layer'], r['original_row'], r['seed'], r['arm']) for r in self.result['backwards']]
             if actual != schedule():
@@ -283,10 +286,12 @@ def metadata_gate(runner, tokens, storage):
     return result
 
 
-def close_source(runner, observer):
+def close_source(runner, observer, *, owned=None):
     """Join existing source workers before unbinding readers or dropping owners."""
-    owned = [StorageWeakRef(value.untyped_storage()) for value in
-        [*runner.model.parameters(), *runner.model.buffers()] if not value.is_meta]
+    if owned is None:
+        owned = []
+    owned.extend(StorageWeakRef(value.untyped_storage()) for value in
+        [*runner.model.parameters(), *runner.model.buffers()] if not value.is_meta)
     for values in runner.context.layer_cache._cache.values():
         owned.extend(StorageWeakRef(value.untyped_storage()) for value in values.values())
     with runner.context._inflight_lock:
@@ -295,12 +300,37 @@ def close_source(runner, observer):
                 values = future.result()
                 if values:
                     owned.extend(StorageWeakRef(value.untyped_storage()) for value in values.values())
-    runner.shutdown()
-    runner.context.reset_between_chunks(retain_cache=False)
-    if observer is not None:
-        observer.runner = observer.original = None
-        observer.tokens = []
+    try:
+        runner.shutdown()
+        runner.context.reset_between_chunks(retain_cache=False)
+    finally:
+        if observer is not None:
+            observer.runner = observer.original = None
+            observer.tokens = []
     return owned
+
+
+def finish_native_observation(result, stop, threads, samples, guard, owned):
+    """A poisoned CUDA context must not suppress host telemetry or the first error."""
+    stop.set()
+    for thread in threads:
+        thread.join(timeout=12)
+    result['memory_samples'] = list(samples)
+    result['source_owners_expired'] = all(ref.expired() for ref in owned) if owned else None
+    for name, call in (
+        ('gc', gc.collect), ('cuda_synchronize', torch.cuda.synchronize),
+        ('peak_allocated_bytes', torch.cuda.max_memory_allocated),
+        ('peak_reserved_bytes', torch.cuda.max_memory_reserved),
+        ('empty_cuda_cache', torch.cuda.empty_cache), ('guard', guard.snapshot),
+        ('after_cleanup', lambda: physical_snapshot(torch.device('cuda'))),
+    ):
+        try:
+            value = call()
+            if name not in ('gc', 'cuda_synchronize', 'empty_cuda_cache'):
+                result[name] = value
+        except BaseException as error:
+            result.setdefault('cleanup_errors', []).append(dict(phase=name, error=repr(error)))
+    result['source_owners_expired'] = all(ref.expired() for ref in owned) if owned else None
 
 
 def preflight(plan, source):
@@ -404,19 +434,30 @@ def run_native(args, plan, source, profile, tokens, shards, result):
         thread.start()
     runner = observer = None
     owned = []
+    source_cleanup_started = False
     def cleanup_source():
-        nonlocal runner, observer, owned
-        if runner is None:
+        nonlocal runner, observer, owned, source_cleanup_started
+        if runner is None or source_cleanup_started:
             return
-        owned = close_source(runner, observer)
-        observer = None
-        runner = None
+        source_cleanup_started = True
+        try:
+            close_source(runner, observer, owned=owned)
+        except BaseException as error:
+            result.setdefault('cleanup_errors', []).append(dict(phase='source_owners', error=repr(error)))
+        finally:
+            observer = None
+            runner = None
     def check(label, reserve_bytes=0):
         guard.check(label, reserve_bytes=reserve_bytes)
         if torch.cuda.memory_reserved() + reserve_bytes > 92*GIB:
             raise RuntimeError('original graph GPU subset admission exceeded')
     try:
+        result['progress'] = dict(phase='authenticating_original_payloads', time_unix=time.time())
+        write_json(args.out/'progress.json', result)
         source.authenticate_payloads()
+        result['source_authentication'] = source.report()['authenticated']
+        result['progress'] = dict(phase='source_authenticated_loading_model', time_unix=time.time())
+        write_json(args.out/'progress.json', result)
         with source.reader_binding(all_indexed_shards=shards), ExitStack() as cleanup:
             cleanup.callback(cleanup_source)
             check('before_original_fixed_source', reserve_bytes=48*GIB)
@@ -439,6 +480,8 @@ def run_native(args, plan, source, profile, tokens, shards, result):
                 storage.bind({'scope': 'original_all512_metadata_only'}, n_probes=4,
                              check_memory=lambda label: check(label))
                 result['metadata'] = metadata_gate(runner, tokens, storage)
+            result['progress'] = dict(phase='metadata_complete_starting_prefix', time_unix=time.time())
+            write_json(args.out/'progress.json', result)
             def settle(layer):
                 with runner.context._inflight_lock:
                     future = runner.context._inflight.get(layer+1)
@@ -465,22 +508,13 @@ def run_native(args, plan, source, profile, tokens, shards, result):
             check('original_graph_complete')
     finally:
         cleanup_source()
-        gc.collect()
-        torch.cuda.synchronize()
-        result['peak_allocated_bytes'] = torch.cuda.max_memory_allocated()
-        result['peak_reserved_bytes'] = torch.cuda.max_memory_reserved()
-        torch.cuda.empty_cache()
-        stop.set()
-        for thread in threads:
-            thread.join(timeout=12)
-        result['memory_samples'] = list(samples)
-        result['guard'] = guard.snapshot()
-        result['after_cleanup'] = physical_snapshot(torch.device('cuda'))
-        result['source_owners_expired'] = all(ref.expired() for ref in owned) if owned else None
+        finish_native_observation(result, stop, threads, samples, guard, owned)
     if any(thread.is_alive() for thread in threads) or result['telemetry_errors']:
         raise RuntimeError('original graph telemetry did not complete successfully')
     if not result['source_owners_expired']:
         raise RuntimeError('original graph cleanup retained original source owners')
+    if result.get('cleanup_errors'):
+        raise RuntimeError('original graph cleanup reported errors')
 
 
 if __name__ == '__main__':

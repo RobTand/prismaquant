@@ -223,7 +223,8 @@ def test_completion_requires_actual_exact_schedule(tmp_path):
     assert len(set(graph.schedule())) == 72
 
 
-def test_close_source_joins_before_cache_release_and_drops_observer_owners():
+@pytest.mark.parametrize('reset_fails',[False,True])
+def test_close_source_joins_before_cache_release_and_drops_observer_owners(reset_fails):
     from concurrent.futures import Future
     order = []
     runner = TinyRunner()
@@ -241,10 +242,17 @@ def test_close_source_joins_before_cache_release_and_drops_observer_owners():
         assert order == ['joined'] and retain_cache is False
         order.append('released')
         runner.context.layer_cache._cache.clear()
+        if reset_fails:
+            raise RuntimeError('poisoned CUDA cleanup')
     runner.shutdown = shutdown
     runner.context.reset_between_chunks = reset
     observer = SimpleNamespace(runner=runner,original=runner._call,tokens=[torch.ones(1)])
-    refs = graph.close_source(runner,observer)
+    refs = []
+    if reset_fails:
+        with pytest.raises(RuntimeError, match='poisoned CUDA cleanup'):
+            graph.close_source(runner,observer,owned=refs)
+    else:
+        graph.close_source(runner,observer,owned=refs)
     assert order == ['joined','released']
     assert observer.runner is observer.original is None and observer.tokens == []
     assert len(refs) == 3 and not all(ref.expired() for ref in refs)
@@ -252,3 +260,29 @@ def test_close_source_joins_before_cache_release_and_drops_observer_owners():
     import gc
     gc.collect()
     assert all(ref.expired() for ref in refs)
+
+
+def test_poisoned_cuda_cleanup_preserves_first_error_and_host_observations(monkeypatch):
+    result, stop, joins = {}, threading.Event(), []
+    def join(timeout):
+        assert stop.is_set()
+        joins.append(timeout)
+    def poisoned():
+        raise RuntimeError('poisoned CUDA')
+    monkeypatch.setattr(torch.cuda,'synchronize',poisoned)
+    monkeypatch.setattr(torch.cuda,'empty_cache',poisoned)
+    monkeypatch.setattr(torch.cuda,'max_memory_allocated',lambda:123)
+    monkeypatch.setattr(torch.cuda,'max_memory_reserved',lambda:456)
+    monkeypatch.setattr(graph,'physical_snapshot',lambda device:dict(host_available=789))
+    guard = SimpleNamespace(snapshot=lambda:dict(failed=False))
+    with pytest.raises(ValueError, match='first failure'):
+        try:
+            raise ValueError('first failure')
+        finally:
+            graph.finish_native_observation(result,stop,[SimpleNamespace(join=join)],
+                [dict(sample=1)],guard,[])
+    assert joins == [12]
+    assert result['memory_samples'] == [dict(sample=1)]
+    assert result['peak_allocated_bytes'] == 123 and result['peak_reserved_bytes'] == 456
+    assert result['after_cleanup'] == dict(host_available=789)
+    assert [item['phase'] for item in result['cleanup_errors']] == ['cuda_synchronize','empty_cuda_cache']
