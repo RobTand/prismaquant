@@ -1,7 +1,19 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `perf/tessera-layout-pricing`. Stamps
+As of: 2026-09-08 · `fix/campaign-portable-image-content`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/campaign-portable-image-content`) for optional
+campaign container `content_sha256` (issue #371). The existing runtime identity
+helper binds the inspected OS, architecture, variant, ordered RootFS layers
+and complete runtime Config using `prismaquant.container_image_content.v1`.
+The adapter resolves a requested reference once, compares a declared content
+seal before launch, records both content and local image identity, and executes
+the resolved immutable ID. A shared tag with this seal permits identical images
+in different Docker stores while refusing changed layers or runtime settings.
+Existing digest-reference specs remain supported. This changes no serving gate,
+model/calibration identity, PB placement rule, cache or production default.
+Gate: `tests/test_campaign_image_content.py` plus existing container identity tests.
 
 Re-stamped (2026-09-08, `perf/tessera-layout-pricing`) for producer-owned
 payload-free pricing. `tessera_footprint` uses Tessera's paired
@@ -675,8 +687,9 @@ Re-stamped (2026-09-07, `codex/first-model-integration-20260907`) for
 **campaign quanta in the declared Docker runtime** (§4.10). The shared fanout
 spec accepts an optional `container` block with `image` and explicit absolute
 `mounts` (`source`, `target`, optional `readonly`). The worker resolves the image
-once, logs its immutable ID and executes that ID; use a digest in versioned
-specs when retries must retain the same runtime. The existing environment is
+once, logs its immutable ID and content digest, and executes that ID; use an
+immutable reference or an explicit `content_sha256` seal in versioned specs
+when retries must retain the same runtime. The existing environment is
 passed into the container. Its source is the PB worker's sealed checkout at
 `/workspace`, read-only; data mounts cannot hide that source. The container
 runs with the worker's UID/GID so shared output remains writable under NFS root

@@ -47,6 +47,39 @@ class RuntimeIdentityError(ValueError):
     """The producer runtime cannot be identified exactly."""
 
 
+def image_content_sha256(image: Mapping[str, Any]) -> str:
+    """Bind executable image content independently of the local Docker store.
+
+    Containerd may report an OCI index/manifest ID where the legacy store
+    reports the configuration ID. Ordered unpacked layer digests, platform
+    and the complete runtime configuration remain the content authority.
+    Tags, storage paths, compression sizes and build history are not inputs.
+    """
+    if not isinstance(image, Mapping):
+        raise RuntimeIdentityError("Docker image inspection must be an object")
+    for field in ("Os", "Architecture"):
+        if not isinstance(image.get(field), str) or not image[field]:
+            raise RuntimeIdentityError(f"Docker image has no {field}")
+    variant = image.get("Variant", "")
+    if not isinstance(variant, str):
+        raise RuntimeIdentityError("Docker image has invalid Variant")
+    rootfs = image.get("RootFS")
+    if (not isinstance(rootfs, dict) or rootfs.get("Type") != "layers"
+            or not isinstance(rootfs.get("Layers"), list)
+            or not all(isinstance(layer, str) and _IMAGE_ID_RE.fullmatch(layer)
+                       for layer in rootfs["Layers"])):
+        raise RuntimeIdentityError("Docker image has no exact RootFS layer list")
+    config = image.get("Config")
+    if not isinstance(config, dict):
+        raise RuntimeIdentityError("Docker image has no runtime Config")
+    content = {"schema": "prismaquant.container_image_content.v1",
+               "os": image["Os"], "architecture": image["Architecture"],
+               "variant": variant, "rootfs": rootfs, "config": config}
+    raw = json.dumps(content, sort_keys=True, separators=(",", ":"),
+                     ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def _reject_duplicate_members(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:

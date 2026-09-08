@@ -9,16 +9,23 @@ import argparse
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import subprocess
+
+from tools.container_runtime_identity import image_content_sha256
 
 
 def validate_container(spec: dict) -> None:
     container = spec.get("container")
-    if not isinstance(container, dict) or set(container) - {"image", "mounts"}:
-        raise RuntimeError("container must declare image and optional mounts only")
+    if not isinstance(container, dict) or set(container) - {"image", "mounts", "content_sha256"}:
+        raise RuntimeError("container must declare image and optional mounts/content_sha256 only")
     image = container.get("image")
     if not isinstance(image, str) or not image or image.startswith("-"):
         raise RuntimeError("container.image must name a Docker image")
+    if "content_sha256" in container:
+        digest = container["content_sha256"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise RuntimeError("container.content_sha256 must be a lowercase SHA256 digest")
     mounts = container.get("mounts", [])
     if not isinstance(mounts, list):
         raise RuntimeError("container.mounts must be a list")
@@ -76,12 +83,22 @@ def main(argv=None) -> int:
     if not command:
         parser.error("a container command is required")
     requested = spec["container"]["image"]
-    image_id = subprocess.check_output(
-        ["docker", "image", "inspect", requested, "--format", "{{.Id}}"], text=True).strip()
-    if not image_id.startswith("sha256:") or len(image_id) != 71:
+    inspected = json.loads(subprocess.check_output(
+        ["docker", "image", "inspect", requested], text=True))
+    if not isinstance(inspected, list) or len(inspected) != 1 or not isinstance(inspected[0], dict):
+        raise RuntimeError("Docker returned no unique image inspection")
+    image_id = inspected[0].get("Id")
+    if not isinstance(image_id, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
         raise RuntimeError("Docker returned no immutable image ID")
+    content_digest = image_content_sha256(inspected[0])
+    declared = spec["container"].get("content_sha256")
+    if declared is not None and declared != content_digest:
+        raise RuntimeError(f"Docker image content differs for {requested!r}: "
+                           f"expected {declared}, observed {content_digest}")
     print(json.dumps({"schema": "prismaquant.tessera_campaign_container.v1",
                       "requested_image": requested, "image_id": image_id,
+                      "image_content_sha256": content_digest,
+                      "declared_content_sha256": declared,
                       "uid": os.getuid(), "gid": os.getgid()}), flush=True)
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id)
