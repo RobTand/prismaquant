@@ -13,8 +13,10 @@ import hashlib
 import io
 import json
 import os
+import pickle
 import re
 import stat
+import struct
 import sys
 import zipfile
 from collections import OrderedDict, defaultdict
@@ -209,9 +211,105 @@ def cache_file_stat_signature(value):
             value.st_mtime_ns, value.st_ctime_ns)
 
 
-def torch_archive_storage_bytes(source, *, label='PWC window', metadata_cap=None):
+def _preflight_torch_zip_directory(source, *, metadata_cap, label):
+    """Bound directory objects before ZipFile creates any ZipInfo instances.
+
+    Reuse zipfile's fixed-size EOCD/ZIP64 reader, then walk fixed-size central
+    headers without decoding names or allocating a roster. ZipFile ignores the
+    EOCD entry count when building its roster, so both count and extent matter.
+    """
+    source.seek(0, os.SEEK_END)
+    file_bytes = source.tell()
+    end = zipfile._EndRecData(source)
+    if end is None:
+        raise RuntimeError(f'{label} has no accountable ZIP directory')
+    count = end[zipfile._ECD_ENTRIES_TOTAL]
+    size = end[zipfile._ECD_SIZE]
+    offset = end[zipfile._ECD_OFFSET]
+    if (end[zipfile._ECD_DISK_NUMBER] != 0 or end[zipfile._ECD_DISK_START] != 0 or
+            count != end[zipfile._ECD_ENTRIES_THIS_DISK] or count <= 0 or
+            count*4096 + size*16 > metadata_cap//2):
+        raise RuntimeError(f'{label} ZIP directory exceeds metadata scratch budget')
+    # Mirror stdlib's concatenated/ZIP64 archive offset calculation.
+    concat = end[zipfile._ECD_LOCATION] - size - offset
+    if end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
+        concat -= zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+    position = offset + concat
+    if position < 0 or size < 0 or position+size > file_bytes:
+        raise RuntimeError(f'{label} has an invalid ZIP directory extent')
+    stop, observed = position+size, 0
+    while position < stop:
+        source.seek(position)
+        header = source.read(zipfile.sizeCentralDir)
+        if len(header) != zipfile.sizeCentralDir:
+            raise RuntimeError(f'{label} has a truncated ZIP directory')
+        values = struct.unpack(zipfile.structCentralDir, header)
+        if values[zipfile._CD_SIGNATURE] != zipfile.stringCentralDir:
+            raise RuntimeError(f'{label} has an invalid ZIP directory header')
+        observed += 1
+        if observed > count or observed*4096 + size*16 > metadata_cap//2:
+            raise RuntimeError(f'{label} ZIP directory exceeds metadata scratch budget')
+        position += zipfile.sizeCentralDir + sum(values[index] for index in (
+            zipfile._CD_FILENAME_LENGTH, zipfile._CD_EXTRA_FIELD_LENGTH, zipfile._CD_COMMENT_LENGTH))
+    if position != stop or observed != count:
+        raise RuntimeError(f'{label} ZIP directory count or extent disagrees')
+    source.seek(0)
+
+
+def _preflight_torch_pickle_storage(archive, *, records, pickle_name, label):
+    """Check every declared storage size without constructing a Torch object.
+
+    Older Torch stages CPU storage even for map_location='meta'. Only a closed
+    set of tensor reconstruction markers is accepted here; those callbacks are
+    inert. ZIP sizes and pickle sizes must agree before either Torch pass.
+    """
+    element_bytes = {'ByteStorage': 1, 'CharStorage': 1, 'BoolStorage': 1,
+        'ShortStorage': 2, 'HalfStorage': 2, 'BFloat16Storage': 2,
+        'IntStorage': 4, 'FloatStorage': 4, 'LongStorage': 8,
+        'DoubleStorage': 8, 'ComplexFloatStorage': 8, 'ComplexDoubleStorage': 16,
+        'UntypedStorage': 1}
+    def tensor_marker(*args):
+        return None
+    class StoragePreflight(pickle.Unpickler):
+        def find_class(self, module, name):
+            if module in ('torch', 'torch.storage') and name in element_bytes:
+                return ('storage_type', element_bytes[name])
+            if module == 'torch._utils' and name in (
+                    '_rebuild_tensor', '_rebuild_tensor_v2', '_rebuild_tensor_v3'):
+                return tensor_marker
+            if module == 'collections' and name == 'OrderedDict':
+                return OrderedDict
+            # v3 carries dtype separately; no callable Torch global escapes.
+            if module == 'torch' and name in ('float16', 'float32', 'float64',
+                    'bfloat16', 'int8', 'uint8', 'int16', 'int32', 'int64', 'bool',
+                    'complex64', 'complex128'):
+                return ('dtype', name)
+            raise RuntimeError(f'{label} has an opaque pickle global: {module}.{name}')
+
+        def persistent_load(self, value):
+            if (type(value) is not tuple or len(value) != 5 or value[0] != 'storage' or
+                    type(value[1]) is not tuple or len(value[1]) != 2 or value[1][0] != 'storage_type' or
+                    type(value[1][1]) is not int or value[1][1] not in (1, 2, 4, 8, 16) or
+                    type(value[2]) is not str or value[2] not in records or value[3] != 'cpu' or
+                    type(value[4]) is not int or value[4] < 0 or
+                    value[4]*value[1][1] != records[value[2]]):
+                raise RuntimeError(f'{label} declared pickle storage disagrees with bounded ZIP storage')
+            return ('storage', value[2])
+    try:
+        with archive.open(pickle_name) as stream:
+            StoragePreflight(stream).load()
+            if stream.read(1):
+                raise RuntimeError(f'{label} has trailing pickle metadata')
+    except (pickle.UnpicklingError, TypeError, ValueError, AttributeError, EOFError) as exc:
+        raise RuntimeError(f'{label} has unaccountable pickle storage metadata') from exc
+
+
+def torch_archive_storage_bytes(source, *, label='PWC window', metadata_cap=None,
+                                max_storage_bytes=None):
     """Inspect ordinary uncompressed Torch storage records without loading them."""
     try:
+        if metadata_cap is not None:
+            _preflight_torch_zip_directory(source, metadata_cap=metadata_cap, label=label)
         with zipfile.ZipFile(source) as archive:
             entries = archive.infolist()
             names = [entry.filename for entry in entries]
@@ -231,7 +329,15 @@ def torch_archive_storage_bytes(source, *, label='PWC window', metadata_cap=None
                 bound = sum(4096 + 8*len(name.encode()) for name in names) + 64*metadata_bytes
                 if bound > metadata_cap // 2:
                     raise RuntimeError(f'{label} archive metadata exceeds scratch budget')
-            return sum(entry.file_size for entry in storage)
+            total = sum(entry.file_size for entry in storage)
+            if max_storage_bytes is not None:
+                if total > max_storage_bytes:
+                    raise RuntimeError(f'{label} archive backing storage exceeds its budget')
+                _preflight_torch_pickle_storage(archive,
+                    records={entry.filename.rsplit('/', 1)[1]: entry.file_size for entry in storage},
+                    pickle_name=next(name for name in names if name.endswith('/data.pkl')),
+                    label=label)
+            return total
     except (OSError, zipfile.BadZipFile) as exc:
         raise RuntimeError(f'{label} has an unaccountable Torch archive') from exc
 
@@ -447,7 +553,8 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
             raise RuntimeError('verified activation file checksum mismatch')
         reader = _VerifiedBufferReader(raw, max_copy_bytes=min(scratch//8, 128*1024))
         archive_storage = torch_archive_storage_bytes(reader, label='verified activation load',
-                                                      metadata_cap=scratch)
+                                                      metadata_cap=scratch,
+                                                      max_storage_bytes=max_storage_bytes)
         if archive_storage > max_storage_bytes:
             raise RuntimeError('verified activation archive backing storage exceeds its budget')
         for device in ('meta', 'cpu'):

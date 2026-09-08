@@ -255,3 +255,57 @@ def test_archive_layout_refuses_before_cpu_decode(tmp_path, monkeypatch, kind):
     monkeypatch.setattr(px.torch, 'load', lambda *a, **k: pytest.fail('decoded invalid archive'))
     with pytest.raises(RuntimeError, match='archive|metadata'):
         load(path)
+
+
+def test_many_empty_zip_entries_refuse_before_zipinfo_construction(tmp_path, monkeypatch):
+    path = tmp_path/'many.pt'
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('archive/data.pkl', b'00')
+        for index in range(1000):
+            archive.writestr(f'archive/data/{index}', b'')
+    # Constructing even the directory objects must wait for scratch admission.
+    monkeypatch.setattr(zipfile.ZipFile, '_RealGetContents',
+        lambda *a, **k: pytest.fail('ZipInfo construction preceded metadata admission'))
+    with pytest.raises(RuntimeError, match='directory.*scratch'):
+        load(path)
+
+
+def test_forged_small_eocd_count_cannot_hide_many_entries(tmp_path, monkeypatch):
+    import struct
+    path = tmp_path/'lying-directory.pt'
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('archive/data.pkl', b'00')
+        for index in range(40):
+            archive.writestr(f'archive/data/{index}', b'')
+    raw = bytearray(path.read_bytes())
+    location = raw.rfind(zipfile.stringEndArchive)
+    struct.pack_into('<HH', raw, location+8, 1, 1)
+    path.write_bytes(raw)
+    monkeypatch.setattr(zipfile.ZipFile, '_RealGetContents',
+        lambda *a, **k: pytest.fail('forged count reached ZipInfo allocation'))
+    with pytest.raises(RuntimeError, match='directory.*scratch|directory count'):
+        load(path)
+
+
+def test_declared_pickle_storage_refuses_before_any_torch_allocation(tmp_path, monkeypatch):
+    import pickletools
+    import struct
+    path = tmp_path/'declared-storage.pt'
+    torch.save({'inputs': torch.ones(1)}, path)
+    with zipfile.ZipFile(path) as archive:
+        entries = {entry.filename: archive.read(entry) for entry in archive.infolist()}
+    name = next(name for name in entries if name.endswith('/data.pkl'))
+    raw = entries[name]
+    operations = list(pickletools.genops(raw))
+    persistent = next(i for i, (op, _, _) in enumerate(operations) if op.name == 'BINPERSID')
+    numeric = max(i for i in range(persistent) if operations[i][0].name in ('BININT','BININT1','BININT2'))
+    assert operations[numeric][1] == 1
+    start, stop = operations[numeric][2], operations[numeric+1][2]
+    entries[name] = raw[:start]+b'J'+struct.pack('<i', 1024**3)+raw[stop:]
+    with zipfile.ZipFile(path, 'w') as archive:
+        for name, value in entries.items():
+            archive.writestr(name, value)
+    monkeypatch.setattr(px.torch, 'load',
+        lambda *a, **k: pytest.fail('oversized pickle declaration reached Torch allocation'))
+    with pytest.raises(RuntimeError, match='declared pickle storage'):
+        load(path, max_storage_bytes=4)
