@@ -1,0 +1,333 @@
+{
+  "schema": "prismaquant.joint_qualification_summary.v1",
+  "scope": "Matched qualification of actual tiny GLM campaign anchors and PWC donors.\n\nThe source is the original-layout two-layer GLM fixture, not a trained model.\nIts full census/capture is real; the priced scope is one dense group and one\ncomplete packed-expert group with two real H-aware formats. Every qualification\nuses prepare_cache and the producer's unchanged source/H/wire/render verifiers.\nThis measures preparation ownership, not a calibration probe, KL, serving,\nfull-GLM fit or production throughput.\n",
+  "result": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-qualification-windows-01/native-02/result.json",
+    "sha256": "10b4a3dae3f23a319241a5678a9224763a290353791e9dccea14e9be6b3c042c"
+  },
+  "input_inventory_sha256": "ac405c2205576a0ee982aa4864954094ea04d6e8f2f6359708359719c6b7faad",
+  "input_files": 90,
+  "torch": "2.13.0+cu130",
+  "cuda": "13.0",
+  "gpu_name": "NVIDIA GB10",
+  "affinity": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "arms": [
+    {
+      "kind": "legacy",
+      "index": 0,
+      "invocations": 16,
+      "median_qualifier_seconds": 0.2895282630051952,
+      "peak_live_combined_bytes": 7077888,
+      "live_storage_peak_bytes": {
+        "H": 3145728,
+        "PWC": 3145728,
+        "X": 786432
+      },
+      "cuda_peak_allocated_bytes": 83589632,
+      "cuda_peak_reserved_bytes": 98566144,
+      "process_anon_after_bytes": 1957257216,
+      "cgroup_current_after_bytes": 2271854592,
+      "source_layer_load_counts": {
+        "model.language_model.layers.0.": 1,
+        "model.language_model.layers.1.": 1
+      },
+      "initialization_source_read_counts": {
+        "model.visual.": 1
+      },
+      "verified_cells": 26,
+      "verified_cells_sha256": "beb8b575b5fddbe90e11e7d11f343679ef3885bbe07b0a90fc09ada54f46c090",
+      "physical_guard": null,
+      "netdata": {
+        "sparky": {
+          "samples": 10,
+          "cpu_busy_percent_mean": 6.42051489,
+          "available_mib_min": 108400.8046875,
+          "distinct_power_samples": {
+            "1788868780": 13.0,
+            "1788868790": 13.0
+          },
+          "power_w_mean": 13.0
+        },
+        "sparklina": {
+          "samples": 10,
+          "cpu_busy_percent_mean": 5.56633232,
+          "available_mib_min": 116168.7460938,
+          "distinct_power_samples": {
+            "1788868780": 11.0,
+            "1788868790": 11.0
+          },
+          "power_w_mean": 11.0
+        }
+      },
+      "trace": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-qualification-windows-01/native-02/arm-0-legacy.trace.json",
+        "sha256": "fb17588efc68fcd8509495d612886c931cd8698fef87031f0580145fb634200a",
+        "event_categories": {
+          "null": 60,
+          "user_annotation": 3,
+          "cpu_op": 7902,
+          "cpu_instant_event": 3872,
+          "overhead": 4,
+          "cuda_runtime": 2625,
+          "ac2g": 4257,
+          "gpu_memcpy": 519,
+          "kernel": 1099,
+          "gpu_memset": 6,
+          "cuda_driver": 8,
+          "gpu_user_annotation": 3,
+          "Trace": 1
+        }
+      }
+    },
+    {
+      "kind": "window",
+      "index": 1,
+      "invocations": 9,
+      "median_qualifier_seconds": 0.997980189989903,
+      "peak_live_combined_bytes": 1441792,
+      "live_storage_peak_bytes": {
+        "H": 1048576,
+        "PWC": 262144,
+        "X": 131072
+      },
+      "cuda_peak_allocated_bytes": 83589632,
+      "cuda_peak_reserved_bytes": 98566144,
+      "process_anon_after_bytes": 1996738560,
+      "cgroup_current_after_bytes": 2312065024,
+      "source_layer_load_counts": {
+        "model.language_model.layers.0.": 1,
+        "model.language_model.layers.1.": 1
+      },
+      "initialization_source_read_counts": {
+        "model.visual.": 1
+      },
+      "verified_cells": 26,
+      "verified_cells_sha256": "beb8b575b5fddbe90e11e7d11f343679ef3885bbe07b0a90fc09ada54f46c090",
+      "physical_guard": {
+        "budget_bytes": 8589934592,
+        "host_floor_bytes": 8589934592,
+        "last_checkpoint": {
+          "cap_bytes": 8589934592,
+          "cgroup_current_bytes": 2311802880,
+          "conservative_cgroup_plus_cuda_reserved_bytes": 2410369024,
+          "cuda_reserved_bytes": 98566144,
+          "future_allocation_bytes": 0,
+          "host_mem_available_bytes": 121960050688,
+          "label": "after_joint_qualification_unit:model.language_model.layers.1.mlp.experts.3.up_proj",
+          "refusal_threshold_bytes": 6442450944
+        },
+        "margin_bytes": 2147483648,
+        "min_host_available_bytes": 121960050688,
+        "peak_conservative_bytes": 2418810880,
+        "scope": "/sys/fs/cgroup"
+      },
+      "netdata": {
+        "sparky": {
+          "samples": 10,
+          "cpu_busy_percent_mean": 3.80275766,
+          "available_mib_min": 108596.4882812,
+          "distinct_power_samples": {
+            "1788868790": 13.0,
+            "1788868800": 13.0
+          },
+          "power_w_mean": 13.0
+        },
+        "sparklina": {
+          "samples": 10,
+          "cpu_busy_percent_mean": 5.66233832,
+          "available_mib_min": 116315.484375,
+          "distinct_power_samples": {
+            "1788868790": 11.0,
+            "1788868800": 11.0
+          },
+          "power_w_mean": 11.0
+        }
+      },
+      "trace": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-qualification-windows-01/native-02/arm-1-window.trace.json",
+        "sha256": "bc7e4955e768cc8044467781a9f3764702d247e809ed4ddfa9361f8f138a9ee0",
+        "event_categories": {
+          "null": 60,
+          "user_annotation": 14,
+          "cpu_op": 7902,
+          "cpu_instant_event": 3872,
+          "cuda_runtime": 2646,
+          "ac2g": 4278,
+          "overhead": 1,
+          "gpu_memcpy": 519,
+          "kernel": 1099,
+          "gpu_memset": 6,
+          "cuda_driver": 8,
+          "gpu_user_annotation": 14,
+          "Trace": 1
+        }
+      }
+    },
+    {
+      "kind": "window",
+      "index": 2,
+      "invocations": 9,
+      "median_qualifier_seconds": 1.01340223698935,
+      "peak_live_combined_bytes": 1441792,
+      "live_storage_peak_bytes": {
+        "H": 1048576,
+        "PWC": 262144,
+        "X": 131072
+      },
+      "cuda_peak_allocated_bytes": 83589632,
+      "cuda_peak_reserved_bytes": 98566144,
+      "process_anon_after_bytes": 2000470016,
+      "cgroup_current_after_bytes": 2326130688,
+      "source_layer_load_counts": {
+        "model.language_model.layers.0.": 1,
+        "model.language_model.layers.1.": 1
+      },
+      "initialization_source_read_counts": {
+        "model.visual.": 1
+      },
+      "verified_cells": 26,
+      "verified_cells_sha256": "beb8b575b5fddbe90e11e7d11f343679ef3885bbe07b0a90fc09ada54f46c090",
+      "physical_guard": {
+        "budget_bytes": 8589934592,
+        "host_floor_bytes": 8589934592,
+        "last_checkpoint": {
+          "cap_bytes": 8589934592,
+          "cgroup_current_bytes": 2326192128,
+          "conservative_cgroup_plus_cuda_reserved_bytes": 2424758272,
+          "cuda_reserved_bytes": 98566144,
+          "future_allocation_bytes": 0,
+          "host_mem_available_bytes": 122006908928,
+          "label": "after_joint_qualification_unit:model.language_model.layers.1.mlp.experts.3.up_proj",
+          "refusal_threshold_bytes": 6442450944
+        },
+        "margin_bytes": 2147483648,
+        "min_host_available_bytes": 122003660800,
+        "peak_conservative_bytes": 2433376256,
+        "scope": "/sys/fs/cgroup"
+      },
+      "netdata": {
+        "sparky": {
+          "samples": 11,
+          "cpu_busy_percent_mean": 3.519502181818182,
+          "available_mib_min": 108647.875,
+          "distinct_power_samples": {
+            "1788868810": 13.0,
+            "1788868820": 13.0
+          },
+          "power_w_mean": 13.0
+        },
+        "sparklina": {
+          "samples": 11,
+          "cpu_busy_percent_mean": 5.572789836363636,
+          "available_mib_min": 116343.9921875,
+          "distinct_power_samples": {
+            "1788868800": 11.0,
+            "1788868810": 11.0
+          },
+          "power_w_mean": 11.0
+        }
+      },
+      "trace": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-qualification-windows-01/native-02/arm-2-window.trace.json",
+        "sha256": "96523e3aaebec67bf7bee60200d9932c721b4966793270d74d2678a264c6306a",
+        "event_categories": {
+          "null": 60,
+          "user_annotation": 14,
+          "cpu_op": 7902,
+          "cpu_instant_event": 3872,
+          "cuda_runtime": 2646,
+          "ac2g": 4278,
+          "overhead": 1,
+          "gpu_memcpy": 519,
+          "kernel": 1099,
+          "gpu_memset": 6,
+          "cuda_driver": 8,
+          "gpu_user_annotation": 14,
+          "Trace": 1
+        }
+      }
+    },
+    {
+      "kind": "legacy",
+      "index": 3,
+      "invocations": 16,
+      "median_qualifier_seconds": 0.2934994760144036,
+      "peak_live_combined_bytes": 7077888,
+      "live_storage_peak_bytes": {
+        "H": 3145728,
+        "PWC": 3145728,
+        "X": 786432
+      },
+      "cuda_peak_allocated_bytes": 83589632,
+      "cuda_peak_reserved_bytes": 98566144,
+      "process_anon_after_bytes": 2010066944,
+      "cgroup_current_after_bytes": 2356436992,
+      "source_layer_load_counts": {
+        "model.language_model.layers.0.": 1,
+        "model.language_model.layers.1.": 1
+      },
+      "initialization_source_read_counts": {
+        "model.visual.": 1
+      },
+      "verified_cells": 26,
+      "verified_cells_sha256": "beb8b575b5fddbe90e11e7d11f343679ef3885bbe07b0a90fc09ada54f46c090",
+      "physical_guard": null,
+      "netdata": {
+        "sparky": {
+          "samples": 10,
+          "cpu_busy_percent_mean": 3.48566736,
+          "available_mib_min": 108617.6445312,
+          "distinct_power_samples": {
+            "1788868820": 13.0,
+            "1788868830": 13.0
+          },
+          "power_w_mean": 13.0
+        },
+        "sparklina": {
+          "samples": 9,
+          "cpu_busy_percent_mean": 5.8344648333333335,
+          "available_mib_min": 116301.5859375,
+          "distinct_power_samples": {
+            "1788868820": 11.0,
+            "1788868830": 11.0
+          },
+          "power_w_mean": 11.0
+        }
+      },
+      "trace": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-qualification-windows-01/native-02/arm-3-legacy.trace.json",
+        "sha256": "eb50b74ab0607f1bcb22a5d99963241c4dd2340fc836c7604f969b92cc327e0b",
+        "event_categories": {
+          "null": 60,
+          "user_annotation": 3,
+          "cpu_op": 7902,
+          "cpu_instant_event": 3872,
+          "cuda_runtime": 2622,
+          "ac2g": 4254,
+          "overhead": 1,
+          "gpu_memcpy": 519,
+          "kernel": 1099,
+          "gpu_memset": 6,
+          "cuda_driver": 8,
+          "gpu_user_annotation": 3,
+          "Trace": 1
+        }
+      }
+    }
+  ],
+  "telemetry": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-qualification-windows-01/native-02/netdata.jsonl",
+    "sha256": "94549ac5a658a6371b3bdb19f3681784013667bf9a0a3a751929118677662138",
+    "samples_by_host": {
+      "sparky": 83,
+      "sparklina": 83
+    }
+  },
+  "energy_ranking": "Not established: tiny ownership diagnostic retains observer and fresh-source setup overhead; per-arm Netdata power only two distinct, lagged samples at 11 W on Sparklina.",
+  "total_invocations": 50
+}
