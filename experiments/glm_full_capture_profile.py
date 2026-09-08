@@ -8,9 +8,10 @@ at 5-second intervals, with explicit disk caps suitable for a 24-hour action.
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -160,18 +161,26 @@ class AnchorObserver(CaptureObserver):
     anchors. They must not turn an encoded anchor into an apparent encoder
     failure, or make a retry encode that successful anchor again.
     """
-    def __init__(self, out, *, profile_calls, trace_max_bytes, command, cuda_only=False):
+    def __init__(self, out, *, profile_calls, trace_max_bytes, command, cuda_only=False,
+                 window_seconds=None):
         if (not profile_calls or 0 not in profile_calls or len(profile_calls) > 4
                 or any(type(i) is not int or i < 0 for i in profile_calls)
                 or len(set(profile_calls)) != len(profile_calls)):
             raise ValueError('anchor profile calls require zero and at most four distinct nonnegative indices')
         if type(trace_max_bytes) is not int or not 0 < trace_max_bytes <= 2*1024**3:
             raise ValueError('anchor trace byte cap must be positive and at most 2 GiB')
+        if window_seconds is not None:
+            if (type(window_seconds) not in (int, float) or not math.isfinite(window_seconds)
+                    or not 0 < window_seconds <= 60):
+                raise ValueError('anchor collection window must be finite and in (0, 60] seconds')
+            if not cuda_only:
+                raise ValueError('timed anchor windows require CUDA-only collection')
         parent = Path(out)
         parent.mkdir(parents=True, exist_ok=True)
         super().__init__(parent/('attempt-'+uuid.uuid4().hex), profile_layers=())
         self.profile_calls = set(profile_calls)
         self.trace_max_bytes = trace_max_bytes
+        self.window_seconds = window_seconds
         self.activities = ([torch.profiler.ProfilerActivity.CUDA] if cuda_only else
                            [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA])
         self.result.update(schema='prismaquant.glm_selected_anchor_profile.v1',
@@ -180,12 +189,53 @@ class AnchorObserver(CaptureObserver):
             trace_max_bytes=trace_max_bytes, native_anchor_profiled=False,
             profile_activities=['cuda'] if cuda_only else ['cpu', 'cuda'],
             call_index_scope='Shared scalar and compatible-batch invocation sequence.',
-            trace_cap_scope='Exported bytes per window; not a live profiler-memory bound.')
+            trace_cap_scope='Exported bytes per window; not a live profiler-memory bound.',
+            requested_window_seconds=window_seconds,
+            window_scope='Initial CUDA collection interval; observed duration records scheduler/toggle delay.')
         self.result.pop('forward_windows_zero_based')
         self.result.pop('profile_layers')
 
     def observation_error(self, error):
         self.result['errors'].append(dict(instrument='anchor_profiler', error=repr(error)))
+
+    @contextmanager
+    def collection_window(self, profiler, record):
+        if self.window_seconds is None:
+            yield
+            return
+        cancel = threading.Event()
+        failures = []
+        started = time.monotonic()
+        window = dict(requested_seconds=self.window_seconds, stopped_by=None)
+        record['collection_window'] = window
+
+        def stop_collection():
+            if cancel.wait(self.window_seconds):
+                return
+            try:
+                # CUDA collection is Kineto-wide. CPU collection uses thread-
+                # local state, hence the explicit CUDA-only contract above.
+                profiler.toggle_collection_dynamic(False, self.activities)
+                window['stopped_by'] = 'deadline'
+            except BaseException as error:
+                failures.append(error)
+                window['stopped_by'] = 'toggle_failed'
+            finally:
+                window['elapsed_seconds'] = time.monotonic() - started
+
+        thread = threading.Thread(target=stop_collection, name='anchor-cuda-window', daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            cancel.set()
+            # Join before profiler teardown; the stopper must never access an
+            # ended profiler or toggle a subsequent anchor's collection.
+            thread.join()
+            if window['stopped_by'] is None:
+                window.update(stopped_by='anchor_return', elapsed_seconds=time.monotonic()-started)
+            if failures:
+                raise RuntimeError(f'CUDA collection window failed: {failures[0]!r}') from failures[0]
 
     def wrap_anchor(self, original):
         def anchor(*args, **kwargs):
@@ -208,12 +258,13 @@ class AnchorObserver(CaptureObserver):
                 try:
                     with torch.profiler.profile(activities=self.activities, record_shapes=False,
                             profile_memory=False, with_stack=False) as profiler:
-                        called = True
-                        try:
-                            value = original(*args, **kwargs)
-                        except BaseException as error:
-                            original_error = error
-                            raise
+                        with self.collection_window(profiler, record):
+                            called = True
+                            try:
+                                value = original(*args, **kwargs)
+                            except BaseException as error:
+                                original_error = error
+                                raise
                     path = self.out/f'anchor-{index:06d}.trace.json'
                     profiler.export_chrome_trace(str(path))
                     size = path.stat().st_size
@@ -292,6 +343,8 @@ def main(argv=None):
                         help='Required exported-byte cap per selected-anchor trace; at most 2 GiB.')
     parser.add_argument('--anchor-cuda-only', action='store_true',
                         help='Collect CUDA activities only for anchors; retain the separate Python sampler.')
+    parser.add_argument('--anchor-profile-seconds', type=float,
+                        help='Stop initial CUDA collection after this interval; requires --anchor-cuda-only.')
     parser.add_argument('campaign_argv', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = args.campaign_argv
@@ -306,7 +359,7 @@ def main(argv=None):
         except (AttributeError, ValueError) as error:
             parser.error(str(error))
     elif (args.anchor_profile_calls is not None or args.anchor_trace_max_bytes is not None
-          or args.anchor_cuda_only):
+          or args.anchor_cuda_only or args.anchor_profile_seconds is not None):
         parser.error('anchor profiling options require --selected-anchors')
     elif '--capture-calibration-out' not in command or '--streaming' not in command:
         parser.error('observer requires the streamed canonical capture action')
@@ -317,7 +370,7 @@ def main(argv=None):
     originals = {method: getattr(campaign, method) for method in methods}
     observer = (AnchorObserver(args.evidence_out, profile_calls=calls,
                               trace_max_bytes=args.anchor_trace_max_bytes, command=command,
-                              cuda_only=args.anchor_cuda_only)
+                              cuda_only=args.anchor_cuda_only, window_seconds=args.anchor_profile_seconds)
                 if args.selected_anchors else CaptureObserver(args.evidence_out))
     with observer:
         try:
