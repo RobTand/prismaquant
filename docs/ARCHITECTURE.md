@@ -42,6 +42,12 @@ their existing routes. PWC shares file-signature/archive inspection helpers;
 its bounded loader and LRU behavior are unchanged. Gates include
 `tests/test_verified_capture_load.py` and streamed admission/qualification/PWC
 regressions. File read counts alone establish no physical-I/O or speed claim.
+The [2026-09-08 native loading report](../experiments/measurements/verified-capture-load-20260908/README.md)
+records an instrumented two-unit ABBA: final prefetch elapsed was 21.6% lower,
+while replay/seal were 4.3%/12.5% slower. Exact byte/tensor parity and raw-buffer
+expiry passed under unchanged 6 GiB physical/2 GiB GPU limits. This qualifies
+that opt-in loading scope only; full-capture fit, serving and per-operation
+energy ranking remain unestablished.
 
 Re-stamped (2026-09-08, `integrate/capture-followups-20260908`) for Hessian
 writer refusal and completed-file page release (#395, #396). A tensor-bearing
