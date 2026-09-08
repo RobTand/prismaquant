@@ -147,3 +147,17 @@ bytes to the review tree and confirms unchanged runtime. `files.json` seals the
 retained bundle. [`native-plan.draft.json`](native-plan.draft.json) and
 [`native-invocation.draft.json`](native-invocation.draft.json) carry the concrete
 pending capture/freeze fields; neither has been submitted.
+
+## Root integration verification — 2026-09-08
+
+The coordinator reviewed the harnesses and independently verified all six
+positive CPU receipts, the failed prototype fixture receipt, sixteen indexed
+artifact files, and the final source differences. The final harness adds only
+process-wide I/O scope annotation and output artifact seals above the tested
+source. Integration with the current authenticated source reader passed all
+30 harness/plan tests (14 A/B and 16 screen), without skips, under PB action
+`0ebefe499232cb03167b979be2b25a5db91236a604d5adae2f71abfebc01e86d`.
+Its source snapshot is closure-only above the integration merge, exit status
+is zero and cleanup is complete. See the three root audit JSON files here.
+Native execution remains unsubmitted until the original complete capture
+manifest can be bound; these CPU results establish no native fit or speed gain.
