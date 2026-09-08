@@ -1,7 +1,19 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `feat/streamed-capture-admission`. Stamps
+As of: 2026-09-08 · `perf/tessera-layout-pricing`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `perf/tessera-layout-pricing`) for producer-owned
+payload-free pricing. `tessera_footprint` uses Tessera's paired
+`build_plane_extents` / `build_terminal_extent` APIs when the installed
+producer exposes them. The existing pinned producer remains supported through
+its writer-based byte calculation. Both paths use the same declared geometry,
+recipe, plane counts, alignment and terminal arithmetic; returned footprint
+and recipe identities remain identical. This adds no probe, cache, format,
+serving admission, or pin change. The older producer still incurs placeholder
+payload construction. Gates: `tests/test_tessera_footprint_extents.py` and the
+existing footprint/menu tests; the modern producer path additionally requires
+validation against a Tessera revision exposing the extent APIs.
 
 Re-stamped (2026-09-08, `feat/streamed-capture-admission`) for experimental
 `--streaming-capture-policy shared-inputs-bounded-v1`. The legacy and prior
