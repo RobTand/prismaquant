@@ -3,6 +3,34 @@
 As of: 2026-09-08 · `feat/joint-operator-windows`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `fix/verified-capture-load`) for explicit capture load
+policy `prismaquant.verified_activation_load.v1` (#405). Canonical capture
+replay, seal and joint qualification may opt into one private serialized byte
+buffer with positive `max_buffer_bytes` and `max_scratch_bytes` (at least 1 MiB).
+The existing activation owner binds a regular nonsymlink file identity, checks
+the complete selected roster's file caps, hashes each source byte once, then
+checks uncompressed ZIP storage and metadata bounds before deserializing the
+same read-only buffer. A metadata pass checks tensor geometry and complete
+backing storage before CPU reconstruction; finite masks use bounded chunks.
+The raw buffer expires before CPU results can transfer to CUDA. File changes,
+unknown owners, overbudget storage and unsupported copying reads refuse.
+
+`--capture-load-policy` accepts that JSON only with streamed
+`shared-inputs-bounded-v1` capture. Materialization and final sealing price
+serialized buffer and scratch separately; forward/source-validation phases
+retain their existing terms. The unchanged physical cap must admit the maximum
+phase. Joint preparation accepts the same top-level `capture_load_policy` only
+with explicit qualification windows and adds these terms to its physical guard;
+the qualification v1 PWC load-buffer meaning is unchanged. Separate execution
+receipts record the policy digest, artifact/load digest chain, source bytes and
+peak buffer/storage bytes in `capture-load-execution.json` or prepared cache
+metadata. Canonical manifest, journal identity and tensor/file bytes do not
+change. Legacy/default capture and exact-boundary activation prefetch retain
+their existing routes. PWC shares file-signature/archive inspection helpers;
+its bounded loader and LRU behavior are unchanged. Gates include
+`tests/test_verified_capture_load.py` and streamed admission/qualification/PWC
+regressions. File read counts alone establish no physical-I/O or speed claim.
+
 Re-stamped (2026-09-08, `fix/layer-major-boundary-capture`) for explicit
 `prismaquant.aura.boundary_storage.v2` with `capture_order: "layer_major"`
 (#394). The existing layer visitor installs each baseline source layer once

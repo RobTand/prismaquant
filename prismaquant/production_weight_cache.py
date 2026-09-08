@@ -435,20 +435,8 @@ class ProductionWeightCache:
     @staticmethod
     def _window_archive_storage_bytes(source):
         """Only ordinary uncompressed Torch archives have accountable loads."""
-        try:
-            with zipfile.ZipFile(source) as archive:
-                entries = archive.infolist()
-                names = [entry.filename for entry in entries]
-                roots = {name.split('/')[0] for name in names}
-                if (len(roots) != 1 or len(set(names)) != len(names)
-                        or not any(name.endswith('/data.pkl') for name in names)
-                        or any(entry.compress_type != zipfile.ZIP_STORED or entry.flag_bits & 1
-                               or entry.file_size != entry.compress_size for entry in entries)):
-                    raise RuntimeError('PWC window requires an uncompressed Torch archive')
-                return sum(entry.file_size for entry in entries
-                           if re.fullmatch(r'[^/]+/data/[0-9]+', entry.filename))
-        except (OSError, zipfile.BadZipFile) as exc:
-            raise RuntimeError('PWC window has an unaccountable Torch archive') from exc
+        from .perturbed_x_cache import torch_archive_storage_bytes
+        return torch_archive_storage_bytes(source)
 
     def _window_keys(self, keys):
         if not isinstance(keys, Sequence) or isinstance(keys, (str, bytes)):
@@ -951,8 +939,8 @@ class ProductionWeightCache:
 
     @staticmethod
     def _file_signature(value):
-        return (value.st_dev, value.st_ino, value.st_size,
-                value.st_mtime_ns, value.st_ctime_ns)
+        from .perturbed_x_cache import cache_file_stat_signature
+        return cache_file_stat_signature(value)
 
     @staticmethod
     def _file_tensor_guard(tensor):

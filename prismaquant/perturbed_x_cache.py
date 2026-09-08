@@ -10,10 +10,13 @@ RTN-quantized just for that module call and restored in the forward hook.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
+import stat
 import sys
+import zipfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -200,6 +203,53 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
     return path
 
 
+def cache_file_stat_signature(value):
+    """Stable file identity shared by the existing activation and PWC owners."""
+    return (value.st_dev, value.st_ino, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns)
+
+
+def torch_archive_storage_bytes(source, *, label='PWC window', metadata_cap=None):
+    """Inspect ordinary uncompressed Torch storage records without loading them."""
+    try:
+        with zipfile.ZipFile(source) as archive:
+            entries = archive.infolist()
+            names = [entry.filename for entry in entries]
+            roots = {name.split('/')[0] for name in names}
+            if (len(roots) != 1 or len(set(names)) != len(names)
+                    or not any(name.endswith('/data.pkl') for name in names)
+                    or any(entry.compress_type != zipfile.ZIP_STORED or entry.flag_bits & 1
+                           or entry.file_size != entry.compress_size for entry in entries)):
+                raise RuntimeError(f'{label} requires an uncompressed Torch archive')
+            storage = [entry for entry in entries
+                       if re.fullmatch(r'[^/]+/data/[0-9]+', entry.filename)]
+            if metadata_cap is not None:
+                # Price Python/ZIP/pickle metadata separately from tensor storage.
+                # The bounded source adapter also refuses oversized directory reads
+                # before ZipFile can construct an unbounded member list.
+                metadata_bytes = sum(entry.file_size for entry in entries if entry not in storage)
+                bound = sum(4096 + 8*len(name.encode()) for name in names) + 64*metadata_bytes
+                if bound > metadata_cap // 2:
+                    raise RuntimeError(f'{label} archive metadata exceeds scratch budget')
+            return sum(entry.file_size for entry in storage)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise RuntimeError(f'{label} has an unaccountable Torch archive') from exc
+
+
+def _advise_activation_descriptor(descriptor, path, expected_stat, *, offset=0,
+                                  length=0, durable=False):
+    expected = cache_file_stat_signature(expected_stat)
+    actual = os.fstat(descriptor)
+    if not stat.S_ISREG(actual.st_mode) or cache_file_stat_signature(actual) != expected:
+        raise RuntimeError('capture entry changed before page advice')
+    if durable:
+        os.fsync(descriptor)
+    if (cache_file_stat_signature(os.fstat(descriptor)) != expected or
+            cache_file_stat_signature(os.stat(path, follow_symlinks=False)) != expected):
+        raise RuntimeError('capture entry changed while completing durability')
+    os.posix_fadvise(descriptor, offset, length, os.POSIX_FADV_DONTNEED)
+
+
 def release_activation_cache_file_pages(path, *, expected_stat):
     """Advise a verified unchanged file extent at a reader/writer boundary.
 
@@ -210,23 +260,234 @@ def release_activation_cache_file_pages(path, *, expected_stat):
     requires the complete seal. Advice is not proof of physical release; the
     caller's guard remains final.
     """
-    import stat
-    def identity(value):
-        return (value.st_dev, value.st_ino, value.st_size,
-                value.st_mtime_ns, value.st_ctime_ns)
     flags = os.O_RDONLY | os.O_NOFOLLOW
     descriptor = os.open(path, flags)
     try:
-        actual = os.fstat(descriptor)
-        if not stat.S_ISREG(actual.st_mode) or identity(actual) != identity(expected_stat):
-            raise RuntimeError('capture entry changed before page advice')
-        os.fsync(descriptor)
-        if (identity(os.fstat(descriptor)) != identity(expected_stat) or
-                identity(os.stat(path, follow_symlinks=False)) != identity(expected_stat)):
-            raise RuntimeError('capture entry changed while completing durability')
-        os.posix_fadvise(descriptor, 0, 0, os.POSIX_FADV_DONTNEED)
+        _advise_activation_descriptor(descriptor, path, expected_stat, durable=True)
     finally:
         os.close(descriptor)
+
+
+VERIFIED_ACTIVATION_LOAD_SCHEMA = 'prismaquant.verified_activation_load.v1'
+
+
+def normalize_verified_activation_load(config):
+    if config is None:
+        return None
+    if (not isinstance(config, dict) or set(config) !=
+            {'schema', 'max_buffer_bytes', 'max_scratch_bytes'} or
+            config.get('schema') != VERIFIED_ACTIVATION_LOAD_SCHEMA):
+        raise ValueError('verified activation load requires a complete closed v1 policy')
+    for key in ('max_buffer_bytes', 'max_scratch_bytes'):
+        if type(config[key]) is not int or config[key] <= 0:
+            raise ValueError(f'verified activation load requires positive {key}')
+    if config['max_scratch_bytes'] < 1024**2:
+        raise ValueError('verified activation load requires at least 1 MiB metadata scratch')
+    return dict(config)
+
+
+class _VerifiedBufferReader(io.RawIOBase):
+    """Read-only access to one private buffer, with no full-copy fallback."""
+    def __init__(self, buffer, *, max_copy_bytes):
+        self._view = memoryview(buffer).toreadonly()
+        self._position = 0
+        self._max_copy_bytes = max_copy_bytes
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        self._checkClosed()
+        return self._position
+
+    def seek(self, offset, whence=0):
+        self._checkClosed()
+        if whence not in (0, 1, 2):
+            raise ValueError('invalid verified-buffer seek origin')
+        position = offset + (0 if whence == 0 else self._position if whence == 1 else len(self._view))
+        if position < 0:
+            raise ValueError('negative verified-buffer seek')
+        self._position = position
+        return position
+
+    def read(self, size=-1):
+        self._checkClosed()
+        available = max(0, len(self._view) - self._position)
+        size = available if size is None or size < 0 else min(size, available)
+        if size > self._max_copy_bytes:
+            raise RuntimeError('verified-buffer copying read exceeds scratch budget; readinto required')
+        result = bytes(self._view[self._position:self._position+size])
+        self._position += size
+        return result
+
+    def readinto(self, target):
+        self._checkClosed()
+        output = memoryview(target).cast('B')
+        try:
+            size = min(len(output), max(0, len(self._view)-self._position))
+            output[:size] = self._view[self._position:self._position+size]
+            self._position += size
+            return size
+        finally:
+            output.release()
+
+    def close(self):
+        if not self.closed:
+            self._view.release()
+            self._view = None
+        super().close()
+
+
+def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
+    """Charge complete backing storage and refuse opaque or oversized metadata."""
+    pending, visited, storages = [payload], set(), {}
+    while pending:
+        value = pending.pop()
+        identity = id(value)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        if len(visited) > max_nodes:
+            raise RuntimeError('verified activation payload exceeds metadata scratch budget')
+        if isinstance(value, torch.Tensor):
+            if (value.device.type != device or value.layout != torch.strided or value.is_quantized
+                    or value.requires_grad or value.numel()*value.element_size() > max_storage_bytes):
+                raise RuntimeError('verified activation payload has unaccountable tensor geometry/type')
+            storage = value.untyped_storage()
+            storages[storage._cdata] = storage.nbytes()
+            if (storage.nbytes() > max_storage_bytes or
+                    (device != 'meta' and sum(storages.values()) > max_storage_bytes)):
+                raise RuntimeError('verified activation backing storage exceeds its budget')
+        elif type(value) in (dict, OrderedDict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif type(value) in (tuple, list):
+            pending.extend(value)
+        elif value is not None and type(value) not in (str, int, float, bool, bytes):
+            raise RuntimeError('verified activation payload has an opaque metadata owner')
+    # Torch's meta restore does not preserve storage aliases (data_ptr is 0).
+    # ZIP records already bound aggregate bytes; meta checks each geometry, and
+    # the CPU pass checks the exact unique backing-storage aggregate.
+    return max(storages.values(), default=0) if device == 'meta' else sum(storages.values())
+
+
+def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
+                                         max_storage_bytes, validate=None,
+                                         expected_stat=None, resource_check=None,
+                                         release_file_pages=False):
+    """Hash and deserialize one admitted byte buffer, released before return.
+
+    The metadata pass uses meta tensors to reject malformed storage/geometry
+    before a real CPU reconstruction. Torch may stage one archive storage on
+    CPU during that pass; the same S cap covers it. Neither pass rereads the
+    source file, and no CUDA transfer is performed by this owner.
+    """
+    policy = normalize_verified_activation_load(policy)
+    if policy is None or type(max_storage_bytes) is not int or max_storage_bytes <= 0:
+        raise ValueError('verified activation load requires explicit buffer and storage budgets')
+    if not isinstance(expected_sha256, str) or re.fullmatch('[0-9a-f]{64}', expected_sha256) is None:
+        raise ValueError('verified activation load requires an exact SHA256 receipt')
+    path = Path(path)
+    before = path.lstat()
+    signature = cache_file_stat_signature(before)
+    if not stat.S_ISREG(before.st_mode):
+        raise RuntimeError('verified activation load requires a regular nonsymlink file')
+    if expected_stat is not None and cache_file_stat_signature(expected_stat) != signature:
+        raise RuntimeError('verified activation file changed before loading')
+    if before.st_size <= 0 or before.st_size > policy['max_buffer_bytes']:
+        raise RuntimeError('verified activation file exceeds serialized buffer budget')
+    scratch = policy['max_scratch_bytes']
+    def check(label, reserve_bytes=0):
+        if resource_check is not None:
+            resource_check(label + ':' + path.name, reserve_bytes=reserve_bytes)
+    def unchanged(descriptor):
+        if (cache_file_stat_signature(os.fstat(descriptor)) != signature or
+                cache_file_stat_signature(path.lstat()) != signature):
+            raise RuntimeError('verified activation file changed during loading')
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    raw = reader = value = payload = None
+    try:
+        unchanged(descriptor)
+        check('before_verified_capture_buffer', before.st_size + max_storage_bytes + scratch)
+        if release_file_pages:
+            # Complete durability once, then advise only verified consumed ranges.
+            os.fsync(descriptor)
+            unchanged(descriptor)
+        raw = bytearray(before.st_size)
+        digest = hashlib.sha256()
+        consumed = advised = 0
+        block_bytes = min(16*1024**2, scratch // 4)
+        with os.fdopen(descriptor, 'rb', buffering=0, closefd=False) as handle:
+            while consumed < len(raw):
+                check('before_verified_capture_read', max_storage_bytes + scratch)
+                view = memoryview(raw)[consumed:min(len(raw), consumed+block_bytes)]
+                try:
+                    size = handle.readinto(view)
+                    if not size:
+                        raise RuntimeError('verified activation file was truncated')
+                    digest.update(view[:size])
+                finally:
+                    view.release()
+                consumed += size
+                unchanged(descriptor)
+                if release_file_pages:
+                    page = os.sysconf('SC_PAGE_SIZE')
+                    end = consumed // page * page
+                    if end > advised:
+                        _advise_activation_descriptor(descriptor, path, before,
+                                                      offset=advised, length=end-advised)
+                        advised = end
+            if handle.read(1):
+                raise RuntimeError('verified activation file grew during loading')
+        unchanged(descriptor)
+        if digest.hexdigest() != expected_sha256:
+            raise RuntimeError('verified activation file checksum mismatch')
+        reader = _VerifiedBufferReader(raw, max_copy_bytes=min(scratch//8, 128*1024))
+        archive_storage = torch_archive_storage_bytes(reader, label='verified activation load',
+                                                      metadata_cap=scratch)
+        if archive_storage > max_storage_bytes:
+            raise RuntimeError('verified activation archive backing storage exceeds its budget')
+        for device in ('meta', 'cpu'):
+            check('before_verified_capture_decode', max_storage_bytes + scratch)
+            reader.seek(0)
+            value = torch.load(reader, map_location=device, weights_only=True)
+            observed = _verified_payload_storage(value, max_storage_bytes=max_storage_bytes,
+                device=device, max_nodes=scratch//512)
+            if observed > archive_storage:
+                raise RuntimeError('verified activation tensor storage exceeds its archive records')
+            if validate is not None:
+                validate(value, check_finite=device == 'cpu')
+            if device == 'cpu':
+                payload = value
+            value = None
+        unchanged(descriptor)
+        if release_file_pages:
+            _advise_activation_descriptor(descriptor, path, before)
+    except BaseException:
+        value = payload = None
+        raise
+    finally:
+        if reader is not None:
+            reader.close()
+        raw = reader = None
+        os.close(descriptor)
+    try:
+        check('after_verified_capture_buffer_release')
+    except BaseException:
+        payload = None
+        raise
+    execution = dict(schema=VERIFIED_ACTIVATION_LOAD_SCHEMA, policy=policy,
+        artifact_sha256=expected_sha256, file_bytes=before.st_size,
+        storage_cap_bytes=max_storage_bytes, archive_storage_bytes=archive_storage,
+        file_signature=signature, source_read_bytes=consumed, live_buffer_bytes=0)
+    execution['identity_sha256'] = hashlib.sha256(json.dumps(
+        {key: execution[key] for key in ('schema', 'policy', 'artifact_sha256', 'file_bytes',
+                                         'storage_cap_bytes')},
+        sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return payload, execution
 
 
 EXACT_ACTIVATION_SCHEMA = "prismaquant.exact_activation_entry.v1"
