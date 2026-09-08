@@ -76,6 +76,13 @@ def reference_kernels(stack):
     return result
 
 
+def decoder_targets(modules, prefix='model.language_model.layers.'):
+    result = {name: module for name, module in modules.items() if name.startswith(prefix)}
+    if not result:
+        raise RuntimeError('tiny fixture has no decoder target coverage')
+    return result
+
+
 def build_fixture(root, device):
     from prismaquant import aura_cost, format_registry as fr
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
@@ -98,6 +105,7 @@ def build_fixture(root, device):
         include_routed_experts=True, profile=profile)
     modules.update({member.qname: member for member in
                     profile_declared_packed_expert_projections(model, profile)})
+    modules = decoder_targets(modules)
     if not any('.experts.' in name for name in modules) or not any('.experts.' not in name for name in modules):
         raise RuntimeError('fixture requires actual dense and routed targets')
     entries, shapes = [], {}

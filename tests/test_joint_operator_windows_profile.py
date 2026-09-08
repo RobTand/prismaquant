@@ -6,8 +6,19 @@ import torch
 
 from experiments.joint_operator_windows_profile import (
     ATOL, PROBES, StorageObserver, make_policy, require_cost_parity,
-    require_cotangent_parity,
+    require_cotangent_parity, decoder_targets,
 )
+
+
+def test_decoder_roster_excludes_visual_targets_from_generic_linear_collector():
+    modules = {name: object() for name in ('model.visual.blocks.0.attn.proj',
+        'model.language_model.layers.0.mlp.up_proj',
+        'model.language_model.layers.1.mlp.experts.0.up_proj')}
+    selected = decoder_targets(modules)
+    assert set(selected) == set(modules) - {'model.visual.blocks.0.attn.proj'}
+    assert all(selected[name] is modules[name] for name in selected)
+    with pytest.raises(RuntimeError, match='no decoder'):
+        decoder_targets({'model.visual.blocks.0.attn.proj': object()})
 
 
 def test_matrix_observer_tracks_backing_storage_through_alias():
