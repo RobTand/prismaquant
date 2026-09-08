@@ -48,6 +48,61 @@ term fails there rather than disappearing into headroom. This bounds
 attribution and admission arithmetic on a fixture roster; it is not a
 full-GLM fit claim, and it does not bound the first step.
 
+Re-stamped (2026-09-08, `audit/glm-full-stack-admission`) to distinguish the
+historical v1 writer limit from current v2 admission. A metadata-only replay
+of all 132 original GLM groups (36,423 units), one group per row and encoder
+batch size one, derives a 98.041521 GiB maximum, rounded to 99 GiB under the
+104 GiB box budget. No sampling, H alias discount or production code change
+is involved. This is a derived plan, not a full-stack native fit qualification.
+Evidence: `experiments/measurements/glm-full-stack-admission-20260908/`.
+
+Re-stamped (2026-09-08, `codex/glm-capture-compatibility-issuance`) for the
+explicit GLM compatibility issuance CLI. A hash-bound closed plan binds the
+original config, corrected image policy, existing native/CPU proofs and
+original producer evidence. `python -m prismaquant.glm_capture_compatibility
+preflight` permits only the four original completion fields to remain pending;
+it constructs the actual corrected model through the shared streaming meta
+skeleton helper, verifies its live derivative and native execution identity,
+and writes no receipt. `issue` requires every completion field, validates the
+unchanged complete capture and producer before constructing the model, then
+calls the existing exclusive-create receipt API, which revalidates all gates.
+Both commands require CUDA unavailable and uninitialized and load no weights.
+They reuse the completed native measurements and do not compute new forward or
+backward passes. The ordinary streaming path uses the same extracted skeleton
+constructor before its unchanged resident-head materialization.
+
+Re-stamped (2026-09-08, `fix/runtime-v2-fixed-resources`) for the concrete
+full-engine fixed-resource admission prerequisites (#420). The gate remains
+closed: current raw ledgers leave shared/escaped ownership, native output/input
+charge boundaries, allocator/context domains and timing qualification unresolved.
+A positive schema cannot infer those measurements. The design specifies a
+closed evidence envelope, independent extent/lifetime/event recomputation and
+candidate-versus-fixed coverage, with exact source/workload/runtime bindings.
+The scalar v2 resource model does not establish TP2 or whole-host/UMA fit;
+those need explicit topology/domain modeling. This optional allocator input
+is not a prerequisite for the six-variant GLM task: the ordinary byte/quality
+allocator can reuse one common probe, then exported variants can be compared
+using actual held-out KL and served prefill under the existing runtime and
+publication gates. The current quality selector has no direct served-prefill
+axis; that bounded metadata/selection integration is separate. No measured
+table, production setting, pin or admission behavior changes.
+Design: [fixed-resource producer prerequisites](design/runtime_fixed_resource_admission.md).
+Gate retained: `tests/test_runtime_provenance.py`.
+
+Re-stamped (2026-09-08, `plan/glm-six-variant-recipes`) for validated-frontier
+metadata ownership. Before writing any selection output, the selector refuses
+to carry a destination recipe's Tessera metadata, expert population or measured
+serving claims into a different canonical assignment, including changes to its
+BF16 units. For an unchanged assignment the selector preserves existing claims;
+downstream provenance and export gates still validate them. The
+Pareto/validation payload chain does not yet publish selected Tessera wire and
+scale provenance; an older destination is not an authority for a changed pick.
+Until that handoff exists, publish each such recipe through the allocator's
+existing metadata and selected-wire gates. CB and whole-artifact-budget stamps
+continue to come from the selected payload. This changes a metadata refusal,
+not runtime pricing, GPU execution, or serving qualification.
+Gate: `tests/test_select_validated_frontier.py`.
+
 Re-stamped (2026-09-08, `codex/joint-operator-windows-profile`) for the opt-in
 GLM KDA derivative contract. The GLM profile declares a closed, source-pinned
 strictly upper-triangular premask of the fallback decay exponent; declaring it
@@ -89,9 +144,11 @@ planning or crash-atomic publication.
 Re-stamped (2026-09-08, `triage/dispatch-admissible-partition`) for the
 campaign dispatcher's **admissible partition** (§4.10, the campaign fanout's
 rows-per-box paragraph; #391). The fit check was all-or-nothing: one row wider than the
-worker refused every row, so the GLM plan's 864-unit routed stacks, deriving
-124.783 GiB against a 104 GiB worker, blocked the 90 rows that fit beside
-them. `plan` now partitions on the same arithmetic: the manifest holds the
+worker refused every row. Under the historical v1 whole-file Hessian writer,
+the GLM plan's 864-unit routed stacks derived 124.783 GiB against a 104 GiB
+worker and blocked the 90 smaller rows. That motivating number is superseded
+by the bounded writer's v2 accounting (#379), not a current routed-stack limit.
+`plan` partitions on the current resource arithmetic: the manifest holds the
 admissible rows, `plan.json` keeps the whole layout with an `admissible` flag
 per row and an `inadmissible_rows` record carrying each declined row's derived
 demand, multiplier, box and reason, and only a plan with nothing admissible

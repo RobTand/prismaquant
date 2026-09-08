@@ -1,0 +1,52 @@
+{
+  "schema": "prismaquant.glm_capture_compatibility_issuance_plan.v1",
+  "model_config": {
+    "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/config.json",
+    "sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943"
+  },
+  "source_derivative": {
+    "schema": "prismaquant.glm_source_derivative.v1",
+    "version": "glm_kda_causal_exp_v1",
+    "image_build": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-image-build-03/result.json",
+      "sha256": "e8426d3554180219a0fff421149118a9e0a17ef7a2091c5a03e21834dd1744c5"
+    }
+  },
+  "capture": null,
+  "producer": {
+    "request": {
+      "path": "/mnt/shared/prismabuild-fleet/cas/requests/87/8740a0b3456bb6cb334ae80b0e35fc3da31c62918abdda8c41ad226020c4e88a.json",
+      "sha256": "31d64b92bcc26c3288976a5e7f540778e2cc3a95cf9748ca187d45f81155d082"
+    },
+    "terminal": null,
+    "receipt": null,
+    "output": null,
+    "image_inspection": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/producer-second-box-image-inspection.json",
+      "sha256": "5c29fdedc10e025f90b682e2ded6290462d7afe8d2f379b2172b090baa7ae842"
+    },
+    "modeling_source": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-image-build-03/original-modeling_glm5_next.py",
+      "sha256": "2092bbb4efa2a8087b74f4a4da37635c503fe1df9ae73f1e6e8342af8b4b8e8b"
+    }
+  },
+  "forward_equivalence": {
+    "cpu_reproduction": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/cpu-kda-source-repro-tightened-01/result.json",
+      "sha256": "75e1b759b68f80494a6db05bc03dd27dee0ec3a7a9867ca5ef434550fa07afc0"
+    },
+    "original_layer0": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-diagnostic-01/result.json",
+      "sha256": "b4463c10d5ecc9d8fb6e7f58957d4450f8eac3ab808cf70bb9969fb1173b4a42"
+    },
+    "corrected_layer0": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-diagnostic-01/result.json",
+      "sha256": "60836c9ae78f3b5f2929588fd22f673a33ed22780e2a7ed369d0cae95db7da02"
+    },
+    "corrected_graph": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/result.json",
+      "sha256": "4126fe86231a1c4ae8dbaee6026bc2781de7ee0a458b2e9a84dd22daadb47e2f"
+    }
+  },
+  "output": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/original-capture-compatibility-v1.json"
+}

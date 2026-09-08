@@ -1,0 +1,132 @@
+[
+  {
+    "action": "03f28dff3c25ebf358afa9eb08b2690216942ff14d63c02c4ecc4c148f801ff4",
+    "receipt": "158b2b01d24e820748a6ab1c68fce296bb0f4a060840df6de6309b521f3ead8a",
+    "payload_sha256": "8b2fe62ec3bd7bc89eb70672ecf292d825eb3bf40dd07f6657c628f292eda0e0",
+    "snapshot": "f93fba4bd7991c98b3132112b27536b4a34d237f",
+    "source_diff_from_commit": [
+      ".pbrun-closure.4a8839e2fc2d396e.json"
+    ],
+    "stdout_tail": ".....................                                                    [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n21 passed, 14 warnings in 6.78s\n"
+  },
+  {
+    "action": "85fb98eac30a6d8dc8f07037f09fc67361fd0fb033704031be1e55c9f347080c",
+    "receipt": "123ba58d95981d7b93e9835d8d420ceddad420e135b28e26b710215d672ec0a1",
+    "payload_sha256": "71e93eee7cf178f96bed1dfdfb37fce348cdcda92ce1da235d7d6040d15b3c6f",
+    "snapshot": "208edddbba28fd5778b6fb4d9d679f0a5e62d021",
+    "source_diff_from_commit": [
+      ".pbrun-closure.5ef609e66da8a6a8.json"
+    ],
+    "stdout_tail": "sts/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\n  /home/rob/tmp/prismabuild-checkouts/85fb98eac30a.hxi3ug0z/checkout/prismaquant/glm_source_derivative.py:109: DeprecationWarning: co_lnotab is deprecated, use co_lines instead.\n    not callable(getattr(actual, name))]\n\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[co_filename]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[co_filename]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[co_flags]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[co_flags]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\n  /home/rob/tmp/prismabuild-checkouts/85fb98eac30a.hxi3ug0z/checkout/prismaquant/glm_source_derivative.py:110: DeprecationWarning: co_lnotab is deprecated, use co_lines instead.\n    return all(equal(getattr(actual, name), getattr(wanted, name)) for name in fields)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n44 passed, 31 warnings in 6.19s\n"
+  },
+  {
+    "action": "ed5c5d6d1c65faab066cbeac7d5b1a0def1945e1f8de03ddccf7e381b22e3cd3",
+    "receipt": "8248a0f5cceda7e7bf3a499807fb87c748826ce0ca5ee1490b4700f3c89b968a",
+    "payload_sha256": "1e42e740a3a8674bc09ffbb2075c4bf9086b96f70257f3ed716d3533e7edb0f4",
+    "snapshot": "ae462c69ddeda3ca0e409cfdbe8484319081a91b",
+    "source_diff_from_commit": [
+      ".pbrun-closure.168eb060e474555c.json"
+    ],
+    "stdout_tail": "..................                                                       [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n18 passed, 14 warnings in 7.71s\n"
+  },
+  {
+    "action": "81878952fadeef13d76b0eda0a6df75d96f396c474b016f3efc76bfc7b74bd95",
+    "receipt": "a93af09ad998987f9897f074e6bb45ded2f0338b369e6d45def450222df93a08",
+    "payload_sha256": "471708b107f74b6727ae412aab778205b5586f295c9ef1a235586d1d3256f7d1",
+    "snapshot": "31bb18ad7582926fbe2b20f92ab9982e89e25958",
+    "source_diff_from_commit": [
+      ".pbrun-closure.aac28758a2721680.json"
+    ],
+    "stdout_tail": "..........................                                               [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n26 passed, 14 warnings in 6.31s\n"
+  },
+  {
+    "action": "5193cf9769a0de284ea9ce633fe14d313afe08da3b6cb867795178c203a54fa5",
+    "receipt": "029d9219a77edbad91dd1ee78b0efbe6ba218093eba1bed204fd5d72b43fb320",
+    "payload_sha256": "ebd6aec0ef192c91e3ca7cffed2e623af78d4235cafb6c3e5e893197e8083800",
+    "snapshot": "7af66f37e752b289f36e21a8f2dae81ff25e1bc1",
+    "source_diff_from_commit": [
+      ".pbrun-closure.bacb98acb2364596.json"
+    ],
+    "stdout_tail": "....                                                                     [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n4 passed, 14 warnings in 5.91s\n"
+  },
+  {
+    "action": "4cdbe058dccf630c3173955b8acdb7963cf4e34faf8e1594b1ab285ab2049c12",
+    "receipt": "7ddd714151e9801b845fe76686bad87aad1352213f4f3f1e1e4958ae7ac45320",
+    "payload_sha256": "4664e1e0b3a55249e6770606579689f78204e408c08d45335ee44cbd765242aa",
+    "snapshot": "b7e7fd1ac9660bdf1044280e43f526263938f537",
+    "source_diff_from_commit": [
+      ".pbrun-closure.b35d4dbcbc54d7f5.json"
+    ],
+    "stdout_tail": "..............                                                           [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n14 passed, 14 warnings in 6.48s\n"
+  },
+  {
+    "action": "1899ca8cbb5a0652fa174516491e0a14c67bfaa9558a89be5c33b449160fabae",
+    "receipt": "5c5f0b9b6a9d484dcca84eb1d4006fea2e91d7bd662161dcb162366154fffa39",
+    "payload_sha256": "818cb88e897da72c79a5b8c1bdc9f6197484f2685d4be2401af03bde9098be69",
+    "snapshot": "a3a8e54848f571f604ce9f4891f91744d9fcfc49",
+    "source_diff_from_commit": [
+      ".pbrun-closure.708e4ec554c7e9d3.json"
+    ],
+    "stdout_tail": "..                                                                       [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n2 passed, 14 warnings in 5.67s\n"
+  },
+  {
+    "action": "f44db817c04452afa4c689101b5e5e3fdb85704de528cce0bab3ea8ac9af4ac2",
+    "receipt": "3dd1445505192fc6f31f8826a114bc902a5cacc0f97de109e99b8cb97527f5f9",
+    "payload_sha256": "46327181ec017af6445f8b1d96232c8be9ad5e5bcb2f5163a4cf886b91f9b8e1",
+    "snapshot": "4a9dbbe416023af7e20be1369cb1395a85697cbb",
+    "source_diff_from_commit": [
+      ".pbrun-closure.b859ec45594a281a.json"
+    ],
+    "stdout_tail": "..                                                                       [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n2 passed, 14 warnings in 6.77s\n"
+  },
+  {
+    "action": "58dcd67f95612fb259774b6ed4fca020a97dd0cc483260866109d01947e95343",
+    "receipt": "4c3e165c48430e9b56281f40f26dd917acda6bebd8477afeb6cf169dd01b357c",
+    "payload_sha256": "930926566bb11aba97d38f2030cec4dde7ddbff0407a4ae536cafef8b66d7b53",
+    "snapshot": "e72a2ffa72a523dfadda86573e1a834f1dd584d5",
+    "source_diff_from_commit": [
+      ".pbrun-closure.d89dd4bbf3f863e2.json"
+    ],
+    "stdout_tail": "....................                                                     [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n20 passed, 14 warnings in 6.20s\n"
+  },
+  {
+    "action": "63fa3375afff28af04cd2df67542fff38b2b750721b46102524fc5017f24c760",
+    "receipt": "cfa4960d60da83170885d49b2ed7c16c92b9182b8b27a6dd777210dce0606dd1",
+    "payload_sha256": "58f15caa490ba1df80cb018cfd1a50287e44798d08bd3c7e3037e3fed35b4ebd",
+    "snapshot": "cbc9fffdff6493f6b816ce453ac0193211ac18e3",
+    "source_diff_from_commit": [
+      ".pbrun-closure.e3587825bcc7455e.json"
+    ],
+    "stdout_tail": ".............                                                            [100%]\n=============================== warnings summary ===============================\ntests/test_architecture_doc.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n13 passed, 14 warnings in 6.00s\n"
+  },
+  {
+    "action": "06451e6143ae7fce80522c05d6f3cc50101e4ce66dcab6c8e7ef187121303a7a",
+    "receipt": "00d00e59fd945231b68052f2f7cc64d73bc01c829606de908fb43d638b4c5b6b",
+    "payload_sha256": "2d9d49867471b36c12a3ee476ecf23809d32b4752a5fd8b0d0f4ba305e3fe0d8",
+    "snapshot": "ab8ebd643b4dd672403e2bd94b27f1cf2362223c",
+    "source_diff_from_commit": [
+      ".pbrun-closure.117317f4b3f967a2.json"
+    ],
+    "stdout_tail": "......                                                                   [100%]\n=============================== warnings summary ===============================\ntests/test_docs_staleness.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n6 passed, 14 warnings in 5.58s\n"
+  },
+  {
+    "action": "0f582924c359b13f1cfc7d372acaf3fde097d3c6d11ce828d79297dfc40706c0",
+    "receipt": "1cdf96a31d525d2f566e3e9f97c6e5d8862575592c3d562d6d46776333da83c9",
+    "payload_sha256": "0f704a2fbee9cf435ce4f5f5e4001d60716c03b2cca068b23bd0af407a5683f8",
+    "snapshot": "c98a9ebe48c8a12bd82087b6bf5efc0dabec56d5",
+    "source_diff_from_commit": [
+      ".pbrun-closure.1bb20cc6784d47f9.json"
+    ],
+    "stdout_tail": "{\"schema\": \"prismaquant.tessera_campaign_container.v1\", \"requested_image\": \"prismaquant-glm-derivative:causal-exp-v1-20260908\", \"image_id\": \"sha256:9195c23f22401c3434df14cc7dd83ee08f68be625ce7fdcb7973e122cfcf8eda\", \"image_content_sha256\": \"d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026\", \"declared_content_sha256\": \"d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026\", \"uid\": 1000, \"gid\": 1000}\n[glm-compatibility] masking torch.cuda queries during meta init\n{\"authenticated_kda_modules\": 34, \"cuda_initialized\": false, \"device\": \"meta\", \"pending\": [\"capture\", \"producer.output\", \"producer.receipt\", \"producer.terminal\"], \"plan\": {\"path\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/compatibility-issuance-pending-plan.json\", \"sha256\": \"6f59204d81a178baa8e6ea1852b836aced9c59bbded1d9399336235d1b333c0a\"}, \"proof\": {\"corrected_modeling_sha256\": \"416bd6168b3c42858c0e22622dd2e85ff04e9460703eadf64e5abef84aac24a3\", \"scope\": \"closed_causal_expression_proof_plus_native_layer0_and_bounded_graph\"}, \"receipt\": null, \"schema\": \"prismaquant.glm_capture_compatibility_issuance_execution.v1\", \"source_derivative_sha256\": \"e989cbe2fa47144af509a373db896ae3c8c2ef3d1dbf0d6dbecc73f78d6f8dd6\", \"source_execution_sha256\": \"a86c98992be523ab6d588130f6d59958347e322310d6e53e2ba6877d16eb7a04\", \"status\": \"preflight_pending_original_capture\"}\n"
+  },
+  {
+    "action": "02d72f6dbfa0fc574f63fc14f81bea7c5dd876d05b3d6826d3b7779099228eab",
+    "receipt": "c9b7ae40aa5bdf7f3d0ddeccfae0ff4f0f86c68171b2424c43501f73fcd1a8a6",
+    "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "snapshot": "589075f6ca0cfcb1efec5d167462f0485f0eab43",
+    "source_diff_from_commit": [
+      ".pbrun-closure.f4158ddc8e4a78b3.json"
+    ],
+    "stdout_tail": ""
+  }
+]
