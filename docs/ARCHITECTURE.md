@@ -26,6 +26,52 @@ and packed-source tests.
 The [primitive measurement](measurements/joint-operator-statistics-2026-09-08.md)
 records the synthetic native before/after profiles and explicit integration limits.
 
+Re-stamped (2026-09-08, `fix/selected-source-anchors`) for bounded selected
+encoder-factor ownership (#370). The existing `(unit, scale_plane)` memo in a
+selected-source row retains at most `--anchor-batch-size` entries. Evicted
+factors are recomputed from the same resident uncapped H and producer settings;
+their values, wire bytes, scores and checkpoint identities remain unchanged.
+Admission charges that bounded memo plus a separate factorization transient.
+The existing export-input writer has its own phase: all selected H, X and
+weights remain resident while one complete Hessian sidecar and one tensor
+serialization temporary may coexist. Completed sidecar, rendered-weight and
+wire files receive verified page advice through the existing helper before
+encoding continues. This does not bound the sidecar writer's within-file peak;
+an indivisible full routed stack can therefore remain above admission.
+Selected weight bytes follow the loader's HF dtype plan, including strict FP32
+parameters; the skeleton's initial dtype does not authorize a cast or a budget.
+Resident-source campaign behavior remains unchanged. This establishes an
+ownership bound, not a throughput gain or full-GLM fit claim.
+
+Re-stamped (2026-09-08, `fix/selected-source-anchors`) for selected Tessera
+anchor preparation from a complete canonical capture (#370). `--streaming`
+with `--units` requires the capture manifest and its expected SHA-256. Scope,
+geometry, calibration draw, runtime, initialization witness and current source
+hashes remain bound to the full census. The initialization witness describes
+the historical capture; sparse preparation does not certify a new full-source
+forward. `StreamedCausalLM.snapshot_selected_weights` uses the existing layer
+cache and a finite selected-layer prefetch sequence, requires resident delivery,
+and copies selected logical expert views into independent storage. Completed
+source layers and fixed source state are released before selected X/H prefetch.
+
+The campaign planner reserves the largest of selected source preparation,
+export-input serialization and resident anchor encoding, using source headers and the existing loader dtype
+policy. It records the selected layers and phase terms in each planned row;
+PrismaBuild continues to own placement and admission. CUDA execution requires
+source-page advice, immediate host allocator purge, and the existing
+finite-cgroup physical memory guard. Source weights and all selected H/X remain
+charged even with bounded encoder factors, so a selected stack may still exceed
+admission. This introduces no new
+capture, sampling policy, joint scope, serving format or numerical calibration.
+Gates: `tests/test_tessera_selected_source.py`,
+`tests/test_glm_campaign_streaming.py`, and existing capture/fanout/resume tests.
+With `--groups-per-row 1`, the canonical GLM census becomes 132 independent PB
+rows whose deterministic union covers all 36,423 units. Its 42 routed-stack
+groups each contain 864 logical units. The current planner cannot subdivide an
+exact full-stack group into smaller independently measured rows; statistical
+stack sampling is a different contract and does not fill that gap.
+
+
 Re-stamped (2026-09-08, `fix/joint-boundary-residency`) for the explicit
 `prismaquant.aura.boundary_storage.v1` policy (#373). Streamed AURA can store
 exact decoder boundaries and rolling cotangents through the existing

@@ -126,6 +126,10 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     raw_body, max_element_bytes = {}, 4
     packed_regex = profile.per_expert_moe_regex()
     packed_pattern = (re.compile(packed_regex.removeprefix('re:')) if packed_regex else None)
+    def resident_element_bytes(name):
+        match = None if dtype_pattern is None else dtype_pattern.search(name)
+        return (2 if match is None else torch.empty((), dtype=
+            dtype_plan[dtype_groups[match.lastgroup]]).element_size())
     for key, meta in header.items():
         name = profile.checkpoint_to_live_name(key, multimodal=multimodal)
         if name is None:
@@ -140,8 +144,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             for suffix in sources:
                 if name.endswith(suffix):
                     target_name = name[:-len(suffix)]+target
-        match = None if dtype_pattern is None else dtype_pattern.search(target_name)
-        target_bytes = 2 if match is None else torch.empty((), dtype=dtype_plan[dtype_groups[match.lastgroup]]).element_size()
+        target_bytes = resident_element_bytes(target_name)
         size = max(stored, numel*target_bytes) if floating is not None else stored
         if (fp4_experts and str(meta['dtype']).upper() in _PACKED_BYTE_DTYPES
                 and declared_expert_dtype_covers(key)):
@@ -178,13 +181,22 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                  for layer in range(layers)]
     loader_transient = min(prefetch_workers, cache_slots) * (
         max(pack_peak, default=0)+max(concat.values(), default=0))
-    h_by_layer, x_by_layer = {}, {}
+    h_by_layer, x_by_layer, unit_source_weight_bytes = {}, {}, {}
     total_h, total_x, widest_unit = 0, 0, 0
     for name, shape in unit_shapes.items():
         if not name.startswith(live_prefix):
             raise ValueError(f'capture unit is outside the decoder source scope: {name}')
         layer = int(name[len(live_prefix):].split('.', 1)[0])
         columns = int(shape[1])
+        parameter_name = name+'.weight'
+        if packed_pattern is not None and (packed_pattern.match(name) or
+                packed_pattern.match(profile.to_vllm_internal_name(name))):
+            owner, projection = name.rsplit('.', 1)
+            expert_path, expert = owner.rsplit('.', 1)
+            parent = profile.packed_expert_parent_for_projection(projection)
+            if parent is not None and expert.isdigit():
+                parameter_name = expert_path+'.'+parent
+        unit_source_weight_bytes[name] = math.prod(shape)*resident_element_bytes(parameter_name)
         h = columns*columns*4
         x = min(int(counts[name]), max_act_rows)*columns*4
         h_by_layer[layer] = h_by_layer.get(layer, 0)+h
@@ -215,7 +227,13 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             separators=(',', ':')).encode()).hexdigest(),
         terms=terms, memory_bytes=sum(terms.values()), disk_bytes=disk,
         full_hessian_bytes=total_h, full_prefix_bytes=total_x,
+        unit_source_weight_bytes=unit_source_weight_bytes,
         body_layer_bytes={str(k): v for k, v in sorted(body.items())},
+        body_loader_transient_bytes={str(k): pack_peak[k]+max(
+            (size for key, size in concat.items() if key[0] == k), default=0)
+            for k in range(layers)},
+        body_source_file_bytes={str(k): v for k, v in sorted(raw_body.items())},
+        live_layer_prefix=live_prefix,
         transient_status='conservative physical allocator bound for direct final-slab packer')
     if capture_policy != 'shared-inputs-bounded-v1':
         return result
@@ -269,6 +287,62 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # mutually exclusive phase maps, with the maximum defining admission.
     del result['terms']
     return result
+
+
+def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
+                              cache_slots, prefetch_workers, headroom_gb,
+                              anchor_batch_size=1):
+    """Bound selected-source preparation separately from resident encoding.
+
+    This extends the source loader's header/dtype accounting. No source
+    forward or calibration accumulation occurs. The existing plane-keyed
+    encoder memo retains at most one compatible batch's factors.
+    """
+    import math
+    if not unit_shapes or type(anchor_batch_size) is not int or anchor_batch_size < 1:
+        raise ValueError('selected anchors require nonempty units and a positive batch size')
+    source = streamed_calibration_resources(model_path, unit_shapes=unit_shapes,
+        counts=counts, nsamples=1, seqlen=1, max_act_rows=max_act_rows,
+        cache_slots=cache_slots, prefetch_workers=prefetch_workers,
+        headroom_gb=headroom_gb)
+    prefix = source['live_layer_prefix']
+    layers = sorted({str(int(name[len(prefix):].split('.', 1)[0])) for name in unit_shapes}, key=int)
+    weights = sum(source['unit_source_weight_bytes'].values())
+    widest_weight = max(math.prod(shape)*4 for shape in unit_shapes.values())
+    widest_h = max(shape[1]**2*4 for shape in unit_shapes.values())
+    widest_x = max(min(counts[name], max_act_rows)*shape[1]*4
+                   for name, shape in unit_shapes.items())
+    terms = source['terms']
+    common = dict(selected_source_weight_bytes=weights,
+                  declared_headroom_bytes=terms['declared_headroom_bytes'])
+    preparation = dict(common, nonbody_source_bytes=terms['nonbody_source_bytes'],
+        source_window_bytes=sum(sorted((source['body_layer_bytes'][k] for k in layers),
+                                       reverse=True)[:cache_slots]),
+        loader_transient_bytes=sum(sorted((source['body_loader_transient_bytes'][k] for k in layers),
+                                          reverse=True)[:min(prefetch_workers, cache_slots)]))
+    encoding = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
+        selected_prefix_bytes=source['full_prefix_bytes'],
+        encoder_memo_bytes=anchor_batch_size*max(
+            shape[1]**2*4+shape[1]*8 for shape in unit_shapes.values()),
+        factorization_scratch_bytes=4*widest_h,
+        compatible_batch_weight_bytes=anchor_batch_size*widest_weight*4,
+        entry_validation_bytes=2*(widest_h+widest_x),
+        source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight)
+    export_inputs = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
+        selected_prefix_bytes=source['full_prefix_bytes'],
+        # The existing torch.save writer completes one file before it can
+        # advise its pages. Counts retain the whole census, not this subset.
+        export_input_file_bytes=source['full_hessian_bytes']+len(counts)*16384,
+        serialization_scratch_bytes=2*widest_h)
+    phases = dict(source_preparation=preparation, export_inputs=export_inputs,
+                  resident_anchors=encoding)
+    return dict(schema='prismaquant.selected_anchor_resources.v1', phases=phases,
+        memory_bytes=max(sum(phase.values()) for phase in phases.values()),
+        selected_source_weight_bytes=weights, selected_layers=layers,
+        source_header_sha256=source['source_header_sha256'],
+        encoder_memo_policy='compatible-anchor-batch-width',
+        encoder_memo_capacity=anchor_batch_size,
+        source_forward_count=0)
 
 
 def _num_layers(cfg: dict) -> int:
