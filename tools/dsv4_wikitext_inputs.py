@@ -24,6 +24,8 @@ import torch
 DSV4_WIKITEXT_INPUTS_SCHEMA = "prismaquant.dsv4_wikitext_inputs/1"
 MODEL_WIKITEXT_INPUTS_SCHEMA = "prismaquant.model_wikitext_inputs/2"
 WIKITEXT_INPUT_MODEL_SCHEMA = "prismaquant.wikitext_input_model/1"
+# Canonical Salesforce cache fingerprints; corpus bytes remain the v1 pins.
+MODEL_DATASET_FINGERPRINTS = {"train": "5d4fb603254a7a5b", "test": "a46124b21ac53738"}
 DSV4_WIKITEXT_INPUTS_MAX_BYTES = 1_048_576
 DATASETS_DISTRIBUTION = "datasets"
 DATASETS_VERSION = "4.6.0"
@@ -399,7 +401,8 @@ def _model_dataset(value: object, *, split: str) -> dict[str, Any]:
     total = value.get("total_tokens")
     if type(total) is not int or total <= 0:
         raise DSv4WikiTextInputsError("WikiText dataset token count is invalid")
-    expected = {**_expected_dataset(split=split), "total_tokens": total}
+    expected = {**_expected_dataset(split=split), "total_tokens": total,
+                "fingerprint": MODEL_DATASET_FINGERPRINTS[split]}
     if dict(value) != expected:
         raise DSv4WikiTextInputsError("WikiText dataset identity differs")
     return dict(value)
