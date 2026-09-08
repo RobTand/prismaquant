@@ -1,5 +1,6 @@
 """CPU state/ownership checks; native CUDA trace coverage needs the real row."""
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -48,14 +49,42 @@ def observer(path, calls=(0, 2), cap=4096):
                                   command=['--unchanged-original-command'])
 
 
-def test_exact_original_calls_returns_and_finite_windows(tmp_path, controlled):
+def monitor_readiness(obs, monkeypatch):
+    """Signal only after the real monitor has committed its sample count."""
+    ready = {kind: threading.Event() for kind in ('netdata', 'python_sampler')}
+    original_wait = obs.stopped.wait
+    def sampled_wait(timeout=None):
+        # monitor() increments samples immediately before waiting on stopped.
+        # No sample or output is fabricated, and production startup stays async.
+        for kind, event in ready.items():
+            if obs.result[kind].get('samples'):
+                event.set()
+        return original_wait(timeout)
+    monkeypatch.setattr(obs.stopped, 'wait', sampled_wait)
+    return ready
+
+
+@pytest.mark.parametrize('delayed_start', [False, True])
+def test_exact_original_calls_returns_and_finite_windows(tmp_path, controlled, monkeypatch,
+                                                        delayed_start):
     obs = observer(tmp_path)
+    ready = monitor_readiness(obs, monkeypatch)
+    start = threading.Event()
+    if delayed_start:
+        original_monitor = obs.monitor
+        def delayed_monitor(kind):
+            assert start.wait(timeout=10), 'test did not release monitor startup'
+            original_monitor(kind)
+        monkeypatch.setattr(obs, 'monitor', delayed_monitor)
     token, weight, acts = object(), object(), object()
     seen = []
     def original(**kwargs):
         seen.append(kwargs)
         return token
     with obs:
+        start.set()  # Force delayed monitors to start after __enter__ returns.
+        for kind, event in ready.items():
+            assert event.wait(timeout=10), f'{kind} did not commit its first sample'
         wrapped = obs.wrap_anchor(original)
         for i in range(5):
             assert wrapped(qname=f'unit-{i}', format_name='original-format',
@@ -75,6 +104,37 @@ def test_exact_original_calls_returns_and_finite_windows(tmp_path, controlled):
     host_records = [json.loads(line) for line in (obs.out/'netdata.jsonl').read_text().splitlines()]
     assert {r['host'] for r in host_records} == {'sparky', 'sparklina'}
     assert all((obs.out/r['trace']['path']).is_file() for r in result['anchors'])
+
+
+@pytest.mark.parametrize('missing', [('netdata',), ('python_sampler',),
+                                    ('netdata', 'python_sampler')])
+def test_delayed_monitors_refuse_missing_telemetry(tmp_path, controlled, monkeypatch, missing):
+    obs = observer(tmp_path, calls=(0,))
+    ready = monitor_readiness(obs, monkeypatch)
+    original_monitor = obs.monitor
+    def delayed_monitor(kind):
+        if kind in missing:
+            # Deterministically schedule this instrument after shutdown, the
+            # interleaving instantaneous fake anchors could previously reach.
+            assert obs.stopped.wait(timeout=10), 'observer did not reach shutdown'
+        original_monitor(kind)
+    monkeypatch.setattr(obs, 'monitor', delayed_monitor)
+    token = object()
+    journal = []
+    with pytest.raises(RuntimeError, match='required profiler evidence'):
+        with obs:
+            for kind, event in ready.items():
+                if kind not in missing:
+                    assert event.wait(timeout=10), f'{kind} did not sample'
+            journal.append(obs.wrap_anchor(lambda **_: token)(qname='u', format_name='f'))
+    assert journal == [token]
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'failed' and result['native_anchor_profiled']
+    assert result['anchors'][0]['status'] == 'complete'
+    assert {row['error'] for row in result['errors']} == {
+        repr(RuntimeError(f'no {kind} sample was recorded')) for kind in missing}
+    for kind in ready:
+        assert bool(result[kind].get('samples')) == (kind not in missing)
 
 
 @pytest.mark.parametrize('failure', ['no_cuda', 'trace_cap', 'enter'])
