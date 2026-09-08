@@ -213,3 +213,23 @@ The 13 changed implementation modules also passed PB compileall action
 `d9b6fa26cbd6a33d8570c15ad406825db326fd171e7592469d62d60e4182389e`
 under one CPU/one GiB, with exit 0 and verified source/CAS/cleanup evidence in
 `root-integrated-compile-cas-audit.json`.
+
+## Full-CI image fixture correction — 2026-09-08
+
+Full CI run `34255038701` reported 2 failures, 6,948 passes, 201 skips,
+3 expected failures and 192 passing subtests. Both failures were in the older
+`test_campaign_image_content.py` fixtures: they mocked `subprocess.check_output`,
+but archive-aware image inspection now uses `subprocess.run`. The tests
+therefore contacted Docker for their fictional image before reaching the
+content-identity assertions.
+
+PB action `d3d522666f9635418009d18717d49746679db3f05016cd1cb999e19974f196ba`
+reproduced exactly 2 failures and 13 passes against unchanged `4446f72506`.
+Commit `80e2d953cd` updates the two process doubles to return inspected
+`CompletedProcess` results. It retains the exact image-ID execution assertion
+and changed-content refusal before launch; no launcher or derivative code changes.
+PB action `0ddf24ba957d50620c6478a57698750f5415a7d609f3fbcff022c403b028cfdb`
+then passed all 24 image-content and container tests, without skips. Both
+actions used one CPU/two GiB and one native thread on dl380g10. Their actual
+terminal results, cleanup, source bundles and successful CAS payload were
+independently verified in the two root image-fixture audits.
