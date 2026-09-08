@@ -67,7 +67,9 @@ python -m prismaquant.tessera_joint_allocation \
 ```
 
 After the shared measured handoff exists, each variant uses the existing
-allocator. Required output flags and exact budget/runtime spellings are:
+allocator. The following template includes the optional measured-runtime
+predictor; its runtime flags require the additional admission described below.
+The common cost handoff and ordinary byte/quality allocation do not require it:
 
 ```text
 python -m prismaquant.allocator \
@@ -154,12 +156,27 @@ wires in the common union avoids that fallback. The top-level validated-surrogat
 pipeline also prepares/recalibrates its own menu cache; use the explicitly bound
 consumers above until that wrapper has a reuse contract for these artifacts.
 
+## Direct served selection without runtime-v2 prediction
+
+Runtime-v2 admission is an optional prediction path, not a prerequisite for
+comparing actual served artifacts. A simpler route is to allocate candidate
+recipes from the shared measured quality/cost table under explicit hardware
+byte budgets, retain each allocator-produced recipe's metadata, validate each
+candidate on the same held-out draw, and measure its actual prefill/decode in
+the target engine on the same workload. Select the accuracy, prefill and
+balanced outputs from those observed tradeoffs. Omit the measured-runtime/SLO
+flags when using this route; do not attach a producer-admitted resource or
+latency prediction to it. Device fit, serving correctness and performance still
+need actual evidence for each selected topology. Candidate allocation and
+served comparisons reuse the source probe; they do not require another probe.
+
 ## Remaining gates and evidence
 
 1. Original COMPLETE capture, native wire-screen qualification, source derivative
    compatibility and full original-graph joint qualification remain owned by the
    active root campaign. None is replaced by this intake audit.
-2. Qualified full-engine runtime resource partition is unimplemented:
+2. For the optional measured-runtime predictor, the qualified full-engine
+   resource partition is unimplemented:
    `runtime_provenance.py:375-389` unconditionally refuses v2 fixed resources.
    Native operator rows do not close this gate. Filed #420, linked #237/#267/#323,
    because implementing and measuring the full producer exceeds this bounded
@@ -167,7 +184,7 @@ consumers above until that wrapper has a reuse contract for these artifacts.
 3. Exact dense+MoE prefill/decode cells, fixed resources and end-to-end measurements
    for each declared one/two-Spark topology and workload are unavailable. The
    historical readiness inventory is retained by hash in recipe-intake.json;
-   root reports Tessera PR #427 integrated at `4cefd8d5f214b648aaed57846b5f5baaf6b212f4`,
+   Tessera PR #427 has reviewed head `4cefd8d5f214b648aaed57846b5f5baaf6b212f4`,
    with no new native06 TP2+MoE measurement yet. Historical selected-expert
    controls are not full trained-model serving qualification.
 4. Full export-H handoff currently accumulates all row H tensors in

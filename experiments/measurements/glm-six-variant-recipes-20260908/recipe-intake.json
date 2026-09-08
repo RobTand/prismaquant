@@ -93,6 +93,17 @@
   "runtime_v2_admission_issue": "https://github.com/RobTand/prismaquant/issues/420",
   "schema": "prismaquant.glm_six_recipe_intake.v1",
   "selected_pareto_metadata_handoff": "UNIMPLEMENTED_RETAIN_INDIVIDUAL_ALLOCATOR_RECIPES",
+  "selection_routes": {
+    "direct_served_comparison": {
+      "requires_actual_served_fit_quality_performance": true,
+      "requires_runtime_v2_predictor": false,
+      "source_probe_reused": true
+    },
+    "runtime_v2_prediction": {
+      "issue": "https://github.com/RobTand/prismaquant/issues/420",
+      "status": "UNAVAILABLE_UNTIL_FULL_ENGINE_PARTITION_QUALIFIED"
+    }
+  },
   "selector_metadata_issue": "https://github.com/RobTand/prismaquant/issues/421",
   "selector_safety_fix_commit": "26b97c6a4a",
   "shared_allocation_cli_bindings": {
