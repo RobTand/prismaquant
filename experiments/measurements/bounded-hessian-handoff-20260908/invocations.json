@@ -1,0 +1,59 @@
+{
+  "common_pbrun": {
+    "cpus": 1,
+    "environment": {
+      "MKL_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "max_attempts": 1,
+    "priority": -10,
+    "tag": "x86"
+  },
+  "prismaquant": {
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "experiments/hessian_reference_contract_check.py",
+      "--producer-archive",
+      "/mnt/shared/prismaquant-experiments/hessian-reference-handoff-20260908/tessera-615e1c0302693447a9cd713bb1f9dddc21fbd378.tar",
+      "--producer-sha256",
+      "c6a6e849f7826ab18053004d4d625b2f26d9131923fda32b20fc6ca6a458aba7",
+      "--producer-commit",
+      "615e1c0302693447a9cd713bb1f9dddc21fbd378",
+      "-q",
+      "-rs",
+      "tests/test_tessera_hessian_reference_handoff.py",
+      "tests/test_tessera_input_handoff.py",
+      "tests/test_tessera_calibration_cache.py",
+      "tests/test_tessera_priced_export_inputs.py",
+      "tests/test_tessera_materialization.py",
+      "tests/test_docs_staleness.py",
+      "tests/test_architecture_doc.py",
+      "tests/test_tessera_campaign_fanout.py",
+      "tests/test_tessera_campaign_merge_integrity.py",
+      "tests/test_allocator_tessera_priced_inputs.py",
+      "tests/test_bounded_hessian_sidecar.py"
+    ],
+    "checkout_commit": "11cdcc823325a56b14a53692a3db2565bc5d16ce",
+    "mem_gb": 4,
+    "timeout_s": 300
+  },
+  "producer": {
+    "argv": [
+      "/home/rob/venvs/pb-cpu/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_hessian_reference_capture.py",
+      "tests/test_priced_inputs_snapshot.py",
+      "tests/test_capture_role.py",
+      "tests/test_cached_producer.py"
+    ],
+    "checkout_commit": "615e1c0302693447a9cd713bb1f9dddc21fbd378",
+    "environment": {
+      "PYTHONPATH": "src"
+    },
+    "mem_gb": 3,
+    "timeout_s": 240
+  }
+}

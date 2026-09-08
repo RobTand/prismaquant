@@ -1,0 +1,14 @@
+{"producer_archive_sha256": "c6a6e849f7826ab18053004d4d625b2f26d9131923fda32b20fc6ca6a458aba7", "producer_commit": "615e1c0302693447a9cd713bb1f9dddc21fbd378", "producer_module": "/home/rob/tmp/bounded-hessian-producer-3e50zx0a/src/tessera/__init__.py"}
+......................................................................s. [ 35%]
+........................................................................ [ 71%]
+.....................................................s....               [100%]
+=============================== warnings summary ===============================
+../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings
+  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_tessera_priced_export_inputs.py:333: this tessera publishes the seal; see the test above
+SKIPPED [1] tests/test_bounded_hessian_sidecar.py:50: explicit native writer measurement only
+200 passed, 2 skipped, 14 warnings in 111.54s (0:01:51)

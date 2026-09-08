@@ -1,0 +1,26 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________ test_unsorted_reference_json_preserves_existing_capture_seal _________
+
+reference = (PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3286/test_unsorted_reference_json_p0/hessian_capture.references.json'),...75227d'}, 'b': {'path': 'inputs/b.pt', 'sha256': '31e2fe19d0c2a9c575b0c2bc28908f1c3ab3ca149ea7d825c950807ff16aeeea'}}})
+
+    def test_unsorted_reference_json_preserves_existing_capture_seal(reference):
+        handoff,payload,H,*_=reference
+        payload['hessians']={name:payload['hessians'][name] for name in ('b','a')}
+        handoff.write_text(json.dumps(payload,sort_keys=False))
+        source=ActivationSource.from_capture(handoff)
+>       assert source.capture_sha256()==ActivationSource(H,payload['provenance']).capture_sha256()
+E       AssertionError: assert '44c1c7a8f999...3348a279f8148' == '3922a8cb3beb...82fe6dc52b38b'
+E
+E         - 3922a8cb3beb3567eaa469f3e8498bae33d90dae78c7b1e204f82fe6dc52b38b
+E         + 44c1c7a8f99911cb3bb6ad88a296ca9f186a133ca9bb07f9d293348a279f8148
+
+tests/test_hessian_reference_capture.py:206: AssertionError
+
+tessera surface: NO CUDA -- torch 2.11.0+cpu reports no CUDA device
+tessera surface: 0 test(s) skipped, 0 module(s) not collected
+tessera surface: this run did not exercise the CUDA-gated surface. Its pass count is not coverage of it.
+tessera surface: 0 test(s) allocated on the device
+=========================== short test summary info ============================
+FAILED tests/test_hessian_reference_capture.py::test_unsorted_reference_json_preserves_existing_capture_seal
+1 failed, 21 deselected in 1.23s
