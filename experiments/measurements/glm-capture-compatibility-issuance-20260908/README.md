@@ -48,7 +48,7 @@ The actual CLI result in `actual-preflight-output.txt` reports:
 - Status `preflight_pending_original_capture`, the four pending fields above,
   and `receipt: null`.
 
-This constructs the real 40-layer GLM skeleton from the already byte-bound
+This constructs the real 45-layer GLM skeleton from the already byte-bound
 configuration without loading model weight shards or starting weight-cache
 prefetch. It does not substitute a fake module or execute model forward.
 
