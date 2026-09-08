@@ -8309,12 +8309,11 @@ and work separately, not a reason to withhold the rows the fleet could already
 be running (#391). A partitioned plan is deliberately not mergeable: `merge`
 still requires every planned row's `cost.pkl`, so the rows that were never
 submitted refuse the merged scope table rather than quietly narrowing it. The
-dominant term in a row's demand today is `_model_bytes` -- every row
-loads the whole checkpoint, because the activations a unit is priced on come
-from a forward pass through the layers above it -- so that term, not the
-selection, is the concurrency ceiling. A quantum that held only its own units'
-weights would have to take its activations from something the census carried,
-or from the streaming loader; that is not this change.
+resident-model branch prices `_model_bytes` for the whole checkpoint. Streamed
+selected rows instead use `_streamed_resource_plan` with their selected source
+layers, canonical capture and encoder bounds; their anchor preparation reuses
+the completed capture without a source forward. Both branches retain their
+derived demand when the dispatcher partitions the rows.
 
 **Why the quantum is the fused anchor group.** The adaptive loop's round is per
 `(group, family)`: a round adds one anchor to each surface still failing its
