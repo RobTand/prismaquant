@@ -51,6 +51,29 @@ def test_original_runtime_identity_is_exact_v1_and_declaration_does_not_enable()
         'modules': {'': {'attention': 'eager', 'experts': 'eager'}}}
 
 
+@pytest.mark.parametrize('changed', ['co_filename', 'co_flags', 'co_consts', 'nested_filename', 'none'])
+def test_callable_auth_compares_source_metadata_flags_constants_and_nested_code(changed):
+    import types
+    source = 'def outer():\n    def inner():\n        return 7\n    return inner()\n'
+    scope = {}
+    exec(compile(source, '/pinned/source.py', 'exec', dont_inherit=True), scope)
+    function = scope['outer']
+    expected = derivative._code_at(compile(source, '/pinned/source.py', 'exec', dont_inherit=True), ('outer',))
+    if changed == 'none':
+        derivative._require_code(function, expected, 'fixture')
+        return
+    if changed == 'nested_filename':
+        constants = tuple(value.replace(co_filename='/foreign.py') if isinstance(value, types.CodeType) else value
+                          for value in expected.co_consts)
+        expected = expected.replace(co_consts=constants)
+    else:
+        replacement = {'co_filename': '/foreign.py', 'co_flags': expected.co_flags ^ 0x1000000,
+                       'co_consts': expected.co_consts + (99,)}[changed]
+        expected = expected.replace(**{changed: replacement})
+    with pytest.raises(ValueError, match='callable code changed'):
+        derivative._require_code(function, expected, 'fixture')
+
+
 @pytest.mark.parametrize('entry', ['identity', 'bind_none', 'capture_consumer'])
 def test_corrected_module_cannot_silently_use_original_identity(tmp_path, monkeypatch, entry):
     name = 'transformers.models.glm5_next.modeling_glm5_next'

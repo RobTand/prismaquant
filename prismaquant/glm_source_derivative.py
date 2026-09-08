@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
-import marshal
 import math
 import os
 import sys
@@ -99,14 +98,21 @@ def _code_at(root, names):
 
 
 def _require_code(function, expected, label):
-    if isinstance(function, types.FunctionType) and marshal.dumps(function.__code__) != marshal.dumps(expected):
-        actual = function.__code__
-        fields = [name for name in dir(actual) if name.startswith('co_') and
-                  not callable(getattr(actual, name)) and getattr(actual, name) != getattr(expected, name)]
-        print(json.dumps(dict(callable_auth_diagnostic=label, unequal_fields=fields,
-                              code_equal=actual == expected)), flush=True)
-    _require(isinstance(function, types.FunctionType) and
-             marshal.dumps(function.__code__) == marshal.dumps(expected), label + ' callable code changed')
+    # Marshal embeds reference/interning state; equivalent imported/recompiled
+    # code can serialize differently. Compare every public immutable code field
+    # recursively, including source location, compiler flags and nested bodies.
+    def equal(actual, wanted):
+        if type(actual) is not type(wanted):
+            return False
+        if isinstance(actual, types.CodeType):
+            fields = [name for name in dir(actual) if name.startswith('co_') and
+                      not callable(getattr(actual, name))]
+            return all(equal(getattr(actual, name), getattr(wanted, name)) for name in fields)
+        if isinstance(actual, tuple):
+            return len(actual) == len(wanted) and all(equal(a, b) for a, b in zip(actual, wanted))
+        return actual == wanted
+    _require(isinstance(function, types.FunctionType) and equal(function.__code__, expected),
+             label + ' callable code changed')
 
 
 def _observe(model, build):
