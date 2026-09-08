@@ -1,0 +1,21 @@
+{
+  "action": "663258efe046746f5ab57976b1afabe320d994cdac0c1215f48e83c7f54d756d",
+  "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/663258efe046746f5ab57976b1afabe320d994cdac0c1215f48e83c7f54d756d.json",
+  "terminal_sha256": "057c5e658d7f668bd8cb3dee0da2ebee30c48d5a3db0b42c76eb6e4428d61049",
+  "source_snapshot": {
+    "commit": "8b519f19f7c70af281df84eb211b59b64e9040f4",
+    "input": {
+      "bytes": 26698633,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "bdf2ae10925949a933a14eb2eec64d1944aa9e7287ca02fa3f2a5b9c99f1fbe0"
+    },
+    "parent": "dbbea2bb1c83a884f2a19b7fca838ef0eae533c8",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "returncode": 1,
+  "cleanup_complete": true,
+  "stdout_tail": "original member bytes.\n        with pytest.raises(RuntimeError, match='fits no planned row'):\n            dispatch.cmd_plan(_plan_args(spec, workspace, groups_per_row=2,\n                                         rows_per_box=1000))\n>       assert {path: path.read_bytes() for path in published} == before\nE       assert {PosixPath('/...1\"\\n}\\n', ...} == {PosixPath('/...1\"\\n}\\n', ...}\nE         \nE         Omitting 4 identical items, use -vv to show\nE         Differing items:\nE         {PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3181/test_failed_fit_replan_preserv0/campaign/units/row-0000.json'): b'...-of-rob/pytest-3181/test_failed_fit_replan_preserv0/model\",\\n  \"schema\": \"prismaquant.tessera_campaign_units.v1\"\\n}\\n'} != {PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3181/test_failed_fit_replan_preserv0/campaign/units/row-0000.json'): b'...-of-rob/pytest-3181/test_failed_fit_replan_preserv0/model\",\\n  \"schema\": \"prismaquant.tessera_campaign_units.v1\"\\n}\\n'}\nE         {PosixPath('/home/rob/tmp/pytest-...\nE         \nE         ...Full output truncated (2 lines hidden), use '-vv' to show\n\ntests/test_tessera_campaign_fanout.py:667: AssertionError\n----------------------------- Captured stdout call -----------------------------\n[dispatch] widest row demands 65 GB; --rows-per-box 1 needs 65 GB per box (spec declares 104 GB)\n[dispatch] 4 of 4 rows are admissible, 0 declined\n[dispatch] planned 4 rows over 4 anchor groups, 4 submitted -> /home/rob/tmp/pytest-of-rob/pytest-3181/test_failed_fit_replan_preserv0/campaign/manifest.json\n[dispatch] widest row demands 66 GB; --rows-per-box 1000 needs 66000 GB per box (spec declares 104 GB)\n=============================== warnings summary ===============================\ntests/test_tessera_campaign_fanout.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_tessera_campaign_fanout.py::test_failed_fit_replan_preserves_published_selection_bytes\n1 failed, 38 deselected, 14 warnings in 5.75s\n",
+  "source_diff_from_original_merge": " .pbrun-closure.b3eff08d6eae849b.json  |  5 +++++\n tests/test_tessera_campaign_fanout.py | 18 ++++++++++++++++++\n 2 files changed, 23 insertions(+)\n"
+}

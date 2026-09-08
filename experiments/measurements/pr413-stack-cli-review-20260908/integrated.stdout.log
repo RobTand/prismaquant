@@ -1,0 +1,67 @@
+{"schema": "prismaquant.tessera_campaign_container.v1", "requested_image": "prismaquant-glm-producer:content-qualified-20260908", "image_id": "sha256:9f9b9f05b17531399ba66dc6415b054cf5d68c82270626d0e9150e75c808435f", "image_content_sha256": "eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd", "declared_content_sha256": "eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd", "uid": 1000, "gid": 1000}
+Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 331.64it/s]
+Loading weights:   0%|          | 0/81 [00:00<?, ?it/s]Loading weights: 100%|██████████| 81/81 [00:00<00:00, 15487.01it/s]
+Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00, 518.52it/s]
+[cost-streaming] profile glm5_next has no text-only skeleton route; using the multimodal construction
+[cost-streaming] masking torch.cuda queries during meta init
+[cost-streaming] base_prefix='model.language_model'  layers=2  head_resident_on=0  offload=/tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/census-cache/source-offload  multimodal=True  visual_prefix=model.visual
+[cost-streaming] head materialized (3 tensors, rotary re-init) in 0.1s
+[cost-streaming] materializing visual tower: 25/25 tensors -> cuda
+[cost-streaming] model ready in 0.1s
+[cost-streaming] building install resolvers for 2 layers ...
+[cost-streaming] resolvers built: 53 tensors across 2 layers in 0.0s
+[cost-streaming] layer cache budget=115.1 GB (free=115.1 GB, headroom=0.0 GB, dynamic_reserve=0.0 GB, explicit)
+[cost-streaming] prefetch auto: workers=1 (explicit, capped by max_cache_slots), cache_slots=57420, max_cache_slots=2, memory_slots=57420, est_layer=0.0 GB, min_avail=0.0 GB (explicit)
+[campaign] 6 target Linears + 12 projected expert units in 1 stacks, 5 anchor groups, mode=research, device=cuda
+{"streamed_calibration_layer": {"layer": 0, "units": 3, "capture_policy": "legacy", "completed_source_released": false, "collect_seconds": 0.6460785969975404, "flush_seconds": 1.5200057532638311e-06, "capture_tensor_bytes": 0}}
+{"streamed_calibration_layer": {"layer": 1, "units": 15, "capture_policy": "legacy", "completed_source_released": false, "collect_seconds": 0.10436741300509311, "flush_seconds": 3.488006768748164e-06, "capture_tensor_bytes": 0}}
+[campaign] wrote streamed calibration census /tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/census.json
+[cost-streaming] profile glm5_next has no text-only skeleton route; using the multimodal construction
+[cost-streaming] base_prefix='model.language_model'  layers=2  head_resident_on=0  offload=/tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/capture-cache/source-offload  multimodal=True  visual_prefix=model.visual
+[cost-streaming] head materialized (3 tensors, rotary re-init) in 0.0s
+[cost-streaming] materializing visual tower: 25/25 tensors -> cuda
+[cost-streaming] model ready in 0.0s
+[cost-streaming] building install resolvers for 2 layers ...
+[cost-streaming] resolvers built: 53 tensors across 2 layers in 0.0s
+[cost-streaming] layer cache budget=113.8 GB (free=113.8 GB, headroom=0.0 GB, dynamic_reserve=0.0 GB, explicit)
+[cost-streaming] prefetch auto: workers=1 (explicit, capped by max_cache_slots), cache_slots=56757, max_cache_slots=2, memory_slots=56757, est_layer=0.0 GB, min_avail=0.0 GB (explicit)
+[campaign] 6 target Linears + 12 projected expert units in 1 stacks, 5 anchor groups, mode=research, device=cuda
+{"streamed_calibration_layer": {"layer": 0, "units": 3, "capture_policy": "legacy", "completed_source_released": false, "collect_seconds": 0.008495831018080935, "flush_seconds": 0.009767526003997773, "capture_tensor_bytes": 1601536}}
+{"streamed_calibration_layer": {"layer": 1, "units": 15, "capture_policy": "legacy", "completed_source_released": false, "collect_seconds": 0.008557895023841411, "flush_seconds": 0.04362237098393962, "capture_tensor_bytes": 4039680}}
+[campaign] complete streamed calibration capture: {'path': '/tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/capture/capture_manifest.json', 'sha256': '6ba1cbb1ae9b56c38dc6961ccca0b615e2a384d7a7c723f68751f0a3242a9000'}
+[dispatch] sampled 6 of 12 routed expert units across 1 stack(s), 3 audited
+[dispatch] widest row demands 25 GB; --rows-per-box 1 needs 25 GB per box (the spec declares no box budget, so this is unchecked)
+[dispatch] planned 5 rows over 5 anchor groups -> /tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/plan/manifest.json
+[cost-streaming] profile glm5_next has no text-only skeleton route; using the multimodal construction
+[cost-streaming] base_prefix='model.language_model'  layers=2  head_resident_on=0  offload=/tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/selected-cache/source-offload  multimodal=True  visual_prefix=model.visual
+[cost-streaming] head materialized (3 tensors, rotary re-init) in 0.0s
+[cost-streaming] materializing visual tower: 25/25 tensors -> cuda
+[cost-streaming] model ready in 0.0s
+[cost-streaming] building install resolvers for 2 layers ...
+[cost-streaming] resolvers built: 53 tensors across 2 layers in 0.0s
+[cost-streaming] layer cache budget=113.8 GB (free=113.8 GB, headroom=0.0 GB, dynamic_reserve=0.0 GB, explicit)
+[cost-streaming] prefetch auto: workers=1 (explicit, capped by max_cache_slots), cache_slots=56762, max_cache_slots=2, memory_slots=56762, est_layer=0.0 GB, min_avail=0.0 GB (explicit)
+[campaign] 6 target Linears + 12 projected expert units in 1 stacks, 5 anchor groups, mode=research, device=cuda
+[campaign] --units selects 1 of 5 anchor groups: 0 dense + 6 projected expert units; 1 group(s) sampled, 3 audit unit(s)
+[campaign] calibration prefetched: 6 units, 1615872 resident bytes, 0 misses
+[campaign] activations ready (hessian=require, rows/Linear 111..257)
+[campaign] producer projected 1 stacks; 6 expert units priced here
+[campaign] wrote /tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/selected-cache/hessian_capture.pt (6 Hessians, capture_sha256 555f1cfb36de)
+[campaign] wrote /tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/selected-cache/input_scales.safetensors (18 static input scales)
+[campaign] anchor groups: s:model.language_model.layers.1.mlp.experts(6)
+[campaign] round 1: 12 anchors
+[campaign] r1 1/12 batch=1 TESSERA_BF16_K1_R256 encode_seconds=8.524
+[campaign] r1 11/12 batch=1 TESSERA_BF16_K1_R256 encode_seconds=0.108
+[campaign] --max-rounds 1 reached
+[campaign] wrote /tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/selected-cost.pkl: 2 units, 4 priced rungs, 2 distinct formats
+[389] pending order [('model.language_model.layers.1.mlp.experts.0.down_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.down_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.0.gate_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.gate_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.0.up_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.up_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.1.gate_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.1.gate_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.1.up_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.1.up_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.3.down_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.3.down_proj', 'TESSERA_BF16_K1_R257')]
+[389] encoder factorizations 6 over 6 distinct units, memo CacheInfo(hits=6, misses=6, maxsize=1, currsize=1)
+[389] release calls 31 over 24 anchor files, other advised files [PosixPath('/tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/selected-cache/hessian_capture.pt'), PosixPath('/tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/selected-cache/hessian_capture.pt.tmp')]
+.
+=============================== warnings summary ===============================
+../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: 14 warnings
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 passed, 14 warnings in 35.41s

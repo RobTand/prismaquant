@@ -1,0 +1,12 @@
+[
+  {
+    "action": "39a54fe8aeee2e695460d9d05cc9ccb9f5d0adf53c4c81b3111991360503bb1d",
+    "receipt": "01fa3a5aaada1c980f42643e2cb2bfa2715f5370263bb518444cb1215227c25d",
+    "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "snapshot": "1b3e4406d835dc4a7c691a001ebf8124552923e5",
+    "source_diff_from_commit": [
+      ".pbrun-closure.c3b59013ccef705f.json"
+    ],
+    "stdout_tail": ""
+  }
+]

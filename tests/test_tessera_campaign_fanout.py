@@ -509,17 +509,187 @@ def test_rows_per_box_is_checked_against_the_box_and_never_shrinks_a_demand():
 
     PrismaBuild admits on the row's declared demand, so the only way to make a
     box hold more rows is to make a row hold less. Declaring a smaller demand
-    than the row holds would reserve less than it uses.
+    than the row holds would reserve less than it uses. A row too wide for the
+    box is declined, and its demand travels with it unchanged.
     """
     import dispatch_tessera_campaign as dispatch
 
-    assert dispatch.require_rows_fit([40, 36], 2, 80) == 40
+    demands = {"row-0000": 40, "row-0001": 36}
+    assert dispatch.partition_rows_by_fit(demands, 2, 80) == (
+        ["row-0000", "row-0001"], [])
     # Unchecked rather than assumed when the spec declares no box.
-    assert dispatch.require_rows_fit([40], 4, None) == 40
+    assert dispatch.partition_rows_by_fit({"row-0000": 40}, 4, None) == (
+        ["row-0000"], [])
+    # The wide row is declined at its own demand, not shrunk to fit.
+    admissible, declined = dispatch.partition_rows_by_fit(demands, 2, 79)
+    assert admissible == ["row-0001"]
+    assert [record["row_id"] for record in declined] == ["row-0000"]
+    assert declined[0]["mem_gb"] == 40
+    assert declined[0]["rows_per_box"] == 2
+    assert declined[0]["box_memory_gb"] == 79
+    assert declined[0]["reason"]
+    # Nothing fits, so there is nothing to submit and the widest demand and the
+    # box are named the way they always were.
     with pytest.raises(RuntimeError, match="at most 2 of these rows"):
-        dispatch.require_rows_fit([40, 36], 3, 80)
+        dispatch.partition_rows_by_fit(demands, 3, 80)
     with pytest.raises(RuntimeError, match="at least 1"):
-        dispatch.require_rows_fit([40], 0, 80)
+        dispatch.partition_rows_by_fit({"row-0000": 40}, 0, 80)
+
+
+# ---------------------------------------------------------------------------
+# The admissible partition
+#
+# One row wider than the worker is a demand to report, not a reason to refuse
+# the rows that fit: on the GLM plan the routed stacks derive 124.783 GiB
+# against a 104 GiB box and used to block the 90 rows that fit with them
+# (RobTand/prismaquant#391).
+# ---------------------------------------------------------------------------
+
+#: Column counts whose derived demand is exact: ``in**2 * 4`` bytes of fp32
+#: Hessian is 1 GiB at 16384 and 64 GiB at 131072, and the retained scoring
+#: rows add the fraction that makes the ceiling 2 GB and 65 GB.
+_NARROW_COLUMNS = 16384
+_WIDE_COLUMNS = 131072
+
+
+def _partition_workspace(tmp_path, *, wide=True, box_memory_gb=104):
+    """A census whose last anchor group is far wider than the others."""
+    model = tmp_path / "model"
+    model.mkdir()
+    groups = {"u:wide": ["wide"]} if not wide else {
+        "u:a": ["a"], "u:b": ["b"], "u:c": ["c"], "u:wide": ["wide"]}
+    shapes = {name: [8, _NARROW_COLUMNS] for names in groups.values()
+              for name in names}
+    shapes["wide"] = [8, _WIDE_COLUMNS]
+    workspace = tmp_path / "campaign"
+    workspace.mkdir()
+    (workspace / "census.json").write_text(json.dumps({
+        "model": str(model), "anchor_groups": groups, "layer_stride": 1,
+        "unit_shapes": shapes}))
+    spec = tmp_path / "spec.json"
+    payload = {"model": str(model), "campaign_argv": [], "cwd": str(tmp_path),
+               "python": "python3", "env": {}, "headroom_gb": 0}
+    if box_memory_gb is not None:
+        payload["box_memory_gb"] = box_memory_gb
+    spec.write_text(json.dumps(payload))
+    return spec, workspace
+
+
+def _plan_args(spec, workspace, **overrides):
+    import types
+
+    args = dict(spec=spec, workspace=workspace, calibration_cache=None,
+                groups_per_row=1, rows_per_box=2, timeout_s=300,
+                stack_sample=None, stack_sample_seed=0, audit_rate=10,
+                probe=None, seed_checkpoint=None, seed_wire_dir=None)
+    args.update(overrides)
+    return types.SimpleNamespace(**args)
+
+
+def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
+        tmp_path, capsys):
+    import dispatch_tessera_campaign as dispatch
+
+    spec, workspace = _partition_workspace(tmp_path)
+    assert dispatch.cmd_plan(_plan_args(spec, workspace)) == 0
+
+    # The manifest is what ``submit`` hands the fleet, so it holds the
+    # admissible rows and nothing else.
+    manifest = json.loads((workspace / "manifest.json").read_text())
+    assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
+            for row in manifest] == ["row-0000.json", "row-0001.json",
+                                     "row-0002.json"]
+    assert {row["demand"]["mem_gb"] for row in manifest} == {2}
+
+    plan = json.loads((workspace / "plan.json").read_text())
+    # The plan is what an auditor reads, so it keeps the whole layout: every
+    # planned row, admissible or not, with its own derived demand.
+    assert [entry["row_id"] for entry in plan["rows"]] == [
+        "row-0000", "row-0001", "row-0002", "row-0003"]
+    assert [entry["admissible"] for entry in plan["rows"]] == [
+        True, True, True, False]
+    assert plan["row_memory_gb"] == {"row-0000": 2, "row-0001": 2,
+                                     "row-0002": 2, "row-0003": 65}
+    declined = plan["inadmissible_rows"]
+    assert [record["row_id"] for record in declined] == ["row-0003"]
+    # The demand is recorded as derived, never rewritten to fit the box.
+    assert declined[0]["mem_gb"] == 65
+    assert declined[0]["rows_per_box"] == 2
+    assert declined[0]["box_memory_gb"] == 104
+    assert declined[0]["members"] == ["wide"]
+    assert declined[0]["reason"]
+
+    out = capsys.readouterr().out
+    assert "3 of 4 rows are admissible" in out
+    assert "1 declined" in out
+    assert "row-0003" in out and "65" in out and "104" in out
+
+
+def test_a_plan_whose_every_row_is_too_wide_refuses(tmp_path):
+    import dispatch_tessera_campaign as dispatch
+
+    spec, workspace = _partition_workspace(tmp_path, wide=False)
+    with pytest.raises(RuntimeError, match="65 GB"):
+        dispatch.cmd_plan(_plan_args(spec, workspace))
+    # Nothing to submit means nothing was written to submit.
+    assert not (workspace / "manifest.json").exists()
+
+
+def test_a_spec_with_no_box_budget_keeps_every_row(tmp_path, capsys):
+    import dispatch_tessera_campaign as dispatch
+
+    spec, workspace = _partition_workspace(tmp_path, box_memory_gb=None)
+    assert dispatch.cmd_plan(_plan_args(spec, workspace)) == 0
+    manifest = json.loads((workspace / "manifest.json").read_text())
+    assert len(manifest) == 4
+    plan = json.loads((workspace / "plan.json").read_text())
+    assert all(entry["admissible"] for entry in plan["rows"])
+    assert plan["inadmissible_rows"] == []
+    assert "the spec declares no box budget, so this is unchecked" in \
+        capsys.readouterr().out
+
+
+def test_failed_fit_replan_preserves_published_selection_bytes(tmp_path):
+    import dispatch_tessera_campaign as dispatch
+
+    spec, workspace = _partition_workspace(tmp_path)
+    assert dispatch.cmd_plan(_plan_args(spec, workspace, rows_per_box=1)) == 0
+    published = [workspace / 'manifest.json', workspace / 'plan.json',
+                 *sorted((workspace / 'units').glob('row-*.json'))]
+    before = {path: path.read_bytes() for path in published}
+
+    # The same census now bundles two groups into each selection. The large
+    # multiplier refuses every proposed row after its selection was derived.
+    # An existing manifest must keep pointing at its original member bytes.
+    with pytest.raises(RuntimeError, match='fits no planned row'):
+        dispatch.cmd_plan(_plan_args(spec, workspace, groups_per_row=2,
+                                     rows_per_box=1000))
+    assert {path: path.read_bytes() for path in published} == before
+
+
+def test_submit_hands_the_fleet_the_admissible_rows_only(tmp_path, monkeypatch):
+    import types
+
+    import dispatch_tessera_campaign as dispatch
+
+    spec, workspace = _partition_workspace(tmp_path)
+    assert dispatch.cmd_plan(_plan_args(spec, workspace)) == 0
+
+    seen: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        seen.append(list(command))
+        return types.SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    args = types.SimpleNamespace(workspace=workspace, wait_s=1)
+    assert dispatch.cmd_submit(args) == 0
+
+    assert len(seen) == 1
+    submitted = json.loads(pathlib.Path(seen[0][-1]).read_text())
+    assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
+            for row in submitted] == ["row-0000.json", "row-0001.json",
+                                      "row-0002.json"]
 
 
 # ---------------------------------------------------------------------------
