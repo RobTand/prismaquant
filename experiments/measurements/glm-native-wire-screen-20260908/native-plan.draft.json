@@ -1,0 +1,42 @@
+{
+  "schema": "prismaquant.glm_native_wire_screen.draft.v1",
+  "status": "NOT_FROZEN_NOT_SUBMITTED",
+  "resources": {
+    "path": "/workspace/experiments/measurements/glm-native-wire-screen-20260908/resource-plan.json",
+    "sha256": "ee7ec9a8178caf5e4713bf3b3a5202af7e056c813be3f22c2a2efe0b886baa75"
+  },
+  "capture": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+    "sha256": "PENDING_COMPLETE_CAPTURE"
+  },
+  "encoder_source_sha256": "PENDING_REVIEWED_PRODUCER_API_DIGEST",
+  "producer_contract_sha256": "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212",
+  "environment": {
+    "HF_DATASETS_CACHE": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/hf-datasets",
+    "HF_HOME": "/hf-cache",
+    "HF_HUB_OFFLINE": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "PRISMAQUANT_DETERMINISTIC": "1",
+    "PRISMAQUANT_LAYER_READ_THREADS": "4",
+    "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
+    "PRISMAQUANT_TMPDIR": "/tmp/glm-native-wire-screen",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "/workspace:/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97/src:/mnt/shared/tessera-measurements/first-model-20260907/inputs/container-compatible-deps:/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/capture-pytest-tools",
+    "PYTORCH_ALLOC_CONF": "expandable_segments:True",
+    "TESSERA_REPO": "/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97",
+    "TORCHINDUCTOR_CACHE_DIR": "/tmp/glm-canonical-inductor",
+    "TRITON_CACHE_DIR": "/tmp/glm-canonical-triton",
+    "XDG_CACHE_HOME": "/tmp/glm-canonical-cache",
+    "MIMALLOC_PURGE_DELAY": "0",
+    "TORCHINDUCTOR_COMPILE_THREADS": "1",
+    "MAX_JOBS": "1",
+    "PRISMAQUANT_PROD_ACT_SCALES": "0",
+    "PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES": "0",
+    "PRISMAQUANT_TESSERA_DEV_PIN": "",
+    "PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE": "0"
+  },
+  "output": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/native-wire-screen-01"
+}
