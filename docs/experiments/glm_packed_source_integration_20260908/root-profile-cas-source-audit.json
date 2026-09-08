@@ -1,0 +1,35 @@
+[
+  {
+    "action": "1f7de9ed8fd697f296640c82d77f3e99bf682727d3d7f66067e3bbe9fd14b128",
+    "receipt": "79bc648d74cf3eb2e8b73053de87a061f133112cf399c038acd96f5650fc78ac",
+    "payload_sha256": "f1642d1252a1586f70c84af8ff5ac85858949a2024a9a6b3b84de434fee7a23f",
+    "snapshot": "da3d75fbe1cfd1cd92626f59522227387a7786cc",
+    "source_diff_from_commit": [
+      ".pbrun-closure.aedd2f45214d3df2.json",
+      "docs/experiments/glm_packed_research_profile_20260908.md"
+    ],
+    "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 61%]\n..............................................                           [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n118 passed, 56 warnings in 8.97s\n"
+  },
+  {
+    "action": "5ebbead650a8e7a5165e8e0bf73c95d2bcc47322f81e09dbfe3c75f9ec6e43b5",
+    "receipt": "48c701fa77a7e7c427b05970f5f580238ef2ddce7e8a9317e09d863fc7b12fa1",
+    "payload_sha256": "ae5b18c61709aa93c9375d7faca629848d248f4756ada919f1c69f5ba859e541",
+    "snapshot": "e62ea8655f1df701c118ad28a9cf088c44a89bf0",
+    "source_diff_from_commit": [
+      ".pbrun-closure.56533555f2bf5faf.json",
+      "docs/experiments/glm_packed_research_profile_20260908.md"
+    ],
+    "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n...................                                                      [100%]\n=============================== warnings summary ===============================\ntests/test_architecture_doc.py: 28 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n19 passed, 28 warnings in 6.74s\n"
+  },
+  {
+    "action": "d7221b2976a1da33ddb736604617425d4e505c51b4a49f8aaad94ac261cbe978",
+    "receipt": "97be356c30956f5c3116aa0f8a85ed1b5c8b6162eb0be24af689e8b25a2f5905",
+    "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "snapshot": "7a21038efe0d4c4d6b70662b8c6810ddddc42f95",
+    "source_diff_from_commit": [
+      ".pbrun-closure.f1fa7a3a3fd61d94.json",
+      "docs/experiments/glm_packed_research_profile_20260908.md"
+    ],
+    "stdout_tail": ""
+  }
+]
