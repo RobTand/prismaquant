@@ -14,6 +14,7 @@ import io
 import json
 import os
 import pickle
+import pickletools
 import re
 import stat
 import struct
@@ -256,13 +257,44 @@ def _preflight_torch_zip_directory(source, *, metadata_cap, label):
     source.seek(0)
 
 
-def _preflight_torch_pickle_storage(archive, *, records, pickle_name, label):
+def _preflight_pickle_opcodes(raw, *, metadata_cap, label):
+    """Bound the C unpickler's memo/frame allocations and disable extensions."""
+    max_memo = metadata_cap//512
+    memo_operations = 0
+    last = None
+    try:
+        for opcode, argument, position in pickletools.genops(raw):
+            last = (opcode.name, position)
+            if opcode.name in ('EXT1', 'EXT2', 'EXT4', 'INST', 'OBJ', 'NEWOBJ',
+                               'NEWOBJ_EX', 'BUILD'):
+                raise RuntimeError(f'{label} has an opaque or extension pickle opcode')
+            if opcode.name in ('PUT', 'BINPUT', 'LONG_BINPUT', 'GET', 'BINGET', 'LONG_BINGET'):
+                if type(argument) is not int or not 0 <= argument < max_memo:
+                    raise RuntimeError(f'{label} pickle memo exceeds scratch budget')
+            if opcode.name in ('PUT', 'BINPUT', 'LONG_BINPUT', 'MEMOIZE'):
+                memo_operations += 1
+                if memo_operations > max_memo:
+                    raise RuntimeError(f'{label} pickle memo exceeds scratch budget')
+            if opcode.name == 'FRAME' and not 0 <= argument <= len(raw):
+                raise RuntimeError(f'{label} pickle frame exceeds bounded metadata')
+        if last != ('STOP', len(raw)-1):
+            raise RuntimeError(f'{label} has trailing or incomplete pickle metadata')
+    except (ValueError, OverflowError) as exc:
+        raise RuntimeError(f'{label} has unaccountable pickle opcodes') from exc
+
+
+def _preflight_torch_pickle_storage(archive, *, records, pickle_name, label, metadata_cap):
     """Check every declared storage size without constructing a Torch object.
 
     Older Torch stages CPU storage even for map_location='meta'. Only a closed
     set of tensor reconstruction markers is accepted here; those callbacks are
     inert. ZIP sizes and pickle sizes must agree before either Torch pass.
     """
+    # Archive metadata was admitted before this bounded read. Inspect opcodes
+    # before constructing the C Unpickler: find_class alone does not guard its
+    # sparse memo allocation or cached extension registry.
+    raw = archive.read(pickle_name)
+    _preflight_pickle_opcodes(raw, metadata_cap=metadata_cap, label=label)
     element_bytes = {'ByteStorage': 1, 'CharStorage': 1, 'BoolStorage': 1,
         'ShortStorage': 2, 'HalfStorage': 2, 'BFloat16Storage': 2,
         'IntStorage': 4, 'FloatStorage': 4, 'LongStorage': 8,
@@ -296,10 +328,7 @@ def _preflight_torch_pickle_storage(archive, *, records, pickle_name, label):
                 raise RuntimeError(f'{label} declared pickle storage disagrees with bounded ZIP storage')
             return ('storage', value[2])
     try:
-        with archive.open(pickle_name) as stream:
-            StoragePreflight(stream).load()
-            if stream.read(1):
-                raise RuntimeError(f'{label} has trailing pickle metadata')
+        StoragePreflight(io.BytesIO(raw)).load()
     except (pickle.UnpicklingError, TypeError, ValueError, AttributeError, EOFError) as exc:
         raise RuntimeError(f'{label} has unaccountable pickle storage metadata') from exc
 
@@ -336,7 +365,7 @@ def torch_archive_storage_bytes(source, *, label='PWC window', metadata_cap=None
                 _preflight_torch_pickle_storage(archive,
                     records={entry.filename.rsplit('/', 1)[1]: entry.file_size for entry in storage},
                     pickle_name=next(name for name in names if name.endswith('/data.pkl')),
-                    label=label)
+                    label=label, metadata_cap=metadata_cap)
             return total
     except (OSError, zipfile.BadZipFile) as exc:
         raise RuntimeError(f'{label} has an unaccountable Torch archive') from exc

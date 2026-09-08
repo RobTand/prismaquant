@@ -11,8 +11,10 @@ The existing activation owner binds a regular nonsymlink file identity, checks
 the complete selected roster's file caps, hashes each source byte once, then
 checks uncompressed ZIP storage and metadata bounds before deserializing the
 same read-only buffer. Directory counts and byte extents are bounded before
-ZIP entry objects exist. Inert pickle reconstruction checks declared storage
-sizes against ZIP records before any Torch allocation. A metadata pass checks
+ZIP entry objects exist. A bounded opcode pass refuses sparse memo/frame
+allocations and extension lookup before the C unpickler is constructed. Inert
+pickle reconstruction then checks declared storage sizes against ZIP records
+before any Torch allocation. A metadata pass checks
 tensor geometry before CPU reconstruction; the CPU pass checks unique backing
 storage, and finite masks use bounded chunks.
 The raw buffer expires before CPU results can transfer to CUDA. File changes,

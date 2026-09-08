@@ -309,3 +309,26 @@ def test_declared_pickle_storage_refuses_before_any_torch_allocation(tmp_path, m
         lambda *a, **k: pytest.fail('oversized pickle declaration reached Torch allocation'))
     with pytest.raises(RuntimeError, match='declared pickle storage'):
         load(path, max_storage_bytes=4)
+
+
+@pytest.mark.parametrize('kind', ['sparse_memo', 'memoize', 'frame', 'extension'])
+def test_pickle_parser_allocations_refuse_before_unpickler_construction(tmp_path, monkeypatch, kind):
+    import struct
+    path = tmp_path/'parser-budget.pt'
+    if kind == 'sparse_memo':
+        raw = b'\x80\x02}r'+struct.pack('<I', 2**30)+b'.'
+    elif kind == 'memoize':
+        raw = b'\x80\x04}'+b'\x94'*3000+b'.'
+    elif kind == 'frame':
+        raw = b'\x80\x04\x95'+struct.pack('<Q', 2**40)+b'}.'
+    else:
+        raw = b'\x80\x02\x82\x01.'
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('archive/data.pkl', raw)
+        archive.writestr('archive/data/0', b'1234')
+    class ConstructorRefusal(px.pickle.Unpickler):
+        def __init__(self, *args, **kwargs):
+            pytest.fail('unpriced parser reached C Unpickler construction')
+    monkeypatch.setattr(px.pickle, 'Unpickler', ConstructorRefusal)
+    with pytest.raises(RuntimeError, match='pickle memo|pickle frame|extension pickle'):
+        load(path)
