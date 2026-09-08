@@ -95,16 +95,33 @@ def main():
         max_buffer_bytes=max(record['source_file_bytes'] for record in source_records.values()),
         max_scratch_bytes=4*1024**2)
     s = sum(cc._capture_storage_bytes(name, census, identity['max_act_rows']) for name in NAMES)
-    # Persistent expected CPU S, largest serialized F, loaded CPU S, possible
-    # GPU S, 4 MiB scratch plus 2 GiB explicit runtime/profile/metadata allowance.
+    # Nominal physical envelope, separate from the live cap-minus-margin gate.
+    # Expected references exist only in replay; source page advice is best effort.
     plan = dict(expected_cpu=s, serialized=policy['max_buffer_bytes'],
         source_page_cache=policy['max_buffer_bytes'],
         loaded_cpu=s, loaded_gpu=s, scratch=policy['max_scratch_bytes'], runtime=2*1024**3)
     if sum(plan.values()) > guard.cap_bytes:
         raise RuntimeError('unchanged PB cap refuses diagnostic phase plan')
+    # Price retained source file contents cumulatively: advice is not admission.
+    # CUDA appears twice in the guard if it is also charged to this cgroup.
+    # At transfer the existing CPU S is live while the production check reserves
+    # another 2*S. Before the read no new GPU storage exists for the current unit.
+    source_pages = gpu_resident = 0
+    phase_future = dict(replay=0, seal=0, prefetch=0)
+    for name in NAMES:
+        f = source_records[name]['source_file_bytes']
+        unit_s = cc._capture_storage_bytes(name, census, identity['max_act_rows'])
+        source_pages += f
+        load_bytes = f + source_pages + unit_s + policy['max_scratch_bytes']
+        for operation in ('replay', 'seal'):
+            phase_future[operation] = max(phase_future[operation], load_bytes)
+        phase_future['prefetch'] = max(phase_future['prefetch'],
+            load_bytes + 2*gpu_resident, source_pages + 3*unit_s + 2*gpu_resident)
+        gpu_resident += unit_s
     write(args.out/'inputs.json', dict(scope='two full-size unit copies; diagnostic subset envelope',
         source_identity_sha256=source_journal['identity_sha256'], source_entries=source_records,
         policy=policy, phase_bound=plan, phase_bound_bytes=sum(plan.values()),
+        phase_future_bytes=phase_future, guard_threshold_bytes=guard.cap_bytes-guard.margin_bytes,
         torch=torch.__version__, cuda=torch.version.cuda))
     expected = {name: torch.load(root/record['path'], weights_only=True) for name, record in records.items()}
     acts = {name: value['inputs'] for name, value in expected.items()}
@@ -170,6 +187,10 @@ def main():
                 for record in records.values():
                     path = root/record['path']
                     px.release_activation_cache_file_pages(path, expected_stat=path.stat())
+                # Evaluate the phase against observed prepared owners and the
+                # actual 4 GiB threshold before entering the timed interval.
+                phase_preflight = guard.check('before_diagnostic_phase:' + operation,
+                    reserve_bytes=phase_future[operation])
                 buffer_start = len(buffer_io)
                 reads = {'bytes': 0, 'opens': 0}
                 class Counted:
@@ -240,7 +261,8 @@ def main():
                 row = dict(arm=arm, mode=mode, operation=operation, started=started,
                     finished=started+elapsed, elapsed_s=elapsed, source_reads=reads,
                     proc_io_delta={key: after[key]-before[key] for key in before},
-                    execution=execution, expected_cpu_bytes=s if operation == 'replay' else 0,
+                    execution=execution, phase_preflight=phase_preflight,
+                    expected_cpu_bytes=s if operation == 'replay' else 0,
                     buffer_io=buffer_io[buffer_start:],
                     memory_guard=guard.snapshot(),
                     tensor_hashes=expected_hashes, live_serialized_buffers=sum(
