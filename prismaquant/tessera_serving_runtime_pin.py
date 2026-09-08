@@ -168,7 +168,7 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: the same commit.  Re-check it against the COMMIT rather than a past HEAD,
 #: which nobody can re-run::
 #:
-#:     git -C "$TS" cat-file -p 9d2314819f027e53ba169039a10cd27594d36670:src/tessera/serving/runtime_contract.json | sha256sum
+#:     git -C "$TS" cat-file -p 07ad344c3275bb2fa7ce2432f93d89945d66f4c2:src/tessera/serving/runtime_contract.json | sha256sum
 #:
 #: Re-pinned 2026-09-05 to ba582d4 (Tessera #356) for the priced-input
 #: exporter snapshot API required by PrismaQuant #231. The v22 contract bytes
@@ -182,8 +182,12 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: carries LFM construction output sizes; the admission answer, native
 #: extensions and serving-cell table are unchanged. Native TP2 remains an
 #: explicit research construction with no runtime-cell promotion.
+#: Re-pinned 2026-09-08 to 07ad344c3 (Tessera #431) for the explicit
+#: packed checkpoint execution declaration and strict typed export carriers.
+#: Contract bytes and admission answers remain unchanged. This is a producer
+#: API/source dependency, with no full-model or TP2 qualification claim.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "9d2314819f027e53ba169039a10cd27594d36670"
+    "07ad344c3275bb2fa7ce2432f93d89945d66f4c2"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
