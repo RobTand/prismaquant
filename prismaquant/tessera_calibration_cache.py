@@ -312,7 +312,8 @@ def require_capture_contract(path, expected_sha256=None):
 
 
 def prefetch_capture(path, *, expected_identity, census, names, device,
-                     expected_sha256=None):
+                     expected_sha256=None, resource_check=None,
+                     release_file_pages=False):
     """Verify selected files and make all selected X/H resident before encoding."""
     import torch
     from .perturbed_x_cache import activation_cache_filename
@@ -334,12 +335,26 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
         if record.get('path') != relative:
             raise RuntimeError(f'{name}: noncanonical capture artifact path')
         artifact = path.parent/relative
-        if sha256(artifact) != record.get('sha256'):
+        file_stat = artifact.stat() if release_file_pages else None
+        if sha256(artifact, resource_check=resource_check,
+                  release_read_pages=release_file_pages) != record.get('sha256'):
             raise RuntimeError(f'{name}: capture artifact checksum mismatch')
+        if resource_check is not None:
+            columns = int(census['unit_shapes'][name][1])
+            resource_check(f'before_capture_prefetch:{name}', reserve_bytes=8*(
+                columns**2+min(census['counts'][name], expected_identity['max_act_rows'])*columns))
         payload = torch.load(artifact,map_location='cpu',weights_only=True)
         x,h = _validate_tensors(name,payload,census,expected_identity['max_act_rows'])
         acts[name],hessians[name] = x.to(device),h.to(device)
         counts[name],maxima[name] = payload['count'],payload['max_abs']
+        if release_file_pages:
+            from .perturbed_x_cache import release_activation_cache_file_pages
+            if str(device).startswith('cuda'):
+                torch.cuda.synchronize(device)
+            del payload, x, h
+            release_activation_cache_file_pages(artifact, expected_stat=file_stat)
+        if resource_check is not None:
+            resource_check(f'after_capture_prefetch:{name}')
     if str(device).startswith('cuda'):
         torch.cuda.synchronize(device)
     resident = sum(t.numel()*t.element_size() for t in (*acts.values(),*hessians.values()))

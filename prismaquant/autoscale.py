@@ -199,6 +199,11 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         terms=terms, memory_bytes=sum(terms.values()), disk_bytes=disk,
         full_hessian_bytes=total_h, full_prefix_bytes=total_x,
         body_layer_bytes={str(k): v for k, v in sorted(body.items())},
+        body_loader_transient_bytes={str(k): pack_peak[k]+max(
+            (size for key, size in concat.items() if key[0] == k), default=0)
+            for k in range(layers)},
+        body_source_file_bytes={str(k): v for k, v in sorted(raw_body.items())},
+        live_layer_prefix=live_prefix,
         transient_status='conservative physical allocator bound for direct final-slab packer')
     if capture_policy != 'shared-inputs-bounded-v1':
         return result
@@ -252,6 +257,54 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # mutually exclusive phase maps, with the maximum defining admission.
     del result['terms']
     return result
+
+
+def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
+                              cache_slots, prefetch_workers, headroom_gb,
+                              anchor_batch_size=1):
+    """Bound selected-source preparation separately from resident encoding.
+
+    This extends the source loader's header/dtype accounting. No source
+    forward or calibration accumulation occurs. Encoder factors currently
+    remain memoized for every selected unit and all three scale planes.
+    """
+    import math
+    if not unit_shapes or type(anchor_batch_size) is not int or anchor_batch_size < 1:
+        raise ValueError('selected anchors require nonempty units and a positive batch size')
+    source = streamed_calibration_resources(model_path, unit_shapes=unit_shapes,
+        counts=counts, nsamples=1, seqlen=1, max_act_rows=max_act_rows,
+        cache_slots=cache_slots, prefetch_workers=prefetch_workers,
+        headroom_gb=headroom_gb)
+    prefix = source['live_layer_prefix']
+    layers = sorted({str(int(name[len(prefix):].split('.', 1)[0])) for name in unit_shapes}, key=int)
+    weights = sum(math.prod(shape)*4 for shape in unit_shapes.values())
+    widest_weight = max(math.prod(shape)*4 for shape in unit_shapes.values())
+    widest_h = max(shape[1]**2*4 for shape in unit_shapes.values())
+    widest_x = max(min(counts[name], max_act_rows)*shape[1]*4
+                   for name, shape in unit_shapes.items())
+    terms = source['terms']
+    common = dict(selected_source_weight_bytes=weights,
+                  declared_headroom_bytes=terms['declared_headroom_bytes'])
+    preparation = dict(common, nonbody_source_bytes=terms['nonbody_source_bytes'],
+        source_window_bytes=sum(sorted((source['body_layer_bytes'][k] for k in layers),
+                                       reverse=True)[:cache_slots]),
+        loader_transient_bytes=sum(sorted((source['body_loader_transient_bytes'][k] for k in layers),
+                                          reverse=True)[:min(prefetch_workers, cache_slots)]))
+    encoding = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
+        selected_prefix_bytes=source['full_prefix_bytes'],
+        encoder_memo_bytes=3*(source['full_hessian_bytes']+
+                            sum(shape[1]*4 for shape in unit_shapes.values())),
+        factorization_scratch_bytes=4*widest_h,
+        compatible_batch_weight_bytes=anchor_batch_size*widest_weight*4,
+        entry_validation_bytes=2*(widest_h+widest_x),
+        source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight)
+    phases = dict(source_preparation=preparation, resident_anchors=encoding)
+    return dict(schema='prismaquant.selected_anchor_resources.v1', phases=phases,
+        memory_bytes=max(sum(phase.values()) for phase in phases.values()),
+        selected_source_weight_bytes=weights, selected_layers=layers,
+        source_header_sha256=source['source_header_sha256'],
+        encoder_memo_policy='all-selected-units-all-scale-planes',
+        source_forward_count=0)
 
 
 def _num_layers(cfg: dict) -> int:

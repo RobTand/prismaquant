@@ -852,7 +852,8 @@ class StreamingContext:
         self.layer_cache.put(L, tensors)
         return tensors, "cold"
 
-    def install(self, L: int, *, require_prefetched: bool = False):
+    def install(self, L: int, *, require_prefetched: bool = False,
+                prefetch_following: bool = True):
         tensors, src = self.ensure_loaded(
             L, require_prefetched=require_prefetched,
         )
@@ -861,7 +862,8 @@ class StreamingContext:
         if audit is not None:
             audit.observe_layer(L, tensors)
         # Re-derive the lookahead window now that this layer's slot is free.
-        self._top_up_prefetch(L)
+        if prefetch_following:
+            self._top_up_prefetch(L)
         # v20 step 3+4: value-aware retention. The historical
         # one-way-stream assumption (discard immediately after install)
         # is wrong for multi-shard workloads where every phase-3 shard

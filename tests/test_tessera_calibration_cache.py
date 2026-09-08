@@ -57,6 +57,22 @@ def test_prefetch_only_selected_and_preserves_full_h_and_prefix_precision(captur
     assert values[2] == {'a':5}
 
 
+def test_selected_prefetch_guards_and_advises_verified_files(capture, monkeypatch):
+    from prismaquant import perturbed_x_cache
+    root, path, census, identity, acts, hessians, record = capture
+    observed, advised = [], []
+    monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages',
+        lambda path, *, expected_stat: advised.append((path.name, expected_stat.st_size)))
+    values, _ = cc.prefetch_capture(record['path'], expected_identity=identity,
+        census=census, names=['a'], device='cpu', expected_sha256=record['sha256'],
+        release_file_pages=True, resource_check=lambda label, **kwargs: observed.append((label, kwargs)))
+    assert advised == [('a.pt', (root/'inputs/a.pt').stat().st_size)]
+    assert ('before_capture_prefetch:a', {'reserve_bytes': 64}) in observed
+    assert observed[-1] == ('after_capture_prefetch:a', {})
+    assert torch.equal(values[0]['a'], acts['a'])
+    assert torch.equal(values[1]['a'], hessians['a'])
+
+
 @pytest.mark.parametrize('change',['artifact','manifest','source','draw','geometry','scope'])
 def test_prefetch_refuses_drift(capture,change):
     root,path,census,identity,acts,hessians,record = capture
@@ -134,11 +150,20 @@ def test_layer_writer_refuses_insufficient_disk(capture, tmp_path, monkeypatch):
         cc.CaptureWriter(tmp_path/'no-space', census_path=path, identity=identity)
 
 
-def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path):
+@pytest.mark.parametrize('streamed_selection', [False, True])
+def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,streamed_selection):
     from test_tessera_campaign_resume import _main_fixture,UNIT
     tc,_,argv,model,inputs = _main_fixture(monkeypatch,tmp_path)
     model.config = SimpleNamespace(_attn_implementation='eager')
-    monkeypatch.setattr(prismaquant,'pretrained_initialization_contract',lambda model:canonical_fields()['model_load_contract'])
+    fields = canonical_fields()
+    if streamed_selection:
+        fields['model_load_contract'] = dict(schema='prismaquant.streaming_initialization.v1',
+            scope='streamed_text_source_forward', status='completed',
+            transformers_version=importlib.metadata.version('transformers'),
+            model_class='SyntheticSource', dtype='torch.bfloat16', layers_prefix='model.layers.',
+            num_layers=1, persistent_tensors=1, derived_buffers=0,
+            state_sha256='a'*64, source_map_sha256='b'*64)
+    monkeypatch.setattr(prismaquant,'pretrained_initialization_contract',lambda model:fields['model_load_contract'])
     argv += ['--attention-implementation','eager']
     source = tmp_path/'source'
     source.mkdir()
@@ -151,7 +176,7 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path):
         seed=0,nsamples=32,seqlen=512,fit_tokens_min=4)
     census = tc.calibration_census({UNIT:4},{UNIT:3.},args=SimpleNamespace(model=str(source),
         nsamples=32,seqlen=512,seed=0,layer_stride=1),groups={'u:'+UNIT:[UNIT]},
-        dense_targets=[UNIT],expert_targets=[],shapes={UNIT:[32,256]},identity=calibration,**canonical_fields())
+        dense_targets=[UNIT],expert_targets=[],shapes={UNIT:[32,256]},identity=calibration,**fields)
     census_path = tmp_path/'census.json'
     census_path.write_text(json.dumps(census))
     argv += ['--nsamples','32','--seqlen','512','--layer-stride','1',
@@ -160,7 +185,26 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path):
     assert tc.main([*argv,'--capture-calibration-out',str(root)]) == 0
     monkeypatch.setattr(tc,'_collect_activations',lambda *a,**k: pytest.fail('repeated forward'))
     assert tc.main([*argv,'--capture-calibration-out',str(root)]) == 0
+    if streamed_selection:
+        from prismaquant import cost_streaming, autoscale
+        source_calls = []
+        def snapshot(names, **kwargs):
+            source_calls.append(list(names))
+            return {UNIT: model.model.layers[0].proj.weight.detach().clone()}, dict(
+                schema='prismaquant.selected_source_weights.v1', source_forward_count=0)
+        runner = SimpleNamespace(model=model, snapshot_selected_weights=snapshot,
+            shutdown=lambda: source_calls.append('shutdown'))
+        monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *a, **k: runner)
+        monkeypatch.setattr(autoscale, 'selected_anchor_resources', lambda *a, **k: dict(
+            memory_bytes=1024**3, selected_source_weight_bytes=32768))
+        selection = tmp_path/'units.json'
+        selection.write_text(json.dumps(dict(schema=tc.UNITS_SCHEMA,
+            groups=[dict(key='u:'+UNIT, members=[UNIT])])))
+        argv += ['--streaming', '--units', str(selection),
+                 '--calibration-cache-sha256', cc.sha256(root/'capture_manifest.json')]
     assert tc.main([*argv,'--calibration-cache',str(root/'capture_manifest.json')]) == tc.EXIT_EMPTY_MENU
+    if streamed_selection:
+        assert source_calls == [[UNIT], 'shutdown']
 
 
 def test_driver_capture_and_plan_bind_one_complete_capture(capture):

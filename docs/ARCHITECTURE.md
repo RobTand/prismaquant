@@ -1,7 +1,29 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `perf/tessera-layout-pricing`. Stamps
+As of: 2026-09-08 · `fix/selected-source-anchors`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/selected-source-anchors`) for selected Tessera
+anchor preparation from a complete canonical capture (#370). `--streaming`
+with `--units` requires the capture manifest and its expected SHA-256. Scope,
+geometry, calibration draw, runtime, initialization witness and current source
+hashes remain bound to the full census. The initialization witness describes
+the historical capture; sparse preparation does not certify a new full-source
+forward. `StreamedCausalLM.snapshot_selected_weights` uses the existing layer
+cache and a finite selected-layer prefetch sequence, requires resident delivery,
+and copies selected logical expert views into independent storage. Completed
+source layers and fixed source state are released before selected X/H prefetch.
+
+The campaign planner reserves the larger of selected source preparation and
+resident anchor encoding, using source headers and the existing loader dtype
+policy. It records the selected layers and phase terms in each planned row;
+PrismaBuild continues to own placement and admission. CUDA execution requires
+source-page advice and the existing finite-cgroup physical memory guard. The
+encoder memo is currently charged for every selected unit and all scale planes;
+a large selected stack may still exceed admission. This introduces no new
+capture, sampling policy, joint scope, serving format or numerical calibration.
+Gates: `tests/test_tessera_selected_source.py`,
+`tests/test_glm_campaign_streaming.py`, and existing capture/fanout/resume tests.
 
 Re-stamped (2026-09-08, `perf/tessera-layout-pricing`) for producer-owned
 payload-free pricing. `tessera_footprint` uses Tessera's paired

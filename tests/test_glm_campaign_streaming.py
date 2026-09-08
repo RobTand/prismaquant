@@ -255,6 +255,52 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
             else:
                 assert guard is None
 
+        # Reuse that actual complete capture through the selected-source CLI,
+        # including one real pinned-producer anchor and a checkpoint resume.
+        import pickle
+        dense_group = next(key for key in result['anchor_groups']
+                           if key.startswith('u:') and '.experts.' not in key)
+        names = result['anchor_groups'][dense_group]
+        selection_path = tmp_path/'selected-units.json'
+        selection_path.write_text(json.dumps(dict(schema=campaign.UNITS_SCHEMA,
+            model=str(source), layer_stride=1,
+            groups=[dict(key=dense_group, members=names)])))
+        def no_forward(*args, **kwargs):
+            pytest.fail('selected anchor reuse repeated calibration')
+        monkeypatch.setattr(campaign, '_collect_activations', no_forward)
+        original_menus = campaign.expand_menus_for_targets
+        def one_rung(weights, targets, **kwargs):
+            assert set(weights) == set(names)
+            assert all(not value.is_meta for value in weights.values())
+            menus = original_menus(weights, targets, **kwargs)
+            narrowed = {name: [row for row in rows
+                if row.format_name == 'TESSERA_E4M3_K1_R1024'] for name, rows in menus.items()}
+            assert all(narrowed.values()), 'native fixture must admit the measured rung'
+            return narrowed
+        monkeypatch.setattr(campaign, 'expand_menus_for_targets', one_rung)
+        selected_out = tmp_path/'selected-cost.pkl'
+        selected_argv = [*common, '--out', str(selected_out),
+            '--cache-dir', str(tmp_path/'selected-cache'), '--units', str(selection_path),
+            '--calibration-census', str(census), '--calibration-cache', str(shared_manifest),
+            '--calibration-cache-sha256', capture.sha256(shared_manifest),
+            '--max-rounds', '1']
+        assert campaign.main(selected_argv) == 0
+        with selected_out.open('rb') as handle:
+            selected = pickle.load(handle)
+        assert set(selected['costs']) == set(names)
+        receipt = selected['provenance']['selected_source_preparation']
+        assert receipt['source_forward_count'] == 0
+        assert receipt['full_source_initialization_repeated'] is False
+        assert all(row['source'] != 'cold' for row in receipt['layers'])
+        journal = selected_out.with_suffix('.anchors.json')
+        first = json.loads(journal.read_text())
+        assert campaign.main(selected_argv) == 0
+        second = json.loads(journal.read_text())
+        assert first['identity_sha256'] == second['identity_sha256']
+        with selected_out.open('rb') as handle:
+            resumed = pickle.load(handle)
+        assert selected['costs'] == resumed['costs']
+
 
 def test_streamed_bf16_keeps_hf_strict_fp32_source_slots(glm_checkpoint, tmp_path):
     """BF16 forward weights retain HF-declared strict FP32 recurrence state."""
@@ -284,6 +330,43 @@ def test_streamed_bf16_keeps_hf_strict_fp32_source_slots(glm_checkpoint, tmp_pat
             runner.context.unload(layer)
         assert any(name.endswith('conv1d.weight') for name in observed)
         assert any(name.endswith('e_score_correction_bias') for name in observed)
+    finally:
+        runner.shutdown()
+
+
+def test_selected_glm_source_copies_dense_and_logical_expert_without_forward(glm_checkpoint, tmp_path, monkeypatch):
+    from prismaquant.routed_experts import profile_declared_packed_expert_projections
+    from prismaquant.autoscale import selected_anchor_resources
+    reference, source = glm_checkpoint
+    profile = Glm5NextProfile()
+    expert = profile_declared_packed_expert_projections(reference, profile)[0]
+    dense = next(name for name, module in reference.named_modules()
+                 if isinstance(module, torch.nn.Linear) and '.layers.0.mlp.' in name)
+    expected = {dense: dict(reference.named_modules())[dense].weight, expert.qname: expert.weight}
+    shapes = {name: list(value.shape) for name, value in expected.items()}
+    resources = selected_anchor_resources(source, unit_shapes=shapes,
+        counts={name: 257 for name in shapes}, max_act_rows=7,
+        cache_slots=2, prefetch_workers=1, headroom_gb=0)
+    runner = build_streamed_causal_lm(str(source), device=torch.device('cpu'),
+        dtype=torch.float32, offload_folder=str(tmp_path/'selected-offload'),
+        profile=profile, max_cache_slots=2, prefetch_workers=1,
+        prefetch_min_available_gb=0, cache_headroom_gb=0,
+        prefetch_lookahead=1, require_prefetched_residency=True,
+        attn_implementation='eager')
+    def no_forward(*args, **kwargs):
+        pytest.fail('selected source must not run a calibration forward')
+    monkeypatch.setattr(runner.model, 'forward', no_forward)
+    try:
+        weights, receipt = runner.snapshot_selected_weights(list(expected),
+            max_resident_bytes=resources['selected_source_weight_bytes'])
+        for name in expected:
+            assert torch.equal(weights[name], expected[name])
+            assert weights[name].untyped_storage().nbytes() == weights[name].numel()*weights[name].element_size()
+        assert receipt['source_forward_count'] == 0
+        assert [row['layer'] for row in receipt['layers']] == sorted({runner.layer_index_for_qname(n) for n in expected})
+        assert all(p.is_meta for layer in runner.layers for p in layer.parameters())
+        assert runner.context.layer_cache._cache == {}
+        assert runner.context._inflight == {}
     finally:
         runner.shutdown()
 
