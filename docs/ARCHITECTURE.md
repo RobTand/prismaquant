@@ -1,7 +1,28 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/glm-packed-source-20260908`. Stamps
+As of: 2026-09-08 · `plan/glm-first-release-rate-band`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `plan/glm-first-release-rate-band`) for the optional
+campaign `--family-restriction` pricing contract. Its closed
+`prismaquant.tessera_campaign_family_restriction.v1` JSON supplies nonempty
+canonical Tessera family lists for both `dense` and `routed_moe`. Campaign
+discovery supplies each unit's topology and the existing profile-aware
+`unit_structure_from_stats` validator resolves its structure; missing,
+conflicting or malformed facts refuse. The existing menu expander receives
+the family's allowlist before rung enumeration, and its cache key binds that
+allowlist alongside shape and serving context. Checkpoint and cost provenance
+bind the canonical policy and exact unit structures. Restricted seed intake
+refuses incompatible active families and out-of-band anchors before linking
+their wires; the existing producer receipt checks still govern accepted bytes.
+Fanout merge refuses mixed policies or incomplete structure maps and preserves
+their complete union. The option narrows research pricing only: existing
+reader, shape, serving-cell, release and export gates still decide support.
+Unset preserves the prior menu and seed behavior. No format default, producer
+pin, wire arithmetic, residency mechanism or PB placement changes.
+Gates: `tests/test_tessera_campaign_family_restriction.py`, existing campaign
+resume/fanout/context tests. CPU contract tests do not qualify native fit,
+batch throughput or a serving release.
 
 Re-stamped (2026-09-08, `integrate/glm-packed-source-20260908`) for the
 synchronized development/serving dependency pin to Tessera `07ad344c3275`

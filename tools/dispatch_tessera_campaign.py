@@ -681,7 +681,8 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
     selection.
     """
     from prismaquant.tessera_campaign import (
-        SCHEMA, campaign_population_block, canonical_refusals, selection_stack_samples)
+        SCHEMA, campaign_population_block, canonical_refusals, selection_stack_samples,
+        parse_family_restriction)
     from prismaquant.tessera_campaign import ExpertPopulation
     # The keys a merged payload must land under are the ones the campaign and
     # the allocation share.  Spelling them here as literals is how a merge
@@ -695,6 +696,32 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
             raise MergeRefused(f"{row_id}: not a {SCHEMA} payload")
 
     provenances = {row: payload["provenance"] for row, payload in row_payloads.items()}
+    family_policies, restricted_structures = {}, {}
+    for row_id, prov in provenances.items():
+        restriction = prov.get("family_restriction")
+        if restriction is None:
+            family_policies[row_id] = None
+            continue
+        if not isinstance(restriction, dict) or set(restriction) != {"policy", "structure_by_unit"}:
+            raise MergeRefused(f"{row_id}: invalid family restriction provenance")
+        try:
+            policy = parse_family_restriction(restriction["policy"])
+        except (ValueError, TypeError) as exc:
+            raise MergeRefused(f"{row_id}: invalid family restriction policy: {exc}") from exc
+        structures = restriction["structure_by_unit"]
+        members = {name for group in prov["unit_selection"]["groups"]
+                   for name in group.get("sampled", group["members"])}
+        if (policy is None or not isinstance(structures, dict) or set(structures) != members
+                or any(s not in ("dense", "routed_moe") for s in structures.values())):
+            raise MergeRefused(f"{row_id}: family restriction must cover exact selected unit structures")
+        for name, structure in structures.items():
+            if name in restricted_structures:
+                raise MergeRefused(f"{row_id}: family restriction repeats selected unit {name}")
+            if name in prov["campaign_scope"]["expert_targets"] and structure != "routed_moe":
+                raise MergeRefused(f"{row_id}: family restriction contradicts projected expert {name}")
+            restricted_structures[name] = structure
+        family_policies[row_id] = policy
+    family_policy = _require_equal("provenance.family_restriction.policy", family_policies)
     for field in SHARED_PROVENANCE:
         _require_equal(f"provenance.{field}",
                        {row: prov.get(field) for row, prov in provenances.items()})
@@ -833,6 +860,9 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
 
     reference = provenances[sorted(provenances)[0]]
     provenance = {key: value for key, value in reference.items()}
+    if family_policy is not None:
+        provenance["family_restriction"] = {"policy": family_policy,
+            "structure_by_unit": dict(sorted(restricted_structures.items()))}
     provenance.update({
         "surfaces": dict(sorted(surfaces.items())),
         "anchor_groups": dict(sorted(anchor_groups.items())),
