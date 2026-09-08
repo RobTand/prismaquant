@@ -569,12 +569,8 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         return sum(value.numel() * value.element_size() for value in self._operators.values())
 
     def arithmetic_identity(self, measurement_dtype):
-        identity = arithmetic_identity(measurement_dtype, self.projection_backend)
-        identity.update(
-            weight_projection='summed_output_operator_fp32_gemm',
-            operator_accumulation='sum_fp32_matrices_in_backward_invocation_order',
-            contraction_order='sum_operators_then_project_each_signed_component')
-        return identity
+        from .joint_statistics_replay import statistics_arithmetic_identity
+        return statistics_arithmetic_identity(measurement_dtype, self.projection_backend)
 
     def begin_probe(self):
         if self._phase != 'new' or not (self.handles or self.forward_originals):

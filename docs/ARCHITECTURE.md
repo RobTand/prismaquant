@@ -3,6 +3,29 @@
 As of: 2026-09-08 · `feat/joint-operator-windows`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `feat/joint-operator-windows`) for opt-in streamed
+operator windows (#392). A closed `operator_windows` v1 policy bounds GW/GA,
+one FP32 candidate delta, PWC residency and serialized load buffers, workspace
+and one replay cotangent fork. The existing target planner supplies whole-target
+windows. Each window observes every calibration batch before projection; all
+signed components sum before squaring. The installed source and its settled
+lookahead remain owned by the existing streaming cache across all windows and
+probes. PWC owns identity preparation and candidate read windows; no complete
+layer dW menu or parameter-gradient plane is created. Earlier windows use one
+quiescent shared-cotangent fork per batch; only the final window advances the
+original shared adjoints and outgoing boundary. Eval mode is required, observed
+Torch RNG consumption refuses, and source fingerprints remain sealed across
+windows/probes. This assumes the profile's source forward is deterministic;
+it does not certify arbitrary mutable user modules. CUDA execution requires the
+bounded source environment and the conservative cgroup-plus-CUDA physical
+guard. Workspace/source/graph fit remains a measured admission requirement.
+The arithmetic and complete policy enter probe/checkpoint identity; legacy
+scalar rows cannot silently mix with summed FP32 operator rows. Default behavior
+is unchanged. Gates include dense/packed FP64 residual oracles, exact replay
+cotangents, shared-state forks, PWC file/alias ownership and interrupted resume
+in `tests/test_joint_operator_windows.py`. Native end-to-end profiling and full
+GLM fit remain pending; this CPU gate alone establishes neither.
+
 Re-stamped (2026-09-08, `feat/joint-operator-windows`) for sealed operator
 diagnostics (#392). The statistics lease reduces each complete FP32 GW sum
 into a trace and optional independently owned CPU column vector. It requires
