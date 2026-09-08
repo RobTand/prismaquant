@@ -393,7 +393,7 @@ class ProbeObserver(StorageObserver):
         self.stack.close()
 
 
-def run_once(fixture, ids, mode, device, out, index, *, profiled):
+def run_once(fixture, ids, mode, device, out, index, *, profiled, reference=None):
     from prismaquant import aura_cost
     from prismaquant.cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
@@ -459,6 +459,13 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled):
                 if len(packed_windows) < 2:
                     raise RuntimeError('native fixture did not force multiple whole-target routed windows')
                 result['distinct_packed_windows'] = len(packed_windows)
+            result['parity'] = require_parity(result if reference is None else reference, result)
+            result.update(status='computed_parity_checked', computed_unix=time.time())
+            if profiled:
+                # A later trace export/analysis failure must not erase the
+                # completed numerical and ownership gates. This file does not
+                # replace the action's terminal success or complete ABBA gate.
+                write_json(out / f'arm-{index}-{mode}-computed.json', result)
             if profiler is not None:
                 trace = out / f'arm-{index}-{mode}.trace.json'
                 profiler.export_chrome_trace(str(trace))
@@ -490,6 +497,7 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled):
                 torch.cuda.empty_cache()
         result['after_source_release'] = physical_snapshot(device)
         result['finished_unix'] = time.time()
+        result['status'] = 'complete'
         return result
 
 
@@ -546,17 +554,17 @@ def main(argv=None):
                     raise RuntimeError('source/PWC input bytes changed before an arm')
                 arm = dict(index=index, mode=mode, started_unix=time.time(), invocations=[])
                 record['arms'].append(arm)
-                observed = run_once(fixture, ids, mode, device, args.out, index, profiled=True)
+                observed = run_once(fixture, ids, mode, device, args.out, index,
+                                    profiled=True, reference=reference)
                 if reference is None:
                     reference = observed
-                observed['parity'] = require_parity(reference, observed)
                 arm['profiled'] = observed
                 write_json(args.out / 'progress.json', record)
                 started = time.perf_counter()
                 arm['measurement_started_unix'] = time.time()
                 while time.perf_counter() - started < args.seconds:
-                    observed = run_once(fixture, ids, mode, device, args.out, index, profiled=False)
-                    observed['parity'] = require_parity(reference, observed)
+                    observed = run_once(fixture, ids, mode, device, args.out, index,
+                                        profiled=False, reference=reference)
                     arm['invocations'].append(observed)
                 arm['measurement_finished_unix'] = time.time()
                 arm['median_probe_seconds'] = statistics.median(r['elapsed_seconds'] for r in arm['invocations'])
