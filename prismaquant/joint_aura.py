@@ -193,6 +193,86 @@ def prefetch_joint_cache(cache, names, formats_by_qname, *, max_resident_bytes, 
     return {"entries": len(keys), "resident_bytes": nbytes, "loaded": loaded, "misses": 0}
 
 
+@dataclass(frozen=True)
+class _JointActivationGroup:
+    spec: object
+    formats: tuple[str, ...]
+    activation_identity_json: str
+
+
+@dataclass(frozen=True)
+class _JointTargetRequirements:
+    shape: tuple[int, int]
+    groups: tuple[_JointActivationGroup, ...]
+    statistics_bytes: int
+
+
+def _joint_projection_requirements(modules, specs_by_qname, *, activation_max_abs=None,
+                                   projection_backend=None):
+    """Resolve shared lease/planner admission without hooks or tensor allocation.
+
+    Preserve target and format insertion order. Callable identity distinguishes
+    dynamic groups only in this process; no pointer becomes persisted identity.
+    Returned specs are borrowed for lease construction, never a tensor plan.
+    """
+    from .format_registry import FormatSpec
+    from .joint_projection_backend import require_prewarmed_projection
+
+    if (not isinstance(modules, Mapping) or not isinstance(specs_by_qname, Mapping)
+            or set(modules) != set(specs_by_qname)):
+        raise ValueError("joint AURA module/spec coverage differs")
+    device = next((module.weight.device for module in modules.values()
+                   if isinstance(module, (nn.Linear, PackedExpertProjection))), torch.device("cpu"))
+    backend = require_prewarmed_projection(projection_backend, device=device)
+    maxima = dict(activation_max_abs or {})
+    dense_modules = [mod for mod in modules.values() if isinstance(mod, nn.Linear)]
+    if len({id(mod) for mod in dense_modules}) != len(dense_modules):
+        raise ValueError("joint AURA refuses aliased Linear modules")
+    packed_aliases, requirements = set(), {}
+    for name, module in modules.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("joint AURA target name must be nonempty text")
+        if isinstance(module, PackedExpertProjection):
+            if module.qname != name:
+                raise ValueError(f"joint AURA packed projection name differs for {name}")
+            rows = module.output_slice
+            alias = (id(module.parameter), module.expert_id, rows.start, rows.stop)
+            if alias in packed_aliases:
+                raise ValueError("joint AURA refuses aliased packed projection views")
+            packed_aliases.add(alias)
+        elif not isinstance(module, nn.Linear):
+            raise TypeError(f"joint AURA target {name} is not Linear")
+        weight = module.weight
+        if (not isinstance(weight, torch.Tensor) or weight.ndim != 2
+                or any(size <= 0 for size in weight.shape) or not weight.is_floating_point()):
+            raise ValueError(f"joint AURA target {name} requires a floating nonempty matrix")
+        backend.require_device(weight.device)
+        choices = specs_by_qname[name]
+        if not isinstance(choices, Mapping) or not choices:
+            raise ValueError(f"joint AURA missing spec coverage for {name}")
+        grouped = {}
+        for fmt, spec in choices.items():
+            if not isinstance(fmt, str) or not fmt or not isinstance(spec, FormatSpec):
+                raise ValueError(f"joint AURA invalid resolved format for {name}")
+            receipt = activation_identity(spec, maxima, name)
+            if receipt["input_global_scale"] is not None:
+                if weight.shape[1] % spec.static_activation_contract.group_size:
+                    raise ValueError(f"joint AURA static activation group geometry differs for {name}")
+                # Static served QDQ owns this path, regardless of the unused
+                # dynamic callable that a registry row happens to carry.
+                callable_key = 0
+            else:
+                callable_key = id(spec.activation_quantize_dequantize)
+            group = (identity_sha256(receipt), callable_key)
+            grouped.setdefault(group, (spec, [], json.dumps(receipt, sort_keys=True,
+                separators=(",", ":"), allow_nan=False)))[1].append(fmt)
+        groups = tuple(_JointActivationGroup(spec, tuple(formats), receipt)
+                       for spec, formats, receipt in grouped.values())
+        requirements[name] = _JointTargetRequirements(tuple(weight.shape), groups,
+            weight.numel() * 4 * (1 + sum(group.spec.act_quant_changes_input for group in groups)))
+    return backend, requirements
+
+
 class SignedJointProjectionLease:
     """Observe a resident layer and retain only signed scalar probe terms.
 
@@ -203,12 +283,10 @@ class SignedJointProjectionLease:
 
     def __init__(self, modules, specs_by_qname, delta_weights, *, activation_max_abs=None,
                  projection_backend=None):
-        from .joint_projection_backend import require_prewarmed_projection
-
         self.modules = dict(modules)
-        device = next((module.weight.device for module in self.modules.values()
-                       if isinstance(module, (nn.Linear, PackedExpertProjection))), torch.device("cpu"))
-        self.projection_backend = require_prewarmed_projection(projection_backend, device=device)
+        self.projection_backend, requirements = _joint_projection_requirements(
+            self.modules, specs_by_qname, activation_max_abs=activation_max_abs,
+            projection_backend=projection_backend)
         self._projection_product_sum = self.projection_backend.product_sum
         self.specs = specs_by_qname
         self.deltas = delta_weights
@@ -218,38 +296,12 @@ class SignedJointProjectionLease:
         self.active = False
         self.terms = {}
         self.groups = {}
+        self._statistics_capacity_bytes = sum(row.statistics_bytes for row in requirements.values())
         self.telemetry = {"qdq_calls": 0, "operator_gemms": 0, "persistent_cache_entries": 0}
-        dense_modules = [mod for mod in self.modules.values() if isinstance(mod, nn.Linear)]
-        if len({id(mod) for mod in dense_modules}) != len(dense_modules):
-            raise ValueError("joint AURA refuses aliased Linear modules")
-        packed_aliases = set()
         for name, module in self.modules.items():
-            if isinstance(module, PackedExpertProjection):
-                if module.qname != name:
-                    raise ValueError(f"joint AURA packed projection name differs for {name}")
-                rows = module.output_slice
-                alias = (id(module.parameter), module.expert_id, rows.start, rows.stop)
-                if alias in packed_aliases:
-                    raise ValueError("joint AURA refuses aliased packed projection views")
-                packed_aliases.add(alias)
-            elif not isinstance(module, nn.Linear):
-                raise TypeError(f"joint AURA target {name} is not Linear")
-            self.projection_backend.require_device(module.weight.device)
             self._validate_delta_coverage(name, module)
-            grouped = {}
-            for fmt, spec in self.specs[name].items():
-                receipt = activation_identity(spec, self.activation_max_abs, name)
-                if receipt["input_global_scale"] is not None:
-                    if module.weight.shape[1] % spec.static_activation_contract.group_size:
-                        raise ValueError(f"joint AURA static activation group geometry differs for {name}")
-                    # A static served contract owns QDQ; different dynamic
-                    # registry lambdas are never executed on this path.
-                    callable_key = 0
-                else:
-                    callable_key = id(spec.activation_quantize_dequantize)
-                group = (identity_sha256(receipt), callable_key)
-                grouped.setdefault(group, (spec, []))[1].append(fmt)
-            self.groups[name] = tuple(grouped.values())
+            self.groups[name] = tuple((group.spec, list(group.formats))
+                                      for group in requirements[name].groups)
 
     def _validate_delta_coverage(self, name, module):
         expected = {fmt for qname, fmt in self.deltas if qname == name}
@@ -484,10 +536,7 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         self._format_groups = {(name, fmt): index
                                for name, groups in self.groups.items()
                                for index, (_, formats) in enumerate(groups) for fmt in formats}
-        self.statistics_capacity_bytes = sum(
-            module.weight.numel() * 4 * (1 + sum(spec.act_quant_changes_input
-                                                 for spec, _ in self.groups[name]))
-            for name, module in self.modules.items())
+        self.statistics_capacity_bytes = self._statistics_capacity_bytes
         if self.statistics_capacity_bytes > max_statistics_bytes:
             raise RuntimeError("joint statistics matrices exceed statistics budget")
         self._operators = {}
