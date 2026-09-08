@@ -1,0 +1,27 @@
+{
+  "action": "abce7b0beecaba6eadd222adbf48ef578de68751069460c600cae513c8687262",
+  "terminal_sha256": "04e1e494b87070424ea39392d49b22ef6c2e67fce6cb6bdf72a5885109898ba1",
+  "returncode": 1,
+  "expected_failure": "4 failing public CLI/stub engine regressions; old tools cannot express TP2 topology",
+  "stdout_sha256": "3be7472148d23811eaf747ea874a5e4691d72f3c41263d34eb269e5b45b9d841",
+  "source_snapshot": {
+    "commit": "305be379bb42edd749e96fa6e259b09a1b1e781a",
+    "input": {
+      "bytes": 27318703,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "cedc0eed7b09592fbc950e8a7b7e47ab9b06cbdea018fd518a1ea6871274813c"
+    },
+    "parent": "21ae7d28b7d313654beda6b4e622d732d4276a34",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff_from_21ae7": [
+    ".pbrun-closure.dfec9cec9c0ae88f.json",
+    "tests/test_gold_engine_options.py"
+  ],
+  "regression_test_sha256": "e4c2bde1b70a3db3f15302f64371a0b447ee16911836ce3204ca4de9f0b20b5b",
+  "original_four_regressions_unchanged": true,
+  "additional_positive_test_lines": 69,
+  "successful_cas_receipt": false
+}

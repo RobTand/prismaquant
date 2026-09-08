@@ -23,6 +23,17 @@ it are readable rather than inferred. No serving pin, wire recipe, cost
 currency, format menu or ship-gate change. Gate:
 `tests/test_tessera_campaign_container.py`.
 
+Re-stamped (2026-09-08, `fix/glm-gold-topology`) for explicit stock-vLLM
+topology in the offline gold KL/PPL tools (#434). Shared closed arguments
+forward TP degree, node count, rank-0 rendezvous, MP backends and an optional
+MoE backend to the existing LLM construction; omitted arguments retain TP1.
+The gold coordinator does not launch remote nodes. Multi-node runs require
+separately launched stock headless workers, explicit compatible MP settings,
+and per-node runtime evidence. Configured topology and the helper's source
+bytes join existing gold provenance. Full-vocab final-position KL remains
+distinct from HTTP top-K KL. This instrument change touches no frozen pricing
+package input, Tessera producer, serving qualification or performance claim.
+
 Re-stamped (2026-09-08, `integrate/glm-packed-source-20260908`) for the
 synchronized development/serving dependency pin to Tessera `07ad344c3275`
 (Tessera #431). The producer can bind an explicit packed research execution
