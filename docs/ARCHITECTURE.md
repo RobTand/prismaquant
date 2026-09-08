@@ -1,7 +1,31 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/glm-packed-source-20260908`. Stamps
+As of: 2026-09-08 · `fix/glm-model-bound-wikitext-inputs`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/glm-model-bound-wikitext-inputs`) for the
+explicit offline `prismaquant.model_wikitext_inputs/2` input contract.
+The existing materializer opts in with `--input-schema model-v2`; its default
+DSv4 v1 exact-value refusals remain unchanged. V2 file intake requires an
+independent SHA256, exact tokenizer-file identity and normalized model family
+and vocabulary. It retains datasets 4.6.0, the pinned WikiText revision and
+corpus construction, eight 512-token train windows at seed 42 and the 8192-token
+test prefix. Tokenizer-dependent counts, starts and token values are derived
+and digest-bound. PPL consumes these pre-tokenized inputs before engine load;
+source config bytes are provenance, while source/candidate pairing uses the
+shared token domain. This CPU preparation does not establish held-out status,
+model fidelity, serving qualification or a measured quality improvement.
+
+Re-stamped (2026-09-08, `fix/glm-gold-topology`) for explicit stock-vLLM
+topology in the offline gold KL/PPL tools (#434). Shared closed arguments
+forward TP degree, node count, rank-0 rendezvous, MP backends and an optional
+MoE backend to the existing LLM construction; omitted arguments retain TP1.
+The gold coordinator does not launch remote nodes. Multi-node runs require
+separately launched stock headless workers, explicit compatible MP settings,
+and per-node runtime evidence. Configured topology and the helper's source
+bytes join existing gold provenance. Full-vocab final-position KL remains
+distinct from HTTP top-K KL. This instrument change touches no frozen pricing
+package input, Tessera producer, serving qualification or performance claim.
 
 Re-stamped (2026-09-08, `integrate/glm-packed-source-20260908`) for the
 synchronized development/serving dependency pin to Tessera `07ad344c3275`
@@ -11245,6 +11269,16 @@ PPL prefix, their value digests, and a whole-payload semantic digest. Both the
 streamed teacher and DSv4 PPL command require `--wikitext-inputs`; neither
 imports `datasets` in the GPU container. The legacy in-process DSv4 teacher
 mode is refused rather than silently recovering the corpus at runtime.
+
+The same materializer's explicit `--input-schema model-v2` produces
+`prismaquant.model_wikitext_inputs/2` for other tokenizer/model token domains.
+`load_wikitext_inputs` dispatches only recognized versions. V2 requires an
+independently supplied file SHA256 and current tokenizer/model identity;
+`--wikitext-inputs-sha256` supplies that binding to the PPL command. Fixed
+corpus/version/sampling rules remain shared, but tokenizer-dependent values
+are derived rather than compared to DSv4 constants. Exact DSv4 v1 loaders and
+the default materialization mode keep their existing fixed identities.
+
 
 `tools/build_streamed_full_kl_teacher.py` extends the existing
 `cost_streaming.build_streamed_causal_lm` layer streamer: BF16 source weights,

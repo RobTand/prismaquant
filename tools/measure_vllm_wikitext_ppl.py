@@ -21,11 +21,13 @@ from prismaquant_source_bootstrap import activate_prismaquant_source
 activate_prismaquant_source()
 
 try:  # package mode (`python -m tools.measure_vllm_wikitext_ppl`)
-    from .dsv4_wikitext_inputs import load_dsv4_wikitext_inputs
+    from .gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
+    from .dsv4_wikitext_inputs import load_wikitext_inputs, wikitext_model_identity
     from .serve_fingerprint import gold_producer_identity, self_manifest
     from .spec_decode_guard import refuse_if_spec_decode
 except ImportError:  # script mode (`python /repo/tools/measure_vllm_wikitext_ppl.py`)
-    from dsv4_wikitext_inputs import load_dsv4_wikitext_inputs  # type: ignore
+    from gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
+    from dsv4_wikitext_inputs import load_wikitext_inputs, wikitext_model_identity  # type: ignore
     from serve_fingerprint import (  # type: ignore
         gold_producer_identity,
         self_manifest,
@@ -111,6 +113,7 @@ def _provenance(args) -> dict:
         extra={
             "measurement_tool": "measure_vllm_wikitext_ppl",
             "producer_identity": producer,
+            "gold_engine_configuration": gold_engine_kwargs(args),
         },
         image=_resolve_serve_image(args),
     )
@@ -208,9 +211,11 @@ def _load_measurement_ids(
             n_tokens=args.n_tokens,
             text_file=args.corpus_text_file,
         )
-    payload = load_dsv4_wikitext_inputs(
+    payload = load_wikitext_inputs(
         args.wikitext_inputs,
         expected_tokenizer_identity=tokenizer_attestation,
+        expected_model_identity=wikitext_model_identity(args.model),
+        expected_sha256=getattr(args, "wikitext_inputs_sha256", None),
     )
     ppl_input = payload["ppl"]
     dataset = ppl_input["dataset"]
@@ -354,7 +359,7 @@ def _load_llm(args) -> "LLM":
         "model": args.model,
         "trust_remote_code": True,
         "dtype": args.dtype,
-        "tensor_parallel_size": 1,
+        **gold_engine_kwargs(args),
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_model_len": int(args.seqlen) + 1,
         "max_num_seqs": 1,
@@ -411,6 +416,7 @@ def _logprob_value(entry, token_id: int) -> float:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_gold_engine_arguments(parser)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--dataset-cache-dir", default="/hfcache/datasets")
@@ -425,6 +431,8 @@ def main() -> int:
         "tools/prepare_dsv4_wikitext_inputs.py; when given, the tool never "
         "imports `datasets` or a tokenizer",
     )
+    parser.add_argument("--wikitext-inputs-sha256",
+        help="Independent exact input file SHA256; required for model-v2 inputs.")
     parser.add_argument("--split", default="test")
     parser.add_argument("--n-tokens", type=int, default=8192)
     parser.add_argument("--seqlen", type=int, default=512)
@@ -448,6 +456,7 @@ def main() -> int:
         "PQ_SERVE_IMAGE): the serve fingerprint is not evidence without it.",
     )
     args = parser.parse_args()
+    validate_gold_engine_arguments(parser, args)
 
     # Resolve the image before the tokenizer or the model loads: an unnamed
     # image is a reproducibility hole (R15), and discovering it only when the

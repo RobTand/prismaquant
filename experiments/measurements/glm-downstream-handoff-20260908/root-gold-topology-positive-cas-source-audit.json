@@ -1,0 +1,13 @@
+[
+  {
+    "action": "48919781f545a692d5b4b8b97de047a3ccce472d20bee21b60609e18ef03bf13",
+    "receipt": "c57b256c09206267c94b9037a17de72475a54367f0d147509733297a6593de0a",
+    "payload_sha256": "e13486e2d95b7b25fff2c7585281d04576c7d6e56a9503f3a27667bb226d803b",
+    "snapshot": "19500c982cb5cb62bb8364f92e528c30db7e729b",
+    "source_diff_from_commit": [
+      ".pbrun-closure.8d4d982668121c0a.json",
+      "docs/ARCHITECTURE.md"
+    ],
+    "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 70%]\n..............................                                           [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 112 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n102 passed, 112 warnings in 9.39s\n"
+  }
+]
