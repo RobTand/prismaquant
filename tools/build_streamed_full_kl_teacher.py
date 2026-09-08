@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Build the DSv4 all-position BF16 KL teacher with one streamed GPU model.
+"""Build a BF16 gold teacher with one streamed GPU model.
 
 This is the one-Spark source-teacher path.  It deliberately extends the
 repository's existing StreamingContext instead of inventing a second offload
 or residency mechanism.  The complete BF16 source never has to be resident at
 once; one decoder layer is installed at a time and logits are reduced to the
-fixed top-K gold support (PROMPT_TOP_K) on GPU.
+fixed top-K gold support (PROMPT_TOP_K) on GPU. An explicit v2 option retains
+full-vocabulary final rows from that same forward; model-bound inputs and
+source execution remain authenticated separately from fitting-overlap claims.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ try:  # package mode
         PROMPT_TOP_K,
         SEQLEN,
         TEACHER_PAYLOAD_SCHEMA,
+        TEACHER_PAYLOAD_V2_SCHEMA,
         WIKITEXT_CONFIG,
         WIKITEXT_DATASET,
         WIKITEXT_REVISION,
@@ -41,6 +44,7 @@ try:  # package mode
         canonical_sha256,
         compact_source_model_identity,
         format_forward_fidelity_profile,
+        file_sha256,
         payload_semantic_sha256,
         teacher_forward_fidelity_summary,
         teacher_meta,
@@ -53,6 +57,7 @@ except ImportError:  # direct script mode
         PROMPT_TOP_K,
         SEQLEN,
         TEACHER_PAYLOAD_SCHEMA,
+        TEACHER_PAYLOAD_V2_SCHEMA,
         WIKITEXT_CONFIG,
         WIKITEXT_DATASET,
         WIKITEXT_REVISION,
@@ -64,6 +69,7 @@ except ImportError:  # direct script mode
         canonical_sha256,
         compact_source_model_identity,
         format_forward_fidelity_profile,
+        file_sha256,
         payload_semantic_sha256,
         teacher_forward_fidelity_summary,
         teacher_meta,
@@ -83,6 +89,52 @@ def _tokenizer_vocab_size(tokenizer) -> int:
     if isinstance(size, bool) or not isinstance(size, int) or size <= PROMPT_TOP_K:
         raise RuntimeError(f"invalid tokenizer vocabulary size: {size!r}")
     return size
+
+
+def _final_logprobs(logits: torch.Tensor) -> torch.Tensor:
+    """The next-token distribution after the entire window, from this forward."""
+    if logits.ndim != 3 or min(logits.shape) <= 0:
+        raise RuntimeError("teacher logits must be nonempty [batch, sequence, vocabulary]")
+    return torch.log_softmax(logits[:, -1, :].float(), dim=-1).to("cpu").contiguous()
+
+
+def _source_derivative_policy(args):
+    path = getattr(args, "source_derivative_json", None)
+    if path is None:
+        return None
+    from prismaquant.glm_source_derivative import bound_json, normalize_source_derivative
+    return normalize_source_derivative(bound_json(
+        {"path": path, "sha256": args.source_derivative_sha256}, "gold source derivative"))
+
+
+def _teacher_producer_identity() -> dict:
+    from serve_fingerprint import gold_producer_identity
+    from prismaquant.production_weight_cache import _production_cache_source_sha256
+    return {"tools": gold_producer_identity("build_streamed_full_kl_teacher"),
+            "prismaquant_source_sha256": _production_cache_source_sha256()}
+
+
+def _require_source_execution_policy(execution, policy) -> None:
+    if policy is None:
+        if execution.get("schema") != "prismaquant.joint_aura.source_execution.v1" or "source_derivative" in execution:
+            raise RuntimeError("teacher original source requires an observed execution without a derivative")
+    elif (execution.get("schema") != "prismaquant.joint_aura.source_execution.v2"
+          or execution.get("source_derivative", {}).get("image_build_sha256") != policy["image_build"]["sha256"]):
+        raise RuntimeError("teacher source derivative requires the declared observed image-build binding")
+
+
+def _load_gold_inputs(args, model_path, tokenizer_attestation):
+    expected = getattr(args, "wikitext_inputs_sha256", None)
+    if expected is None:
+        return load_dsv4_wikitext_inputs(
+            args.wikitext_inputs, expected_tokenizer_identity=tokenizer_attestation)
+    try:
+        from .dsv4_wikitext_inputs import load_wikitext_inputs, wikitext_model_identity
+    except ImportError:
+        from dsv4_wikitext_inputs import load_wikitext_inputs, wikitext_model_identity
+    return load_wikitext_inputs(
+        args.wikitext_inputs, expected_tokenizer_identity=tokenizer_attestation,
+        expected_model_identity=wikitext_model_identity(model_path), expected_sha256=expected)
 
 
 def _topk_all_positions(
@@ -142,16 +194,19 @@ def _build_payload(args: argparse.Namespace) -> dict:
     from prismaquant.model_profiles import detect_profile
 
     device = require_cuda_hot_path("build_streamed_full_kl_teacher", "cuda")
+    include_final = getattr(args, "include_final_logprobs", False)
+    explicit_derivative = getattr(args, "source_derivative_json", None) is not None
+    v2 = include_final or explicit_derivative or getattr(args, "wikitext_inputs_sha256", None) is not None
+    derivative_policy = _source_derivative_policy(args)
+    producer_identity = _teacher_producer_identity() if v2 else None
     model_path = Path(args.model).resolve(strict=True)
     if not model_path.is_dir():
         raise RuntimeError(f"source model is not a directory: {model_path}")
     tokenizer_attestation = tokenizer_identity(model_path)
     # Reject an absent/tampered 156-KiB token input before walking the much
     # larger checkpoint identity or constructing any model/tokenizer runtime.
-    wikitext_inputs = load_dsv4_wikitext_inputs(
-        args.wikitext_inputs,
-        expected_tokenizer_identity=tokenizer_attestation,
-    )
+    input_sha256 = file_sha256(args.wikitext_inputs) if v2 else None
+    wikitext_inputs = _load_gold_inputs(args, model_path, tokenizer_attestation)
     full_kl_inputs = wikitext_inputs["full_kl"]
     calibration = torch.tensor(
         full_kl_inputs["token_ids"], dtype=torch.long
@@ -201,6 +256,8 @@ def _build_payload(args: argparse.Namespace) -> dict:
         max_cache_slots=1,
         prefetch_workers=1,
         prefetch_lookahead=0,
+        **({"source_derivative": derivative_policy, "attn_implementation": "eager"}
+           if explicit_derivative else {}),
     )
     try:
         if runner.context.max_cache_slots != 1 or runner.prefetch_lookahead != 0:
@@ -209,6 +266,10 @@ def _build_payload(args: argparse.Namespace) -> dict:
                 f"(slots={runner.context.max_cache_slots}, "
                 f"lookahead={runner.prefetch_lookahead})"
             )
+        if v2:
+            from prismaquant.joint_aura import source_execution_identity
+            source_execution = source_execution_identity(runner.model)
+            _require_source_execution_policy(source_execution, derivative_policy)
         with torch.inference_mode():
             output = runner(calibration.to(device, non_blocking=True))
             logits = output.logits.detach()
@@ -221,12 +282,27 @@ def _build_payload(args: argparse.Namespace) -> dict:
                 logits,
                 chunk_rows=int(args.logits_chunk_rows),
             )
+            final_logprobs = _final_logprobs(logits) if include_final else None
             del output, logits
+        if v2:
+            if validate_cached_streamed_model_identity(
+                    model_path, args.identity_cache, require_complete_checkpoint=True) != full_identity:
+                raise RuntimeError("teacher source identity changed during the forward")
+            if source_execution_identity(runner.model) != source_execution:
+                raise RuntimeError("teacher source execution changed during the forward")
+            if tokenizer_identity(model_path) != tokenizer_attestation:
+                raise RuntimeError("teacher tokenizer identity changed during the forward")
+            if _source_derivative_policy(args) != derivative_policy:
+                raise RuntimeError("teacher source derivative input changed during the forward")
+            if _teacher_producer_identity() != producer_identity:
+                raise RuntimeError("teacher producer source changed during the forward")
+            if file_sha256(args.wikitext_inputs) != input_sha256:
+                raise RuntimeError("teacher WikiText input changed during the forward")
     finally:
         runner.shutdown()
 
     payload: dict = {
-        "schema": TEACHER_PAYLOAD_SCHEMA,
+        "schema": TEACHER_PAYLOAD_V2_SCHEMA if v2 else TEACHER_PAYLOAD_SCHEMA,
         "score_positions": "all",
         "prompt_top_k": PROMPT_TOP_K,
         "topk_ids": topk_ids,
@@ -242,6 +318,9 @@ def _build_payload(args: argparse.Namespace) -> dict:
         "source_model_identity_sha256": canonical_sha256(full_identity),
         "calibration_contract": calibration_contract,
         "calibration_contract_sha256": canonical_sha256(calibration_contract),
+        **({"final_logprobs": final_logprobs, "source_execution": source_execution,
+            "producer_identity": producer_identity, "fit_overlap_status": "unverified",
+            "wikitext_inputs_sha256": input_sha256} if v2 else {}),
     }
     payload["payload_semantic_sha256"] = payload_semantic_sha256(payload)
     validate_teacher_payload(payload)
@@ -280,7 +359,16 @@ def main() -> int:
     )
     parser.add_argument("--cache-headroom-gb", type=float, default=100.0)
     parser.add_argument("--logits-chunk-rows", type=int, default=32)
+    parser.add_argument("--wikitext-inputs-sha256",
+                        help="independent file SHA required for model-bound v2 WikiText input")
+    parser.add_argument("--include-final-logprobs", action="store_true",
+                        help="add full-vocabulary final rows from the same forward in a v2 payload")
+    parser.add_argument("--source-derivative-json",
+                        help="hash-bound existing GLM derivative policy, or JSON null for original; uses eager attention")
+    parser.add_argument("--source-derivative-sha256")
     args = parser.parse_args()
+    if (args.source_derivative_json is None) != (args.source_derivative_sha256 is None):
+        parser.error("--source-derivative-json and --source-derivative-sha256 must be supplied together")
 
     output = Path(args.output)
     meta_output = Path(args.meta_output)

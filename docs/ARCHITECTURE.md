@@ -3,6 +3,19 @@
 As of: 2026-09-08 · `integrate/glm-packed-source-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `fix/glm-streamed-gold-companion`) for the opt-in
+streamed gold companion (#437). The existing v1 8×512 seed-42 WikiText
+all-position top-K=8192 payload and coverage/fidelity gates retain their
+defaults. V2 can retain normalized full-vocabulary final rows from the same
+streamed forward, with explicit observed GLM source-derivative binding,
+pre/post checkpoint/tokenizer/input/source identity checks, and tool/package
+provenance. Model-bound WikiText inputs require an independent file digest.
+V2 students verify teacher evidence and candidate tokenizer/family/vocabulary
+before engine loading and retain the teacher evidence in final-position KL.
+Fitting overlap remains unverified in this payload; full-vocabulary scope is
+not a held-out claim. This tools-only extension changes no pricing package,
+streaming residency mechanism, fitting capture, quantization or serving gate.
+
 Re-stamped (2026-09-08, `fix/glm-gold-topology`) for explicit stock-vLLM
 topology in the offline gold KL/PPL tools (#434). Shared closed arguments
 forward TP degree, node count, rank-0 rendezvous, MP backends and an optional
