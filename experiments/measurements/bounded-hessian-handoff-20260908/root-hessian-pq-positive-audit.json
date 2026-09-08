@@ -1,0 +1,12 @@
+[
+  {
+    "action": "e77e2f2fe875f2fc16b030d4b642d684cb7b277ae036e32419e9165081b47a9f",
+    "receipt": "c7b2e4b518d019806708eedd4bb6090ec5ac2b97d6e31e66167d4686b180dc6c",
+    "payload_sha256": "ee295565e13c3a642b30bf90fc5b45c7a8b446a26a1bac2654b32618b03b3af5",
+    "snapshot": "7ad9332808b430b003d575304b3ba28ce9fdc9c9",
+    "source_diff_from_commit": [
+      ".pbrun-closure.25f2b76ab058e6ec.json"
+    ],
+    "stdout_tail": "{\"producer_archive_sha256\": \"c6a6e849f7826ab18053004d4d625b2f26d9131923fda32b20fc6ca6a458aba7\", \"producer_commit\": \"615e1c0302693447a9cd713bb1f9dddc21fbd378\", \"producer_module\": \"/home/rob/tmp/bounded-hessian-producer-3e50zx0a/src/tessera/__init__.py\"}\n......................................................................s. [ 35%]\n........................................................................ [ 71%]\n.....................................................s....               [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nSKIPPED [1] tests/test_tessera_priced_export_inputs.py:333: this tessera publishes the seal; see the test above\nSKIPPED [1] tests/test_bounded_hessian_sidecar.py:50: explicit native writer measurement only\n200 passed, 2 skipped, 14 warnings in 111.54s (0:01:51)\n"
+  }
+]
