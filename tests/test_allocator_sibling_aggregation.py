@@ -1127,7 +1127,7 @@ def test_promotion_leaves_a_mixed_rung_group_alone():
 def test_the_fold_declines_when_no_runtime_contract_is_pinned():
     """No table, no licence -- and the absence of a statement is not a yes.
 
-    Production is exactly this state: no Tessera RELEASE tag exists, so
+    Without a requested development answer pin,
     ``tessera_menu.fused_module_licence()`` is ``None``. The fold must then
     offer nothing and say why, rather than fall back on the reading its own
     docstring used to assert (RobTand/prismaquant#132).

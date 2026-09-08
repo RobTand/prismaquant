@@ -349,7 +349,7 @@ def tessera_runtime_contract():
 
     Every Tessera attestation in this module goes through here, so "which
     table answered" is a single fact per run rather than a per-call race.
-    ``None`` is production (no RELEASE tag exists, so nothing is attested); a
+    ``None`` means the development answer pin was not requested; a
     mismatched or malformed pin raises rather than degrading to ``None``,
     because a stale pin that silently empties the menu is the exact failure
     the pin exists to prevent.
