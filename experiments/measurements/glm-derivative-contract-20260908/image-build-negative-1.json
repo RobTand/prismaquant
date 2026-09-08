@@ -25,55 +25,11 @@
   "cleanup": {
     "checked_unix": 1788882298.8233778,
     "complete": true,
-    "nonce": "1bad18891ec94cfbabb15e83fddf77b7",
     "released": {
       "ok": true,
       "scope_id": "prismabuild-job46672608a81c410c3b735caf3627059c.slice",
       "stop_reason": "failed",
       "stopped_unix": 1788882298.756099
-    },
-    "telemetry": {
-      "action_key": "26ceef570f0d7509c005a95ec0696b8e5df0a1e8cc4624274d56657b9e98a2c4",
-      "complete": true,
-      "cpu_seconds": 0.451199,
-      "cpu_system_seconds": 0.114072,
-      "cpu_user_seconds": 0.337126,
-      "errors": [],
-      "gpu_memory_max_bytes": 8589934592,
-      "host": "sparklina",
-      "memory_current_bytes": 1257472,
-      "memory_max_bytes": 8589934592,
-      "memory_peak_bytes": 76267520,
-      "nonce": "1bad18891ec94cfbabb15e83fddf77b7",
-      "oom_kill": 0,
-      "oom_local": 0,
-      "process_io": {
-        "live": {},
-        "members": [],
-        "processes_live": 0,
-        "processes_observed": 0,
-        "processes_unreadable": 0,
-        "rchar": 0,
-        "read_bytes": 0,
-        "retired": {
-          "rchar": 0,
-          "read_bytes": 0,
-          "syscr": 0,
-          "syscw": 0,
-          "wchar": 0,
-          "write_bytes": 0
-        },
-        "source": "proc_io",
-        "syscr": 0,
-        "syscw": 0,
-        "wchar": 0,
-        "write_bytes": 0
-      },
-      "sampled_unix": 1788882298.809062,
-      "scope_unit": "prismabuild-job46672608a81c410c3b735caf3627059c.slice",
-      "shape_key": "89baa3445ccb77cf35aa7bd24dc73ef3b1f605f0932100385adeec6a47499b44",
-      "termination_reason": "failed",
-      "wall_seconds": 1.193951623979956
     }
   },
   "resource_profile": {

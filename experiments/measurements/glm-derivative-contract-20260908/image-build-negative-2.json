@@ -25,61 +25,11 @@
   "cleanup": {
     "checked_unix": 1788882750.669269,
     "complete": true,
-    "nonce": "b63736f97d904e038a01afed27907dc8",
     "released": {
       "ok": true,
       "scope_id": "prismabuild-job2a94583e35ac5646a5b5beeed1bef2fe.slice",
       "stop_reason": "failed",
       "stopped_unix": 1788882750.4951875
-    },
-    "telemetry": {
-      "action_key": "a48fcb5bea21793823d6cdfa9e40d3e6049db3f343960e5e5b6c3ee90101768d",
-      "complete": true,
-      "cpu_seconds": 33.78259,
-      "cpu_system_seconds": 32.949504,
-      "cpu_user_seconds": 0.833086,
-      "errors": [],
-      "gpu_memory_max_bytes": 8589934592,
-      "host": "sparklina",
-      "memory_current_bytes": 8490663936,
-      "memory_max_bytes": 8589934592,
-      "memory_peak_bytes": 8589934592,
-      "nonce": "b63736f97d904e038a01afed27907dc8",
-      "oom_kill": 0,
-      "oom_local": 0,
-      "process_io": {
-        "live": {},
-        "members": [
-          1659647,
-          1659681,
-          1659682,
-          1659683,
-          1659783
-        ],
-        "processes_live": 0,
-        "processes_observed": 5,
-        "processes_unreadable": 0,
-        "rchar": 46808882,
-        "read_bytes": 4096,
-        "retired": {
-          "rchar": 46808882,
-          "read_bytes": 4096,
-          "syscr": 2241,
-          "syscw": 16,
-          "wchar": 904,
-          "write_bytes": 12288
-        },
-        "source": "proc_io",
-        "syscr": 2241,
-        "syscw": 16,
-        "wchar": 904,
-        "write_bytes": 12288
-      },
-      "sampled_unix": 1788882750.6500623,
-      "scope_unit": "prismabuild-job2a94583e35ac5646a5b5beeed1bef2fe.slice",
-      "shape_key": "1b1b6949f594b98041b192426e11df444e3a43e9bf059907c44a95956636542c",
-      "termination_reason": "failed",
-      "wall_seconds": 107.82090043701464
     }
   },
   "resource_profile": {

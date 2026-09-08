@@ -1,0 +1,247 @@
+{
+  "action_key": "1fb94e6b11a125147cb2bf8053d36bbeffd4e98443c24c6b911de82bf0f813c4",
+  "status": "done",
+  "returncode": 0,
+  "terminal": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/done/1fb94e6b11a125147cb2bf8053d36bbeffd4e98443c24c6b911de82bf0f813c4.json",
+    "sha256": "268abb73cafd895dc80069508a3bc3d1ffd747b2e43b374d2d506e7d8a8e7b2f"
+  },
+  "source_snapshot": {
+    "commit": "0b6650284ed74aea2a56c58617b56a15a655f04b",
+    "input": {
+      "bytes": 26649371,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "b93e58f4e3ce84ec2b4fdbbde39f8a1a3e8f6fc0acebaee91b664194de6da4d4"
+    },
+    "parent": "32a69a82cac06c055452b7cf0087e86c3e992b71",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff": "A\t.pbrun-closure.ec456bf162fe35e1.json\n",
+  "source_checks": {
+    "prismaquant/glm_source_derivative.py": "69a250c3a8ccc83417ffd7e4df4c60a82a99ac911f688c42f3dd8b0d16797229",
+    "prismaquant/glm_capture_compatibility.py": "676d3c7f7dc111ef68ad08c0bd1375f1f90e803aa045291079364515ce6044e0",
+    "experiments/glm_derivative_cpu_gate.py": "9e67cf0da807952b698f4dc5660c0ce2c0e52e4141909d4220f130a70fd07120",
+    "experiments/glm_kda_backward_source_repro.py": "082a8c8b7363dcbb9e44ebd661cd108195143db68db04ce92ff744c301493e9b",
+    "tools/tessera_campaign_container.py": "aee37a6b26638c0e15d266c37b864184d5aa9c9ffdf2c28251b670e22cdfab44"
+  },
+  "cleanup": {
+    "checked_unix": 1788884958.2894826,
+    "complete": true,
+    "released": {
+      "ok": true,
+      "scope_id": "prismabuild-joba56e5acdde6eba9ae5943ad885acda7a.slice",
+      "stop_reason": "executed",
+      "stopped_unix": 1788884958.2434669
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 5.869920276923076,
+        "busy_percent_peak": 13.0216183,
+        "psi_some_avg10_max": 0.0,
+        "psi_some_avg10_samples": 12,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 13,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788884958.1121192,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.031928571428571424,
+        "power_reference_scope": "soc_tdp",
+        "power_reference_source": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html",
+        "power_reference_w": 140.0,
+        "power_w_mean": 4.372999999999999,
+        "power_w_peak": 4.47,
+        "samples": 20,
+        "source": "pqteld",
+        "temperature_c_peak": 45.0,
+        "utilization_percent_mean": 0.0,
+        "utilization_percent_peak": 0.0,
+        "utilization_samples": 20,
+        "uvm_residual_bytes_peak": 3511234560,
+        "uvm_residual_samples": 20
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 9.23,
+        "psi_mem_full_avg10_max": 0.0,
+        "samples": 20,
+        "source": "pqteld",
+        "unified_available_bytes_min": 124018651136,
+        "unified_total_bytes": 130595991552,
+        "unified_used_bytes_peak": 6577340416
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1788884947.8094804
+    },
+    "finished_unix": 1788884958.1121192,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 6,
+      "processes_unreadable": 0,
+      "rchar": 202626475,
+      "read_bytes": 4096,
+      "source": "proc_io",
+      "syscr": 19181,
+      "syscw": 33,
+      "wchar": 37934,
+      "write_bytes": 16384
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 3,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 107802624,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.01835899999999846,
+      "user_seconds": 0.06473699999999383,
+      "voluntary_context_switches": 21
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 8.38364,
+      "cpu_system_seconds": 0.76224,
+      "cpu_user_seconds": 7.6214,
+      "memory_current_bytes": 532480,
+      "memory_peak_bytes": 612270080,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788884947.8094804,
+    "wall_seconds": 10.30263876914978
+  },
+  "receipt": {
+    "action_key": "1fb94e6b11a125147cb2bf8053d36bbeffd4e98443c24c6b911de82bf0f813c4",
+    "action_manifest_sha256": "297ecf7aeb508b31b2dd06abc8ea6626319efae56a6553a28802f0d54aedc313",
+    "producer": {
+      "action_key": "1fb94e6b11a125147cb2bf8053d36bbeffd4e98443c24c6b911de82bf0f813c4",
+      "attestation_sha256": "7e5bab8428ddeae2a7d7eb0599a48bc20841679e09c5a7684a45d8d9d33c0d33",
+      "evidence": {
+        "accelerators": [
+          {
+            "compute_capability": "12.1",
+            "driver_version": "595.84",
+            "kind": "nvidia"
+          }
+        ],
+        "hostname": "sparklina",
+        "libc": "glibc-2.39",
+        "machine": "aarch64",
+        "slurm": null,
+        "source": "local",
+        "system": "linux"
+      },
+      "executable": {
+        "bytes": 1543048,
+        "path": "/bin/bash",
+        "resolved_path": "/usr/bin/bash",
+        "sha256": "af955ef55333c8fc9c5aa50df91ad1a629d9a79a9afa125cd5e9629585f78015"
+      },
+      "host_class": null,
+      "inputs": [
+        {
+          "bytes": 26649371,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "b93e58f4e3ce84ec2b4fdbbde39f8a1a3e8f6fc0acebaee91b664194de6da4d4"
+        }
+      ],
+      "platform_key": "linux-aarch64-sm121",
+      "runtime": {
+        "core": {
+          "bytes": 283089,
+          "path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py",
+          "resolved_path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py",
+          "sha256": "31825990dec609e2b8c719ee5a3fd04a17739a9f744bbe1438fc3bd6315a09a9"
+        },
+        "launch_kind": "script",
+        "launcher": {
+          "bytes": 2285,
+          "path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py",
+          "resolved_path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py",
+          "sha256": "9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418"
+        },
+        "runtime_sha256": "4f8eec2f6a2b8d0b7807d5c1aa430f7830a9912055629d3b8f743e395ba2c3d6",
+        "schema": "prismaquant.prismabuild.worker_runtime.v1"
+      },
+      "schema": "prismaquant.prismabuild.worker_attestation.v2",
+      "toolchain": {
+        "declared": {},
+        "verified": {}
+      },
+      "worker_id": "sparklina"
+    },
+    "receipt_sha256": "73d1e606277b08d5f714c852957cb0f7cb1856ccecf6e4ede38bd2b4d857aa4a",
+    "result": {
+      "bytes": 520,
+      "sha256": "d92bd879e14892f99e2405107ea75fd143eefa99edb17a895f08cc628284aaf8"
+    },
+    "schema": "prismaquant.prismabuild.cas_receipt.v3"
+  },
+  "claims": [
+    {
+      "schema": "prismaquant.prismabuild.pbmcp.v1",
+      "tool": "pb_verify_claim",
+      "generated_unix": 1788885026.33423,
+      "deadline_s": 5.0,
+      "complete": true,
+      "timed_out": [],
+      "unavailable": [],
+      "abandoned_readers": [],
+      "generation": "437ad81b1129-1788868060-209c40b934b6",
+      "generation_stale": false,
+      "started_from_generation": true,
+      "sha256": "48a488b82a2ec8f7e8bff039186c114f330c6d45ca2af5707ba808034af4b200",
+      "cas_root": "/mnt/shared/prismabuild-fleet/cas",
+      "claim_path": "/mnt/shared/prismabuild-fleet/cas/local-results/v1/48/48a488b82a2ec8f7e8bff039186c114f330c6d45ca2af5707ba808034af4b200.json",
+      "claim": {
+        "action_key": "1fb94e6b11a125147cb2bf8053d36bbeffd4e98443c24c6b911de82bf0f813c4",
+        "action_manifest_sha256": "297ecf7aeb508b31b2dd06abc8ea6626319efae56a6553a28802f0d54aedc313",
+        "checkout_root": "/home/rob/tmp/prismabuild-checkouts/1fb94e6b11a1.vp1sqdw1/checkout",
+        "claim_sha256": "48a488b82a2ec8f7e8bff039186c114f330c6d45ca2af5707ba808034af4b200",
+        "result_path": "pbrun_result.ec456bf162fe35e1.txt",
+        "schema": "prismaquant.prismabuild.local_result_claim.v1",
+        "working_directory": "."
+      },
+      "checks": {
+        "claim_present": true,
+        "claim_addressed_correctly": true,
+        "claim_digest_matches_body": true,
+        "receipt_present": true,
+        "receipt_self_consistent": true,
+        "receipt_binds_the_claims_manifest": true,
+        "payload_present": true,
+        "payload_bytes_match": true,
+        "payload_sha256_match": true
+      },
+      "not_checked": [
+        "worker attestation (needs the full action manifest; core.PrismaBuildCAS.lookup is the verifier)"
+      ],
+      "receipt_path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/1f/1fb94e6b11a125147cb2bf8053d36bbeffd4e98443c24c6b911de82bf0f813c4.json",
+      "payload_path": "/mnt/shared/prismabuild-fleet/cas/blobs/d9/d92bd879e14892f99e2405107ea75fd143eefa99edb17a895f08cc628284aaf8",
+      "payload": {
+        "present": true,
+        "bytes": 520,
+        "sha256": "d92bd879e14892f99e2405107ea75fd143eefa99edb17a895f08cc628284aaf8"
+      },
+      "checks_passed": true,
+      "attestation_verified": null
+    }
+  ],
+  "output": {
+    "path": "/mnt/shared/prismabuild-fleet/cas/blobs/d9/d92bd879e14892f99e2405107ea75fd143eefa99edb17a895f08cc628284aaf8",
+    "sha256": "d92bd879e14892f99e2405107ea75fd143eefa99edb17a895f08cc628284aaf8",
+    "bytes": 520
+  },
+  "artifact": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-meta-cpu-05/result.json",
+    "sha256": "5c17c306dac3459a6e1b4773e7592f833024f0d02429463451a4febee285d431",
+    "repository_copy": "experiments/measurements/glm-derivative-contract-20260908/actual-image-meta-result.json"
+  }
+}

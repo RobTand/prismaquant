@@ -7,7 +7,10 @@ Re-stamped (2026-09-08, `codex/joint-operator-windows-profile`) for the opt-in
 GLM KDA derivative contract. The GLM profile declares a closed, source-pinned
 strictly upper-triangular premask of the fallback decay exponent; declaring it
 does not activate it. Binding verifies a separate image build, the actual
-decorated Torch fallback and live nonpositive gate configuration. Corrected
+decorated Torch fallback, the original accelerate wrapper and its live closure,
+and live nonpositive gate configuration. Callable authentication compares all
+immutable code fields recursively without inheriting verifier compiler flags.
+Corrected
 models emit `source_execution.v2` with the derivative identity, and every
 identity reread checks that binding. Unbound callers retain exact v1 identity.
 The existing streamed builder accepts the explicit policy and refuses the
@@ -18,7 +21,9 @@ exact completeness, source and runtime validation. Receipt issuance requires
 the original completed PB capture action, canonical CAS/producer digests and
 snapshot input, actual image/config/layer evidence, the original modeling
 source, core/final-state CPU equivalence, original/corrected native layer0
-equality and the corrected 72-call bounded graph gate. The native layer0 check
+equality and the corrected 72-call bounded graph gate, rechecking the exact
+schedule, finite nonzero cotangents, and per-arm numerical and route equality.
+The native layer0 check
 is not a full-model forward A/B; the closed causal-expression transform and
 observed gate configuration supply the broader equivalence argument.
 The original image and canonical capture remain separate producer artifacts;

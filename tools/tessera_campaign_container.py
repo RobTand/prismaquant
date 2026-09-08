@@ -19,7 +19,7 @@ from tools.container_runtime_identity import image_content_sha256
 def validate_container(spec: dict) -> None:
     container = spec.get("container")
     if not isinstance(container, dict) or set(container) - {"image", "mounts", "content_sha256", "archive"}:
-        raise RuntimeError("container must declare image and optional mounts/content_sha256 only")
+        raise RuntimeError("container must declare image and optional mounts/content_sha256/archive only")
     image = container.get("image")
     if not isinstance(image, str) or not image or image.startswith("-"):
         raise RuntimeError("container.image must name a Docker image")

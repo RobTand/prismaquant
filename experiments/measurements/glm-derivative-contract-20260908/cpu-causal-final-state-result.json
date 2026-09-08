@@ -1,0 +1,1310 @@
+{
+  "schema": "prismaquant.glm_kda_source_cpu_reproduction.v1",
+  "torch_version": "2.10.0+cpu",
+  "device": "cpu",
+  "threads": 1,
+  "source": {
+    "modeling_source_sha256": "2092bbb4efa2a8087b74f4a4da37635c503fe1df9ae73f1e6e8342af8b4b8e8b",
+    "functions": {
+      "l2norm": {
+        "source": "def l2norm(x: torch.FloatTensor, dim: int = -1, eps: float = 1e-6):\n    \"\"\"\n    This function is intended to align with the l2norm implementation in the FLA library.\n\n    # NOTE: FLA compares against `F.normalize` but does + eps instead of max(..., eps) leading to a slight differences\n    \"\"\"\n    # main difference to qwen's gdn variation: intentionally use sqrt and / to match original triton\n    inv_norm = torch.sqrt((x * x).sum(dim=dim, keepdim=True) + eps)\n    return x / inv_norm\n",
+        "first_line": 416,
+        "last_line": 424,
+        "sha256": "67f70365e46f93e1156432e6076304683569d6452473c0c7a4cdf30930aafc5b"
+      },
+      "chunk_kimi_delta_attention": {
+        "source": "def chunk_kimi_delta_attention(\n    query,\n    key,\n    value,\n    g,\n    beta,\n    chunk_size=64,\n    initial_state=None,\n    output_final_state=False,\n    use_qk_l2norm_in_kernel=False,\n    **kwargs,\n):\n    # calculations happen in float as states are more susceptible to rounding errors\n    initial_dtype = query.dtype\n\n    query, key, value, beta, g = [\n        x.transpose(1, 2).contiguous().to(torch.float32) for x in (query, key, value, beta, g)\n    ]\n\n    # important: FLA calculates these in fp32 so we do this after the float casts\n    if use_qk_l2norm_in_kernel:\n        query = l2norm(query, dim=-1, eps=1e-6)\n        key = l2norm(key, dim=-1, eps=1e-6)\n\n    # shapes and other metadata\n    batch_size, num_heads, sequence_length, k_head_dim = key.shape\n    v_head_dim = value.shape[-1]\n    scale = 1 / (query.shape[-1] ** 0.5)\n    pad_size = (chunk_size - sequence_length % chunk_size) % chunk_size\n    total_sequence_length = sequence_length + pad_size\n\n    # prepare all the relevant input\n    query = F.pad(query, (0, 0, 0, pad_size)) * scale\n    key = F.pad(key, (0, 0, 0, pad_size))\n    value = F.pad(value, (0, 0, 0, pad_size))\n    g = F.pad(g, (0, 0, 0, pad_size))\n    beta = F.pad(beta, (0, pad_size))\n    v_beta = value * beta.unsqueeze(-1)\n    k_beta = key * beta.unsqueeze(-1)\n\n    # reshape to chunks\n    query, key, value, g, k_beta, v_beta = [\n        x.reshape(x.shape[0], x.shape[1], -1, chunk_size, x.shape[-1]) for x in (query, key, value, g, k_beta, v_beta)\n    ]\n    beta = beta.reshape(beta.shape[0], beta.shape[1], -1, chunk_size)\n\n    # Intra chunk\n    # Main difference to GDN is the per head application of `g` which was broadcasted across heads instead\n    g = g.cumsum(dim=-2)\n    mask = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=0)\n    decay_mask = (g.unsqueeze(-2) - g.unsqueeze(-3)).exp().float()\n    attn = -(k_beta.unsqueeze(-2) * key.unsqueeze(-3) * decay_mask).sum(dim=-1).masked_fill(mask, 0)\n    for i in range(1, chunk_size):\n        row = attn[..., i, :i].clone()\n        sub = attn[..., :i, :i].clone()\n        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)\n\n    attn = attn + torch.eye(chunk_size, dtype=attn.dtype, device=attn.device)\n    value = attn @ v_beta\n    k_cumdecay = attn @ (k_beta * g.exp())\n\n    last_recurrent_state = (\n        torch.zeros(batch_size, num_heads, k_head_dim, v_head_dim, dtype=value.dtype, device=value.device)\n        if initial_state is None\n        else initial_state.to(value)\n    )\n    core_attn_out = torch.zeros_like(value)\n\n    mask = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=1)\n    for i in range(total_sequence_length // chunk_size):\n        q_i = query[:, :, i]\n        k_i = key[:, :, i]\n        v_i = value[:, :, i]\n        g_i = g[:, :, i]\n\n        # Inter chunk\n        attn_inter = (q_i * g_i.exp()) @ last_recurrent_state\n        # Intra chunk\n        attn_intra = (q_i.unsqueeze(-2) * k_i.unsqueeze(-3) * decay_mask[:, :, i]).sum(dim=-1).masked_fill(mask, 0)\n        # New update rule\n        v_prime = k_cumdecay[:, :, i] @ last_recurrent_state\n        v_new = v_i - v_prime\n\n        core_attn_out[:, :, i] = attn_inter + attn_intra @ v_new\n        last_recurrent_state = (\n            last_recurrent_state * g_i[:, :, -1].exp().unsqueeze(-1)\n            + (k_i * (g_i[:, :, -1:] - g_i).exp()).transpose(-1, -2) @ v_new\n        )\n\n    if not output_final_state:\n        last_recurrent_state = None\n\n    core_attn_out = core_attn_out.reshape(core_attn_out.shape[0], core_attn_out.shape[1], -1, core_attn_out.shape[-1])\n    core_attn_out = core_attn_out[:, :, :sequence_length]\n    core_attn_out = core_attn_out.transpose(1, 2).contiguous().to(initial_dtype)\n\n    return core_attn_out, last_recurrent_state\n",
+        "first_line": 482,
+        "last_line": 578,
+        "sha256": "41fa41e5181252c29bf376ec652c48163a2caa4ed55db157dd79674d06ef6ecf"
+      }
+    },
+    "scope": "Exact function bodies extracted without dispatch decorators for CPU numerical source reproduction only; not native kernel qualification."
+  },
+  "expression": {
+    "original": {
+      "delta_min": -315.0,
+      "delta_max": 315.0,
+      "exponent": {
+        "elements": 4096,
+        "finite": 3015,
+        "nan": 0,
+        "inf": 1081,
+        "finite_nonzero": 2069
+      },
+      "used": {
+        "elements": 4096,
+        "finite": 4096,
+        "nan": 0,
+        "inf": 0,
+        "finite_nonzero": 1070
+      },
+      "used_sha256": "cb3190cee7f04769b102bbf64939d9e0d6bb985abbe21790ce95c93215dc3d0c",
+      "gradient": {
+        "elements": 64,
+        "finite": 0,
+        "nan": 64,
+        "inf": 0,
+        "finite_nonzero": 0
+      }
+    },
+    "premask": {
+      "delta_min": -315.0,
+      "delta_max": 315.0,
+      "exponent": {
+        "elements": 4096,
+        "finite": 4096,
+        "nan": 0,
+        "inf": 0,
+        "finite_nonzero": 3150
+      },
+      "used": {
+        "elements": 4096,
+        "finite": 4096,
+        "nan": 0,
+        "inf": 0,
+        "finite_nonzero": 1070
+      },
+      "used_sha256": "cb3190cee7f04769b102bbf64939d9e0d6bb985abbe21790ce95c93215dc3d0c",
+      "gradient": {
+        "elements": 64,
+        "finite": 64,
+        "nan": 0,
+        "inf": 0,
+        "finite_nonzero": 63
+      }
+    },
+    "analytic_max_abs_error": 3.8715149662527093e-10
+  },
+  "cases": [
+    {
+      "length": 64,
+      "gate": -5.0,
+      "dtype": "torch.float32",
+      "use_norm": false,
+      "initial_state": false,
+      "original_all_gradients_finite": false,
+      "forward_byte_equal": true,
+      "final_state_byte_equal": null,
+      "variants": {
+        "original": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "7e594924a36d78843c6df20fc0d4eb4042f864c6cfb7fde1f068c4b3e205e374",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 36,
+              "nan": 92,
+              "inf": 0,
+              "finite_nonzero": 36
+            },
+            "k": {
+              "elements": 128,
+              "finite": 0,
+              "nan": 128,
+              "inf": 0,
+              "finite_nonzero": 0
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 0,
+              "nan": 128,
+              "inf": 0,
+              "finite_nonzero": 0
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 18,
+              "nan": 46,
+              "inf": 0,
+              "finite_nonzero": 18
+            }
+          }
+        },
+        "premask": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "7e594924a36d78843c6df20fc0d4eb4042f864c6cfb7fde1f068c4b3e205e374",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "k": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 64,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 64
+            }
+          }
+        },
+        "float64_oracle": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "a038b0d4308f2513f8a248677e42e5158b561c58f9b7ebb9ea4d8a63afc0b1cd",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "k": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 64,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 64
+            }
+          }
+        }
+      },
+      "premask_vs_float64_gradient_errors": {
+        "q": {
+          "max_abs": 1.6954373044386628e-09,
+          "relative_l2": 7.414386310062066e-08
+        },
+        "k": {
+          "max_abs": 8.247224006149856e-10,
+          "relative_l2": 6.960892356220386e-08
+        },
+        "v": {
+          "max_abs": 6.023229285126441e-10,
+          "relative_l2": 6.929381163744698e-08
+        },
+        "g": {
+          "max_abs": 2.0291240467252203e-10,
+          "relative_l2": 6.481987707598267e-05
+        },
+        "beta": {
+          "max_abs": 4.690207926899559e-10,
+          "relative_l2": 7.131278186151173e-08
+        }
+      }
+    },
+    {
+      "length": 65,
+      "gate": -5.0,
+      "dtype": "torch.float32",
+      "use_norm": true,
+      "initial_state": true,
+      "original_all_gradients_finite": false,
+      "forward_byte_equal": true,
+      "final_state_byte_equal": true,
+      "variants": {
+        "original": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "387325cc98a335496acbb79a83e319fd067db68826d94d7245e9889d6f8a5780",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "bcc3b2cd0cba0e9bbebe9ecc9af963b2c124e340bc0699e4064f6fecef256b05"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 38,
+              "nan": 92,
+              "inf": 0,
+              "finite_nonzero": 38
+            },
+            "k": {
+              "elements": 130,
+              "finite": 2,
+              "nan": 128,
+              "inf": 0,
+              "finite_nonzero": 2
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 2,
+              "nan": 128,
+              "inf": 0,
+              "finite_nonzero": 2
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 19,
+              "nan": 46,
+              "inf": 0,
+              "finite_nonzero": 19
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        },
+        "premask": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "387325cc98a335496acbb79a83e319fd067db68826d94d7245e9889d6f8a5780",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "bcc3b2cd0cba0e9bbebe9ecc9af963b2c124e340bc0699e4064f6fecef256b05"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "k": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 65,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 65
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        },
+        "float64_oracle": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "ed3a6318930b646cee9a7998d6380bb7c070fc9394d9d66b5f7039418672145c",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "cd07b7c4d5d0902c4bbde4fb71fe6949948116a59d28ca312b1b85290ed38bed"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "k": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 65,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 65
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        }
+      },
+      "premask_vs_float64_gradient_errors": {
+        "q": {
+          "max_abs": 1.2386707881617554e-07,
+          "relative_l2": 1.6577456243941556e-07
+        },
+        "k": {
+          "max_abs": 5.759811128047687e-08,
+          "relative_l2": 1.08805548918621e-07
+        },
+        "v": {
+          "max_abs": 7.095489773512043e-08,
+          "relative_l2": 1.1535604939362803e-07
+        },
+        "g": {
+          "max_abs": 1.017995436168248e-08,
+          "relative_l2": 5.675321936987466e-05
+        },
+        "beta": {
+          "max_abs": 4.589631852347509e-08,
+          "relative_l2": 1.4752360373333458e-07
+        },
+        "state": {
+          "max_abs": 1.0998404118868488e-10,
+          "relative_l2": 5.643526353132226e-08
+        }
+      }
+    },
+    {
+      "length": 64,
+      "gate": -0.1,
+      "dtype": "torch.float32",
+      "use_norm": true,
+      "initial_state": false,
+      "original_all_gradients_finite": true,
+      "forward_byte_equal": true,
+      "final_state_byte_equal": null,
+      "variants": {
+        "original": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "80da9132b1780ecb18490518ca482ec17cf6a19ee76f49be1f72ad2feadab8c6",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "k": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 64,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 64
+            }
+          }
+        },
+        "premask": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "80da9132b1780ecb18490518ca482ec17cf6a19ee76f49be1f72ad2feadab8c6",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "k": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 64,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 64
+            }
+          }
+        },
+        "float64_oracle": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "0138d5aab7f5641ea6c9a7d2013ba7c94f66a007d30039b6f252395316c508aa",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "k": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 64,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 64
+            }
+          }
+        }
+      },
+      "premask_vs_float64_gradient_errors": {
+        "q": {
+          "max_abs": 5.162820624349251e-07,
+          "relative_l2": 2.900456579313899e-07
+        },
+        "k": {
+          "max_abs": 1.7791516695453424e-06,
+          "relative_l2": 4.1493779602258357e-07
+        },
+        "v": {
+          "max_abs": 2.4097332329553467e-07,
+          "relative_l2": 2.586548636479245e-07
+        },
+        "g": {
+          "max_abs": 4.651846695694073e-08,
+          "relative_l2": 7.013550269019688e-07
+        },
+        "beta": {
+          "max_abs": 1.3694335049274642e-07,
+          "relative_l2": 2.50834036918514e-07
+        }
+      }
+    },
+    {
+      "length": 65,
+      "gate": -0.1,
+      "dtype": "torch.float32",
+      "use_norm": false,
+      "initial_state": true,
+      "original_all_gradients_finite": true,
+      "forward_byte_equal": true,
+      "final_state_byte_equal": true,
+      "variants": {
+        "original": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "152da8b7687d89213e7262347685d62d26caf9dce3e5ba31942a1b0f2bb45d8a",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "709883953f4ea6277bfbe5e44c0b3ac26f723104e121c993144e3a38660bb09b"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "k": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 65,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 65
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        },
+        "premask": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "152da8b7687d89213e7262347685d62d26caf9dce3e5ba31942a1b0f2bb45d8a",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "709883953f4ea6277bfbe5e44c0b3ac26f723104e121c993144e3a38660bb09b"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "k": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 65,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 65
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        },
+        "float64_oracle": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "710571e1bbcbd00e877b0633c3791fd11df23506c3e641432ae0bb9f7022d418",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "018ee731970be76bc57c5dc7357703ed30ad6791ca3947a8bc5e48f1ff89460d"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "k": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 65,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 65
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        }
+      },
+      "premask_vs_float64_gradient_errors": {
+        "q": {
+          "max_abs": 3.3588701290818146e-09,
+          "relative_l2": 1.5913122408258374e-07
+        },
+        "k": {
+          "max_abs": 5.439008580326865e-09,
+          "relative_l2": 1.6690727849363847e-07
+        },
+        "v": {
+          "max_abs": 5.8013345134722005e-09,
+          "relative_l2": 2.2554846667577988e-07
+        },
+        "g": {
+          "max_abs": 1.4529371003850142e-09,
+          "relative_l2": 4.744599748192465e-07
+        },
+        "beta": {
+          "max_abs": 3.616577523568587e-09,
+          "relative_l2": 1.9105197896608794e-07
+        },
+        "state": {
+          "max_abs": 5.341958622673282e-08,
+          "relative_l2": 2.384150567354682e-07
+        }
+      }
+    },
+    {
+      "length": 64,
+      "gate": -5.0,
+      "dtype": "torch.bfloat16",
+      "use_norm": true,
+      "initial_state": false,
+      "original_all_gradients_finite": false,
+      "forward_byte_equal": true,
+      "final_state_byte_equal": null,
+      "variants": {
+        "original": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "17f98c7631c3e42157ef46735bc23d4afd5b4cedf97c56ad63af637adf6e371f",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 36,
+              "nan": 92,
+              "inf": 0,
+              "finite_nonzero": 36
+            },
+            "k": {
+              "elements": 128,
+              "finite": 0,
+              "nan": 128,
+              "inf": 0,
+              "finite_nonzero": 0
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 0,
+              "nan": 128,
+              "inf": 0,
+              "finite_nonzero": 0
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 18,
+              "nan": 46,
+              "inf": 0,
+              "finite_nonzero": 18
+            }
+          }
+        },
+        "premask": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "17f98c7631c3e42157ef46735bc23d4afd5b4cedf97c56ad63af637adf6e371f",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "k": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 64,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 64
+            }
+          }
+        },
+        "float64_oracle": {
+          "output": {
+            "elements": 128,
+            "finite": 128,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 128
+          },
+          "output_sha256": "53111afe612ba4d351fa8b8f46322c6f6832ff4f1de61c2ae891bf7a6c966afb",
+          "final_state": null,
+          "gradients": {
+            "q": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "k": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "v": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "g": {
+              "elements": 128,
+              "finite": 128,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 128
+            },
+            "beta": {
+              "elements": 64,
+              "finite": 64,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 64
+            }
+          }
+        }
+      },
+      "premask_vs_float64_gradient_errors": {
+        "q": {
+          "max_abs": 0.0038883096516395543,
+          "relative_l2": 0.0020526437877586043
+        },
+        "k": {
+          "max_abs": 0.002581373288251587,
+          "relative_l2": 0.0012871749145574518
+        },
+        "v": {
+          "max_abs": 0.0008979304910933239,
+          "relative_l2": 0.0017315602358827717
+        },
+        "g": {
+          "max_abs": 9.390340998571465e-07,
+          "relative_l2": 0.001530657241817537
+        },
+        "beta": {
+          "max_abs": 0.0008368292390012466,
+          "relative_l2": 0.0017749724010679084
+        }
+      }
+    },
+    {
+      "length": 65,
+      "gate": -5.0,
+      "dtype": "torch.bfloat16",
+      "use_norm": true,
+      "initial_state": true,
+      "original_all_gradients_finite": false,
+      "forward_byte_equal": true,
+      "final_state_byte_equal": true,
+      "variants": {
+        "original": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "533bec734ed12f96e37238f995d3b65e2514e77bfcd63c9229e1597270890061",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "72daf92f7ad505ae3db3d2f345303d2ce6283f6813a497c1c8ebf394a8389246"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 38,
+              "nan": 92,
+              "inf": 0,
+              "finite_nonzero": 38
+            },
+            "k": {
+              "elements": 130,
+              "finite": 2,
+              "nan": 128,
+              "inf": 0,
+              "finite_nonzero": 2
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 2,
+              "nan": 128,
+              "inf": 0,
+              "finite_nonzero": 2
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 19,
+              "nan": 46,
+              "inf": 0,
+              "finite_nonzero": 19
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        },
+        "premask": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "533bec734ed12f96e37238f995d3b65e2514e77bfcd63c9229e1597270890061",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "72daf92f7ad505ae3db3d2f345303d2ce6283f6813a497c1c8ebf394a8389246"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "k": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 65,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 65
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        },
+        "float64_oracle": {
+          "output": {
+            "elements": 130,
+            "finite": 130,
+            "nan": 0,
+            "inf": 0,
+            "finite_nonzero": 130
+          },
+          "output_sha256": "d4cfdd2baea75a4165f5112a992faf71c9491c9424d978fc1b07c96801097e0a",
+          "final_state": {
+            "statistics": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            },
+            "sha256": "121f6ab4758c7dc4a1b1e4681ed3a9b1cef72c371f23939a23f1e996ae61e51e"
+          },
+          "gradients": {
+            "q": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "k": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "v": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "g": {
+              "elements": 130,
+              "finite": 130,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 130
+            },
+            "beta": {
+              "elements": 65,
+              "finite": 65,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 65
+            },
+            "state": {
+              "elements": 4,
+              "finite": 4,
+              "nan": 0,
+              "inf": 0,
+              "finite_nonzero": 4
+            }
+          }
+        }
+      },
+      "premask_vs_float64_gradient_errors": {
+        "q": {
+          "max_abs": 0.0012312814474193523,
+          "relative_l2": 0.0016505724595675148
+        },
+        "k": {
+          "max_abs": 0.0010413386396888047,
+          "relative_l2": 0.0013604955877363199
+        },
+        "v": {
+          "max_abs": 0.0007663495982066504,
+          "relative_l2": 0.0016914374540797491
+        },
+        "g": {
+          "max_abs": 7.101949425576052e-07,
+          "relative_l2": 0.0019446744518440229
+        },
+        "beta": {
+          "max_abs": 0.00047915957014255106,
+          "relative_l2": 0.0015508711882324863
+        },
+        "state": {
+          "max_abs": 1.3465854264808896e-06,
+          "relative_l2": 0.0008817772020686736
+        }
+      }
+    }
+  ],
+  "proposed_expression": {
+    "before": "(g.unsqueeze(-2) - g.unsqueeze(-3)).exp().float()",
+    "after": "(g.unsqueeze(-2) - g.unsqueeze(-3)).masked_fill(mask.triu(diagonal=1).unsqueeze(-1), 0).exp().float()"
+  },
+  "scope": "Exact pinned fallback bodies with decorators omitted only for CPU source attribution. No native runtime, capture, image, checkpoint, profile or probe identity changed."
+}
