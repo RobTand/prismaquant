@@ -3331,6 +3331,39 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
         )
 
 
+def _save_hessian_capture_with_page_release(payload, path, *, resource_check=None):
+    """Use Torch's path writer unchanged, advising each stable tensor prefix.
+
+    A file-like torch.save target changes archive record names. Keep the same
+    filename writer and serializer as torch.save, and interpose only after its
+    synchronous storage writes. No storage, pickle or archive byte is rewritten.
+    """
+    import torch.serialization as serialization
+    from .perturbed_x_cache import release_activation_cache_file_pages
+
+    class RecordBoundary:
+        def __init__(self, writer):
+            self.writer = writer
+
+        def __getattr__(self, name):
+            return getattr(self.writer, name)
+
+        def write_record(self, name, *args, **kwargs):
+            result = self.writer.write_record(name, *args, **kwargs)
+            if name.startswith('data/'):
+                # The serializer is paused: the visible file extent cannot
+                # change while the existing helper checks identity and fsyncs.
+                expected = path.stat()
+                release_activation_cache_file_pages(path, expected_stat=expected)
+                if resource_check is not None:
+                    resource_check('after_hessian_tensor_record:'+name)
+            return result
+
+    with serialization._open_zipfile_writer(os.fspath(path)) as writer:
+        serialization._save(payload, RecordBoundary(writer), serialization.pickle,
+                            serialization.DEFAULT_PROTOCOL, False)
+
+
 def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
                         hessian_identity, static_scales, static_scale_policy,
                         release_file_pages=False, resource_check=None):
@@ -3383,11 +3416,13 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
             hessian_capture_path.name + ".provenance.json")
         tmp_capture = hessian_capture_path.with_suffix(".pt.tmp")
         tmp_sidecar = sidecar.with_suffix(".json.tmp")
-        torch.save({
-            "H": saved_hessians,
-            "counts": dict(hessian_rows),
-            "provenance": capture_provenance,
-        }, tmp_capture)
+        payload = {"H": saved_hessians, "counts": dict(hessian_rows),
+                   "provenance": capture_provenance}
+        if release_file_pages:
+            _save_hessian_capture_with_page_release(payload, tmp_capture,
+                                                    resource_check=resource_check)
+        else:
+            torch.save(payload, tmp_capture)
         tmp_sidecar.write_text(json.dumps({
             **capture_provenance,
             "capture_sha256": capture_sha256,
@@ -4329,7 +4364,7 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     if selected_guard is not None:
         phase = selected_resources['phases']['export_inputs']
         selected_guard.check('before_selected_export_input_write', reserve_bytes=
-            phase['export_input_file_bytes']+phase['serialization_scratch_bytes'])
+            phase['export_input_page_window_bytes']+phase['serialization_scratch_bytes'])
     hessian_capture_path, input_scales_path, capture_sha256 = write_export_inputs(
         cache_dir,
         hessians=hessians if want_h else None,

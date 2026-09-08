@@ -1,7 +1,23 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `fix/selected-source-anchors`. Stamps
+As of: 2026-09-08 · `fix/bounded-hessian-sidecar`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/bounded-hessian-sidecar`) for within-file Hessian
+sidecar page ownership (#377). Selected-source export keeps Torch's existing
+path writer, archive record names and serializer, pausing after each tensor
+record to pass its stable visible prefix through the existing inode/size/time
+checks, durability fence and page advice. It changes no tensor, archive byte,
+content seal or publication order; failures retain the previous published pair.
+The v2 selected-anchor resource plan charges one largest H record plus metadata
+as the export file-page window, while all selected H/X/weights and serialization
+scratch remain charged. The physical cgroup guard remains decisive because page
+advice alone is not evidence of release. Resident-source serialization retains
+its previous policy. The bounded writer is byte-qualified against the supported
+Torch runtimes, including shared storage and noncontiguous views; it does not
+establish a full GLM fit or change an exact anchor quantum.
+Gates: `tests/test_bounded_hessian_sidecar.py`, existing capture byte/identity
+checks, and before/after native writer memory traces with both Sparks' Netdata.
 
 Re-stamped (2026-09-08, `fix/selected-source-anchors`) for bounded selected
 encoder-factor ownership (#370). The existing `(unit, scale_plane)` memo in a

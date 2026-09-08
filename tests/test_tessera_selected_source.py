@@ -100,7 +100,9 @@ def test_selected_admission_excludes_unselected_source_and_forward_owners(monkey
     assert source['loader_transient_bytes'] == 200
     assert anchors['selected_hessian_bytes'] == 128
     assert anchors['selected_prefix_bytes'] == 64
-    assert export['export_input_file_bytes'] == 128+2*16384
+    assert export['export_input_page_window_bytes'] == 64+2*16384
+    assert plan['schema'] == 'prismaquant.selected_anchor_resources.v2'
+    assert plan['export_input_writer_policy'] == 'verified-tensor-record-prefix'
     assert export['serialization_scratch_bytes'] == 2*4**2*4
     assert anchors['encoder_memo_bytes'] == 4*4*4+4*8
     assert plan['encoder_memo_capacity'] == 1

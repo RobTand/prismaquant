@@ -5,9 +5,12 @@ import pytest
 import torch
 
 
-def test_export_releases_stable_tensor_prefixes_with_exact_archive_bytes(tmp_path, monkeypatch):
+@pytest.mark.parametrize('dtype', [torch.float32, torch.float64, torch.bfloat16])
+@pytest.mark.parametrize('directory_name', ['ascii', 'café'])
+def test_export_releases_stable_tensor_prefixes_with_exact_archive_bytes(tmp_path, monkeypatch,
+                                                                        dtype, directory_name):
     from prismaquant import perturbed_x_cache, tessera_campaign as campaign
-    hessians = {f'unit.{index}': torch.arange(128*128, dtype=torch.float32).reshape(128, 128)+index
+    hessians = {f'unit.{index}': torch.arange(128*128, dtype=torch.float32).to(dtype).reshape(128, 128)+index
                 for index in range(4)}
     hessians['shared.view'] = hessians['unit.0'].t()
     calls = []
@@ -18,8 +21,8 @@ def test_export_releases_stable_tensor_prefixes_with_exact_archive_bytes(tmp_pat
     monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages', observe)
     outcomes = []
     for bounded in (False, True):
-        directory = tmp_path/str(bounded)
-        directory.mkdir()
+        directory = tmp_path/directory_name/str(bounded)
+        directory.mkdir(parents=True)
         path, _scales, digest = campaign.write_export_inputs(directory,
             hessians=hessians, hessian_rows=dict.fromkeys(hessians, 512),
             hessian_identity={'fit_ids_sha256': 'unchanged-draw'},
@@ -113,3 +116,23 @@ def test_native_hessian_writer_profile(tmp_path, monkeypatch):
         content_digest=content_digest, torch=torch.__version__, cuda=torch.version.cuda,
         claim='writer ownership qualification; no full GLM fit or throughput claim')
     (root/'measurement.json').write_text(json.dumps(report, indent=2)+'\n')
+
+
+@pytest.mark.parametrize('failure', ['page_advice', 'memory_guard'])
+def test_record_failure_preserves_previous_published_capture(tmp_path, monkeypatch, failure):
+    from prismaquant import perturbed_x_cache, tessera_campaign as campaign
+    inputs = dict(hessians={'unit': torch.eye(128)}, hessian_rows={'unit': 512},
+                  hessian_identity={'fit_ids_sha256': 'same-draw'}, static_scales={},
+                  static_scale_policy='fixture')
+    path, _, _ = campaign.write_export_inputs(tmp_path, **inputs)
+    sidecar = path.with_name(path.name+'.provenance.json')
+    previous = (path.read_bytes(), sidecar.read_bytes())
+    inputs['hessians'] = {'unit': torch.eye(128)*2}
+    def refuse(*args, **kwargs):
+        raise RuntimeError('refused at stable record')
+    if failure == 'page_advice':
+        monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages', refuse)
+    with pytest.raises(RuntimeError, match='refused at stable record'):
+        campaign.write_export_inputs(tmp_path, **inputs, release_file_pages=True,
+            resource_check=refuse if failure == 'memory_guard' else None)
+    assert (path.read_bytes(), sidecar.read_bytes()) == previous
