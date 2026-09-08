@@ -1,7 +1,20 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/glm-profiled-anchor-campaign-20260908`. Stamps
+As of: 2026-09-08 · `integrate/glm-packed-source-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `feat/glm-packed-research-profile`) for the opt-in
+`glm_packed_research_sm121` allocation profile. It extends the existing Tessera
+research profile and restricts both logical routed expert names and aggregate
+stack names matching `(^|\.)mlp\.experts(\.|$)` to legal `TESSERA_E4M3_K1`
+rungs or plain `BF16`. `ServingFormatRule.allow_tessera_families` unions with
+exact scalar `allow_formats`, validates canonical family declarations and uses
+the existing full rung parser; it is not wildcard matching or a new registry.
+The real candidate filter applies this restriction before allocation/grouping,
+then retains the existing shape, source-precision and per-unit context gates.
+Dense readable families are preserved. The profile is explicitly emulation-only,
+has no export lane, keeps TP world size 1 and grants no per-role expert format
+scope, serving qualification, TP2 qualification, menu/default or pin promotion.
 
 Re-stamped (2026-09-08, `plan/glm-full-anchor-campaign`) for adaptive anchor
 progress refusal. When a fused member fails at a shared refinement rung,

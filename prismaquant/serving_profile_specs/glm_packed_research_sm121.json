@@ -1,0 +1,18 @@
+{
+  "schema": "prismaquant.serving_profile.v1",
+  "id": "glm_packed_research_sm121",
+  "extends": ["tessera_research_sm121"],
+  "runtime": "vllm+tessera_plugin",
+  "emulation_only": true,
+  "description": "Opt-in GLM packed-research allocation on sm_121. Routed logical expert units and aggregate stacks permit legal Tessera E4M3 K1 rungs or plain BF16 source passthrough. Dense readable families retain the inherited policy. This allocation restriction is not a serving qualification or export lane; per-unit context, shape and source-precision gates remain mandatory, and TP2 qualification is separate.",
+  "format_rules": [
+    {
+      "id": "glm_routed_packed_research_families",
+      "when": {"regex": "(^|\\.)mlp\\.experts(\\.|$)"},
+      "allow_formats": ["BF16"],
+      "allow_tessera_families": ["TESSERA_E4M3_K1"],
+      "reason": "profile_mismatch",
+      "detail": "GLM packed research permits only legal Tessera E4M3 K1 routed rungs or plain BF16 source passthrough; Tessera E2M1, BF16-body and unrelated formats are unsupported by this research builder."
+    }
+  ]
+}
