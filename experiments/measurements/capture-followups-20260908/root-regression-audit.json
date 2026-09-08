@@ -1,0 +1,51 @@
+[
+  {
+    "action": "49801762d3c7953ec6ecfe53ceb2cafdebc94a8d96ab8ea090fa54d802ee1181",
+    "terminal_sha256": "3bfcc527afd77588f4003d82714b65a658af6aab6aeb5583f79c7026b9f90142",
+    "returncode": 1,
+    "cleanup_complete": true,
+    "source": "1efbc09f40c6aa63634b8b68c005a639a188a245",
+    "snapshot": "adc194cdb0b8554c1e20a7cb99c6f6668f3b78bc",
+    "source_diff": [
+      ".pbrun-closure.e78988907164f1df.json"
+    ],
+    "actual_failed_lines": [
+      "FAILED tests/test_tessera_calibration_cache.py::test_export_input_page_release_does_not_reread_the_archive",
+      "FAILED tests/test_tessera_calibration_cache.py::test_completed_anchor_page_release_does_not_reread_the_entries"
+    ],
+    "summary": "2 failed, 32 passed",
+    "no_success_receipt_claim": true
+  },
+  {
+    "action": "182ce135adfc79ed6bc1a69d20d7cd9e6608f8d9443a0c5e039b2e2b37c003e1",
+    "terminal_sha256": "8abfac30630d652cbbfd796c1e4bee7eb2b070728e805021e7ccef461daff001",
+    "returncode": 1,
+    "cleanup_complete": true,
+    "source": "adad67e1c9c62bf34d77a2b49cfc421307fd4002",
+    "snapshot": "d98dae88d2d10dabdbedcdadd3f3d8b9d6f8ccfe",
+    "source_diff": [
+      ".pbrun-closure.5a550fe40fa7b97b.json"
+    ],
+    "actual_failed_lines": [
+      "FAILED tests/test_bounded_hessian_sidecar.py::test_writer_refuses_when_no_stable_tensor_record_is_written"
+    ],
+    "summary": "1 failed, 9 passed, 1 skipped",
+    "no_success_receipt_claim": true
+  },
+  {
+    "action": "5d53e29e3fa850f7eb1874595038d25da370a3101bacfac7d87164b9656a2f70",
+    "terminal_sha256": "dda0e2788cfdb49ede8672d659530a7d8951fbc6f14ee54b68145f30650dade7",
+    "returncode": 1,
+    "cleanup_complete": true,
+    "source": "695439cb3714db0f6024f92d7a81e3321bfde8ee",
+    "snapshot": "5feea21a82d156fd32e5e4b200f163fef145533e",
+    "source_diff": [
+      ".pbrun-closure.d67de7c591d430bb.json"
+    ],
+    "actual_failed_lines": [
+      "FAILED tests/test_tessera_selected_source.py::test_selected_capture_cli_reaches_existing_streamed_source"
+    ],
+    "summary": "1 failed, 10 passed",
+    "no_success_receipt_claim": true
+  }
+]

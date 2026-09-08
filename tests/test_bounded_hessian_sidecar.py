@@ -136,3 +136,43 @@ def test_record_failure_preserves_previous_published_capture(tmp_path, monkeypat
         campaign.write_export_inputs(tmp_path, **inputs, release_file_pages=True,
             resource_check=refuse if failure == 'memory_guard' else None)
     assert (path.read_bytes(), sidecar.read_bytes()) == previous
+
+
+def test_writer_refuses_when_no_stable_tensor_record_is_written(tmp_path, monkeypatch):
+    """A serializer that files tensor bytes under another prefix must refuse, not degrade."""
+    import torch.serialization as serialization
+    from prismaquant import tessera_campaign as campaign
+    inputs = dict(hessians={'unit': torch.eye(128)}, hessian_rows={'unit': 512},
+                  hessian_identity={'fit_ids_sha256': 'same-draw'}, static_scales={},
+                  static_scale_policy='fixture')
+    path, _, _ = campaign.write_export_inputs(tmp_path, **inputs)
+    sidecar = path.with_name(path.name+'.provenance.json')
+    previous = (path.read_bytes(), sidecar.read_bytes())
+    original = serialization._save
+    class Relocated:
+        def __init__(self, writer):
+            self.writer = writer
+        def __getattr__(self, name):
+            return getattr(self.writer, name)
+        def write_record(self, name, *args, **kwargs):
+            if name.startswith('data/'):
+                name = 'storage/'+name[len('data/'):]
+            return self.writer.write_record(name, *args, **kwargs)
+    def relocated_save(obj, zip_file, *args, **kwargs):
+        return original(obj, Relocated(zip_file), *args, **kwargs)
+    monkeypatch.setattr(serialization, '_save', relocated_save)
+    inputs['hessians'] = {'unit': torch.eye(128)*2}
+    with pytest.raises(RuntimeError, match='no stable tensor record'):
+        campaign.write_export_inputs(tmp_path, **inputs, release_file_pages=True)
+    assert (path.read_bytes(), sidecar.read_bytes()) == previous
+    assert sorted(entry.name for entry in tmp_path.iterdir()) == sorted([path.name, sidecar.name])
+
+
+def test_writer_accepts_a_capture_with_no_tensors(tmp_path):
+    """No tensor, no stable record expected: the check must not refuse an empty table."""
+    from prismaquant import tessera_campaign as campaign
+    path, _, digest = campaign.write_export_inputs(tmp_path, hessians={'unit': None},
+        hessian_rows={}, hessian_identity={'fit_ids_sha256': 'same-draw'}, static_scales={},
+        static_scale_policy='fixture', release_file_pages=True)
+    assert path.exists() and digest
+    assert torch.load(path, weights_only=False)['H'] == {}

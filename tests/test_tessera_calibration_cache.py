@@ -98,6 +98,76 @@ def test_export_input_page_release_preserves_existing_file_bytes(capture, monkey
     assert calls == ['hessian_capture.pt.tmp']*2+['hessian_capture.pt']
 
 
+def test_export_input_page_release_does_not_reread_the_archive(capture, monkeypatch, tmp_path):
+    """Releasing a completed archive's pages must not read the archive again.
+
+    The capture seal is computed in memory before the write, and
+    ``release_activation_cache_file_pages`` fsyncs and advises the whole file
+    from its descriptor. A hashing pass over the written bytes has no
+    consumer, and on a routed GLM stack it is a full read of a 44 GB sidecar
+    per row (PR #376 audit, finding 1).
+    """
+    from prismaquant import tessera_campaign as campaign, tessera_calibration_cache
+    _root, _path, census, identity, _acts, hessians, _record = capture
+    hashed = []
+    original = tessera_calibration_cache.sha256
+    def counting_sha256(path, **kwargs):
+        hashed.append(Path(path).name)
+        return original(path, **kwargs)
+    monkeypatch.setattr(tessera_calibration_cache, 'sha256', counting_sha256)
+    observed = []
+    root = tmp_path/'bounded'
+    root.mkdir()
+    path, _scales, _digest = campaign.write_export_inputs(root, hessians=hessians,
+        hessian_rows=census['counts'], hessian_identity=identity['calibration'],
+        static_scales={}, static_scale_policy='fixture', release_file_pages=True,
+        resource_check=lambda label, **kwargs: observed.append(label))
+    assert path.name not in hashed
+    assert not [label for label in observed if 'capture_hash' in label]
+
+
+def test_completed_anchor_page_release_does_not_reread_the_entries(monkeypatch, tmp_path):
+    """The rendered shard and the wire are advised out, never hashed again."""
+    import types
+    import torch
+    from prismaquant import tessera_campaign as campaign
+    from prismaquant import perturbed_x_cache, tessera_calibration_cache
+
+    def refuse_reread(path, **kwargs):
+        raise AssertionError(f'completed anchor entry was re-read: {Path(path).name}')
+    monkeypatch.setattr(tessera_calibration_cache, 'sha256', refuse_reread)
+    released = []
+    original = perturbed_x_cache.release_activation_cache_file_pages
+    def release(path, *, expected_stat):
+        released.append(Path(path).name)
+        return original(path, expected_stat=expected_stat)
+    monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages', release)
+
+    cache_dir = tmp_path/'cache'
+    wire_dir = tmp_path/'wire'
+    cache_dir.mkdir()
+    wire_dir.mkdir()
+    cache = types.SimpleNamespace(weights={}, cache_dir=str(cache_dir),
+                                  metadata={'release_completed_anchor_file_pages': True})
+    weight = torch.arange(64, dtype=torch.float32).reshape(8, 8) / 64
+    activations = torch.ones(4, 8)
+    spec = types.SimpleNamespace(
+        bits_for_shape=lambda shape: 4 * shape[0] * shape[1],
+        memory_bytes_for_shape=lambda shape: shape[0] * shape[1] // 2,
+        act_dtype_name=None)
+    prepared = dict(spec=spec, family=types.SimpleNamespace(name='fixture'),
+                    rung=1024, activation_qdq=lambda x: x, input_scale=None,
+                    activation_kwargs={})
+    anchor = campaign._finish_anchor(qname='layers.0.q_proj', weight=weight,
+        activations=activations, format_name='FIXTURE_R4', cache=cache,
+        wire_dir=wire_dir, prepared=prepared, render=weight.clone(),
+        blob=b'wire-bytes', elapsed=0.0)
+    rendered = cache.weights[('layers.0.q_proj', 'FIXTURE_R4')]
+    assert sorted(released) == sorted([Path(rendered).name,
+                                       'layers__0__q_proj__FIXTURE_R4.tessera'])
+    assert anchor.wire_bytes == len(b'wire-bytes')
+
+
 @pytest.mark.parametrize('change',['artifact','manifest','source','draw','geometry','scope'])
 def test_prefetch_refuses_drift(capture,change):
     root,path,census,identity,acts,hessians,record = capture

@@ -1,0 +1,12 @@
+[
+  {
+    "action": "a326b99c339fdbc6989e91ebd7bcd35d415db4228e9fd3fbe4f68db8a66cec2a",
+    "receipt": "aed62c125707c8a86239468dc38ac77853313dc78d971c80633d014102016c5e",
+    "payload_sha256": "e055a42cdf7a9d80be079dfb4016a10a2bc6ade1f8112d6a7d1bf04392aee355",
+    "snapshot": "5c3b72a89314a1ec14e68425421a2d6faa126947",
+    "source_diff_from_commit": [
+      ".pbrun-closure.73dd36be26b1906e.json"
+    ],
+    "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\ns..........                                                              [100%]\n=============================== warnings summary ===============================\ntests/test_bounded_hessian_sidecar.py: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n10 passed, 1 skipped, 56 warnings in 9.05s\n"
+  }
+]
