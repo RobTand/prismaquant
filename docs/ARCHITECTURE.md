@@ -1,7 +1,25 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/dispatch-admissible-partition-20260908`. Stamps
+As of: 2026-09-08 · `fix/runtime-v2-fixed-resources`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/runtime-v2-fixed-resources`) for the concrete
+full-engine fixed-resource admission prerequisites (#420). The gate remains
+closed: current raw ledgers leave shared/escaped ownership, native output/input
+charge boundaries, allocator/context domains and timing qualification unresolved.
+A positive schema cannot infer those measurements. The design specifies a
+closed evidence envelope, independent extent/lifetime/event recomputation and
+candidate-versus-fixed coverage, with exact source/workload/runtime bindings.
+The scalar v2 resource model does not establish TP2 or whole-host/UMA fit;
+those need explicit topology/domain modeling. This optional allocator input
+is not a prerequisite for the six-variant GLM task: the ordinary byte/quality
+allocator can reuse one common probe, then exported variants can be compared
+using actual held-out KL and served prefill under the existing runtime and
+publication gates. The current quality selector has no direct served-prefill
+axis; that bounded metadata/selection integration is separate. No measured
+table, production setting, pin or admission behavior changes.
+Design: [fixed-resource producer prerequisites](design/runtime_fixed_resource_admission.md).
+Gate retained: `tests/test_runtime_provenance.py`.
 
 Re-stamped (2026-09-08, `integrate/dispatch-admissible-partition-20260908`)
 for failed-fit replan preservation. The dispatcher derives all proposed
