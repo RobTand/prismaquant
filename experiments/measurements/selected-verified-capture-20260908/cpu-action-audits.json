@@ -1012,7 +1012,7 @@
       "all_tree_differences": [
         ".pbrun-closure.c357129a261247e0.json"
       ],
-      "reference": "HEAD",
+      "reference": "5f12978a8bfd625b217774a81e76e662273666fd",
       "snapshot": {
         "commit": "eaed9631ed95ab50d147f46304af07eed1754d58",
         "input": {
