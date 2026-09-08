@@ -119,3 +119,20 @@ before constructing the meta skeleton, revalidates all existing compatibility
 gates immediately before publication, and writes the new sidecar with
 exclusive-create semantics. Existing output causes refusal. The original
 capture remains the bound input; it is never rewritten.
+
+## Root integration check
+
+Root reviewed the CLI, all new refusal/control cases and the shared constructor
+extraction. All 13 original successful PB actions were independently checked
+against their actual terminal cleanup, canonical receipt/result and source
+bundle. Each source snapshot differs from `2196dbcc2a` only by its generated
+closure. The actual corrected-image preflight output confirms meta execution,
+34 authenticated gates, no CUDA initialization and no receipt. The original
+bound configuration declares 45 decoder layers; the report's earlier 40-layer
+wording was corrected separately without rerunning the measurement.
+
+The root integration retains both sets of architecture stamps. It changes no
+issuer or constructor code relative to the tested branch. `root-cas-source-audit.json`
+records this independent evidence. Original completion inputs remain pending;
+a reviewed final plan and successful complete-plan verification are still
+required before actual issuance.
