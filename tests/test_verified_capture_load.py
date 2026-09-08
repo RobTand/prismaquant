@@ -332,3 +332,28 @@ def test_pickle_parser_allocations_refuse_before_unpickler_construction(tmp_path
     monkeypatch.setattr(px.pickle, 'Unpickler', ConstructorRefusal)
     with pytest.raises(RuntimeError, match='pickle memo|pickle frame|extension pickle'):
         load(path)
+
+
+def test_pickle_view_cannot_resize_one_storage_within_aggregate_cap(tmp_path, monkeypatch):
+    import pickletools
+    path = tmp_path/'resized-view.pt'
+    # Aggregate S=8 would hide a4-byte storage resizing itself to8 during meta
+    # restore, followed by the other4-byte storage during CPU reconstruction.
+    torch.save({'inputs': torch.ones(1), 'hessian': torch.ones(1)}, path)
+    with zipfile.ZipFile(path) as archive:
+        entries = {entry.filename: archive.read(entry) for entry in archive.infolist()}
+    name = next(name for name in entries if name.endswith('/data.pkl'))
+    raw = entries[name]
+    operations = list(pickletools.genops(raw))
+    persistent = next(i for i, (op, _, _) in enumerate(operations) if op.name == 'BINPERSID')
+    offset = next(i for i in range(persistent+1, len(operations)) if operations[i][0].name == 'BININT1')
+    assert operations[offset][1] == 0
+    start, stop = operations[offset][2], operations[offset+1][2]
+    entries[name] = raw[:start]+b'K\x01'+raw[stop:]
+    with zipfile.ZipFile(path, 'w') as archive:
+        for name, value in entries.items():
+            archive.writestr(name, value)
+    monkeypatch.setattr(px.torch, 'load',
+        lambda *a, **k: pytest.fail('resizing tensor geometry reached Torch allocation'))
+    with pytest.raises(RuntimeError, match='geometry.*declared backing'):
+        load(path, max_storage_bytes=8)

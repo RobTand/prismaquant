@@ -231,13 +231,34 @@ def _preflight_torch_zip_directory(source, *, metadata_cap, label):
             count != end[zipfile._ECD_ENTRIES_THIS_DISK] or count <= 0 or
             count*4096 + size*16 > metadata_cap//2):
         raise RuntimeError(f'{label} ZIP directory exceeds metadata scratch budget')
-    # Mirror stdlib's concatenated/ZIP64 archive offset calculation.
-    concat = end[zipfile._ECD_LOCATION] - size - offset
-    if end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
-        concat -= zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
-    position = offset + concat
-    if position < 0 or size < 0 or position+size > file_bytes:
+    # Canonical Torch files are not concatenated archives. Validate the actual
+    # footer chain instead of relying on private _ECD_LOCATION semantics:
+    # patched Python 3.12 reports ZIP64 EOCD there, older versions report EOCD32.
+    position = offset
+    directory_end = offset+size
+    if position < 0 or size < 0 or directory_end > file_bytes:
         raise RuntimeError(f'{label} has an invalid ZIP directory extent')
+    footer_position = directory_end
+    source.seek(footer_position)
+    if end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
+        data = source.read(zipfile.sizeEndCentDir64)
+        if len(data) != zipfile.sizeEndCentDir64:
+            raise RuntimeError(f'{label} has a truncated ZIP64 footer')
+        record = struct.unpack(zipfile.structEndArchive64, data)
+        if (record[0] != zipfile.stringEndArchive64 or record[1]+12 != zipfile.sizeEndCentDir64 or
+                tuple(record[6:]) != (count, count, size, offset)):
+            raise RuntimeError(f'{label} requires a canonical fixed-size ZIP64 footer')
+        locator = source.read(zipfile.sizeEndCentDir64Locator)
+        if len(locator) != zipfile.sizeEndCentDir64Locator or struct.unpack(
+                zipfile.structEndArchive64Locator, locator) != (
+                    zipfile.stringEndArchive64Locator, 0, directory_end, 1):
+            raise RuntimeError(f'{label} has an invalid ZIP64 locator')
+        footer_position += zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+    source.seek(footer_position)
+    footer = source.read(zipfile.sizeEndCentDir)
+    if (len(footer) != zipfile.sizeEndCentDir or not footer.startswith(zipfile.stringEndArchive) or
+            footer_position+zipfile.sizeEndCentDir+len(end[zipfile._ECD_COMMENT]) != file_bytes):
+        raise RuntimeError(f'{label} requires a canonical non-concatenated ZIP directory')
     stop, observed = position+size, 0
     while position < stop:
         source.seek(position)
@@ -300,7 +321,25 @@ def _preflight_torch_pickle_storage(archive, *, records, pickle_name, label, met
         'IntStorage': 4, 'FloatStorage': 4, 'LongStorage': 8,
         'DoubleStorage': 8, 'ComplexFloatStorage': 8, 'ComplexDoubleStorage': 16,
         'UntypedStorage': 1}
+    storage_types = {}
     def tensor_marker(*args):
+        if (len(args) < 4 or type(args[0]) is not tuple or len(args[0]) != 3 or
+                args[0][0] != 'storage' or type(args[0][1]) is not str or args[0][1] not in records or
+                type(args[0][2]) is not int or args[0][2] not in (1, 2, 4, 8, 16) or
+                type(args[1]) is not int or args[1] < 0 or
+                type(args[2]) is not tuple or type(args[3]) is not tuple or
+                len(args[2]) != len(args[3]) or len(args[2]) > 64 or
+                any(type(value) is not int or value < 0 for value in (*args[2], *args[3]))):
+            raise RuntimeError(f'{label} has unaccountable pickle tensor geometry')
+        size = args[0][2]
+        if len(args) > 6 and type(args[6]) is tuple and args[6][0] == 'dtype':
+            sizes = dict(float16=2, float32=4, float64=8, bfloat16=2, int8=1,
+                         uint8=1, int16=2, int32=4, int64=8, bool=1, complex64=8, complex128=16)
+            size = sizes[args[6][1]]
+        extent = (0 if any(value == 0 for value in args[2]) else
+                  args[1]+1+sum((dim-1)*stride for dim, stride in zip(args[2], args[3])))
+        if extent*size > records[args[0][1]]:
+            raise RuntimeError(f'{label} pickle tensor geometry exceeds its declared backing storage')
         return None
     class StoragePreflight(pickle.Unpickler):
         def find_class(self, module, name):
@@ -326,7 +365,9 @@ def _preflight_torch_pickle_storage(archive, *, records, pickle_name, label, met
                     type(value[4]) is not int or value[4] < 0 or
                     value[4]*value[1][1] != records[value[2]]):
                 raise RuntimeError(f'{label} declared pickle storage disagrees with bounded ZIP storage')
-            return ('storage', value[2])
+            if storage_types.setdefault(value[2], value[1][1]) != value[1][1]:
+                raise RuntimeError(f'{label} pickle storage aliases disagree on element size')
+            return ('storage', value[2], value[1][1])
     try:
         StoragePreflight(io.BytesIO(raw)).load()
     except (pickle.UnpicklingError, TypeError, ValueError, AttributeError, EOFError) as exc:
