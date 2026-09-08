@@ -362,7 +362,8 @@ def carried_units(carried: Any) -> tuple[dict, dict[str, dict], dict[str, str]]:
 # ---------------------------------------------------------------------------
 # The source bytes the producer will read
 # ---------------------------------------------------------------------------
-def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: Mapping[str, Any]):
+def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: Mapping[str, Any],
+                       *, source_authentication=None):
     """Read the unit's whole source tensor from the shard the producer hashed.
 
     The exporter re-reads exactly this tensor (``packed_expert_weight`` on an
@@ -377,7 +378,9 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     except KeyError:
         raise ExpertProjectionError(f"{tensor}: not in the producer's hashed tensor roster")
     path = Path(model_path) / file
-    with safe_open(str(path), framework="pt", device="cpu") as handle:
+    context = (safe_open(str(path), framework="pt", device="cpu") if source_authentication is None else
+               source_authentication.safe_open(safe_open, path, framework="pt", device="cpu"))
+    with context as handle:
         if tensor not in handle.keys():
             raise ExpertProjectionError(f"{tensor}: absent from {path}")
         weight = handle.get_tensor(tensor)
