@@ -113,3 +113,8 @@ remain under `native-01/` through `native-03/`.
 
 This initial runtime measurement does not exercise a full-scale 32 GiB operator
 reservation or certify future allocator/boundary policy changes.
+
+The subsequent [final runtime gate](final-runtime.md) exercises runtime
+`34388d2bfe`, three source layers with two slots, exact v2 layer-major boundaries,
+and native allocator retirement. It retains this initial result as prior
+measurement rather than treating the changed fixture as the same benchmark.

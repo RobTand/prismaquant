@@ -1,0 +1,250 @@
+{
+  "key": "d4f002a1b0c4aeaee60944c37aefc6ba312b37ffcde7fc4db2b597819f0f499d",
+  "returncode": 0,
+  "terminal": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/done/d4f002a1b0c4aeaee60944c37aefc6ba312b37ffcde7fc4db2b597819f0f499d.json",
+    "sha256": "a31118312d8334507c4ac2a1d87e275658d3cf00006efbea88c39c0ecc0bce46"
+  },
+  "snapshot": {
+    "commit": "105e0a4f4a41cbfd1a7dc02acb92280062bfdb4c",
+    "input": {
+      "bytes": 26393668,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "1c05493d429af0daa252ec52072a0476d6fcd70b6b6fe32c111b301f37b39fb0"
+    },
+    "parent": "fbdeadf954c9685d94525ea37a8be3d8084987c7",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff": "A\t.pbrun-closure.2ad3228e10a3ae93.json\n",
+  "receipt": {
+    "action_key": "d4f002a1b0c4aeaee60944c37aefc6ba312b37ffcde7fc4db2b597819f0f499d",
+    "action_manifest_sha256": "e6ba98d627691289f83d810f870abc90a0b64b6772a9766bae3582e1d8cac2f9",
+    "producer": {
+      "action_key": "d4f002a1b0c4aeaee60944c37aefc6ba312b37ffcde7fc4db2b597819f0f499d",
+      "attestation_sha256": "165a4421a61891594fc3d544da2a0ce2d848e421de8e6c0721b668c4e467e6e3",
+      "evidence": {
+        "accelerators": [],
+        "hostname": "dl380g10",
+        "libc": "glibc-2.43",
+        "machine": "x86_64",
+        "slurm": null,
+        "source": "local",
+        "system": "linux"
+      },
+      "executable": {
+        "bytes": 1540520,
+        "path": "/bin/bash",
+        "resolved_path": "/usr/bin/bash",
+        "sha256": "3efccc187bafa75ff1e37d246270ab3e7aa559f242c7a52bf3ec2a1b5450bdbd"
+      },
+      "host_class": null,
+      "inputs": [
+        {
+          "bytes": 26393668,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "1c05493d429af0daa252ec52072a0476d6fcd70b6b6fe32c111b301f37b39fb0"
+        }
+      ],
+      "platform_key": "linux-x86_64",
+      "runtime": {
+        "core": {
+          "bytes": 283089,
+          "path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py",
+          "resolved_path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py",
+          "sha256": "31825990dec609e2b8c719ee5a3fd04a17739a9f744bbe1438fc3bd6315a09a9"
+        },
+        "launch_kind": "script",
+        "launcher": {
+          "bytes": 2285,
+          "path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py",
+          "resolved_path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py",
+          "sha256": "9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418"
+        },
+        "runtime_sha256": "4f8eec2f6a2b8d0b7807d5c1aa430f7830a9912055629d3b8f743e395ba2c3d6",
+        "schema": "prismaquant.prismabuild.worker_runtime.v1"
+      },
+      "schema": "prismaquant.prismabuild.worker_attestation.v2",
+      "toolchain": {
+        "declared": {},
+        "verified": {}
+      },
+      "worker_id": "dl380g10"
+    },
+    "receipt_sha256": "2fdceb5f06b15b86bd4eb60f9392babb26208f374405e8ac7196a7682a8c32db",
+    "result": {
+      "bytes": 4016,
+      "sha256": "666a24616caca70f21290e294fba2758b05b3e54ac521c81064e016beb3cc6b9"
+    },
+    "schema": "prismaquant.prismabuild.cas_receipt.v3"
+  },
+  "claims": [
+    {
+      "schema": "prismaquant.prismabuild.pbmcp.v1",
+      "tool": "pb_verify_claim",
+      "generated_unix": 1788872830.5300875,
+      "deadline_s": 5.0,
+      "complete": true,
+      "timed_out": [],
+      "unavailable": [],
+      "abandoned_readers": [],
+      "generation": "437ad81b1129-1788868060-209c40b934b6",
+      "generation_stale": false,
+      "started_from_generation": true,
+      "sha256": "a8e4c3f470e4b0ac65f712feaa8ccae395715785d0e34dcf4a8e73e7d8ee05f1",
+      "cas_root": "/mnt/shared/prismabuild-fleet/cas",
+      "claim_path": "/mnt/shared/prismabuild-fleet/cas/local-results/v1/a8/a8e4c3f470e4b0ac65f712feaa8ccae395715785d0e34dcf4a8e73e7d8ee05f1.json",
+      "claim": {
+        "action_key": "d4f002a1b0c4aeaee60944c37aefc6ba312b37ffcde7fc4db2b597819f0f499d",
+        "action_manifest_sha256": "e6ba98d627691289f83d810f870abc90a0b64b6772a9766bae3582e1d8cac2f9",
+        "checkout_root": "/home/rob/tmp/prismabuild-checkouts/d4f002a1b0c4.h7tv22_s/checkout",
+        "claim_sha256": "a8e4c3f470e4b0ac65f712feaa8ccae395715785d0e34dcf4a8e73e7d8ee05f1",
+        "result_path": "pbrun_result.2ad3228e10a3ae93.txt",
+        "schema": "prismaquant.prismabuild.local_result_claim.v1",
+        "working_directory": "."
+      },
+      "checks": {
+        "claim_present": true,
+        "claim_addressed_correctly": true,
+        "claim_digest_matches_body": true,
+        "receipt_present": true,
+        "receipt_self_consistent": true,
+        "receipt_binds_the_claims_manifest": true,
+        "payload_present": true,
+        "payload_bytes_match": true,
+        "payload_sha256_match": true
+      },
+      "not_checked": [
+        "worker attestation (needs the full action manifest; core.PrismaBuildCAS.lookup is the verifier)"
+      ],
+      "receipt_path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/d4/d4f002a1b0c4aeaee60944c37aefc6ba312b37ffcde7fc4db2b597819f0f499d.json",
+      "payload_path": "/mnt/shared/prismabuild-fleet/cas/blobs/66/666a24616caca70f21290e294fba2758b05b3e54ac521c81064e016beb3cc6b9",
+      "payload": {
+        "present": true,
+        "bytes": 4016,
+        "sha256": "666a24616caca70f21290e294fba2758b05b3e54ac521c81064e016beb3cc6b9"
+      },
+      "checks_passed": true,
+      "attestation_verified": null
+    }
+  ],
+  "cleanup": {
+    "checked_unix": 1788872745.1420982,
+    "complete": true,
+    "nonce": "c6c8b478c4f145369e607c13e8181d48",
+    "released": {
+      "ok": true,
+      "scope_id": "prismabuild-jobda4690b57fa2b25400f15f9e03ebf2b1.slice",
+      "stop_reason": "executed",
+      "stopped_unix": 1788872745.0790446
+    },
+    "telemetry": {
+      "action_key": "d4f002a1b0c4aeaee60944c37aefc6ba312b37ffcde7fc4db2b597819f0f499d",
+      "complete": true,
+      "cpu_seconds": 1.576254,
+      "cpu_system_seconds": 0.290862,
+      "cpu_user_seconds": 1.285391,
+      "errors": [],
+      "gpu_memory_max_bytes": 2147483648,
+      "host": "dl380g10",
+      "memory_current_bytes": 843776,
+      "memory_max_bytes": 2147483648,
+      "memory_peak_bytes": 257343488,
+      "nonce": "c6c8b478c4f145369e607c13e8181d48",
+      "oom_kill": 0,
+      "oom_local": 0,
+      "process_io": {
+        "live": {},
+        "members": [],
+        "processes_live": 0,
+        "processes_observed": 0,
+        "processes_unreadable": 0,
+        "rchar": 0,
+        "read_bytes": 0,
+        "retired": {
+          "rchar": 0,
+          "read_bytes": 0,
+          "syscr": 0,
+          "syscw": 0,
+          "wchar": 0,
+          "write_bytes": 0
+        },
+        "source": "proc_io",
+        "syscr": 0,
+        "syscw": 0,
+        "wchar": 0,
+        "write_bytes": 0
+      },
+      "sampled_unix": 1788872745.1244187,
+      "scope_unit": "prismabuild-jobda4690b57fa2b25400f15f9e03ebf2b1.slice",
+      "shape_key": "de0fabdbeac6624241abdd8cb0b07e51501b8f0da581f20b8bdec21b8a4f1cc0",
+      "termination_reason": "executed",
+      "wall_seconds": 2.0101000189897604
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 8.706796133333333,
+        "busy_percent_peak": 13.1536053,
+        "psi_some_avg10_max": 0.0,
+        "psi_some_avg10_samples": 4,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 6,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788872745.0645838,
+      "errors": [
+        "no pqteld CSV for dl380g10 covering the window"
+      ],
+      "host": "dl380g10",
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata",
+      "start_unix": 1788872741.5675437
+    },
+    "finished_unix": 1788872745.0645838,
+    "host": "dl380g10",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 0,
+      "processes_unreadable": 0,
+      "rchar": 0,
+      "read_bytes": 0,
+      "source": "proc_io",
+      "syscr": 0,
+      "syscw": 0,
+      "wchar": 0,
+      "write_bytes": 0
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 1,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 135450624,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.011966000000000143,
+      "user_seconds": 0.11267100000000596,
+      "voluntary_context_switches": 3
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 1.576254,
+      "cpu_system_seconds": 0.290862,
+      "cpu_user_seconds": 1.285391,
+      "memory_current_bytes": 942080,
+      "memory_peak_bytes": 257343488,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788872741.5675437,
+    "wall_seconds": 3.497040033340454
+  },
+  "output": {
+    "path": "/mnt/shared/prismabuild-fleet/cas/blobs/66/666a24616caca70f21290e294fba2758b05b3e54ac521c81064e016beb3cc6b9",
+    "sha256": "666a24616caca70f21290e294fba2758b05b3e54ac521c81064e016beb3cc6b9",
+    "bytes": 4016
+  }
+}
