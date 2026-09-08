@@ -250,3 +250,45 @@ def test_changed_source_identity_refuses_advice(tmp_path, monkeypatch):
     monkeypatch.setattr(os, 'posix_fadvise', lambda *args: pytest.fail('replacement source advised'))
     with pytest.raises(RuntimeError, match='source changed'):
         ls._advise_consumed_safetensors_pages(str(path), ['selected'], expected)
+
+
+def test_adjacent_consumed_payloads_coalesce_before_page_alignment(tmp_path, monkeypatch):
+    path, tensors, header, base, page = checkpoint(tmp_path)
+    selected = sorted(header, key=lambda name: header[name]['data_offsets'][0])[:2]
+    calls = []
+    monkeypatch.setattr(os, 'posix_fadvise', lambda fd, start, size, mode:
+                        calls.append((start, size, mode)))
+    ls._advise_consumed_safetensors_pages(str(path), list(reversed(selected))+selected)
+    begin = base+header[selected[0]]['data_offsets'][0]
+    end = base+header[selected[-1]]['data_offsets'][1]
+    first = (begin+page-1)//page*page
+    last = end//page*page
+    assert calls == [(first, last-first, os.POSIX_FADV_DONTNEED)]
+    assert last <= base+header['unread_after']['data_offsets'][0]
+
+
+def test_nonadjacent_consumed_payloads_preserve_unread_gap(tmp_path, monkeypatch):
+    path, tensors, header, base, page = checkpoint(tmp_path)
+    ordered = sorted(header, key=lambda name: header[name]['data_offsets'][0])
+    calls = []
+    monkeypatch.setattr(os, 'posix_fadvise', lambda fd, start, size, mode:
+                        calls.append((start, size)))
+    ls._advise_consumed_safetensors_pages(str(path), [ordered[0], ordered[2]])
+    assert len(calls) == 2
+    unread_begin, unread_end = (base+x for x in header[ordered[1]]['data_offsets'])
+    assert all(start+size <= unread_begin or start >= unread_end for start, size in calls)
+
+
+def test_invalid_later_span_refuses_before_any_advice(tmp_path, monkeypatch):
+    path, tensors, header, base, page = checkpoint(tmp_path)
+    calls = []
+    monkeypatch.setattr(os, 'posix_fadvise', lambda *args: calls.append(args))
+    real_loads = json.loads
+    def malformed(raw):
+        h = real_loads(raw)
+        h['unread_after']['data_offsets'][1] = path.stat().st_size
+        return h
+    monkeypatch.setattr(json, 'loads', malformed)
+    with pytest.raises(ValueError, match='invalid tensor span'):
+        ls._advise_consumed_safetensors_pages(str(path), list(header))
+    assert calls == []

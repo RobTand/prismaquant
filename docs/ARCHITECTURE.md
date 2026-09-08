@@ -89,6 +89,18 @@ exact full-stack group into smaller independently measured rows; statistical
 stack sampling is a different contract and does not fill that gap.
 
 
+Re-stamped (2026-09-08, `fix/coalesced-source-page-release`) for consumed
+source-page release (#380). The existing CUDA reader chunk validates selected
+safetensors spans, merges adjacent or overlapping consumed bytes, then advises
+only complete pages of each union. This releases internal tensor-boundary
+pages while preserving headers, unread gaps and outer partial pages. The
+existing completed-copy fence, mapping lifetime and source-identity checks
+remain unchanged. No global page drop, admission allowance or source cache is
+introduced; advice remains best effort. Gates cover adjacency, unread gaps,
+invalid-span refusal, CUDA lifecycle and a bounded real-checkpoint native
+profile. A full canonical capture still requires its own successful receipt.
+
+
 Re-stamped (2026-09-08, `fix/joint-boundary-residency`) for the explicit
 `prismaquant.aura.boundary_storage.v1` policy (#373). Streamed AURA can store
 exact decoder boundaries and rolling cotangents through the existing
