@@ -280,6 +280,15 @@ as full-draw quality evidence.
 
 ## Exact boundary working storage (opt-in)
 
+For bounded target replay, `SharedStateCotangents.fork_for_replay` accepts a
+mandatory `max_resident_bytes` cap for the fork's newly allocated compact
+adjoint tensors. It requires a quiescent owner after harvest, deep-copies all
+accumulators, and keeps diagnostic lists independent. The original adjoints
+remain separately charged. Earlier target windows may consume/harvest one
+batch's disposable fork and release it; only the final target window may use
+the original owner and commit outgoing cotangents. This helper does not itself
+schedule replay or change reverse-pass behavior.
+
 `compute_aura_cost_streamed(..., boundary_storage=policy)`, CLI
 `--boundary-storage-config policy.json`, or the Tessera joint plan's
 `execution.boundary_storage` accepts the closed policy:
