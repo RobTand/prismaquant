@@ -9,9 +9,11 @@ alignment and block-offset rules -- and Tessera has a different wire
 byte count here from Gridbook's model would produce a number that no exporter
 would ever write.
 
-So nothing here counts bytes.  ``tessera.layout`` does, through the same
-``build_planes`` / ``build_terminal`` path the artifact writer uses, and this
-module arranges the call and reports the result.  That is deliberate: the
+So nothing here counts bytes. ``tessera.layout`` does, through the shared
+plane/terminal extent arithmetic used by the artifact writer. Older producers
+expose that arithmetic through ``build_planes`` / ``build_terminal``; newer
+ones also expose payload-free extent builders. This module arranges the call
+and reports the result. That is deliberate: the
 allocator's byte budget, the accountant's figures and the exported artifact
 have to be one number, and the only way to guarantee that is to have one
 implementation of it.
@@ -63,6 +65,7 @@ GROUP_WEIGHTS = 32
 HALF_WEIGHTS = 16
 
 try:  # pragma: no cover
+    from tessera import layout as _layout
     from tessera.grammar import forest_plane_bytes
     from tessera.layout import TerminalSpec, build_planes, build_terminal
     from tessera.manifest import BodyKind, Geometry
@@ -71,6 +74,12 @@ except ImportError as exc:  # pragma: no cover
         "prismaquant.tessera_footprint requires the `tessera` package, which "
         "owns the plane layout these byte counts come from."
     ) from exc
+
+
+# The existing reviewed producer pin remains supported. Newer producer inputs
+# can price directly from extents without allocating or hashing payload bytes.
+_build_plane_extents = getattr(_layout, "build_plane_extents", None)
+_build_terminal_extent = getattr(_layout, "build_terminal_extent", None)
 
 
 #: What the recipe digest covers.  Named because a content address is only
@@ -357,17 +366,7 @@ def tessera_tensor_payload_breakdown(
             f"{spec.name}: a CHANNEL plane *is* the DIAG_SV field; segment 2a "
             "cannot be fitted under it (tessera.encode.encode_unit)"
         )
-    # Zero-filled blobs of the wire's own lengths: `build_planes` charges a
-    # plane by its extent and the contents never reach the byte count.  Routed
-    # through it rather than added afterwards so any alignment the descriptors
-    # impose is charged too -- the same thing `tessera.calculator.terminal_rate`
-    # does under `with_forest=True`.  The second argument was a hardcoded `b""`
-    # until 2026-09-03, which charged zero DESCENDANT bytes on every rung.
-    planes = build_planes(
-        geometry,
-        rates,
-        bytes(alphabet_bytes),
-        bytes(descendant_bytes),
+    layout_kwargs = dict(
         with_diagonals=with_diagonals,
         cap=cap,
         arity=spec.arity,
@@ -375,10 +374,20 @@ def tessera_tensor_payload_breakdown(
         span=span,
         with_row_scale=plane == "channel",
     )
-    record = build_terminal(
-        geometry, rates, terminal_spec, planes, alphabet_bytes, descendant_bytes,
-        cap=cap, arity=spec.arity, span=span,
-    )
+    if _build_plane_extents is not None and _build_terminal_extent is not None:
+        planes = _build_plane_extents(
+            geometry, rates, alphabet_bytes, descendant_bytes, **layout_kwargs)
+        terminal_builder = _build_terminal_extent
+    else:
+        # Compatibility with the pinned producer: its writer remains the
+        # byte authority, including blob extents and plane alignment.
+        planes = build_planes(
+            geometry, rates, bytes(alphabet_bytes), bytes(descendant_bytes),
+            **layout_kwargs)
+        terminal_builder = build_terminal
+    record = terminal_builder(geometry, rates, terminal_spec, planes,
+                              alphabet_bytes, descendant_bytes,
+                              cap=cap, arity=spec.arity, span=span)
 
     route = tessera_serving_route(spec, wire, rung)
     total_bytes = record.exact_bytes + sidecar_header_bytes
