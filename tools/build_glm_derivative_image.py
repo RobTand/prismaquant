@@ -34,11 +34,17 @@ def inspect_image(name):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--base-archive', type=Path,
+        help='Reuse a prior bounded export; its config/layer identities must match the inspected original image')
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
     before = inspect_image('prismaquant-glm-producer:content-qualified-20260908')
     assert image_content_sha256(before) == ORIGINAL_IMAGE_CONTENT_SHA256
-    disk_bound = 2 * int(before['Size']) + 256 * 1024**2
+    # Docker Size is compressed on one GB10 image store and uncompressed on
+    # the other. This frozen source exports to 20.9 GB; cap either archive at
+    # 32 GiB rather than treating the nonportable Size field as an authority.
+    archive_bound = 32 * 1024**3
+    disk_bound = 2 * archive_bound + 256 * 1024**2
     assert shutil.disk_usage(args.out).free >= disk_bound, 'insufficient disk for two bounded image archives'
     query = '''import base64,importlib.util,json
 from pathlib import Path
@@ -55,9 +61,10 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
     path = read['path']
     assert path.startswith('/') and '..' not in Path(path).parts
     image = 'prismaquant-glm-derivative:causal-exp-v1-20260908'
-    original_archive = args.out/'original-image.tar'
-    subprocess.run(['docker', 'save', '--output', str(original_archive), before['Id']], check=True)
-    assert original_archive.stat().st_size <= disk_bound // 2
+    original_archive = args.base_archive or args.out/'original-image.tar'
+    if args.base_archive is None:
+        subprocess.run(['docker', 'save', '--output', str(original_archive), before['Id']], check=True)
+    assert original_archive.stat().st_size <= archive_bound
     # A Docker daemon builder is not permitted to escape the admitted scope.
     # Compose one bounded layer and image metadata in this CPU process instead.
     buffer = io.BytesIO()
@@ -95,6 +102,7 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
                 member.mode, member.size = 0o644, len(data)
                 new.addfile(member, io.BytesIO(data))
     subprocess.run(['docker', 'load', '--input', str(archive)], check=True)
+    assert archive.stat().st_size <= archive_bound
     after = inspect_image(image)
     assert after['Config'] == before['Config'], 'runtime image config changed'
     assert after['Architecture'] == before['Architecture'] and after['Os'] == before['Os']
@@ -131,7 +139,8 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
         modeling_path=path, changed_payload_files=changed, original_image=before,
         corrected_image=after, archive=dict(path=str(archive),sha256=sha256(archive)), image=image)
     (args.out/'result.json').write_text(json.dumps(result, indent=2)+'\n')
-    original_archive.unlink()  # This attempt's temporary copy is superseded by its checked derivative archive.
+    if args.base_archive is None:
+        original_archive.unlink()  # This attempt's copy is superseded by its checked derivative archive.
     print(json.dumps(result), flush=True)
 
 
