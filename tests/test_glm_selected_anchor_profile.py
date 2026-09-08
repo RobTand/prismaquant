@@ -303,3 +303,59 @@ def test_native_cuda_only_batch_trace_has_actual_events(tmp_path, monkeypatch):
     assert result['status'] == 'complete' and result['native_anchor_profiled']
     assert result['anchors'][0]['cuda_events'] > 0
     assert 0 < result['anchors'][0]['trace']['bytes'] <= 4*1024**2
+
+
+def test_timed_cuda_window_stops_collection_while_original_call_continues(
+        tmp_path, controlled, monkeypatch):
+    stopped = threading.Event()
+    toggles = []
+    def toggle(self, enabled, activities):
+        toggles.append((enabled, activities))
+        stopped.set()
+    monkeypatch.setattr(FakeProfiler, 'toggle_collection_dynamic', toggle, raising=False)
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+        command=selected(), cuda_only=True, window_seconds=.01)
+    token, calls = object(), []
+    def original(**kwargs):
+        calls.append(kwargs)
+        assert stopped.wait(10), 'CUDA collection was not stopped during the call'
+        return token
+    assert obs.wrap_anchor(original)(qname='dense', format_name='BF16') is token
+    assert len(calls) == 1
+    assert toggles == [(False, [torch.profiler.ProfilerActivity.CUDA])]
+    record, = obs.result['anchors']
+    assert record['status'] == 'complete'
+    assert record['collection_window']['stopped_by'] == 'deadline'
+    assert record['collection_window']['elapsed_seconds'] >= .01
+
+
+def test_timed_collection_failure_preserves_original_success(tmp_path, controlled, monkeypatch):
+    attempted = threading.Event()
+    def toggle(self, *_):
+        attempted.set()
+        raise RuntimeError('controlled CUDA toggle failure')
+    monkeypatch.setattr(FakeProfiler, 'toggle_collection_dynamic', toggle, raising=False)
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+        command=selected(), cuda_only=True, window_seconds=.01)
+    token, calls = object(), []
+    def original(**kwargs):
+        calls.append(kwargs)
+        assert attempted.wait(10)
+        return token
+    assert obs.wrap_anchor(original)(qname='u', format_name='f') is token
+    assert len(calls) == 1
+    assert obs.result['anchors'][0]['status'] == 'observation_failed'
+    assert 'controlled CUDA toggle failure' in obs.result['errors'][0]['error']
+
+
+@pytest.mark.parametrize('seconds', [0, -1, float('nan'), float('inf'), True])
+def test_timed_window_refuses_invalid_duration(tmp_path, seconds):
+    with pytest.raises(ValueError, match='window'):
+        observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+            command=selected(), cuda_only=True, window_seconds=seconds)
+
+
+def test_timed_window_requires_cuda_only(tmp_path):
+    with pytest.raises(ValueError, match='CUDA-only'):
+        observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+            command=selected(), window_seconds=.01)
