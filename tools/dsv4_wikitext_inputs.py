@@ -1,4 +1,4 @@
-"""Offline, value-closed WikiText token inputs for DSv4 gold measurements.
+"""Offline, value-closed WikiText token inputs for gold measurements.
 
 The exact Spark serving image intentionally contains no Hugging Face
 ``datasets`` package.  Dataset materialization is CPU preprocessing, not part
@@ -14,6 +14,7 @@ from collections.abc import Mapping
 import hashlib
 import json
 from pathlib import Path
+import random
 import re
 from typing import Any
 
@@ -21,6 +22,8 @@ import torch
 
 
 DSV4_WIKITEXT_INPUTS_SCHEMA = "prismaquant.dsv4_wikitext_inputs/1"
+MODEL_WIKITEXT_INPUTS_SCHEMA = "prismaquant.model_wikitext_inputs/2"
+WIKITEXT_INPUT_MODEL_SCHEMA = "prismaquant.wikitext_input_model/1"
 DSV4_WIKITEXT_INPUTS_MAX_BYTES = 1_048_576
 DATASETS_DISTRIBUTION = "datasets"
 DATASETS_VERSION = "4.6.0"
@@ -99,7 +102,9 @@ def _tensor_sha256(value: torch.Tensor) -> str:
     ).hexdigest()
 
 
-def _strict_json_load(path: str | Path) -> object:
+def _strict_json_load(
+    path: str | Path, *, expected_sha256: str | None = None,
+) -> object:
     def reject_constant(value: str) -> None:
         raise DSv4WikiTextInputsError(
             f"WikiText inputs contain non-JSON constant {value}"
@@ -125,8 +130,17 @@ def _strict_json_load(path: str | Path) -> object:
                 "WikiText inputs size is outside the closed "
                 f"1..{DSV4_WIKITEXT_INPUTS_MAX_BYTES}-byte bound"
             )
+        raw = source.read_bytes()
+        if len(raw) != size:
+            raise DSv4WikiTextInputsError("WikiText inputs changed while reading")
+        if expected_sha256 is not None and (
+            not isinstance(expected_sha256, str)
+            or _SHA256_RE.fullmatch(expected_sha256) is None
+            or hashlib.sha256(raw).hexdigest() != expected_sha256
+        ):
+            raise DSv4WikiTextInputsError("WikiText input file SHA256 differs")
         return json.loads(
-            source.read_text(encoding="utf-8"),
+            raw.decode("utf-8"),
             parse_constant=reject_constant,
             object_pairs_hook=reject_duplicate_members,
         )
@@ -138,13 +152,18 @@ def _strict_json_load(path: str | Path) -> object:
         ) from exc
 
 
-def _validate_tokenizer_identity(value: object) -> dict[str, Any]:
+def _validate_tokenizer_identity(
+    value: object, *, expected_content_sha256: str | None = None,
+) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != {
         "schema", "content_sha256", "files"
     }:
         raise DSv4WikiTextInputsError("tokenizer identity is not closed")
     if value.get("schema") != "prismaquant.tokenizer_identity/1" or (
-        value.get("content_sha256") != TOKENIZER_IDENTITY_SHA256
+        value.get("content_sha256") != (
+            TOKENIZER_IDENTITY_SHA256 if expected_content_sha256 is None
+            else expected_content_sha256
+        )
     ):
         raise DSv4WikiTextInputsError("tokenizer value identity differs")
     files = value.get("files")
@@ -335,6 +354,186 @@ def load_dsv4_wikitext_inputs(
     )
 
 
+def _validate_model_identity(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema", "model_type", "text_model_type", "vocab_size"
+    } or value.get("schema") != WIKITEXT_INPUT_MODEL_SCHEMA:
+        raise DSv4WikiTextInputsError("WikiText input model identity is not closed")
+    if any(not isinstance(value.get(key), str) or not value[key]
+           for key in ("model_type", "text_model_type")) or (
+        type(value.get("vocab_size")) is not int or value["vocab_size"] <= 0
+    ):
+        raise DSv4WikiTextInputsError("WikiText input model token domain is invalid")
+    return dict(value)
+
+
+def normalize_wikitext_model_identity(config: Mapping[str, Any]) -> dict[str, Any]:
+    """Project source or candidate config onto its shared token domain."""
+    if not isinstance(config, Mapping):
+        raise DSv4WikiTextInputsError("WikiText model config is not an object")
+    text = config.get("text_config", config)
+    if not isinstance(text, Mapping):
+        raise DSv4WikiTextInputsError("WikiText text config is not an object")
+    return _validate_model_identity({
+        "schema": WIKITEXT_INPUT_MODEL_SCHEMA,
+        "model_type": config.get("model_type"),
+        "text_model_type": text.get("model_type", config.get("model_type")),
+        "vocab_size": text.get("vocab_size"),
+    })
+
+
+def wikitext_model_identity(model: str | Path) -> dict[str, Any]:
+    """Read the token domain; quantization config bytes are provenance only."""
+    try:
+        return normalize_wikitext_model_identity(json.loads(
+            (Path(model) / "config.json").read_text(encoding="utf-8")))
+    except DSv4WikiTextInputsError:
+        raise
+    except (OSError, ValueError, AttributeError) as exc:
+        raise DSv4WikiTextInputsError("could not read WikiText model config") from exc
+
+
+def _model_dataset(value: object, *, split: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise DSv4WikiTextInputsError("WikiText dataset identity differs")
+    total = value.get("total_tokens")
+    if type(total) is not int or total <= 0:
+        raise DSv4WikiTextInputsError("WikiText dataset token count is invalid")
+    expected = {**_expected_dataset(split=split), "total_tokens": total}
+    if dict(value) != expected:
+        raise DSv4WikiTextInputsError("WikiText dataset identity differs")
+    return dict(value)
+
+
+def validate_model_wikitext_inputs(
+    payload: object, *, expected_tokenizer_identity: Mapping[str, Any],
+    expected_model_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate v2 values; file intake additionally requires an external SHA."""
+    if not isinstance(payload, Mapping) or set(payload) != {
+        "schema", "datasets_distribution", "corpus_construction", "tokenizer",
+        "model", "source_config", "full_kl", "ppl", "semantic_sha256",
+    }:
+        raise DSv4WikiTextInputsError("WikiText input fields are not closed")
+    if payload.get("schema") != MODEL_WIKITEXT_INPUTS_SCHEMA:
+        raise DSv4WikiTextInputsError("unsupported WikiText input schema")
+    if payload.get("datasets_distribution") != {
+        "name": DATASETS_DISTRIBUTION, "version": DATASETS_VERSION,
+    }:
+        raise DSv4WikiTextInputsError("datasets producer version differs")
+    if payload.get("corpus_construction") != CORPUS_CONSTRUCTION:
+        raise DSv4WikiTextInputsError("WikiText corpus construction differs")
+    model = _validate_model_identity(payload.get("model"))
+    if model != _validate_model_identity(expected_model_identity):
+        raise DSv4WikiTextInputsError("WikiText input model differs from the current model")
+    if not isinstance(expected_tokenizer_identity, Mapping):
+        raise DSv4WikiTextInputsError("expected tokenizer identity is missing")
+    expected_tokenizer_sha = expected_tokenizer_identity.get("content_sha256")
+    if not isinstance(expected_tokenizer_sha, str) or not _SHA256_RE.fullmatch(expected_tokenizer_sha):
+        raise DSv4WikiTextInputsError("expected tokenizer identity is malformed")
+    tokenizer = _validate_tokenizer_identity(payload.get("tokenizer"),
+        expected_content_sha256=expected_tokenizer_sha)
+    if tokenizer != dict(expected_tokenizer_identity):
+        raise DSv4WikiTextInputsError("WikiText inputs tokenizer differs from the current model")
+    source_config = payload.get("source_config")
+    if not isinstance(source_config, Mapping) or set(source_config) != {"bytes", "sha256"} or (
+        type(source_config.get("bytes")) is not int or source_config["bytes"] <= 0
+        or not isinstance(source_config.get("sha256"), str)
+        or _SHA256_RE.fullmatch(source_config["sha256"]) is None
+    ):
+        raise DSv4WikiTextInputsError("source config provenance is malformed")
+
+    def token(value, *, where):
+        if type(value) is not int or not 0 <= value < model["vocab_size"]:
+            raise DSv4WikiTextInputsError(f"{where} contains an invalid token id")
+        return value
+
+    full = payload.get("full_kl")
+    if not isinstance(full, Mapping) or set(full) != {
+        "dataset", "selection", "token_ids", "token_ids_tensor_sha256",
+    }:
+        raise DSv4WikiTextInputsError("full-KL fields are not closed")
+    train = _model_dataset(full["dataset"], split=FULL_KL_SPLIT)
+    max_start = train["total_tokens"] - FULL_KL_SEQLEN
+    if max_start < FULL_KL_N_SAMPLES:
+        raise DSv4WikiTextInputsError("full-KL corpus cannot satisfy the window selection")
+    selection = {
+        "sampler": "python.random.Random(seed).sample(range(max_start), n_samples)/v1",
+        "window_seed": FULL_KL_WINDOW_SEED, "n_samples": FULL_KL_N_SAMPLES,
+        "seqlen": FULL_KL_SEQLEN,
+        "starts": random.Random(FULL_KL_WINDOW_SEED).sample(range(max_start), FULL_KL_N_SAMPLES),
+    }
+    if full.get("selection") != selection or any(
+        type(start) is not int for start in full.get("selection", {}).get("starts", [])
+    ):
+        raise DSv4WikiTextInputsError("full-KL window selection differs")
+    raw_windows = full.get("token_ids")
+    if not isinstance(raw_windows, list) or len(raw_windows) != FULL_KL_N_SAMPLES:
+        raise DSv4WikiTextInputsError("full-KL token windows are malformed")
+    windows = []
+    for index, row in enumerate(raw_windows):
+        if not isinstance(row, list) or len(row) != FULL_KL_SEQLEN:
+            raise DSv4WikiTextInputsError("full-KL token window has the wrong length")
+        windows.append([token(value, where=f"full-KL token window {index}") for value in row])
+    if full.get("token_ids_tensor_sha256") != _tensor_sha256(torch.tensor(windows, dtype=torch.long)):
+        raise DSv4WikiTextInputsError("full-KL token values differ")
+
+    ppl = payload.get("ppl")
+    if not isinstance(ppl, Mapping) or set(ppl) != {
+        "dataset", "selection", "token_ids", "token_ids_sha256",
+    }:
+        raise DSv4WikiTextInputsError("PPL fields are not closed")
+    test = _model_dataset(ppl["dataset"], split=PPL_SPLIT)
+    if test["total_tokens"] < PPL_N_TOKENS or ppl.get("selection") != {
+        "strategy": "contiguous_prefix_after_full_corpus_tokenization/v1",
+        "n_tokens": PPL_N_TOKENS,
+    }:
+        raise DSv4WikiTextInputsError("PPL token selection differs")
+    raw_ppl = ppl.get("token_ids")
+    if not isinstance(raw_ppl, list) or len(raw_ppl) != PPL_N_TOKENS:
+        raise DSv4WikiTextInputsError("PPL token prefix is malformed")
+    ppl_ids = [token(value, where="PPL token prefix") for value in raw_ppl]
+    if ppl.get("token_ids_sha256") != canonical_sha256(ppl_ids):
+        raise DSv4WikiTextInputsError("PPL token values differ")
+    unsigned = {key: value for key, value in payload.items() if key != "semantic_sha256"}
+    if payload.get("semantic_sha256") != canonical_sha256(unsigned):
+        raise DSv4WikiTextInputsError("WikiText input semantic digest differs")
+    return {**payload, "model": model, "tokenizer": tokenizer,
+            "full_kl": {**full, "token_ids": windows}, "ppl": {**ppl, "token_ids": ppl_ids}}
+
+
+def seal_model_wikitext_inputs(
+    payload: Mapping[str, Any], *, expected_tokenizer_identity: Mapping[str, Any],
+    expected_model_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    if "semantic_sha256" in payload:
+        raise DSv4WikiTextInputsError("unsealed payload already has a digest")
+    sealed = {**payload, "semantic_sha256": canonical_sha256(payload)}
+    return validate_model_wikitext_inputs(sealed,
+        expected_tokenizer_identity=expected_tokenizer_identity,
+        expected_model_identity=expected_model_identity)
+
+
+def load_wikitext_inputs(
+    path: str | Path, *, expected_tokenizer_identity: Mapping[str, Any],
+    expected_model_identity: Mapping[str, Any] | None = None,
+    expected_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Read recognized versions, requiring an independently pinned v2 file."""
+    payload = _strict_json_load(path, expected_sha256=expected_sha256)
+    schema = payload.get("schema") if isinstance(payload, Mapping) else None
+    if schema == DSV4_WIKITEXT_INPUTS_SCHEMA:
+        return validate_dsv4_wikitext_inputs(payload,
+            expected_tokenizer_identity=expected_tokenizer_identity)
+    if schema != MODEL_WIKITEXT_INPUTS_SCHEMA:
+        raise DSv4WikiTextInputsError("unsupported WikiText input schema")
+    if expected_sha256 is None:
+        raise DSv4WikiTextInputsError("model-v2 inputs require an independent file SHA256")
+    return validate_model_wikitext_inputs(payload,
+        expected_tokenizer_identity=expected_tokenizer_identity,
+        expected_model_identity=expected_model_identity)
+
+
 __all__ = [name for name in globals() if name.startswith(("DSV4_", "FULL_", "PPL_", "TOKENIZER_", "WIKITEXT_"))] + [
     "CORPUS_CONSTRUCTION",
     "DATASETS_DISTRIBUTION",
@@ -344,4 +543,10 @@ __all__ = [name for name in globals() if name.startswith(("DSV4_", "FULL_", "PPL
     "load_dsv4_wikitext_inputs",
     "seal_dsv4_wikitext_inputs",
     "validate_dsv4_wikitext_inputs",
+    "MODEL_WIKITEXT_INPUTS_SCHEMA",
+    "wikitext_model_identity",
+    "normalize_wikitext_model_identity",
+    "load_wikitext_inputs",
+    "seal_model_wikitext_inputs",
+    "validate_model_wikitext_inputs",
 ]
