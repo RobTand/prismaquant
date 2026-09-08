@@ -3,6 +3,17 @@
 As of: 2026-09-08 · `integrate/glm-packed-source-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `integrate/glm-packed-source-20260908`) for the
+synchronized development/serving dependency pin to Tessera `07ad344c3275`
+(Tessera #431). The producer can bind an explicit packed research execution
+input through export, partition identity and checkpoint config; the ordinary
+registered plugin reconstructs the existing packed expert owner from that
+closed declaration. All carried copies use the same strict integer grammar.
+The packaged contract SHA and allocator admission answer are unchanged from
+`9d2314819f02`; this source/API dependency does not qualify full-model serving
+or TP2 and does not change the serving knob. Pricing and export must retain
+the frozen producer source seal, including this bridge, before new wires exist.
+
 Re-stamped (2026-09-08, `feat/glm-packed-research-profile`) for the opt-in
 `glm_packed_research_sm121` allocation profile. It extends the existing Tessera
 research profile and restricts both logical routed expert names and aggregate
