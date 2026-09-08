@@ -95,6 +95,11 @@ _GOLD_PRODUCER_COMMON_FILES = (
     "tools/spec_decode_guard.py",
 )
 _GOLD_PRODUCER_TOOL_FILES = {
+    "build_streamed_full_kl_teacher": (
+        "tools/build_streamed_full_kl_teacher.py",
+        "tools/container_runtime_identity.py",
+        "tools/full_kl_teacher_payload.py",
+    ),
     "measure_vllm_full_kl": (
         "tools/gold_engine_options.py",
         "tools/full_kl_teacher_payload.py",

@@ -25,6 +25,9 @@ import torch
 TEACHER_PAYLOAD_SCHEMA = "prismaquant.full_kl_teacher_payload/1"
 TEACHER_META_SCHEMA = "prismaquant.full_kl_teacher_meta/1"
 TEACHER_EVIDENCE_SCHEMA = "prismaquant.full_kl_teacher_evidence/1"
+TEACHER_PAYLOAD_V2_SCHEMA = "prismaquant.full_kl_teacher_payload/2"
+TEACHER_META_V2_SCHEMA = "prismaquant.full_kl_teacher_meta/2"
+TEACHER_EVIDENCE_V2_SCHEMA = "prismaquant.full_kl_teacher_evidence/2"
 CALIBRATION_SCHEMA = "prismaquant.wikitext_gold_calibration/1"
 TOKENIZER_IDENTITY_SCHEMA = "prismaquant.tokenizer_identity/1"
 
@@ -81,6 +84,8 @@ _MAX_REPORTABLE_NLL = math.log(float(torch.finfo(torch.float64).max))
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _TENSOR_KEYS = ("calib_ids", "topk_ids", "topk_lps")
+_V2_FIELDS = {"final_logprobs", "source_execution", "producer_identity", "fit_overlap_status",
+              "wikitext_inputs_sha256", "model_identity"}
 _TOKENIZER_FILENAMES = (
     "added_tokens.json",
     "merges.txt",
@@ -711,7 +716,8 @@ def tokenizer_identity(model_dir: str | os.PathLike) -> dict[str, object]:
 def tensor_semantic_projection(payload: Mapping[str, Any]) -> dict[str, object]:
     """Replace tensor bodies with byte descriptors for a stable payload hash."""
     expected = set(payload) - {"payload_semantic_sha256"}
-    missing = set(_TENSOR_KEYS) - expected
+    tensor_keys = teacher_tensor_keys(payload)
+    missing = set(tensor_keys) - expected
     if missing:
         raise TeacherPayloadError(
             f"teacher payload misses semantic tensors: {sorted(missing)}"
@@ -719,8 +725,89 @@ def tensor_semantic_projection(payload: Mapping[str, Any]) -> dict[str, object]:
     projection: dict[str, object] = {}
     for key in sorted(expected):
         value = payload[key]
-        projection[key] = tensor_descriptor(value) if key in _TENSOR_KEYS else value
+        projection[key] = tensor_descriptor(value) if key in tensor_keys else value
     return projection
+
+
+def teacher_tensor_keys(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    if payload.get("schema") == TEACHER_PAYLOAD_V2_SCHEMA and payload.get("final_logprobs") is not None:
+        return _TENSOR_KEYS + ("final_logprobs",)
+    return _TENSOR_KEYS
+
+
+def validate_final_logprobs(value: object, *, n_samples: int, vocab_size: int) -> torch.Tensor:
+    """Validate a full normalized FP32 row without top-K or tail substitution."""
+    if (not isinstance(value, torch.Tensor) or value.dtype != torch.float32
+            or list(value.shape) != [n_samples, vocab_size]):
+        raise TeacherPayloadError("final companion shape/dtype is invalid")
+    if not bool(torch.isfinite(value).all()) or bool((value > 0).any()):
+        raise TeacherPayloadError("final companion logprobs must be finite and nonpositive")
+    mass = value.double().exp().sum(dim=-1)
+    if bool((torch.abs(mass - 1) > TOPK_PROBABILITY_MASS_ABS_TOLERANCE).any()):
+        raise TeacherPayloadError("final companion must carry the full normalized vocabulary")
+    return value
+
+
+def _validate_v2_source(payload: Mapping[str, Any]) -> None:
+    _require_sha256(payload.get("wikitext_inputs_sha256"), where="teacher WikiText input file")
+    try:
+        from .dsv4_wikitext_inputs import normalize_wikitext_model_identity
+    except ImportError:
+        from dsv4_wikitext_inputs import normalize_wikitext_model_identity
+    model = payload.get("model_identity")
+    if not isinstance(model, Mapping) or set(model) != {"schema", "model_type", "text_model_type", "vocab_size"}:
+        raise TeacherPayloadError("teacher input model identity fields are not closed")
+    normalized = normalize_wikitext_model_identity({"model_type": model["model_type"],
+        "text_config": {"model_type": model["text_model_type"], "vocab_size": model["vocab_size"]}})
+    if model != normalized or model["vocab_size"] != payload["vocab_size"]:
+        raise TeacherPayloadError("teacher input model identity/vocabulary differs")
+    execution = payload.get("source_execution")
+    if not isinstance(execution, Mapping):
+        raise TeacherPayloadError("teacher source execution is missing")
+    schema = execution.get("schema")
+    expected = {"schema", "modules"}
+    if schema == "prismaquant.joint_aura.source_execution.v2":
+        expected.add("source_derivative")
+    elif schema != "prismaquant.joint_aura.source_execution.v1":
+        raise TeacherPayloadError("teacher source execution schema is unsupported")
+    if set(execution) != expected or not isinstance(execution.get("modules"), Mapping):
+        raise TeacherPayloadError("teacher source execution fields are not closed")
+    for name, selectors in execution["modules"].items():
+        if (not isinstance(name, str) or not isinstance(selectors, Mapping)
+                or not selectors or not set(selectors) <= {"attention", "experts"}):
+            raise TeacherPayloadError("teacher source execution selectors are invalid")
+    if "source_derivative" in execution:
+        from prismaquant.glm_source_derivative import (
+            declaration, CORRECTED_MODELING_SHA256, CORRECTED_IMAGE_CONTENT_SHA256,
+            ORIGINAL_HUB_KERNELS_SHA256, ORIGINAL_ACCELERATE_INTEGRATION_SHA256,
+        )
+        derivative = execution["source_derivative"]
+        fixed = {"declaration": declaration(), "modeling_sha256": CORRECTED_MODELING_SHA256,
+                 "image_content_sha256": CORRECTED_IMAGE_CONTENT_SHA256,
+                 "hub_kernels_sha256": ORIGINAL_HUB_KERNELS_SHA256,
+                 "accelerate_integration_sha256": ORIGINAL_ACCELERATE_INTEGRATION_SHA256}
+        if (not isinstance(derivative, Mapping)
+                or set(derivative) != set(fixed) | {"gates", "image_build_sha256"}
+                or any(derivative.get(key) != value for key, value in fixed.items())
+                or not isinstance(derivative.get("gates"), Mapping) or not derivative["gates"]):
+            raise TeacherPayloadError("teacher source derivative identity differs")
+        _require_sha256(derivative["image_build_sha256"], where="teacher derivative image build")
+    canonical_json_bytes(execution)
+    producer = payload.get("producer_identity")
+    if not isinstance(producer, Mapping) or set(producer) != {"tools", "prismaquant_source_sha256"}:
+        raise TeacherPayloadError("teacher producer identity fields are not closed")
+    _require_sha256(producer["prismaquant_source_sha256"], where="teacher source package")
+    from prismaquant.shipcard import _verify_gold_producer_identity
+    tools = producer["tools"]
+    problems = _verify_gold_producer_identity(
+        "streamed teacher", {"git_commit": tools.get("git_commit") if isinstance(tools, Mapping) else None},
+        {"measurement_tool": "build_streamed_full_kl_teacher", "producer_identity": tools},
+        canonical_sha=canonical_sha256,
+    )
+    if problems:
+        raise TeacherPayloadError("; ".join(problems))
+    if payload.get("fit_overlap_status") != "unverified":
+        raise TeacherPayloadError("fixed gold draw fitting overlap has not been verified")
 
 
 def payload_semantic_sha256(payload: Mapping[str, Any]) -> str:
@@ -878,9 +965,12 @@ def validate_teacher_payload(payload: object) -> dict[str, Any]:
         "calibration_contract", "calibration_contract_sha256",
         "payload_semantic_sha256",
     }
+    v2 = payload.get("schema") == TEACHER_PAYLOAD_V2_SCHEMA
+    if v2:
+        expected_keys |= _V2_FIELDS
     if set(payload) != expected_keys:
         raise TeacherPayloadError("teacher payload fields are not closed")
-    if payload.get("schema") != TEACHER_PAYLOAD_SCHEMA:
+    if payload.get("schema") not in {TEACHER_PAYLOAD_SCHEMA, TEACHER_PAYLOAD_V2_SCHEMA}:
         raise TeacherPayloadError("unsupported teacher payload schema")
     if (
         payload.get("score_positions") != "all"
@@ -892,6 +982,10 @@ def validate_teacher_payload(payload: object) -> dict[str, Any]:
     vocab_size = payload.get("vocab_size")
     if isinstance(vocab_size, bool) or not isinstance(vocab_size, int) or vocab_size <= PROMPT_TOP_K:
         raise TeacherPayloadError("teacher vocab_size is invalid")
+    if v2:
+        _validate_v2_source(payload)
+        if payload["final_logprobs"] is not None:
+            validate_final_logprobs(payload["final_logprobs"], n_samples=N_SAMPLES, vocab_size=vocab_size)
     calib_ids = payload.get("calib_ids")
     topk_ids = payload.get("topk_ids")
     topk_lps = payload.get("topk_lps")
@@ -943,6 +1037,20 @@ def validate_teacher_payload(payload: object) -> dict[str, Any]:
     return dict(payload)
 
 
+def _v2_evidence_fields(payload: Mapping[str, Any]) -> dict[str, object]:
+    if payload.get("schema") != TEACHER_PAYLOAD_V2_SCHEMA:
+        return {}
+    final = payload["final_logprobs"]
+    return {
+        "source_execution": payload["source_execution"],
+        "producer_identity": payload["producer_identity"],
+        "fit_overlap_status": payload["fit_overlap_status"],
+        "wikitext_inputs_sha256": payload["wikitext_inputs_sha256"],
+        "model_identity": payload["model_identity"],
+        "final_logprobs_descriptor": None if final is None else tensor_descriptor(final),
+    }
+
+
 def teacher_meta(
     *,
     payload_path: str | os.PathLike,
@@ -959,7 +1067,8 @@ def teacher_meta(
         vocab_size=int(validated["vocab_size"]),
     )
     return {
-        "schema": TEACHER_META_SCHEMA,
+        "schema": (TEACHER_META_V2_SCHEMA if validated["schema"] == TEACHER_PAYLOAD_V2_SCHEMA
+                   else TEACHER_META_SCHEMA),
         "payload": str(path),
         "payload_sha256": file_sha256(path),
         "payload_bytes": int(path.stat().st_size),
@@ -969,8 +1078,9 @@ def teacher_meta(
         "calibration_contract": validated["calibration_contract"],
         "calibration_contract_sha256": validated["calibration_contract_sha256"],
         "tensor_descriptors": {
-            key: tensor_descriptor(validated[key]) for key in _TENSOR_KEYS
+            key: tensor_descriptor(validated[key]) for key in teacher_tensor_keys(validated)
         },
+        **_v2_evidence_fields(validated),
         "teacher_shape": list(validated["topk_lps"].shape),
         **coverage,
         "elapsed_s": float(elapsed_s),
@@ -1039,7 +1149,9 @@ def load_teacher_evidence(
     except Exception as exc:
         raise TeacherPayloadError("could not load teacher payload evidence") from exc
     validated = validate_teacher_payload(payload)
-    if not isinstance(meta, Mapping) or meta.get("schema") != TEACHER_META_SCHEMA:
+    v2 = validated["schema"] == TEACHER_PAYLOAD_V2_SCHEMA
+    if not isinstance(meta, Mapping) or meta.get("schema") != (
+            TEACHER_META_V2_SCHEMA if v2 else TEACHER_META_SCHEMA):
         raise TeacherPayloadError("unsupported teacher metadata schema")
     if meta.get("payload_sha256") != file_sha256(payload_file) or meta.get(
         "payload_bytes"
@@ -1053,6 +1165,7 @@ def load_teacher_evidence(
         "topk_coverage_mean", "topk_coverage_min", "topk_coverage_policy",
         "elapsed_s",
     }
+    expected_meta_fields |= set(_v2_evidence_fields(validated))
     if set(meta) != expected_meta_fields:
         raise TeacherPayloadError("teacher metadata fields are not closed")
     comparisons = {
@@ -1062,8 +1175,9 @@ def load_teacher_evidence(
         "calibration_contract": validated["calibration_contract"],
         "calibration_contract_sha256": validated["calibration_contract_sha256"],
         "tensor_descriptors": {
-            key: tensor_descriptor(validated[key]) for key in _TENSOR_KEYS
+            key: tensor_descriptor(validated[key]) for key in teacher_tensor_keys(validated)
         },
+        **_v2_evidence_fields(validated),
         "teacher_shape": list(validated["topk_lps"].shape),
         **topk_coverage_summary(
             validated["topk_ids"],
@@ -1082,7 +1196,7 @@ def load_teacher_evidence(
     ):
         raise TeacherPayloadError("teacher metadata elapsed time is invalid")
     evidence = {
-        "schema": TEACHER_EVIDENCE_SCHEMA,
+        "schema": TEACHER_EVIDENCE_V2_SCHEMA if v2 else TEACHER_EVIDENCE_SCHEMA,
         "payload_sha256": meta["payload_sha256"],
         "payload_bytes": meta["payload_bytes"],
         "payload_semantic_sha256": meta["payload_semantic_sha256"],
@@ -1094,6 +1208,7 @@ def load_teacher_evidence(
         "topk_coverage_mean": meta["topk_coverage_mean"],
         "topk_coverage_min": meta["topk_coverage_min"],
         "topk_coverage_policy": meta["topk_coverage_policy"],
+        **_v2_evidence_fields(validated),
     }
     return validated, evidence
 
@@ -1108,6 +1223,9 @@ __all__ = [
     "TEACHER_EVIDENCE_SCHEMA",
     "TEACHER_META_SCHEMA",
     "TEACHER_PAYLOAD_SCHEMA",
+    "TEACHER_PAYLOAD_V2_SCHEMA",
+    "TEACHER_META_V2_SCHEMA",
+    "TEACHER_EVIDENCE_V2_SCHEMA",
     "TeacherPayloadError",
     "TOPK_COVERAGE_POLICY_SCHEMA",
     "TOPK_MINIMUM_COVERAGE",
@@ -1133,9 +1251,11 @@ __all__ = [
     "teacher_forward_nll_per_position",
     "teacher_meta",
     "tensor_descriptor",
+    "teacher_tensor_keys",
     "topk_coverage_policy",
     "topk_coverage_summary",
     "tokenizer_identity",
     "validate_calibration_contract",
     "validate_teacher_payload",
+    "validate_final_logprobs",
 ]
