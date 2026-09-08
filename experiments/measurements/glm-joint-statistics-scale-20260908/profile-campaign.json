@@ -1,0 +1,40 @@
+[
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 1
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 120,
+    "priority": -10,
+    "argv": [
+      "python3",
+      "experiments/chrome_trace_summary.py",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/native-01/window_0.trace.json",
+      "5f19ca006c9221e389274981bb9dc8005ccf6f813822ec3e0a925eac1b11b3cc",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/window-0-profile-summary.json"
+    ]
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 1
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 120,
+    "priority": -10,
+    "argv": [
+      "python3",
+      "experiments/chrome_trace_summary.py",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/native-01/window_1.trace.json",
+      "b5ac02f8211f9728e39e2f56e7c251703660ce0916cc60b974109371da829220",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/window-1-profile-summary.json"
+    ]
+  }
+]
