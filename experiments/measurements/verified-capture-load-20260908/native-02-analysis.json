@@ -1,0 +1,937 @@
+{
+  "schema": "prismaquant.verified_capture_native_analysis.v1",
+  "source_root": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/verified-capture-load-native-02",
+  "source_sha256": {
+    "arm-0-legacy-seal.trace.json": "595a51764de20203bcfdf7dcf789c624bf2d90f601c786beee4b5e0c24f2ed5d",
+    "arm-2-verified-replay.cprofile": "1320f9cf42e487e26925187e1f2db90148049a2a75ddb809aef640beff4fc15c",
+    "arm-2-verified-replay.cprofile.txt": "b50570f472edb9c2b32217eebb3f11eb4cb25d019b6ca7a4fb3a3cfd61fdd5ae",
+    "arm-1-verified-replay.json": "b2a2f1d4ce77895a8b0e80c652534ccf6dc011a71e6f9059127c903bb3fa5293",
+    "arm-3-legacy-replay.json": "2df097240753f8b0f0a97c9a09d9ce47f1c9a8493446b7b11ef7bb95657492e4",
+    "arm-1-verified-replay.cprofile": "bb67f34e460d0723b1b20937533f48d06a6c87b7d703d0f5af296f7b94d5ea60",
+    "subset-census.json": "40680f64c7ca3f2d01c5a2364bb1c2e246cbf464b448237238bad9281838636d",
+    "netdata.jsonl": "0d86abe68928d83bc2e4296167b6ba28aad8b539f279210b13996866b138c9ea",
+    "arm-3-legacy-replay.trace.json": "aec53359c0f47b3de708a9af136af96d155492be42cadbfbb28cc064a65ab3a1",
+    "arm-1-verified-seal.cprofile.txt": "03456bb1d2bc9cab59776084f835fe86b36c0c0084cfa01cc8fb75a432b51e61",
+    "arm-2-verified-prefetch.trace.json": "c1ad3b674bf32af1d0294339f75c56f88282237333c505cdd560f25cfb79249b",
+    "arm-0-legacy-replay.trace.json": "b9007bc35ceabcb0159e31fd638545dee05e877f91126a916108f6b6065a4496",
+    "arm-1-verified-prefetch.trace.json": "bf5e197bf5d4ba7d5e473ac472483607f7f2b32e781271c790173f0e6977d428",
+    "arm-1-verified-seal.json": "d931f8e1d95c599552be44cbebc69e4222b930ac40bf59441ad06479e6b6c032",
+    "arm-3-legacy-seal.trace.json": "23a700b2cb907c7301d7191f029ae5a59e6ceea004109dd78427c2955853fd06",
+    "arm-0-legacy-prefetch.cprofile": "b074af5abc578a459d535e61b3ad1a18cbc436c5dc53b5f4e70f5f0daf4dbc30",
+    "arm-1-verified-prefetch.cprofile.txt": "3005b033782ae1f8337429f5583035bf9382f543a611d31f5921f62faee2fc61",
+    "arm-3-legacy-prefetch.cprofile": "772364bbbc6755078bea4f54fe49427f8c8a30c28d778d85f1df0c1f76f015c2",
+    "arm-3-legacy-seal.cprofile": "670a94da908230fb83c262f51be7d5a88250a0c0122d442ff80deacb9d4fbc21",
+    "arm-3-legacy-prefetch.json": "7ed31daf84b884cea97181a1abfbb9d7cd6af517111a8b37af9f554c5b1384b1",
+    "arm-1-verified-replay.cprofile.txt": "836e0b7f224614a1aee1ac20ddedeca0d7b6d3b09dfcda6892de889f2f616f9b",
+    "pqteld-slice.json": "81074ecb77c9c138e9203a5cb888063551c5173df1a026778a9cfa6144075a4e",
+    "arm-2-verified-seal.cprofile.txt": "6b4ddbdcbd7b3a4a7f4a652c589fd22279768244d49db67f684c5e36347845a9",
+    "summary.json": "f4333a2e83c5f3957f6589dbb548e5baa8fcbfdbb2f1c2f709c0913149c8bd10",
+    "arm-3-legacy-replay.cprofile.txt": "56578d070b2187f30b6f13855bc085af7be7b58b8c0ed865ce1afa6d8386eeb8",
+    "arm-2-verified-prefetch.cprofile": "215abbb40771986ddf3553d002904f484c71d91e0811063728c85d54598c2f56",
+    "arm-3-legacy-seal.json": "81d3f94af30bb01c32482a33fe556e152e3c2a7847c4df76a85293feaecd337b",
+    "arm-1-verified-seal.trace.json": "caa12eb3b6372e373bc8200581e7851552cf356363a3c2597918751864054794",
+    "arm-1-verified-replay.trace.json": "0ecad7674644b227ffa94ed0b1a6fcb5d3b66d699b8be133d4f7f2d8929b774b",
+    "arm-3-legacy-seal.cprofile.txt": "f9eb8d9d41e96ee8799af22f2bb2f3a1604836ee41d22b07e60fa072cfc2dcfb",
+    "arm-0-legacy-seal.json": "a9101cfad6d49bdf64f4e9c9fc527165821e1c4160778f71c1a97b12c55cd440",
+    "arm-0-legacy-prefetch.json": "a939fdaa0a68f711582534c8b07ead68f001f6264097b71fe42e0e918978ae85",
+    "arm-3-legacy-prefetch.trace.json": "3129d9800a3a11c419d057712541e2868921ed35b44b8dd83c7a0b6a46f77901",
+    "arm-0-legacy-prefetch.cprofile.txt": "efdc951c45f44141b599cce2c7912303743878dcb115f9a90972a75671003e8c",
+    "arm-0-legacy-seal.cprofile": "5dbd347772693d1edd7d292c7c24b0b729ae76845fb669790b0a97aa64e6134a",
+    "arm-2-verified-seal.trace.json": "4cede7e8217ba2439400737515b590c4b03ec8f277b6048129803f075f8b4aca",
+    "arm-0-legacy-replay.cprofile": "c3d636610ffb4473f3d1f78d80db44991f6e7e31349f1725d305e4c88be25481",
+    "arm-2-verified-seal.cprofile": "7aa073cdee56b9ed9203055c71c2257aaf5b50c6a71df6238d53784e54816dc2",
+    "arm-0-legacy-seal.cprofile.txt": "849353e2c53a800ee48f750c7de37dc20fe595a37b8d041e097d6aa4307eb45a",
+    "arm-2-verified-prefetch.json": "e58e764eb86df2c94f4aa0558171eec94dc08efc108fedb0d056cb8320281e1a",
+    "arm-0-legacy-replay.json": "f3df33a4f377d9432ebe29f7382c762de9a7c521bff3e857f088ed4c4e663776",
+    "arm-3-legacy-prefetch.cprofile.txt": "34ed58535257970ac1e0e7c81b7d2bcadcf76cb2acb0ef8c95d47247043245c6",
+    "inputs.json": "5b5c1190c0a0a168e06334085d1d15e475c6245dc1a4e2015d1c06f720658503",
+    "arm-2-verified-replay.json": "fce83f80447844b71adb6dc5fc733be98898cd2a7c531d0457820812d6bd6dc8",
+    "arm-0-legacy-replay.cprofile.txt": "281dcbd08a9c31f1fce695a33886dd19ba41fe7f5e85c3683245f4105b97cb7d",
+    "arm-1-verified-prefetch.cprofile": "cf49ab71375d3debda56a1a682e97f14e8ff2526ec323d197dc30a10e69a057f",
+    "arm-2-verified-seal.json": "ff586158936bbcd8eb8e7e7d7ca4f75ade77d484f5b68f9c21364aa042bce9e4",
+    "arm-0-legacy-prefetch.trace.json": "5e795584ba89105b196fb3bc1038b8f4bda6635bbf336d33ea4d626d68d6c26a",
+    "arm-1-verified-prefetch.json": "44a15bb81a0f107933eb60054487c2e03d74ab57448f178d01167608be0e8b46",
+    "arm-2-verified-prefetch.cprofile.txt": "3b4d6872a7057a3db48904150bb64c1385fd722d0ef294e6b252f3a4ecc3c73a",
+    "arm-1-verified-seal.cprofile": "16b4105dd0f7d5f509740675d213005af97a0e5faa5f706a70572f298e1c4967",
+    "arm-2-verified-replay.trace.json": "71d3ebcf222c3428e765fef0f9ddf153c31b30373e5ef76b500ceb408a9addee",
+    "arm-3-legacy-replay.cprofile": "732a143302a13d74ffb8ed60b1a0977a170098d01846970840dd6ddd52afd869"
+  },
+  "rows": [
+    {
+      "arm": 0,
+      "mode": "legacy",
+      "operation": "replay",
+      "elapsed_s": 1.4864068031311035,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1470054571,
+        "read_bytes": 758513664,
+        "syscr": 1342,
+        "syscw": 20,
+        "wchar": 69445,
+        "write_bytes": 69632
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 8,
+          "inclusive_s": 0.400540007,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 8,
+          "inclusive_s": 0.15931742999999998,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 4,
+      "cprofile_guard_cumulative_s": 0.0019292780000000002,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880042.803,
+          "watts": 4.28
+        },
+        {
+          "time": 1788880043.303,
+          "watts": 4.28
+        },
+        {
+          "time": 1788880043.803,
+          "watts": 4.35
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 0,
+      "mode": "legacy",
+      "operation": "seal",
+      "elapsed_s": 1.0717368125915527,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1469488276,
+        "read_bytes": 704667648,
+        "syscr": 754,
+        "syscw": 9,
+        "wchar": 62381,
+        "write_bytes": 61440
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.20454987900000002,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.08058015400000001,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 4,
+      "cprofile_guard_cumulative_s": 0.001953455,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880044.303,
+          "watts": 4.35
+        },
+        {
+          "time": 1788880044.803,
+          "watts": 6.09
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 0,
+      "mode": "legacy",
+      "operation": "prefetch",
+      "elapsed_s": 1.3279340267181396,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1416187818,
+        "read_bytes": 1409294336,
+        "syscr": 828,
+        "syscw": 11,
+        "wchar": 69529,
+        "write_bytes": 69632
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.20842532900000002,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.080210123,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 92,
+      "cprofile_guard_cumulative_s": 0.033755439000000005,
+      "gpu_transfer_count": 4,
+      "gpu_transfer_s": 0.028087171,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880045.803,
+          "watts": 11.53
+        },
+        {
+          "time": 1788880046.303,
+          "watts": 11.53
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 1,
+      "mode": "verified",
+      "operation": "replay",
+      "elapsed_s": 2.0039186477661133,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 759568022,
+        "read_bytes": 704651264,
+        "syscr": 4817,
+        "syscw": 12,
+        "wchar": 92560,
+        "write_bytes": 90112
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 676,
+          "inclusive_s": 0.649131346,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 676,
+          "inclusive_s": 0.159185524,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 686,
+      "cprofile_guard_cumulative_s": 0.21837684200000002,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880047.803,
+          "watts": 11.47
+        },
+        {
+          "time": 1788880048.303,
+          "watts": 11.47
+        },
+        {
+          "time": 1788880048.803,
+          "watts": 11.52
+        },
+        {
+          "time": 1788880049.303,
+          "watts": 11.52
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 1,
+      "mode": "verified",
+      "operation": "seal",
+      "elapsed_s": 1.6614551544189453,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 759600106,
+        "read_bytes": 704667648,
+        "syscr": 4820,
+        "syscw": 11,
+        "wchar": 85520,
+        "write_bytes": 86016
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 672,
+          "inclusive_s": 0.416734082,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 672,
+          "inclusive_s": 0.079347067,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 686,
+      "cprofile_guard_cumulative_s": 0.215183737,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880049.803,
+          "watts": 11.48
+        },
+        {
+          "time": 1788880050.303,
+          "watts": 11.48
+        },
+        {
+          "time": 1788880050.803,
+          "watts": 11.46
+        },
+        {
+          "time": 1788880051.303,
+          "watts": 11.46
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 1,
+      "mode": "verified",
+      "operation": "prefetch",
+      "elapsed_s": 1.4694099426269531,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 705748190,
+        "read_bytes": 704651264,
+        "syscr": 4814,
+        "syscw": 11,
+        "wchar": 69519,
+        "write_bytes": 69632
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 672,
+          "inclusive_s": 0.426143689,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 672,
+          "inclusive_s": 0.078647502,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 686,
+      "cprofile_guard_cumulative_s": 0.22118499400000002,
+      "gpu_transfer_count": 4,
+      "gpu_transfer_s": 0.028118178,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880051.803,
+          "watts": 11.48
+        },
+        {
+          "time": 1788880052.302,
+          "watts": 11.48
+        },
+        {
+          "time": 1788880052.803,
+          "watts": 11.56
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 2,
+      "mode": "verified",
+      "operation": "replay",
+      "elapsed_s": 2.065972328186035,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 759567852,
+        "read_bytes": 704651264,
+        "syscr": 4815,
+        "syscw": 11,
+        "wchar": 81266,
+        "write_bytes": 77824
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 676,
+          "inclusive_s": 0.658888486,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 676,
+          "inclusive_s": 0.160433952,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 686,
+      "cprofile_guard_cumulative_s": 0.215677329,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880054.302,
+          "watts": 11.55
+        },
+        {
+          "time": 1788880054.802,
+          "watts": 11.49
+        },
+        {
+          "time": 1788880055.303,
+          "watts": 11.49
+        },
+        {
+          "time": 1788880055.803,
+          "watts": 11.44
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 2,
+      "mode": "verified",
+      "operation": "seal",
+      "elapsed_s": 1.7093017101287842,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 759600280,
+        "read_bytes": 704667648,
+        "syscr": 4822,
+        "syscw": 13,
+        "wchar": 108498,
+        "write_bytes": 110592
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 672,
+          "inclusive_s": 0.46345614500000004,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 672,
+          "inclusive_s": 0.07979712300000001,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 686,
+      "cprofile_guard_cumulative_s": 0.22307374300000002,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880056.303,
+          "watts": 11.44
+        },
+        {
+          "time": 1788880056.803,
+          "watts": 11.47
+        },
+        {
+          "time": 1788880057.302,
+          "watts": 11.47
+        },
+        {
+          "time": 1788880057.803,
+          "watts": 11.59
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 2,
+      "mode": "verified",
+      "operation": "prefetch",
+      "elapsed_s": 1.553380012512207,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 705748195,
+        "read_bytes": 704651264,
+        "syscr": 4814,
+        "syscw": 11,
+        "wchar": 69458,
+        "write_bytes": 69632
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 672,
+          "inclusive_s": 0.46443920400000005,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 672,
+          "inclusive_s": 0.078456312,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 686,
+      "cprofile_guard_cumulative_s": 0.22084140200000002,
+      "gpu_transfer_count": 4,
+      "gpu_transfer_s": 0.028796351999999997,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880058.303,
+          "watts": 11.59
+        },
+        {
+          "time": 1788880058.803,
+          "watts": 11.67
+        },
+        {
+          "time": 1788880059.303,
+          "watts": 11.67
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 3,
+      "mode": "legacy",
+      "operation": "replay",
+      "elapsed_s": 1.3800694942474365,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1469456026,
+        "read_bytes": 704651264,
+        "syscr": 749,
+        "syscw": 8,
+        "wchar": 46266,
+        "write_bytes": 45056
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 8,
+          "inclusive_s": 0.41930913799999997,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 8,
+          "inclusive_s": 0.158649384,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 4,
+      "cprofile_guard_cumulative_s": 0.00210451,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880060.803,
+          "watts": 11.73
+        },
+        {
+          "time": 1788880061.303,
+          "watts": 11.73
+        },
+        {
+          "time": 1788880061.803,
+          "watts": 11.66
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 3,
+      "mode": "legacy",
+      "operation": "seal",
+      "elapsed_s": 1.0502653121948242,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1469488283,
+        "read_bytes": 704667648,
+        "syscr": 754,
+        "syscw": 9,
+        "wchar": 62417,
+        "write_bytes": 65536
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.209001041,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.080334378,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 4,
+      "cprofile_guard_cumulative_s": 0.0019523810000000002,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880062.303,
+          "watts": 11.66
+        },
+        {
+          "time": 1788880062.803,
+          "watts": 11.6
+        }
+      ],
+      "phase_preflight": null
+    },
+    {
+      "arm": 3,
+      "mode": "legacy",
+      "operation": "prefetch",
+      "elapsed_s": 1.297090768814087,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1415773298,
+        "read_bytes": 1409294336,
+        "syscr": 645,
+        "syscw": 9,
+        "wchar": 46426,
+        "write_bytes": 45056
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.209482497,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.080722954,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 92,
+      "cprofile_guard_cumulative_s": 0.034604812000000006,
+      "gpu_transfer_count": 4,
+      "gpu_transfer_s": 0.028781537,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788880063.802,
+          "watts": 11.68
+        },
+        {
+          "time": 1788880064.303,
+          "watts": 11.68
+        }
+      ],
+      "phase_preflight": null
+    }
+  ],
+  "comparisons": [
+    {
+      "operation": "replay",
+      "mean_elapsed_s": {
+        "legacy": 1.43323814868927,
+        "verified": 2.034945487976074
+      },
+      "verified_over_legacy_elapsed": 1.4198236977135166
+    },
+    {
+      "operation": "seal",
+      "mean_elapsed_s": {
+        "legacy": 1.0610010623931885,
+        "verified": 1.6853784322738647
+      },
+      "verified_over_legacy_elapsed": 1.5884794954609507
+    },
+    {
+      "operation": "prefetch",
+      "mean_elapsed_s": {
+        "legacy": 1.3125123977661133,
+        "verified": 1.51139497756958
+      },
+      "verified_over_legacy_elapsed": 1.1515281532898
+    }
+  ],
+  "netdata_hosts": {
+    "sparky": {
+      "samples": 43,
+      "cpu_busy_mean": 10.009716220930233,
+      "cpu_busy_peak": 30.8553972,
+      "gpu_power_w_unique_samples": [
+        [
+          1788880030,
+          37.0
+        ],
+        [
+          1788880040,
+          39.0
+        ],
+        [
+          1788880050,
+          37.0
+        ],
+        [
+          1788880060,
+          44.0
+        ]
+      ]
+    },
+    "sparklina": {
+      "samples": 43,
+      "cpu_busy_mean": 5.43392073255814,
+      "cpu_busy_peak": 6.3723031,
+      "gpu_power_w_unique_samples": [
+        [
+          1788880030,
+          4.0
+        ],
+        [
+          1788880040,
+          11.0
+        ],
+        [
+          1788880050,
+          11.0
+        ]
+      ]
+    }
+  },
+  "energy_limit": "Only a few 2 Hz pqteld observations fall inside each short operation. Preserve raw timestamps; do not interpolate arm boundaries or rank per-operation work/J. Host/CPU energy is unmeasured.",
+  "limits": "One instrumented ABBA; cProfile background thread/wait and nested totals cannot be summed as exclusive wall costs. Torch inclusive scopes also overlap. Netdata GPU power updates every 10 s; pqteld supplies finer power observations, but still insufficient per-operation energy coverage. No production/full-model fit/serving/KL claim."
+}

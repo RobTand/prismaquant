@@ -108,7 +108,7 @@ def capture_identity(census_path, *, calibration, max_act_rows,
                 units={name:list(shape) for name,shape in sorted(census['unit_shapes'].items())})
 
 
-def _validate_tensors(name, payload, census, max_rows):
+def _validate_tensors(name, payload, census, max_rows, *, check_finite=True):
     import torch
     columns = int(census['unit_shapes'][name][1])
     count = int(census['counts'][name])
@@ -123,14 +123,111 @@ def _validate_tensors(name, payload, census, max_rows):
             not isinstance(h, torch.Tensor) or h.dtype != torch.float32 or
             list(h.shape) != [columns, columns]):
         raise RuntimeError(f'{name}: calibration capture tensor geometry or precision changed')
-    if not torch.isfinite(x).all() or not torch.isfinite(h).all():
+    if check_finite and (not torch.isfinite(x).all() or not torch.isfinite(h).all()):
         raise RuntimeError(f'{name}: calibration capture contains nonfinite tensors')
     return x, h
 
 
+def _capture_storage_bytes(name, census, max_rows):
+    columns, count = census['unit_shapes'][name][1], census['counts'][name]
+    if any(type(value) is not int or value <= 0 for value in (columns, count, max_rows)):
+        raise ValueError('verified capture needs positive exact census geometry')
+    return 4 * (columns**2 + min(count, max_rows)*columns)
+
+
+def _load_execution(policy, identity, output=None):
+    from .perturbed_x_cache import normalize_verified_activation_load
+    policy = normalize_verified_activation_load(policy)
+    if policy is None:
+        return None
+    descriptor = dict(schema='prismaquant.capture_load_execution.v1', policy=policy,
+                      capture_identity=identity)
+    hasher = hashlib.sha256()
+    for chunk in json.JSONEncoder(sort_keys=True, separators=(',', ':')).iterencode(descriptor):
+        hasher.update(chunk.encode())
+    digest = hasher.hexdigest()
+    value = dict(schema=descriptor['schema'], policy=policy, identity_sha256=digest,
+                 loaded_entries=0, source_read_bytes=0, peak_buffer_bytes=0,
+                 peak_archive_storage_bytes=0, live_buffer_bytes=0,
+                 ordered_load_identities_sha256=hashlib.sha256(b'').hexdigest())
+    if output is not None:
+        if not isinstance(output, dict) or output:
+            raise ValueError('capture load execution receipt must be an empty dictionary')
+        output.update(value)
+        return output
+    return value
+
+
+def merge_load_execution(total, partial):
+    if total['identity_sha256'] != partial['identity_sha256'] or total['policy'] != partial['policy']:
+        raise RuntimeError('capture load execution identity changed between units')
+    for key in ('loaded_entries', 'source_read_bytes'):
+        total[key] += partial[key]
+    for key in ('peak_buffer_bytes', 'peak_archive_storage_bytes'):
+        total[key] = max(total[key], partial[key])
+    total['ordered_load_identities_sha256'] = hashlib.sha256((
+        total['ordered_load_identities_sha256'] + partial['ordered_load_identities_sha256']).encode()).hexdigest()
+
+
+def preflight_verified_capture_entries(root, entries, *, names, policy, census, max_rows):
+    """Check the complete selected roster's file/geometry bounds before loading."""
+    import stat
+    from .perturbed_x_cache import activation_cache_filename, normalize_verified_activation_load
+    policy = normalize_verified_activation_load(policy)
+    if policy is None:
+        raise ValueError('verified capture preflight requires an explicit load policy')
+    largest_file = largest_storage = 0
+    for name in names:
+        expected = str(Path('inputs') / activation_cache_filename(name))
+        record = entries[name]
+        if record.get('path') != expected:
+            raise RuntimeError(f'{name}: noncanonical capture artifact path')
+        observed = (Path(root)/expected).lstat()
+        if not stat.S_ISREG(observed.st_mode):
+            raise RuntimeError(f'{name}: verified capture requires a regular nonsymlink file')
+        if observed.st_size <= 0 or observed.st_size > policy['max_buffer_bytes']:
+            raise RuntimeError(f'{name}: capture file exceeds verified serialized buffer budget')
+        largest_file = max(largest_file, observed.st_size)
+        largest_storage = max(largest_storage, _capture_storage_bytes(name, census, max_rows))
+    return dict(max_file_bytes=largest_file, max_storage_bytes=largest_storage)
+
+
+def _verified_capture_entry(path, name, *, expected_sha256, census, max_rows,
+                            policy, execution, resource_check=None,
+                            release_file_pages=False, expected_stat=None):
+    from .perturbed_x_cache import load_verified_activation_cache_entry
+    def validate(payload, *, check_finite):
+        if (not isinstance(payload, dict) or set(payload) !=
+                {'inputs', 'hessian', 'name', 'source', 'count', 'max_abs'}):
+            raise RuntimeError(f'{name}: verified capture payload has unexpected owners')
+        x, h = _validate_tensors(name, payload, census, max_rows, check_finite=False)
+        if not x.is_contiguous() or not h.is_contiguous():
+            raise RuntimeError(f'{name}: verified capture requires contiguous canonical tensors')
+        if check_finite:
+            from .perturbed_x_cache import bounded_cpu_float32_isfinite
+            for tensor in (x, h):
+                if not bounded_cpu_float32_isfinite(tensor,
+                        max_scratch_bytes=policy['max_scratch_bytes']):
+                    raise RuntimeError(f'{name}: calibration capture contains nonfinite tensors')
+    payload, receipt = load_verified_activation_cache_entry(path,
+        expected_sha256=expected_sha256, policy=policy,
+        max_storage_bytes=_capture_storage_bytes(name, census, max_rows),
+        validate=validate, expected_stat=expected_stat, resource_check=resource_check,
+        release_file_pages=release_file_pages)
+    execution['loaded_entries'] += 1
+    execution['source_read_bytes'] += receipt['source_read_bytes']
+    execution['peak_buffer_bytes'] = max(execution['peak_buffer_bytes'], receipt['file_bytes'])
+    execution['peak_archive_storage_bytes'] = max(execution['peak_archive_storage_bytes'],
+                                                  receipt['archive_storage_bytes'])
+    execution['ordered_load_identities_sha256'] = hashlib.sha256((
+        execution['ordered_load_identities_sha256'] + receipt['identity_sha256']).encode()).hexdigest()
+    return payload
+
+
 def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
                     counts=None, maxima=None, existing_entries=None,
-                    release_file_pages=False, resource_check=None):
+                    release_file_pages=False, resource_check=None,
+                    verified_load_policy=None, load_execution=None):
     """Seal a complete capture, journalling per-unit file receipts atomically.
 
     ``existing_entries`` seals a previously measured raw capture without another
@@ -140,6 +237,7 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
     from .perturbed_x_cache import activation_cache_filename, write_activation_cache_entry
     root = Path(root).resolve()
     census = json.loads(Path(census_path).read_text())
+    execution = _load_execution(verified_load_policy, identity, load_execution)
     names = sorted(identity['units'])
     if len({activation_cache_filename(n) for n in names}) != len(names):
         raise RuntimeError('calibration unit filenames collide')
@@ -152,8 +250,13 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
         raise RuntimeError('raw capture does not cover the full census')
     journal, digest, completed = prepare_journal(root/'journal', stage=STAGE,
         resume=True, identity=identity, qnames=names)
+    if execution is not None:
+        available = {**(existing_entries or {}), **completed}
+        preflight_verified_capture_entries(root, available, names=sorted(available),
+            policy=execution['policy'], census=census, max_rows=identity['max_act_rows'])
     records = {}
     for name in names:
+        loaded_verified = False
         if resource_check is not None:
             resource_check(f'before_capture_seal:{name}')
         expected_path = Path('inputs') / activation_cache_filename(name)
@@ -171,11 +274,19 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
                 raise RuntimeError(f'{name}: capture file is outside its canonical location')
             path = root/expected_path
             file_stat = path.stat() if release_file_pages else None
-            if sha256(path) != record['sha256']:
-                raise RuntimeError(f'{name}: capture artifact checksum mismatch')
-            _validate_tensors(name,torch.load(path,map_location='cpu',weights_only=True),
-                              census,identity['max_act_rows'])
-        if release_file_pages:
+            if execution is None:
+                if sha256(path) != record['sha256']:
+                    raise RuntimeError(f'{name}: capture artifact checksum mismatch')
+                _validate_tensors(name,torch.load(path,map_location='cpu',weights_only=True),
+                                  census,identity['max_act_rows'])
+            else:
+                payload = _verified_capture_entry(path, name, expected_sha256=record['sha256'],
+                    census=census, max_rows=identity['max_act_rows'], policy=execution['policy'],
+                    execution=execution, resource_check=resource_check,
+                    release_file_pages=release_file_pages, expected_stat=file_stat)
+                del payload
+                loaded_verified = True
+        if release_file_pages and not loaded_verified:
             from .perturbed_x_cache import release_activation_cache_file_pages
             release_activation_cache_file_pages(path, expected_stat=file_stat)
         if name not in completed:
@@ -201,13 +312,16 @@ class CaptureWriter:
     """
 
     def __init__(self, root, *, census_path, identity,
-                 release_file_pages=False, resource_check=None):
+                 release_file_pages=False, resource_check=None,
+                 verified_load_policy=None):
         self.root = Path(root).resolve()
         self.census_path = census_path
         self.census = json.loads(Path(census_path).read_text())
         self.identity = identity
         self.release_file_pages = release_file_pages
         self.resource_check = resource_check
+        self.load_execution = _load_execution(verified_load_policy, identity)
+        self.seal_load_execution = None
         self.names = sorted(identity['units'])
         if set(self.names) != set(self.census['counts']):
             raise RuntimeError('calibration writer scope differs from census')
@@ -229,6 +343,10 @@ class CaptureWriter:
                                f'only {available} are available')
         self.journal, self.digest, self.completed = prepare_journal(
             self.root/'journal', stage=STAGE, resume=True, identity=identity, qnames=self.names)
+        if self.load_execution is not None:
+            preflight_verified_capture_entries(self.root, self.completed, names=sorted(self.completed),
+                policy=self.load_execution['policy'], census=self.census,
+                max_rows=self.identity['max_act_rows'])
         self.records = {}
 
     def write(self, *, acts, hessians, counts, maxima):
@@ -249,23 +367,36 @@ class CaptureWriter:
                 expected = str(Path('inputs')/activation_cache_filename(name))
                 path = self.root/expected
                 file_stat = path.stat() if self.release_file_pages else None
-                if previous.get('path') != expected or sha256(path) != previous.get('sha256'):
+                if previous.get('path') != expected:
                     raise RuntimeError(f'{name}: interrupted capture entry changed')
-                old = torch.load(path, map_location='cpu', weights_only=True)
-                old_x, old_h = _validate_tensors(name, old, self.census, self.identity['max_act_rows'])
-                if not torch.equal(old_x, acts[name]) or not torch.equal(old_h, hessians[name]):
-                    raise RuntimeError(f'{name}: replayed capture differs from interrupted entry')
-                record = previous
-                # Admission allows one loaded validation entry alongside the
-                # current capture. Drop all views before loading its successor.
-                del old, old_x, old_h
+                if self.load_execution is None:
+                    if sha256(path) != previous.get('sha256'):
+                        raise RuntimeError(f'{name}: interrupted capture entry changed')
+                    old = torch.load(path, map_location='cpu', weights_only=True)
+                else:
+                    old = _verified_capture_entry(path, name, expected_sha256=previous.get('sha256'),
+                        census=self.census, max_rows=self.identity['max_act_rows'],
+                        policy=self.load_execution['policy'], execution=self.load_execution,
+                        resource_check=self.resource_check, release_file_pages=self.release_file_pages,
+                        expected_stat=file_stat)
+                old_x = old_h = None
+                try:
+                    old_x, old_h = _validate_tensors(name, old, self.census, self.identity['max_act_rows'],
+                                                    check_finite=self.load_execution is None)
+                    if not torch.equal(old_x, acts[name]) or not torch.equal(old_h, hessians[name]):
+                        raise RuntimeError(f'{name}: replayed capture differs from interrupted entry')
+                    record = previous
+                finally:
+                    # One loaded validation entry expires before its successor,
+                    # including when replay equality or geometry refuses.
+                    del old, old_x, old_h
             else:
                 path = write_activation_cache_entry(self.root/'inputs', name, acts[name],
                     source=SOURCE, durable=True, hessian=hessians[name],
                     count=counts[name], max_abs=maxima[name])
                 file_stat = path.stat() if self.release_file_pages else None
                 record = dict(path=str(Path('inputs')/activation_cache_filename(name)), sha256=sha256(path))
-            if self.release_file_pages:
+            if self.release_file_pages and (self.load_execution is None or previous is None):
                 from .perturbed_x_cache import release_activation_cache_file_pages
                 release_activation_cache_file_pages(path, expected_stat=file_stat)
             if previous is None:
@@ -280,10 +411,15 @@ class CaptureWriter:
         actual = validate_source_initialization_contract(model_load_contract)
         if actual != self.identity['model_load_contract']:
             raise RuntimeError('actual capture initialization differs from the census')
+        extra = {}
+        if self.load_execution is not None:
+            self.seal_load_execution = {}
+            extra = dict(verified_load_policy=self.load_execution['policy'],
+                         load_execution=self.seal_load_execution)
         return publish_capture(self.root, census_path=self.census_path,
                                identity=self.identity, existing_entries=self.records,
                                release_file_pages=self.release_file_pages,
-                               resource_check=self.resource_check)
+                               resource_check=self.resource_check, **extra)
 
 
 def require_capture_contract(path, expected_sha256=None):
@@ -313,11 +449,13 @@ def require_capture_contract(path, expected_sha256=None):
 
 def prefetch_capture(path, *, expected_identity, census, names, device,
                      expected_sha256=None, resource_check=None,
-                     release_file_pages=False):
+                     release_file_pages=False, verified_load_policy=None,
+                     load_execution=None):
     """Verify selected files and make all selected X/H resident before encoding."""
     import torch
     from .perturbed_x_cache import activation_cache_filename
     path = Path(path)
+    execution = _load_execution(verified_load_policy, expected_identity, load_execution)
     digest = sha256(path)
     if expected_sha256 is not None and digest != expected_sha256:
         raise RuntimeError('priced calibration capture manifest changed')
@@ -328,35 +466,58 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
             set(manifest.get('entries',{})) != set(expected_identity['units']) or
             not set(names) <= set(expected_identity['units'])):
         raise RuntimeError('calibration capture identity, completeness or scope mismatch')
+    if execution is not None:
+        preflight_verified_capture_entries(path.parent, manifest['entries'], names=names,
+            policy=execution['policy'], census=census, max_rows=expected_identity['max_act_rows'])
     acts, hessians, counts, maxima = {}, {}, {}, {}
-    for name in names:
-        record = manifest['entries'][name]
-        relative = str(Path('inputs') / activation_cache_filename(name))
-        if record.get('path') != relative:
-            raise RuntimeError(f'{name}: noncanonical capture artifact path')
-        artifact = path.parent/relative
-        file_stat = artifact.stat() if release_file_pages else None
-        if sha256(artifact, resource_check=resource_check,
-                  release_read_pages=release_file_pages) != record.get('sha256'):
-            raise RuntimeError(f'{name}: capture artifact checksum mismatch')
-        if resource_check is not None:
-            columns = int(census['unit_shapes'][name][1])
-            resource_check(f'before_capture_prefetch:{name}', reserve_bytes=8*(
-                columns**2+min(census['counts'][name], expected_identity['max_act_rows'])*columns))
-        payload = torch.load(artifact,map_location='cpu',weights_only=True)
-        x,h = _validate_tensors(name,payload,census,expected_identity['max_act_rows'])
-        acts[name],hessians[name] = x.to(device),h.to(device)
-        counts[name],maxima[name] = payload['count'],payload['max_abs']
-        if release_file_pages:
-            from .perturbed_x_cache import release_activation_cache_file_pages
-            if str(device).startswith('cuda'):
-                torch.cuda.synchronize(device)
+    payload = x = h = None
+    try:
+        for name in names:
+            record = manifest['entries'][name]
+            relative = str(Path('inputs') / activation_cache_filename(name))
+            if record.get('path') != relative:
+                raise RuntimeError(f'{name}: noncanonical capture artifact path')
+            artifact = path.parent/relative
+            file_stat = artifact.stat() if release_file_pages else None
+            if execution is None:
+                if sha256(artifact, resource_check=resource_check,
+                          release_read_pages=release_file_pages) != record.get('sha256'):
+                    raise RuntimeError(f'{name}: capture artifact checksum mismatch')
+                if resource_check is not None:
+                    columns = int(census['unit_shapes'][name][1])
+                    resource_check(f'before_capture_prefetch:{name}', reserve_bytes=8*(
+                        columns**2+min(census['counts'][name], expected_identity['max_act_rows'])*columns))
+                payload = torch.load(artifact,map_location='cpu',weights_only=True)
+            else:
+                payload = _verified_capture_entry(artifact, name, expected_sha256=record.get('sha256'),
+                    census=census, max_rows=expected_identity['max_act_rows'], policy=execution['policy'],
+                    execution=execution, resource_check=resource_check,
+                    release_file_pages=release_file_pages, expected_stat=file_stat)
+                if resource_check is not None:
+                    resource_check(f'before_capture_prefetch:{name}', reserve_bytes=
+                        2*_capture_storage_bytes(name, census, expected_identity['max_act_rows']))
+            x,h = _validate_tensors(name,payload,census,expected_identity['max_act_rows'],
+                                    check_finite=execution is None)
+            acts[name],hessians[name] = x.to(device),h.to(device)
+            counts[name],maxima[name] = payload['count'],payload['max_abs']
+            if release_file_pages:
+                from .perturbed_x_cache import release_activation_cache_file_pages
+                if str(device).startswith('cuda'):
+                    torch.cuda.synchronize(device)
             del payload, x, h
-            release_activation_cache_file_pages(artifact, expected_stat=file_stat)
-        if resource_check is not None:
-            resource_check(f'after_capture_prefetch:{name}')
-    if str(device).startswith('cuda'):
-        torch.cuda.synchronize(device)
+            payload = x = h = None
+            if release_file_pages and execution is None:
+                release_activation_cache_file_pages(artifact, expected_stat=file_stat)
+            if resource_check is not None:
+                resource_check(f'after_capture_prefetch:{name}')
+        if str(device).startswith('cuda'):
+            torch.cuda.synchronize(device)
+    except BaseException:
+        if execution is not None:
+            acts.clear()
+            hessians.clear()
+            payload = x = h = None
+        raise
     resident = sum(t.numel()*t.element_size() for t in (*acts.values(),*hessians.values()))
     print(f'[campaign] calibration prefetched: {len(names)} units, {resident} resident bytes, 0 misses',flush=True)
     return (acts,hessians,counts,maxima),dict(path=str(path.resolve()),sha256=digest)

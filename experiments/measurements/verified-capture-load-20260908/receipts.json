@@ -1,0 +1,212 @@
+[
+  {
+    "name": "native-complete-02",
+    "action_key": "9cf97e5c985759fbb2f827ace599fbf1dc055b243f58b7d3dba663f9e3c95931",
+    "status": "executed",
+    "host": "sparklina",
+    "returncode": 0,
+    "elapsed_s": 35.69089913368225,
+    "checkout_snapshot": {
+      "commit": "64b0a38dce99a6ed9e750183472999d9d67ceeb3",
+      "input": {
+        "bytes": 26548194,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "0068ad05785bc4329c3482af820116d045946ac58c2259f1ee75d7dffbe31352"
+      },
+      "parent": "636895a6150baa5a81657145b154a6e1bf16394d",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "cleanup": {
+      "complete": true,
+      "released_ok": true,
+      "termination_reason": "executed",
+      "processes_live": 0,
+      "oom_kill": 0,
+      "memory_peak_bytes": 4106964992
+    },
+    "terminal_sha256": "9faf2e91e916d1597251262517fbc5107b2e39fa3f67a814b0c5287173542a52",
+    "terminal_audit": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/verified-capture-load-design-01/native-complete-02-audit.json",
+    "canonical_receipt_sha256": "2724dea5d6cf969c5aab90d1ca8c40e4abead0314a584284d2eb3108b515e864",
+    "result": {
+      "bytes": 4205,
+      "sha256": "20817368bf0b22cf3ab77886fa6e3be3f0d763878d9a28ea9f58079a6aee6b06"
+    },
+    "payload_bytes_verified": true
+  },
+  {
+    "name": "native-complete-03",
+    "action_key": "807d24936563a101e8a66978c16f9adb1d696596b314cea2fd37ae300d61f2df",
+    "status": "executed",
+    "host": "sparklina",
+    "returncode": 0,
+    "elapsed_s": 32.544299602508545,
+    "checkout_snapshot": {
+      "commit": "3b7c55e1d32aa887ff45d0407745c44536f7ff79",
+      "input": {
+        "bytes": 26555355,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "75342399251f3112cdd8c033ac10ccc31d6e64fd867a125101700bb1c1218a11"
+      },
+      "parent": "9dfde2ec1bda58b4274036a00392c1e811cddc8d",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "cleanup": {
+      "complete": true,
+      "released_ok": true,
+      "termination_reason": "executed",
+      "processes_live": 0,
+      "oom_kill": 0,
+      "memory_peak_bytes": 4063555584
+    },
+    "terminal_sha256": "1f8b3ce097b521ca0c7e9d4f217d785233f4120d7cdc5e6a53b964a40a7d214d",
+    "terminal_audit": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/verified-capture-load-design-01/native-complete-03-audit.json",
+    "canonical_receipt_sha256": "1ec8fec911ad27f336e7c15adb025b29e2d3e7778a502f39c3d831e4d5eba8ce",
+    "result": {
+      "bytes": 4206,
+      "sha256": "ac471ad1e604a8b97b0ddeb208535348238f14f9b07b67edcd71fe47d379d4e2"
+    },
+    "payload_bytes_verified": true
+  },
+  {
+    "name": "finite-final-cpu",
+    "action_key": "00019837030a75d40321918048a9dcce79cf14d2cbeab75638f86aa0176d3273",
+    "status": "executed",
+    "host": "dl380g10",
+    "returncode": 0,
+    "elapsed_s": 11.30089545249939,
+    "checkout_snapshot": {
+      "commit": "99dd3d46f35ba4b516e5fac4b5ef3d961add2fb1",
+      "input": {
+        "bytes": 26554129,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "3f53534d442a15860a4a47d46c0ee54fd97597697479ba02c51695e84fedd792"
+      },
+      "parent": "65f1e1b0141e05ec475ca4bd8f1e9f2df43ee592",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "cleanup": {
+      "complete": true,
+      "released_ok": true,
+      "termination_reason": "executed",
+      "processes_live": 0,
+      "oom_kill": 0,
+      "memory_peak_bytes": 1690689536
+    },
+    "terminal_sha256": "43070e9ecec82a2f63a35602da2c092a4573e046b224c8fed4179e0cfbfa1dda",
+    "terminal_audit": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/verified-capture-load-design-01/finite-final-cpu-audit.json",
+    "canonical_receipt_sha256": "9d0f8e5c692ca87f1ac26811c026fc425f558d0d46524c234db2f96a10d6f031",
+    "result": {
+      "bytes": 1469,
+      "sha256": "ebd9e4e6dee2ce7fc4f34520dbd4e5079f10afae72e3518eb1c2f0c369b02d9c"
+    },
+    "payload_bytes_verified": true
+  },
+  {
+    "name": "finite-final-producer-cpu",
+    "action_key": "d71fb68d852b51ecd1cb465721e9195af0dab167a649f6bfe7cb133cd90fa3fa",
+    "status": "executed",
+    "host": "sparklina",
+    "returncode": 0,
+    "elapsed_s": 10.563732385635376,
+    "checkout_snapshot": {
+      "commit": "2d3a6a9ae796590bb028c69439c7232da8792087",
+      "input": {
+        "bytes": 26554129,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "abdd541b50d65d815c911ec11c0d49a7ca5cedee36679d2ecc99d0eb54d511e4"
+      },
+      "parent": "65f1e1b0141e05ec475ca4bd8f1e9f2df43ee592",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "cleanup": {
+      "complete": true,
+      "released_ok": true,
+      "termination_reason": "executed",
+      "processes_live": 0,
+      "oom_kill": 0,
+      "memory_peak_bytes": 1276706816
+    },
+    "terminal_sha256": "59010e97cc71265c90e018a5523e3d13fcfef5df4b03d57bfb3ff20c7b622599",
+    "terminal_audit": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/verified-capture-load-design-01/finite-final-producer-cpu-audit.json",
+    "canonical_receipt_sha256": "8b438172e7f8e1078cf89f17d371ead833d6f9de944c4c04e7c575a9c9d071ae",
+    "result": {
+      "bytes": 6650,
+      "sha256": "7218f434b920879903c506df3293985605d5b7514ed8d5c7739b3ab37c17475d"
+    },
+    "payload_bytes_verified": true
+  },
+  {
+    "name": "read-window-red",
+    "action_key": "b30ca92b93f44146f3a7c3c08d53ca899b57063b6ac2a6c8b3d9c541fbcf4293",
+    "status": "failed",
+    "host": "dl380g10",
+    "returncode": 1,
+    "elapsed_s": 7.6179444789886475,
+    "checkout_snapshot": {
+      "commit": "0cde108bd24d3f9bcf6501ea602ffbf548e92699",
+      "input": {
+        "bytes": 26551014,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "9fd4244ea97d1f52bf4d766dec7a7f04c27cb002d2e5f43928d9b07041aba648"
+      },
+      "parent": "a709950efb2e15c3ee1f35c4cb3c996ae15ac868",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "cleanup": {
+      "complete": true,
+      "released_ok": true,
+      "termination_reason": "failed",
+      "processes_live": 0,
+      "oom_kill": 0,
+      "memory_peak_bytes": 803102720
+    },
+    "terminal_sha256": "2e9f72e0de41569f84d770fe81f4ba193e23082a35a8eafbe6dc519ac45feca6",
+    "terminal_audit": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/verified-capture-load-design-01/read-window-red-audit.json"
+  },
+  {
+    "name": "read-window-green",
+    "action_key": "4ddc67a8a6efcf53b3ec2be775e3647b7dfef8694cfae1417d5c657625ce8c4f",
+    "status": "executed",
+    "host": "dl380g10",
+    "returncode": 0,
+    "elapsed_s": 9.499298095703125,
+    "checkout_snapshot": {
+      "commit": "e9d677300b25989dfd22f7e04725785fe2febff3",
+      "input": {
+        "bytes": 26586516,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "e1307154082a9586fa159a9a7789d866206e6e62f1c513a259274360042a58db"
+      },
+      "parent": "a709950efb2e15c3ee1f35c4cb3c996ae15ac868",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "cleanup": {
+      "complete": true,
+      "released_ok": true,
+      "termination_reason": "executed",
+      "processes_live": 0,
+      "oom_kill": 0,
+      "memory_peak_bytes": 1649586176
+    },
+    "terminal_sha256": "a25bf6e341414312d28821eccc0bb635fa7b4888c5fc9bf1496bcb3d269c6abf",
+    "terminal_audit": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/verified-capture-load-design-01/read-window-green-audit.json",
+    "canonical_receipt_sha256": "ad2b973beb88c0b7cc641117cfc870c5f0e59376e2f5662bbe3121030517ba5a",
+    "result": {
+      "bytes": 1013,
+      "sha256": "7e4ac8a50d21a3cffed4d6df4f0c7fb0a2ce4f218e28dda91665164369504e7c"
+    },
+    "payload_bytes_verified": true
+  }
+]

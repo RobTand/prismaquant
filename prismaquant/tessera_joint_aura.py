@@ -345,7 +345,7 @@ def _qualification_capture_sizes(data, identity, policy):
 
 
 def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
-                  qualification_window=None):
+                  qualification_window=None, capture_load_policy=None):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
@@ -362,6 +362,10 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
 
     _require(type(max_render_bytes) is int and max_render_bytes > 0, "positive PWC residency budget required")
     policy = normalize_qualification_window(qualification_window)
+    from .perturbed_x_cache import normalize_verified_activation_load
+    capture_load_policy = normalize_verified_activation_load(capture_load_policy)
+    if capture_load_policy is not None:
+        _require(policy is not None, 'verified capture loading requires explicit qualification windows')
     guard = None
     if policy is not None and str(runner.device).startswith('cuda'):
         import os
@@ -389,6 +393,11 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     _same(data.manifest["identity"]["calibration"], recorded["calibration"], "journal/canonical draw")
     capture_sizes = (None if policy is None else
                      _qualification_capture_sizes(data, expected, policy))
+    capture_load_execution = cc._load_execution(capture_load_policy, expected)
+    if capture_load_policy is not None:
+        cc.preflight_verified_capture_entries(capture_path.parent, manifest['entries'],
+            names=sorted(data.formats_by_qname), policy=capture_load_policy,
+            census=data.census, max_rows=expected['max_act_rows'])
     maxima, scales = calibrated_maxima(data, runner.profile)
     cache = ProductionWeightCache(
         weights={pair: cell["render"] for pair, cell in data.cells.items()},
@@ -431,12 +440,19 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                     if guard is not None:
                         guard.check('before_joint_qualification_unit:' + unit_names[0], reserve_bytes=
                             2 * capture_sizes[unit_names[0]] + max_render_bytes +
-                            policy['max_load_buffer_bytes'] + policy['workspace_reserve_bytes'])
+                            policy['max_load_buffer_bytes'] + policy['workspace_reserve_bytes'] +
+                            (0 if capture_load_policy is None else 2 * capture_load_policy['max_buffer_bytes'] +
+                             capture_load_policy['max_scratch_bytes']))
+                    unit_load_execution = {}
                     (acts, hessians, _counts, _maxima), _receipt = cc.prefetch_capture(capture_path,
                         expected_sha256=capture["sha256"], expected_identity=expected,
                         census=data.census, names=unit_names, device=runner.device,
                         **(dict(resource_check=None if guard is None else guard.check,
-                                release_file_pages=True) if policy is not None else {}))
+                                release_file_pages=True) if policy is not None else {}),
+                        **(dict(verified_load_policy=capture_load_policy,
+                                load_execution=unit_load_execution) if capture_load_policy is not None else {}))
+                    if capture_load_execution is not None:
+                        cc.merge_load_execution(capture_load_execution, unit_load_execution)
                     calibration_source = th.activation_source(hessians, expected["calibration"])
                     if policy is None:
                         layer_stats.append(prefetch_joint_cache(cache, unit_names, renders,
@@ -495,6 +511,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     _same(set(verified), set(data.cells), "complete qualified wire/render roster")
     cache.disable_file_load_receipts()
     cache.metadata.update({"verified_cells": verified, "prefetch": telemetry,
+        **({'capture_load_execution': capture_load_execution} if capture_load_execution is not None else {}),
         **({"qualification_window": policy, "capture_resident_bytes": capture_sizes,
             "qualification_memory_guard": None if guard is None else guard.snapshot()}
            if policy is not None else {})})
@@ -552,6 +569,10 @@ def _load_plan(path, digest):
     _source_prefetch(config)
     execution = config["execution"]
     normalize_qualification_window(config.get("qualification_window"))
+    from .perturbed_x_cache import normalize_verified_activation_load
+    if normalize_verified_activation_load(config.get('capture_load_policy')) is not None:
+        _require(config.get('qualification_window') is not None,
+                 'verified capture loading requires explicit qualification windows')
     from .joint_projection_backend import normalize_projection_backend
     normalize_projection_backend(execution.get("projection_backend"))
     from .cost_streaming import normalize_boundary_storage
@@ -691,7 +712,9 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             cache = prepare_cache(runner, data, capture=config["canonical_capture"],
                                   max_render_bytes=config["max_render_bytes"], reader=reader,
                                   file_load_workers=file_hash_workers,
-                                  qualification_window=config.get("qualification_window"))
+                                  qualification_window=config.get("qualification_window"),
+                                  **({'capture_load_policy': config['capture_load_policy']}
+                                     if config.get('capture_load_policy') is not None else {}))
             cache.metadata.update(plan_sha256=plan_sha256, source_model_identity=source,
                                   source_execution=source_execution, implementation_sha256=implementation,
                                   projection_backend=projection_backend.identity)

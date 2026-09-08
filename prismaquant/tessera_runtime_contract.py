@@ -15,15 +15,16 @@ the serving pin a transcription of it.
 
 The cell grammar has one home in ``lane_eligibility``. This reader adds the
 development answer pin, format ranges, native-extension identity and fused
-module licence; export uses the same parsed cells under the separate release
+module licence; export uses the same parsed cells under the separate serving
 pin. Since lane schema v4, residency scopes each cell and ``executes`` names
 its launches. Both readers retain those fields and reject malformed or
 overlapping claims through the shared parser. Neither accepts a Gridbook
 schema; that serving lane was retired on 2026-09-02.
 
-**The dev pin.**  PrismaQuant's Tessera admission is fail-closed until a
-Tessera RELEASE tag exists, and none has been cut.  A development override is
-therefore explicit, named, and loud:
+**The dev pin.** This reader provides an explicit development answer pin.
+Serving and export separately require the exact commit and packaged contract
+digest in ``tessera_serving_runtime_pin``; that gate does not require a release
+tag. The development override is explicit:
 
 * ``PRISMAQUANT_TESSERA_DEV_PIN=<anything non-empty>`` opts in.  The value is
   recorded verbatim in provenance as what the operator asked for; it is not
@@ -32,8 +33,8 @@ therefore explicit, named, and loud:
   reads, in the vocabulary of :func:`contract_answer` -- must equal
   :data:`TESSERA_DEV_PIN_ANSWER` or the read raises, with a field-level diff
   naming what moved.
-* unset is production: no Tessera contract is read at all, and every rung
-  stays ``unattested`` exactly as before.
+* unset disables this development reader: it returns ``None`` without reading
+  a contract. This does not replace the separate serving/export pin checks.
 
 There is no third state.  A mismatch never degrades to "unattested" -- that
 would turn a stale pin into a silently empty menu, which is the failure mode
@@ -56,10 +57,10 @@ than a corruption warning.  :data:`TESSERA_DEV_PIN_COMMIT` and
 travel into provenance alongside the bytes this run actually read, so
 prose-only drift is visible without being fatal.
 
-This is deliberately weaker than a release pin and says so: it admits any
+This is deliberately weaker than an exact contract-byte pin: it admits any
 Tessera whose table answers identically, which is exactly the claim
-PrismaQuant makes about it.  A Tessera RELEASE tag (issue #17) is still what
-retires the override.
+this development reader makes about it. The serving pin independently requires
+the reviewed contract bytes, whether or not the pinned version is a release.
 
 The contract's own identity (commit, sha, path, schema, contract_version)
 travels into every allocation's provenance as ``tessera_dev_pin`` so a
@@ -1018,13 +1019,14 @@ class TesseraContract:
                 for ext in self.native_extensions
             ],
             "note": (
-                "development override: no Tessera RELEASE tag exists, so this "
-                "allocation's Tessera routes were admitted by the packaged "
+                "development override: this allocation's Tessera routes "
+                "were admitted by the packaged "
                 "contract, whose ANSWER (every value the admission gate "
                 "reads) equals the one reviewed at the named commit. Its "
                 "scope is admission: the export lane's structures/platforms/"
-                "regimes are the RELEASE pin's. The bytes need not be the "
-                "reviewed bytes; bytes_are_the_reviewed_bytes says which"
+                "regimes require the separate exact serving pin. This development "
+                "contract need not have the reviewed bytes; "
+                "bytes_are_the_reviewed_bytes says which"
             ),
         }
 
@@ -1713,8 +1715,8 @@ def _load_at(path: str, sha: str, commit: str) -> TesseraContract:
 def load_tessera_contract() -> "TesseraContract | None":
     """The packaged Tessera contract under the dev pin, or ``None``.
 
-    ``None`` means the pin is not requested, which is production: no Tessera
-    route is attested and the attested menu is empty.  Every other failure --
+    ``None`` means this development pin is not requested. Serving and export
+    have separate exact pin checks. Every other failure --
     a contract whose *answer* is not the reviewed one, a missing or malformed
     file -- raises.  A mismatch never degrades to "unattested"; that would turn
     a stale pin into a silently empty menu.
