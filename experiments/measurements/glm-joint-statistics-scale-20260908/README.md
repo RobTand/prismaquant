@@ -6,7 +6,7 @@ Sparklina (NVIDIA GB10, PyTorch 2.13.0+cu130, CUDA 13.0). Each window retained
 backings, completed 682 controlled candidate projections, and expired every
 statistics backing. The complete 33,315,763,888-byte source stand-in remained
 resident and unchanged across both windows. The second admission reclaimed
-32 GiB of inactive allocator reservation without releasing the live source.
+31.992 GiB of inactive allocator reservation without releasing the live source.
 
 This is an operator storage, sampled-contraction, cotangent and lifetime gate.
 It is not an original GLM weight/routing replay, model-quality measurement,
@@ -76,8 +76,8 @@ The complete source storage identity, pointer, version, shape, stride and
 sampled-value hashes are checked after each window. All source weights remain
 frozen and have no gradients. After the fixture drops its owners, all **869**
 source/remainder/candidate storage weak references expire. CUDA still reports
-67,109,376 allocated bytes and 85,983,232 reserved bytes; this known runtime
-residual is reported separately and is not attributed to fixture owners.
+67,109,376 allocated bytes and 85,983,232 reserved bytes. The enumerated fixture
+owners all expired; this fixture does not identify the remaining backing.
 
 ## Physical memory and profiles
 
