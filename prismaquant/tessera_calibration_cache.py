@@ -714,12 +714,17 @@ class CaptureWriter:
 
 def require_capture_contract(path, expected_sha256=None):
     """Validate a complete canonical capture before downstream preparation."""
-    from prismaquant import validate_source_initialization_contract
     path = Path(path)
     raw = path.read_bytes()
     if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
         raise RuntimeError('priced calibration capture manifest changed')
     manifest = json.loads(raw)
+    return validate_capture_contract(manifest)
+
+
+def validate_capture_contract(manifest):
+    """Validate the canonical contract on an already owned metadata snapshot."""
+    from prismaquant import validate_source_initialization_contract
     identity = manifest.get('identity') or {}
     if manifest.get('schema') != SCHEMA or manifest.get('status') != 'complete':
         raise RuntimeError('not a complete canonical calibration capture v2')
@@ -736,6 +741,98 @@ def require_capture_contract(path, expected_sha256=None):
             set(manifest.get('entries',{})) != set(identity['units'])):
         raise RuntimeError('canonical capture runtime, source or completeness is invalid')
     return manifest
+
+
+def open_hessian_reference(path):
+    """Reuse the producer's bounded reader under the full canonical contract.
+
+    No new H storage or residency cache is created. The returned owner retains
+    only metadata; every mapping value access authenticates one existing input
+    file and its committed H. The caller must close this owner.
+    """
+    try:
+        from tessera.hessian_capture import ReferenceHessians
+    except ImportError as error:
+        raise RuntimeError('canonical Hessian references require the reviewed Tessera reference reader') from error
+    owner = ReferenceHessians(path)
+    try:
+        validate_capture_contract(owner.canonical_manifest())
+        return owner
+    except BaseException:
+        owner.close()
+        raise
+
+
+def write_hessian_reference(path, descriptor):
+    """Publish a metadata-only handoff after both owners accept its commitments."""
+    path = Path(path)
+    temporary = path.with_name(path.name+'.tmp')
+    try:
+        _json(temporary, descriptor)
+        with open_hessian_reference(temporary) as owner:
+            digest = owner.descriptor['capture_sha256']
+        os.replace(temporary, path)
+        return digest
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def canonical_hessian_reference_descriptor(*, hessians, counts, provenance,
+        canonical_capture, census_path, load_policy):
+    """Commit resident row H to the original capture without copying its bytes."""
+    try:
+        from tessera.cached_unit import tensor_identity
+        from tessera.hessian_capture import REFERENCE_SCHEMA, capture_sha256_from_units
+    except ImportError as error:
+        raise RuntimeError('canonical Hessian references require the reviewed Tessera reference reader') from error
+    if not isinstance(canonical_capture, dict) or set(canonical_capture) != {'path','sha256'}:
+        raise RuntimeError('Hessian reference needs a hash-bound canonical capture')
+    manifest = require_capture_contract(canonical_capture['path'], canonical_capture['sha256'])
+    census_path = Path(census_path).resolve()
+    census_digest = sha256(census_path)
+    if census_digest != manifest['identity']['census_sha256']:
+        raise RuntimeError('Hessian reference census differs from the complete capture')
+    identities = {name:tensor_identity(value) for name,value in hessians.items() if value is not None}
+    digest = capture_sha256_from_units(provenance, {n:v['sha256'] for n,v in identities.items()})
+    return dict(schema=REFERENCE_SCHEMA,
+        canonical_capture=dict(path=str(Path(canonical_capture['path']).resolve()),
+                               sha256=canonical_capture['sha256']),
+        census=dict(path=str(census_path),sha256=census_digest),
+        provenance=dict(provenance),counts=dict(counts),hessians=identities,
+        capture_sha256=digest,rows=[dict(units=sorted(identities),capture_sha256=digest)],
+        load_policy=dict(load_policy))
+
+
+def hessian_reference_binding(canonical_capture_sha256, census_sha256):
+    """The optional source binding carried unchanged from prices to export."""
+    from tessera.hessian_capture import BINDING_SCHEMA, normalize_reference_binding
+    return normalize_reference_binding(dict(schema=BINDING_SCHEMA,
+        canonical_capture_sha256=canonical_capture_sha256,census_sha256=census_sha256))
+
+
+def merge_hessian_reference_descriptors(descriptors):
+    """Union accepted metadata snapshots without reading or retaining any H."""
+    import copy
+    from tessera.hessian_capture import capture_sha256_from_units
+    result = None
+    for descriptor in descriptors:
+        if result is None:
+            result = copy.deepcopy(descriptor)
+            continue
+        for key in ('schema','canonical_capture','census','provenance','counts','load_policy'):
+            if result[key] != descriptor[key]:
+                raise RuntimeError(f'Hessian reference union differs at {key}')
+        overlap = result['hessians'].keys() & descriptor['hessians'].keys()
+        if overlap:
+            raise RuntimeError('Hessian reference units occur in multiple rows: '+', '.join(sorted(overlap)[:4]))
+        result['hessians'].update(copy.deepcopy(descriptor['hessians']))
+        result['rows'].extend(copy.deepcopy(descriptor['rows']))
+    if result is None:
+        raise RuntimeError('Hessian reference union needs at least one accepted row')
+    result['hessians'] = dict(sorted(result['hessians'].items()))
+    result['capture_sha256'] = capture_sha256_from_units(result['provenance'],
+        {n:v['sha256'] for n,v in result['hessians'].items()})
+    return result
 
 
 def authenticate_selected_capture_source(census_path, capture_path, *, expected_sha256,

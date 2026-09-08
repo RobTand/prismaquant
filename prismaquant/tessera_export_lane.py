@@ -994,6 +994,10 @@ def hessian_capture_sha256(hessians: "Mapping[str, Any]",
     import torch
 
     _require_capture_context_roster()
+    if _is_hessian_reference(hessians):
+        from tessera.hessian_capture import capture_sha256_from_units
+        hessians.require_provenance(provenance)
+        return capture_sha256_from_units(provenance, hessians.committed_units())
     identity = {field: provenance.get(field)
                 for field in PRICED_HESSIAN_IDENTITY_FIELDS}
     identity.update({field: provenance.get(field)
@@ -1033,6 +1037,16 @@ def _tessera_capture_seal(hessians, provenance) -> "str | None":
         ) from exc
 
 
+def _is_hessian_reference(value):
+    if isinstance(value, dict):
+        return False
+    try:
+        from tessera.hessian_capture import ReferenceHessians
+    except ImportError:
+        return False
+    return isinstance(value, ReferenceHessians)
+
+
 def _bound_hessian_capture(hessian_path: Path) -> tuple:
     """``(hessians, provenance, capture_sha256)`` of the payload itself.
 
@@ -1049,6 +1063,14 @@ def _bound_hessian_capture(hessian_path: Path) -> tuple:
     """
     import torch
 
+    if str(hessian_path).endswith('.references.json'):
+        from .tessera_calibration_cache import open_hessian_reference
+        owner = open_hessian_reference(hessian_path)
+        try:
+            return owner, owner.provenance, hessian_capture_sha256(owner, owner.provenance)
+        except BaseException:
+            owner.close()
+            raise
     payload = torch.load(str(hessian_path), map_location="cpu",
                          weights_only=False)
     hessians = payload.get("H") if isinstance(payload, Mapping) else None
@@ -1215,42 +1237,57 @@ def require_priced_export_inputs(
                 "capture it writes) and re-allocate."
             )
         hessians, identity, digest = _bound_hessian_capture(hessian_path)
-        role = identity.get("hessian_role")
-        if role is not None and role != "fit":
-            raise TesseraExportLaneError(
-                f"--hessian {hessian_path} is a {role!r} capture and must "
-                "not shape bytes")
-        mismatched = {
-            field: (identity.get(field), value)
-            for field, value in expected.items()
-            if identity.get(field) != value
-        }
-        if mismatched:
-            raise TesseraExportLaneError(
-                f"--hessian {hessian_path} is not the capture that priced "
-                "this allocation: "
-                + "; ".join(
-                    f"{field}: capture={got!r} != allocation={want!r}"
-                    for field, (got, want) in sorted(mismatched.items()))
-                + ". An encode against a different Hessian ships bytes the "
-                  "allocation did not price; hand the campaign's own capture "
-                  "or re-allocate."
-            )
-        if digest != priced_digest:
-            raise TesseraExportLaneError(
-                f"--hessian {hessian_path} is not the capture that priced "
-                f"this allocation: capture_sha256 payload={digest} != "
-                f"allocation={priced_digest}. Its identity triple agrees, so "
-                "this is the same token draw over different Hessian content "
-                "or capture context (model, seqlen, source) -- a rewritten, "
-                "re-captured or corrupted payload. An encode against it ships "
-                "bytes the allocation did not price; hand the campaign's own "
-                "capture or re-allocate."
-            )
-        report["hessian"] = str(hessian_path)
-        report["hessian_capture_sha256"] = digest
-        report["hessian_capture_seal_crosscheck"] = _crosscheck_capture_seal(
-            hessian_path, hessians, identity, digest)
+        reference_binding = hessians.binding() if _is_hessian_reference(hessians) else None
+        if reference_binding != block.get('reference_binding'):
+            if _is_hessian_reference(hessians):
+                hessians.close()
+            raise TesseraExportLaneError('canonical Hessian reference binding differs from the allocation')
+        if reference_binding is not None:
+            if not set(selected) <= set(hessians):
+                hessians.close()
+                raise TesseraExportLaneError('canonical Hessian commitments do not cover every selected unit')
+            report.update(hessian_reference_binding=reference_binding,
+                          hessian_payload_verification='deferred_to_consumption', hessian_verified_units=[])
+        try:
+            role = identity.get("hessian_role")
+            if role is not None and role != "fit":
+                raise TesseraExportLaneError(
+                    f"--hessian {hessian_path} is a {role!r} capture and must "
+                    "not shape bytes")
+            mismatched = {
+                field: (identity.get(field), value)
+                for field, value in expected.items()
+                if identity.get(field) != value
+            }
+            if mismatched:
+                raise TesseraExportLaneError(
+                    f"--hessian {hessian_path} is not the capture that priced "
+                    "this allocation: "
+                    + "; ".join(
+                        f"{field}: capture={got!r} != allocation={want!r}"
+                        for field, (got, want) in sorted(mismatched.items()))
+                    + ". An encode against a different Hessian ships bytes the "
+                      "allocation did not price; hand the campaign's own capture "
+                      "or re-allocate."
+                )
+            if digest != priced_digest:
+                raise TesseraExportLaneError(
+                    f"--hessian {hessian_path} is not the capture that priced "
+                    f"this allocation: capture_sha256 payload={digest} != "
+                    f"allocation={priced_digest}. Its identity triple agrees, so "
+                    "this is the same token draw over different Hessian content "
+                    "or capture context (model, seqlen, source) -- a rewritten, "
+                    "re-captured or corrupted payload. An encode against it ships "
+                    "bytes the allocation did not price; hand the campaign's own "
+                    "capture or re-allocate."
+                )
+            report["hessian"] = str(hessian_path)
+            report["hessian_capture_sha256"] = digest
+            report["hessian_capture_seal_crosscheck"] = _crosscheck_capture_seal(
+                hessian_path, hessians, identity, digest)
+        finally:
+            if _is_hessian_reference(hessians):
+                hessians.close()
     elif hessian_path is not None:
         raise TesseraExportLaneError(
             "the allocation was priced weights-only (tessera_hessian."
@@ -1476,9 +1513,13 @@ def preflight(model_path: str | Path, *, target=None,
             "source_model": str(model_path), "layer_config": str(assignment_path),
             "layer_config_sha": assignment_sha,
             "priced_inputs": {
-                "schema": "tessera.priced_export_inputs.v1",
+                "schema": ('tessera.priced_export_inputs.v2'
+                           if priced_inputs.get('hessian_reference_binding') is not None
+                           else 'tessera.priced_export_inputs.v1'),
                 "hessian_capture_sha256": priced_inputs["hessian_capture_sha256"],
                 "input_global_scales": priced_inputs["input_global_scales"],
+                **({'hessian_reference_binding':priced_inputs['hessian_reference_binding']}
+                   if priced_inputs.get('hessian_reference_binding') is not None else {}),
             },
         }
         if scope is not None:

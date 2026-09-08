@@ -1,7 +1,28 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/glm-six-variant-intake-20260908`. Stamps
+As of: 2026-09-08 · `integrate/glm-bounded-handoff-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/bounded-export-handoff`) for the opt-in
+canonical Hessian reference handoff. Selected reuse may declare
+`--export-hessian-reference-policy` with explicit metadata/file/H byte caps.
+The existing row writer emits `hessian_capture.references.json`, binding the
+complete canonical capture and exact census, full-census counts, per-unit H
+commitments and the unchanged old row capture SHA. Dispatcher merge verifies
+row/provenance/selection bindings and unions only metadata; it does not load
+or copy the full H corpus. Allocation carries the separate canonical binding,
+and export emits `tessera.priced_export_inputs.v2` for the producer's bounded
+reference reader. Intake reports H payload verification as deferred; every
+actual H consumption, including cached-wire identity, checks original file
+bytes and the committed H through the producer's held-descriptor owner.
+Legacy `.pt` handoffs keep their eager behavior. Sampled selected-wire
+materialization explicitly refuses reference inputs until it has a bounded
+reference union; complete priced wires remain the supported reference scope.
+This adds no cache or scheduler, changes no row resident-prefetch estimator,
+serving pin, wire format or ship gate. It requires the reviewed producer reader
+and a fresh producer source identity for new prices; old wire identities are
+not reused under the changed producer hash. CPU contract validation does not
+establish native throughput, GPU residency or full-model serving performance.
 
 Re-stamped (2026-09-08, `audit/glm-full-stack-admission`) to distinguish the
 historical v1 writer limit from current v2 admission. A metadata-only replay
