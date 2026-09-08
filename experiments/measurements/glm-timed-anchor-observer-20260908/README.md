@@ -40,3 +40,26 @@ A fresh dense qualification is running at source `8e8506e584`, action
 `9f46d50b9abd700c67f2b52539fe153ab574e2aee70cfc30d08dab3347e65e28`;
 its result is pending. This fixture is instrument correctness, not a throughput
 or quantization-quality comparison.
+
+
+## Completed dense qualification
+
+The pending action above completed with exit 0 and complete PB resource cleanup.
+The actual CAS payload records fourteen anchor calls (ten first-round, four
+refinement), two units and 1,030 priced rungs across 515 formats. Its snapshot
+differs from `8e8506e584` only by the declared PB closure. The complete
+PrismaQuant source package and producer remain byte-identical to the failed
+dense baseline. The original canonical capture `f4bcbf40…` is unchanged.
+
+Both native traces are accepted, with no observer errors. Requested 0.25 s;
+observed collection intervals are 0.251329934 and 0.255068171 s. Trace sizes
+are 1,683,273 and 72,418,678 bytes. Independently parsing the actual JSON finds
+781 and 66,262 kernels, spanning 0.053970752 and 0.249615059 s respectively.
+The second window contains 65,536 `_step` kernels totaling 169,734.857 us;
+that finding covers this dense window only, not the expert workload or a full
+anchor. The first window largely covers factorization startup.
+
+The observer recorded 228 main-thread samples and 46 Netdata samples for each
+host over 230.634 s. The earlier failed dense action ran on Sparky and this
+one ran on Sparklina: this is an instrument validation, not a controlled
+throughput A/B. The adjacent final audit seals actual traces and artifacts.
