@@ -116,8 +116,10 @@ def _observe(model, build):
     raw, hub_raw = model_path.read_bytes(), hub_path.read_bytes()
     _require(hashlib.sha256(raw).hexdigest() == CORRECTED_MODELING_SHA256, 'actual modeling source differs')
     _require(hashlib.sha256(hub_raw).hexdigest() == build['hub_kernels_sha256'], 'actual dispatch source differs')
-    compiled = compile(raw, str(model_path), 'exec')
-    hub_compiled = compile(hub_raw, str(hub_path), 'exec')
+    # Authenticate the target module's compiler flags, without inheriting this
+    # verifier's future-annotations flag into unrelated Transformers modules.
+    compiled = compile(raw, str(model_path), 'exec', dont_inherit=True)
+    hub_compiled = compile(hub_raw, str(hub_path), 'exec', dont_inherit=True)
     function = modeling.chunk_kimi_delta_attention
     _require_code(function, _code_at(hub_compiled, ('use_kernel_func_from_hub_with_fallback', 'decorator', 'wrapped')),
                   'decorated fallback')
