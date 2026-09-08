@@ -110,6 +110,7 @@ def main():
     hessians = {name: value['hessian'] for name, value in expected.items()}
     expected_hashes = {name: {key: tensor_sha(value[key]) for key in ('inputs','hessian')}
                        for name, value in expected.items()}
+    expected = acts = hessians = None
     stop, errors, state = threading.Event(), [], {'arm': None, 'operation': None}
     def observe():
         with (args.out/'netdata.jsonl').open('w') as stream:
@@ -154,6 +155,15 @@ def main():
             state['arm'] = arm
             for operation in ('replay', 'seal', 'prefetch'):
                 state['operation'] = operation
+                # Replay alone needs the reference CPU tensors. Seal and GPU
+                # prefetch compare stored digests and must not retain that owner.
+                if operation == 'replay':
+                    expected = {name: torch.load(root/record['path'], weights_only=True)
+                                for name, record in records.items()}
+                    acts = {name: value['inputs'] for name, value in expected.items()}
+                    hessians = {name: value['hessian'] for name, value in expected.items()}
+                elif expected is not None or acts is not None or hessians is not None:
+                    raise RuntimeError('expected CPU tensors overlap a non-replay phase')
                 gc.collect()
                 torch.cuda.empty_cache()
                 for record in records.values():
@@ -229,12 +239,14 @@ def main():
                 row = dict(arm=arm, mode=mode, operation=operation, started=started,
                     finished=started+elapsed, elapsed_s=elapsed, source_reads=reads,
                     proc_io_delta={key: after[key]-before[key] for key in before},
-                    execution=execution, buffer_io=buffer_io[buffer_start:],
+                    execution=execution, expected_cpu_bytes=s if operation == 'replay' else 0,
+                    buffer_io=buffer_io[buffer_start:],
                     memory_guard=guard.snapshot(),
                     tensor_hashes=expected_hashes, live_serialized_buffers=sum(
                         ref() is not None and ref()._view is not None for ref in raw_refs))
                 write(Path(str(stem)+'.json'), row)
                 results.append(row)
+                expected = acts = hessians = None
                 print(json.dumps(dict(arm=arm, mode=mode, operation=operation, elapsed_s=elapsed, reads=reads)), flush=True)
         for name, record in records.items():
             if cc.sha256(root/record['path']) != record['sha256']:
