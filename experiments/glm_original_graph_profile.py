@@ -66,6 +66,76 @@ def state_identity(value):
     raise TypeError(f'opaque source state: {type(value).__name__}')
 
 
+def tensor_statistics(value):
+    """Scalar diagnostic counts/extrema, never a retained activation copy."""
+    if value is None:
+        return dict(present=False)
+    with torch.no_grad():
+        value = value.detach()
+        finite = torch.isfinite(value)
+        count, total = int(finite.count_nonzero()), value.numel()
+        zero = int((value == 0).count_nonzero())
+        result = dict(present=True, shape=list(value.shape), dtype=str(value.dtype),
+            elements=total, finite=count, nonfinite=total-count, zero=zero,
+            finite_nonzero=count-zero, nan=int(torch.isnan(value).count_nonzero()),
+            positive_inf=int(torch.isposinf(value).count_nonzero()),
+            negative_inf=int(torch.isneginf(value).count_nonzero()),
+            finite_min=None, finite_max=None)
+        if count:
+            result['finite_min'] = float(value.amin()) if count == total else float(
+                torch.where(finite, value, float('inf')).amin())
+            result['finite_max'] = float(value.amax()) if count == total else float(
+                torch.where(finite, value, float('-inf')).amax())
+        return result
+
+
+class TensorBranchObservations:
+    """Transparent tensor hooks on one actual original forward/backward.
+
+    Module forward observers return None; tensor gradient hooks return None.
+    No full-module backward hooks, output views, replacement or second graph.
+    """
+    NAMES = ('', 'attn_hc', 'input_layernorm', 'self_attn',
+        'self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj',
+        'self_attn.forget_gate', 'self_attn.o_norm', 'self_attn.o_proj',
+        'ffn_hc', 'post_attention_layernorm', 'mlp')
+
+    def __init__(self, module, records):
+        self.module, self.records, self.handles = module, records, []
+
+    def observe(self, name, value):
+        if isinstance(value, torch.Tensor):
+            self.records.append(dict(site=name, phase='forward', statistics=tensor_statistics(value)))
+            if value.requires_grad:
+                def gradient(grad):
+                    self.records.append(dict(site=name, phase='backward', statistics=tensor_statistics(grad)))
+                    return None
+                self.handles.append(value.register_hook(gradient))
+        elif isinstance(value, (list, tuple)):
+            for index, child in enumerate(value):
+                self.observe(f'{name}[{index}]', child)
+
+    def __enter__(self):
+        for name in self.NAMES:
+            try:
+                module = self.module.get_submodule(name)
+            except AttributeError:
+                continue
+            def hook(_module, args, kwargs, output, name=name):
+                hidden = args[0] if args else kwargs.get('hidden_states')
+                self.observe(f'{name or "layer"}.input', hidden)
+                self.observe(f'{name or "layer"}.output', output)
+                return None
+            self.handles.append(module.register_forward_hook(hook, with_kwargs=True))
+        return self
+
+    def __exit__(self, *_args):
+        for handle in self.handles:
+            handle.remove()
+        self.handles.clear()
+        self.module = None
+
+
 def module_identity(module):
     result = {}
     for kind, values in (('parameter', module.named_parameters()), ('buffer', module.named_buffers())):
@@ -156,22 +226,29 @@ class Activity:
             raise RuntimeError('original routed/shared MLP path was not exercised')
 
 
-def replay_arm(runner, layer, hidden, batch, pass_state, seed, arm, owner):
+def replay_arm(runner, layer, hidden, batch, pass_state, seed, arm, owner, *,
+               diagnostics=None, observe_branches=False):
     """One disposable graph through existing isolated_layer and shared owner API."""
     from prismaquant.sensitivity_probe import SharedStateCotangents
     if arm not in ARMS:
         raise ValueError('unknown original graph replay arm')
+    if diagnostics is None:
+        diagnostics = {}
     shared = (SharedStateCotangents(enabled=True) if arm == ARMS[0] else
         owner.fork_for_replay(max_resident_bytes=GIB//4) if arm == ARMS[1] else owner)
     leaf = output = delta = gradient = None
     try:
-        with unchanged_execution(runner.layers[layer], batch, pass_state), torch.enable_grad():
+        with unchanged_execution(runner.layers[layer], batch, pass_state), torch.enable_grad(), ExitStack() as hooks:
             leaf = hidden.detach().requires_grad_(True)
             state = shared.graft(pass_state)
             generator = torch.Generator(device='cpu').manual_seed(seed)
             delta = (torch.randint(0, 2, tuple(hidden.shape), generator=generator,
                                    dtype=torch.int8).to(torch.bfloat16).mul_(2).sub_(1).div_(256)
                      ).to(hidden.device)
+            diagnostics.update(input=tensor_statistics(leaf), stimulus=tensor_statistics(delta))
+            if observe_branches:
+                hooks.enter_context(TensorBranchObservations(runner.layers[layer],
+                    diagnostics.setdefault('branches', [])))
             # Activity is separate from numerical identity; baseline has no graph hooks.
             if arm == ARMS[0]:
                 output = runner.isolated_layer(batch, layer, leaf, pass_state=state)
@@ -181,12 +258,27 @@ def replay_arm(runner, layer, hidden, batch, pass_state, seed, arm, owner):
                     output = runner.isolated_layer(batch, layer, leaf, pass_state=state)
                 observed.validate(layer)
                 activity = observed.rows
+            diagnostics['output'] = tensor_statistics(output)
+            diagnostics['output_identity'] = tensor_identity(output)
+            if 'primary_output_identity' in diagnostics:
+                diagnostics['output_matches_primary'] = diagnostics['output_identity'] == diagnostics['primary_output_identity']
+                if not diagnostics['output_matches_primary']:
+                    raise RuntimeError('replayed output differs from original prefix output')
+            if diagnostics['output']['nonfinite']:
+                raise RuntimeError('original graph replay output contains nonfinite elements')
             roots, grads = shared.produced_roots()
+            diagnostics['backward_started'] = True
             torch.autograd.backward([output, *roots], [delta, *grads])
+            diagnostics['backward_completed'] = True
             shared.harvest()
             gradient = leaf.grad
-            if gradient is None or not torch.isfinite(gradient).all() or not torch.any(gradient != 0):
-                raise RuntimeError('original graph input cotangent is absent/nonfinite/zero')
+            diagnostics['leaf_gradient'] = tensor_statistics(gradient)
+            if gradient is None:
+                raise RuntimeError('original graph input cotangent is absent')
+            if diagnostics['leaf_gradient']['nonfinite']:
+                raise RuntimeError('original graph input cotangent contains nonfinite elements')
+            if not diagnostics['leaf_gradient']['finite_nonzero']:
+                raise RuntimeError('original graph input cotangent is all zero')
             if shared.pending_keys() or shared.resident_tensors():
                 raise RuntimeError('empty original GLM state produced retained shared adjoints')
             return dict(seed=seed, arm=arm, output=tensor_identity(output),
@@ -200,32 +292,48 @@ def replay_arm(runner, layer, hidden, batch, pass_state, seed, arm, owner):
 
 
 class GraphObserver:
-    def __init__(self, runner, out, result, settle, *, replay=replay_arm):
+    def __init__(self, runner, out, result, settle, *, replay=replay_arm, diagnostic=False):
         self.runner, self.out, self.result, self.settle = runner, out, result, settle
         self.original, self.replay = runner._call, replay
         self.in_replay, self.row = False, None
+        self.diagnostic = diagnostic
+        self.layers, self.rows, self.seeds, self.arms = (
+            ((0,), (0,), (7000,), (ARMS[0],)) if diagnostic else (LAYERS, ROWS, SEEDS, ARMS))
+
+    def expected_schedule(self):
+        return [(layer, row, seed, arm) for layer in self.layers for row in self.rows
+                for seed in self.seeds for arm in self.arms]
 
     def __call__(self, layer, hidden, *, batch, pass_state):
         if self.in_replay:
             return self.original(layer, hidden, batch=batch, pass_state=pass_state)
         with unchanged_execution(self.runner.layers[layer], batch, pass_state):
             original = self.original(layer, hidden, batch=batch, pass_state=pass_state)
-        if layer not in LAYERS:
+        if layer not in self.layers:
             return original
         if tuple(hidden.shape) != SHAPE or hidden.dtype != torch.bfloat16:
             raise RuntimeError('original graph boundary shape/dtype differs')
         from prismaquant.sensitivity_probe import SharedStateCotangents
         self.settle(layer)
+        primary_stats = tensor_statistics(original)
         primary = tensor_identity(original)
+        self.result.setdefault('primary_outputs', []).append(dict(layer=layer,
+            original_row=self.row, statistics=primary_stats, identity=primary))
+        if primary_stats['nonfinite']:
+            raise RuntimeError('original prefix output contains nonfinite elements')
         incoming = tensor_identity(hidden)
         self.in_replay = True
         try:
-            for seed in SEEDS:
+            for seed in self.seeds:
                 owner = SharedStateCotangents(enabled=True)
                 baseline = None
                 try:
-                    for arm in ARMS:
-                        call = lambda: self.replay(self.runner, layer, hidden, batch, pass_state, seed, arm, owner)
+                    for arm in self.arms:
+                        diagnostics = dict(layer=layer, original_row=self.row, seed=seed, arm=arm,
+                            primary_output_identity=primary)
+                        self.result.setdefault('replay_diagnostics', []).append(diagnostics)
+                        call = lambda: self.replay(self.runner, layer, hidden, batch, pass_state, seed, arm, owner,
+                            diagnostics=diagnostics, observe_branches=self.diagnostic)
                         if self.row == 0 and seed == SEEDS[0]:
                             value, profile = profile_phase(self.out, f'layer{layer}_{arm}', call)
                         else:
@@ -240,7 +348,7 @@ class GraphObserver:
                             raise RuntimeError('replay cotangent/stimulus differs from isolated baseline')
                         value.update(layer=layer, original_row=self.row, profile=profile)
                         self.result['backwards'].append(value)
-                    if self.result['backwards'][-1]['activity'] != self.result['backwards'][-2]['activity']:
+                    if not self.diagnostic and self.result['backwards'][-1]['activity'] != self.result['backwards'][-2]['activity']:
                         raise RuntimeError('original route/activity differs across fork/final replay')
                 finally:
                     owner.release_resident_state()
@@ -249,16 +357,16 @@ class GraphObserver:
         return original
 
     def visit(self, layer, forward_batch):
-        for row, tokens in zip(ROWS, self.tokens):
+        for row, tokens in zip(self.rows, self.tokens):
             self.row = row
             forward_batch(tokens)
         self.result['progress'] = dict(phase='prefix_layer_completed', layer=layer,
             backward_calls=len(self.result['backwards']), time_unix=time.time())
         write_json(self.out/'progress.json', self.result)
-        if layer == 4:
+        if layer == (0 if self.diagnostic else 4):
             actual = [(r['layer'], r['original_row'], r['seed'], r['arm']) for r in self.result['backwards']]
-            if actual != schedule():
-                raise RuntimeError('original graph qualification did not complete its exact72-call schedule')
+            if actual != self.expected_schedule():
+                raise RuntimeError(f'original graph qualification did not complete its exact{len(self.expected_schedule())}-call schedule')
             raise PrefixGraphQualificationComplete()
 
 
@@ -333,7 +441,7 @@ def finish_native_observation(result, stop, threads, samples, guard, owned):
     result['source_owners_expired'] = all(ref.expired() for ref in owned) if owned else None
 
 
-def preflight(plan, source):
+def preflight(plan, source, *, diagnostic=False):
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
     config = source.read_metadata('config.json')
     index = source.read_metadata('model.safetensors.index.json')['weight_map']
@@ -351,7 +459,7 @@ def preflight(plan, source):
             [text['mlp_layer_types'][i] for i in LAYERS] != ['dense', 'sparse', 'sparse']):
         raise ValueError('original GLM attention/MLP qualification layer types differ')
     profile = Glm5NextProfile()
-    source.bind_roster(derive_source_roster(source.root, index, profile))
+    source.bind_roster(derive_source_roster(source.root, index, profile, last_layer=1 if diagnostic else 5))
     path = plan['calibration_input']['path']
     if sha(path) != plan['calibration_input']['sha256']:
         raise ValueError('sealed calibration input content differs')
@@ -372,22 +480,25 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--cpu-preflight', action='store_true')
+    parser.add_argument('--diagnostic-layer0', action='store_true',
+        help='One original row0/layer0/seed7000 backward with transparent tensor hooks; not qualification')
     args = parser.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=False)
     plan = json.loads(PLAN.read_text())
     manifest = checked_json(plan['source_files']['path'], plan['source_files']['sha256'])
     result = dict(schema='prismaquant.glm_original_graph_qualification.v1', status='running',
-        scope=plan['limits'], backwards=[], telemetry_errors=[], cpu_preflight=args.cpu_preflight)
+        scope=plan['limits'], backwards=[], telemetry_errors=[], cpu_preflight=args.cpu_preflight,
+        mode='layer0_diagnostic_not_qualification' if args.diagnostic_layer0 else 'bounded_prefix_qualification')
     source = AuthenticatedSourceInputs(plan['model'], manifest)
     try:
         with source:
-            profile, tokens, shards = preflight(plan, source)
+            profile, tokens, shards = preflight(plan, source, diagnostic=args.diagnostic_layer0)
             result['source_preflight'] = source.report()
             if args.cpu_preflight:
                 result['status'] = 'cpu_preflight_complete_native_not_run'
                 return
             run_native(args, plan, source, profile, tokens, shards, result)
-            result['status'] = 'complete'
+            result['status'] = 'diagnostic_complete_not_qualification' if args.diagnostic_layer0 else 'complete'
     except BaseException:
         result.update(status='failed', traceback=traceback.format_exc())
         raise
@@ -476,11 +587,13 @@ def run_native(args, plan, source, profile, tokens, shards, result):
                 value = original_read(*read_args, **read_kwargs)
                 check('after_original_source_load')
                 return value
-            with StreamedBoundaryArtifacts(boundary_policy(args.out/'metadata')) as storage:
-                storage.bind({'scope': 'original_all512_metadata_only'}, n_probes=4,
-                             check_memory=lambda label: check(label))
-                result['metadata'] = metadata_gate(runner, tokens, storage)
-            result['progress'] = dict(phase='metadata_complete_starting_prefix', time_unix=time.time())
+            if not args.diagnostic_layer0:
+                with StreamedBoundaryArtifacts(boundary_policy(args.out/'metadata')) as storage:
+                    storage.bind({'scope': 'original_all512_metadata_only'}, n_probes=4,
+                                 check_memory=lambda label: check(label))
+                    result['metadata'] = metadata_gate(runner, tokens, storage)
+            result['progress'] = dict(phase='starting_layer0_diagnostic' if args.diagnostic_layer0 else
+                'metadata_complete_starting_prefix', time_unix=time.time())
             write_json(args.out/'progress.json', result)
             def settle(layer):
                 with runner.context._inflight_lock:
@@ -491,19 +604,20 @@ def run_native(args, plan, source, profile, tokens, shards, result):
                 check('settled_original_graph_workspace', reserve_bytes=16*GIB)
                 result.setdefault('source_residency', []).append(dict(layer=layer,
                     row=observer.row, snapshot=runner.context.source_residency_snapshot([layer, layer+1])))
-            observer = GraphObserver(runner, args.out, result, settle)
-            observer.tokens = [tokens[row].unsqueeze(0) for row in ROWS]
+            observer = GraphObserver(runner, args.out, result, settle, diagnostic=args.diagnostic_layer0)
+            observer.tokens = [tokens[row].unsqueeze(0) for row in observer.rows]
             with StreamedBoundaryArtifacts(boundary_policy(args.out/'prefix')) as storage:
-                storage.bind({'scope':'original_rows0_511_prefix0_4'}, n_probes=4,
+                storage.bind({'scope':'original_row0_layer0_diagnostic' if args.diagnostic_layer0 else
+                    'original_rows0_511_prefix0_4'}, n_probes=4,
                              check_memory=lambda label: check(label))
                 with patch.object(runner, '_call', observer), patch.object(
                         streaming_model, '_read_layer_to_device', guarded_read):
                     try:
                         runner.visit_layer_batches(observer.tokens, observer.visit, boundary_storage=storage)
                     except PrefixGraphQualificationComplete:
-                        result['bounded_prefix_completed'] = True
+                        result['diagnostic_completed' if args.diagnostic_layer0 else 'bounded_prefix_completed'] = True
                     else:
-                        raise RuntimeError('original prefix qualification failed to stop at layer4')
+                        raise RuntimeError('original prefix did not stop at its declared bound')
                 result['boundary_telemetry'] = dict(storage.telemetry)
             check('original_graph_complete')
     finally:

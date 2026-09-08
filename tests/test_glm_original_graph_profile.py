@@ -196,7 +196,7 @@ def test_observer_preserves_original_object_and_recursion_and_failure(tmp_path):
         originals.append(value)
         return value
     runner._call = record
-    def replay(runner, layer, hidden, batch, state, seed, arm, owner):
+    def replay(runner, layer, hidden, batch, state, seed, arm, owner, **kwargs):
         value = runner.isolated_layer(batch,layer,hidden,pass_state=state)
         return dict(output=graph.tensor_identity(value),cotangent='same',stimulus='same',activity={},seed=seed,arm=arm)
     observer = graph.GraphObserver(runner,tmp_path,result,lambda layer: None,replay=replay)
@@ -205,7 +205,7 @@ def test_observer_preserves_original_object_and_recursion_and_failure(tmp_path):
         output = runner._call(0,hidden,batch=batch(),pass_state={})
         assert output is originals[0]
         assert runner.calls == 13 and len(result['backwards']) == 12
-        observer.replay = lambda *a: (_ for _ in ()).throw(RuntimeError('backward failed'))
+        observer.replay = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('backward failed'))
         with pytest.raises(RuntimeError, match='backward failed'):
             runner._call(0,hidden,batch=batch(),pass_state={})
         assert not observer.in_replay
@@ -286,3 +286,84 @@ def test_poisoned_cuda_cleanup_preserves_first_error_and_host_observations(monke
     assert result['peak_allocated_bytes'] == 123 and result['peak_reserved_bytes'] == 456
     assert result['after_cleanup'] == dict(host_available=789)
     assert [item['phase'] for item in result['cleanup_errors']] == ['cuda_synchronize','empty_cuda_cache']
+
+
+def test_tensor_statistics_distinguishes_absent_zero_and_nonfinite():
+    assert graph.tensor_statistics(None) == dict(present=False)
+    stats = graph.tensor_statistics(torch.tensor([float('nan'),float('inf'),float('-inf'),0.,2.]))
+    assert (stats['finite'],stats['nonfinite'],stats['zero'],stats['finite_nonzero']) == (2,3,1,1)
+    assert (stats['nan'],stats['positive_inf'],stats['negative_inf']) == (1,1,1)
+    assert (stats['finite_min'],stats['finite_max']) == (0.,2.)
+    assert graph.tensor_statistics(torch.zeros(2))['finite_nonzero'] == 0
+
+
+def test_tensor_branch_hooks_preserve_original_output_and_gradient():
+    module = torch.nn.Linear(3,3,bias=False).eval().requires_grad_(False)
+    x = torch.ones(2,3,requires_grad=True)
+    expected = module(x)
+    expected.sum().backward()
+    grad = x.grad.clone()
+    x.grad = None
+    records = []
+    with graph.TensorBranchObservations(module,records):
+        output = module(x)
+        output.sum().backward()
+    assert torch.equal(output,expected) and torch.equal(x.grad,grad)
+    assert [(r['site'],r['phase']) for r in records] == [
+        ('layer.input','forward'),('layer.output','forward'),
+        ('layer.output','backward'),('layer.input','backward')]
+    assert all(row['statistics']['nonfinite'] == 0 for row in records)
+    assert not module._forward_hooks and not x._backward_hooks
+
+
+def test_layer0_diagnostic_schedule_is_one_original_backward(tmp_path):
+    observer = graph.GraphObserver(TinyRunner(),tmp_path,{'backwards':[]},lambda layer: None,diagnostic=True)
+    assert observer.expected_schedule() == [(0,0,7000,graph.ARMS[0])]
+    observer.tokens = [torch.ones(1,2,dtype=torch.int64)]
+    with pytest.raises(RuntimeError,match='exact1-call schedule'):
+        observer.visit(0,lambda tokens: None)
+
+
+def test_primary_nonfinite_output_refuses_before_any_replay(tmp_path):
+    runner = TinyRunner()
+    with torch.no_grad():
+        runner.layers[0].weight.fill_(float('inf'))
+    hidden = torch.ones(1,2,3,dtype=torch.bfloat16)
+    result = {'backwards':[]}
+    observer = graph.GraphObserver(runner,tmp_path,result,lambda layer: None)
+    with patch.object(graph,'SHAPE',tuple(hidden.shape)),pytest.raises(RuntimeError,match='prefix output contains nonfinite'):
+        observer(0,hidden,batch=batch(),pass_state={})
+    assert runner.calls == 1 and result['backwards'] == []
+    assert result['primary_outputs'][0]['statistics']['nonfinite'] == 6
+
+
+@pytest.mark.parametrize('kind',['absent','nonfinite','zero'])
+def test_replay_retains_specific_leaf_failure_statistics(kind):
+    from prismaquant.sensitivity_probe import SharedStateCotangents
+    runner = TinyRunner()
+    if kind == 'absent':
+        runner._call = lambda layer, hidden, **kwargs: hidden.detach().requires_grad_(True)
+    elif kind == 'nonfinite':
+        class BadGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx,value):
+                return value.clone()
+            @staticmethod
+            def backward(ctx,grad):
+                return grad*float('nan')
+        runner._call = lambda layer, hidden, **kwargs: BadGradient.apply(hidden)
+    else:
+        with torch.no_grad():
+            runner.layers[0].weight.zero_()
+    diagnostics = {}
+    with pytest.raises(RuntimeError,match=kind if kind != 'zero' else 'all zero'):
+        graph.replay_arm(runner,0,torch.ones(1,2,3,dtype=torch.bfloat16),batch(),{},7000,
+            graph.ARMS[0],SharedStateCotangents(enabled=True),diagnostics=diagnostics)
+    assert diagnostics['output']['nonfinite'] == 0
+    assert diagnostics['backward_completed'] is True
+    stats = diagnostics['leaf_gradient']
+    assert stats['present'] is (kind != 'absent')
+    if kind == 'nonfinite':
+        assert stats['nan'] == 6 and stats['finite'] == 0
+    elif kind == 'zero':
+        assert stats['zero'] == 6 and stats['finite_nonzero'] == 0
