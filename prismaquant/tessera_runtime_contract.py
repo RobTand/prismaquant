@@ -1065,8 +1065,8 @@ def contract_answer(contract: "TesseraContract") -> dict:
     ``platforms`` and ``regimes`` are read by the EXPORT lane's own reader
     (``tessera_export_lane.require_declared_structure`` through
     ``lane_eligibility.load_eligibility_table``), which is gated by the
-    RELEASE pin -- an exact commit and sha, fail-closed today on PENDING
-    sentinels.  Pulling them in here would make an export-lane edit re-stale
+    RELEASE pin -- an exact reviewed commit and contract SHA, refusing
+    unresolved sentinels or mismatched installed contract bytes.  Pulling them in here would make an export-lane edit re-stale
     the allocator's menu, which is issue #38's own failure mode wearing a
     different hat.  Each pin covers the values its own gates read.
 
