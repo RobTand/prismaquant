@@ -28,7 +28,9 @@ and one replay cotangent fork. The existing target planner supplies whole-target
 windows. Each window observes every calibration batch before projection; all
 signed components sum before squaring. The installed source and its settled
 lookahead remain owned by the existing streaming cache across all windows and
-probes. PWC owns identity preparation and candidate read windows; no complete
+probes. Reverse installation disables adaptive top-up and explicitly schedules
+only the configured successor range before settling it; spare cache slots do
+not enlarge that reservation. PWC owns identity preparation and candidate read windows; no complete
 layer dW menu or parameter-gradient plane is created. Earlier windows use one
 quiescent shared-cotangent fork per batch; only the final window advances the
 original shared adjoints and outgoing boundary. Eval mode is required, observed

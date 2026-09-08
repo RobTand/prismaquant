@@ -2746,6 +2746,7 @@ def compute_aura_cost_streamed(
         runner.context.install(
             layer,
             require_prefetched=runner.require_prefetched_residency,
+            **({'prefetch_following': False} if operator_windows is not None else {}),
         )
         _refresh_packed_layer_views(layer)
         # Forward boundary capture leaves the final lookahead window hot.
@@ -2754,11 +2755,17 @@ def compute_aura_cost_streamed(
         # while the current layer performs its expensive anchor render and
         # adjoint probes.  Without this call, every layer after the retained
         # tail window falls through ensure_loaded()'s synchronous cold path.
-        runner.schedule_reverse_prefetch(layer)
-        if operator_windows is not None:
+        if operator_windows is None:
+            runner.schedule_reverse_prefetch(layer)
+        else:
+            # The operator reservation covers exactly the explicit lookahead.
+            # Adaptive cache top-up can otherwise enqueue additional owners.
+            successors = range(max(0, layer-runner.prefetch_lookahead), layer)
+            for successor in reversed(successors):
+                runner.context.schedule_prefetch(successor)
             settle = getattr(runner.context, 'settle_prefetched_layers', None)
             if callable(settle):
-                settle(range(max(0, layer-runner.prefetch_lookahead), layer))
+                settle(successors)
             elif torch.device(runner.device).type == 'cuda':
                 raise RuntimeError('joint operator replay requires source prefetch settlement')
         pending = [

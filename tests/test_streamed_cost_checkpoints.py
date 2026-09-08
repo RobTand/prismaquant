@@ -35,7 +35,7 @@ class _FakeStreamingContext:
         self.install_require_prefetched: list[bool] = []
         self.events: list[tuple[str, int]] = []
 
-    def install(self, layer, *, require_prefetched=False):
+    def install(self, layer, *, require_prefetched=False, prefetch_following=True):
         self.install_calls += 1
         self.install_require_prefetched.append(bool(require_prefetched))
         self.events.append(("install", int(layer)))

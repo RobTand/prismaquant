@@ -206,3 +206,44 @@ def test_guarded_operator_phases_release_inactive_allocator_reservation(tmp_path
     assert {'before_joint_statistics_window', 'before_joint_candidate_load',
             'before_joint_window_backward'} <= set(labels)
     assert state['releases'] >= len(labels)
+
+
+def test_operator_reverse_owns_exact_lookahead_when_cache_has_extra_slots(monkeypatch):
+    import copy
+    model, context, runner, cache = _fixture()
+    model.model.layers.extend([copy.deepcopy(model.model.layers[0]) for _ in range(2)])
+    context.num_layers = runner.num_layers = 4
+    runner.prefetch_lookahead = 1
+    for layer in (2, 3):
+        name = f'model.layers.{layer}.proj'
+        cache.activation_max_abs[name] = 1.0
+        for fmt in ('FP8_E4M3', 'NVFP4A16'):
+            cache.weights[name, fmt] = model.model.layers[layer].proj.weight.detach().clone()+0.03125
+    original = context.install
+    state = {'previous': -1, 'reverse': False}
+    futures = set()
+    settled = []
+    def install(layer, *, require_prefetched=False, prefetch_following=True):
+        if layer <= state['previous']:
+            state['reverse'] = True
+        state['previous'] = layer
+        futures.discard(layer)
+        if state['reverse'] and prefetch_following:
+            # An adaptive three-slot cache can enqueue two successors while
+            # this runner's explicitly budgeted reverse lookahead is one.
+            futures.update(range(max(0, layer-2), layer))
+        return original(layer, require_prefetched=require_prefetched)
+    def schedule(layer):
+        if state['reverse']:
+            futures.add(layer)
+    def settle(indices):
+        expected = set(indices)
+        if futures != expected:
+            raise RuntimeError(f'unexpected source owners: {futures} != {expected}')
+        settled.append(expected)
+    monkeypatch.setattr(context, 'install', install)
+    monkeypatch.setattr(context, 'schedule_prefetch', schedule)
+    monkeypatch.setattr(context, 'settle_prefetched_layers', settle, raising=False)
+    result = _run(runner, cache, operator_windows=policy())
+    assert len(result['costs']) == 4
+    assert settled == [{2}, {1}, {0}, set()]
