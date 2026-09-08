@@ -872,23 +872,24 @@ def build_streamed_causal_lm(
         log_prefix="[cost-streaming]",
         attn_implementation=attn_implementation,
     )
-    effective_lookahead = max(0, int(prefetch_lookahead))
-    if context.max_cache_slots is not None:
-        effective_lookahead = min(
-            effective_lookahead,
-            max(0, context.max_cache_slots - 1),
-        )
-    runner = StreamedCausalLM(
-        context,
-        profile,
-        prefetch_lookahead=effective_lookahead,
-        require_prefetched_residency=require_prefetched_residency,
-    )
-    from .glm_source_derivative import bind_source_derivative
+    runner = None
     try:
+        effective_lookahead = max(0, int(prefetch_lookahead))
+        if context.max_cache_slots is not None:
+            effective_lookahead = min(
+                effective_lookahead,
+                max(0, context.max_cache_slots - 1),
+            )
+        runner = StreamedCausalLM(
+            context,
+            profile,
+            prefetch_lookahead=effective_lookahead,
+            require_prefetched_residency=require_prefetched_residency,
+        )
+        from .glm_source_derivative import bind_source_derivative
         bind_source_derivative(runner.model, profile, source_derivative)
     except BaseException:
-        runner.shutdown()
+        (context if runner is None else runner).shutdown()
         raise
     return runner
 

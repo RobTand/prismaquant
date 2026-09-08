@@ -283,3 +283,19 @@ def test_streamed_builder_checks_binding_and_shuts_down_on_refusal(monkeypatch):
         cost_streaming.build_streamed_causal_lm('fixture', device=torch.device('cpu'), dtype=torch.bfloat16,
             offload_folder='unused', profile=Glm5NextProfile(), source_derivative={'closed': 'requested'})
     assert calls == ['binding', 'shutdown']
+
+
+@pytest.mark.parametrize('failure', ['constructor', 'lookahead'])
+def test_streamed_builder_retires_context_when_runner_construction_fails(monkeypatch, failure):
+    from prismaquant import cost_streaming, streaming_model
+    calls = []
+    context = SimpleNamespace(max_cache_slots=2, shutdown=lambda: calls.append('shutdown'))
+    monkeypatch.setattr(streaming_model, '_build_streaming_context', lambda *a, **k: context)
+    def constructor(*args, **kwargs):
+        raise RuntimeError('constructor failed')
+    monkeypatch.setattr(cost_streaming, 'StreamedCausalLM', constructor)
+    with pytest.raises((RuntimeError, ValueError)):
+        cost_streaming.build_streamed_causal_lm('fixture', device=torch.device('cpu'), dtype=torch.bfloat16,
+            offload_folder='unused', profile=Glm5NextProfile(),
+            prefetch_lookahead='invalid' if failure == 'lookahead' else 2)
+    assert calls == ['shutdown']
