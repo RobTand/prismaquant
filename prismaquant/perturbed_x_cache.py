@@ -10,10 +10,16 @@ RTN-quantized just for that module call and restored in the forward hook.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
+import pickle
+import pickletools
 import re
+import stat
+import struct
 import sys
+import zipfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -200,6 +206,226 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
     return path
 
 
+def cache_file_stat_signature(value):
+    """Stable file identity shared by the existing activation and PWC owners."""
+    return (value.st_dev, value.st_ino, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns)
+
+
+def _preflight_torch_zip_directory(source, *, metadata_cap, label):
+    """Bound directory objects before ZipFile creates any ZipInfo instances.
+
+    Reuse zipfile's fixed-size EOCD/ZIP64 reader, then walk fixed-size central
+    headers without decoding names or allocating a roster. ZipFile ignores the
+    EOCD entry count when building its roster, so both count and extent matter.
+    """
+    source.seek(0, os.SEEK_END)
+    file_bytes = source.tell()
+    end = zipfile._EndRecData(source)
+    if end is None:
+        raise RuntimeError(f'{label} has no accountable ZIP directory')
+    count = end[zipfile._ECD_ENTRIES_TOTAL]
+    size = end[zipfile._ECD_SIZE]
+    offset = end[zipfile._ECD_OFFSET]
+    if (end[zipfile._ECD_DISK_NUMBER] != 0 or end[zipfile._ECD_DISK_START] != 0 or
+            count != end[zipfile._ECD_ENTRIES_THIS_DISK] or count <= 0 or
+            count*4096 + size*16 > metadata_cap//2):
+        raise RuntimeError(f'{label} ZIP directory exceeds metadata scratch budget')
+    # Canonical Torch files are not concatenated archives. Validate the actual
+    # footer chain instead of relying on private _ECD_LOCATION semantics:
+    # patched Python 3.12 reports ZIP64 EOCD there, older versions report EOCD32.
+    position = offset
+    directory_end = offset+size
+    if position < 0 or size < 0 or directory_end > file_bytes:
+        raise RuntimeError(f'{label} has an invalid ZIP directory extent')
+    footer_position = directory_end
+    source.seek(footer_position)
+    if end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
+        data = source.read(zipfile.sizeEndCentDir64)
+        if len(data) != zipfile.sizeEndCentDir64:
+            raise RuntimeError(f'{label} has a truncated ZIP64 footer')
+        record = struct.unpack(zipfile.structEndArchive64, data)
+        if (record[0] != zipfile.stringEndArchive64 or record[1]+12 != zipfile.sizeEndCentDir64 or
+                tuple(record[6:]) != (count, count, size, offset)):
+            raise RuntimeError(f'{label} requires a canonical fixed-size ZIP64 footer')
+        locator = source.read(zipfile.sizeEndCentDir64Locator)
+        if len(locator) != zipfile.sizeEndCentDir64Locator or struct.unpack(
+                zipfile.structEndArchive64Locator, locator) != (
+                    zipfile.stringEndArchive64Locator, 0, directory_end, 1):
+            raise RuntimeError(f'{label} has an invalid ZIP64 locator')
+        footer_position += zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+    source.seek(footer_position)
+    footer = source.read(zipfile.sizeEndCentDir)
+    if (len(footer) != zipfile.sizeEndCentDir or not footer.startswith(zipfile.stringEndArchive) or
+            footer_position+zipfile.sizeEndCentDir+len(end[zipfile._ECD_COMMENT]) != file_bytes):
+        raise RuntimeError(f'{label} requires a canonical non-concatenated ZIP directory')
+    stop, observed = position+size, 0
+    while position < stop:
+        source.seek(position)
+        header = source.read(zipfile.sizeCentralDir)
+        if len(header) != zipfile.sizeCentralDir:
+            raise RuntimeError(f'{label} has a truncated ZIP directory')
+        values = struct.unpack(zipfile.structCentralDir, header)
+        if values[zipfile._CD_SIGNATURE] != zipfile.stringCentralDir:
+            raise RuntimeError(f'{label} has an invalid ZIP directory header')
+        observed += 1
+        if observed > count or observed*4096 + size*16 > metadata_cap//2:
+            raise RuntimeError(f'{label} ZIP directory exceeds metadata scratch budget')
+        position += zipfile.sizeCentralDir + sum(values[index] for index in (
+            zipfile._CD_FILENAME_LENGTH, zipfile._CD_EXTRA_FIELD_LENGTH, zipfile._CD_COMMENT_LENGTH))
+    if position != stop or observed != count:
+        raise RuntimeError(f'{label} ZIP directory count or extent disagrees')
+    source.seek(0)
+
+
+def _preflight_pickle_opcodes(raw, *, metadata_cap, label):
+    """Bound the C unpickler's memo/frame allocations and disable extensions."""
+    max_memo = metadata_cap//512
+    memo_operations = 0
+    last = None
+    try:
+        for opcode, argument, position in pickletools.genops(raw):
+            last = (opcode.name, position)
+            if opcode.name in ('EXT1', 'EXT2', 'EXT4', 'INST', 'OBJ', 'NEWOBJ',
+                               'NEWOBJ_EX', 'BUILD'):
+                raise RuntimeError(f'{label} has an opaque or extension pickle opcode')
+            if opcode.name in ('PUT', 'BINPUT', 'LONG_BINPUT', 'GET', 'BINGET', 'LONG_BINGET'):
+                if type(argument) is not int or not 0 <= argument < max_memo:
+                    raise RuntimeError(f'{label} pickle memo exceeds scratch budget')
+            if opcode.name in ('PUT', 'BINPUT', 'LONG_BINPUT', 'MEMOIZE'):
+                memo_operations += 1
+                if memo_operations > max_memo:
+                    raise RuntimeError(f'{label} pickle memo exceeds scratch budget')
+            if opcode.name == 'FRAME' and not 0 <= argument <= len(raw):
+                raise RuntimeError(f'{label} pickle frame exceeds bounded metadata')
+        if last != ('STOP', len(raw)-1):
+            raise RuntimeError(f'{label} has trailing or incomplete pickle metadata')
+    except (ValueError, OverflowError) as exc:
+        raise RuntimeError(f'{label} has unaccountable pickle opcodes') from exc
+
+
+def _preflight_torch_pickle_storage(archive, *, records, pickle_name, label, metadata_cap):
+    """Check every declared storage size without constructing a Torch object.
+
+    Older Torch stages CPU storage even for map_location='meta'. Only a closed
+    set of tensor reconstruction markers is accepted here; those callbacks are
+    inert. ZIP sizes and pickle sizes must agree before either Torch pass.
+    """
+    # Archive metadata was admitted before this bounded read. Inspect opcodes
+    # before constructing the C Unpickler: find_class alone does not guard its
+    # sparse memo allocation or cached extension registry.
+    raw = archive.read(pickle_name)
+    _preflight_pickle_opcodes(raw, metadata_cap=metadata_cap, label=label)
+    element_bytes = {'ByteStorage': 1, 'CharStorage': 1, 'BoolStorage': 1,
+        'ShortStorage': 2, 'HalfStorage': 2, 'BFloat16Storage': 2,
+        'IntStorage': 4, 'FloatStorage': 4, 'LongStorage': 8,
+        'DoubleStorage': 8, 'ComplexFloatStorage': 8, 'ComplexDoubleStorage': 16,
+        'UntypedStorage': 1}
+    storage_types = {}
+    def tensor_marker(*args):
+        if (len(args) < 4 or type(args[0]) is not tuple or len(args[0]) != 3 or
+                args[0][0] != 'storage' or type(args[0][1]) is not str or args[0][1] not in records or
+                type(args[0][2]) is not int or args[0][2] not in (1, 2, 4, 8, 16) or
+                type(args[1]) is not int or args[1] < 0 or
+                type(args[2]) is not tuple or type(args[3]) is not tuple or
+                len(args[2]) != len(args[3]) or len(args[2]) > 64 or
+                any(type(value) is not int or value < 0 for value in (*args[2], *args[3]))):
+            raise RuntimeError(f'{label} has unaccountable pickle tensor geometry')
+        size = args[0][2]
+        if len(args) > 6 and type(args[6]) is tuple and args[6][0] == 'dtype':
+            sizes = dict(float16=2, float32=4, float64=8, bfloat16=2, int8=1,
+                         uint8=1, int16=2, int32=4, int64=8, bool=1, complex64=8, complex128=16)
+            size = sizes[args[6][1]]
+        extent = (0 if any(value == 0 for value in args[2]) else
+                  args[1]+1+sum((dim-1)*stride for dim, stride in zip(args[2], args[3])))
+        if extent*size > records[args[0][1]]:
+            raise RuntimeError(f'{label} pickle tensor geometry exceeds its declared backing storage')
+        return None
+    class StoragePreflight(pickle.Unpickler):
+        def find_class(self, module, name):
+            if module in ('torch', 'torch.storage') and name in element_bytes:
+                return ('storage_type', element_bytes[name])
+            if module == 'torch._utils' and name in (
+                    '_rebuild_tensor', '_rebuild_tensor_v2', '_rebuild_tensor_v3'):
+                return tensor_marker
+            if module == 'collections' and name == 'OrderedDict':
+                return OrderedDict
+            # v3 carries dtype separately; no callable Torch global escapes.
+            if module == 'torch' and name in ('float16', 'float32', 'float64',
+                    'bfloat16', 'int8', 'uint8', 'int16', 'int32', 'int64', 'bool',
+                    'complex64', 'complex128'):
+                return ('dtype', name)
+            raise RuntimeError(f'{label} has an opaque pickle global: {module}.{name}')
+
+        def persistent_load(self, value):
+            if (type(value) is not tuple or len(value) != 5 or value[0] != 'storage' or
+                    type(value[1]) is not tuple or len(value[1]) != 2 or value[1][0] != 'storage_type' or
+                    type(value[1][1]) is not int or value[1][1] not in (1, 2, 4, 8, 16) or
+                    type(value[2]) is not str or value[2] not in records or value[3] != 'cpu' or
+                    type(value[4]) is not int or value[4] < 0 or
+                    value[4]*value[1][1] != records[value[2]]):
+                raise RuntimeError(f'{label} declared pickle storage disagrees with bounded ZIP storage')
+            if storage_types.setdefault(value[2], value[1][1]) != value[1][1]:
+                raise RuntimeError(f'{label} pickle storage aliases disagree on element size')
+            return ('storage', value[2], value[1][1])
+    try:
+        StoragePreflight(io.BytesIO(raw)).load()
+    except (pickle.UnpicklingError, TypeError, ValueError, AttributeError, EOFError) as exc:
+        raise RuntimeError(f'{label} has unaccountable pickle storage metadata') from exc
+
+
+def torch_archive_storage_bytes(source, *, label='PWC window', metadata_cap=None,
+                                max_storage_bytes=None):
+    """Inspect ordinary uncompressed Torch storage records without loading them."""
+    try:
+        if metadata_cap is not None:
+            _preflight_torch_zip_directory(source, metadata_cap=metadata_cap, label=label)
+        with zipfile.ZipFile(source) as archive:
+            entries = archive.infolist()
+            names = [entry.filename for entry in entries]
+            roots = {name.split('/')[0] for name in names}
+            if (len(roots) != 1 or len(set(names)) != len(names)
+                    or not any(name.endswith('/data.pkl') for name in names)
+                    or any(entry.compress_type != zipfile.ZIP_STORED or entry.flag_bits & 1
+                           or entry.file_size != entry.compress_size for entry in entries)):
+                raise RuntimeError(f'{label} requires an uncompressed Torch archive')
+            storage = [entry for entry in entries
+                       if re.fullmatch(r'[^/]+/data/[0-9]+', entry.filename)]
+            if metadata_cap is not None:
+                # Price Python/ZIP/pickle metadata separately from tensor storage.
+                # The bounded source adapter also refuses oversized directory reads
+                # before ZipFile can construct an unbounded member list.
+                metadata_bytes = sum(entry.file_size for entry in entries if entry not in storage)
+                bound = sum(4096 + 8*len(name.encode()) for name in names) + 64*metadata_bytes
+                if bound > metadata_cap // 2:
+                    raise RuntimeError(f'{label} archive metadata exceeds scratch budget')
+            total = sum(entry.file_size for entry in storage)
+            if max_storage_bytes is not None:
+                if total > max_storage_bytes:
+                    raise RuntimeError(f'{label} archive backing storage exceeds its budget')
+                _preflight_torch_pickle_storage(archive,
+                    records={entry.filename.rsplit('/', 1)[1]: entry.file_size for entry in storage},
+                    pickle_name=next(name for name in names if name.endswith('/data.pkl')),
+                    label=label, metadata_cap=metadata_cap)
+            return total
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise RuntimeError(f'{label} has an unaccountable Torch archive') from exc
+
+
+def _advise_activation_descriptor(descriptor, path, expected_stat, *, offset=0,
+                                  length=0, durable=False):
+    expected = cache_file_stat_signature(expected_stat)
+    actual = os.fstat(descriptor)
+    if not stat.S_ISREG(actual.st_mode) or cache_file_stat_signature(actual) != expected:
+        raise RuntimeError('capture entry changed before page advice')
+    if durable:
+        os.fsync(descriptor)
+    if (cache_file_stat_signature(os.fstat(descriptor)) != expected or
+            cache_file_stat_signature(os.stat(path, follow_symlinks=False)) != expected):
+        raise RuntimeError('capture entry changed while completing durability')
+    os.posix_fadvise(descriptor, offset, length, os.POSIX_FADV_DONTNEED)
+
+
 def release_activation_cache_file_pages(path, *, expected_stat):
     """Advise a verified unchanged file extent at a reader/writer boundary.
 
@@ -210,23 +436,235 @@ def release_activation_cache_file_pages(path, *, expected_stat):
     requires the complete seal. Advice is not proof of physical release; the
     caller's guard remains final.
     """
-    import stat
-    def identity(value):
-        return (value.st_dev, value.st_ino, value.st_size,
-                value.st_mtime_ns, value.st_ctime_ns)
     flags = os.O_RDONLY | os.O_NOFOLLOW
     descriptor = os.open(path, flags)
     try:
-        actual = os.fstat(descriptor)
-        if not stat.S_ISREG(actual.st_mode) or identity(actual) != identity(expected_stat):
-            raise RuntimeError('capture entry changed before page advice')
-        os.fsync(descriptor)
-        if (identity(os.fstat(descriptor)) != identity(expected_stat) or
-                identity(os.stat(path, follow_symlinks=False)) != identity(expected_stat)):
-            raise RuntimeError('capture entry changed while completing durability')
-        os.posix_fadvise(descriptor, 0, 0, os.POSIX_FADV_DONTNEED)
+        _advise_activation_descriptor(descriptor, path, expected_stat, durable=True)
     finally:
         os.close(descriptor)
+
+
+VERIFIED_ACTIVATION_LOAD_SCHEMA = 'prismaquant.verified_activation_load.v1'
+
+
+def normalize_verified_activation_load(config):
+    if config is None:
+        return None
+    if (not isinstance(config, dict) or set(config) !=
+            {'schema', 'max_buffer_bytes', 'max_scratch_bytes'} or
+            config.get('schema') != VERIFIED_ACTIVATION_LOAD_SCHEMA):
+        raise ValueError('verified activation load requires a complete closed v1 policy')
+    for key in ('max_buffer_bytes', 'max_scratch_bytes'):
+        if type(config[key]) is not int or config[key] <= 0:
+            raise ValueError(f'verified activation load requires positive {key}')
+    if config['max_scratch_bytes'] < 1024**2:
+        raise ValueError('verified activation load requires at least 1 MiB metadata scratch')
+    return dict(config)
+
+
+class _VerifiedBufferReader(io.RawIOBase):
+    """Read-only access to one private buffer, with no full-copy fallback."""
+    def __init__(self, buffer, *, max_copy_bytes):
+        self._view = memoryview(buffer).toreadonly()
+        self._position = 0
+        self._max_copy_bytes = max_copy_bytes
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        self._checkClosed()
+        return self._position
+
+    def seek(self, offset, whence=0):
+        self._checkClosed()
+        if whence not in (0, 1, 2):
+            raise ValueError('invalid verified-buffer seek origin')
+        position = offset + (0 if whence == 0 else self._position if whence == 1 else len(self._view))
+        if position < 0:
+            raise ValueError('negative verified-buffer seek')
+        self._position = position
+        return position
+
+    def read(self, size=-1):
+        self._checkClosed()
+        available = max(0, len(self._view) - self._position)
+        size = available if size is None or size < 0 else min(size, available)
+        if size > self._max_copy_bytes:
+            raise RuntimeError('verified-buffer copying read exceeds scratch budget; readinto required')
+        result = bytes(self._view[self._position:self._position+size])
+        self._position += size
+        return result
+
+    def readinto(self, target):
+        self._checkClosed()
+        output = memoryview(target).cast('B')
+        try:
+            size = min(len(output), max(0, len(self._view)-self._position))
+            output[:size] = self._view[self._position:self._position+size]
+            self._position += size
+            return size
+        finally:
+            output.release()
+
+    def close(self):
+        if not self.closed:
+            self._view.release()
+            self._view = None
+        super().close()
+
+
+def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
+    """Charge complete backing storage and refuse opaque or oversized metadata."""
+    pending, visited, storages = [payload], set(), {}
+    while pending:
+        value = pending.pop()
+        identity = id(value)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        if len(visited) > max_nodes:
+            raise RuntimeError('verified activation payload exceeds metadata scratch budget')
+        if isinstance(value, torch.Tensor):
+            if (value.device.type != device or value.layout != torch.strided or value.is_quantized
+                    or value.requires_grad or value.numel()*value.element_size() > max_storage_bytes):
+                raise RuntimeError('verified activation payload has unaccountable tensor geometry/type')
+            storage = value.untyped_storage()
+            storages[storage._cdata] = storage.nbytes()
+            if (storage.nbytes() > max_storage_bytes or
+                    (device != 'meta' and sum(storages.values()) > max_storage_bytes)):
+                raise RuntimeError('verified activation backing storage exceeds its budget')
+        elif type(value) in (dict, OrderedDict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif type(value) in (tuple, list):
+            pending.extend(value)
+        elif value is not None and type(value) not in (str, int, float, bool, bytes):
+            raise RuntimeError('verified activation payload has an opaque metadata owner')
+    # Torch's meta restore does not preserve storage aliases (data_ptr is 0).
+    # ZIP records already bound aggregate bytes; meta checks each geometry, and
+    # the CPU pass checks the exact unique backing-storage aggregate.
+    return max(storages.values(), default=0) if device == 'meta' else sum(storages.values())
+
+
+def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
+                                         max_storage_bytes, validate=None,
+                                         expected_stat=None, resource_check=None,
+                                         release_file_pages=False):
+    """Hash and deserialize one admitted byte buffer, released before return.
+
+    The metadata pass uses meta tensors to reject malformed storage/geometry
+    before a real CPU reconstruction. Torch may stage one archive storage on
+    CPU during that pass; the same S cap covers it. Neither pass rereads the
+    source file, and no CUDA transfer is performed by this owner.
+    """
+    policy = normalize_verified_activation_load(policy)
+    if policy is None or type(max_storage_bytes) is not int or max_storage_bytes <= 0:
+        raise ValueError('verified activation load requires explicit buffer and storage budgets')
+    if not isinstance(expected_sha256, str) or re.fullmatch('[0-9a-f]{64}', expected_sha256) is None:
+        raise ValueError('verified activation load requires an exact SHA256 receipt')
+    path = Path(path)
+    before = path.lstat()
+    signature = cache_file_stat_signature(before)
+    if not stat.S_ISREG(before.st_mode):
+        raise RuntimeError('verified activation load requires a regular nonsymlink file')
+    if expected_stat is not None and cache_file_stat_signature(expected_stat) != signature:
+        raise RuntimeError('verified activation file changed before loading')
+    if before.st_size <= 0 or before.st_size > policy['max_buffer_bytes']:
+        raise RuntimeError('verified activation file exceeds serialized buffer budget')
+    scratch = policy['max_scratch_bytes']
+    def check(label, reserve_bytes=0):
+        if resource_check is not None:
+            resource_check(label + ':' + path.name, reserve_bytes=reserve_bytes)
+    def unchanged(descriptor):
+        if (cache_file_stat_signature(os.fstat(descriptor)) != signature or
+                cache_file_stat_signature(path.lstat()) != signature):
+            raise RuntimeError('verified activation file changed during loading')
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    raw = reader = value = payload = None
+    try:
+        unchanged(descriptor)
+        check('before_verified_capture_buffer', before.st_size + max_storage_bytes + scratch)
+        if release_file_pages:
+            # Complete durability once, then advise only verified consumed ranges.
+            os.fsync(descriptor)
+            unchanged(descriptor)
+        raw = bytearray(before.st_size)
+        digest = hashlib.sha256()
+        consumed = advised = 0
+        block_bytes = min(16*1024**2, scratch // 4)
+        with os.fdopen(descriptor, 'rb', buffering=0, closefd=False) as handle:
+            while consumed < len(raw):
+                check('before_verified_capture_read', max_storage_bytes + scratch)
+                view = memoryview(raw)[consumed:min(len(raw), consumed+block_bytes)]
+                try:
+                    size = handle.readinto(view)
+                    if not size:
+                        raise RuntimeError('verified activation file was truncated')
+                    digest.update(view[:size])
+                finally:
+                    view.release()
+                consumed += size
+                unchanged(descriptor)
+                if release_file_pages:
+                    page = os.sysconf('SC_PAGE_SIZE')
+                    end = consumed // page * page
+                    if end > advised:
+                        _advise_activation_descriptor(descriptor, path, before,
+                                                      offset=advised, length=end-advised)
+                        advised = end
+            if handle.read(1):
+                raise RuntimeError('verified activation file grew during loading')
+        unchanged(descriptor)
+        if digest.hexdigest() != expected_sha256:
+            raise RuntimeError('verified activation file checksum mismatch')
+        reader = _VerifiedBufferReader(raw, max_copy_bytes=min(scratch//8, 128*1024))
+        archive_storage = torch_archive_storage_bytes(reader, label='verified activation load',
+                                                      metadata_cap=scratch,
+                                                      max_storage_bytes=max_storage_bytes)
+        if archive_storage > max_storage_bytes:
+            raise RuntimeError('verified activation archive backing storage exceeds its budget')
+        for device in ('meta', 'cpu'):
+            check('before_verified_capture_decode', max_storage_bytes + scratch)
+            reader.seek(0)
+            value = torch.load(reader, map_location=device, weights_only=True)
+            observed = _verified_payload_storage(value, max_storage_bytes=max_storage_bytes,
+                device=device, max_nodes=scratch//512)
+            if observed > archive_storage:
+                raise RuntimeError('verified activation tensor storage exceeds its archive records')
+            if validate is not None:
+                validate(value, check_finite=device == 'cpu')
+            if device == 'cpu':
+                payload = value
+            value = None
+        unchanged(descriptor)
+        if release_file_pages:
+            _advise_activation_descriptor(descriptor, path, before)
+    except BaseException:
+        value = payload = None
+        raise
+    finally:
+        if reader is not None:
+            reader.close()
+        raw = reader = None
+        os.close(descriptor)
+    try:
+        check('after_verified_capture_buffer_release')
+    except BaseException:
+        payload = None
+        raise
+    execution = dict(schema=VERIFIED_ACTIVATION_LOAD_SCHEMA, policy=policy,
+        artifact_sha256=expected_sha256, file_bytes=before.st_size,
+        storage_cap_bytes=max_storage_bytes, archive_storage_bytes=archive_storage,
+        file_signature=signature, source_read_bytes=consumed, live_buffer_bytes=0)
+    execution['identity_sha256'] = hashlib.sha256(json.dumps(
+        {key: execution[key] for key in ('schema', 'policy', 'artifact_sha256', 'file_bytes',
+                                         'storage_cap_bytes')},
+        sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return payload, execution
 
 
 EXACT_ACTIVATION_SCHEMA = "prismaquant.exact_activation_entry.v1"

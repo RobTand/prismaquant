@@ -1,7 +1,40 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/capture-followups-20260908`. Stamps
+As of: 2026-09-08 · `fix/verified-capture-load`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/verified-capture-load`) for explicit capture load
+policy `prismaquant.verified_activation_load.v1` (#405). Canonical capture
+replay, seal and joint qualification may opt into one private serialized byte
+buffer with positive `max_buffer_bytes` and `max_scratch_bytes` (at least 1 MiB).
+The existing activation owner binds a regular nonsymlink file identity, checks
+the complete selected roster's file caps, hashes each source byte once, then
+checks canonical non-concatenated uncompressed ZIP storage and metadata bounds
+before deserializing the same read-only buffer. ZIP64 uses a fixed-size footer. Directory counts and byte extents are bounded before
+ZIP entry objects exist. A bounded opcode pass refuses sparse memo/frame
+allocations and extension lookup before the C unpickler is constructed. Inert
+pickle reconstruction then checks declared storage sizes against ZIP records
+before any Torch allocation, including each view’s extent within its own storage
+record. A metadata pass checks tensor geometry before CPU reconstruction; the CPU pass checks unique backing
+storage, and finite masks use bounded chunks.
+The raw buffer expires before CPU results can transfer to CUDA. File changes,
+unknown owners, overbudget storage and unsupported copying reads refuse.
+
+`--capture-load-policy` accepts that JSON only with streamed
+`shared-inputs-bounded-v1` capture. Materialization and final sealing price
+serialized buffer and scratch separately; forward/source-validation phases
+retain their existing terms. The unchanged physical cap must admit the maximum
+phase. Joint preparation accepts the same top-level `capture_load_policy` only
+with explicit qualification windows and adds these terms to its physical guard;
+the qualification v1 PWC load-buffer meaning is unchanged. Separate execution
+receipts record the policy digest, artifact/load digest chain, source bytes and
+peak buffer/storage bytes in `capture-load-execution.json` or prepared cache
+metadata. Canonical manifest, journal identity and tensor/file bytes do not
+change. Legacy/default capture and exact-boundary activation prefetch retain
+their existing routes. PWC shares file-signature/archive inspection helpers;
+its bounded loader and LRU behavior are unchanged. Gates include
+`tests/test_verified_capture_load.py` and streamed admission/qualification/PWC
+regressions. File read counts alone establish no physical-I/O or speed claim.
 
 Re-stamped (2026-09-08, `integrate/capture-followups-20260908`) for Hessian
 writer refusal and completed-file page release (#395, #396). A tensor-bearing

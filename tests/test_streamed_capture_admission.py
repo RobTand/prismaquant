@@ -218,3 +218,28 @@ def test_projected_source_advice_waits_for_byte_check_and_mapping_release(tmp_pa
         campaign._checked_projected_units(bound, weights={'expert': weight+1},
             model_path=tmp_path, source=source, release_source_pages=True)
     assert not calls
+
+
+def test_verified_load_buffer_is_priced_only_in_load_phases(glm_checkpoint):
+    from prismaquant.autoscale import streamed_calibration_resources
+    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+    from prismaquant.routed_experts import profile_declared_packed_expert_projections
+    model, source = glm_checkpoint
+    members = profile_declared_packed_expert_projections(model, Glm5NextProfile())
+    shapes = {member.qname: list(member.weight.shape) for member in members}
+    kwargs = dict(unit_shapes=shapes, counts={name: 2 for name in shapes}, nsamples=1,
+        seqlen=2, max_act_rows=7, cache_slots=2, prefetch_workers=1, headroom_gb=1)
+    policy = dict(schema='prismaquant.verified_activation_load.v1',
+                  max_buffer_bytes=8*1024**2, max_scratch_bytes=1024**2)
+    before = streamed_calibration_resources(source, **kwargs,
+        capture_policy='shared-inputs-bounded-v1')
+    after = streamed_calibration_resources(source, **kwargs,
+        capture_policy='shared-inputs-bounded-v1', capture_load_policy=policy)
+    for phase in ('forward', 'source_validation'):
+        assert after['phases'][phase] == before['phases'][phase]
+    assert sum(after['phases']['materialization'].values()) - sum(
+        before['phases']['materialization'].values()) == 9*1024**2
+    assert after['phases']['seal']['capture_serialized_buffer_bytes'] == 8*1024**2
+    assert after['memory_bytes'] == max(sum(p.values()) for p in after['phases'].values())
+    with pytest.raises(ValueError, match='bounded capture'):
+        streamed_calibration_resources(source, **kwargs, capture_load_policy=policy)

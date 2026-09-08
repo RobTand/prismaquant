@@ -3523,6 +3523,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     capture_policy = getattr(args, 'streaming_capture_policy', 'legacy')
     shared_capture = capture_policy in ('shared-inputs-release-v1', 'shared-inputs-bounded-v1')
     bounded_capture = capture_policy == 'shared-inputs-bounded-v1'
+    capture_load_policy = getattr(args, 'capture_load_policy', None)
     guard = None
     if bounded_capture and runner.device.type == 'cuda':
         from .memory_management import CaptureMemoryGuard
@@ -3548,7 +3549,8 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         writer = store.CaptureWriter(args.capture_calibration_out,
             census_path=args.calibration_census, identity=identity,
             release_file_pages=bounded_capture,
-            resource_check=None if guard is None else guard.check)
+            resource_check=None if guard is None else guard.check,
+            verified_load_policy=capture_load_policy)
 
     if shared_capture and writer is None:
         raise RuntimeError('shared-inputs-release-v1 requires streamed calibration capture')
@@ -3559,7 +3561,8 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             counts=census['counts'], nsamples=args.nsamples, seqlen=args.seqlen,
             max_act_rows=args.max_act_rows, cache_slots=args.streaming_cache_slots,
             prefetch_workers=args.streaming_prefetch_workers,
-            headroom_gb=args.streaming_cache_headroom_gb, capture_policy=capture_policy)
+            headroom_gb=args.streaming_cache_headroom_gb, capture_policy=capture_policy,
+            capture_load_policy=capture_load_policy)
         if resources['memory_bytes'] > guard.cap_bytes:
             raise RuntimeError('capture cgroup budget is smaller than its checked phase plan')
         additional = max(sum(value for key, value in phase.items() if key not in
@@ -3659,6 +3662,14 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     if writer is not None:
         census_max_abs(census, maxima)
         receipt = writer.finish(model_load_contract=contract)
+        if writer.load_execution is not None:
+            from .cost_stage_checkpoint import atomic_write_bytes
+            execution_record = dict(schema='prismaquant.capture_load_run.v1',
+                replay=writer.load_execution, seal=writer.seal_load_execution,
+                resources=resources if guard is not None else None,
+                memory_guard=None if guard is None else guard.snapshot())
+            atomic_write_bytes(Path(args.cache_dir)/'capture-load-execution.json',
+                (json.dumps(execution_record, indent=2, sort_keys=True)+'\n').encode())
         print(f"[campaign] complete streamed calibration capture: {receipt}", flush=True)
     else:
         payload = calibration_census(counts, maxima, args=args, groups=scope_groups,
@@ -3795,6 +3806,8 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     ap.add_argument("--streaming-capture-policy", default="legacy",
                     choices=("legacy", "shared-inputs-release-v1", "shared-inputs-bounded-v1"),
                     help="Opt-in shared capture; bounded also checks phase ownership and physical memory.")
+    ap.add_argument("--capture-load-policy", type=json.loads, default=None,
+                    help="Explicit verified activation load v1 JSON policy; requires bounded capture.")
     ap.add_argument("--capture-calibration-out", default=None,
                     help="Capture full-census float32 prefix X and uncapped H once, then exit.")
     ap.add_argument("--calibration-cache", default=None,
@@ -3802,6 +3815,15 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     ap.add_argument("--calibration-cache-sha256", default=None,
                     help="Expected capture manifest hash, sealed by the campaign planner.")
     args = ap.parse_args(argv)
+    from .perturbed_x_cache import normalize_verified_activation_load
+    try:
+        args.capture_load_policy = normalize_verified_activation_load(args.capture_load_policy)
+    except ValueError as exc:
+        ap.error(str(exc))
+    if args.capture_load_policy is not None and not (
+            args.streaming and args.capture_calibration_out and
+            args.streaming_capture_policy == 'shared-inputs-bounded-v1'):
+        ap.error('--capture-load-policy requires streamed shared-inputs-bounded-v1 capture')
     if args.streaming_capture_policy != "legacy" and not (args.streaming and args.capture_calibration_out):
         ap.error("--streaming-capture-policy requires --streaming and --capture-calibration-out")
     selected_source = bool(args.streaming and args.units and args.calibration_cache

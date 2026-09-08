@@ -75,7 +75,7 @@ def require_bounded_capture_environment(environ):
 def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
                                    prefetch_workers, headroom_gb,
-                                   capture_policy='legacy'):
+                                   capture_policy='legacy', capture_load_policy=None):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -95,6 +95,10 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             (nsamples, seqlen, max_act_rows, cache_slots, prefetch_workers)) or
             cache_slots < 2 or not math.isfinite(headroom_gb) or headroom_gb < 0):
         raise ValueError('invalid streamed calibration resource dimensions')
+    from .perturbed_x_cache import normalize_verified_activation_load
+    capture_load_policy = normalize_verified_activation_load(capture_load_policy)
+    if capture_load_policy is not None and capture_policy != 'shared-inputs-bounded-v1':
+        raise ValueError('verified capture load admission requires bounded capture phases')
     profile = detect_profile(str(model_path))
     cfg = json.loads((Path(model_path)/'config.json').read_text())
     text = cfg.get('text_config') or cfg
@@ -279,11 +283,24 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         source_validation_cpu_copy_bytes=max(
             (math.prod(shape)*max_element_bytes for shape in unit_shapes.values()), default=0))
     phases = dict(source_validation=source_validation, forward=forward, materialization=materialization)
+    if capture_load_policy is not None:
+        # Replay/validation loads occur during materialization and final seal,
+        # never in the model forward. The existing entry_validation_bytes is S.
+        materialization.update(
+            capture_serialized_buffer_bytes=capture_load_policy['max_buffer_bytes'],
+            capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'])
+        phases['seal'] = dict(common,
+            source_window_bytes=terms['source_window_bytes'],
+            loader_transient_bytes=loader_transient,
+            capture_serialized_buffer_bytes=capture_load_policy['max_buffer_bytes'],
+            capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'],
+            finite_validation_mask_bytes=materialization['finite_validation_mask_bytes'])
+        result['capture_load_policy'] = capture_load_policy
     result.update(schema='prismaquant.streamed_calibration_resources.v2',
         capture_policy=capture_policy, input_groups=groups, phases=phases,
         memory_bytes=max(sum(phase.values()) for phase in phases.values()),
         transient_status='checked shared input groups; settled prefetch window and completed source release before materialization')
-    # v1's additive terms are retained only in its own schema. v2 carries three
+    # v1's additive terms are retained only in its own schema. v2 carries
     # mutually exclusive phase maps, with the maximum defining admission.
     del result['terms']
     return result
