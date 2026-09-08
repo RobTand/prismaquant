@@ -1,7 +1,22 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/capture-followups-20260908`. Stamps
+As of: 2026-09-08 · `triage/dispatch-admissible-partition`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `triage/dispatch-admissible-partition`) for the
+campaign dispatcher's **admissible partition** (§4.10, the campaign fanout's
+rows-per-box paragraph; #391). The fit check was all-or-nothing: one row wider than the
+worker refused every row, so the GLM plan's 864-unit routed stacks, deriving
+124.783 GiB against a 104 GiB worker, blocked the 90 rows that fit beside
+them. `plan` now partitions on the same arithmetic: the manifest holds the
+admissible rows, `plan.json` keeps the whole layout with an `admissible` flag
+per row and an `inadmissible_rows` record carrying each declined row's derived
+demand, multiplier, box and reason, and only a plan with nothing admissible
+refuses. No demand is rewritten to fit, no placement moves: PrismaBuild still
+admits and places on the row's declared demand, and all that changed is which
+rows the dispatcher declines to submit. The merge's gap refusal is untouched,
+so a partitioned plan cannot become a merged scope table. Gates:
+`tests/test_tessera_campaign_fanout.py`, shown failing before the change.
 
 Re-stamped (2026-09-08, `integrate/capture-followups-20260908`) for Hessian
 writer refusal and completed-file page release (#395, #396). A tensor-bearing
@@ -8201,10 +8216,22 @@ the reference row, and two rows that carry different evidence for one
 PrismaBuild admits on the row's declared demand, so the only way to put more
 rows on a box is to make a row hold less; declaring a smaller demand than the
 row holds would reserve less than it uses. `plan --rows-per-box N` therefore
-*checks* rather than sets: it refuses when the spec declares a
-`box_memory_gb` that `N` widest rows do not fit, prints the arithmetic
-otherwise, and records `rows_per_box` and each row's `row_memory_gb` in the
-plan. The dominant term in a row's demand today is `_model_bytes` -- every row
+*checks* rather than sets, and what it decides is which rows the manifest
+holds. When the spec declares a `box_memory_gb`, a row is admissible while
+`row_memory_gb * N` fits that box, and `manifest.json` holds the admissible
+rows alone, so `submit` hands the fleet exactly them. A row that does not fit
+is **declined, not shrunk**: `plan.json` keeps every planned row under an
+explicit `admissible` flag, keeps `row_memory_gb` for all of them, and records
+the declined ones under `inadmissible_rows` with the derived demand, the
+per-box multiplier, the box and the reason, which the run also prints. A spec
+that declares no box budget admits every row and says the check was not made.
+Only a plan with **no** admissible row refuses, naming the widest demand and
+the box, and it writes no manifest. One over-wide row is a demand to report
+and work separately, not a reason to withhold the rows the fleet could already
+be running (#391). A partitioned plan is deliberately not mergeable: `merge`
+still requires every planned row's `cost.pkl`, so the rows that were never
+submitted refuse the merged scope table rather than quietly narrowing it. The
+dominant term in a row's demand today is `_model_bytes` -- every row
 loads the whole checkpoint, because the activations a unit is priced on come
 from a forward pass through the layers above it -- so that term, not the
 selection, is the concurrency ceiling. A quantum that held only its own units'
