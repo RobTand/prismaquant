@@ -1,0 +1,1163 @@
+{
+  "bands": [
+    {
+      "body_q256": [
+        768,
+        1024
+      ],
+      "initial_per_linear_anchors": 182115,
+      "per_shape": {
+        "[12288, 4096]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.0091145833333335,
+              "bytes": 18931712,
+              "q256": 768
+            },
+            {
+              "bpp": 4.009114583333333,
+              "bytes": 25223168,
+              "q256": 1024
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.000081380208333,
+              "bytes": 25166336,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.0065104166666665,
+              "bytes": 18915328,
+              "q256": 768
+            },
+            {
+              "bpp": 4.006510416666667,
+              "bytes": 25206784,
+              "q256": 1024
+            }
+          ]
+        },
+        "[2048, 4096]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.03515625,
+              "bytes": 3182592,
+              "q256": 768
+            },
+            {
+              "bpp": 4.03515625,
+              "bytes": 4231168,
+              "q256": 1024
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.00048828125,
+              "bytes": 4194816,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.01953125,
+              "bytes": 3166208,
+              "q256": 768
+            },
+            {
+              "bpp": 4.01953125,
+              "bytes": 4214784,
+              "q256": 1024
+            }
+          ]
+        },
+        "[4096, 12288]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.0065104166666665,
+              "bytes": 18915328,
+              "q256": 768
+            },
+            {
+              "bpp": 4.006510416666667,
+              "bytes": 25206784,
+              "q256": 1024
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.000081380208333,
+              "bytes": 25166336,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.00390625,
+              "bytes": 18898944,
+              "q256": 768
+            },
+            {
+              "bpp": 4.00390625,
+              "bytes": 25190400,
+              "q256": 1024
+            }
+          ]
+        },
+        "[4096, 2048]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.0390625,
+              "bytes": 3186688,
+              "q256": 768
+            },
+            {
+              "bpp": 4.0390625,
+              "bytes": 4235264,
+              "q256": 1024
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.00048828125,
+              "bytes": 4194816,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.0234375,
+              "bytes": 3170304,
+              "q256": 768
+            },
+            {
+              "bpp": 4.0234375,
+              "bytes": 4218880,
+              "q256": 1024
+            }
+          ]
+        }
+      },
+      "uniform_byte_checks": {
+        "TESSERA_BF16_K1": {
+          "endpoints": [
+            {
+              "bytes": 116110958592,
+              "q256": 768
+            },
+            {
+              "bytes": 154350428160,
+              "q256": 1024
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.0364165586952945,
+            "bytes": 154350428160,
+            "q256": 1024
+          },
+          "legal_shared_rungs": 257
+        },
+        "TESSERA_E2M1_K2": {
+          "endpoints": [
+            {
+              "bytes": 152976526848,
+              "q256": 896
+            },
+            {
+              "bytes": 152976526848,
+              "q256": 896
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.000487678731182,
+            "bytes": 152976526848,
+            "q256": 896
+          },
+          "legal_shared_rungs": 1
+        },
+        "TESSERA_E4M3_K1": {
+          "endpoints": [
+            {
+              "bytes": 115514204160,
+              "q256": 768
+            },
+            {
+              "bytes": 153753673728,
+              "q256": 1024
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.020810839297466,
+            "bytes": 153753673728,
+            "q256": 1024
+          },
+          "legal_shared_rungs": 257
+        }
+      }
+    },
+    {
+      "body_q256": [
+        832,
+        1088
+      ],
+      "initial_per_linear_anchors": 182115,
+      "per_shape": {
+        "[12288, 4096]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.2591145833333335,
+              "bytes": 20504576,
+              "q256": 832
+            },
+            {
+              "bpp": 4.259114583333333,
+              "bytes": 26796032,
+              "q256": 1088
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.000081380208333,
+              "bytes": 25166336,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.2565104166666665,
+              "bytes": 20488192,
+              "q256": 832
+            },
+            {
+              "bpp": 4.256510416666667,
+              "bytes": 26779648,
+              "q256": 1088
+            }
+          ]
+        },
+        "[2048, 4096]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.28515625,
+              "bytes": 3444736,
+              "q256": 832
+            },
+            {
+              "bpp": 4.28515625,
+              "bytes": 4493312,
+              "q256": 1088
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.00048828125,
+              "bytes": 4194816,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.26953125,
+              "bytes": 3428352,
+              "q256": 832
+            },
+            {
+              "bpp": 4.26953125,
+              "bytes": 4476928,
+              "q256": 1088
+            }
+          ]
+        },
+        "[4096, 12288]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.2565104166666665,
+              "bytes": 20488192,
+              "q256": 832
+            },
+            {
+              "bpp": 4.256510416666667,
+              "bytes": 26779648,
+              "q256": 1088
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.000081380208333,
+              "bytes": 25166336,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.25390625,
+              "bytes": 20471808,
+              "q256": 832
+            },
+            {
+              "bpp": 4.25390625,
+              "bytes": 26763264,
+              "q256": 1088
+            }
+          ]
+        },
+        "[4096, 2048]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.2890625,
+              "bytes": 3448832,
+              "q256": 832
+            },
+            {
+              "bpp": 4.2890625,
+              "bytes": 4497408,
+              "q256": 1088
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.00048828125,
+              "bytes": 4194816,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.2734375,
+              "bytes": 3432448,
+              "q256": 832
+            },
+            {
+              "bpp": 4.2734375,
+              "bytes": 4481024,
+              "q256": 1088
+            }
+          ]
+        }
+      },
+      "uniform_byte_checks": {
+        "TESSERA_BF16_K1": {
+          "endpoints": [
+            {
+              "bytes": 125670825984,
+              "q256": 832
+            },
+            {
+              "bytes": 163910295552,
+              "q256": 1088
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.0676665586952945,
+            "bytes": 155545411584,
+            "q256": 1032
+          },
+          "legal_shared_rungs": 257
+        },
+        "TESSERA_E2M1_K2": {
+          "endpoints": [
+            {
+              "bytes": 152976526848,
+              "q256": 896
+            },
+            {
+              "bytes": 152976526848,
+              "q256": 896
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.000487678731182,
+            "bytes": 152976526848,
+            "q256": 896
+          },
+          "legal_shared_rungs": 1
+        },
+        "TESSERA_E4M3_K1": {
+          "endpoints": [
+            {
+              "bytes": 125074071552,
+              "q256": 832
+            },
+            {
+              "bytes": 163313541120,
+              "q256": 1088
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.067685839297466,
+            "bytes": 155546148864,
+            "q256": 1036
+          },
+          "legal_shared_rungs": 257
+        }
+      }
+    },
+    {
+      "body_q256": [
+        896,
+        1152
+      ],
+      "initial_per_linear_anchors": 182115,
+      "per_shape": {
+        "[12288, 4096]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.5091145833333335,
+              "bytes": 22077440,
+              "q256": 896
+            },
+            {
+              "bpp": 4.509114583333333,
+              "bytes": 28368896,
+              "q256": 1152
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.000081380208333,
+              "bytes": 25166336,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.5065104166666665,
+              "bytes": 22061056,
+              "q256": 896
+            },
+            {
+              "bpp": 4.506510416666667,
+              "bytes": 28352512,
+              "q256": 1152
+            }
+          ]
+        },
+        "[2048, 4096]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.53515625,
+              "bytes": 3706880,
+              "q256": 896
+            },
+            {
+              "bpp": 4.53515625,
+              "bytes": 4755456,
+              "q256": 1152
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.00048828125,
+              "bytes": 4194816,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.51953125,
+              "bytes": 3690496,
+              "q256": 896
+            },
+            {
+              "bpp": 4.51953125,
+              "bytes": 4739072,
+              "q256": 1152
+            }
+          ]
+        },
+        "[4096, 12288]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.5065104166666665,
+              "bytes": 22061056,
+              "q256": 896
+            },
+            {
+              "bpp": 4.506510416666667,
+              "bytes": 28352512,
+              "q256": 1152
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.000081380208333,
+              "bytes": 25166336,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.50390625,
+              "bytes": 22044672,
+              "q256": 896
+            },
+            {
+              "bpp": 4.50390625,
+              "bytes": 28336128,
+              "q256": 1152
+            }
+          ]
+        },
+        "[4096, 2048]": {
+          "TESSERA_BF16_K1": [
+            {
+              "bpp": 3.5390625,
+              "bytes": 3710976,
+              "q256": 896
+            },
+            {
+              "bpp": 4.5390625,
+              "bytes": 4759552,
+              "q256": 1152
+            }
+          ],
+          "TESSERA_E2M1_K2": [
+            {
+              "bpp": 4.00048828125,
+              "bytes": 4194816,
+              "q256": 896
+            }
+          ],
+          "TESSERA_E4M3_K1": [
+            {
+              "bpp": 3.5234375,
+              "bytes": 3694592,
+              "q256": 896
+            },
+            {
+              "bpp": 4.5234375,
+              "bytes": 4743168,
+              "q256": 1152
+            }
+          ]
+        }
+      },
+      "uniform_byte_checks": {
+        "TESSERA_BF16_K1": {
+          "endpoints": [
+            {
+              "bytes": 135230693376,
+              "q256": 896
+            },
+            {
+              "bytes": 173470162944,
+              "q256": 1152
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.0676665586952945,
+            "bytes": 155545411584,
+            "q256": 1032
+          },
+          "legal_shared_rungs": 257
+        },
+        "TESSERA_E2M1_K2": {
+          "endpoints": [
+            {
+              "bytes": 152976526848,
+              "q256": 896
+            },
+            {
+              "bytes": 152976526848,
+              "q256": 896
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.000487678731182,
+            "bytes": 152976526848,
+            "q256": 896
+          },
+          "legal_shared_rungs": 1
+        },
+        "TESSERA_E4M3_K1": {
+          "endpoints": [
+            {
+              "bytes": 134633938944,
+              "q256": 896
+            },
+            {
+              "bytes": 172873408512,
+              "q256": 1152
+            }
+          ],
+          "highest_uniform_within_common_budget": {
+            "bpp": 4.067685839297466,
+            "bytes": 155546148864,
+            "q256": 1036
+          },
+          "legal_shared_rungs": 257
+        }
+      }
+    }
+  ],
+  "batches": [
+    {
+      "batch_size": 1,
+      "fits_104gib": true,
+      "fits_104gib_with_previous_4gib_observer": true,
+      "independently_checked_widest_resource": {
+        "encoder_memo_capacity": 1,
+        "encoder_memo_policy": "compatible-anchor-batch-width",
+        "export_input_writer_policy": "verified-tensor-record-prefix",
+        "memory_bytes": 105271281496,
+        "phases": {
+          "export_inputs": {
+            "declared_headroom_bytes": 25769803776,
+            "export_input_page_window_bytes": 663863296,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "serialization_scratch_bytes": 134217728
+          },
+          "resident_anchors": {
+            "compatible_batch_weight_bytes": 134217728,
+            "declared_headroom_bytes": 25769803776,
+            "encoder_memo_bytes": 67141632,
+            "entry_validation_bytes": 150994944,
+            "factorization_scratch_bytes": 268435456,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "source_validation_bytes": 14858831704
+          },
+          "source_preparation": {
+            "declared_headroom_bytes": 25769803776,
+            "loader_transient_bytes": 14495907840,
+            "nonbody_source_bytes": 3664816128,
+            "selected_source_weight_bytes": 14495514624,
+            "source_window_bytes": 14825473880
+          }
+        },
+        "schema": "prismaquant.selected_anchor_resources.v2",
+        "selected_layers": [
+          "6"
+        ],
+        "selected_source_weight_bytes": 14495514624,
+        "source_forward_count": 0,
+        "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c"
+      },
+      "maximum_memory_bytes": 105271281496,
+      "mem_gib": 99,
+      "rows_fitting": 132,
+      "widest_row": "row-0083"
+    },
+    {
+      "batch_size": 2,
+      "fits_104gib": true,
+      "fits_104gib_with_previous_4gib_observer": true,
+      "independently_checked_widest_resource": {
+        "encoder_memo_capacity": 2,
+        "encoder_memo_policy": "compatible-anchor-batch-width",
+        "export_input_writer_policy": "verified-tensor-record-prefix",
+        "memory_bytes": 105472640856,
+        "phases": {
+          "export_inputs": {
+            "declared_headroom_bytes": 25769803776,
+            "export_input_page_window_bytes": 663863296,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "serialization_scratch_bytes": 134217728
+          },
+          "resident_anchors": {
+            "compatible_batch_weight_bytes": 268435456,
+            "declared_headroom_bytes": 25769803776,
+            "encoder_memo_bytes": 134283264,
+            "entry_validation_bytes": 150994944,
+            "factorization_scratch_bytes": 268435456,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "source_validation_bytes": 14858831704
+          },
+          "source_preparation": {
+            "declared_headroom_bytes": 25769803776,
+            "loader_transient_bytes": 14495907840,
+            "nonbody_source_bytes": 3664816128,
+            "selected_source_weight_bytes": 14495514624,
+            "source_window_bytes": 14825473880
+          }
+        },
+        "schema": "prismaquant.selected_anchor_resources.v2",
+        "selected_layers": [
+          "6"
+        ],
+        "selected_source_weight_bytes": 14495514624,
+        "source_forward_count": 0,
+        "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c"
+      },
+      "maximum_memory_bytes": 105472640856,
+      "mem_gib": 99,
+      "rows_fitting": 132,
+      "widest_row": "row-0083"
+    },
+    {
+      "batch_size": 4,
+      "fits_104gib": true,
+      "fits_104gib_with_previous_4gib_observer": true,
+      "independently_checked_widest_resource": {
+        "encoder_memo_capacity": 4,
+        "encoder_memo_policy": "compatible-anchor-batch-width",
+        "export_input_writer_policy": "verified-tensor-record-prefix",
+        "memory_bytes": 105875359576,
+        "phases": {
+          "export_inputs": {
+            "declared_headroom_bytes": 25769803776,
+            "export_input_page_window_bytes": 663863296,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "serialization_scratch_bytes": 134217728
+          },
+          "resident_anchors": {
+            "compatible_batch_weight_bytes": 536870912,
+            "declared_headroom_bytes": 25769803776,
+            "encoder_memo_bytes": 268566528,
+            "entry_validation_bytes": 150994944,
+            "factorization_scratch_bytes": 268435456,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "source_validation_bytes": 14858831704
+          },
+          "source_preparation": {
+            "declared_headroom_bytes": 25769803776,
+            "loader_transient_bytes": 14495907840,
+            "nonbody_source_bytes": 3664816128,
+            "selected_source_weight_bytes": 14495514624,
+            "source_window_bytes": 14825473880
+          }
+        },
+        "schema": "prismaquant.selected_anchor_resources.v2",
+        "selected_layers": [
+          "6"
+        ],
+        "selected_source_weight_bytes": 14495514624,
+        "source_forward_count": 0,
+        "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c"
+      },
+      "maximum_memory_bytes": 105875359576,
+      "mem_gib": 99,
+      "rows_fitting": 132,
+      "widest_row": "row-0083"
+    },
+    {
+      "batch_size": 8,
+      "fits_104gib": true,
+      "fits_104gib_with_previous_4gib_observer": true,
+      "independently_checked_widest_resource": {
+        "encoder_memo_capacity": 8,
+        "encoder_memo_policy": "compatible-anchor-batch-width",
+        "export_input_writer_policy": "verified-tensor-record-prefix",
+        "memory_bytes": 106680797016,
+        "phases": {
+          "export_inputs": {
+            "declared_headroom_bytes": 25769803776,
+            "export_input_page_window_bytes": 663863296,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "serialization_scratch_bytes": 134217728
+          },
+          "resident_anchors": {
+            "compatible_batch_weight_bytes": 1073741824,
+            "declared_headroom_bytes": 25769803776,
+            "encoder_memo_bytes": 537133056,
+            "entry_validation_bytes": 150994944,
+            "factorization_scratch_bytes": 268435456,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "source_validation_bytes": 14858831704
+          },
+          "source_preparation": {
+            "declared_headroom_bytes": 25769803776,
+            "loader_transient_bytes": 14495907840,
+            "nonbody_source_bytes": 3664816128,
+            "selected_source_weight_bytes": 14495514624,
+            "source_window_bytes": 14825473880
+          }
+        },
+        "schema": "prismaquant.selected_anchor_resources.v2",
+        "selected_layers": [
+          "6"
+        ],
+        "selected_source_weight_bytes": 14495514624,
+        "source_forward_count": 0,
+        "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c"
+      },
+      "maximum_memory_bytes": 106680797016,
+      "mem_gib": 100,
+      "rows_fitting": 132,
+      "widest_row": "row-0083"
+    },
+    {
+      "batch_size": 16,
+      "fits_104gib": true,
+      "fits_104gib_with_previous_4gib_observer": false,
+      "independently_checked_widest_resource": {
+        "encoder_memo_capacity": 16,
+        "encoder_memo_policy": "compatible-anchor-batch-width",
+        "export_input_writer_policy": "verified-tensor-record-prefix",
+        "memory_bytes": 108291671896,
+        "phases": {
+          "export_inputs": {
+            "declared_headroom_bytes": 25769803776,
+            "export_input_page_window_bytes": 663863296,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "serialization_scratch_bytes": 134217728
+          },
+          "resident_anchors": {
+            "compatible_batch_weight_bytes": 2147483648,
+            "declared_headroom_bytes": 25769803776,
+            "encoder_memo_bytes": 1074266112,
+            "entry_validation_bytes": 150994944,
+            "factorization_scratch_bytes": 268435456,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "source_validation_bytes": 14858831704
+          },
+          "source_preparation": {
+            "declared_headroom_bytes": 25769803776,
+            "loader_transient_bytes": 14495907840,
+            "nonbody_source_bytes": 3664816128,
+            "selected_source_weight_bytes": 14495514624,
+            "source_window_bytes": 14825473880
+          }
+        },
+        "schema": "prismaquant.selected_anchor_resources.v2",
+        "selected_layers": [
+          "6"
+        ],
+        "selected_source_weight_bytes": 14495514624,
+        "source_forward_count": 0,
+        "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c"
+      },
+      "maximum_memory_bytes": 108291671896,
+      "mem_gib": 101,
+      "rows_fitting": 132,
+      "widest_row": "row-0083"
+    },
+    {
+      "batch_size": 24,
+      "fits_104gib": true,
+      "fits_104gib_with_previous_4gib_observer": false,
+      "independently_checked_widest_resource": {
+        "encoder_memo_capacity": 24,
+        "encoder_memo_policy": "compatible-anchor-batch-width",
+        "export_input_writer_policy": "verified-tensor-record-prefix",
+        "memory_bytes": 109902546776,
+        "phases": {
+          "export_inputs": {
+            "declared_headroom_bytes": 25769803776,
+            "export_input_page_window_bytes": 663863296,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "serialization_scratch_bytes": 134217728
+          },
+          "resident_anchors": {
+            "compatible_batch_weight_bytes": 3221225472,
+            "declared_headroom_bytes": 25769803776,
+            "encoder_memo_bytes": 1611399168,
+            "entry_validation_bytes": 150994944,
+            "factorization_scratch_bytes": 268435456,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "source_validation_bytes": 14858831704
+          },
+          "source_preparation": {
+            "declared_headroom_bytes": 25769803776,
+            "loader_transient_bytes": 14495907840,
+            "nonbody_source_bytes": 3664816128,
+            "selected_source_weight_bytes": 14495514624,
+            "source_window_bytes": 14825473880
+          }
+        },
+        "schema": "prismaquant.selected_anchor_resources.v2",
+        "selected_layers": [
+          "6"
+        ],
+        "selected_source_weight_bytes": 14495514624,
+        "source_forward_count": 0,
+        "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c"
+      },
+      "maximum_memory_bytes": 109902546776,
+      "mem_gib": 103,
+      "rows_fitting": 132,
+      "widest_row": "row-0083"
+    },
+    {
+      "batch_size": 32,
+      "fits_104gib": true,
+      "fits_104gib_with_previous_4gib_observer": false,
+      "independently_checked_widest_resource": {
+        "encoder_memo_capacity": 32,
+        "encoder_memo_policy": "compatible-anchor-batch-width",
+        "export_input_writer_policy": "verified-tensor-record-prefix",
+        "memory_bytes": 111513421656,
+        "phases": {
+          "export_inputs": {
+            "declared_headroom_bytes": 25769803776,
+            "export_input_page_window_bytes": 663863296,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "serialization_scratch_bytes": 134217728
+          },
+          "resident_anchors": {
+            "compatible_batch_weight_bytes": 4294967296,
+            "declared_headroom_bytes": 25769803776,
+            "encoder_memo_bytes": 2148532224,
+            "entry_validation_bytes": 150994944,
+            "factorization_scratch_bytes": 268435456,
+            "selected_hessian_bytes": 43486543872,
+            "selected_prefix_bytes": 6039797760,
+            "selected_source_weight_bytes": 14495514624,
+            "source_validation_bytes": 14858831704
+          },
+          "source_preparation": {
+            "declared_headroom_bytes": 25769803776,
+            "loader_transient_bytes": 14495907840,
+            "nonbody_source_bytes": 3664816128,
+            "selected_source_weight_bytes": 14495514624,
+            "source_window_bytes": 14825473880
+          }
+        },
+        "schema": "prismaquant.selected_anchor_resources.v2",
+        "selected_layers": [
+          "6"
+        ],
+        "selected_source_weight_bytes": 14495514624,
+        "source_forward_count": 0,
+        "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c"
+      },
+      "maximum_memory_bytes": 111513421656,
+      "mem_gib": 104,
+      "rows_fitting": 132,
+      "widest_row": "row-0083"
+    }
+  ],
+  "budget": {
+    "common": {
+      "bpp": 4.070894713933706,
+      "parameters": 305915756544,
+      "tensor_payload_bytes": 155668854528,
+      "units": 36423
+    },
+    "dense": {
+      "parameters": 1509949440,
+      "tensor_payload_bytes": 3019898880,
+      "units": 135
+    },
+    "routed": {
+      "parameters": 304405807104,
+      "tensor_payload_bytes": 152648955648,
+      "units": 36288
+    }
+  },
+  "budget_audit_sha256": "245bc10daacd7f0f2626b5d857d9ba1341ec89c9bab17cdb6fccf8927a611472",
+  "capture_sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c",
+  "completed_anchor_count": 2,
+  "completed_anchor_records": [
+    {
+      "anchor": {
+        "activation_contract": "bfloat16",
+        "activation_quantized": false,
+        "bits_per_param": 1.0390625,
+        "body_rate_q256": 256,
+        "dloss": 0.0004260484711267054,
+        "dloss_stderr": 0.0,
+        "encoding_batch_size": 1,
+        "family": "TESSERA_BF16_K1",
+        "format_name": "TESSERA_BF16_K1_R256",
+        "hessian_applied": true,
+        "input_global_scale": null,
+        "memory_bytes": 1089536,
+        "qname": "model.language_model.layers.4.mlp.experts.0.down_proj",
+        "seconds": 17.138996601104736,
+        "wire_bytes": 1090244
+      },
+      "record": {
+        "blob_bytes": 1090244,
+        "blob_sha256": "010e37d209569a0f09989f976e03ab0044cf78c6cddc2642dda9f32b4fd9c1ba",
+        "file": "model__language_model__layers__4__mlp__experts__0__down_proj__TESSERA_BF16_K1_R256.tessera",
+        "identity": {
+          "calibration": {
+            "hessian": {
+              "algorithm": "sha256.dtype_shape_contiguous.v1",
+              "dtype": "torch.float32",
+              "sha256": "62c8c77cdee8eb74d9b7aaea9e52f0b2f6006fab66dbca25cbf87904352bed1f",
+              "shape": [
+                2048,
+                2048
+              ]
+            },
+            "settings": {
+              "hessian": {
+                "fit_ids_sha256": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+                "fit_tokens": 262144,
+                "text_sha256": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5"
+              },
+              "ldlq_block": 32,
+              "ldlq_sigma": 1.0,
+              "refit_gauss_seidel": false,
+              "refit_objective": {
+                "channel": "hessian",
+                "lut16": "h^1.0",
+                "s6b": "plain"
+              },
+              "refit_objective_trailing": null,
+              "refit_reach_floor": false
+            }
+          },
+          "encoder_fixture_id": "03bbc5b1c56d55e1d7f5f0d1baa1107e462d5bad18a412d0c232c78d04c95519",
+          "encoder_source_sha256": "42783e5214ba1a56d020925155641f9348139ce3f1980ec6df016f71583ee4c3",
+          "projection": {
+            "cols": 2048,
+            "expert": 0,
+            "group": "w2",
+            "projection": "down_proj",
+            "rows": 4096,
+            "source_layout": "unpacked_per_expert",
+            "source_slice": {
+              "expert": 0,
+              "selector": "whole",
+              "transpose": false
+            },
+            "source_tensor": "model.language_model.layers.4.mlp.experts.0.down_proj.weight",
+            "tensor": "model.language_model.layers.4.mlp.experts.0.down_proj.weight"
+          },
+          "recipe": {
+            "body": "window",
+            "channel_sigma": 1.0,
+            "grid": "BF16",
+            "plane": "channel",
+            "q256": 256,
+            "seed": 0,
+            "sigma": null,
+            "span": 1,
+            "window_bits": 14
+          },
+          "schema": "tessera.cached_unit_inputs.v1",
+          "source": {
+            "algorithm": "sha256.dtype_shape_contiguous.v1",
+            "dtype": "torch.bfloat16",
+            "sha256": "8ee486affc2f26bfdbcdeb4845b6c7dd3a0d5137b1987a5261b7910afeb36fe5",
+            "shape": [
+              4096,
+              2048
+            ]
+          },
+          "unit": "model.language_model.layers.4.mlp.experts.0.down_proj"
+        }
+      },
+      "row": "row-0076",
+      "unit": "model.language_model.layers.4.mlp.experts.0.down_proj"
+    },
+    {
+      "anchor": {
+        "activation_contract": "bfloat16",
+        "activation_quantized": false,
+        "bits_per_param": 1.0065104166666667,
+        "body_rate_q256": 256,
+        "dloss": 2.3355514713330194e-06,
+        "dloss_stderr": 0.0,
+        "encoding_batch_size": 1,
+        "family": "TESSERA_BF16_K1",
+        "format_name": "TESSERA_BF16_K1_R256",
+        "hessian_applied": true,
+        "input_global_scale": null,
+        "memory_bytes": 6332416,
+        "qname": "model.language_model.layers.0.mlp.down_proj",
+        "seconds": 45.68931984901428,
+        "wire_bytes": 6333405
+      },
+      "record": {
+        "blob_bytes": 6333405,
+        "blob_sha256": "9d0b5917894da5352fc5612114cf8c889e8b9794c91509130e81017a0ef09458",
+        "file": "model__language_model__layers__0__mlp__down_proj__TESSERA_BF16_K1_R256.tessera",
+        "identity": {
+          "calibration": {
+            "hessian": {
+              "algorithm": "sha256.dtype_shape_contiguous.v1",
+              "dtype": "torch.float32",
+              "sha256": "83e2da83fda5201881b29ce0f7b3004f2fd3da5020c8d89af9b6920264f80a23",
+              "shape": [
+                12288,
+                12288
+              ]
+            },
+            "settings": {
+              "hessian": {
+                "fit_ids_sha256": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+                "fit_tokens": 262144,
+                "text_sha256": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5"
+              },
+              "ldlq_block": 32,
+              "ldlq_sigma": 1.0,
+              "refit_gauss_seidel": false,
+              "refit_objective": {
+                "channel": "hessian",
+                "lut16": "h^1.0",
+                "s6b": "plain"
+              },
+              "refit_objective_trailing": null,
+              "refit_reach_floor": false
+            }
+          },
+          "encoder_fixture_id": "03bbc5b1c56d55e1d7f5f0d1baa1107e462d5bad18a412d0c232c78d04c95519",
+          "encoder_source_sha256": "42783e5214ba1a56d020925155641f9348139ce3f1980ec6df016f71583ee4c3",
+          "recipe": {
+            "body": "window",
+            "channel_sigma": 1.0,
+            "grid": "BF16",
+            "plane": "channel",
+            "q256": 256,
+            "seed": 0,
+            "sigma": null,
+            "span": 1,
+            "window_bits": 14
+          },
+          "schema": "tessera.encoding_inputs.v1",
+          "source": {
+            "algorithm": "sha256.dtype_shape_contiguous.v1",
+            "dtype": "torch.bfloat16",
+            "sha256": "936ac668347a302f5dfde304af1ad220626aab5e145049dd445ea7df6c861131",
+            "shape": [
+              4096,
+              12288
+            ]
+          },
+          "unit": "model.language_model.layers.0.mlp.down_proj"
+        }
+      },
+      "row": "row-0087",
+      "unit": "model.language_model.layers.0.mlp.down_proj"
+    }
+  ],
+  "groups": 132,
+  "limitations": [
+    "Uniform affordability is a byte feasibility witness, not per-Linear empirical allocation or a quality result.",
+    "The current campaign CLI has no per-structure family allowlist; a readable narrow band still prices every admitted family. The downstream packed research allocation profile restricts routed choices to E4M3_K1/BF16.",
+    "Rate-band changes require a new journal identity; existing seed intake can verify old wires. Out-of-band adopted anchors can widen subsequent grids and need explicit disposition before reuse.",
+    "Timing values in completed journal records describe only those completed encodes; no throughput prediction or ETA is extrapolated to new band or batch widths.",
+    "PB retains the existing 132 whole-group quanta and owns placement; compatible batching occurs only inside each action."
+  ],
+  "scope": "Exact intrinsic wire-byte estimates through the existing menu accountant, baseline row resource bounds plus shared planner checks, and accepted partial journal records. No source weights, X/H payloads, model forward, wire render, new capture or GPU work.",
+  "shapes": {
+    "[12288, 4096]": 6,
+    "[2048, 4096]": 24276,
+    "[4096, 12288]": 3,
+    "[4096, 2048]": 12138
+  },
+  "source_census_sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+  "status": "DERIVED_CPU_ONLY_NO_GPU_SUBMISSION",
+  "units": 36423
+}
