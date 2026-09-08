@@ -175,7 +175,8 @@ cleanup fails.
 `1be1d9eec5` with the same admission, image, source descriptors, geometry,
 stimuli and comparisons; only the corrected helper and new output directory
 change. At this update it awaits root review and has not been submitted.
-`native-negative-audit-01.json` records the first attempt's actual source
-snapshot (`2bdec238606d63d659662898c1df46954af60770`), all 13 original frozen
+`native-negative-audit-01.json` records the first attempt's source parent
+(`2bdec238606d63d659662898c1df46954af60770`) and actual PB snapshot
+(`e3c40be969bac23bf18b4e045c9c4f819b0216c9`), all 13 original frozen
 file-hash checks, terminal evidence, complete metadata result and Netdata
 identities. The raw failed result and log remain under the shared run directory.
