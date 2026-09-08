@@ -649,6 +649,24 @@ def test_a_spec_with_no_box_budget_keeps_every_row(tmp_path, capsys):
         capsys.readouterr().out
 
 
+def test_failed_fit_replan_preserves_published_selection_bytes(tmp_path):
+    import dispatch_tessera_campaign as dispatch
+
+    spec, workspace = _partition_workspace(tmp_path)
+    assert dispatch.cmd_plan(_plan_args(spec, workspace, rows_per_box=1)) == 0
+    published = [workspace / 'manifest.json', workspace / 'plan.json',
+                 *sorted((workspace / 'units').glob('row-*.json'))]
+    before = {path: path.read_bytes() for path in published}
+
+    # The same census now bundles two groups into each selection. The large
+    # multiplier refuses every proposed row after its selection was derived.
+    # An existing manifest must keep pointing at its original member bytes.
+    with pytest.raises(RuntimeError, match='fits no planned row'):
+        dispatch.cmd_plan(_plan_args(spec, workspace, groups_per_row=2,
+                                     rows_per_box=1000))
+    assert {path: path.read_bytes() for path in published} == before
+
+
 def test_submit_hands_the_fleet_the_admissible_rows_only(tmp_path, monkeypatch):
     import types
 

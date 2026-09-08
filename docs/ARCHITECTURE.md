@@ -3,6 +3,15 @@
 As of: 2026-09-08 · `integrate/dispatch-admissible-partition-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `integrate/dispatch-admissible-partition-20260908`)
+for failed-fit replan preservation. The dispatcher derives all proposed
+selection bytes and demands before the fit check. If that check refuses,
+existing selection files, plan and manifest remain byte-identical; a previous
+manifest cannot silently acquire newly bundled members from the refused plan.
+Gate: `test_failed_fit_replan_preserves_published_selection_bytes`, reproduced
+failing before this correction. This covers fit-check refusal, not concurrent
+planning or crash-atomic publication.
+
 Re-stamped (2026-09-08, `triage/dispatch-admissible-partition`) for the
 campaign dispatcher's **admissible partition** (§4.10, the campaign fanout's
 rows-per-box paragraph; #391). The fit check was all-or-nothing: one row wider than the
@@ -8294,7 +8303,8 @@ the declined ones under `inadmissible_rows` with the derived demand, the
 per-box multiplier, the box and the reason, which the run also prints. A spec
 that declares no box budget admits every row and says the check was not made.
 Only a plan with **no** admissible row refuses, naming the widest demand and
-the box, and it writes no manifest. One over-wide row is a demand to report
+the box. The fit check precedes publication of every selection file and the
+manifest; a refusal leaves any previously published plan unchanged. One over-wide row is a demand to report
 and work separately, not a reason to withhold the rows the fleet could already
 be running (#391). A partitioned plan is deliberately not mergeable: `merge`
 still requires every planned row's `cost.pkl`, so the rows that were never

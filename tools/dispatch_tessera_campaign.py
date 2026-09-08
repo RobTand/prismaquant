@@ -532,13 +532,13 @@ def cmd_plan(args) -> int:
               f"{sum(len(e['audit']) for e in stack_sample.values())} audited")
 
     units_dir = workspace / "units"
-    units_dir.mkdir(parents=True, exist_ok=True)
     ordered = sorted(groups)
     bundles = [ordered[index:index + args.groups_per_row]
                for index in range(0, len(ordered), args.groups_per_row)]
 
     rows: list[dict] = []
     planned: list[dict] = []
+    selection_writes: list[tuple[Path, str]] = []
     for index, bundle in enumerate(bundles):
         row_id = f"row-{index:04d}"
         entries = []
@@ -556,7 +556,7 @@ def cmd_plan(args) -> int:
             "groups": entries,
         }
         units_path = units_dir / f"{row_id}.json"
-        units_path.write_text(json.dumps(selection, indent=2, sort_keys=True) + "\n")
+        selection_writes.append((units_path, json.dumps(selection, indent=2, sort_keys=True) + "\n"))
         row_dir = workspace / "rows" / row_id
         members = [name for entry in entries
                    for name in (entry.get("sampled") or entry["members"])]
@@ -601,6 +601,11 @@ def cmd_plan(args) -> int:
     for entry in planned:
         entry["admissible"] = entry["row_id"] in admitted
 
+    # A refused fit check must not rewrite selections still named by an
+    # existing published manifest. Derive every row before publishing bytes.
+    units_dir.mkdir(parents=True, exist_ok=True)
+    for units_path, selection_text in selection_writes:
+        units_path.write_text(selection_text)
     manifest = workspace / "manifest.json"
     manifest.write_text(json.dumps(
         [row for entry, row in zip(planned, rows) if entry["admissible"]],
