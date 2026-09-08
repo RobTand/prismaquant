@@ -1792,7 +1792,8 @@ def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename) -> None:
 def _collect_activations(model, targets, tokens, max_rows: int, device,
                          *, want_hessian: bool = False, profile=None,
                          boundary_consumer=None, forward_batch=None, resource_check=None,
-                         shared_packed_inputs: bool = False, on_forwards_complete=None):
+                         shared_packed_inputs: bool = False, on_forwards_complete=None,
+                         expected_shared_input_groups=None):
     """One model forward per batch, for dense and declared packed projections.
 
     Returns ``(rows, hessians, token_counts, max_abs)``. Counts describe every
@@ -1944,12 +1945,12 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
         selected_by_module = {}
         # These are the input kinds published by the existing derivation,
         # not a mapping to the producer's served role/group vocabulary.
-        input_kind = {"gate_up_proj": "gate_up", "down_proj": "down"}
+        from .routed_experts import packed_activation_input_kind
+        input_kind = {}
         for name in sorted(missing_modules):
             member = by_name[name]
             if member.param_name not in input_kind:
-                raise RuntimeError(
-                    f"packed activation derivation does not support {member.packed_qname!r}")
+                input_kind[member.param_name] = packed_activation_input_kind(member.param_name)
             selected_by_module.setdefault(member.module_qname, []).append(member)
             routed_seen[name] = 0
         parents = {name: _packed_experts_parent_module(model, name)
@@ -1993,6 +1994,11 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
             boundary_consumer=(consume_boundary if boundary_consumer is not None else None),
         )
     try:
+        if expected_shared_input_groups is not None:
+            actual = sorted(sorted(names) for names in group_members.values())
+            expected = sorted(sorted(names) for names in expected_shared_input_groups.values())
+            if not shared_packed_inputs or actual != expected:
+                raise RuntimeError('actual capture input groups differ from memory admission')
         for name in targets:
             if name not in missing_modules:
                 handles.append(modules[name].register_forward_pre_hook(make_hook(name)))
@@ -3069,7 +3075,8 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
 
 
 def _checked_projected_units(bound, *, weights, model_path, source,
-                             measured=None) -> dict[str, dict]:
+                             measured=None, resource_check=None,
+                             release_source_pages=False) -> dict[str, dict]:
     """The producer's unit records for the units this run prices, bytes checked.
 
     Each unit's source tensor is read from the shard the producer hashed and
@@ -3084,11 +3091,17 @@ def _checked_projected_units(bound, *, weights, model_path, source,
 
     projected: dict[str, dict] = {}
     mismatched: list[str] = []
+    consumed, source_stats = {}, {}
     for _stack, units in sorted(bound.items()):
         for name, unit in sorted(units.items()):
             if measured is not None and name not in measured:
                 continue
+            if resource_check is not None:
+                resource_check(f'before_source_projection_check:{name}')
             try:
+                if release_source_pages:
+                    path = Path(model_path)/source['tensors'][unit['source_tensor']]
+                    source_stats.setdefault(str(path), path.stat())
                 weight = source_unit_weight(model_path, source, unit)
             except ExpertProjectionError as exc:
                 raise RuntimeError(
@@ -3099,14 +3112,27 @@ def _checked_projected_units(bound, *, weights, model_path, source,
                 mismatched.append(
                     f"{name} (live {tuple(live.shape)} {live.dtype} vs source "
                     f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
+                if resource_check is not None:
+                    del weight, live
+                    resource_check(f'after_source_projection_check:{name}')
                 continue
             projected[name] = unit
+            if release_source_pages:
+                consumed.setdefault(str(path), []).append(unit['source_tensor'])
+            if resource_check is not None or release_source_pages:
+                del weight, live
+            if resource_check is not None:
+                resource_check(f'after_source_projection_check:{name}')
     if mismatched:
         raise RuntimeError(
             "Tessera campaign's live expert view disagrees byte-for-byte with the "
             "producer's source tensor for " + ", ".join(mismatched)
             + "; the exporter would encode bytes this table did not price. "
             "Refusing (PrismaQuant #183).")
+    if release_source_pages:
+        from .layer_streaming import _advise_consumed_safetensors_pages
+        for path, keys in consumed.items():
+            _advise_consumed_safetensors_pages(path, keys, source_stats[path])
     return projected
 
 
@@ -3387,6 +3413,14 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             measured=set(), projection=None if census is None else census.get('expert_projection'))
     del weights
 
+    capture_policy = getattr(args, 'streaming_capture_policy', 'legacy')
+    shared_capture = capture_policy in ('shared-inputs-release-v1', 'shared-inputs-bounded-v1')
+    bounded_capture = capture_policy == 'shared-inputs-bounded-v1'
+    guard = None
+    if bounded_capture and runner.device.type == 'cuda':
+        from .memory_management import CaptureMemoryGuard
+        guard = CaptureMemoryGuard(runner.device)
+        guard.check('before_capture_identity')
     writer = None
     if census is not None:
         if (census.get('model_load_contract') or {}).get('schema') != 'prismaquant.streaming_initialization.v1':
@@ -3401,40 +3435,82 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         # as an already completed checkpoint load before it runs.
         identity = store.capture_identity(args.calibration_census, calibration=calibration,
             max_act_rows=args.max_act_rows, model_load_contract=census['model_load_contract'],
-            attention_implementation=attention_implementation)
+            attention_implementation=attention_implementation,
+            resource_check=None if guard is None else guard.check,
+            release_read_pages=guard is not None)
         writer = store.CaptureWriter(args.capture_calibration_out,
-            census_path=args.calibration_census, identity=identity)
+            census_path=args.calibration_census, identity=identity,
+            release_file_pages=bounded_capture,
+            resource_check=None if guard is None else guard.check)
 
-    capture_policy = getattr(args, 'streaming_capture_policy', 'legacy')
-    shared_capture = capture_policy == 'shared-inputs-release-v1'
     if shared_capture and writer is None:
         raise RuntimeError('shared-inputs-release-v1 requires streamed calibration capture')
     counts, maxima, telemetry = {}, {}, []
+    if guard is not None:
+        from .autoscale import streamed_calibration_resources
+        resources = streamed_calibration_resources(args.model, unit_shapes=shapes,
+            counts=census['counts'], nsamples=args.nsamples, seqlen=args.seqlen,
+            max_act_rows=args.max_act_rows, cache_slots=args.streaming_cache_slots,
+            prefetch_workers=args.streaming_prefetch_workers,
+            headroom_gb=args.streaming_cache_headroom_gb, capture_policy=capture_policy)
+        if resources['memory_bytes'] > guard.cap_bytes:
+            raise RuntimeError('capture cgroup budget is smaller than its checked phase plan')
+        additional = max(sum(value for key, value in phase.items() if key not in
+            ('nonbody_source_bytes', 'declared_headroom_bytes'))
+            for phase in resources['phases'].values())
+        guard.check('before_capture_source_traversal', reserve_bytes=additional)
     runner.context.begin_source_initialization_audit()
 
     def visit(layer, forward_batch):
         names = names_by_layer.get(layer, [])
+        if bounded_capture:
+            # No loader allocation can race with growing capture tensors.
+            runner.context.settle_prefetched_layers(range(
+                layer+1, min(runner.num_layers, layer+1+runner.prefetch_lookahead)))
         members = [m for m in population.members if m.qname in names]
         live = refresh_packed_expert_projections(members, profile)
         if live:
             _checked_projected_units(projection['stacks'],
                 weights={m.qname: m.weight for m in live}, model_path=args.model,
-                source=projection['producer']['source'], measured={m.qname for m in live})
+                source=projection['producer']['source'], measured={m.qname for m in live},
+                resource_check=None if guard is None else guard.check,
+                release_source_pages=guard is not None)
         # The source identity check is complete. The collector creates its own
         # live views; this caller must not pin old packed storage through return.
         del live
         completed_source_released = False
+        settled_prefetch = None
         def release_completed_source():
-            nonlocal completed_source_released
+            nonlocal completed_source_released, settled_prefetch
+            if bounded_capture:
+                settled_prefetch = runner.context.settle_prefetched_layers(range(
+                    layer+1, min(runner.num_layers, layer+1+runner.prefetch_lookahead)))
             runner.context.release_completed_layer(layer)
             completed_source_released = True
+
+        expected_groups = None
+        if bounded_capture:
+            from .routed_experts import declared_shared_capture_groups
+            expected_groups = declared_shared_capture_groups({name: shapes[name] for name in names}, profile)
+            if guard is not None:
+                capture_bytes = sum(4*(shapes[name][1]**2+args.max_act_rows*shapes[name][1])
+                                    for name in expected_groups)
+                guard.check('before_capture_tensor_growth', reserve_bytes=capture_bytes)
+        def checked_forward(batch):
+            guard.check('before_capture_forward')
+            value = forward_batch(batch)
+            guard.check('after_capture_forward')
+            return value
 
         before = time.perf_counter()
         acts, hessians, rows, amax = _collect_activations(runner.model, names, tokens,
             args.max_act_rows if writer is not None else 0, runner.device,
-            want_hessian=writer is not None, profile=profile, forward_batch=forward_batch,
+            want_hessian=writer is not None, profile=profile,
+            forward_batch=forward_batch if guard is None else checked_forward,
             shared_packed_inputs=shared_capture,
-            on_forwards_complete=release_completed_source if shared_capture else None)
+            on_forwards_complete=release_completed_source if shared_capture else None,
+            expected_shared_input_groups=expected_groups,
+            resource_check=None if guard is None else guard.check)
         collected = time.perf_counter()
         counts.update(rows)
         maxima.update(amax)
@@ -3446,13 +3522,24 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             flush_seconds=flushed-collected,
             capture_tensor_bytes=sum(t.numel()*t.element_size()
                 for t in [*acts.values(), *hessians.values()] if t is not None))
+        if bounded_capture:
+            record['settled_prefetch'] = settled_prefetch
+            record['physical_memory_guard'] = None if guard is None else guard.snapshot()
         telemetry.append(record)
         print(json.dumps({'streamed_calibration_layer': record}), flush=True)
         del acts, hessians
         if runner.device.type == 'cuda':
             torch.cuda.empty_cache()
 
-    runner.visit_layer_batches(tokens, visit)
+    try:
+        runner.visit_layer_batches(tokens, visit)
+    except BaseException:
+        if guard is not None:
+            from .cost_stage_checkpoint import atomic_write_bytes
+            failure = dict(completed_layers=telemetry, physical_memory_guard=guard.snapshot())
+            atomic_write_bytes(Path(args.cache_dir)/'capture-memory-refusal.json',
+                (json.dumps(failure, indent=2, sort_keys=True)+'\n').encode())
+        raise
     contract = runner.context.source_initialization_contract()
     if set(counts) != set(targets) or any(value <= 0 for value in counts.values()):
         raise RuntimeError('streamed calibration did not observe every in-scope unit')
@@ -3597,8 +3684,8 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     ap.add_argument("--streaming-prefetch-workers", type=int, default=1)
     ap.add_argument("--streaming-cache-headroom-gb", type=float, default=24)
     ap.add_argument("--streaming-capture-policy", default="legacy",
-                    choices=("legacy", "shared-inputs-release-v1"),
-                    help="Opt-in shared packed inputs and completed-source release for capture.")
+                    choices=("legacy", "shared-inputs-release-v1", "shared-inputs-bounded-v1"),
+                    help="Opt-in shared capture; bounded also checks phase ownership and physical memory.")
     ap.add_argument("--capture-calibration-out", default=None,
                     help="Capture full-census float32 prefix X and uncapped H once, then exit.")
     ap.add_argument("--calibration-cache", default=None,
@@ -3645,6 +3732,9 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             "H-aware encoder branch is merged."
         )
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if (args.streaming_capture_policy == "shared-inputs-bounded-v1" and device == "cuda"
+            and os.environ.get("PRISMAQUANT_RELEASE_SOURCE_PAGES") != "1"):
+        raise RuntimeError("bounded CUDA capture requires PRISMAQUANT_RELEASE_SOURCE_PAGES=1")
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     wire_dir = cache_dir / "wire"

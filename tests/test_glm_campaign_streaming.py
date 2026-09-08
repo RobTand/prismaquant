@@ -166,7 +166,8 @@ def test_streamed_resource_plan_prices_layer_capture_and_packer_transients(glm_c
     assert result['disk_bytes'] > result['full_hessian_bytes']+result['full_prefix_bytes']
 
 
-def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_checkpoint, tmp_path, monkeypatch):
+@pytest.mark.parametrize('capture_policy', ['shared-inputs-release-v1', 'shared-inputs-bounded-v1'])
+def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_checkpoint, tmp_path, monkeypatch, capture_policy):
     """The CLI publishes a complete capture from real GLM source forwards."""
     import json
     from pathlib import Path
@@ -223,7 +224,7 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
     shared_root = tmp_path/'shared-capture'
     campaign.main([*common, '--cache-dir', str(tmp_path/'shared-capture-cache'),
         '--calibration-census', str(census), '--capture-calibration-out', str(shared_root),
-        '--streaming-capture-policy', 'shared-inputs-release-v1'])
+        '--streaming-capture-policy', capture_policy])
     shared_manifest = shared_root/'capture_manifest.json'
     capture.require_capture_contract(shared_manifest)
     baseline = json.loads(manifest.read_text())
@@ -241,8 +242,18 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
                 assert value == after[key], (name, key)
     assert released == list(range(config.text_config.num_hidden_layers))
     telemetry = json.loads((tmp_path/'shared-capture-cache'/'streamed-calibration-telemetry.json').read_text())
-    assert all(row['capture_policy'] == 'shared-inputs-release-v1' and
+    assert all(row['capture_policy'] == capture_policy and
                row['completed_source_released'] for row in telemetry)
+    if capture_policy == 'shared-inputs-bounded-v1':
+        assert [[entry['layer'] for entry in row['settled_prefetch']] for row in telemetry] == [[1], []]
+        for row in telemetry:
+            guard = row['physical_memory_guard']
+            if torch.cuda.is_available():
+                assert guard['peak_conservative_bytes'] <= guard['budget_bytes']-guard['margin_bytes']
+                assert guard['min_host_available_bytes'] >= guard['host_floor_bytes']
+                assert guard['last_checkpoint']['cuda_reserved_bytes'] > 0
+            else:
+                assert guard is None
 
 
 def test_streamed_bf16_keeps_hf_strict_fp32_source_slots(glm_checkpoint, tmp_path):

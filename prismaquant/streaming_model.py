@@ -907,6 +907,35 @@ class StreamingContext:
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
 
+    def settle_prefetched_layers(self, layer_indices):
+        """Await an already scheduled window without claiming its owners.
+
+        Capture may exclude loader temporaries only after every remaining
+        prefetch is complete. Missing, refused, failed or unexpected loads
+        fail closed; this boundary never schedules a cold read, installs a
+        layer, changes an LRU pin or removes a delivery future.
+        """
+        indices = tuple(layer_indices)
+        if (len(set(indices)) != len(indices) or any(
+                type(index) is not int or not 0 <= index < self.num_layers for index in indices)):
+            raise ValueError('prefetch settlement requires unique in-scope layers')
+        with self._inflight_lock:
+            futures = dict(self._inflight)
+        if set(futures) - set(indices):
+            raise RuntimeError('capture prefetch window has unexpected source owners')
+        settled = []
+        for index in indices:
+            future = futures.get(index)
+            if future is not None:
+                if not future.result():
+                    raise RuntimeError(f'capture successor {index} prefetch was refused')
+                settled.append(dict(layer=index, owner='prefetch_future'))
+            elif self.layer_cache.peek(index):
+                settled.append(dict(layer=index, owner='layer_cache'))
+            else:
+                raise RuntimeError(f'capture successor {index} has no resident prefetch')
+        return settled
+
     def source_residency_snapshot(self, layer_indices):
         """Describe existing layer owners without retaining any tensor views.
 

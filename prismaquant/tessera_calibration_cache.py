@@ -18,8 +18,39 @@ STAGE = 'tessera_calibration_capture'
 SOURCE = 'tessera_campaign_prefix_f32_v1'
 
 
-def sha256(path):
+def sha256(path, *, resource_check=None, release_read_pages=False):
     with Path(path).open('rb') as handle:
+        if resource_check is not None or release_read_pages:
+            import os
+            import stat
+            original = os.fstat(handle.fileno())
+            if release_read_pages and not stat.S_ISREG(original.st_mode):
+                raise RuntimeError('source hash page release requires a regular file')
+            digest = hashlib.sha256()
+            consumed = advised = 0
+            while True:
+                if resource_check is not None:
+                    resource_check(f'before_capture_hash:{Path(path).name}')
+                block = handle.read(16*1024**2)
+                if not block:
+                    after = os.fstat(handle.fileno())
+                    named = Path(path).stat()
+                    if any(getattr(original, key) != getattr(actual, key)
+                           for actual in (after, named) for key in
+                           ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')):
+                        raise RuntimeError('source changed during guarded capture hashing')
+                    return digest.hexdigest()
+                digest.update(block)
+                consumed += len(block)
+                del block
+                if release_read_pages:
+                    page = os.sysconf('SC_PAGE_SIZE')
+                    end = consumed//page*page
+                    if end > advised:
+                        os.posix_fadvise(handle.fileno(), advised, end-advised, os.POSIX_FADV_DONTNEED)
+                        advised = end
+                if resource_check is not None:
+                    resource_check(f'after_capture_hash:{Path(path).name}')
         return hashlib.file_digest(handle, 'sha256').hexdigest()
 
 
@@ -29,7 +60,8 @@ def _json(path, value):
 
 
 def capture_identity(census_path, *, calibration, max_act_rows,
-                     model_load_contract, attention_implementation):
+                     model_load_contract, attention_implementation,
+                     resource_check=None, release_read_pages=False):
     """Hash source bytes on every invocation; mtimes never authorize reuse."""
     import importlib.metadata
     import torch
@@ -51,7 +83,9 @@ def capture_identity(census_path, *, calibration, max_act_rows,
                     *root.glob('*.model'), *root.glob('*.txt')})
     if not files or not (root / 'config.json').is_file():
         raise RuntimeError('calibration capture needs a complete local source checkpoint')
-    source = {p.name:sha256(p) for p in files if p.is_file()}
+    def source_digest(path):
+        return sha256(path, resource_check=resource_check, release_read_pages=release_read_pages)
+    source = {p.name:source_digest(p) for p in files if p.is_file()}
     # The census already seals the producer's complete source/auxiliary
     # roster (including non-JSON tokenizer assets such as chat_template.jinja).
     # Check those bytes too, without inventing another producer identity.
@@ -61,7 +95,7 @@ def capture_identity(census_path, *, calibration, max_act_rows,
     if declared.get('config_sha256'):
         expected['config.json'] = declared['config_sha256']
     for name,digest in expected.items():
-        actual = source[name] if name in source else sha256(root/name)
+        actual = source[name] if name in source else source_digest(root/name)
         if actual != digest:
             raise RuntimeError(f'calibration source differs from census producer: {name}')
     if not any(name.endswith('.safetensors') for name in source):
@@ -95,7 +129,8 @@ def _validate_tensors(name, payload, census, max_rows):
 
 
 def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
-                    counts=None, maxima=None, existing_entries=None):
+                    counts=None, maxima=None, existing_entries=None,
+                    release_file_pages=False, resource_check=None):
     """Seal a complete capture, journalling per-unit file receipts atomically.
 
     ``existing_entries`` seals a previously measured raw capture without another
@@ -119,6 +154,8 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
         resume=True, identity=identity, qnames=names)
     records = {}
     for name in names:
+        if resource_check is not None:
+            resource_check(f'before_capture_seal:{name}')
         expected_path = Path('inputs') / activation_cache_filename(name)
         record = completed.get(name) or (existing_entries or {}).get(name)
         if record is None:
@@ -127,18 +164,25 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
             _validate_tensors(name,payload,census,identity['max_act_rows'])
             path = write_activation_cache_entry(root/'inputs',name,acts[name],
                 source=SOURCE,durable=True,hessian=hessians[name],count=counts[name],max_abs=maxima[name])
+            file_stat = path.stat() if release_file_pages else None
             record = dict(path=str(expected_path),sha256=sha256(path))
         else:
             if record.get('path') != str(expected_path):
                 raise RuntimeError(f'{name}: capture file is outside its canonical location')
             path = root/expected_path
+            file_stat = path.stat() if release_file_pages else None
             if sha256(path) != record['sha256']:
                 raise RuntimeError(f'{name}: capture artifact checksum mismatch')
             _validate_tensors(name,torch.load(path,map_location='cpu',weights_only=True),
                               census,identity['max_act_rows'])
+        if release_file_pages:
+            from .perturbed_x_cache import release_activation_cache_file_pages
+            release_activation_cache_file_pages(path, expected_stat=file_stat)
         if name not in completed:
             write_unit(journal,stage=STAGE,qname=name,identity_sha256=digest,state=record)
         records[name] = record
+        if resource_check is not None:
+            resource_check(f'after_capture_seal:{name}')
     manifest = dict(schema=SCHEMA,status='complete',identity=identity,entries=records)
     path = root/'capture_manifest.json'
     if path.exists() and json.loads(path.read_text()) != manifest:
@@ -156,11 +200,14 @@ class CaptureWriter:
     witness from that traversal, not only the census's expected descriptor.
     """
 
-    def __init__(self, root, *, census_path, identity):
+    def __init__(self, root, *, census_path, identity,
+                 release_file_pages=False, resource_check=None):
         self.root = Path(root).resolve()
         self.census_path = census_path
         self.census = json.loads(Path(census_path).read_text())
         self.identity = identity
+        self.release_file_pages = release_file_pages
+        self.resource_check = resource_check
         self.names = sorted(identity['units'])
         if set(self.names) != set(self.census['counts']):
             raise RuntimeError('calibration writer scope differs from census')
@@ -191,6 +238,8 @@ class CaptureWriter:
                 any(set(values) != names for values in (hessians, counts, maxima))):
             raise RuntimeError('calibration writer has repeated or inconsistent layer scope')
         for name in sorted(names):
+            if self.resource_check is not None:
+                self.resource_check(f'before_capture_write:{name}')
             payload = dict(inputs=acts[name], hessian=hessians[name], count=counts[name],
                            max_abs=maxima[name], name=name, source=SOURCE)
             _validate_tensors(name, payload, self.census, self.identity['max_act_rows'])
@@ -199,6 +248,7 @@ class CaptureWriter:
                 import torch
                 expected = str(Path('inputs')/activation_cache_filename(name))
                 path = self.root/expected
+                file_stat = path.stat() if self.release_file_pages else None
                 if previous.get('path') != expected or sha256(path) != previous.get('sha256'):
                     raise RuntimeError(f'{name}: interrupted capture entry changed')
                 old = torch.load(path, map_location='cpu', weights_only=True)
@@ -213,10 +263,17 @@ class CaptureWriter:
                 path = write_activation_cache_entry(self.root/'inputs', name, acts[name],
                     source=SOURCE, durable=True, hessian=hessians[name],
                     count=counts[name], max_abs=maxima[name])
+                file_stat = path.stat() if self.release_file_pages else None
                 record = dict(path=str(Path('inputs')/activation_cache_filename(name)), sha256=sha256(path))
+            if self.release_file_pages:
+                from .perturbed_x_cache import release_activation_cache_file_pages
+                release_activation_cache_file_pages(path, expected_stat=file_stat)
+            if previous is None:
                 write_unit(self.journal, stage=STAGE, qname=name,
                            identity_sha256=self.digest, state=record)
             self.records[name] = record
+            if self.resource_check is not None:
+                self.resource_check(f'after_capture_write:{name}')
 
     def finish(self, *, model_load_contract):
         from prismaquant import validate_source_initialization_contract
@@ -224,7 +281,9 @@ class CaptureWriter:
         if actual != self.identity['model_load_contract']:
             raise RuntimeError('actual capture initialization differs from the census')
         return publish_capture(self.root, census_path=self.census_path,
-                               identity=self.identity, existing_entries=self.records)
+                               identity=self.identity, existing_entries=self.records,
+                               release_file_pages=self.release_file_pages,
+                               resource_check=self.resource_check)
 
 
 def require_capture_contract(path, expected_sha256=None):

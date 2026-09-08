@@ -183,7 +183,8 @@ def _streamed_resource_plan(spec, census, members):
         cache_slots=argument('--streaming-cache-slots', 2),
         prefetch_workers=argument('--streaming-prefetch-workers', 1),
         headroom_gb=max(float(spec.get('headroom_gb', 24)),
-                        argument('--streaming-cache-headroom-gb', 24., float)))
+                        argument('--streaming-cache-headroom-gb', 24., float)),
+        capture_policy=argument('--streaming-capture-policy', 'legacy', str))
 
 
 def require_rows_fit(mem_gb: "list[int]", per_box: int, budget) -> int:

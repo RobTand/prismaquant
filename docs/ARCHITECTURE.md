@@ -1,7 +1,38 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `feat/streamed-shared-capture`. Stamps
+As of: 2026-09-08 · `feat/streamed-capture-admission`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `feat/streamed-capture-admission`) for experimental
+`--streaming-capture-policy shared-inputs-bounded-v1`. The legacy and prior
+shared-input policies keep their conservative v1 reservation. The bounded
+policy uses a v2 resource plan with separate source-validation, forward and
+materialization phases; their maximum determines admission. Expected packed
+input groups come from the profile and must equal actual collector groups
+before any forward. Device prefixes reserve the full row capacity, including
+short draws; independent CPU sibling outputs remain fully charged. The
+existing prefetch futures settle before capture growth and again before
+completed-source release, retaining successor cache/delivery ownership.
+
+CUDA execution requires `PRISMAQUANT_RELEASE_SOURCE_PAGES=1` and a finite
+cgroup v2 budget. The shared memory guard adds the entire CUDA reservation to
+the cgroup charge conservatively, preserves a 2 GiB margin and 8 GiB host
+available-memory floor, and reserves upcoming growth before allocation.
+It checks bounded source-hash reads, source projection checks, original
+forwards, output materialization, writes and sealing. A refusal latches.
+Completed source-hash pages and byte-verified projection payload pages receive
+kernel advice through their existing readers; completed capture files are
+advised only after durability and unchanged-file checks. Kernel advice never
+certifies release: observed counters decide whether capture can continue.
+The existing per-unit capture writer, source/census identities, numerical
+calibration and downstream prefetch remain authoritative. CPU qualification
+exercises ownership and byte parity; CUDA qualification additionally exercises
+the physical guard. No full-GLM fit or throughput improvement follows from the
+formula or tiny-model parity alone. Full-model capture remains a measurement
+gate before this policy can become a default. Gates:
+`tests/test_streamed_capture_admission.py`,
+`tests/test_glm_campaign_streaming.py`, and
+`tests/test_tessera_calibration_cache.py`.
 
 Re-stamped (2026-09-08, `feat/streamed-shared-capture`) for the experimental
 campaign `--streaming-capture-policy shared-inputs-release-v1`. Only full-scope

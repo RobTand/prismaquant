@@ -200,6 +200,32 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
     return path
 
 
+def release_activation_cache_file_pages(path, *, expected_stat):
+    """Advise only a completed, unchanged entry after its checksum is checked.
+
+    This optional capture-writer boundary leaves the artifact and all tensor
+    owners intact. Later consumers still use the ordinary activation prefetch.
+    Advice is not proof of physical release; the caller's guard remains final.
+    """
+    import stat
+    def identity(value):
+        return (value.st_dev, value.st_ino, value.st_size,
+                value.st_mtime_ns, value.st_ctime_ns)
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        actual = os.fstat(descriptor)
+        if not stat.S_ISREG(actual.st_mode) or identity(actual) != identity(expected_stat):
+            raise RuntimeError('capture entry changed before page advice')
+        os.fsync(descriptor)
+        if (identity(os.fstat(descriptor)) != identity(expected_stat) or
+                identity(os.stat(path, follow_symlinks=False)) != identity(expected_stat)):
+            raise RuntimeError('capture entry changed while completing durability')
+        os.posix_fadvise(descriptor, 0, 0, os.POSIX_FADV_DONTNEED)
+    finally:
+        os.close(descriptor)
+
+
 def _tensor_hash_update(h: "hashlib._Hash", tensor: torch.Tensor) -> None:
     t = tensor.detach().to("cpu").contiguous()
     h.update(str(tuple(t.shape)).encode())
