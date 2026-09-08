@@ -238,8 +238,10 @@ def test_verified_load_buffer_is_priced_only_in_load_phases(glm_checkpoint):
     for phase in ('forward', 'source_validation'):
         assert after['phases'][phase] == before['phases'][phase]
     assert sum(after['phases']['materialization'].values()) - sum(
-        before['phases']['materialization'].values()) == 9*1024**2
+        before['phases']['materialization'].values()) == 17*1024**2
     assert after['phases']['seal']['capture_serialized_buffer_bytes'] == 8*1024**2
+    assert after['phases']['seal']['capture_source_page_cache_bytes'] == 8*1024**2
+    assert after['phases']['materialization']['capture_source_page_cache_bytes'] == 8*1024**2
     assert after['memory_bytes'] == max(sum(p.values()) for p in after['phases'].values())
     with pytest.raises(ValueError, match='bounded capture'):
         streamed_calibration_resources(source, **kwargs, capture_load_policy=policy)

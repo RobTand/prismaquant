@@ -357,3 +357,47 @@ def test_pickle_view_cannot_resize_one_storage_within_aggregate_cap(tmp_path, mo
         lambda *a, **k: pytest.fail('resizing tensor geometry reached Torch allocation'))
     with pytest.raises(RuntimeError, match='geometry.*declared backing'):
         load(path, max_storage_bytes=8)
+
+
+def test_source_read_views_share_private_buffer_and_price_kernel_pages(tmp_path, monkeypatch):
+    path = tmp_path/'source-window.pt'
+    expected = torch.zeros(17*1024**2//4, dtype=torch.float32)
+    torch.save({'inputs': expected}, path)
+    file_bytes, storage_bytes = path.stat().st_size, expected.numel()*4
+    views, owners, guards = [], set(), []
+    original = px.os.fdopen
+    class Observed:
+        def __init__(self, handle): self.handle = handle
+        def __getattr__(self, key): return getattr(self.handle, key)
+        def __enter__(self): return self
+        def __exit__(self, *args): return self.handle.__exit__(*args)
+        def readinto(self, target):
+            assert isinstance(target, memoryview) and isinstance(target.obj, bytearray)
+            assert len(target.obj) == file_bytes
+            views.append(len(target)); owners.add(id(target.obj))
+            return self.handle.readinto(target)
+    monkeypatch.setattr(px.os, 'fdopen', lambda *a, **k: Observed(original(*a, **k)))
+    value, receipt = load(path, max_storage_bytes=storage_bytes,
+        policy=policy(buffer=file_bytes, scratch=4*1024**2),
+        resource_check=lambda label, **kwargs: guards.append((label, kwargs['reserve_bytes'])))
+    assert torch.equal(value['inputs'], expected)
+    assert len(owners) == 1 and sum(views) == file_bytes
+    assert 4*1024**2 < max(views) <= 16*1024**2
+    assert guards[0][1] == 2*file_bytes + storage_bytes + 4*1024**2
+    assert all(reserve == file_bytes+storage_bytes+4*1024**2
+        for label, reserve in guards if label.startswith('before_verified_capture_read'))
+    assert receipt['source_page_cache_reserve_bytes'] == file_bytes
+
+
+def test_kernel_page_exposure_refuses_before_private_buffer_allocation(capture, monkeypatch):
+    path = capture[0]/'inputs/a.pt'
+    f = path.stat().st_size
+    opened = []
+    original = px.os.fdopen
+    monkeypatch.setattr(px.os, 'fdopen', lambda *a, **k: opened.append(True) or original(*a, **k))
+    def guard(label, reserve_bytes=0):
+        if label.startswith('before_verified_capture_buffer') and reserve_bytes > 2*f+4*1024**2+1024**2-1:
+            raise RuntimeError('priced source pages exceed remaining physical room')
+    with pytest.raises(RuntimeError, match='priced source pages'):
+        load(path, resource_check=guard)
+    assert not opened

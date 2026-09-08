@@ -98,6 +98,7 @@ def main():
     # Persistent expected CPU S, largest serialized F, loaded CPU S, possible
     # GPU S, 4 MiB scratch plus 2 GiB explicit runtime/profile/metadata allowance.
     plan = dict(expected_cpu=s, serialized=policy['max_buffer_bytes'],
+        source_page_cache=policy['max_buffer_bytes'],
         loaded_cpu=s, loaded_gpu=s, scratch=policy['max_scratch_bytes'], runtime=2*1024**3)
     if sum(plan.values()) > guard.cap_bytes:
         raise RuntimeError('unchanged PB cap refuses diagnostic phase plan')

@@ -587,7 +587,12 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     raw = reader = value = payload = None
     try:
         unchanged(descriptor)
-        check('before_verified_capture_buffer', before.st_size + max_storage_bytes + scratch)
+        # Buffered file I/O can retain all source contents in the kernel even
+        # when advice is requested. Price that full F separately from private F
+        # and metadata M; page rounding/bookkeeping remain in the guard margin.
+        source_page_cache_bytes = before.st_size
+        check('before_verified_capture_buffer',
+              before.st_size + source_page_cache_bytes + max_storage_bytes + scratch)
         if release_file_pages:
             # Complete durability once, then advise only verified consumed ranges.
             os.fsync(descriptor)
@@ -595,10 +600,13 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         raw = bytearray(before.st_size)
         digest = hashlib.sha256()
         consumed = advised = 0
-        block_bytes = min(16*1024**2, scratch // 4)
+        # These are views of the already admitted F allocation, not M-sized
+        # owned scratch copies. Every bounded read retains guard/stat/advice.
+        block_bytes = 16*1024**2
         with os.fdopen(descriptor, 'rb', buffering=0, closefd=False) as handle:
             while consumed < len(raw):
-                check('before_verified_capture_read', max_storage_bytes + scratch)
+                check('before_verified_capture_read',
+                      source_page_cache_bytes + max_storage_bytes + scratch)
                 view = memoryview(raw)[consumed:min(len(raw), consumed+block_bytes)]
                 try:
                     size = handle.readinto(view)
@@ -628,7 +636,8 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         if archive_storage > max_storage_bytes:
             raise RuntimeError('verified activation archive backing storage exceeds its budget')
         for device in ('meta', 'cpu'):
-            check('before_verified_capture_decode', max_storage_bytes + scratch)
+            check('before_verified_capture_decode',
+                  source_page_cache_bytes + max_storage_bytes + scratch)
             reader.seek(0)
             value = torch.load(reader, map_location=device, weights_only=True)
             observed = _verified_payload_storage(value, max_storage_bytes=max_storage_bytes,
@@ -659,6 +668,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     execution = dict(schema=VERIFIED_ACTIVATION_LOAD_SCHEMA, policy=policy,
         artifact_sha256=expected_sha256, file_bytes=before.st_size,
         storage_cap_bytes=max_storage_bytes, archive_storage_bytes=archive_storage,
+        source_page_cache_reserve_bytes=source_page_cache_bytes,
         file_signature=signature, source_read_bytes=consumed, live_buffer_bytes=0)
     execution['identity_sha256'] = hashlib.sha256(json.dumps(
         {key: execution[key] for key in ('schema', 'policy', 'artifact_sha256', 'file_bytes',

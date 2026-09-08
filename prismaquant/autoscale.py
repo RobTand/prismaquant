@@ -288,11 +288,13 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         # never in the model forward. The existing entry_validation_bytes is S.
         materialization.update(
             capture_serialized_buffer_bytes=capture_load_policy['max_buffer_bytes'],
+            capture_source_page_cache_bytes=capture_load_policy['max_buffer_bytes'],
             capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'])
         phases['seal'] = dict(common,
             source_window_bytes=terms['source_window_bytes'],
             loader_transient_bytes=loader_transient,
             capture_serialized_buffer_bytes=capture_load_policy['max_buffer_bytes'],
+            capture_source_page_cache_bytes=capture_load_policy['max_buffer_bytes'],
             capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'],
             finite_validation_mask_bytes=materialization['finite_validation_mask_bytes'])
         result['capture_load_policy'] = capture_load_policy

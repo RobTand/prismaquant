@@ -441,7 +441,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                         guard.check('before_joint_qualification_unit:' + unit_names[0], reserve_bytes=
                             2 * capture_sizes[unit_names[0]] + max_render_bytes +
                             policy['max_load_buffer_bytes'] + policy['workspace_reserve_bytes'] +
-                            (0 if capture_load_policy is None else capture_load_policy['max_buffer_bytes'] +
+                            (0 if capture_load_policy is None else 2 * capture_load_policy['max_buffer_bytes'] +
                              capture_load_policy['max_scratch_bytes']))
                     unit_load_execution = {}
                     (acts, hessians, _counts, _maxima), _receipt = cc.prefetch_capture(capture_path,
