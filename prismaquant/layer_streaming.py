@@ -86,6 +86,20 @@ except ModuleNotFoundError:
 from safetensors import safe_open
 
 
+def _source_safe_open(path, *, source_authentication=None, **kwargs):
+    """Use the existing reader, optionally through its complete-capture owner."""
+    if source_authentication is None:
+        return safe_open(path, **kwargs)
+    return source_authentication.safe_open(safe_open, path, **kwargs)
+
+
+def _source_json(path, source_authentication=None):
+    if source_authentication is not None:
+        return source_authentication.read_json(path)
+    with open(path) as handle:
+        return json.load(handle)
+
+
 # ---------------------------------------------------------------------------
 # v21 #5: opt-in direct-to-CUDA safetensors load. Default path opens the
 # safetensors file with framework="pt" (CPU mmap) and explicitly moves
@@ -126,7 +140,7 @@ def _safe_open_kwargs(device: torch.device) -> dict:
 
 
 def _build_weight_map(model_path: str, *,
-                      multimodal: bool = False
+                      multimodal: bool = False, source_authentication=None,
                       ) -> tuple[dict[str, str], dict[str, str]]:
     """Return ({model_key: shard_path}, {model_key: checkpoint_key}).
 
@@ -157,13 +171,12 @@ def _build_weight_map(model_path: str, *,
 
     index_file = os.path.join(model_path, "model.safetensors.index.json")
     if os.path.exists(index_file):
-        with open(index_file) as f:
-            raw = json.load(f)["weight_map"]
+        raw = _source_json(index_file, source_authentication)["weight_map"]
     else:
         single = os.path.join(model_path, "model.safetensors")
         if not os.path.exists(single):
             raise FileNotFoundError(f"no safetensors under {model_path}")
-        with safe_open(single, framework="pt") as f:
+        with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as f:
             raw = {k: single for k in f.keys()}
     model_to_shard: dict[str, str] = {}
     model_to_ckpt: dict[str, str] = {}
@@ -267,7 +280,7 @@ def _fp8_dequant_block(
 
 
 def _build_fp8_scale_inv_map(model_path: str, *,
-                             multimodal: bool = False
+                             multimodal: bool = False, source_authentication=None,
                              ) -> "Fp8ScaleInvMap":
     """Return `{model_weight_key: (scale_shard_path, scale_ckpt_key)}`
     for every native-FP8 weight tensor (fp8_e4m3fn + paired
@@ -308,13 +321,12 @@ def _build_fp8_scale_inv_map(model_path: str, *,
 
     index_file = os.path.join(model_path, "model.safetensors.index.json")
     if os.path.exists(index_file):
-        with open(index_file) as f:
-            raw = json.load(f)["weight_map"]
+        raw = _source_json(index_file, source_authentication)["weight_map"]
     else:
         single = os.path.join(model_path, "model.safetensors")
         if not os.path.exists(single):
             return Fp8ScaleInvMap()
-        with safe_open(single, framework="pt") as f:
+        with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as f:
             raw = {k: single for k in f.keys()}
 
     out: dict[str, tuple[str, str]] = {}
@@ -603,6 +615,7 @@ def _apply_fp8_dequant_inplace(
     out: dict[str, torch.Tensor],
     fp8_scale_inv_map: dict[str, tuple[str, str]],
     device: torch.device,
+    *, source_authentication=None,
 ) -> int:
     """For each tensor in `out` whose key matches a `fp8_scale_inv_map`
     entry, read the scale_inv, apply the checkpoint-declared block
@@ -639,7 +652,7 @@ def _apply_fp8_dequant_inplace(
     # Step 1: Read all scales from source safetensors once per shard.
     loaded_scales: dict[str, torch.Tensor] = {}  # name -> fp32 scale (cpu)
     for shard, reads in scale_reads.items():
-        with safe_open(shard, framework="pt") as f:
+        with _source_safe_open(shard, framework="pt", source_authentication=source_authentication) as f:
             for model_name, scale_key in reads:
                 loaded_scales[model_name] = f.get_tensor(scale_key)
 
@@ -824,6 +837,7 @@ def _materialize(model: nn.Module, prefixes: list[str],
                  model_to_ckpt: dict[str, str],
                  device: torch.device, dtype: torch.dtype,
                  fp8_scale_inv_map: dict[str, tuple[str, str]] | None = None,
+                 *, source_authentication=None,
                  ) -> int:
     """Load all tensors whose model-side name starts with any prefix in
     `prefixes` onto `device`, with parameters as `dtype` and buffers in their declared dtype. Uses the checkpoint-side key to
@@ -845,11 +859,11 @@ def _materialize(model: nn.Module, prefixes: list[str],
     open_kwargs = _safe_open_kwargs(device)
     for shard, pairs in by_shard.items():
         try:
-            f_ctx = safe_open(shard, **open_kwargs)
+            f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
         except (TypeError, RuntimeError):
             # Older safetensors / unsupported device combos: drop the
             # device kwarg and fall back to the host-stage path.
-            f_ctx = safe_open(shard, framework="pt")
+            f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
         with f_ctx as f:
             for model_name, ckpt_name in pairs:
                 t = f.get_tensor(ckpt_name)
@@ -860,7 +874,8 @@ def _materialize(model: nn.Module, prefixes: list[str],
                     t = t.to(buffer_dtypes.get(model_name, dtype))
                 out[model_name] = t
     if fp8_scale_inv_map:
-        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device)
+        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device,
+            **({'source_authentication': source_authentication} if source_authentication is not None else {}))
     loaded = 0
     for model_name, t in out.items():
         install_dtype = t.dtype if t.is_floating_point() else None
@@ -1429,6 +1444,7 @@ def _read_layer_to_device(prefix: str,
                           pack_experts=None,
                           merge_concat=None,
                           buffer_dtypes: dict[str, torch.dtype] | None = None,
+                          source_authentication=None,
                           ) -> dict[str, torch.Tensor]:
     """Read all tensors under `prefix` from safetensors and place them
     on `device`. Returns {model_name: device_tensor}.
@@ -1461,17 +1477,18 @@ def _read_layer_to_device(prefix: str,
     direct = "device" in open_kwargs
     release_pages = (os.environ.get('PRISMAQUANT_RELEASE_SOURCE_PAGES') == '1'
                      and device.type == 'cuda')
-    source_stats = {shard: os.stat(shard) for shard in by_shard} if release_pages else {}
+    source_stats = {shard: (os.stat(shard) if source_authentication is None else
+        source_authentication.file_stat(shard)) for shard in by_shard} if release_pages else {}
     def _read_chunk(shard: str,
                     pairs: list[tuple[str, str]]) -> dict[str, torch.Tensor]:
         local: dict[str, torch.Tensor] = {}
         if not pairs:
             return local
         try:
-            f_ctx = safe_open(shard, **open_kwargs)
+            f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
             used_direct = direct
         except (TypeError, RuntimeError):
-            f_ctx = safe_open(shard, framework="pt")
+            f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
             used_direct = False
         # This existing read chunk owns its mmap-backed/converted staging
         # through one stream event, rather than retaining it for the layer.
@@ -1512,7 +1529,8 @@ def _read_layer_to_device(prefix: str,
             # Reached only on a successful chunk: its map is closed, copies
             # completed and CPU views released. Other readers may still run.
             _advise_consumed_safetensors_pages(
-                shard, [key for _, key in pairs], source_stats[shard])
+                shard if source_authentication is None else source_authentication.descriptor_path(shard),
+                [key for _, key in pairs], source_stats[shard])
         return local
 
     total_tensors = sum(len(pairs) for pairs in by_shard.values())
@@ -1525,9 +1543,10 @@ def _read_layer_to_device(prefix: str,
                 jobs.append((shard, chunk))
         futures = [pool.submit(_read_chunk, shard, chunk)
                    for shard, chunk in jobs]
-        if release_pages:
+        if release_pages or source_authentication is not None:
             # Drain every launched reader before propagating an error;
             # each chunk fences its own copies, including on read failure.
+            # An authenticated owner must outlive every reader on CPU too.
             wait_futures(futures)
         # `.result()` re-raises any worker exception: a partially gathered
         # layer must never be installed as if it were complete.
@@ -1548,7 +1567,8 @@ def _read_layer_to_device(prefix: str,
             "refusing to install a partial layer"
         )
     if fp8_scale_inv_map:
-        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device)
+        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device,
+            **({'source_authentication': source_authentication} if source_authentication is not None else {}))
     if pack_experts is not None:
         # Generic per-expert -> packed-3D bridge for checkpoints that ship
         # MoE experts unfused while the live module is packed. No-op (None)
