@@ -95,3 +95,37 @@ before any execution and replaced by the explicit x86 tooling class.
 Checked-in stdout excerpts omit the trailing worker receipt JSON and trim
 line-end spaces. The receipt JSONs retain hashes and locations of the exact
 original logs whose bytes were independently verified.
+
+## Final integration and dependency pin
+
+The final root integration `1228c3523166` includes the merged six-variant
+intake (`main` merge `50b209fc702c`), the bounded H handoff, and synchronized
+development/serving pins to reviewed Tessera `9d2314819f02` (PR #429).
+The producer contract SHA is
+`a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212`.
+A structural comparison to the prior `ba582d4` contract found only LFM
+construction output sizes added. The allocator answer, serving-cell and
+native-extension tables are unchanged; version 0.1.0 remains advisory and
+no TP2 runtime cell is promoted. The exact reviewed producer includes the
+separately reproduced FIFO refusal fix. The new source seal must be used
+consistently by pricing and export; old wires are not relabeled.
+
+PB action `b1c1dd4dc4d3fb37c7ec2e6bab2060a4cc67b3c204d7a487c741331ec3b8b79d`
+passed 239 tests with 3 skips in 87.63 seconds, CPU only, on the x86 tooling
+worker with one CPU, 4 GiB and OMP/MKL/OpenBLAS threads of one. It exercised
+the eleven earlier handoff/merge/materialization/architecture modules plus
+serving-pin and contract-v4/v5 tests through the existing archive-bound
+`experiments/hessian_reference_contract_check.py`. The archive is
+`/mnt/shared/tessera-measurements/glm-tp2-plan-20260908/source-producer-9d2314819.tar`,
+SHA `30bf315c472062bf3aca1d47b76d21d3a92f157711baae68cf0f73a1739d875b`.
+The three skips concern a legacy producer-absence case, the explicit native
+writer measurement and an unsupplied immutable v5 publisher contract. No
+native handoff performance claim is made. Terminal return code, cleanup,
+canonical CAS receipt and actual payload/source bytes were independently
+verified; the tested source differs only by generated PB closure metadata.
+`root-final-handoff-pin-cas-source-audit.json` retains the exact stdout and
+source comparison. Full invocation/output is in the shared canonical-census
+root as `root-final-handoff-pin-tests.log`.
+
+The separate prose-only fix corrects an obsolete statement that the serving
+pin still contains PENDING sentinels. It changes no gate behavior.
