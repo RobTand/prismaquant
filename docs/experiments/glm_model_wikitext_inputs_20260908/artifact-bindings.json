@@ -1,0 +1,17 @@
+{
+  "glm-wikitext-inputs.v2.json": {
+    "bytes": 155657,
+    "sha256": "eb7c36a6211796bdaf523c20ca3583cbe4794e9583a11f3ec5f124641b374652",
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/model-bound-wikitext-inputs-01/glm-wikitext-inputs.v2.json"
+  },
+  "overlap-audit.json": {
+    "bytes": 5368,
+    "sha256": "30a0261a304c16a7e914b293bd06b5749290711ab147eefb59752a5d7b35048e",
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/model-bound-wikitext-inputs-01/overlap-audit.json"
+  },
+  "cpu-cas-source-audit.json": {
+    "bytes": 7447,
+    "sha256": "04261506d95c551c881b3bfc9f2422ca6380784b07948b500700c70518a9eb72",
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/model-bound-wikitext-inputs-01/cpu-cas-source-audit.json"
+  }
+}
