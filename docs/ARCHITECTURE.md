@@ -32,6 +32,39 @@ and `experiments/measurements/glm-derivative-contract-20260908/`. The corrected
 72-call native graph passed finite cotangent and exact replay/route checks;
 compatibility receipt issuance still requires the original capture to complete.
 
+Re-stamped (2026-09-08, `integrate/dispatch-admissible-partition-20260908`)
+for failed-fit replan preservation. The dispatcher derives all proposed
+selection bytes and demands before the fit check. If that check refuses,
+existing selection files, plan and manifest remain byte-identical; a previous
+manifest cannot silently acquire newly bundled members from the refused plan.
+Gate: `test_failed_fit_replan_preserves_published_selection_bytes`, reproduced
+failing before this correction. This covers fit-check refusal, not concurrent
+planning or crash-atomic publication.
+
+Re-stamped (2026-09-08, `triage/dispatch-admissible-partition`) for the
+campaign dispatcher's **admissible partition** (§4.10, the campaign fanout's
+rows-per-box paragraph; #391). The fit check was all-or-nothing: one row wider than the
+worker refused every row, so the GLM plan's 864-unit routed stacks, deriving
+124.783 GiB against a 104 GiB worker, blocked the 90 rows that fit beside
+them. `plan` now partitions on the same arithmetic: the manifest holds the
+admissible rows, `plan.json` keeps the whole layout with an `admissible` flag
+per row and an `inadmissible_rows` record carrying each declined row's derived
+demand, multiplier, box and reason, and only a plan with nothing admissible
+refuses. No demand is rewritten to fit, no placement moves: PrismaBuild still
+admits and places on the row's declared demand, and all that changed is which
+rows the dispatcher declines to submit. The merge's gap refusal is untouched,
+so a partitioned plan cannot become a merged scope table. Gates:
+`tests/test_tessera_campaign_fanout.py`, shown failing before the change.
+
+Re-stamped (2026-09-08, `triage/stack-group-cli-coverage`) for end-to-end cover
+of the completed-anchor page release on a sampled routed stack (#389). The
+verified page advice recorded below is now driven through the CLI by a
+selected-source row whose selection carries a planner-drawn `s:` stack group, so
+the release of each completed anchor's rendered shard and `.tessera` wire is
+observed rather than inferred. This adds coverage only: no default, stage,
+format, lane or gate contract changes.
+Gate: `tests/test_tessera_stack_group_cli.py`.
+
 Re-stamped (2026-09-08, `fix/selected-source-authentication`) for selected
 source authentication from a hash-bound complete canonical capture (#388).
 The full source roster, calibration identity and capture identity stay byte
@@ -8298,15 +8331,27 @@ the reference row, and two rows that carry different evidence for one
 PrismaBuild admits on the row's declared demand, so the only way to put more
 rows on a box is to make a row hold less; declaring a smaller demand than the
 row holds would reserve less than it uses. `plan --rows-per-box N` therefore
-*checks* rather than sets: it refuses when the spec declares a
-`box_memory_gb` that `N` widest rows do not fit, prints the arithmetic
-otherwise, and records `rows_per_box` and each row's `row_memory_gb` in the
-plan. The dominant term in a row's demand today is `_model_bytes` -- every row
-loads the whole checkpoint, because the activations a unit is priced on come
-from a forward pass through the layers above it -- so that term, not the
-selection, is the concurrency ceiling. A quantum that held only its own units'
-weights would have to take its activations from something the census carried,
-or from the streaming loader; that is not this change.
+*checks* rather than sets, and what it decides is which rows the manifest
+holds. When the spec declares a `box_memory_gb`, a row is admissible while
+`row_memory_gb * N` fits that box, and `manifest.json` holds the admissible
+rows alone, so `submit` hands the fleet exactly them. A row that does not fit
+is **declined, not shrunk**: `plan.json` keeps every planned row under an
+explicit `admissible` flag, keeps `row_memory_gb` for all of them, and records
+the declined ones under `inadmissible_rows` with the derived demand, the
+per-box multiplier, the box and the reason, which the run also prints. A spec
+that declares no box budget admits every row and says the check was not made.
+Only a plan with **no** admissible row refuses, naming the widest demand and
+the box. The fit check precedes publication of every selection file and the
+manifest; a refusal leaves any previously published plan unchanged. One over-wide row is a demand to report
+and work separately, not a reason to withhold the rows the fleet could already
+be running (#391). A partitioned plan is deliberately not mergeable: `merge`
+still requires every planned row's `cost.pkl`, so the rows that were never
+submitted refuse the merged scope table rather than quietly narrowing it. The
+resident-model branch prices `_model_bytes` for the whole checkpoint. Streamed
+selected rows instead use `_streamed_resource_plan` with their selected source
+layers, canonical capture and encoder bounds; their anchor preparation reuses
+the completed capture without a source forward. Both branches retain their
+derived demand when the dispatcher partitions the rows.
 
 **Why the quantum is the fused anchor group.** The adaptive loop's round is per
 `(group, family)`: a round adds one anchor to each surface still failing its
