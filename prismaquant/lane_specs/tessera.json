@@ -50,15 +50,15 @@
     },
     {
       "id": "gold.kl",
-      "runner": "tools/measure_vllm_full_kl.py --base-url http://127.0.0.1:8000",
+      "runner": "python tools/measure_vllm_full_kl.py --mode student --model <artifact> --teacher-payload <teacher.pt> --teacher-meta <teacher_meta.json> --output <kl.json> --score-positions final --serve-image <image>",
       "shipcard_slot": "gold.kl",
-      "description": "Served exact full-vocab KL-vs-BF16 in the plugin serving env, against an image-matched BF16 teacher. Match extension residency across A/B arms: the NVFP4 route builds one CUDA extension on first use, and loading a CUDA extension shifts allocator addresses."
+      "description": "Run inside the plugin serving container through vLLM's offline LLM API. Exact full-vocab KL-vs-BF16 scores each stored teacher window's final position; --score-positions all uses prompt top-K and is a different metric. Generate the image-matched BF16 teacher payload with the same tool's --mode teacher first. Match extension residency across A/B arms: the NVFP4 route builds one CUDA extension on first use, and loading a CUDA extension shifts allocator addresses."
     },
     {
       "id": "gold.ppl",
-      "runner": "tools/measure_vllm_wikitext_ppl.py --base-url http://127.0.0.1:8000 --wikitext-inputs <gold-inputs.json>",
+      "runner": "python tools/measure_vllm_wikitext_ppl.py --model <artifact> --output <ppl.json> --wikitext-inputs <gold-inputs.json> --serve-image <image>",
       "shipcard_slot": "gold.ppl",
-      "description": "Direct WikiText PPL on the served Tessera artifact using the exact CPU-materialized, value-closed offline token payload."
+      "description": "Run inside the plugin serving container through vLLM's offline LLM API. Direct WikiText PPL on the Tessera artifact uses the exact CPU-materialized, value-closed offline token payload."
     }
   ],
   "producer_tools": [
