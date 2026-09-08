@@ -1,7 +1,16 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/selected-source-authentication-20260908`. Stamps
+As of: 2026-09-08 · `triage/stack-group-cli-coverage`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `triage/stack-group-cli-coverage`) for end-to-end cover
+of the completed-anchor page release on a sampled routed stack (#389). The
+verified page advice recorded below is now driven through the CLI by a
+selected-source row whose selection carries a planner-drawn `s:` stack group, so
+the release of each completed anchor's rendered shard and `.tessera` wire is
+observed rather than inferred. This adds coverage only: no default, stage,
+format, lane or gate contract changes.
+Gate: `tests/test_tessera_stack_group_cli.py`.
 
 Re-stamped (2026-09-08, `fix/selected-source-authentication`) for selected
 source authentication from a hash-bound complete canonical capture (#388).
