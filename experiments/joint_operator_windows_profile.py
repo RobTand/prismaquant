@@ -465,9 +465,12 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled):
                 cpu_profiler.dump_stats(str(out / f'arm-{index}-{mode}.cprofile'))
                 with (out / f'arm-{index}-{mode}.cprofile.txt').open('w') as stream:
                     pstats.Stats(cpu_profiler, stream=stream).sort_stats('cumulative').print_stats(80)
-                result['profile'] = dict(path=str(trace), sha256=sha(trace), events=[dict(key=row.key,
-                    calls=row.count, self_cpu_us=row.self_cpu_time_total, self_device_us=row.self_device_time_total)
-                    for row in profiler.key_averages()])
+                # key_averages() rebuilds a large event graph after a full
+                # replay trace. The native 8-GiB attempt exceeded its cgroup
+                # here, after trace/cProfile export. Raw traces retain every
+                # event; analyze them separately without another live graph.
+                result['profile'] = dict(path=str(trace), sha256=sha(trace),
+                    bytes=trace.stat().st_size, aggregation='raw_trace_only')
             del payload
         except BaseException:
             result.update(status='failed', traceback=traceback.format_exc(),
