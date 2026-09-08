@@ -517,13 +517,13 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
         # The existing PWC entry is already disk-backed. Completed anchor
         # files must not accumulate an unbounded page-cache owner across rungs.
+        # The bytes were sealed in memory before the write, and the release
+        # helper checks the entry's identity, fsyncs and advises it from its
+        # own descriptor: nothing here reads the entry back.
         from .perturbed_x_cache import release_activation_cache_file_pages
-        from .tessera_calibration_cache import sha256
         rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
         for path in (rendered_path, wire_path):
-            expected = path.stat()
-            sha256(path, release_read_pages=True)
-            release_activation_cache_file_pages(path, expected_stat=expected)
+            release_activation_cache_file_pages(path, expected_stat=path.stat())
 
     bits = spec.bits_for_shape(tuple(weight.shape))
     return CampaignAnchor(
@@ -3433,11 +3433,13 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
         os.replace(tmp_capture, hessian_capture_path)
         os.replace(tmp_sidecar, sidecar)
         if release_file_pages:
+            # ``capture_sha256`` was sealed from the in-memory bytes above;
+            # the release helper checks identity, fsyncs and advises from its
+            # own descriptor. Reading the archive back here would be a full
+            # pass over the Hessian sidecar per row with no consumer.
             from .perturbed_x_cache import release_activation_cache_file_pages
-            from .tessera_calibration_cache import sha256
-            expected = hessian_capture_path.stat()
-            sha256(hessian_capture_path, resource_check=resource_check, release_read_pages=True)
-            release_activation_cache_file_pages(hessian_capture_path, expected_stat=expected)
+            release_activation_cache_file_pages(
+                hessian_capture_path, expected_stat=hessian_capture_path.stat())
         if resource_check is not None:
             resource_check('after_selected_export_input_write')
         print(f"[campaign] wrote {hessian_capture_path} "
