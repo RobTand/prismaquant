@@ -330,16 +330,19 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight)
     export_inputs = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
-        # The existing torch.save writer completes one file before it can
-        # advise its pages. Counts retain the whole census, not this subset.
-        export_input_file_bytes=source['full_hessian_bytes']+len(counts)*16384,
+        # The unchanged Torch serializer pauses after each tensor record;
+        # verified prefix advice bounds visible file pages to one record.
+        # Counts retain the whole census, not this subset. The metadata bound
+        # also covers the writer's small buffered tail and central directory.
+        export_input_page_window_bytes=widest_h+len(counts)*16384,
         serialization_scratch_bytes=2*widest_h)
     phases = dict(source_preparation=preparation, export_inputs=export_inputs,
                   resident_anchors=encoding)
-    return dict(schema='prismaquant.selected_anchor_resources.v1', phases=phases,
+    return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases,
         memory_bytes=max(sum(phase.values()) for phase in phases.values()),
         selected_source_weight_bytes=weights, selected_layers=layers,
         source_header_sha256=source['source_header_sha256'],
+        export_input_writer_policy='verified-tensor-record-prefix',
         encoder_memo_policy='compatible-anchor-batch-width',
         encoder_memo_capacity=anchor_batch_size,
         source_forward_count=0)

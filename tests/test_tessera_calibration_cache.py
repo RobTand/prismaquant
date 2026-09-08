@@ -95,7 +95,7 @@ def test_export_input_page_release_preserves_existing_file_bytes(capture, monkey
         if bounded:
             assert observed[-1] == 'after_selected_export_input_write'
     assert outcomes[0] == outcomes[1]
-    assert calls == ['hessian_capture.pt']
+    assert calls == ['hessian_capture.pt.tmp']*2+['hessian_capture.pt']
 
 
 @pytest.mark.parametrize('change',['artifact','manifest','source','draw','geometry','scope'])
