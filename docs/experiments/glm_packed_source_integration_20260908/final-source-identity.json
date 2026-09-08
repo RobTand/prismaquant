@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "producer_commit": "07ad344c3275bb2fa7ce2432f93d89945d66f4c2",
+  "producer_archive_sha256": "956bbafeab40fca1144672c3af35900daaeac693d777b0c3f243de73354d4c75",
+  "staging_roster_sha256": "57edbe868ecdaefee0fca7372e3f13d409b97b06a4d3617ad6a079fc54460ba6",
+  "verified_source_files": 1179,
+  "producer_module": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/__init__.py",
+  "encoder_source_sha256": "42783e5214ba1a56d020925155641f9348139ce3f1980ec6df016f71583ee4c3",
+  "prismaquant_source_sha256": "5a507741716b7a7a7f50dd8f650852e2f5b910d245e9325244b9ccf736c64a53",
+  "contract_sha256": "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212",
+  "runtime_pin_commit": "07ad344c3275bb2fa7ce2432f93d89945d66f4c2",
+  "scope": "CPU source and dependency identity only; no weights, calibration payloads or new encoding"
+}
