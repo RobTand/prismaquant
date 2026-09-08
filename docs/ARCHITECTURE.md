@@ -12,7 +12,10 @@ activation terms against unchanged source weights and releases this lease's
 source references. Caller-prefetched candidate dW quanta then produce the three
 signed components; each quantum must fit a finite complete-backing-storage
 budget. Unknown, repeated, incomplete, stale-source and nonfinite results
-refuse. Matrix and candidate owners expire at their explicit phase boundaries.
+refuse. A failed backward poisons the lease; even a caught error cannot be retried
+into a successful seal. Completed hooks release their input/source captures,
+and abort clears pending observer captures. Matrix and candidate owners expire
+at their explicit phase boundaries.
 Matrix accumulation has its own arithmetic identity. The original signed
 per-invocation lease and pipeline defaults remain unchanged. This primitive
 does not schedule source/cache transfers or certify full-model physical
@@ -22,6 +25,39 @@ Gate: `tests/test_joint_operator_statistics.py` and existing joint lease/oracle
 and packed-source tests.
 The [primitive measurement](measurements/joint-operator-statistics-2026-09-08.md)
 records the synthetic native before/after profiles and explicit integration limits.
+
+Re-stamped (2026-09-08, `fix/joint-boundary-residency`) for the explicit
+`prismaquant.aura.boundary_storage.v1` policy (#373). Streamed AURA can store
+exact decoder boundaries and rolling cotangents through the existing
+activation artifact writer, checked page-release helper and bounded prefetch
+window owner. A window validates every complete tensor before source replay;
+lookups never load a missing entry. Source traversal remains batch-major
+capture and layer/probe/batch reverse, with the original B1 RNG coordinates,
+source kwargs, cotangents and signed scalar projection arithmetic. Legacy
+callers keep their in-memory behavior. PWC, full-layer dW and parameter-gradient
+lifetimes are unchanged.
+
+Exact storage uses a fresh isolated working generation per invocation. It binds
+source, calibration, producer and probe identity; immutable receipts bind
+shape, dtype, bytes and coordinates. Successful cotangent writes replace only
+the preceding boundary generation of the same probe/batch slot. Interrupted
+working tensors are never resumed; existing complete cost shards remain the
+only resumable measurement state. The policy has finite tensor-window,
+artifact-storage and auxiliary-state caps. Metadata tensors and potential
+per-probe shared-state adjoints are explicitly charged, with opaque owners
+refused. Completion/failure releases working entries and retains a small
+non-reusable generation receipt.
+
+This memory-lifetime change does not admit a full GLM run. The existing
+batch-major source traversal rereads decoder layers for each calibration
+microbatch, and full candidate/delta/diagnostic planes remain separate limits.
+A production path still needs a separately qualified layer-major boundary
+capture using `visit_layer_batches` and the original per-batch shared state,
+plus bounded candidate/projection lifetimes. No full-draw fit, GPU-bound
+throughput or serving claim follows from the exact-storage mode. Gates include
+`tests/test_streamed_boundary_artifacts.py`, existing joint microbatch/packed/
+lease and shared-state regressions, and a bounded native paired profiler and
+both-host Netdata qualification. The mode remains default-off.
 
 Re-stamped (2026-09-08, `fix/campaign-portable-image-content`) for optional
 campaign container `content_sha256` (issue #371). The existing runtime identity

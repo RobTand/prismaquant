@@ -46,8 +46,317 @@ class StreamedForwardBoundaries:
     position_ids: torch.Tensor
     position_embeddings: object
     attention_mask: object
-    activations_cpu: list[torch.Tensor]
+    # Explicit artifact mode stores ExactActivationReference receipts here;
+    # all legacy callers continue to receive their original CPU tensors.
+    activations_cpu: list[Any]
     shared_pass_state: object
+
+
+BOUNDARY_STORAGE_SCHEMA = "prismaquant.aura.boundary_storage.v1"
+
+
+def normalize_boundary_storage(config):
+    """Validate the explicit exact-artifact policy without touching storage."""
+    if config is None:
+        return None
+    fields = {"schema", "directory", "max_resident_bytes", "max_auxiliary_bytes",
+              "max_artifact_bytes", "prefetch_batches"}
+    if not isinstance(config, dict) or set(config) != fields or config.get("schema") != BOUNDARY_STORAGE_SCHEMA:
+        raise ValueError("exact boundary storage requires a complete v1 policy")
+    for key in fields - {"schema", "directory"}:
+        if type(config[key]) is not int or config[key] <= 0:
+            raise ValueError(f"exact boundary storage requires positive {key}")
+    if not isinstance(config["directory"], str) or not config["directory"].strip():
+        raise ValueError("exact boundary storage requires an artifact directory")
+    return {**config, "directory": str(Path(config["directory"]).resolve())}
+
+
+def _state_tensors(value):
+    """Closed source-metadata grammar: opaque tensor owners must refuse."""
+    from collections.abc import Mapping
+    if isinstance(value, torch.Tensor):
+        if value.is_meta or value.layout != torch.strided:
+            raise TypeError("exact boundary storage cannot account this state tensor")
+        yield value
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _state_tensors(key)
+            yield from _state_tensors(item)
+    elif isinstance(value, (tuple, list)):
+        for item in value:
+            yield from _state_tensors(item)
+    elif value is not None and type(value) not in (str, bool, int, float, complex):
+        raise TypeError(f"exact boundary storage cannot account opaque state {type(value).__name__}")
+
+
+def _state_storage_bytes(values):
+    storages = {}
+    for tensor in _state_tensors(values):
+        storage = tensor.untyped_storage()
+        key = (str(tensor.device), storage.data_ptr(), storage.nbytes())
+        storages[key] = storage.nbytes()
+    return sum(storages.values())
+
+
+class StreamedBoundaryArtifacts:
+    """Own exact-boundary receipts and generations, never a second tensor cache.
+
+    Tensor writing, page release and each bounded resident window are delegated
+    to the existing activation artifact owner in ``perturbed_x_cache``. Working
+    generations are deliberately not checkpoint inputs: an interrupted cost
+    resume recaptures into a fresh generation, as the legacy producer already
+    does. Only completed signed cost shards are resumable measurement state.
+    """
+
+    def __init__(self, config):
+        self.config = normalize_boundary_storage(config)
+        self.identity = {key: value for key, value in self.config.items() if key != "directory"}
+        self.session = None
+        self.directory = None
+        self._references = {}
+        self._slots = {}
+        self._active_window = None
+        self._check_memory = None
+        self._n_probes = 0
+        self._batches = None
+        self._cotangents = None
+        self._status = "unused"
+        self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
+            "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
+            "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
+            "written_tensor_bytes": 0, "read_tensor_bytes": 0,
+            "written_entries": 0, "retired_entries": 0, "prefetch_windows": 0,
+            "hot_read_misses": 0}
+
+    def __enter__(self):
+        return self
+
+    def bind(self, identity, *, n_probes, check_memory=None):
+        import uuid
+        from .cost_stage_checkpoint import canonical_json_sha256
+        if self.session is not None:
+            raise RuntimeError("exact boundary generation is already bound")
+        self._n_probes = n_probes
+        self._check_memory = check_memory
+        self.session = {"generation": uuid.uuid4().hex,
+            "run_identity_sha256": canonical_json_sha256(identity, where="exact boundary source")}
+        self.directory = Path(self.config["directory"]) / self.session["generation"]
+        self.directory.mkdir(parents=True, exist_ok=False)
+        self._status = "running"
+        self._publish_status()
+
+    def _publish_status(self):
+        if self.directory is None:
+            return
+        from .cost_stage_checkpoint import atomic_write_bytes
+        data = {"schema": BOUNDARY_STORAGE_SCHEMA, "session": self.session,
+                "policy": self.identity, "status": self._status,
+                "working_artifacts_reusable": False, "telemetry": self.telemetry}
+        atomic_write_bytes(self.directory / "generation.json",
+            (json.dumps(data, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
+
+    def _reserve(self, delta):
+        value = self.telemetry["resident_tensor_bytes"] + delta
+        if value < 0 or value > self.config["max_resident_bytes"]:
+            raise RuntimeError("exact boundary tensor residency budget exceeded")
+        if delta > 0 and self._check_memory is not None:
+            self._check_memory("exact activation allocation")
+        self.telemetry["resident_tensor_bytes"] = value
+        self.telemetry["peak_resident_tensor_bytes"] = max(
+            value, self.telemetry["peak_resident_tensor_bytes"])
+
+    def check_auxiliary(self, batches, *, cotangents=(), extra=(), shared_extra=()):
+        """Bound retained metadata plus all potential per-probe shared adjoints.
+
+        Shared state remains under the profile's original ownership/precision.
+        We conservatively reserve one >=FP32 cotangent per captured occurrence
+        per probe, including aliases at different shared-state keys; actual
+        accumulators are checked too. No hidden tensor plane is called metadata.
+        """
+        metadata = [(batch.input_ids, batch.position_ids, batch.position_embeddings,
+                     batch.attention_mask, batch.shared_pass_state) for batch in batches]
+        actual_accumulators = [cotangent.resident_tensors() for row in cotangents for cotangent in row]
+        shared = [batch.shared_pass_state for batch in batches] + [shared_extra]
+        reserved_shared = self._n_probes * sum(
+            tensor.numel() * max(4, tensor.element_size())
+            for tensor in _state_tensors(shared)
+            if tensor.is_floating_point() or tensor.is_complex())
+        actual_shared = _state_storage_bytes(actual_accumulators)
+        total = _state_storage_bytes((metadata, extra)) + max(actual_shared, reserved_shared)
+        if total > self.config["max_auxiliary_bytes"]:
+            raise RuntimeError("exact boundary auxiliary/shared-state residency budget exceeded")
+        self.telemetry["peak_auxiliary_bytes"] = max(total, self.telemetry["peak_auxiliary_bytes"])
+        self.telemetry["peak_shared_cotangent_reservation_bytes"] = max(
+            reserved_shared, self.telemetry["peak_shared_cotangent_reservation_bytes"])
+        if self._check_memory is not None:
+            self._check_memory("exact boundary auxiliary state")
+
+    def watch_auxiliary(self, batches, cotangents):
+        """Register existing owners for deterministic end-of-call cleanup."""
+        self._batches = batches
+        self._cotangents = cotangents
+
+    def _entry_identity(self, reference):
+        from .perturbed_x_cache import ExactActivationReference
+        if (not isinstance(reference, ExactActivationReference)
+                or self._references.get(reference.name) != reference):
+            raise RuntimeError("exact boundary reference is stale or belongs to another generation")
+        identity = json.loads(reference.metadata_json)["identity"]
+        if identity["session"] != self.session or self._slots.get(identity["slot"]) != reference:
+            raise RuntimeError("exact boundary reference has a stale generation")
+        return identity
+
+    def write(self, tensor, *, batch_index, boundary_index, probe_index=None, previous=None):
+        from .perturbed_x_cache import write_exact_activation_cache_entry
+        if self._status != "running":
+            raise RuntimeError("exact boundary generation is not running")
+        kind = "boundary" if probe_index is None else "cotangent"
+        coordinates = {"batch": batch_index, "boundary": boundary_index, "probe": probe_index}
+        if any(type(v) is not int or v < 0 for v in (batch_index, boundary_index)):
+            raise ValueError("exact boundary coordinates must be nonnegative integers")
+        if probe_index is not None and (type(probe_index) is not int or not 0 <= probe_index < self._n_probes):
+            raise ValueError("exact cotangent probe coordinate is outside the run")
+        slot = f"boundary-{batch_index}-{boundary_index}" if probe_index is None else f"cotangent-{probe_index}-{batch_index}"
+        if previous is not None:
+            old = self._entry_identity(previous)
+            if (kind != "cotangent" or old["slot"] != slot
+                    or old["coordinates"]["boundary"] != boundary_index + 1):
+                raise RuntimeError("exact cotangent rollover changed its original coordinates")
+        elif slot in self._slots:
+            raise RuntimeError("exact boundary slot already exists")
+        nbytes = tensor.numel() * tensor.element_size()
+        # A bounded envelope for the exact writer's small PyTorch zip header.
+        # Actual file length is checked before the entry can be published.
+        file_limit = nbytes + 65536
+        if self.telemetry["live_artifact_bytes"] + file_limit > self.config["max_artifact_bytes"]:
+            raise RuntimeError("exact boundary artifact budget exceeded")
+        name = f"{slot}-at-{boundary_index}"
+        identity = {"session": self.session, "slot": slot, "kind": kind, "coordinates": coordinates}
+        self._reserve(nbytes)
+        try:
+            with torch.profiler.record_function("aura.exact_activation.write"):
+                reference = write_exact_activation_cache_entry(self.directory / "entries", name, tensor,
+                    identity=identity, max_tensor_bytes=nbytes, max_file_bytes=file_limit)
+        finally:
+            self._reserve(-nbytes)
+        self._references[name] = reference
+        self._slots[slot] = reference
+        self.telemetry["written_entries"] += 1
+        self.telemetry["written_tensor_bytes"] += nbytes
+        self.telemetry["live_artifact_bytes"] += reference.file_bytes
+        self.telemetry["peak_artifact_bytes"] = max(
+            self.telemetry["live_artifact_bytes"], self.telemetry["peak_artifact_bytes"])
+        if previous is not None:
+            self._retire(previous)
+        if self._check_memory is not None:
+            self._check_memory("exact activation publication")
+        return reference
+
+    def _retire(self, reference, *, missing_ok=False):
+        if self._references.get(reference.name) != reference:
+            raise RuntimeError("exact boundary retirement has a stale reference")
+        Path(reference.path).unlink(missing_ok=missing_ok)
+        del self._references[reference.name]
+        self.telemetry["live_artifact_bytes"] -= reference.file_bytes
+        self.telemetry["retired_entries"] += 1
+
+    def retire(self, reference):
+        identity = self._entry_identity(reference)
+        del self._slots[identity["slot"]]
+        self._retire(reference)
+
+    @contextmanager
+    def prefetch(self, references):
+        from .perturbed_x_cache import prefetch_exact_activation_cache_entries
+        if self._active_window is not None:
+            raise RuntimeError("exact boundary windows may not overlap")
+        references = tuple(references)
+        for reference in references:
+            self._entry_identity(reference)
+        with torch.profiler.record_function("aura.exact_activation.prefetch"):
+            context = prefetch_exact_activation_cache_entries(references,
+                expected_session=self.session, max_tensor_bytes=self.config["max_resident_bytes"],
+                residency_check=self._reserve)
+            window = context.__enter__()
+        self._active_window = window
+        self.telemetry["prefetch_windows"] += 1
+        self.telemetry["read_tensor_bytes"] += sum(ref.tensor_bytes for ref in references)
+        try:
+            yield window
+        finally:
+            self._active_window = None
+            context.__exit__(None, None, None)
+
+    def get(self, window, reference):
+        self._entry_identity(reference)
+        if window is not self._active_window:
+            raise RuntimeError("exact boundary lookup has no active resident window")
+        try:
+            return window.get(reference)
+        except RuntimeError:
+            self.telemetry["hot_read_misses"] += 1
+            raise
+
+    def __exit__(self, exc_type, exc, traceback):
+        # No working tensor reference is resumable. Cost checkpoint shards own
+        # successful measurements; a new attempt always uses a new generation.
+        self._status = "failed" if exc_type is not None else ("complete" if self.session else "unused")
+        try:
+            if self._active_window is not None or self.telemetry["resident_tensor_bytes"]:
+                raise RuntimeError("exact boundary generation closed with a live window")
+            for reference in list(self._references.values()):
+                self._retire(reference, missing_ok=True)
+            self._slots.clear()
+        except BaseException:
+            self._status = "failed"
+            raise
+        finally:
+            for batch in self._batches or ():
+                batch.activations_cpu.clear()
+                batch.input_ids = batch.position_ids = None
+                batch.position_embeddings = batch.attention_mask = batch.shared_pass_state = None
+            for row in self._cotangents or ():
+                for cotangent in row:
+                    cotangent.release_resident_state()
+                row.clear()
+            if self._batches is not None:
+                self._batches.clear()
+            if self._cotangents is not None:
+                self._cotangents.clear()
+            self._batches = self._cotangents = None
+            self._check_memory = None
+            self._publish_status()
+
+    def receipt(self):
+        return {"policy": self.identity, "session": self.session, "status": self._status,
+                "generation_manifest": str(self.directory / "generation.json") if self.directory else None,
+                "working_artifacts_reusable": False, "telemetry": dict(self.telemetry)}
+
+
+@contextmanager
+def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None):
+    """Preserve original batch order while leasing exact tensors in windows."""
+    def iterate():
+        size = len(batches) if storage is None else storage.config["prefetch_batches"]
+        for start in range(0, len(batches), size):
+            indices = range(start, min(start + size, len(batches)))
+            if storage is None:
+                for index in indices:
+                    yield index, batches[index], batches[index].activations_cpu[boundary_index], (
+                        None if incoming is None else incoming[index])
+            else:
+                references = [batches[index].activations_cpu[boundary_index] for index in indices]
+                if incoming is not None:
+                    references.extend(incoming[index] for index in indices)
+                with storage.prefetch(references) as window:
+                    for index in indices:
+                        yield index, batches[index], storage.get(window, batches[index].activations_cpu[boundary_index]), (
+                            None if incoming is None else storage.get(window, incoming[index]))
+    iterator = iterate()
+    try:
+        yield iterator
+    finally:
+        iterator.close()
 
 
 class StreamedCausalLM:
@@ -173,7 +482,7 @@ class StreamedCausalLM:
         return self._head()(hidden)
 
     def capture_boundaries(
-        self, input_ids: torch.Tensor
+        self, input_ids: torch.Tensor, *, boundary_writer=None, resource_check=None,
     ) -> StreamedForwardBoundaries:
         """Stream a no-grad source forward and retain only boundary acts."""
         ids, position_ids, hidden, position_embeddings, attention_mask = (
@@ -188,7 +497,10 @@ class StreamedCausalLM:
             shared_pass_state=None,
         )
         pass_state = self.profile.new_forward_pass_state()
-        batch.activations_cpu.append(hidden.detach().to("cpu"))
+        if resource_check is not None:
+            resource_check(batch, pass_state)
+        batch.activations_cpu.append(hidden.detach().to("cpu") if boundary_writer is None
+                                     else boundary_writer(0, hidden))
         for depth in range(self.prefetch_lookahead):
             self.context.schedule_prefetch(depth)
         for layer in range(self.num_layers):
@@ -203,13 +515,18 @@ class StreamedCausalLM:
                     hidden = self._call(
                         layer, hidden, batch=batch, pass_state=pass_state
                     )
-                batch.activations_cpu.append(hidden.detach().to("cpu"))
+                if resource_check is not None:
+                    resource_check(batch, pass_state)
+                batch.activations_cpu.append(hidden.detach().to("cpu") if boundary_writer is None
+                                             else boundary_writer(layer + 1, hidden))
             finally:
                 if self._pinned_layer != layer:
                     self.context.unload(layer)
         batch.shared_pass_state = self.profile.capture_forward_pass_state(
             pass_state
         )
+        if resource_check is not None:
+            resource_check(batch, pass_state)
         return batch
 
     def isolated_layer(

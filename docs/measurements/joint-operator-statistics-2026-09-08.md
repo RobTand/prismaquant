@@ -99,3 +99,27 @@ terminal status, canonical CAS receipt/payload hashes and complete source
 snapshots against the implementation commit; only generated PB closure files
 differ. All eight trace hashes were checked. Native result SHA256:
 `3798d4008715690bbd0885f650e7d0e6e62073ae0e04df0b47cb169105c6d7d0`.
+
+## Review corrections and final native qualification
+
+Review found that a QDQ exception after an operator update could be caught and
+retried, double-counting the earlier update. It also found that a retained
+output kept completed observer input/source captures alive. Three regression
+cases failed on the original implementation in PB `ede589437c71`. Commit
+`6ffbf2e5d` makes any failed collection poison the lease, clears pending captures
+on failure/exit, and clears consumed captures immediately while preserving the
+duplicate-backward refusal. PB `34c97d65248f` then passed 66 CPU cases with two
+CUDA skips and compiled the touched modules. An earlier mistargeted submission
+`ca3c77d863bf` selected no tests; it provides no validation evidence.
+
+Final native PB `93e6a3ae8fdb3d4022fe27974beb7c39ea4b4aa0a9e2ec301c0908ed7a4e489d`
+ran the corrected commit on Sparky under the same content-qualified image and
+12/8 GiB physical/GPU budgets: 49 passed, zero skipped, exit zero and completed
+cleanup. Its new A/B/B/A pairs are self-contained on that host; no cross-host
+latency delta is inferred from the earlier Sparklina run. For 2048×4096 the
+means of arm medians are 41.905→16.458 ms (2.546×); for 4096×2048 they are
+41.750→16.637 ms (2.509×). Approximate work/board-joule ratios from matched
+2 Hz host samples are 2.413× and 2.431×. The synthetic workload and scope limits
+above still apply. New traces, both-host telemetry and derived summaries are
+in `native-02/`, with invocation and independent canonical-CAS/full-source
+verification in `native-invocation-02.json` and `native-root-audit-02.json`.
