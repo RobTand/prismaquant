@@ -1,7 +1,25 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `fix/campaign-portable-image-content`. Stamps
+As of: 2026-09-08 · `research/joint-operator-statistics`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `research/joint-operator-statistics`) for the explicit
+one-probe `JointOperatorStatisticsLease` (issue #374). It extends the existing
+joint-AURA source hooks and packed Linear observers. A finite matrix budget
+admits one FP32 sum(G.T@X) per target and one sum(G.T@dX) per distinct nonidentity
+activation group. After all backwards finish, an observation seal contracts
+activation terms against unchanged source weights and releases this lease's
+source references. Caller-prefetched candidate dW quanta then produce the three
+signed components; each quantum must fit a finite complete-backing-storage
+budget. Unknown, repeated, incomplete, stale-source and nonfinite results
+refuse. Matrix and candidate owners expire at their explicit phase boundaries.
+Matrix accumulation has its own arithmetic identity. The original signed
+per-invocation lease and pipeline defaults remain unchanged. This primitive
+does not schedule source/cache transfers or certify full-model physical
+residency, GPU saturation, KL, bpp or serving quality. Production integration
+requires separate phase admission and numerical/performance qualification.
+Gate: `tests/test_joint_operator_statistics.py` and existing joint lease/oracle
+and packed-source tests.
 
 Re-stamped (2026-09-08, `fix/campaign-portable-image-content`) for optional
 campaign container `content_sha256` (issue #371). The existing runtime identity
