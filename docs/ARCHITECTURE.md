@@ -1,7 +1,14 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `fix/bounded-hessian-sidecar`. Stamps
+As of: 2026-09-08 · `integration/glm-probe-memory`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `integration/glm-probe-memory`) for the combined
+integration of issues #374, #377, #380 and #381. The reviewed operator-statistics,
+Hessian writer, consumed-source-page and PWC window changes retain their
+individual contracts and measurement scopes below. This integration resolves
+architecture stamps only; it does not enable the experimental policies or claim
+that a complete GLM capture, joint probe or served artifact has passed.
 
 Re-stamped (2026-09-08, `fix/bounded-hessian-sidecar`) for within-file Hessian
 sidecar page ownership (#377). Selected-source export keeps Torch's existing
