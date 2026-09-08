@@ -3,6 +3,25 @@
 As of: 2026-09-08 · `fix/bounded-hessian-sidecar`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `codex/pwc-resident-windows`) for opt-in candidate
+windows through `ProductionWeightCache` (#381). `plan_resident_windows`
+resolves aliases in input order and bounds each finite quantum by a declared
+byte cap and loader count. `resident_window` uses the existing prefetch pool;
+`get_resident` refuses missing or evicted entries and preserves CB integrity
+and active file-load receipts. Whole backing storages count, including views,
+aliases and unrelated resident entries. Incoming standard uncompressed Torch
+archives have a conservative file-size bound plus storage-record preflight;
+opaque/compressed inputs refuse. Serialized load buffers have a separate
+aggregate cap. Nested windows and LRU eviction of other entries refuse.
+Context completion or failure releases the selected disk-backed cache owners
+through the existing release mechanism. Optional checked file-page advice
+follows the verified load, without changing artifact bytes or promising
+physical reclaim. Callers still admit allocator overhead, borrowed references
+and projection workspaces separately. Legacy cache defaults, pipeline order,
+quantization arithmetic and serving gates are unchanged. CPU lifecycle and
+budget gates are in `tests/test_pwc_resident_windows.py`; this API is not a
+full-model fit or throughput qualification.
+
 Re-stamped (2026-09-08, `fix/bounded-hessian-sidecar`) for within-file Hessian
 sidecar page ownership (#377). Selected-source export keeps Torch's existing
 path writer, archive record names and serializer, pausing after each tensor
@@ -63,6 +82,7 @@ rows whose deterministic union covers all 36,423 units. Its 42 routed-stack
 groups each contain 864 logical units. The current planner cannot subdivide an
 exact full-stack group into smaller independently measured rows; statistical
 stack sampling is a different contract and does not fill that gap.
+
 
 Re-stamped (2026-09-08, `fix/joint-boundary-residency`) for the explicit
 `prismaquant.aura.boundary_storage.v1` policy (#373). Streamed AURA can store

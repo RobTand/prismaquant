@@ -79,6 +79,7 @@ import re
 import subprocess
 import stat
 import time
+import zipfile
 
 import torch
 import torch.nn as nn
@@ -376,7 +377,7 @@ class ProductionWeightCache:
         self._file_load_receipts = None
         return compacted
 
-    def release_resident_tensors(self) -> int:
+    def release_resident_tensors(self, keys: Sequence[tuple[str, str]] | None = None) -> int:
         """Drop disk-backed resident tensors, keeping every key resolvable.
 
         Same operation as :meth:`compact_for_pickle` — that one is named for
@@ -389,8 +390,198 @@ class ProductionWeightCache:
         Entries that were never disk-backed are left resident, because dropping
         those would lose data rather than free a re-readable copy. A later
         ``get()`` on a released key simply reloads it from disk.
+
+        ``keys`` limits release to entries with a recorded load path. It never
+        adopts an unrelated same-named file as backing for an in-memory tensor.
+        Omitting ``keys`` preserves the legacy whole-cache compaction behavior.
         """
-        return self.compact_for_pickle()
+        if keys is None:
+            return self.compact_for_pickle()
+        released = 0
+        for key in dict.fromkeys(keys):
+            value = self.weights.get(key)
+            if not isinstance(value, torch.Tensor):
+                continue
+            path = (self._lru_paths or {}).get(key)
+            if path is None:
+                continue  # A non-disk-backed value remains its only owner.
+            self.weights[key] = path
+            if self._lru_order is not None and key in self._lru_order:
+                self._lru_order.remove(key)
+                self._lru_bytes -= value.numel() * value.element_size()
+            if self._cb_verified_keys is not None:
+                self._cb_verified_keys.discard(key)
+            if self._file_load_receipts is not None:
+                self._file_load_receipts.pop(key, None)
+            released += 1
+        return released
+
+    @staticmethod
+    def _window_storage(tensor):
+        if (type(tensor) not in (torch.Tensor, nn.Parameter)
+                or tensor.layout != torch.strided or tensor.device.type == 'meta'):
+            raise RuntimeError('PWC resident window has unaccountable tensor storage')
+        storage = tensor.untyped_storage()
+        return (tensor.device, storage.data_ptr()), storage.nbytes()
+
+    def _window_resident_storages(self):
+        storages = {}
+        for value in self.weights.values():
+            if isinstance(value, torch.Tensor):
+                identity, nbytes = self._window_storage(value)
+                storages[identity] = max(storages.get(identity, 0), nbytes)
+        return storages
+
+    @staticmethod
+    def _window_archive_storage_bytes(source):
+        """Only ordinary uncompressed Torch archives have accountable loads."""
+        try:
+            with zipfile.ZipFile(source) as archive:
+                entries = archive.infolist()
+                names = [entry.filename for entry in entries]
+                roots = {name.split('/')[0] for name in names}
+                if (len(roots) != 1 or len(set(names)) != len(names)
+                        or not any(name.endswith('/data.pkl') for name in names)
+                        or any(entry.compress_type != zipfile.ZIP_STORED or entry.flag_bits & 1
+                               or entry.file_size != entry.compress_size for entry in entries)):
+                    raise RuntimeError('PWC window requires an uncompressed Torch archive')
+                return sum(entry.file_size for entry in entries
+                           if re.fullmatch(r'[^/]+/data/[0-9]+', entry.filename))
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise RuntimeError('PWC window has an unaccountable Torch archive') from exc
+
+    def _window_keys(self, keys):
+        if not isinstance(keys, Sequence) or isinstance(keys, (str, bytes)):
+            raise TypeError('PWC window keys must be a finite sequence')
+        resolved, seen = [], set()
+        for pair in keys:
+            if (not isinstance(pair, (tuple, list)) or len(pair) != 2
+                    or any(not isinstance(part, str) or not part for part in pair)):
+                raise ValueError('PWC window needs (name, format) keys')
+            key = self.resolve_key(*pair)
+            if key is None:
+                raise RuntimeError(f'PWC window missing cache entry {pair}')
+            if key not in seen:
+                resolved.append(key)
+                seen.add(key)
+        return tuple(resolved)
+
+    @staticmethod
+    def _window_limits(max_resident_bytes, max_workers):
+        if type(max_resident_bytes) is not int or max_resident_bytes <= 0:
+            raise ValueError('PWC window requires a positive resident byte budget')
+        if (type(max_workers) is not int or max_workers <= 0
+                or max_workers > len(os.sched_getaffinity(0))):
+            raise ValueError('PWC window workers exceed assigned CPU affinity')
+
+    def _window_file(self, key):
+        value = self.weights[key]
+        if not isinstance(value, (str, Path)):
+            raise RuntimeError('PWC window has an unaccountable cache input')
+        path = Path(self._path_for_value(value)).absolute()
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise RuntimeError('PWC window requires a regular file, not a symlink')
+        storage_bytes = self._window_archive_storage_bytes(path)
+        if self._file_signature(path.lstat()) != self._file_signature(before):
+            raise RuntimeError('PWC window file changed during preflight')
+        estimate = self.estimate_nbytes([key])
+        if estimate != before.st_size or storage_bytes > estimate:
+            raise RuntimeError('PWC window file storage estimate changed')
+        return path, before, estimate, storage_bytes
+
+    def plan_resident_windows(self, keys, *, max_resident_bytes: int, max_workers: int):
+        """Plan finite research quanta in input order without loading tensors.
+
+        All existing PWC tensor backing storages count, including unrelated
+        entries and storage hidden behind views; aliases count once. Incoming
+        standard uncompressed Torch files use the existing conservative file
+        estimate. Each quantum has at most ``max_workers`` keys, bounding the
+        existing prefetch pool's futures as well as its loader concurrency.
+        Plans are key-only hints; ``resident_window`` revalidates each entry.
+        """
+        self._window_limits(max_resident_bytes, max_workers)
+        keys = self._window_keys(keys)
+        baseline = sum(self._window_resident_storages().values())
+        if baseline > max_resident_bytes:
+            raise RuntimeError('PWC existing resident storage exceeds window budget')
+        windows, window, nbytes = [], [], baseline
+        for key in keys:
+            value = self.weights[key]
+            incoming = 0 if isinstance(value, torch.Tensor) else self._window_file(key)[2]
+            if baseline + incoming > max_resident_bytes:
+                raise RuntimeError(f'PWC single entry exceeds resident window budget: {key}')
+            if window and (len(window) == max_workers or nbytes + incoming > max_resident_bytes):
+                windows.append(tuple(window))
+                window, nbytes = [], baseline
+            window.append(key)
+            nbytes += incoming
+        if window:
+            windows.append(tuple(window))
+        return tuple(windows)
+
+    @contextmanager
+    def resident_window(self, keys, *, max_resident_bytes: int, max_workers: int,
+                        max_load_buffer_bytes: int | None = None, release_file_pages: bool = False):
+        """Prefetch one research quantum, then expose strict resident lookups.
+
+        This owns no tensor dictionary. PWC remains the only cache; selected
+        disk-backed entries are released on success/failure. Callers must drop
+        their borrowed tensor references at the boundary. Nested windows refuse.
+        The resident cap covers all cache backing storages. Serialized loader
+        buffers have a separate aggregate cap (default: resident cap); both
+        caps, allocator overhead and consumer workspaces need phase admission.
+        Page-release advice is optional and is not a physical-memory guarantee.
+        """
+        if getattr(self, '_resident_window_files', None) is not None:
+            raise RuntimeError('PWC resident windows cannot be nested')
+        if type(release_file_pages) is not bool:
+            raise ValueError('PWC window page release must be boolean')
+        buffer_cap = max_resident_bytes if max_load_buffer_bytes is None else max_load_buffer_bytes
+        if type(buffer_cap) is not int or buffer_cap <= 0:
+            raise ValueError('PWC window needs a positive serialized buffer budget')
+        windows = self.plan_resident_windows(keys, max_resident_bytes=max_resident_bytes,
+                                             max_workers=max_workers)
+        if len(windows) != 1:
+            raise RuntimeError('PWC resident_window requires one nonempty planned quantum')
+        keys = windows[0]
+        files = {}
+        for key in keys:
+            value = self.weights[key]
+            if not isinstance(value, torch.Tensor):
+                path, observed, estimate, storage_bytes = self._window_file(key)
+                files[str(path)] = (observed, estimate, storage_bytes)
+        # Different keys reading one file still allocate separate load buffers.
+        buffer_bytes = sum(files[str(Path(self._path_for_value(self.weights[key])).absolute())][1]
+                           for key in keys if not isinstance(self.weights[key], torch.Tensor))
+        if buffer_bytes > buffer_cap:
+            raise RuntimeError('PWC serialized load buffers exceed window budget')
+        incoming_storage = sum(files[str(Path(self._path_for_value(self.weights[key])).absolute())][2]
+                               for key in keys if not isinstance(self.weights[key], torch.Tensor))
+        if (self._lru_order is not None and self._lru_max_bytes > 0
+                and self._lru_bytes + incoming_storage > self._lru_max_bytes):
+            raise RuntimeError('PWC resident window exceeds available LRU budget')
+        self._resident_window_files = files
+        self._resident_window_receipt_keys = frozenset(
+            key for key in keys if not isinstance(self.weights[key], torch.Tensor))
+        try:
+            loaded = self.prefetch(keys, max_workers=max_workers)
+            for key in keys:
+                self.get_resident(*key)
+            actual = sum(self._window_resident_storages().values())
+            if actual > max_resident_bytes:
+                raise RuntimeError('PWC actual backing storage exceeds resident window budget')
+            if release_file_pages:
+                from .perturbed_x_cache import release_activation_cache_file_pages
+                for path, (observed, _, _) in files.items():
+                    release_activation_cache_file_pages(path, expected_stat=observed)
+            yield {'keys': keys, 'loaded': loaded, 'resident_bytes': actual,
+                   'budget_bytes': max_resident_bytes, 'load_buffer_capacity_bytes': buffer_bytes,
+                   'load_buffer_budget_bytes': buffer_cap, 'file_pages_advised': len(files) if release_file_pages else 0}
+        finally:
+            self.release_resident_tensors(keys)
+            self._resident_window_files = None
+            self._resident_window_receipt_keys = frozenset()
 
     def _path_for_value(self, value: object) -> str:
         path = str(value)
@@ -772,6 +963,13 @@ class ProductionWeightCache:
     def _load_file_tensor(self, value):
         path = Path(self._path_for_value(value)).absolute()
         limit = getattr(self, "_file_load_max_bytes", 0)
+        window_files = getattr(self, '_resident_window_files', None)
+        window_entry = None
+        if window_files is not None:
+            window_entry = window_files.get(str(path))
+            if window_entry is None:
+                raise RuntimeError('PWC load is outside the active resident window')
+            limit = min(limit, window_entry[1]) if limit else window_entry[1]
         if not limit:
             return torch.load(path, map_location="cpu", weights_only=True), None
         before = path.lstat()
@@ -780,6 +978,8 @@ class ProductionWeightCache:
         if before.st_size > limit:
             raise RuntimeError("PWC file exceeds the explicit read buffer bound")
         signature = self._file_signature(before)
+        if window_entry is not None and signature != self._file_signature(window_entry[0]):
+            raise RuntimeError('PWC window file changed before its content read')
         with path.open("rb") as handle:
             if self._file_signature(os.fstat(handle.fileno())) != signature:
                 raise RuntimeError("PWC file changed before its content read")
@@ -790,9 +990,14 @@ class ProductionWeightCache:
         # The temporary serialized buffer is per loader worker and is released
         # before its result enters the existing LRU. No whole-cache byte store.
         receipt = {"path": str(path), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+        if window_entry is not None:
+            if self._window_archive_storage_bytes(io.BytesIO(raw)) != window_entry[2]:
+                raise RuntimeError('PWC window archive storage changed during its read')
         tensor = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
         if not isinstance(tensor, torch.Tensor):
             raise RuntimeError("PWC file receipt requires a tensor shard")
+        if window_entry is not None and self._window_storage(tensor)[1] > window_entry[2]:
+            raise RuntimeError('PWC loaded backing storage exceeds its archive bound')
         return tensor, (receipt, signature, self._file_tensor_guard(tensor))
 
     def _record_file_load(self, key, tensor, observed) -> None:
@@ -867,16 +1072,22 @@ class ProductionWeightCache:
                 loaded_count += 1
         return loaded_count
 
-    def _resolve_to_tensor(self, key: tuple[str, str]) -> torch.Tensor | None:
+    def _resolve_to_tensor(self, key: tuple[str, str], *, resident_only=False) -> torch.Tensor | None:
         """Return the tensor at ``key`` (lazy-load from disk if needed).
         With LRU enabled, the freshly-loaded tensor is bookkept and the
         oldest entries get evicted back to filenames when the byte budget
         is exceeded.  Returns None if the key isn't present."""
         v = self.weights.get(key)
+        if resident_only and not isinstance(v, torch.Tensor):
+            raise RuntimeError(f'PWC cache entry is not resident: {key}')
         if v is None:
             return None
         if isinstance(v, torch.Tensor):
             self._validate_loaded_cb_pair_tensor(key, v)
+            if resident_only and (getattr(self, '_file_load_max_bytes', 0)
+                                  or key in (self._file_load_receipts or {})
+                                  or key in getattr(self, '_resident_window_receipt_keys', ())):
+                self.file_load_receipt(key, v)
             # Refresh LRU position.
             if self._lru_order is not None:
                 if key in self._lru_order:
@@ -891,7 +1102,7 @@ class ProductionWeightCache:
         self._record_file_load(key, loaded, receipt)
         return loaded
 
-    def get(self, name: str, fmt: str) -> torch.Tensor | None:
+    def get(self, name: str, fmt: str, *, resident_only=False) -> torch.Tensor | None:
         key = self.resolve_key(name, fmt)
         if key is not None:
             if _is_cb_format_name(key[1]):
@@ -900,8 +1111,14 @@ class ProductionWeightCache:
                     require_for_formats=[key[1]],
                     where=f"ProductionWeightCache get({key[0]}@{key[1]})",
                 )
-            return self._resolve_to_tensor(key)
+            return self._resolve_to_tensor(key, resident_only=resident_only)
+        if resident_only:
+            raise RuntimeError(f'PWC missing cache entry: {name}@{fmt}')
         return None
+
+    def get_resident(self, name: str, fmt: str) -> torch.Tensor:
+        """Return a resident tensor with CB/receipt guards; never load a file."""
+        return self.get(name, fmt, resident_only=True)
 
     def relocate(self, new_cache_dir: str | Path) -> None:
         """Point the cache at a new on-disk directory of .pt shards.
