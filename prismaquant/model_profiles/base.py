@@ -319,6 +319,10 @@ class ModelProfile(ABC):
             return tuple(spec.pinned_names)
         return ("lm_head",)
 
+    def source_derivative_contract(self) -> dict | None:
+        """Optional closed research derivative contract; declaration does not enable it."""
+        return None
+
     def probe_linear_exclude_extra(self) -> str:
         """Extra regex fragment OR'd into the probe's Linear exclusion.
 

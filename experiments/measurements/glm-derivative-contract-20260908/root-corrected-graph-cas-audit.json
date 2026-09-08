@@ -1,0 +1,12 @@
+[
+  {
+    "action": "abad03ae5f0d53afc801b6a206501a41b9a52bebb8bc850a130a6da1ed6ff91d",
+    "receipt": "dd6fde44cf3abc4bc591b36e69a8d3d04258649be825ec13e0c4187cecc6bb3b",
+    "payload_sha256": "75673acf66dc892d8bf10f6c5b114de769fdf261a9fa93ab3b5ab9e13251eb5d",
+    "snapshot": "7376380fbbc40fae586e9ef001b83c1fc6dd1051",
+    "source_diff_from_commit": [
+      ".pbrun-closure.0f24ee3e97d56239.json"
+    ],
+    "stdout_tail": " 16:50:05 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\n/usr/local/lib/python3.12/dist-packages/torch/autograd/graph.py:979: UserWarning: Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context... (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/cuda/CublasHandlePool.cpp:408.)\n  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass\nUSDT:2026-09-08 16:50:06 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 16:50:06 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 16:50:07 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 16:50:07 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 16:50:08 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 16:50:26 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 16:50:27 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 16:50:27 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 16:50:27 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 16:50:27 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 16:50:28 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 16:50:36 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 16:50:37 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 16:50:37 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 16:50:38 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 16:50:38 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 16:50:39 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\n"
+  }
+]

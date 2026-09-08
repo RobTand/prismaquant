@@ -150,6 +150,7 @@ def test_prewarmer_device_scope_cannot_be_reused_for_another_device():
 def _plan(tmp_path):
     from prismaquant.tessera_joint_aura import SCHEMA
     return {'schema': SCHEMA, 'model': 'fixture', 'inputs': {}, 'output_root': str(tmp_path),
+        'canonical_capture': {'path': 'fixture-capture', 'sha256': 'b' * 64},
         'calibration_input': {'path': 'fixture', 'sha256': 'a' * 64},
         'execution': {'n_calib_samples': 512, 'calib_seqlen': 512, 'probe_microbatch': 1,
                       'n_probes': 4, 'seed_base': 7000, 'token_scope': 'all', 'temperature': 1.0,
@@ -188,7 +189,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     monkeypatch.setattr(bridge, 'load_measured_anchor_input', lambda *_args, **_kwargs: data)
     monkeypatch.setattr(calibration_data, 'load_calibration_input', lambda *_args, **_kwargs:
         (torch.zeros((512, 512), dtype=torch.int64), calibration))
-    runner = SimpleNamespace(model=object(), layer_index_for_qname=lambda _: 0, shutdown=lambda: None)
+    runner = SimpleNamespace(model=torch.nn.Module(), layer_index_for_qname=lambda _: 0, shutdown=lambda: None)
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *_args, **_kwargs: runner)
     monkeypatch.setattr(cost_streaming, 'build_streamed_model_identity', lambda *_args, **_kwargs: source)
     monkeypatch.setattr(joint_aura, 'source_execution_identity', lambda _: execution)

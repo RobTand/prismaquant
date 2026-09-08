@@ -1,0 +1,119 @@
+{
+  "schema": "prismaquant.glm_original_prefix_graph_plan.v1",
+  "status": "PROPOSED_NOT_RUNNABLE",
+  "implementation_present": false,
+  "native_authorized": false,
+  "source_runtime": "34388d2bfeea0e76830645aab92d15132f766bcf",
+  "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+  "source_files": {
+    "path": "/mnt/shared/tessera-measurements/glm-streaming-source-20260907/workspace-prefix-inputs-03/source-files.json",
+    "sha256": "f05c8d55f091e2fa4a2663f8b983f3137e94d0f153648b35c336b8e4ecea082c",
+    "files": 21,
+    "bytes": 73904396020,
+    "stat_fingerprints_matched_at_design": true
+  },
+  "config_sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943",
+  "index_sha256": "e6007bd58fb7e07f9fe69544257ee2713f252ef5855bbf685b48c991d524ef0f",
+  "calibration_input": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/exact-calibration-input-01/calibration_tokens.safetensors",
+    "sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329",
+    "shape": [
+      512,
+      512
+    ],
+    "dtype": "torch.int64",
+    "fit_ids_sha256": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+    "selected_original_row_indices": [
+      0,
+      511
+    ]
+  },
+  "prefix_layers": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "measured_layers": [
+    0,
+    3,
+    4
+  ],
+  "metadata_only_original_rows": 512,
+  "sequence_length": 512,
+  "microbatch": 1,
+  "hc_mult": 4,
+  "probes": {
+    "count": 4,
+    "seeds": [
+      7000,
+      7001,
+      7002,
+      7003
+    ],
+    "kind": "deterministic_boundary_qualification_stimuli_not_original_downstream_Fisher_adjoints",
+    "values": "BF16 plus/minus 1/256, one local CPU generator per seed; no global RNG mutation",
+    "shape": [
+      1,
+      512,
+      4,
+      4096
+    ]
+  },
+  "arms": [
+    "unobserved_isolated_baseline",
+    "nonfinal_fork_replay",
+    "final_original_owner_replay"
+  ],
+  "expected_backward_calls": 72,
+  "statistics_allocations": false,
+  "pwc_reads": false,
+  "cost_output": false,
+  "resources": {
+    "physical_bytes": 111669149696,
+    "gpu_subset_bytes": 98784247808,
+    "cpus": 6,
+    "source_reader_threads": 4,
+    "native_math_threads": 1,
+    "timeout_seconds": 1800,
+    "measurement": true,
+    "portable_host_class": "gb10",
+    "source_slots": 2,
+    "prefetch_workers": 1,
+    "lookahead": 1,
+    "prefetch_min_available_bytes": 25769803776,
+    "source_cache_headroom_bytes": 25769803776,
+    "workspace_reserve_bytes": 17179869184,
+    "auxiliary_cap_bytes": 2147483648,
+    "boundary_resident_cap_bytes": 2281701376,
+    "boundary_artifact_cap_bytes": 1073741824,
+    "replay_fork_cap_bytes": 268435456,
+    "inactive_cuda_allowance_bytes": 8589934592,
+    "host_runtime_metadata_allowance_bytes": 4294967296,
+    "physical_guard_margin_bytes": 2147483648,
+    "host_free_floor_bytes": 8589934592
+  },
+  "image": {
+    "content_sha256": "eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd",
+    "image_id": "sha256:9f9b9f05b17531399ba66dc6415b054cf5d68c82270626d0e9150e75c808435f",
+    "modeling_file_sha256": "2092bbb4efa2a8087b74f4a4da37635c503fe1df9ae73f1e6e8342af8b4b8e8b",
+    "modeling_file_bytes": 102403,
+    "inspection": "Copied from unstarted disposable image container; container removed; no native code executed"
+  },
+  "guard_conditional_envelopes": {
+    "source_loading_physical_gib": 78.65308921039104,
+    "source_loading_gpu_gib": 70.52808921039104,
+    "settled_graph_physical_gib": 65.15272299945354,
+    "settled_graph_gpu_gib": 57.027722999453545,
+    "graph_plus_unallocated_full_statistics_and_fork_physical_gib": 97.40272299945354,
+    "graph_plus_unallocated_full_statistics_and_fork_gpu_gib": 89.27772299945354
+  },
+  "limits": [
+    "No original full-45-layer or full-512-row graph peak qualification",
+    "No true downstream Fisher adjoints, costs, anchors, quality, throughput or served attestation",
+    "No full statistics allocation or PWC candidates; coupled graph/statistics fit remains conditional",
+    "No dynamic nonempty cross-layer state qualification if original GLM profile remains empty",
+    "No changes to active capture files/process or source bytes"
+  ]
+}

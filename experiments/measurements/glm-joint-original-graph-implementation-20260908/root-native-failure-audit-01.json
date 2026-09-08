@@ -1,0 +1,38 @@
+{
+  "action": "5dac548ddf0844d62873aefb9201bbc42e72a85a07a9615e3b50cd609a30c17a",
+  "terminal_sha256": "19d43b4fb7f0a7c57911202a8d3e3347bf6a98cf70f1e9150ec1b0c133a53f54",
+  "returncode": 1,
+  "cleanup_complete": true,
+  "oom_kill": 0,
+  "snapshot": "e3c40be969bac23bf18b4e045c9c4f819b0216c9",
+  "source_diff": [
+    ".pbrun-closure.f9ed6eba59991c1e.json"
+  ],
+  "result_path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-01/result.json",
+  "result_sha256": "28685cb8e7e774e51530aab6dd7a4238e629168752a7a7104682545347699ced",
+  "authenticated_files": 16,
+  "authenticated_bytes": 73884166070,
+  "payload_files": 14,
+  "completed_backwards": 0,
+  "metadata": {
+    "graph_calls": 0,
+    "metadata_owners_expired": true,
+    "rows": 512,
+    "telemetry": {
+      "hot_read_misses": 0,
+      "live_artifact_bytes": 0,
+      "peak_artifact_bytes": 0,
+      "peak_auxiliary_bytes": 272891904,
+      "peak_resident_tensor_bytes": 0,
+      "peak_shared_cotangent_reservation_bytes": 0,
+      "prefetch_windows": 0,
+      "read_tensor_bytes": 0,
+      "resident_tensor_bytes": 0,
+      "retired_entries": 0,
+      "written_entries": 0,
+      "written_tensor_bytes": 0
+    }
+  },
+  "failure": "Helper FP32 linspace sample indexing triggered device assert; no original graph forward completed. Cleanup CUDA calls also failed and final memory fields are absent.",
+  "no_success_receipt_claim": true
+}

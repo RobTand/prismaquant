@@ -1,0 +1,133 @@
+{
+  "schema": "prismaquant.glm_corrected_graph_invocation.v1",
+  "status": "CORRECTED_72_CALL_GRAPH_FROZEN_FOR_ROOT_REVIEW_NOT_SUBMITTED",
+  "source": "08e56c1fd4885214946553a8d634b56e350ed87b",
+  "source_files_sha256": {
+    "experiments/glm_derivative_cpu_gate.py": "9e67cf0da807952b698f4dc5660c0ce2c0e52e4141909d4220f130a70fd07120",
+    "experiments/glm_kda_backward_source_repro.py": "082a8c8b7363dcbb9e44ebd661cd108195143db68db04ce92ff744c301493e9b",
+    "experiments/glm_original_graph_profile.py": "bd2a3164e7b4669b916ce9c70f10f0d86d574ecda7ef57e6f433745f512828e2",
+    "experiments/glm_original_graph_source.py": "21bb03c8176285fa3439fe61caf348b8b3f883a58d801020a249bf371070ad86",
+    "experiments/joint_allocator_turnover_profile.py": "e12ba70aa00634529d043d382f691792f4afe56e97d73c59cb09740fb402fb10",
+    "experiments/joint_operator_windows_profile.py": "2e2b7f44c99adb44f90a08363772a7d754626ce19e81ca77b34717091d33faa6",
+    "experiments/measurements/glm-joint-original-graph-plan-20260908/plan.json": "9ebfb0300a94a07ff6309ad34542be967d668873a9fab396111b40726a7be618",
+    "experiments/workspace_netdata.py": "938db1c5d613990324b0397a364439159eb3e4da7daa824f790d96722d4e3361",
+    "prismaquant/cost_streaming.py": "3aa55ecc5137188dfe983fb9c9a0d4d5f31223fcf28618a63404a24dcb908446",
+    "prismaquant/glm_capture_compatibility.py": "676d3c7f7dc111ef68ad08c0bd1375f1f90e803aa045291079364515ce6044e0",
+    "prismaquant/glm_source_derivative.py": "69a250c3a8ccc83417ffd7e4df4c60a82a99ac911f688c42f3dd8b0d16797229",
+    "prismaquant/joint_aura.py": "db0071aef5ccf66f9d8f8deb6a0681b31626b033f2668c22d00b805045173f45",
+    "prismaquant/layer_streaming.py": "c92b68cbd43124af7d3428d92a0c3ae26efe3ae856890589b94120d07d93f0a9",
+    "prismaquant/memory_management.py": "e19bea17082ad4fc07972c28f7988c46aaa95c9b7a353c5650f64ff2ad16384c",
+    "prismaquant/model_profiles/base.py": "e6b2ca886ba39d47204852e3f6ab243d9a03f06b1dd34cfa0d2f2451eb1207b6",
+    "prismaquant/model_profiles/glm5_next.py": "2bc82489cac341d88cd5de7ae60872bab09812ca36b81d3b73c2b51ebcd8355f",
+    "prismaquant/perturbed_x_cache.py": "b4b7374513eb631218ada192699d3b62228b671426241f3c1969b81c99c4444c",
+    "prismaquant/sensitivity_probe.py": "647ee0b19d9376a26af6d55e4cbd42a32795d750f543e3fcb303bc3e62ae1491",
+    "prismaquant/streaming_model.py": "4d4b75edc2cbf2fde3b5bb0e4c331b8b3705fef77b24700ef3a18cc315de90f9",
+    "prismaquant/tessera_joint_aura.py": "e0f48a5f0ae5ad2eadc1ef1a375c68f18671994d3a007fb390f6cd2f0041a203",
+    "tests/test_glm_original_graph_profile.py": "0bae400278a840c7691ba3f5daf82502635ac63d6e543f57cfeeea2d4e3dcc0d",
+    "tests/test_glm_source_derivative.py": "17837e9f66de522806358952ec579043a3bd6aba8703c7103a7133e2badcc58f",
+    "tools/container_runtime_identity.py": "28a215446e101f41f203db72bc0e0a4c3edfa566e7b5419defff92b684a102fe",
+    "tools/tessera_campaign_container.py": "79f7c4a6a7c2fb31f3486cce49a0bf675bdbe290c61388ab6e85b29a5b3f54f6"
+  },
+  "command": [
+    "python3",
+    "/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
+    "--cwd",
+    "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "--gpu",
+    "--measurement",
+    "--host-class",
+    "gb10",
+    "--cpus",
+    "6",
+    "--demand",
+    "mem_gb=104",
+    "--gpu-memory-gb",
+    "92",
+    "--priority",
+    "-10",
+    "--timeout-s",
+    "1800",
+    "--detach",
+    "--",
+    "python3",
+    "-m",
+    "tools.tessera_campaign_container",
+    "--spec",
+    "{\"container\":{\"archive\":{\"path\":\"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-image-build-03/corrected-image.tar\",\"sha256\":\"f68f0cced8285711895a43c9e7ab7d9f3bfa00d737b2d1e4f21d608ff0c2b0af\"},\"content_sha256\":\"d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026\",\"image\":\"prismaquant-glm-derivative:causal-exp-v1-20260908\",\"mounts\":[{\"source\":\"/mnt/shared\",\"target\":\"/mnt/shared\"},{\"readonly\":true,\"source\":\"/home/rob/.cache/huggingface\",\"target\":\"/hf-cache\"},{\"readonly\":true,\"source\":\"/mnt/shared/models/GLM-5.3-Flash-BF16\",\"target\":\"/mnt/shared/models/GLM-5.3-Flash-BF16\"}]},\"env\":{\"HF_DATASETS_CACHE\":\"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/hf-datasets\",\"HF_HOME\":\"/hf-cache\",\"HF_HUB_OFFLINE\":\"1\",\"MAX_JOBS\":\"1\",\"MIMALLOC_PURGE_DELAY\":\"0\",\"MKL_NUM_THREADS\":\"1\",\"NUMEXPR_NUM_THREADS\":\"1\",\"OMP_NUM_THREADS\":\"1\",\"OPENBLAS_NUM_THREADS\":\"1\",\"PRISMAQUANT_DETERMINISTIC\":\"1\",\"PRISMAQUANT_LAYER_READ_THREADS\":\"4\",\"PRISMAQUANT_RELEASE_SOURCE_PAGES\":\"1\",\"PRISMAQUANT_TMPDIR\":\"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/staging\",\"PYTHONDONTWRITEBYTECODE\":\"1\",\"PYTHONPATH\":\"/workspace:/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97/src:/mnt/shared/tessera-measurements/first-model-20260907/inputs/container-compatible-deps:/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/capture-pytest-tools\",\"PYTORCH_ALLOC_CONF\":\"expandable_segments:True\",\"TESSERA_REPO\":\"/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97\",\"TORCHINDUCTOR_CACHE_DIR\":\"/tmp/glm-canonical-inductor\",\"TORCHINDUCTOR_COMPILE_THREADS\":\"1\",\"TRITON_CACHE_DIR\":\"/tmp/glm-canonical-triton\",\"XDG_CACHE_HOME\":\"/tmp/glm-canonical-cache\"}}",
+    "--",
+    "python3",
+    "-m",
+    "experiments.glm_original_graph_profile",
+    "--out",
+    "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01",
+    "--source-derivative",
+    "{\"image_build\":{\"path\":\"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-image-build-03/result.json\",\"sha256\":\"e8426d3554180219a0fff421149118a9e0a17ef7a2091c5a03e21834dd1744c5\"},\"schema\":\"prismaquant.glm_source_derivative.v1\",\"version\":\"glm_kda_causal_exp_v1\"}",
+    "--original-layer0-reference",
+    "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-diagnostic-01/result.json",
+    "--original-layer0-reference-sha256",
+    "b4463c10d5ecc9d8fb6e7f58957d4450f8eac3ab808cf70bb9969fb1173b4a42"
+  ],
+  "source_derivative": {
+    "schema": "prismaquant.glm_source_derivative.v1",
+    "version": "glm_kda_causal_exp_v1",
+    "image_build": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-image-build-03/result.json",
+      "sha256": "e8426d3554180219a0fff421149118a9e0a17ef7a2091c5a03e21834dd1744c5"
+    }
+  },
+  "original_layer0": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-diagnostic-01/result.json",
+    "sha256": "b4463c10d5ecc9d8fb6e7f58957d4450f8eac3ab808cf70bb9969fb1173b4a42"
+  },
+  "required_cpu_proofs": {
+    "actual_image_meta": "1fb94e6b11a125147cb2bf8053d36bbeffd4e98443c24c6b911de82bf0f813c4",
+    "exact_code_auth_unit": "4f3bab55b3b912d35bae9dc9ed07c9b3278053f086e374efffb15a067635917d",
+    "causal_and_final_state": "1c91ea18a1c8da392318587059806974770521ab18aebfdae520ca70b616b8f7",
+    "independent_complete_archive": "a6b3c3f460b6cfab52738cc17d76c72a3d1934128a0d5e894d6a68aaa7232c62",
+    "final_related_suite": "ad3591a03e80a28588ca07873f4d7397625a8bdcb9cb6373d897dabe62c3d4f5"
+  },
+  "scope": "Exactly72 corrected native backward calls: original rows0/511, original prefix layers0/3/4, seeds7000..7003, each unobserved isolated baseline/nonfinal fork replay/final original-owner replay. Preserve actual original45-layer model config and original calibration draw; authenticate required prefetched source bytes and explicit corrected runtime; visit only original prefix0..4 with lookahead to5. This is bounded graph qualification, not full-model costs, quality, serving or capture compatibility.",
+  "acceptance": [
+    "All24 pinned helper/runtime/source hashes and actual derivative code/dispatch/gates stay authenticated; consumed original source bytes match descriptor-bound hashes.",
+    "Six finite primary outputs; original row0/layer0 output bytes match original unmodified native reference.",
+    "Exactly72 scheduled native backward+diagnostic records, finite nonzero input cotangents, each replay output equals its primary, each fork/final cotangent and stimulus equals isolated baseline.",
+    "Fork/final activity and routed expert decisions match for every layer/row/seed; produced shared adjoints are absent and original-owner/fork lifetime closes.",
+    "In-process Torch traces for9 layer/arm scopes, both-box Netdata, memory/source ownership/cleanup evidence complete."
+  ],
+  "next_gate": "Root reviews the actual72-call result. Original-capture compatibility additionally requires the original capture action COMPLETE; no compatibility issuance or full model run is authorized by this file.",
+  "schedule": {
+    "original_rows": [
+      0,
+      511
+    ],
+    "layers": [
+      0,
+      3,
+      4
+    ],
+    "seeds": [
+      7000,
+      7001,
+      7002,
+      7003
+    ],
+    "arms": [
+      "unobserved_isolated_baseline",
+      "nonfinal_fork_replay",
+      "final_original_owner_replay"
+    ],
+    "backward_calls": 72,
+    "order": "layer,row,seed,arm"
+  },
+  "native_prerequisite": {
+    "action_key": "37056154d67ef1e47ca0a5079e4d6f01e226c0e313fd1925387e22fd1a0c092a",
+    "audit": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-diagnostic-audit.json",
+      "sha256": "a9c6e0f2ff141b05ae91abf4b939e38131b4340284fdd9a81331a15c3b208bae"
+    },
+    "result": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-diagnostic-01/result.json",
+      "sha256": "60836c9ae78f3b5f2929588fd22f673a33ed22780e2a7ed369d0cae95db7da02"
+    }
+  }
+}

@@ -194,6 +194,10 @@ _VISUAL_PREFIX = "model.visual."
 class Glm5NextProfile(ModelProfile):
     """Zhipu GLM-5.3-Flash / glm5_next family."""
 
+    def source_derivative_contract(self) -> dict:
+        from prismaquant.glm_source_derivative import declaration
+        return declaration()
+
     # Detection priority (lower = consulted first). 210 follows qwen4_exp
     # (200), which follows Laguna (190); disjoint from every other family's
     # match. It MUST equal `specs/glm5_next.json`'s `priority`

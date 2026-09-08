@@ -1,0 +1,139 @@
+{
+  "action_key": "6219d346dfd3aee00c0bc43185beb018513961aa505151a4d2787849fd0662f6",
+  "status": "failed_control_derivative_byte_equality_with_diagonal_premask",
+  "terminal_sha256": "5680c6e5190283bb667118d7d31b263f2e5f17820beef341e25e7e14cda64519",
+  "snapshot": {
+    "commit": "7941b37a351609e1e0c954500040fceb652bc344",
+    "input": {
+      "bytes": 26617908,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "ead117f31883b641c12db93e3a486ee028aba3cc1ece12340c8a1b0f2799d520"
+    },
+    "parent": "c462fcbcdac1fc2f787ab855029308d3646de094",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff": "A\t.pbrun-closure.d3e23b12521b2732.json\n",
+  "returncode": 1,
+  "cleanup": {
+    "checked_unix": 1788881436.4938767,
+    "complete": true,
+    "nonce": "afd9ce473c914428a5b2f4967c5968d1",
+    "released": {
+      "ok": true,
+      "scope_id": "prismabuild-job172dbf507e4ea096b395d279a01a336b.slice",
+      "stop_reason": "failed",
+      "stopped_unix": 1788881436.374204
+    },
+    "telemetry": {
+      "action_key": "6219d346dfd3aee00c0bc43185beb018513961aa505151a4d2787849fd0662f6",
+      "complete": true,
+      "cpu_seconds": 2.822262,
+      "cpu_system_seconds": 0.366163,
+      "cpu_user_seconds": 2.456098,
+      "errors": [],
+      "gpu_memory_max_bytes": 2147483648,
+      "host": "dl380g10",
+      "memory_current_bytes": 688128,
+      "memory_max_bytes": 2147483648,
+      "memory_peak_bytes": 179695616,
+      "nonce": "afd9ce473c914428a5b2f4967c5968d1",
+      "oom_kill": 0,
+      "oom_local": 0,
+      "process_io": {
+        "live": {},
+        "members": [
+          2756464,
+          2756533,
+          2756535,
+          2756536
+        ],
+        "processes_live": 0,
+        "processes_observed": 4,
+        "processes_unreadable": 0,
+        "rchar": 47607930,
+        "read_bytes": 0,
+        "retired": {
+          "rchar": 47607930,
+          "read_bytes": 0,
+          "syscr": 2211,
+          "syscw": 11,
+          "wchar": 868,
+          "write_bytes": 472
+        },
+        "source": "proc_io",
+        "syscr": 2211,
+        "syscw": 11,
+        "wchar": 868,
+        "write_bytes": 472
+      },
+      "sampled_unix": 1788881436.4782877,
+      "scope_unit": "prismabuild-job172dbf507e4ea096b395d279a01a336b.slice",
+      "shape_key": "444cf685089c362cdca131acb93c595653355aa670d7d66ddd80eccafe3bf9e6",
+      "termination_reason": "failed",
+      "wall_seconds": 3.7161250509961974
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 48.3493496,
+        "busy_percent_peak": 54.020104800000006,
+        "psi_some_avg10_max": 4.11,
+        "psi_some_avg10_samples": 7,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 8,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788881436.3323143,
+      "errors": [
+        "no pqteld CSV for dl380g10 covering the window"
+      ],
+      "host": "dl380g10",
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata",
+      "start_unix": 1788881430.5564811
+    },
+    "finished_unix": 1788881436.3323143,
+    "host": "dl380g10",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 4,
+      "processes_unreadable": 0,
+      "rchar": 47607930,
+      "read_bytes": 0,
+      "source": "proc_io",
+      "syscr": 2211,
+      "syscw": 11,
+      "wchar": 868,
+      "write_bytes": 472
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 0,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 125669376,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.024059000000000053,
+      "user_seconds": 0.15538499999999988,
+      "voluntary_context_switches": 3
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 2.822262,
+      "cpu_system_seconds": 0.366163,
+      "cpu_user_seconds": 2.456098,
+      "memory_current_bytes": 688128,
+      "memory_peak_bytes": 179695616,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788881430.5564811,
+    "wall_seconds": 5.7758331298828125
+  },
+  "stdout": "Traceback (most recent call last):\n  File \"<frozen runpy>\", line 198, in _run_module_as_main\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/rob/tmp/prismabuild-checkouts/6219d346dfd3.4_8scxvv/checkout/experiments/glm_kda_backward_source_repro.py\", line 144, in <module>\n    main()\n  File \"/home/rob/tmp/prismabuild-checkouts/6219d346dfd3.4_8scxvv/checkout/experiments/glm_kda_backward_source_repro.py\", line 127, in main\n    cases = [run_case(functions, length=length, gate=gate, dtype=dtype, use_norm=norm, state=state)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rob/tmp/prismabuild-checkouts/6219d346dfd3.4_8scxvv/checkout/experiments/glm_kda_backward_source_repro.py\", line 86, in run_case\n    assert torch.equal(a, b), 'non-overflow control derivative changed'\n           ^^^^^^^^^^^^^^^^^\nAssertionError: non-overflow control derivative changed\n",
+  "lesson": "Only strictly upper-triangular entries are unused in both contractions. Preserve diagonal expression arithmetic to retain finite-control derivative rounding. This is a CPU proposal refinement, not a production regression."
+}

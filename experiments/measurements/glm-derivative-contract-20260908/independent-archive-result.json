@@ -1,0 +1,9 @@
+{
+  "status": "complete",
+  "archive_sha256": "f68f0cced8285711895a43c9e7ab7d9f3bfa00d737b2d1e4f21d608ff0c2b0af",
+  "archive_bytes": 20891473920,
+  "modeling_sha256": "416bd6168b3c42858c0e22622dd2e85ff04e9460703eadf64e5abef84aac24a3",
+  "layer_sha256": "fa86d327da704d598dc741c96ae15ecabc4389387a9311604352600a9ff9a5ae",
+  "config_sha256": "9195c23f22401c3434df14cc7dd83ee08f68be625ce7fdcb7973e122cfcf8eda",
+  "build_sha256": "e8426d3554180219a0fff421149118a9e0a17ef7a2091c5a03e21834dd1744c5"
+}

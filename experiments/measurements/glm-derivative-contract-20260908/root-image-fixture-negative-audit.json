@@ -1,0 +1,23 @@
+{
+  "action": "d3d522666f9635418009d18717d49746679db3f05016cd1cb999e19974f196ba",
+  "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/d3d522666f9635418009d18717d49746679db3f05016cd1cb999e19974f196ba.json",
+  "terminal_sha256": "5a8063b346821645a04d0e47183286f8848dc8a207116132c6be3e256bbba837",
+  "source_snapshot": {
+    "commit": "85a1040509de165b6484d2964ae85414c3067865",
+    "input": {
+      "bytes": 26933292,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "68469d9022d22460d325868e8f0104a193861be1bffcfa29cbb9108ce37f9c36"
+    },
+    "parent": "4446f72506160d9b2df38823ac130b4d1f86868d",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff_from_4446": [
+    ".pbrun-closure.96c4551d41314f20.json"
+  ],
+  "returncode": 1,
+  "cleanup_complete": true,
+  "stdout_tail": "f bound is None:\n>               raise RuntimeError('declared container image is unavailable: ' + found.stderr)\nE               RuntimeError: declared container image is unavailable: Error response from daemon: No such image: qualified:portable\n\ntools/tessera_campaign_container.py:94: RuntimeError\n__________ test_changed_portable_tag_refuses_before_container_launch ___________\n\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc971468830>\n\n    def test_changed_portable_tag_refuses_before_container_launch(monkeypatch):\n        expected = identity.image_content_sha256(inspection())\n        observed = inspection()\n        observed[\"Config\"][\"Env\"] = [\"PATH=/changed\"]\n        monkeypatch.setattr(runner.subprocess, \"check_output\", lambda *a, **k: json.dumps([observed]))\n        def forbidden(*args):\n            pytest.fail(\"changed runtime reached container launch\")\n        monkeypatch.setattr(runner.os, \"execvp\", forbidden)\n        spec = {\"container\": {\"image\": \"qualified:portable\", \"content_sha256\": expected}}\n>       with pytest.raises(RuntimeError, match=\"content.*differs\"):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       AssertionError: Regex pattern did not match.\nE         Expected regex: 'content.*differs'\nE         Actual message: 'declared container image is unavailable: Error response from daemon: No such image: qualified:portable\\n'\n\ntests/test_campaign_image_content.py:74: AssertionError\n=============================== warnings summary ===============================\ntests/test_campaign_image_content.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_campaign_image_content.py::test_resolved_image_is_executed_after_content_check\nFAILED tests/test_campaign_image_content.py::test_changed_portable_tag_refuses_before_container_launch\n2 failed, 13 passed, 14 warnings in 4.99s\n"
+}

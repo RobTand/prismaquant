@@ -1,0 +1,75 @@
+[
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 2,
+      "mem_gb": 4
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 180,
+    "priority": -10,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-c",
+      "from pathlib import Path\nimport pytest\nfor name in ['experiments/glm_original_graph_profile.py','experiments/glm_original_graph_source.py','tests/test_glm_original_graph_profile.py']:\n compile(Path(name).read_text(),name,'exec')\nraise SystemExit(pytest.main(['-q','-rs','tests/test_glm_original_graph_profile.py']))\n"
+    ]
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 2,
+      "mem_gb": 4
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 180,
+    "priority": -10,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "experiments.glm_original_graph_profile",
+      "--cpu-preflight",
+      "--diagnostic-layer0",
+      "--out",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/cpu-preflight-diagnostic-01"
+    ]
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 2
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 180,
+    "priority": -10,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-c",
+      "import collections,hashlib,json,sys\nfrom pathlib import Path\np=Path(sys.argv[1]); expected=sys.argv[2]\nraw=p.read_bytes()\nassert hashlib.sha256(raw).hexdigest()==expected\nevents=json.loads(raw)['traceEvents']; del raw\nkernels=collections.Counter(e['name'] for e in events if e.get('cat')=='kernel');cpu=collections.Counter(e['name'] for e in events if e.get('cat')=='cpu_op')\nneedles=['kda','delta','chunk','fla','causal','triton']\nresult=dict(trace_sha256=expected,kernel_names=len(kernels),matched_kernels={n:c for n,c in kernels.items() if any(x in n.lower() for x in needles)},matched_cpu_ops={n:c for n,c in cpu.items() if any(x in n.lower() for x in needles) or any(x in n for x in ['ExpBackward','MaskedFillBackward','CumsumBackward'])},scope='Full-name inventory is dispatch evidence only; it does not identify numerical values or prove the cause of nonfinite gradients.')\nPath(sys.argv[3]).write_text(json.dumps(result,indent=2)+'\\n');print(json.dumps(result))\n",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-02/layer0_unobserved_isolated_baseline.trace.json",
+      "69a0cf6fe1ec8f79c1d036f497008fd0c077cdb0cc45e5745e041207a596be4f",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-02/dispatch-inventory.json"
+    ]
+  }
+]

@@ -1,0 +1,175 @@
+{
+  "action": "d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e",
+  "terminal_sha256": "cc2a0e03586487a770427c804d356ea9e6eeb30ad6bd222227fb6f3249c5e7c3",
+  "returncode": 1,
+  "cleanup": {
+    "checked_unix": 1788879852.8459373,
+    "complete": true,
+    "nonce": "87a6607bd62a42e5800ec4149388744e",
+    "released": {
+      "ok": true,
+      "retired": true,
+      "scope_id": "prismabuild-jobbda6e44f715b06d0bc6d64ff6e605dda.slice"
+    },
+    "telemetry": {
+      "action_key": "d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e",
+      "complete": true,
+      "cpu_seconds": 54.104954,
+      "cpu_system_seconds": 13.124981,
+      "cpu_user_seconds": 40.979972,
+      "errors": [],
+      "gpu_memory_max_bytes": 98784247808,
+      "host": "sparklina",
+      "memory_current_bytes": 2588315648,
+      "memory_max_bytes": 111669149696,
+      "memory_peak_bytes": 7088664576,
+      "nonce": "87a6607bd62a42e5800ec4149388744e",
+      "oom_kill": 0,
+      "oom_local": 0,
+      "process_io": {
+        "live": {},
+        "members": [
+          1547997,
+          1548020,
+          1548021,
+          1548022,
+          1548043,
+          1548088
+        ],
+        "processes_live": 0,
+        "processes_observed": 6,
+        "processes_unreadable": 0,
+        "rchar": 74179801421,
+        "read_bytes": 75905859584,
+        "retired": {
+          "rchar": 74179801421,
+          "read_bytes": 75905859584,
+          "syscr": 41107,
+          "syscw": 1677,
+          "wchar": 254430196,
+          "write_bytes": 253620224
+        },
+        "source": "proc_io",
+        "syscr": 41107,
+        "syscw": 1677,
+        "wchar": 254430196,
+        "write_bytes": 253620224
+      },
+      "sampled_unix": 1788879852.8331115,
+      "scope_unit": "prismabuild-jobbda6e44f715b06d0bc6d64ff6e605dda.slice",
+      "shape_key": "9db7750a4bb0e95acd79e57534b5d3cdd98baed84e29a53e59c9dcaab27ead16",
+      "termination_reason": "failed",
+      "wall_seconds": 88.05706831099815
+    }
+  },
+  "snapshot": "dddf8c771a8acdd272c8c25703b062375485df79",
+  "source_diff_from_f7b617": [
+    ".pbrun-closure.c46406d715b33063.json"
+  ],
+  "result_sha256": "8265a92c7eca8a07477b95d5e229b7d53ce30688ac15fd2d5c507ef46e1de5ad",
+  "result_status": "failed",
+  "backwards": 0,
+  "metadata": {
+    "graph_calls": 0,
+    "metadata_owners_expired": true,
+    "rows": 512,
+    "telemetry": {
+      "hot_read_misses": 0,
+      "live_artifact_bytes": 0,
+      "peak_artifact_bytes": 0,
+      "peak_auxiliary_bytes": 272891904,
+      "peak_resident_tensor_bytes": 0,
+      "peak_shared_cotangent_reservation_bytes": 0,
+      "prefetch_windows": 0,
+      "read_tensor_bytes": 0,
+      "resident_tensor_bytes": 0,
+      "retired_entries": 0,
+      "written_entries": 0,
+      "written_tensor_bytes": 0
+    }
+  },
+  "telemetry_errors": [],
+  "source_owners_expired": false,
+  "traceback": "Traceback (most recent call last):\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 389, in main\n    run_native(args, plan, source, profile, tokens, shards, result)\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 502, in run_native\n    runner.visit_layer_batches(observer.tokens, observer.visit, boundary_storage=storage)\n  File \"/workspace/prismaquant/cost_streaming.py\", line 816, in visit_layer_batches\n    visitor(layer, forward_batch)\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 254, in visit\n    forward_batch(tokens)\n  File \"/workspace/prismaquant/cost_streaming.py\", line 804, in forward_batch\n    output = checked(self._call, layer, hidden, batch=batch, pass_state=pass_state)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/prismaquant/cost_streaming.py\", line 729, in checked\n    result = function(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 230, in __call__\n    value, profile = profile_phase(self.out, f'layer{layer}_{arm}', call)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/joint_allocator_turnover_profile.py\", line 70, in profile_phase\n    value = body()\n            ^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 228, in <lambda>\n    call = lambda: self.replay(self.runner, layer, hidden, batch, pass_state, seed, arm, owner)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 189, in replay_arm\n    raise RuntimeError('original graph input cotangent is absent/nonfinite/zero')\nRuntimeError: original graph input cotangent is absent/nonfinite/zero\n",
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 7.3134139120879125,
+        "busy_percent_peak": 12.5565039,
+        "psi_some_avg10_max": 0.77,
+        "psi_some_avg10_samples": 90,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 91,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788879852.5378177,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.12285714285714285,
+        "power_reference_scope": "soc_tdp",
+        "power_reference_source": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html",
+        "power_reference_w": 140.0,
+        "power_w_mean": 5.097191011235956,
+        "power_w_peak": 17.2,
+        "samples": 178,
+        "source": "pqteld",
+        "temperature_c_peak": 48.0,
+        "utilization_percent_mean": 0.6741573033707865,
+        "utilization_percent_peak": 46.0,
+        "utilization_samples": 178,
+        "uvm_residual_bytes_peak": 16141836288,
+        "uvm_residual_samples": 178
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 32.53,
+        "psi_mem_full_avg10_max": 0.0,
+        "samples": 178,
+        "source": "pqteld",
+        "unified_available_bytes_min": 107314348032,
+        "unified_total_bytes": 130595991552,
+        "unified_used_bytes_peak": 23281643520
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1788879763.7626228
+    },
+    "finished_unix": 1788879852.5378177,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 6,
+      "processes_unreadable": 0,
+      "rchar": 74179801421,
+      "read_bytes": 75905859584,
+      "source": "proc_io",
+      "syscr": 41107,
+      "syscw": 1677,
+      "wchar": 254430196,
+      "write_bytes": 253620224
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 1,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 103837696,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.016704000000000052,
+      "user_seconds": 0.0609219999999997,
+      "voluntary_context_switches": 21
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 54.104954,
+      "cpu_system_seconds": 13.124981,
+      "cpu_user_seconds": 40.979972,
+      "memory_current_bytes": 2588360704,
+      "memory_peak_bytes": 7088664576,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788879763.7626228,
+    "wall_seconds": 88.77519488334656
+  }
+}
