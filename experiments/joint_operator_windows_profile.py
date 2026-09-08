@@ -423,8 +423,13 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled, reference=None
                     activities = [torch.profiler.ProfilerActivity.CPU]
                     if device.type == 'cuda':
                         activities.append(torch.profiler.ProfilerActivity.CUDA)
+                    # Full replay allocation/shape event graphs retain enough
+                    # host heap to trip the next call's unchanged 8-GiB guard.
+                    # Shapes are bound by the fixture; direct allocator peaks,
+                    # cgroup/process counters and weak storage owners measure
+                    # memory independently of this timing trace.
                     profiler = stack.enter_context(torch.profiler.profile(activities=activities,
-                        profile_memory=True, record_shapes=True))
+                        profile_memory=False, record_shapes=False))
                     cpu_profiler = stack.enter_context(cProfile.Profile())
                 started = time.perf_counter()
                 with torch.profiler.record_function('joint_operator_probe_' + mode):
@@ -477,7 +482,8 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled, reference=None
                 # here, after trace/cProfile export. Raw traces retain every
                 # event; analyze them separately without another live graph.
                 result['profile'] = dict(path=str(trace), sha256=sha(trace),
-                    bytes=trace.stat().st_size, aggregation='raw_trace_only')
+                    bytes=trace.stat().st_size, aggregation='raw_trace_only',
+                    record_shapes=False, profile_memory=False)
             del payload
         except BaseException:
             result.update(status='failed', traceback=traceback.format_exc(),
