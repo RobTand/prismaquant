@@ -98,3 +98,80 @@ def test_image_archive_requires_content_digest_and_refuses_changed_bytes(tmp_pat
     with pytest.raises(RuntimeError, match='archive bytes changed'):
         runner.inspect_or_load(data['container'])
     assert len(calls) == 1
+
+
+def _runner():
+    return importlib.import_module('tools.tessera_campaign_container')
+
+
+def test_a_row_that_reserved_no_gpu_does_not_get_the_device():
+    """The defect in one assertion (#430).
+
+    ``pbrun`` empties ``CUDA_VISIBLE_DEVICES`` in the action's environment
+    exactly when it granted no GPU slots.  Attaching the device anyway spends
+    no PrismaBuild token for it, so its admission arithmetic can seat a
+    GPU-reserving row beside this one, and a power reading taken next door has
+    an owner it cannot see.
+    """
+
+    attached, reason = _runner().gpu_attachment(
+        spec(), cpu_only=False, environ={'CUDA_VISIBLE_DEVICES': ''})
+    assert attached is False, (
+        'the container took the whole GPU for a row that reserved none: '
+        'PrismaBuild granted no slots and emptied CUDA_VISIBLE_DEVICES, and '
+        'nothing but a remembered --cpu-only withheld --gpus all (#430)')
+    assert 'no visible device' in reason
+
+
+def test_a_spec_that_hides_the_device_from_its_payload_does_not_attach_it():
+    """Masking CUDA is not the same as not having the device, and the spec
+    saying its payload sees none is a declaration this must honour."""
+
+    data = spec()
+    data['env']['CUDA_VISIBLE_DEVICES'] = ''
+    attached, reason = _runner().gpu_attachment(data, cpu_only=False, environ={})
+    assert attached is False
+    assert reason.startswith('container spec env')
+
+
+def test_a_granted_row_still_gets_the_device():
+    """The control.  Without it the assertions above would pass on a function
+    that never attaches anything, which would break every campaign row."""
+
+    attached, _ = _runner().gpu_attachment(
+        spec(), cpu_only=False, environ={'CUDA_VISIBLE_DEVICES': '0'})
+    assert attached is True
+
+
+def test_an_interactive_run_outside_pbrun_keeps_its_behaviour():
+    """Unset is not a declaration: there is no grant to read, so the flag is
+    still the way to say no and the default is unchanged."""
+
+    runner = _runner()
+    assert runner.gpu_attachment(spec(), cpu_only=False, environ={})[0] is True
+    assert runner.gpu_attachment(spec(), cpu_only=True, environ={})[0] is False
+    assert runner.gpu_attachment(
+        spec(), cpu_only=True, environ={'CUDA_VISIBLE_DEVICES': '0'})[0] is False
+
+
+def test_main_withholds_the_device_from_a_row_that_reserved_none(monkeypatch):
+    """The same property through the real entry point, on the argv it execs.
+
+    The unit assertions above call the decision directly; this one asserts on
+    what Docker is actually handed, so a decision that is right in isolation
+    and unwired in ``main`` still fails.
+    """
+
+    runner = _runner()
+    launched = {}
+    monkeypatch.setattr(runner, 'inspect_or_load', lambda container: [
+        {'Id': 'sha256:' + 'c' * 64, 'RepoDigests': [], 'RootFS': {'Layers': []}}])
+    monkeypatch.setattr(runner, 'image_content_sha256', lambda inspected: 'd' * 64)
+    monkeypatch.setattr(runner.os, 'execvp', lambda file, argv: launched.setdefault('argv', argv))
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '')
+    data = spec()
+    data['container'].pop('archive', None)
+    runner.main(['--spec', json.dumps(data), '--', 'python3', '-c', 'pass'])
+    assert '--gpus' not in launched['argv'], (
+        'the exec line still maps the whole GPU into a container whose row '
+        'reserved none (#430): ' + ' '.join(launched['argv'][:8]))
