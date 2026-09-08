@@ -73,8 +73,9 @@ def module_identity(module):
             if value.is_meta or (kind == 'parameter' and value.requires_grad):
                 raise RuntimeError('graph gate requires resident frozen original source parameters')
             flat = value.detach().reshape(-1)
-            indices = torch.linspace(0, max(0, flat.numel()-1), min(64, flat.numel()),
-                                     device=flat.device).long()
+            count = min(64, flat.numel())
+            positions = [i * (flat.numel()-1) // max(1, count-1) for i in range(count)]
+            indices = torch.tensor(positions, dtype=torch.int64, device=flat.device)
             result[f'{kind}:{name}'] = dict(ptr=value.data_ptr(), version=value._version,
                 shape=list(value.shape), dtype=str(value.dtype), samples=tensor_identity(flat[indices]))
     result['training'] = [name for name, item in module.named_modules() if item.training]

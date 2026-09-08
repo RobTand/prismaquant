@@ -161,6 +161,18 @@ def test_real_baseline_backward_in_outer_no_grad_preserves_source_and_rng():
     assert runner.calls == 1
 
 
+def test_module_identity_samples_original_dense_size_without_float_rounding():
+    # Actual original layer0 gate/up geometry: n-1 is not representable in FP32.
+    module = torch.nn.Linear(4096,12288,bias=False,device='meta',dtype=torch.bfloat16)
+    module.to_empty(device='cpu').eval().requires_grad_(False)
+    with torch.no_grad():
+        module.weight[0,0] = 3
+        module.weight[-1,-1] = 7
+    identity = graph.module_identity(module)
+    assert identity['parameter:weight']['shape'] == [12288,4096]
+    assert identity['parameter:weight']['samples']['shape'] == [64]
+
+
 def test_inference_and_mutating_execution_refuse():
     runner = TinyRunner()
     with torch.inference_mode(), pytest.raises(RuntimeError, match='inference_mode'):
