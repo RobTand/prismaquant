@@ -1,5 +1,7 @@
 # Frontier destination metadata ownership — 2026-09-08
 
+Tracking issue: [#421](https://github.com/RobTand/prismaquant/issues/421).
+
 A new validated assignment could inherit the overwritten allocator recipe's
 Tessera wire/scale/population and serving/runtime claims. The selector now
 requires complete canonical assignment equality before carrying those fields;

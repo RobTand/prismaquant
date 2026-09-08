@@ -7,7 +7,8 @@ Re-stamped (2026-09-08, `plan/glm-six-variant-recipes`) for validated-frontier
 metadata ownership. Before writing any selection output, the selector refuses
 to carry a destination recipe's Tessera metadata, expert population or measured
 serving claims into a different canonical assignment, including changes to its
-BF16 units. Those claims remain usable for the same exact assignment. The
+BF16 units. For an unchanged assignment the selector preserves existing claims;
+downstream provenance and export gates still validate them. The
 Pareto/validation payload chain does not yet publish selected Tessera wire and
 scale provenance; an older destination is not an authority for a changed pick.
 Until that handoff exists, publish each such recipe through the allocator's
