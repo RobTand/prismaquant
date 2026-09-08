@@ -634,14 +634,14 @@ def _student_all_positions(args, payload, teacher_evidence=None) -> int:
 def _require_v2_candidate_identity(args, payload) -> None:
     """Pair model family/vocabulary and token IDs before a costly engine load."""
     try:
-        from .dsv4_wikitext_inputs import wikitext_model_identity, normalize_wikitext_model_identity
+        from .dsv4_wikitext_inputs import wikitext_model_identity
     except ImportError:
-        from dsv4_wikitext_inputs import wikitext_model_identity, normalize_wikitext_model_identity
+        from dsv4_wikitext_inputs import wikitext_model_identity
     tokenizer = tokenizer_identity(args.model)
     if tokenizer["content_sha256"] != payload["calibration_contract"]["tokenizer"]["identity_sha256"]:
         raise RuntimeError("candidate tokenizer identity differs from the authenticated teacher")
     candidate = wikitext_model_identity(args.model)
-    source = normalize_wikitext_model_identity(payload["source_model_identity"]["config"])
+    source = payload["model_identity"]
     if candidate != source or candidate["vocab_size"] != payload["vocab_size"]:
         raise RuntimeError("candidate model family/vocabulary differs from the authenticated teacher")
 

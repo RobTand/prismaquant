@@ -116,6 +116,7 @@ def v1_payload(tmp_path_factory):
                "checkpoint_weight_map": {"layers.0.weight": shard.name},
                "shards": [{"path": str(shard), "size": shard.stat().st_size,
                            "sha256": hashlib.sha256(shard.read_bytes()).hexdigest()}]}
+    (root / "config.json").write_text(json.dumps(bearing["config"]))
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
     identity = {"schema": "prismaquant.streamed_model.identity.v1", "source": str(root),
                 "resolved_commit": None, "content_sha256": canonical_json_sha256(bearing, where="fixture"), **bearing}
@@ -145,13 +146,15 @@ def v1_payload(tmp_path_factory):
 
 @pytest.fixture
 def v2_payload(v1_payload):
+    from tools.dsv4_wikitext_inputs import normalize_wikitext_model_identity
     payload = dict(v1_payload, schema=V2,
                    final_logprobs=torch.full((contract.N_SAMPLES, v1_payload["vocab_size"]),
                                             -math.log(v1_payload["vocab_size"])),
                    source_execution={"schema": "prismaquant.joint_aura.source_execution.v1",
                                      "modules": {"": {"attention": "eager"}}},
                    producer_identity=_producer(), fit_overlap_status="unverified",
-                   wikitext_inputs_sha256="e" * 64)
+                   wikitext_inputs_sha256="e" * 64,
+                   model_identity=normalize_wikitext_model_identity(v1_payload["source_model_identity"]["config"]))
     payload["payload_semantic_sha256"] = contract.payload_semantic_sha256(payload)
     return payload
 
@@ -301,7 +304,7 @@ def _stub_builder(v1_payload, tmp_path, monkeypatch, *, include_final=True,
         wikitext_inputs=str(input_path), offload_folder=str(tmp_path / "offload"),
         cache_headroom_gb=100., logits_chunk_rows=32, include_final_logprobs=include_final,
         source_derivative_json="declared.json" if explicit_derivative else None)
-    calls = {"forward": 0, "shutdown": 0, "source": 0, "execution": 0, "policy": 0, "tokenizer": 0,
+    calls = {"forward": 0, "shutdown": 0, "source": 0, "execution": 0, "policy": 0, "tokenizer": 0, "input_model": 0,
              "producer": 0, "kwargs": None}
     vocab = v1_payload["vocab_size"]
     last = torch.arange(vocab).float() / vocab
@@ -349,6 +352,14 @@ def _stub_builder(v1_payload, tmp_path, monkeypatch, *, include_final=True,
         calls["tokenizer"] += 1
         return {"content_sha256": "a" * 64 if drift == "tokenizer" and calls["tokenizer"] > 1 else "f" * 64}
 
+    def input_model_identity(*a):
+        from tools.dsv4_wikitext_inputs import normalize_wikitext_model_identity
+        calls["input_model"] += 1
+        config = source["config"]
+        if drift == "input_model" and calls["input_model"] > 1:
+            config = dict(config, model_type="changed")
+        return normalize_wikitext_model_identity(config)
+
     def producer():
         calls["producer"] += 1
         value = _producer()
@@ -360,6 +371,7 @@ def _stub_builder(v1_payload, tmp_path, monkeypatch, *, include_final=True,
     monkeypatch.setattr(model_profiles, "detect_profile", lambda *a: object())
     monkeypatch.setattr(AutoTokenizer, "from_pretrained", lambda *a, **k: range(vocab))
     monkeypatch.setattr(builder, "tokenizer_identity", tokenizer_identity)
+    monkeypatch.setattr(builder, "_input_model_identity", input_model_identity)
     monkeypatch.setattr(builder, "_load_gold_inputs", lambda *a: {"full_kl": {
         "token_ids": v1_payload["calib_ids"].tolist(), "selection": {"starts": v1_payload["starts"]},
         "dataset": dict(v1_payload["calibration_contract"]["dataset"], total_tokens=100_000)}})
@@ -394,7 +406,7 @@ def test_builder_default_v1_payload_and_runner_kwargs_preserved(v1_payload, tmp_
     assert "source_derivative" not in calls["kwargs"] and "attn_implementation" not in calls["kwargs"]
 
 
-@pytest.mark.parametrize("drift", ["source", "execution", "producer", "derivative", "input", "tokenizer"])
+@pytest.mark.parametrize("drift", ["source", "execution", "producer", "derivative", "input", "tokenizer", "input_model"])
 def test_builder_drift_refuses_and_releases_runner(v1_payload, tmp_path, monkeypatch, drift):
     args, calls, _ = _stub_builder(v1_payload, tmp_path, monkeypatch, drift=drift)
     with pytest.raises((RuntimeError, ValueError), match="changed"):
@@ -489,3 +501,20 @@ def test_builder_generic_input_reader_requires_independent_sha(tmp_path, monkeyp
     assert called == {"path": "input.json", "expected_sha256": "a" * 64,
                       "expected_tokenizer_identity": {"tokenizer": "bound"},
                       "expected_model_identity": {"model": "bound"}}
+
+
+def test_v2_full_glm_candidate_pairs_to_original_domain_despite_staged_text_config(
+        v2_payload, tmp_path, monkeypatch):
+    from tools.dsv4_wikitext_inputs import normalize_wikitext_model_identity
+    full = {"model_type": "glm5_next", "text_config": {
+        "model_type": "glm5_next_text", "vocab_size": v2_payload["vocab_size"]},
+        "vision_config": {"model_type": "glm5_next_vision"},
+        "quantization_config": {"quant_method": "tessera"}}
+    staged = dict(full["text_config"])
+    v2_payload["source_model_identity"] = dict(v2_payload["source_model_identity"], config=staged)
+    v2_payload["model_identity"] = normalize_wikitext_model_identity(full)
+    assert normalize_wikitext_model_identity(staged) != v2_payload["model_identity"]
+    (tmp_path / "config.json").write_text(json.dumps(full))
+    monkeypatch.setattr(gold, "tokenizer_identity", lambda *a: {
+        "content_sha256": v2_payload["calibration_contract"]["tokenizer"]["identity_sha256"]})
+    gold._require_v2_candidate_identity(argparse.Namespace(model=str(tmp_path)), v2_payload)

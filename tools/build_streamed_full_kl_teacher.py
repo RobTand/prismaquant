@@ -137,6 +137,14 @@ def _load_gold_inputs(args, model_path, tokenizer_attestation):
         expected_model_identity=wikitext_model_identity(model_path), expected_sha256=expected)
 
 
+def _input_model_identity(model_path):
+    try:
+        from .dsv4_wikitext_inputs import wikitext_model_identity
+    except ImportError:
+        from dsv4_wikitext_inputs import wikitext_model_identity
+    return wikitext_model_identity(model_path)
+
+
 def _topk_all_positions(
     logits: torch.Tensor,
     *,
@@ -203,6 +211,7 @@ def _build_payload(args: argparse.Namespace) -> dict:
     if not model_path.is_dir():
         raise RuntimeError(f"source model is not a directory: {model_path}")
     tokenizer_attestation = tokenizer_identity(model_path)
+    input_model_identity = _input_model_identity(model_path) if v2 else None
     # Reject an absent/tampered 156-KiB token input before walking the much
     # larger checkpoint identity or constructing any model/tokenizer runtime.
     input_sha256 = file_sha256(args.wikitext_inputs) if v2 else None
@@ -292,6 +301,8 @@ def _build_payload(args: argparse.Namespace) -> dict:
                 raise RuntimeError("teacher source execution changed during the forward")
             if tokenizer_identity(model_path) != tokenizer_attestation:
                 raise RuntimeError("teacher tokenizer identity changed during the forward")
+            if _input_model_identity(model_path) != input_model_identity:
+                raise RuntimeError("teacher input model identity changed during the forward")
             if _source_derivative_policy(args) != derivative_policy:
                 raise RuntimeError("teacher source derivative input changed during the forward")
             if _teacher_producer_identity() != producer_identity:
@@ -320,7 +331,7 @@ def _build_payload(args: argparse.Namespace) -> dict:
         "calibration_contract_sha256": canonical_sha256(calibration_contract),
         **({"final_logprobs": final_logprobs, "source_execution": source_execution,
             "producer_identity": producer_identity, "fit_overlap_status": "unverified",
-            "wikitext_inputs_sha256": input_sha256} if v2 else {}),
+            "wikitext_inputs_sha256": input_sha256, "model_identity": input_model_identity} if v2 else {}),
     }
     payload["payload_semantic_sha256"] = payload_semantic_sha256(payload)
     validate_teacher_payload(payload)

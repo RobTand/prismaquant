@@ -85,7 +85,7 @@ _MAX_REPORTABLE_NLL = math.log(float(torch.finfo(torch.float64).max))
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _TENSOR_KEYS = ("calib_ids", "topk_ids", "topk_lps")
 _V2_FIELDS = {"final_logprobs", "source_execution", "producer_identity", "fit_overlap_status",
-              "wikitext_inputs_sha256"}
+              "wikitext_inputs_sha256", "model_identity"}
 _TOKENIZER_FILENAMES = (
     "added_tokens.json",
     "merges.txt",
@@ -750,6 +750,17 @@ def validate_final_logprobs(value: object, *, n_samples: int, vocab_size: int) -
 
 def _validate_v2_source(payload: Mapping[str, Any]) -> None:
     _require_sha256(payload.get("wikitext_inputs_sha256"), where="teacher WikiText input file")
+    try:
+        from .dsv4_wikitext_inputs import normalize_wikitext_model_identity
+    except ImportError:
+        from dsv4_wikitext_inputs import normalize_wikitext_model_identity
+    model = payload.get("model_identity")
+    if not isinstance(model, Mapping) or set(model) != {"schema", "model_type", "text_model_type", "vocab_size"}:
+        raise TeacherPayloadError("teacher input model identity fields are not closed")
+    normalized = normalize_wikitext_model_identity({"model_type": model["model_type"],
+        "text_config": {"model_type": model["text_model_type"], "vocab_size": model["vocab_size"]}})
+    if model != normalized or model["vocab_size"] != payload["vocab_size"]:
+        raise TeacherPayloadError("teacher input model identity/vocabulary differs")
     execution = payload.get("source_execution")
     if not isinstance(execution, Mapping):
         raise TeacherPayloadError("teacher source execution is missing")
@@ -1035,6 +1046,7 @@ def _v2_evidence_fields(payload: Mapping[str, Any]) -> dict[str, object]:
         "producer_identity": payload["producer_identity"],
         "fit_overlap_status": payload["fit_overlap_status"],
         "wikitext_inputs_sha256": payload["wikitext_inputs_sha256"],
+        "model_identity": payload["model_identity"],
         "final_logprobs_descriptor": None if final is None else tensor_descriptor(final),
     }
 
