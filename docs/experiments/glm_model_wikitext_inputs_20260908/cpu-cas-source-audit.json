@@ -1,0 +1,180 @@
+{
+  "status": "PASS",
+  "records": [
+    {
+      "name": "regression-red",
+      "action": "605f436dd29e04ce4ba91a8f7e23ec7e093f05e43d5d3719cea9a28f9dbd2bdb",
+      "state": "failed",
+      "returncode": 1,
+      "snapshot": {
+        "commit": "573b923200e97a11be2ea670447ce028972ec020",
+        "input": {
+          "bytes": 27320745,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "da362a86061f2c42306ba08cdd696124f286811af4e07aa38f56d063a109e45d"
+        },
+        "parent": "273bd61dfa6ec0ec77592e8e1c32b8f17bd2f926",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "snapshot_diff": [
+        ".pbrun-closure.ccb132f60dc7dda4.json",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "stdout_sha256": "b67d4dae0a1b4fb8866f22758f1107e3df4e2a0e9402b5d27913b2eea05bf224",
+      "cas_checks_passed": null,
+      "scope": "Expected regression failed; no success CAS receipt claimed."
+    },
+    {
+      "name": "green-canonical",
+      "action": "2e102b37d3a8454a990d6abde67f0f73ca39cee9767738f870f9c7bda13ab139",
+      "state": "done",
+      "returncode": 0,
+      "snapshot": {
+        "commit": "e7cd20f50612c6af56e254c0f1c6422ccb1a78f4",
+        "input": {
+          "bytes": 27333974,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "fafa7d1383b9a51543c6c36781615e918bc886e0f25b1223a2fdd4a5f881fccf"
+        },
+        "parent": "273bd61dfa6ec0ec77592e8e1c32b8f17bd2f926",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "snapshot_diff": [
+        ".pbrun-closure.b07be41c4ceb3497.json",
+        "docs/ARCHITECTURE.md",
+        "docs/experiments/glm_model_wikitext_inputs_20260908/audit_overlap.py",
+        "tests/test_model_wikitext_inputs.py",
+        "tools/dsv4_wikitext_inputs.py",
+        "tools/measure_vllm_wikitext_ppl.py",
+        "tools/prepare_dsv4_wikitext_inputs.py"
+      ],
+      "stdout_sha256": "86139f8c0fdeffd89dc9a7f2f829fd9bffa39776b2e4469ef749be7647b0f72a",
+      "claim": "2ad8612479136fc450683377832ee4c6873e3ef27682993f45472327aa6247aa",
+      "receipt": {
+        "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/2e/2e102b37d3a8454a990d6abde67f0f73ca39cee9767738f870f9c7bda13ab139.json",
+        "present": false
+      },
+      "cas_checks_passed": true
+    },
+    {
+      "name": "green-pinned-corpus",
+      "action": "9ab97a04432c6a322c3ac9166c9d2040ad45f8a765dc3fbb817ea3a5e8bbabc2",
+      "state": "done",
+      "returncode": 0,
+      "snapshot": {
+        "commit": "c3de20f628ec48312a40f0f3fe62f3cb3118fa8e",
+        "input": {
+          "bytes": 27335335,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "5b8e785b5b9f5f11c424fbc9486ca5f4b17e9a31aee87799b8418000cedfacba"
+        },
+        "parent": "1a41c04cf89bc93deaee71df882e0e39a29dc221",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "snapshot_diff": [
+        ".pbrun-closure.f999d513b9724e97.json",
+        "tests/test_model_wikitext_inputs.py",
+        "tools/dsv4_wikitext_inputs.py"
+      ],
+      "stdout_sha256": "59f03123f3fa0c2220314f5d4182a8ace3ae956e37a3f136a11f6cf688702cac",
+      "claim": "e18b2dc1e49a0206fb79222a648026b0df9af537cc48bbcdae0258935abcd938",
+      "receipt": {
+        "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/9a/9ab97a04432c6a322c3ac9166c9d2040ad45f8a765dc3fbb817ea3a5e8bbabc2.json",
+        "present": false
+      },
+      "cas_checks_passed": true,
+      "current_source_matches_snapshot": true
+    },
+    {
+      "name": "materialize-final",
+      "action": "2fe5cc25aeb12c984b1a0e79165594af892ad008f7fd2203957189749459bb7e",
+      "state": "done",
+      "returncode": 0,
+      "snapshot": {
+        "commit": "0a147d920ea097db8758ea60203f5bf586565e31",
+        "input": {
+          "bytes": 27335336,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "6a1e3433c62cefba496028e2a79dda24cdbc50313b8b0b3a15b8bf8f3e1fe8ae"
+        },
+        "parent": "1a41c04cf89bc93deaee71df882e0e39a29dc221",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "snapshot_diff": [
+        ".pbrun-closure.ab59c5250872d84a.json",
+        "tests/test_model_wikitext_inputs.py",
+        "tools/dsv4_wikitext_inputs.py"
+      ],
+      "stdout_sha256": "b96881c2ce10d9a9667e8d275971aa3f951f1d41ef01ef2df5a6e8cfedc967e8",
+      "claim": "fd2a11cd2b85849cbef63fb756ce7289e05b1529a3be2717afb01fec2adef2bb",
+      "receipt": {
+        "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/2f/2fe5cc25aeb12c984b1a0e79165594af892ad008f7fd2203957189749459bb7e.json",
+        "present": false
+      },
+      "cas_checks_passed": true,
+      "current_source_matches_snapshot": true
+    },
+    {
+      "name": "datasets-install",
+      "action": "49107d3bb33172c4ff7d8832f4eae47758a53e1c4ccc97f1803ef2a202398b2e",
+      "state": "done",
+      "returncode": 0,
+      "snapshot": {
+        "commit": "6255473c0290eacab98505804366e94fc231eea4",
+        "input": {
+          "bytes": 27323139,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "2dfa2851933cde4a2b52daa106e6acfd7c3c1af63256546190f4dfadf2757ce9"
+        },
+        "parent": "273bd61dfa6ec0ec77592e8e1c32b8f17bd2f926",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "snapshot_diff": [
+        ".pbrun-closure.c33ecbe48558cab9.json",
+        "tests/test_model_wikitext_inputs.py",
+        "tools/dsv4_wikitext_inputs.py",
+        "tools/measure_vllm_wikitext_ppl.py",
+        "tools/prepare_dsv4_wikitext_inputs.py"
+      ],
+      "stdout_sha256": "1eaff056f7f0d3926376884d91fb0f07f3d11fb3074a878c3edfbe9a3280954b",
+      "claim": "56bd65161fadafda8cdf09f8830f0f6d4fdddd499435b205a0fc0112ca47f5c1",
+      "receipt": {
+        "action_manifest_sha256": "f6d06701fbb7cdb25aa3293dea333c6965c7a6ddd2a9939d180becc6a94aa5c5",
+        "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/49/49107d3bb33172c4ff7d8832f4eae47758a53e1c4ccc97f1803ef2a202398b2e.json",
+        "present": true,
+        "receipt_sha256": "b8d631c79393ddcab97003ac529cbbba3b61311d88e63de88f937e39b7892606",
+        "result": {
+          "bytes": 375,
+          "sha256": "26283d4fc410cea0925d6163ca154baa6c0a207518cfddad7a200ec04f7bfd90"
+        }
+      },
+      "cas_checks_passed": true
+    }
+  ],
+  "artifact": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/model-bound-wikitext-inputs-01/glm-wikitext-inputs.v2.json",
+    "bytes": 155657,
+    "sha256": "eb7c36a6211796bdaf523c20ca3583cbe4794e9583a11f3ec5f124641b374652"
+  },
+  "scope": "CAS claim/payload checks and source snapshots verified separately; no independent worker attestation certification or held-out claim.",
+  "overlap": {
+    "action": "0b2242a1fb5d9371d67864d7b24f59266dc7bdae24804c720882071a9f7aa845",
+    "claim": "64874b31143fb67d5c6408fd62591a6408d4aaded93f0b7dd305bd7f1c97b4a0",
+    "receipt": {
+      "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/0b/0b2242a1fb5d9371d67864d7b24f59266dc7bdae24804c720882071a9f7aa845.json",
+      "present": false
+    },
+    "sha256": "30a0261a304c16a7e914b293bd06b5749290711ab147eefb59752a5d7b35048e",
+    "cas_checks_passed": true
+  }
+}

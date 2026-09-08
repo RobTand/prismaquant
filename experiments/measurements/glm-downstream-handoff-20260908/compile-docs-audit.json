@@ -1,0 +1,41 @@
+{
+  "action": "b87ff6f43e4c43807ccc4d01126024579e904dbc24bc04a909d8920cbbdd4d16",
+  "returncode": 0,
+  "test_result": "compile succeeded; 19 passed, zero skips, 56 deprecation warnings in 6.73s",
+  "worker": "dl380g10",
+  "demand": {
+    "cpu": 4,
+    "mem_gb": 6
+  },
+  "receipt_sha256": "e29d6de3ba4cd1685841cebe111615b9fcd8596e3d7c0748be46d1c48b3a2a3b",
+  "payload": {
+    "bytes": 610,
+    "sha256": "29166bd0be4d58cc3a0d6b2cadb848b1b15b3ebb736047e6576d5ae71f4c3772"
+  },
+  "source_snapshot": {
+    "commit": "71cadc318c7819e3835c99e206fd490b94023dc9",
+    "input": {
+      "bytes": 27338218,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "177b39130b5d4a7bf1e3dbf77b972bac2e9c62d63620d49a381e051c85d5e560"
+    },
+    "parent": "0661c3e7eb9285753259abd933283ed01bd95617",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff_snapshot_to_0661": [
+    ".pbrun-closure.f3b80966129e2120.json",
+    "experiments/measurements/glm-downstream-handoff-20260908/README.md",
+    "experiments/measurements/glm-downstream-handoff-20260908/handoff-draft.json",
+    "experiments/measurements/glm-downstream-handoff-20260908/root-gold-topology-negative-source-audit.json",
+    "experiments/measurements/glm-downstream-handoff-20260908/root-gold-topology-positive-cas-source-audit.json"
+  ],
+  "verified": [
+    "canonical receipt SHA",
+    "actual result SHA/size and successful terminal",
+    "source bundle SHA/size and fetched snapshot"
+  ],
+  "runtime_mode": "CPU Python3.12; no GPU",
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n...................                                                      [100%]\n=============================== warnings summary ===============================\ntests/test_docs_staleness.py: 42 warnings\ntests/test_architecture_doc.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n19 passed, 56 warnings in 6.73s\n"
+}

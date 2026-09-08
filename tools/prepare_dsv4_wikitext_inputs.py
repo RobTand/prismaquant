@@ -17,6 +17,9 @@ from tools.dsv4_wikitext_inputs import (
     DATASETS_DISTRIBUTION,
     DATASETS_VERSION,
     DSV4_WIKITEXT_INPUTS_SCHEMA,
+    MODEL_WIKITEXT_INPUTS_SCHEMA,
+    seal_model_wikitext_inputs,
+    wikitext_model_identity,
     FULL_KL_N_SAMPLES,
     FULL_KL_SEQLEN,
     FULL_KL_SPLIT,
@@ -31,11 +34,11 @@ from tools.dsv4_wikitext_inputs import (
 from tools.full_kl_teacher_payload import atomic_json_write, tokenizer_identity
 
 
-def _load_corpus(*, split: str, cache_dir: str) -> tuple[object, str, dict]:
+def _load_corpus(*, split: str, cache_dir: str, dataset_repo: str = WIKITEXT_DATASET) -> tuple[object, str, dict]:
     from datasets import load_dataset
 
     dataset = load_dataset(
-        WIKITEXT_DATASET,
+        dataset_repo,
         WIKITEXT_CONFIG,
         split=split,
         cache_dir=cache_dir,
@@ -59,30 +62,36 @@ def _load_corpus(*, split: str, cache_dir: str) -> tuple[object, str, dict]:
     }
 
 
-def _build_payload(*, model: Path, cache_dir: str) -> dict:
+def _build_payload(*, model: Path, cache_dir: str, input_schema: str = "dsv4-v1") -> dict:
+    if input_schema not in {"dsv4-v1", "model-v2"}:
+        raise ValueError("unsupported WikiText materialization schema")
     observed_datasets = version(DATASETS_DISTRIBUTION)
     if observed_datasets != DATASETS_VERSION:
         raise RuntimeError(
             f"DSv4 token materialization requires datasets=={DATASETS_VERSION}, "
             f"got {observed_datasets}"
         )
+    source_config_bytes = (model / "config.json").read_bytes() if input_schema == "model-v2" else None
     tokenizer_attestation = tokenizer_identity(model)
     # The source declares PreTrainedTokenizerFast in tokenizer_config.json.
     # Constructing that class directly avoids importing the DSv4 model config
     # in this CPU-only environment while using the same tokenizer.json backend
     # as the exact serving image's AutoTokenizer.
-    from transformers import PreTrainedTokenizerFast
+    from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
-    tokenizer = PreTrainedTokenizerFast.from_pretrained(
+    constructor = AutoTokenizer if input_schema == "model-v2" else PreTrainedTokenizerFast
+    tokenizer = constructor.from_pretrained(
         model,
         local_files_only=True,
     )
     if len(tokenizer) <= 0:
         raise RuntimeError("DSv4 tokenizer has no vocabulary")
 
+    corpus_options = {"dataset_repo": "Salesforce/wikitext"} if input_schema == "model-v2" else {}
     _train, train_text, train_evidence = _load_corpus(
         split=FULL_KL_SPLIT,
         cache_dir=cache_dir,
+        **corpus_options,
     )
     train_ids = tokenizer(
         train_text,
@@ -104,6 +113,7 @@ def _build_payload(*, model: Path, cache_dir: str) -> dict:
     _test, test_text, test_evidence = _load_corpus(
         split=PPL_SPLIT,
         cache_dir=cache_dir,
+        **corpus_options,
     )
     test_ids = tokenizer(
         test_text,
@@ -127,7 +137,7 @@ def _build_payload(*, model: Path, cache_dir: str) -> dict:
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")).hexdigest()
-    return seal_dsv4_wikitext_inputs({
+    payload = {
         "schema": DSV4_WIKITEXT_INPUTS_SCHEMA,
         "datasets_distribution": {
             "name": DATASETS_DISTRIBUTION,
@@ -161,7 +171,24 @@ def _build_payload(*, model: Path, cache_dir: str) -> dict:
             "token_ids": ppl_ids,
             "token_ids_sha256": ppl_sha,
         },
-    }, expected_tokenizer_identity=tokenizer_attestation)
+    }
+    if tokenizer_identity(model) != tokenizer_attestation:
+        raise RuntimeError("tokenizer files changed during materialization")
+    if input_schema == "model-v2":
+        identity = wikitext_model_identity(model)
+        if len(tokenizer) > identity["vocab_size"]:
+            raise RuntimeError("tokenizer vocabulary exceeds model token domain")
+        config_bytes = (model / "config.json").read_bytes()
+        if config_bytes != source_config_bytes:
+            raise RuntimeError("model config changed during materialization")
+        payload.update(schema=MODEL_WIKITEXT_INPUTS_SCHEMA, model=identity,
+            source_config={"bytes": len(config_bytes),
+                           "sha256": hashlib.sha256(config_bytes).hexdigest()})
+        return seal_model_wikitext_inputs(payload,
+            expected_tokenizer_identity=tokenizer_attestation,
+            expected_model_identity=identity)
+    return seal_dsv4_wikitext_inputs(payload,
+        expected_tokenizer_identity=tokenizer_attestation)
 
 
 def main() -> int:
@@ -169,6 +196,7 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--dataset-cache-dir", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--input-schema", choices=("dsv4-v1", "model-v2"), default="dsv4-v1")
     args = parser.parse_args()
     model = Path(args.model).resolve(strict=True)
     output = Path(args.output)
@@ -176,10 +204,12 @@ def main() -> int:
         parser.error("--model must be a local model directory")
     if output.exists():
         parser.error("refusing to overwrite existing WikiText inputs")
-    payload = _build_payload(model=model, cache_dir=args.dataset_cache_dir)
+    payload = _build_payload(model=model, cache_dir=args.dataset_cache_dir, input_schema=args.input_schema)
     atomic_json_write(payload, output)
     print(json.dumps({
         "output": str(output.resolve()),
+        "sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+        "schema": payload["schema"],
         "semantic_sha256": payload["semantic_sha256"],
         "full_kl_token_ids_tensor_sha256": (
             payload["full_kl"]["token_ids_tensor_sha256"]
