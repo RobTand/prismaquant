@@ -205,3 +205,9 @@ The metadata repair's red/green/compile records are in the sibling
 `frontier-metadata-owner-20260908/` report. A separate comment-only commit fixes
 two stale allocator statements about development overrides and retired Gridbook
 routing; it changes no behavior and needed no additional test.
+
+## Full-suite follow-up and complete group coverage
+
+Full CI 34263378573 on f3cd7c7af reported one stale source-name assertion, with 7,013 passed, 202 skipped and 3 xfailed. The assertion required a helper name that the metadata-ownership fix replaced; the failing line did not inspect behavior. Separate commit 2d827320ea replaces it with a public selector call that verifies the resolved profile and canonical assignment survive publication. PrismaBuild then passed all 92 tests across the selector and wave3 files, zero skips, on x86 with 1 CPU / 4 GiB per shard and bounded native threads. Actual CAS and source audits match that commit except generated closures.
+
+The separate current full-stack audit is integrated from b371a925f. All 132 original groups and 36,423 units fit the current metadata planner without sampling; the 98.041521 GiB maximum rounds to 99 GiB under 104 GiB. This does not establish native memory fit. Its metadata and compile/runtime inventory receipts were independently verified, and tested sources differ only by generated closures and later reports. Integration architecture/staleness checks passed 19 tests, zero skips; no production resource arithmetic changed. Root audits are checked in with the corresponding reports.
