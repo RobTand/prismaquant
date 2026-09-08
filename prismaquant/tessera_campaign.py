@@ -4125,6 +4125,13 @@ def _main(argv, *, source_scope) -> int:
         finally:
             runner.shutdown()
         selected_source_preparation.update(resources=selected_resources,
+            # The plan beside it states deltas, so the receipt has to carry
+            # the floor those deltas are over, measured in this row's own
+            # process rather than assumed from another host's run
+            # (RobTand/prismaquant#390). None on a CPU row, where there is no
+            # guard and therefore no measurement to report.
+            baseline=(None if selected_guard is None
+                      else dict(selected_guard.baseline)),
             initialization_witness_origin='complete-canonical-capture',
             full_source_initialization_repeated=False)
         # Release fixed non-body state and the source context before selected

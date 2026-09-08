@@ -309,6 +309,24 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
         receipt = selected['provenance']['selected_source_preparation']
         if profile_root:
             (profile_root/'selected-source-receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
+        # The guard reads absolute process bytes; the plan states deltas. The
+        # gap between them used to be covered by declared headroom, which is
+        # zero on this row (--streaming-cache-headroom-gb 0), so nothing but
+        # the plan itself can cover the growth the guard observed. A plan that
+        # undercharges fails here (RobTand/prismaquant#390).
+        selected_guard = receipt['memory_guard']
+        baseline = receipt['baseline']
+        if torch.cuda.is_available():
+            assert baseline is not None and baseline['measured_in_process'] is True
+            assert selected_guard['last_checkpoint']['cuda_reserved_bytes'] > 0
+            assert receipt['resources']['phases']['source_preparation'][
+                'declared_headroom_bytes'] == 0
+            growth = selected_guard['peak_conservative_bytes'] - baseline['bytes']
+            assert growth <= receipt['resources']['memory_bytes'], dict(
+                growth=growth, baseline=baseline, guard=selected_guard,
+                plan=receipt['resources'])
+        else:
+            assert selected_guard is None and baseline is None
         assert receipt['source_forward_count'] == 0
         assert receipt['full_source_initialization_repeated'] is False
         assert all(row['source'] != 'cold' for row in receipt['layers'])

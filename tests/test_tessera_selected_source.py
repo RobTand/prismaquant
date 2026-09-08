@@ -103,12 +103,93 @@ def test_selected_admission_excludes_unselected_source_and_forward_owners(monkey
     assert export['export_input_page_window_bytes'] == 64+2*16384
     assert plan['schema'] == 'prismaquant.selected_anchor_resources.v2'
     assert plan['export_input_writer_policy'] == 'verified-tensor-record-prefix'
-    assert export['serialization_scratch_bytes'] == 2*4**2*4
+    assert export['serialization_scratch_bytes'] == 4**2*4
     assert anchors['encoder_memo_bytes'] == 4*4*4+4*8
     assert plan['encoder_memo_capacity'] == 1
     assert 'nonbody_source_bytes' not in anchors
     assert all('boundary' not in key for phase in plan['phases'].values() for key in phase)
     assert plan['memory_bytes'] == max(map(lambda phase: sum(phase.values()), plan['phases'].values()))
+
+
+def test_selected_plan_terms_follow_the_allocations_they_bound(monkeypatch):
+    """Each charged term is the shape and dtype of a traced allocation.
+
+    The plan is a delta over a process floor it cannot see, so a term that is
+    a chosen multiplier is not conservative, it is unattributable
+    (RobTand/prismaquant#390). Every number here is derived in
+    ``selected_anchor_resources``' comments from a named allocating line.
+    """
+    from prismaquant import autoscale
+    monkeypatch.setattr(autoscale, 'streamed_calibration_resources', lambda *a, **k: dict(
+        live_layer_prefix='layers.', terms=dict(nonbody_source_bytes=100, declared_headroom_bytes=200),
+        body_layer_bytes={'0': 1000, '2': 2000}, body_loader_transient_bytes={'0': 100, '2': 200},
+        body_source_file_bytes={'0': 900, '2': 1800},
+        unit_source_weight_bytes={'layers.0.proj': 24, 'layers.2.wide': 48},
+        full_hessian_bytes=128, full_prefix_bytes=64, source_header_sha256='a'*64))
+    shapes = {'layers.0.proj': [3, 4], 'layers.2.wide': [3, 6]}
+    # Different counts put the widest H and the widest X on different
+    # units, so a sum of separate maxima is distinguishable from the
+    # widest single entry the loader actually holds.
+    counts = {'layers.0.proj': 9, 'layers.2.wide': 1}
+    plan = autoscale.selected_anchor_resources('/source', unit_shapes=shapes,
+        counts=counts, max_act_rows=2, cache_slots=2, prefetch_workers=1,
+        headroom_gb=0, anchor_batch_size=3)
+    anchors = plan['phases']['resident_anchors']
+    export = plan['phases']['export_inputs']
+    widest_h = 6**2*4
+    # torch.serialization._save stages exactly one CPU copy of a device
+    # storage per data/ record, not two.
+    assert export['serialization_scratch_bytes'] == widest_h
+    # The seal/unit content hash and the regularise-plus-factorise stage are
+    # sequential, and each peaks at two fp32 copies of the widest H.
+    assert anchors['factorization_scratch_bytes'] == 2*widest_h
+    # One capture entry's CPU payload and its device copy coexist; the entry
+    # is H plus X for ONE unit, so the widest entry is not the sum of the
+    # widest H and the widest X measured on different units.
+    assert anchors['entry_validation_bytes'] == 2*max(
+        4*(cols**2 + min(counts[name], 2)*cols)
+        for name, (_rows, cols) in shapes.items())
+    # The retained keywords are the [in, in] fp32 LDL factor and two fp32
+    # [in] refit metrics, once per memo entry the memo is built with.
+    assert plan['encoder_memo_capacity'] == 3
+    assert anchors['encoder_memo_bytes'] == 3*(6**2*4 + 6*8)
+    # No process baseline can be derived before the row runs, so the plan
+    # says which pre-run term it has instead of inventing one.
+    assert plan['baseline_policy'] == 'declared-headroom-pre-run-measured-in-row'
+    assert anchors['declared_headroom_bytes'] == 200
+
+
+def test_selected_guard_measures_its_own_process_floor(tmp_path, monkeypatch):
+    """The floor a delta plan is admitted against is read, never assumed."""
+    from prismaquant import memory_management as memory
+    gib = 1024**3
+    root = tmp_path/'cgroup'
+    child = root/'job'
+    child.mkdir(parents=True)
+    (root/'memory.max').write_text(str(16*gib))
+    (root/'memory.current').write_text(str(gib))
+    (child/'memory.max').write_text('max')
+    membership = tmp_path/'membership'
+    membership.write_text('0::/job\n')
+    monkeypatch.setattr(memory.torch.cuda, 'memory_reserved', lambda _device: 2*gib)
+    monkeypatch.setattr(memory, '_host_memory_info', lambda: (20*gib, 32*gib))
+    guard = memory.CaptureMemoryGuard('cuda', cgroup_root=root, membership=membership)
+    with pytest.raises(RuntimeError, match='baseline is unmeasured'):
+        guard.baseline_bytes()
+    guard.check('before_selected_capture_identity')
+    assert guard.baseline_bytes() == 3*gib
+    (root/'memory.current').write_text(str(4*gib))
+    guard.check('before_selected_encoder_factors:layers.0.proj')
+    snapshot = guard.snapshot()
+    # The floor stays the first reading; the peak moves and says where.
+    assert snapshot['baseline'] == dict(label='before_selected_capture_identity',
+        bytes=3*gib, measured_in_process=True, cgroup_current_bytes=gib,
+        cuda_reserved_bytes=2*gib)
+    assert snapshot['peak_conservative_bytes'] == 6*gib
+    assert snapshot['peak_checkpoint'] == 'before_selected_encoder_factors:layers.0.proj'
+    assert snapshot['peak_by_checkpoint_prefix'] == {
+        'before_selected_capture_identity': 3*gib,
+        'before_selected_encoder_factors': 6*gib}
 
 
 def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monkeypatch, tmp_path):
