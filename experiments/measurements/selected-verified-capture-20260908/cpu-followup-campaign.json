@@ -1,0 +1,52 @@
+[
+  {
+    "cwd": "/home/rob/tmp/pq-glm-selected-verified-capture",
+    "tags": [
+      "x86"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "priority": -10,
+    "timeout_s": 240,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_tessera_campaign_fanout.py"
+    ]
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-glm-selected-verified-capture",
+    "tags": [
+      "x86"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "priority": -10,
+    "timeout_s": 240,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "py_compile",
+      "prismaquant/tessera_campaign.py",
+      "prismaquant/autoscale.py",
+      "tools/dispatch_tessera_campaign.py",
+      "tests/test_selected_verified_capture.py"
+    ]
+  }
+]

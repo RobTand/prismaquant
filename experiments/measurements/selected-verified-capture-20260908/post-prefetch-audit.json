@@ -1,0 +1,825 @@
+{
+  "after_observer_finish_unix": 1788910133.728102,
+  "first": 1788910133.9296627,
+  "host_metrics": {
+    "sparklina": {
+      "metrics": {
+        "nvidia_smi.gpu_gpu-b1eceeea-fec7-371e-2cf3-cd10f2e7b705_power_draw/power_draw": {
+          "max": 11.0,
+          "mean": 4.11864406779661,
+          "min": 4.0
+        },
+        "system.cpu/guest": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/guest_nice": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/idle": {
+          "max": 98.8966901,
+          "mean": 97.62713840338984,
+          "min": 86.4892014
+        },
+        "system.cpu/iowait": {
+          "max": 2.361809,
+          "mean": 0.8831489779661017,
+          "min": 0.2003005
+        },
+        "system.cpu/irq": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/nice": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/softirq": {
+          "max": 0.0501756,
+          "mean": 0.0025478966101694913,
+          "min": 0.0
+        },
+        "system.cpu/steal": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/system": {
+          "max": 4.0703518,
+          "mean": 0.6835467610169491,
+          "min": 0.3503504
+        },
+        "system.cpu/user": {
+          "max": 11.1501758,
+          "mean": 0.8036179644067797,
+          "min": 0.2506266
+        }
+      },
+      "samples": 59
+    },
+    "sparky": {
+      "metrics": {
+        "nvidia_smi.gpu_gpu-e76c7efc-c157-b1f4-1348-83e4eb5092f4_power_draw/power_draw": {
+          "max": 61.0,
+          "mean": 58.08474576271186,
+          "min": 14.0
+        },
+        "system.cpu/guest": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/guest_nice": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/idle": {
+          "max": 96.686747,
+          "mean": 92.11163986949153,
+          "min": 75.5276382
+        },
+        "system.cpu/iowait": {
+          "max": 0.6529382,
+          "mean": 0.43538151186440677,
+          "min": 0.0501505
+        },
+        "system.cpu/irq": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/nice": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/softirq": {
+          "max": 0.0503018,
+          "mean": 0.004255167796610169,
+          "min": 0.0
+        },
+        "system.cpu/steal": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        },
+        "system.cpu/system": {
+          "max": 5.2261307,
+          "mean": 1.2352677288135594,
+          "min": 0.3007519
+        },
+        "system.cpu/user": {
+          "max": 19.1457286,
+          "mean": 6.213455711864407,
+          "min": 2.0090407
+        }
+      },
+      "samples": 59
+    }
+  },
+  "journal_anchors": 72,
+  "journal_bindings": [
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/a9b02c5f428e667c8bbbb86b9cba68c035740a191d830813b0a53a39783c5004.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.14.down_proj",
+      "sha256": "e78ac40107107fd9191e8086b7404da63843aed3d8b9ad55590c81ca25e287ca",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/33128491a04e71be0b1afe07cae9023da672466973039e729225aa3777c1fe80.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.111.down_proj",
+      "sha256": "7bfe008c9d0864e2561dc1c34c9e8dda3aeec3f7ace81263381864e212d51d41",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/408ac461a32e7943501466708d9e3c892e8aca17c2c1d35db4c903013174ca6f.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.116.down_proj",
+      "sha256": "6ccc2c717442742544353b792e460b0d2cef84b71d358be6c792ebfa7890fc20",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/0b30cb39310c285679ac7c732e38e62043fee74deb151dedce097c84025dc8a9.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.140.down_proj",
+      "sha256": "72019e81f4a770b9455e57701a7eec4a92f187abdf620c08c43cd7e8bc6a7a61",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/027efe0d6a146d8b98f3313e41ec69023dc384016a45ad4c1eefa21daa25d80a.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.104.down_proj",
+      "sha256": "4d75aaf84c52bd0a549d614d4e0fae2c70c104aa174d9d9d8432f55c6b921484",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/c625628a41e664483f93ba479b58b8df12ea716a13c898c199d7ab734310cd82.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.141.down_proj",
+      "sha256": "6d64f30616bc83bb92243d4763e2b8bf6c8e649a172f2f9101393556ad626e0e",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/9e1f2ea1b263124f07cd00eb48ff42530e54132d1035b54d8b248ad636721a54.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.146.down_proj",
+      "sha256": "664a8c357cdaaa5dd3edb02e9c29ed18cb00503e8406b0f4968d05f5caefe018",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/de03fa83ef2494afb702d7e2dbbb94a5a3f10a878711a591d1cc05c4efa7db05.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.118.down_proj",
+      "sha256": "b0d25dbaeb068665366ac2422278d761976c88dedbb7b0e9f8e12de559894277",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/395af4a2909551d39125a618128d8ad5b3388e791d783c5d9220a2267ea55bb8.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.137.down_proj",
+      "sha256": "689f9939aa5e40f9d3302fd87fac5900fcc265b9f1b518103e6f2e567dc8b7d5",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/37458737c17b80863b159d8af19dd6a7006da1ea1034bec1ee94f724a5ae10d9.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.162.down_proj",
+      "sha256": "45a6f230c1a22070f180a2e413a5618afc505e51e309187304f49d7a0d857398",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/f85a249de67958e0de432e95c745d4c5040b5e4087adb999d8a3f138403ae27d.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.10.down_proj",
+      "sha256": "ae9abb0dfb59ee4068339c0323e3f66e0a39aa6aebabeae055fd0f582b353430",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/97d47cb0cc756aaea97b453df384e8df686b4942fa3e5ad884281835cbae7fed.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.119.down_proj",
+      "sha256": "45199429e367086bb40e78718b2430280a5ef2d55169d07ee7f167c3555b18c5",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/09bf9451fa1c8238833a14cd415740926df4b38ebe5e14c4845c4b722576e1b4.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.112.down_proj",
+      "sha256": "453ce3353756d3efe657b63c88d61fc05a99392e8e24a5ee31a01fd693e69bcd",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/1a9eeecd2e8ae7bdd742915b191d650f444f5a40e32da90cc9754b323b81109c.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.115.down_proj",
+      "sha256": "bbbb73bd63de33b0b8654c0631206a4de46e298df05767a4a848bb3468e985e8",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/79c811fc1623474bb26028510966669215f1dc5d0624220b5466f6e74aa2b60a.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.135.down_proj",
+      "sha256": "977ebc2a1e13d19e099e664b74100d1d515c979fb7689ce250ca038f11e8320e",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/710f97a9b7cb5d6c944d7b70bdc1083ecf360e5d98b0079f4fb6d5c97b05e41c.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.110.down_proj",
+      "sha256": "9efe60cdecc5d6bee4a9f474ccced9c657997983a19cbccc885f7c1239eea3f1",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/d1e0b7edf573e1a5128d607ffb1c3ca17e178cf4f3ec49876d5eb347b204c89f.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.154.down_proj",
+      "sha256": "960da25c59d99a1f2c733d9a078aac4ffccf7209b4dd40f81e9f63f5f691de6a",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/6b4672a279ac99c6954083d1fa89cd40b00ef52c7aab26ef147e2eec4da986b3.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.153.down_proj",
+      "sha256": "5a029b0d31ac18e76cd10a52c9a2e29da31e949cc7bffe6c47fd4a1fb9ac820a",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/fbb54d6c8b34fdf276e0b97bcf936269c78587d5e5be3adea6f00b2fcff46336.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.1.down_proj",
+      "sha256": "47745a639bcaed8ba52fb513391e2490797f784d3d92f172f0b743d6aa35bd75",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/b5fc0f8271c81f0977f57d58f79bef054e51574d3766ed2a2487608c13a96155.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.152.down_proj",
+      "sha256": "22fbab72c01fd308b721fbf54edc4e713eb2272ffe03fed3921742cea1bd2525",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/d763ffce639bda72c4079fc6828568c907c6bf06104873eab3f4ece58b24795f.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.143.down_proj",
+      "sha256": "927f1b159e9ce6b58049abff09580d73d2f07fb2933c9178f24eaf0195a8c406",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/db2657b256a3c5b1234cdb58cc21b82926214e8d39d12bb5264463a3a6293b72.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.158.down_proj",
+      "sha256": "5562e73a57740b9c2a0b719520fe55d2f8a2cd938dd03c46e651d5e4e91b9231",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/29366b01bffc076de726ee2df3c3586d260cfea3ec58907378d4fd014382f557.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.125.down_proj",
+      "sha256": "bca5c44dddd05abaa8ab5eab90ce170e3acc9b4dd0157ef5a0ec9d84cdff13f2",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/83a2c727c26eeaf38a1bfe2d37eb0cef2805b3b7731d1ba6a73352981925519a.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.160.down_proj",
+      "sha256": "c0e35b781aa101a99cda45b1bab2bcc9e4b894847408793c60ecfcccc3f5594c",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/92c222202315607c6318537bfecf6048da2c10d2cf8bacc1997505fe22a6b265.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.129.down_proj",
+      "sha256": "da32a542611c1a46badb7e9dec17bac9b12cb26ac857df4b27f4222ae00a3e56",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/d114213800a159727477ea335b9b912eb03e06df31944508b85490f3796e0f28.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.145.down_proj",
+      "sha256": "b96dcd506a7afa8025cb0d01d3e21849284f54511665ef96f5fb5bd8abc37db1",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/b8b8280fcd18303693f69e2c17b83243d014f57a6a35e9e6f134abcce26097ed.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.124.down_proj",
+      "sha256": "c640e65b7067a39d073f50047393a8f7522a158d3d179b5e5f562a649b2cadb7",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/d5f72f62dcd78f9c0b317ca6ff7b14281c310332a4390422c1382b779127fa32.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.136.down_proj",
+      "sha256": "aa234ca92aa07eb2c6dd3d2e2f5d135b9c0edcafa8140eaade973dcb98bf0997",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/0dc825c059f4c548751b3a0087f1975293fcd52f7ec6871c566703cbbaf67493.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.109.down_proj",
+      "sha256": "79a8edd9e3a22f96e7c36706311638cd65506b2f6293a170d6c62dac30901de9",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/e34cf8df32522d699271627ebd3853b5cf452ac03c887ce85a5a595ccbcad0a0.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.147.down_proj",
+      "sha256": "02d407a3cffdd83524df7dba47b85e39ea4b9566da7d097bc2336e321615ceb4",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/42de301f96ebdeddea8741bc932cb775c029a00e7125b181bda67e54790a8a50.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.150.down_proj",
+      "sha256": "0bcd36b0cb8d3c3358ad8f22ebbc3a1015494e6ae6e3f565dfe3cf05908ac2d7",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/3319ecfb5e14506d9420732b8156a7d7e768dbf7cbf4258a94e6929d7c2df028.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.100.down_proj",
+      "sha256": "d255345d54a3bf3357ea878ab72f3ebe628f02dcf7c3cbb6e3c567d811d83fe0",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/decd00df4c4f139d010f38fed3518f876c9401215d69091abf1d2fd18da6e3e4.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.106.down_proj",
+      "sha256": "90db240bd881d5c8b901fc089d54b7140e2c58ea575b1c318133d7b82d6f7e57",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/08b53712455fa368d8c028816542d2d8c9aa264ab7f608d2e54dc1401b2ab3fb.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.139.down_proj",
+      "sha256": "e7f789bd96ba0d2d476d0a42811d7aa45dcc0e6ed338544aa7846bd8082ee37e",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/9d8db29d48da34ab0b6117dec6f045a313158665d366baae2ec7e7cdd9625ace.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.0.down_proj",
+      "sha256": "b8f1ae803b8599e4cc2d3bd1e749a6f44fc5ef0f6c6576843eb7a7f4dbd0a8b7",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/f8b5fa3549b9021112a5dca677c7edfd7bbef36b42dc4feb281e5420dbb4aa20.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.159.down_proj",
+      "sha256": "a47462039fb608c3077774fa2a1970d5386dc21c6dac747ce5477889883316e7",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/a7cb1c647bae11cf64297160067959922a7f83c894e65eca2b1eb49a0c94e820.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.101.down_proj",
+      "sha256": "64ed3884a31ef7c20799d973cb76b2f8c4305f60848d7db7c290d9367ba803f3",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/f35ec914a8d972ee6985826ccc9e88fab72877ba5a8fc5147ecede7194cb72b6.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.113.down_proj",
+      "sha256": "02b4fba1f84c90c575d8173858d7331dafe3d98b299af01bc778ae678d205dac",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/fbba4724e68de4fa3a12dfe663c7109ff9df0b1dbac1c0ad1e877bc1ae0fd658.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.134.down_proj",
+      "sha256": "4f9a39abc5ec760915978a82326c686e9f737d5c74fc75b25575f3763be74d0f",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/7319b03cb644190ebe12dd3019d7b553d4b4eaf48379f93d72bdbc4baed83190.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.148.down_proj",
+      "sha256": "87f8c461576ef26fb1372864db36624ca09414bd10a021218fe21823924a21e1",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/32052ec8c2c991e5cb15efde7fbc221a3e45bd95b40a0bcaf8123847dbd07bb0.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.102.down_proj",
+      "sha256": "d2168db2b52ee7d03733b2d86d2c43b5f65584c497bb82ff2c8c133f58fbe23d",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/7b04d137b2bd07ac4d07ecc4e5b2acec7d0e70ddd39fd786a2214c79b65a086c.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.128.down_proj",
+      "sha256": "cb11d984e1bd7e0774a73d35771fac38891e13ba99eb0ecb2cc2bd6b9a87f1fb",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/990922d3ceddd9c6b360882acd306d2c3f637048a684b5a84a4ed9fad4a06013.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.127.down_proj",
+      "sha256": "029f3f4a61506fdca33f8c5f234b156c9cf56635043cebb444b5becab69a8a91",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/49aecf7e1c7945255338f22dce6496deab7a660fceb9ff53d0bebf48dd14441e.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.151.down_proj",
+      "sha256": "0b162877f0712b94a51bc40edf77b42abc10189ffabff2b68ef07b87e58d5566",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/257951a102e302d69011216c1a1dd1f059dcd7699aed2345e9e3449f68813aa3.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.155.down_proj",
+      "sha256": "3a48eb40a86ab0998c1302a9cfaab44d3b4d665b5d42ef1451dc7610c2541ab3",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/f983ab59bd4af5a7b359344e4b115d0b9a75f119fcecfc931b684225bcd460d3.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.13.down_proj",
+      "sha256": "06b9c5405420568f708a284a763a922ddc5dfc2fc9d42a2926bd0ff7b6a2d027",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/b67101051ba529c303a9fd9568dfdbb6884bbe61006b23f10d6122385c8d0850.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.142.down_proj",
+      "sha256": "850c8e4b865c6e7ab3b3e170b51d3aa3c12040e77d028ca88647b994f1a4ecca",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/0130fe34188c659af2b49f1445dfce740236c78caa6cb90c0cf9724b6439d521.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.11.down_proj",
+      "sha256": "d7e12dc77e9321a2c744f710dd4cc59f448bf9680931bb083c31b0981b181c37",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/bd43c604025c05ba38d76efebd9eca7f5c6f408125c9f567e92dbca64de3ecfd.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.120.down_proj",
+      "sha256": "e015957277e8c798db2b66da74f0b9a9834ffec9dd7fe539d6c9d0fbfd7818d9",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/836732d0f8e691780fed671e7b9f9ea6294315ade9f2817e7544bc667c05b30d.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.103.down_proj",
+      "sha256": "f343da70b2a79b9cb7e49e249816fa3cbead002af202089dc0da88a6ee59c3d8",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/a05d0fcda8fb8763f0f5de703fe34e135305a5ac4726f6e1aba38272f023cc50.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.156.down_proj",
+      "sha256": "3b9a5f07e7c02843187094a6d55d41ea0783cb684a8913eeba8922115e63a624",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/fffab544ab93563e6710b003139a2aaae5f3f04a0b2773362868d9711f31b30a.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.161.down_proj",
+      "sha256": "cb6ed89975d75640e639e3989962ac265c2d214bd5ed5f09889ff7952a94db69",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/5e185def0cc8e68a98cef8d98594495c103130a8cf2cc752b8645857e83650da.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.123.down_proj",
+      "sha256": "7a83615a3ae2817d995b95d1dff70f45cf95b48c7090b45e8a910005af9178fc",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/20f0cbf381f7872c726b1b50e0bbe542078aa878589c297f82122c921c8d82d6.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.122.down_proj",
+      "sha256": "633d894ec0fedffe417ac7c188c0df8c8a2de31e0abf046b5d68043c97a1b1c1",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/d11a0da0a1840b3fd357c1b6df119ad99b14db26617e64c75102637c08037c9f.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.15.down_proj",
+      "sha256": "2ba3fb262d836b2fffe328f2bff84f480269977d3aadcfe30a728a9d91cf4b53",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/ef09c644a74d282c3a04b7571378eb7069501d0837e395de4ee5e00fa4bb2beb.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.108.down_proj",
+      "sha256": "3b5f2bd4d5f019eb697186531515197e746990857e77fb3eecbc96013bdf1d6b",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/1f55bb9b4076f345cc9780dae9ce4ce16a4155ae3f9e58bdd89f479cee4b1900.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.149.down_proj",
+      "sha256": "db80aef68701054c18b21eb5875f0443237f5f4f79469a9bd13dfe8b37010e0e",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/8bebbc6ebe630e8e9c73ce9073855c37951e446f0590feb986c8e77847bd7ce3.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.126.down_proj",
+      "sha256": "4a696387da2138fd721cf3f3e22dfe4bda81125f05885d666b9b56547873ee67",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/6e4e0869496c481ae77b2fa05f80ebb3d456f58444599a242c4e44461eb50bba.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.133.down_proj",
+      "sha256": "f20f2b51500843b1a3058906d7075b9e709cb269c499dcee4939173c5a7632cb",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/ca26aeac390a0d7b5d2e8033699033832932e407025d3a79ca814f6552fb0a85.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.132.down_proj",
+      "sha256": "ea850b792b99867228441136de60af73d244ab1ce765c59cb1a1276d5d71f010",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/e878439fd95fdd32308a213a7e2b01aded8b48145b446580b916df48af7fc00c.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.130.down_proj",
+      "sha256": "5702497c5e68eabac552171a41f8cebbf5383411df5940244123a31b5f4d1b65",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/425d321a242a2a2c7826c7e1066189a87ef26a8400301e4d032320e8e1f751d1.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.105.down_proj",
+      "sha256": "9c22afdec0046d2a7cdc1ec5b960d6db37c6fadf3852e80ceea218df9cd3bc75",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/e35523f57925810e2f3f78af8319da92fa02714dc7fe5505dd57398f149bcc29.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.121.down_proj",
+      "sha256": "b0c4bf663f333253ce5c576c13165b1e5b73e36339843a72b6771623d848cc0f",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/15547947d6c3661da1613c55394b562f7e97988b60ad47530ba7fe65d882c547.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.107.down_proj",
+      "sha256": "e668c4002f00195f01021b8fe441a67db669e65c5304af4e31b64a319e54a189",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/d367822d7bf4f2dcd664fa7a45d25935acdd90ebbdc13fb457e28c0e009b01cc.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.157.down_proj",
+      "sha256": "ce8c60fa219e065d2ea571d0876094465ec48f5d45a2c161bf5ecbad893a1dda",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/9df6b4e76c4bc4af8e51ebaad35446595ff52feb2b3f3885c36f3d612baf21c0.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.12.down_proj",
+      "sha256": "eb453e22b872f10201f74c5a4ec40ea3fb91338bc56180c1c9930481ba419e37",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/d12f3f692d549c8869c6b1e455798507b6d7f3dcaf7b5698f5ba089875968e0b.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.131.down_proj",
+      "sha256": "20ef0c9e3af3eba3b03dc4e2915d41284cd59b0b1e9eefdef8ec78bbd247122b",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/6ac5c00f96cb749654add44be87580b3ee773f1402897520b7ece65aeaa3c7ad.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.138.down_proj",
+      "sha256": "39f8c35e2457ed1b26d898dd17f210d07464048db9a42bc8a797a657ae6d14fc",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/26dad29f44434c187c75c253a6e5ea8b747adee4c4c26da4faf44e4b6e9ea1a1.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.144.down_proj",
+      "sha256": "1b9a6c0b9f0bce85c031de993680f5447cd7e6ec3644ef53abfd757a13569d3b",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/8d7a482ad8364cd816bdb68139af3af3ba20710c4f19ab2bcc71e4dd22a76c62.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.117.down_proj",
+      "sha256": "32eeab01e006665b1ec97edbf80c79b7d08c47e82900bb99000ca59c7edf2687",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/51032bd1b02e42e35c1dd37068d6d20db01964f52629ec2fbf98f0697a108ea3.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.114.down_proj",
+      "sha256": "515af18ad4865a7504d09c58a8052936312014184013c560480085112be9ab68",
+      "wire_records": 1
+    },
+    {
+      "anchors": 1,
+      "identity_sha256": "f683d4344cb9af379ad15846d3ac5a368fa537aada25cf5786775fcd84cb68f3",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0076/cost.anchors.json.parts/units/d5fad333775a8417ba942f2d0502292e19177795373241eb6b00cd7abc27c12d.pkl",
+      "qname": "model.language_model.layers.4.mlp.experts.16.down_proj",
+      "sha256": "6ab9d38d3dd16707e2b054d5424e0bbcc315f55269ea862ed54b7c1749a6b23c",
+      "wire_records": 1
+    }
+  ],
+  "journal_files": 72,
+  "journal_observed_unix": 1788910463.7228405,
+  "journal_unit_records": 72,
+  "last": 1788910432.3122528,
+  "observer": {
+    "batch_size": 8,
+    "call_index": 0,
+    "cuda_events": 0,
+    "error": "RuntimeError('anchor trace exceeded its exported byte cap or was empty')",
+    "finished_unix": 1788910133.728102,
+    "format_name": "TESSERA_E4M3_K1_R832",
+    "qname": null,
+    "qnames": [
+      "model.language_model.layers.4.mlp.experts.0.down_proj",
+      "model.language_model.layers.4.mlp.experts.1.down_proj",
+      "model.language_model.layers.4.mlp.experts.10.down_proj",
+      "model.language_model.layers.4.mlp.experts.100.down_proj",
+      "model.language_model.layers.4.mlp.experts.101.down_proj",
+      "model.language_model.layers.4.mlp.experts.102.down_proj",
+      "model.language_model.layers.4.mlp.experts.103.down_proj",
+      "model.language_model.layers.4.mlp.experts.104.down_proj"
+    ],
+    "rejected_trace_bytes": 9222546186,
+    "started_unix": 1788909983.9614086,
+    "status": "observation_failed"
+  },
+  "samples": 299,
+  "scope": "Live sampled stack and host window after rejected first profiler export. No accepted CUDA trace or instruction attribution.",
+  "snapshot_unix": 1788910433.0079606,
+  "snapshots": [
+    {
+      "bytes": 1652115,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/selected-verified-capture-01/post-prefetch-python_sampler.jsonl",
+      "sha256": "38f1951cb075bf2fdc4eacd88b34d7dbefe8617e9692b21fa15fda151e498306"
+    },
+    {
+      "bytes": 5479024,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/selected-verified-capture-01/post-prefetch-netdata.jsonl",
+      "sha256": "25536b544e8e66ff56ff3da0f3a7db966d48c5aad93e2f704f3cfe80af4047c6"
+    },
+    {
+      "bytes": 4445,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/selected-verified-capture-01/post-prefetch-progress.json",
+      "sha256": "16f3efa170f34aac7c22248ce95da51944fa079023dc993af561889500124da7"
+    }
+  ],
+  "top": [
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/window_viterbi.py",
+      "function": "viterbi_window_fused",
+      "line": 771,
+      "samples": 266
+    },
+    {
+      "file": "/usr/local/lib/python3.12/dist-packages/torch/cuda/graphs.py",
+      "function": "replay",
+      "line": 186,
+      "samples": 11
+    },
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/wire.py",
+      "function": "_to_bits",
+      "line": 84,
+      "samples": 4
+    },
+    {
+      "file": "/usr/local/lib/python3.12/dist-packages/torch/serialization.py",
+      "function": "__exit__",
+      "line": 834,
+      "samples": 4
+    },
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/cached_unit.py",
+      "function": "tensor_identity",
+      "line": 45,
+      "samples": 2
+    },
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/encode.py",
+      "function": "columns_of",
+      "line": 2782,
+      "samples": 2
+    },
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/compensate.py",
+      "function": "block_ldl",
+      "line": 115,
+      "samples": 1
+    },
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/encode.py",
+      "function": "trellis_pass",
+      "line": 2824,
+      "samples": 1
+    },
+    {
+      "file": "/usr/lib/python3.12/pathlib.py",
+      "function": "write_bytes",
+      "line": 1038,
+      "samples": 1
+    },
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/layout.py",
+      "function": "build_terminal",
+      "line": 679,
+      "samples": 1
+    },
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/wire.py",
+      "function": "pack_levels",
+      "line": 263,
+      "samples": 1
+    },
+    {
+      "file": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-03/producer-source-07ad344c3/src/tessera/window_viterbi.py",
+      "function": "viterbi_window_fused",
+      "line": 774,
+      "samples": 1
+    }
+  ]
+}
