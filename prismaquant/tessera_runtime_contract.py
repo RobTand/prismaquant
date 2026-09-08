@@ -148,6 +148,9 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: The Tessera commit this pin's answer was reviewed against.  Declared and
 #: recorded; NOT compared to anything.  A moving ``master`` is not a review
 #: event -- :data:`TESSERA_DEV_PIN_ANSWER` is what refuses. Re-pinned
+#: 2026-09-08 to 07ad344c3 (Tessera #431) for explicit packed checkpoint
+#: execution and strict typed export carriers, retaining the exact contract
+#: bytes and admission answer. Previously re-pinned
 #: 2026-09-08 to 9d2314819 (Tessera #429) for bounded canonical Hessian
 #: references and their nonblocking file refusal. The allocator/serving-cell
 #: answer remains unchanged; the raw contract additionally records LFM
@@ -155,7 +158,7 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: contract v22 / lane schema v9 (Tessera master 8ed1d9a, the merge of its
 #: #332, which answers its #327; v21 landed at b8b1cb38 in its #313 and the
 #: release e78959ed carried v20). The development and serving pins now both
-#: bind 9d2314819: they name ONE object, and
+#: bind 07ad344c3: they name ONE object, and
 #: letting them drift is how two of this repository's own spec files came to
 #: disagree about one runtime.  Between the v17 review and this one the
 #: answer moved in exactly four places and nowhere else -- no family, rung,
@@ -208,7 +211,7 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: Verified by fetching ``RobTand/tessera`` master into a scratch repository
 #: and hashing the blob at the tip -- never a working tree (the command is in
 #: ``tessera_runtime/README.md``).  No tag names the commit.
-TESSERA_DEV_PIN_COMMIT = "9d2314819f027e53ba169039a10cd27594d36670"
+TESSERA_DEV_PIN_COMMIT = "07ad344c3275bb2fa7ce2432f93d89945d66f4c2"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and

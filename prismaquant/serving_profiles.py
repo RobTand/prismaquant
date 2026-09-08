@@ -104,6 +104,10 @@ class ServingFormatRule:
     # declare capabilities that differ between dense Linears and packed
     # expert stacks (e.g. nvfp4_cb carries no stock-CT packed-MoE emission).
     scope: str = "all"
+    # Continuous Tessera rungs are grammar parameters, not registry entries.
+    # This allow-list unions with exact scalar formats; it never skips the
+    # allocator's later shape, source-precision or serving-context gates.
+    allow_tessera_families: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ServingFormatRule":
@@ -128,6 +132,10 @@ class ServingFormatRule:
             reason=str(payload.get("reason", "profile_mismatch")),
             detail=str(payload.get("detail", "")),
             scope=scope,
+            allow_tessera_families=_declared_tessera_families(
+                payload.get("allow_tessera_families", ()),
+                owner=f"format rule {payload['id']!r}",
+            ),
         )
 
     def check(self, qname: str, fmt: str,
@@ -138,7 +146,10 @@ class ServingFormatRule:
             return None
         if not self.when.matches(qname):
             return None
-        if self.allow_formats and not _format_in(fmt, self.allow_formats):
+        if (self.allow_formats or self.allow_tessera_families) and not (
+            _format_in(fmt, self.allow_formats)
+            or _tessera_family_in(fmt, self.allow_tessera_families)
+        ):
             return ServingFormatDecision(
                 False,
                 self.reason,
@@ -1488,6 +1499,37 @@ def _load_serving_profile_uncached(profile_id: str) -> ServingProfile:
 def _format_in(fmt: str, names: Collection[str]) -> bool:
     candidates = {fmt, fr.canonical_format_name(fmt), *fr.aliases_for(fmt)}
     return bool(candidates.intersection(names))
+
+
+def _declared_tessera_families(values, *, owner: str) -> tuple[str, ...]:
+    if not isinstance(values, (list, tuple)):
+        raise ValueError(f"{owner}: allow_tessera_families must be a list of canonical families")
+    if not values:
+        return ()  # Existing profiles do not acquire a Tessera dependency.
+    from .tessera_formats import get_tessera_family, TesseraFormatError
+
+    names = []
+    for value in values:
+        try:
+            family = get_tessera_family(value)
+        except TesseraFormatError as exc:
+            raise ValueError(f"{owner}: invalid Tessera family {value!r}") from exc
+        if not isinstance(value, str) or family.name != value:
+            raise ValueError(f"{owner}: expected a canonical Tessera family, got {value!r}")
+        names.append(value)
+    return tuple(dict.fromkeys(names))
+
+
+def _tessera_family_in(fmt: str, names: Collection[str]) -> bool:
+    if not names or not fr.is_tessera_format_name(fmt):
+        return False
+    from .tessera_formats import parse_tessera_format_name, TesseraFormatError
+
+    try:
+        parsed = parse_tessera_format_name(fr.canonical_format_name(fmt))
+    except TesseraFormatError:
+        return False
+    return parsed is not None and parsed[0].name in names
 
 
 def _runtime_shape_validator_accepts(
