@@ -1517,3 +1517,47 @@ def test_a_uniform_rate_axis_plan_is_its_own_control(tmp_path):
     assert stamped["rate_axis_formats"] == [_TESSERA_RUNG]
     meta = json.loads(layer_config.read_text())["__prismaquant__"]
     assert meta["uniform_control"]["status"] == "not_applicable"
+
+
+@pytest.mark.parametrize("metadata_key", [
+    "tessera_expert_wires", "tessera_activation_static_scales",
+    "tessera_serving_scope", "serving_lane_provenance", "serve_constraints",
+    "measured_runtime_search", "population",
+])
+def test_selector_refuses_destination_claims_for_changed_assignment(tmp_path, metadata_key):
+    validation_path, layer_config, assignment_out, summary = _rate_axis_cli_fixture(
+        tmp_path, formats=("NVFP4", "BF16"))
+    original = {
+        "model.layers.0.self_attn.q_proj": "BF16",
+        "model.layers.0.mlp.down_proj": "BF16",
+        "__prismaquant__": {"target_profile": "research", metadata_key: {"old": "claim"}},
+    }
+    layer_config.write_text(json.dumps(original))
+    before = layer_config.read_bytes()
+    proc = _run_selector(
+        "--validation-json", str(validation_path), "--mode", "best-kl",
+        "--output-layer-config", str(layer_config),
+        "--output-assignment", str(assignment_out), "--output-summary", str(summary))
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "assignment-coupled metadata" in proc.stderr
+    assert metadata_key in proc.stderr
+    assert layer_config.read_bytes() == before
+    assert not assignment_out.exists()
+    assert not summary.exists()
+
+
+def test_selector_preserves_destination_claims_for_exact_assignment(tmp_path):
+    validation_path, layer_config, assignment_out, summary = _rate_axis_cli_fixture(
+        tmp_path, formats=("NVFP4", "BF16"))
+    original = {
+        "model.layers.0.self_attn.q_proj": {"data_type": "nv_fp", "bits": 4},
+        "model.layers.0.mlp.down_proj": {"data_type": "float", "bits": 16},
+        "__prismaquant__": {"target_profile": "research", "serve_constraints": {"old": "claim"}},
+    }
+    layer_config.write_text(json.dumps(original))
+    proc = _run_selector(
+        "--validation-json", str(validation_path), "--mode", "best-kl",
+        "--output-layer-config", str(layer_config),
+        "--output-assignment", str(assignment_out), "--output-summary", str(summary))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(layer_config.read_text())["__prismaquant__"]["serve_constraints"] == {"old": "claim"}

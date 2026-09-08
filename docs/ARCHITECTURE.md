@@ -1,7 +1,20 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/selected-source-authentication-20260908`. Stamps
+As of: 2026-09-08 · `plan/glm-six-variant-recipes`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `plan/glm-six-variant-recipes`) for validated-frontier
+metadata ownership. Before writing any selection output, the selector refuses
+to carry a destination recipe's Tessera metadata, expert population or measured
+serving claims into a different canonical assignment, including changes to its
+BF16 units. Those claims remain usable for the same exact assignment. The
+Pareto/validation payload chain does not yet publish selected Tessera wire and
+scale provenance; an older destination is not an authority for a changed pick.
+Until that handoff exists, publish each such recipe through the allocator's
+existing metadata and selected-wire gates. CB and whole-artifact-budget stamps
+continue to come from the selected payload. This changes a metadata refusal,
+not runtime pricing, GPU execution, or serving qualification.
+Gate: `tests/test_select_validated_frontier.py`.
 
 Re-stamped (2026-09-08, `fix/selected-source-authentication`) for selected
 source authentication from a hash-bound complete canonical capture (#388).
