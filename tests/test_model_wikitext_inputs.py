@@ -47,6 +47,8 @@ def materializer(monkeypatch, tmp_path):
         assert dataset_repo in {"wikitext", "Salesforce/wikitext"}
         evidence = inputs._expected_dataset(split=split)
         evidence.pop("total_tokens")
+        if dataset_repo == "Salesforce/wikitext":
+            evidence["fingerprint"] = inputs.MODEL_DATASET_FINGERPRINTS[split]
         return None, split, evidence
 
     monkeypatch.setattr(prepare, "_load_corpus", corpus)
@@ -212,6 +214,8 @@ def test_v1_reader_continuity_and_fixed_values(materializer, tmp_path, monkeypat
     for key, value in {
         "TOKENIZER_IDENTITY_SHA256": payload["tokenizer"]["content_sha256"],
         "TOKENIZER_VOCAB_SIZE": 32,
+        "FULL_KL_DATASET_FINGERPRINT": payload["full_kl"]["dataset"]["fingerprint"],
+        "PPL_DATASET_FINGERPRINT": payload["ppl"]["dataset"]["fingerprint"],
         "FULL_KL_TOTAL_TOKENS": payload["full_kl"]["dataset"]["total_tokens"],
         "FULL_KL_STARTS": tuple(payload["full_kl"]["selection"]["starts"]),
         "FULL_KL_TOKEN_IDS_TENSOR_SHA256": payload["full_kl"]["token_ids_tensor_sha256"],
