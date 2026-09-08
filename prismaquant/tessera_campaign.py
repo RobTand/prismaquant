@@ -3338,12 +3338,14 @@ def _save_hessian_capture_with_page_release(payload, path, *, resource_check=Non
     filename writer and serializer as torch.save, and interpose only after its
     synchronous storage writes. No storage, pickle or archive byte is rewritten.
     """
+    import torch
     import torch.serialization as serialization
     from .perturbed_x_cache import release_activation_cache_file_pages
 
     class RecordBoundary:
         def __init__(self, writer):
             self.writer = writer
+            self.stable_records = 0
 
         def __getattr__(self, name):
             return getattr(self.writer, name)
@@ -3353,15 +3355,34 @@ def _save_hessian_capture_with_page_release(payload, path, *, resource_check=Non
             if name.startswith('data/'):
                 # The serializer is paused: the visible file extent cannot
                 # change while the existing helper checks identity and fsyncs.
+                self.stable_records += 1
                 expected = path.stat()
                 release_activation_cache_file_pages(path, expected_stat=expected)
                 if resource_check is not None:
                     resource_check('after_hessian_tensor_record:'+name)
             return result
 
+    def holds_tensor(value):
+        if isinstance(value, torch.Tensor):
+            return True
+        if isinstance(value, dict):
+            return any(holds_tensor(item) for item in value.values())
+        if isinstance(value, (list, tuple)):
+            return any(holds_tensor(item) for item in value)
+        return False
+
     with serialization._open_zipfile_writer(os.fspath(path)) as writer:
-        serialization._save(payload, RecordBoundary(writer), serialization.pickle,
+        boundary = RecordBoundary(writer)
+        serialization._save(payload, boundary, serialization.pickle,
                             serialization.DEFAULT_PROTOCOL, False)
+    if holds_tensor(payload) and boundary.stable_records == 0:
+        # Fail closed: a torch archive layout that files tensor bytes under
+        # another prefix would otherwise turn this writer into a plain
+        # torch.save with the whole sidecar left resident and no signal.
+        raise RuntimeError(
+            'hessian capture writer saw no stable tensor record (data/*) for a '
+            'payload holding tensors; the torch archive layout changed and the '
+            'page release would be silently skipped (RobTand/prismaquant#396)')
 
 
 def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
@@ -3418,11 +3439,17 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
         tmp_sidecar = sidecar.with_suffix(".json.tmp")
         payload = {"H": saved_hessians, "counts": dict(hessian_rows),
                    "provenance": capture_provenance}
-        if release_file_pages:
-            _save_hessian_capture_with_page_release(payload, tmp_capture,
-                                                    resource_check=resource_check)
-        else:
-            torch.save(payload, tmp_capture)
+        try:
+            if release_file_pages:
+                _save_hessian_capture_with_page_release(payload, tmp_capture,
+                                                        resource_check=resource_check)
+            else:
+                torch.save(payload, tmp_capture)
+        except BaseException:
+            # The previously published capture and sidecar stay untouched;
+            # do not leave a half-written .pt.tmp beside them.
+            tmp_capture.unlink(missing_ok=True)
+            raise
         tmp_sidecar.write_text(json.dumps({
             **capture_provenance,
             "capture_sha256": capture_sha256,
