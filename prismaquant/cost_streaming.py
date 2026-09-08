@@ -752,16 +752,22 @@ class StreamedCausalLM:
         # the runner no longer holds (the layer was hot and then evicted, or
         # the pressure floor refused the read) gets one bounded retry and the
         # `require_prefetched` refusal stays fail-closed for anything else (#403).
+        # The speculation record is the runner's future, whose result is the
+        # layer's tensors; it is released at re-assert, the same moment the
+        # runner drops its own reference at install, so this visitor is never
+        # a second owner of a claimed layer's source bytes.
         speculated: dict[int, object] = {}
         retried: list[int] = []
+        unspeculated = object()
 
         def speculate(layer):
             if 0 <= layer < self.num_layers and layer not in speculated:
                 speculated[layer] = self.context.schedule_prefetch(layer)
 
         def reassert(layer):
+            previous = speculated.pop(layer, unspeculated)
             held = self.context.schedule_prefetch(layer)
-            if layer in speculated and held is not None and held is not speculated[layer]:
+            if previous is not unspeculated and held is not None and held is not previous:
                 retried.append(layer)
 
         if exact:

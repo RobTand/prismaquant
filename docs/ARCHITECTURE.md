@@ -9,11 +9,16 @@ visit_layer_batches` with v2 `layer_major` storage keeps no residency state of
 its own: the streaming runner owns residency, and `StreamingContext.
 schedule_prefetch` is idempotent (None for a hot layer, the held future for a
 read in flight or delivered and unclaimed, a fresh read only when nothing is
-held). A held read is now returned before the pressure floor and admission
+held, and None with a counted memory skip when the pressure floor refuses a
+fresh one). A held read is now returned before the pressure floor and admission
 gates, so re-asserting a schedule under pressure is never counted as a memory
 skip. The visitor speculates each layer once ahead of its turn
 (`prefetch_lookahead`) and re-asserts it once, immediately before
-`install(require_prefetched=True)`. A speculation the runner no longer holds,
+`install(require_prefetched=True)`, releasing its record of the speculation
+at that re-assert: the record is the runner's future, whose result is the
+layer's tensors, and the runner drops its own reference at install, so the
+visitor never holds a claimed layer's source bytes past its turn. A
+speculation the runner no longer holds,
 because the layer was hot when speculated and the LRU evicted it before its
 turn, or because the pressure floor refused the read, therefore gets exactly
 one bounded retry, costing one serialized source read in the critical path.
