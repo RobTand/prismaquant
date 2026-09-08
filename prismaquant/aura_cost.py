@@ -2138,6 +2138,8 @@ def compute_aura_cost_streamed(
         )
         unit_formats[name] = tuple(planned)
         render_formats[name] = measured
+    if operator_windows is not None and any(not render_formats[name] for name in names):
+        raise ValueError('joint operator windows require a measured candidate for every target')
     nonzero_fmts = list(dict.fromkeys(
         fmt for name in names for fmt in render_formats[name]
     ))

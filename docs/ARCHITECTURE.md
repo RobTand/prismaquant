@@ -29,6 +29,8 @@ The joint campaign's `execution.operator_windows` carries the same closed
 policy into cost execution, requires exact boundary storage and keeps its PWC
 cap within campaign admission. It replaces whole-layer candidate admission
 only for that explicit run policy, checking every donor's read bound first.
+Every selected target must have a measured candidate; a passthrough-only target
+refuses before capture rather than emitting an unmeasured zero diagnostic.
 Preparation retains its independent qualification policy. No other stage or
 legacy configuration inherits the new mode.
 

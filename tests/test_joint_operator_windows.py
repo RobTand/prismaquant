@@ -159,3 +159,14 @@ def test_campaign_admits_only_explicit_candidate_windows_and_checks_later_donor(
     del config['execution']['boundary_storage']
     with pytest.raises(ValueError, match='exact boundary'):
         _admit_candidate_phase('run', config, data, {0: 320})
+
+
+def test_passthrough_only_target_refuses_instead_of_emitting_unmeasured_diagnostics():
+    from test_streamed_cost_checkpoints import _model_identity
+    _, context, runner, cache = _fixture()
+    with pytest.raises(ValueError, match='measured candidate for every target'):
+        aura.compute_aura_cost_streamed(runner, torch.tensor([[1,2,3,4]]), ['BF16'],
+            n_probes=3, min_free_gib=0, joint_activation=True, production_cache=cache,
+            model_identity=_model_identity('joint-source'), operator_windows=policy(),
+            collect_col_energy=True)
+    assert context.install_calls == 0
