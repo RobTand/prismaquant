@@ -150,3 +150,31 @@ both-host Netdata, exact resident/selected bytes, and native tensor parity.
 Compare the prefetch phase, not whole campaign duration, and retain original
 calibration/runtime/resource conditions. Until that completes, reduced physical
 I/O, speed and work-per-joule for this selected route remain unmeasured.
+
+
+## Review branch and source boundaries
+
+The dedicated `fix/glm-selected-verified-capture-review` delivery branch is
+stacked on observer PR #442 at `2cf67c1a6641e9bc44c7972739a6ce02d95dd645`.
+It carries only the reader, focused tests, evidence and audit-reference fix.
+The original tested branch remains retained; its CPU receipts continue to name
+that original source. The focused 17-test receipt compares to immutable
+`5f12978a8bfd625b217774a81e76e662273666fd`, replacing the ambiguous `HEAD` label.
+
+Read-only source comparison in `delivery-source-audit.json` verifies byte
+identity for autoscale, both existing capture loaders, the new focused test
+file and the existing observer. Campaign and dispatcher differ from the tested
+tree by the separate unmerged family-restriction implementation, which this PR
+does not carry. The cherry-pick resolved only architecture stamp history and
+preserved current-main model-bound WikiText and gold-topology documentation.
+Existing CPU results are not represented as a rerun on this delivery tree.
+
+The underlying verified-loader and selected-source APIs are already on main.
+The #442 stack supplies the established batch observer used for the before
+measurement; native follow-up also needs the bounded window in #444 and the
+coordinator's separately reviewed restricted-family pricing source, frozen
+producer and unchanged canonical capture. Those campaign integration inputs
+are not changes made by this reader PR. A new integrated pricing checkout must
+pass normal source/policy resume boundaries and retain its own exact evidence.
+No native after-change run, default switch, artifact qualification or speed
+claim is part of this draft delivery.
