@@ -1,0 +1,58 @@
+{
+  "complete": true,
+  "state": "failed",
+  "outcome": {
+    "status": "failed",
+    "claimed_host": "dl380g10",
+    "claimed_by": "dl380g10:2753366:4d28e2e4",
+    "claimed_unix": 1788896411.445863,
+    "finished_host": "dl380g10",
+    "finished_unix": 1788896438.1003428,
+    "attempts": 1,
+    "elapsed_s": 24.67043161392212,
+    "returncode": 1,
+    "action_returncode": 1,
+    "action_signal": null,
+    "receipt_published": null,
+    "reason": null
+  },
+  "sealed": {
+    "cas_root": "/mnt/shared/prismabuild-fleet/cas",
+    "worker_script": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py",
+    "tags": [
+      "x86"
+    ],
+    "needs_gpu": false,
+    "priority": -10,
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 3
+    },
+    "max_attempts": 1,
+    "retry_safe": false,
+    "container_owner": "05407705567ee3c93a5140c704a10444227e2fd8930e86ef8e30b59c642f1447",
+    "checkout_root": null,
+    "checkout_snapshot": {
+      "commit": "6e14049023739c7d7b594f97f24575db47159daf",
+      "input": {
+        "bytes": 27280356,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "6dc1e3b78a3d74fd5a6b5acbc964fb109bac8f0d803c66e7e24602e35df862f2"
+      },
+      "parent": "62453a5175675c55bd8377958dda6ab0f8155200",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "published_unix": 1788896411.0543485,
+    "published_by": "sparky",
+    "supersedes_withdrawal": null,
+    "preempted_by": null
+  },
+  "log_verification": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/attempts/64cd567f15eada1025215be0094e5ae9641c5829b2a3c8762c1f8b4a1c4bfde2/eac31d698ba8e2f3ff62b9455f4c2f4c0539ead2bab289961f38bda448a8ff8b/00000001.stdout.4650a50b134784910ddae97df12e455be22517274ec9bf764587938d003a8d3f.log",
+    "recorded_sha256": "4650a50b134784910ddae97df12e455be22517274ec9bf764587938d003a8d3f",
+    "recorded_bytes": 2706
+  },
+  "test_delta_after_initial_regression": "diff --git a/tests/test_tessera_campaign_progress.py b/tests/test_tessera_campaign_progress.py\nindex b218e4902f..5c1139cb2f 100644\n--- a/tests/test_tessera_campaign_progress.py\n+++ b/tests/test_tessera_campaign_progress.py\n@@ -71,7 +71,7 @@ def test_permanent_adaptive_rejection_stops_and_journals_successes(monkeypatch,\n     assert counts[(UNIT, 1280)] == 1, 'already successful member was re-encoded'\n     assert counts[(OTHER, 1280)] == 2  # One partial-success round, then no progress.\n     saved = states(checkpoint)\n-    assert [a['body_rate_q256'] for a in saved[UNIT]['anchors']] == [1024, 1280, 1536]\n+    assert sorted(a['body_rate_q256'] for a in saved[UNIT]['anchors']) == [1024, 1280, 1536]\n     assert [a['body_rate_q256'] for a in saved[OTHER]['anchors']] == [1024, 1536]\n     assert not (tmp_path/'cost.pkl').exists()\n \n@@ -108,7 +108,9 @@ def test_successful_refinement_is_unchanged(monkeypatch, tmp_path):\n @pytest.mark.parametrize('kind', ['HessianContractError', 'ActivationScaleContractError'])\n def test_hard_contract_failures_remain_immediate(monkeypatch, tmp_path, kind):\n     campaign, _checkpoint, argv, calls, controls = fixture(monkeypatch, tmp_path)\n-    error = getattr(campaign, kind)('original hard refusal')\n+    from prismaquant.tessera_render import HessianContractError\n+    error_type = HessianContractError if kind == 'HessianContractError' else campaign.ActivationScaleContractError\n+    error = error_type('original hard refusal')\n     controls['hard'] = error\n     with pytest.raises(type(error), match='original hard refusal') as caught:\n         campaign.main(argv)\n"
+}

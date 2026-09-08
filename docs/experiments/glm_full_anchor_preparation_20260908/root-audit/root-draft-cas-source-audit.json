@@ -1,0 +1,15 @@
+[
+  {
+    "action": "562025acf49cbd142bf2b4626346b291c0c63199623d656cc5a0fbb57f3c76f1",
+    "receipt": "a5b331e86b38abf9cd50277e3c164bf5f36d06aa67704cdb32583cd4b7700aa7",
+    "payload_sha256": "da9b94a9820f19a982c0719d007698d7efc4e907479c10dee2b73fd25778438d",
+    "snapshot": "31fc2f6a48bcb32d43b53d59668641bc90764e1f",
+    "source_diff_from_commit": [
+      ".pbrun-closure.c2de93bfc24bfb3c.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/README.md",
+      "docs/experiments/glm_full_anchor_preparation_20260908/invocation.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/qualification-manifest.draft.json"
+    ],
+    "stdout_tail": "Wrote two review-only rows to /mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/qualification-manifest.draft.json; UNFROZEN_CAPTURE_SHA256 refuses execution.\n"
+  }
+]

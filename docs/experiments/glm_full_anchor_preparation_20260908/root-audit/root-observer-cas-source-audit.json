@@ -1,0 +1,30 @@
+[
+  {
+    "action": "1388f214f7ffa9c3b6fa708e43cf007151b4581800554936b7849d84ba019542",
+    "receipt": "768d3f64696afefdd439525639ffe371d1fd7a32653c3684778590d10395b142",
+    "payload_sha256": "00bfbbc08c11e5875734ae7999fa7f6abd3574f90ca86035cdc2419b46925fe2",
+    "snapshot": "82053a1d8fbac95bd73557ab32bd7cb7e46486fa",
+    "source_diff_from_commit": [
+      ".pbrun-closure.fcd8a0b30f85e85e.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/anchor-spec.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/invocation.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/preflight.py",
+      "tests/test_tessera_campaign_progress.py"
+    ],
+    "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n..............s............                                              [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 28 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n26 passed, 1 skipped, 28 warnings in 7.51s\n"
+  },
+  {
+    "action": "c4df16f54ef0071551b43468e082b2be592714e3ea45c75a4ed3c140a0aa2a01",
+    "receipt": "9bb3acf5d713863d34a5a991b1f4a0c47e9a320dc155944fad12f6a87478425a",
+    "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "snapshot": "0ebe2e72c27b16be381e7360fea83a4c12634865",
+    "source_diff_from_commit": [
+      ".pbrun-closure.e37c28ed4efe7fe2.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/anchor-spec.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/invocation.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/preflight.py",
+      "tests/test_tessera_campaign_progress.py"
+    ],
+    "stdout_tail": ""
+  }
+]
