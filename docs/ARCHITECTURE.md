@@ -36,7 +36,11 @@ Torch RNG consumption refuses, and source fingerprints remain sealed across
 windows/probes. This assumes the profile's source forward is deterministic;
 it does not certify arbitrary mutable user modules. CUDA execution requires the
 bounded source environment and the conservative cgroup-plus-CUDA physical
-guard. Workspace/source/graph fit remains a measured admission requirement.
+guard. Each guarded allocation phase first returns inactive CUDA allocator
+blocks through the existing streamed cleanup helper, retaining all live source,
+statistics and candidate owners. This prevents retired blocks being charged
+again alongside the next phase reservation; it does not relax physical caps.
+Workspace/source/graph fit remains a measured admission requirement.
 The arithmetic and complete policy enter probe/checkpoint identity; legacy
 scalar rows cannot silently mix with summed FP32 operator rows. Default behavior
 is unchanged. Gates include dense/packed FP64 residual oracles, exact replay

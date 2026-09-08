@@ -170,3 +170,39 @@ def test_passthrough_only_target_refuses_instead_of_emitting_unmeasured_diagnost
             model_identity=_model_identity('joint-source'), operator_windows=policy(),
             collect_col_energy=True)
     assert context.install_calls == 0
+
+
+def test_guarded_operator_phases_release_inactive_allocator_reservation(tmp_path, monkeypatch):
+    """Retired CUDA blocks must not consume the next phase's future budget."""
+    import prismaquant.joint_statistics_replay as replay
+    import prismaquant.memory_management as memory
+    scope = tmp_path/'job'; scope.mkdir()
+    cap = 4*1024**3
+    (scope/'memory.max').write_text(str(cap))
+    (scope/'memory.current').write_text(str(1024**3))
+    membership = tmp_path/'membership'; membership.write_text('0::/job\n')
+    guard = memory.CaptureMemoryGuard('cuda:0', cgroup_root=tmp_path, membership=membership)
+    state = {'inactive': 2*1024**3, 'releases': 0}
+    labels = []
+    monkeypatch.setattr(memory, '_host_memory_info', lambda: (32*1024**3, 64*1024**3))
+    monkeypatch.setattr(torch.cuda, 'memory_reserved', lambda device: state['inactive'])
+    monkeypatch.setattr(torch.cuda, 'synchronize', lambda device: None)
+    def empty_cache():
+        state['inactive'] = 0
+        state['releases'] += 1
+    monkeypatch.setattr(torch.cuda, 'empty_cache', empty_cache)
+    checked = guard.check
+    def check(label, *, reserve_bytes=0):
+        result = checked(label, reserve_bytes=reserve_bytes)
+        labels.append(label)
+        # Model the just-completed phase leaving only inactive CUDA blocks.
+        state['inactive'] = 2*1024**3
+        return result
+    monkeypatch.setattr(guard, 'check', check)
+    monkeypatch.setattr(replay, 'operator_window_guard', lambda device: guard)
+    _, _, runner, cache = _fixture()
+    result = _run(runner, cache, operator_windows=policy())
+    assert result['costs']
+    assert {'before_joint_statistics_window', 'before_joint_candidate_load',
+            'before_joint_window_backward'} <= set(labels)
+    assert state['releases'] >= len(labels)

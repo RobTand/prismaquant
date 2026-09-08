@@ -531,14 +531,15 @@ def _free_gib() -> float:
 
 
 def _release_streamed_anchor_allocator_cache(device: object) -> None:
-    """Return consumed production anchors to Spark unified memory.
+    """Return retired streamed CUDA allocations to Spark unified memory.
 
     Dropping the final tensor reference only moves its CUDA allocation into
     PyTorch's reusable cache.  On the single-GPU GB10 path that memory still
     overlaps the much larger FP32 adjoint deltas unless the cache is returned
-    to the unified host/device pool before backward begins.  This is once per
-    streamed layer, outside the probe loop; non-CUDA test/research paths stay a
-    no-op.
+    to the unified host/device pool before the next allocation phase. Anchor
+    execution calls this once per streamed layer; bounded operator replay also
+    calls it before reserving each phase. Live tensor owners remain intact.
+    Non-CUDA test/research paths stay a no-op.
     """
     resolved = torch.device(device)
     if resolved.type != "cuda":
@@ -1920,6 +1921,7 @@ def compute_aura_cost_streamed(
     """
     from prismaquant.joint_statistics_replay import (
         normalize_operator_windows, operator_window_guard, resident_candidates,
+        check_operator_allocation,
         observe_and_project_windows, statistics_arithmetic_identity,
     )
     operator_windows = normalize_operator_windows(operator_windows)
@@ -3006,7 +3008,7 @@ def compute_aura_cost_streamed(
                                     boundary_storage.check_auxiliary(batches, cotangents=cotangents,
                                         extra=() if final else owner.resident_tensors())
                                 if operator_guard is not None:
-                                    operator_guard.check('before_joint_window_backward', reserve_bytes=(
+                                    check_operator_allocation(operator_guard, 'before_joint_window_backward', reserve_bytes=(
                                         operator_windows['workspace_reserve_bytes'] +
                                         (0 if lease is None else lease.statistics_capacity_bytes - lease.resident_statistics_bytes)))
                                 if _free_gib() < min_free_gib:
