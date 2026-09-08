@@ -1,7 +1,21 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integration/glm-probe-memory`. Stamps
+As of: 2026-09-08 · `feat/joint-statistics-target-windows`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `feat/joint-statistics-target-windows`) for whole-target
+operator-statistics planning (#385). The planner and both existing joint
+projection leases share one target-validation and activation-group requirement
+calculation. A target charges one FP32 GW matrix plus one FP32 GA matrix per
+distinct executed nonidentity QDQ group. Sorted target names form deterministic
+whole-target windows under an explicit statistics cap; oversize targets refuse
+before hooks or allocation. Plans retain names, shapes, ordered format groups
+and activation receipts, never source tensors, specs or callable pointers.
+Dynamic callable distinctions remain separate groups, while static served
+contracts retain their shared QDQ owner. Existing lease insertion order and
+projection arithmetic remain unchanged. The planner does not execute replay or
+admit source, boundary, graph, candidate or allocator memory. Gates:
+`tests/test_joint_statistics_plan.py` plus existing joint lease/projection tests.
 
 Re-stamped (2026-09-08, `integration/glm-probe-memory`) for the combined
 integration of issues #374, #377, #380 and #381. The reviewed operator-statistics,
