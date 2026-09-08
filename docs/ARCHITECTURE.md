@@ -48,12 +48,42 @@ projection arithmetic remain unchanged. The planner does not execute replay or
 admit source, boundary, graph, candidate or allocator memory. Gates:
 `tests/test_joint_statistics_plan.py` plus existing joint lease/projection tests.
 
+Re-stamped (2026-09-08, `fix/joint-qualification-windows`) for explicit
+`prismaquant.joint_anchor_qualification.v1` (#383). Joint anchor preparation
+can qualify one canonical unit's X/H at a time, with exact candidate renders
+leased through existing PWC windows. It checks the complete roster's capture
+sizes and donor file bounds before loading; source prefetch futures settle
+before growing unit state. Every format retains its original source/H/settings,
+wire decode, render-byte and activation-scale checks, with one bound identity
+per complete unit roster. Unit tensors and candidate owners expire before the
+next unit/window, including on failure. The existing verified page helper
+advises completed capture, PWC and wire files.
+
+The opt-in policy declares finite capture-resident and serialized-load caps
+plus a separate verification workspace reserve. Source/fixed state, loader
+transients and allocator overhead remain part of physical admission. CUDA
+requires the existing finite-cgroup guard, source-page policy and immediate
+host-allocator purge; advice alone never certifies reclamation. This bounds
+preparation ownership only. The cost stage still enforces its existing
+whole-layer candidate limit until a separate phased probe implementation is
+qualified. Legacy preparation, formats, numerical checks and serving gates
+retain their defaults. Gates: `tests/test_joint_qualification_windows.py` and
+existing joint-anchor, capture and PWC integrity tests; native qualification
+must establish exact records and memory behavior before a full-model fit claim.
+The [tiny native qualification](../experiments/measurements/glm-joint-qualification-20260908/README.md)
+preserved 26 verified cells across 50 invocations and reduced simultaneous
+X/H/PWC ownership from 6.75 to 1.375 MiB. Instrumented latency regressed and
+CUDA allocation peaks were unchanged; this is an ownership qualification,
+with no production speed or full-GLM fit claim.
+
+
 Re-stamped (2026-09-08, `integration/glm-probe-memory`) for the combined
 integration of issues #374, #377, #380 and #381. The reviewed operator-statistics,
 Hessian writer, consumed-source-page and PWC window changes retain their
 individual contracts and measurement scopes below. This integration resolves
 architecture stamps only; it does not enable the experimental policies or claim
 that a complete GLM capture, joint probe or served artifact has passed.
+
 
 Re-stamped (2026-09-08, `fix/bounded-hessian-sidecar`) for within-file Hessian
 sidecar page ownership (#377). Selected-source export keeps Torch's existing
