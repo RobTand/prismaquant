@@ -133,11 +133,15 @@ class StreamedCausalLM:
             layer = self.layer_index_for_qname(name)
             if name in projected:
                 weight = projected[name].weight
+                parameter_name = projected[name].module_qname+'.'+projected[name].param_name
             elif isinstance(modules.get(name), torch.nn.Linear):
                 weight = modules[name].weight
+                parameter_name = name+'.weight'
             else:
                 raise RuntimeError(f"selected source unit is not a declared Linear: {name}")
-            shapes[name] = (tuple(weight.shape), weight.dtype, weight.numel() * weight.element_size())
+            dtype = getattr(self.context, 'buffer_dtypes', {}).get(parameter_name, self.dtype)
+            shapes[name] = (tuple(weight.shape), dtype,
+                            weight.numel()*torch.empty((), dtype=dtype).element_size())
             layers.setdefault(layer, []).append(name)
         del weight
         required = sum(shape[2] for shape in shapes.values())

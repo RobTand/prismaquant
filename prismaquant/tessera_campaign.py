@@ -335,6 +335,26 @@ def _encode_and_render(weight, format_name: str, *, activation_kwargs=None,
     )
 
 
+def _activation_kwargs_memo(source, weights, device, *, max_entries=None,
+                            resource_check=None, factor_scratch_bytes=0):
+    """The campaign's existing plane-keyed memo, with an explicit owner bound."""
+    if max_entries is not None and (type(max_entries) is not int or max_entries < 1):
+        raise ValueError('encoder memo capacity must be positive or unbounded')
+
+    @functools.lru_cache(maxsize=max_entries)
+    def for_unit(name, scale_plane):
+        if resource_check is not None:
+            resource_check('before_selected_encoder_factors:'+name,
+                           reserve_bytes=factor_scratch_bytes)
+        kwargs = th.encoder_kwargs(source, name, int(weights[name].shape[1]),
+                                   device, scale_plane=scale_plane)
+        if resource_check is not None:
+            resource_check('after_selected_encoder_factors:'+name)
+        return kwargs
+
+    return for_unit
+
+
 def _measure_anchor(
     *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
     activation_kwargs_for=None, hessian_required: bool = True,
@@ -358,7 +378,8 @@ def _measure_anchor(
     wasteful: no rate reaches that call, and a twelve-anchor surface would
     otherwise factorise the same Hessian twelve times.  The plane is constant
     across every rung of a family and differs between families, so the bound is
-    one factorisation per unit per family-plane.
+    one factorisation per unit per family-plane while retained. Selected
+    source campaigns bound the memo to the compatible anchor batch width.
 
     A **missing key is a hard failure**, never a silently H-free encode: this
     codebase has already been bitten once by a render whose activation lookup
@@ -493,6 +514,16 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     tmp = wire_path.with_suffix(".tessera.tmp")
     tmp.write_bytes(blob)
     os.replace(tmp, wire_path)
+    if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
+        # The existing PWC entry is already disk-backed. Completed anchor
+        # files must not accumulate an unbounded page-cache owner across rungs.
+        from .perturbed_x_cache import release_activation_cache_file_pages
+        from .tessera_calibration_cache import sha256
+        rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
+        for path in (rendered_path, wire_path):
+            expected = path.stat()
+            sha256(path, release_read_pages=True)
+            release_activation_cache_file_pages(path, expected_stat=expected)
 
     bits = spec.bits_for_shape(tuple(weight.shape))
     return CampaignAnchor(
@@ -3301,7 +3332,8 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
 
 
 def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
-                        hessian_identity, static_scales, static_scale_policy):
+                        hessian_identity, static_scales, static_scale_policy,
+                        release_file_pages=False, resource_check=None):
     """Write the exporter's ``--hessian`` and ``--input-scales`` inputs.
 
     ``(hessian_capture_path | None, input_scales_path | None,
@@ -3365,6 +3397,14 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
             sidecar.unlink()
         os.replace(tmp_capture, hessian_capture_path)
         os.replace(tmp_sidecar, sidecar)
+        if release_file_pages:
+            from .perturbed_x_cache import release_activation_cache_file_pages
+            from .tessera_calibration_cache import sha256
+            expected = hessian_capture_path.stat()
+            sha256(hessian_capture_path, resource_check=resource_check, release_read_pages=True)
+            release_activation_cache_file_pages(hessian_capture_path, expected_stat=expected)
+        if resource_check is not None:
+            resource_check('after_selected_export_input_write')
         print(f"[campaign] wrote {hessian_capture_path} "
               f"({len(saved_hessians)} Hessians, capture_sha256 "
               f"{capture_sha256[:12]})", flush=True)
@@ -4061,8 +4101,10 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     # keys the refit objective by plane (the exact quadratic on a CHANNEL row
     # scale, a diagonal power on the LUT plane's coupled blocks) and the two
     # measured answers disagree. The plane is a property of the family, not of
-    # the rung, so the memo is keyed by (unit, plane) and the bound is one
-    # factorisation per unit per family-plane. The source is built from the
+    # the rung, so the memo is keyed by (unit, plane). Selected-source rows
+    # retain at most one compatible batch's factors and deterministically
+    # recompute evicted entries; resident-source rows keep the historical
+    # memo. The source is built from the
     # same functions the production render calls (``tessera_hessian``), so the
     # campaign's price and the cache's render are one rendering of one draw
     # (principle 8).
@@ -4070,22 +4112,17 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     if want_h:
         calibration_source = th.activation_source(hessians, hessian_identity)
 
-    @functools.lru_cache(maxsize=None)
-    def _activation_kwargs_for(name: str, scale_plane) -> dict:
-        if selected_guard is not None:
-            selected_guard.check('before_selected_encoder_factors:'+name,
-                reserve_bytes=selected_resources['phases']['resident_anchors']['factorization_scratch_bytes'])
-        kwargs = th.encoder_kwargs(
-            calibration_source, name,
-            int(weights[name].shape[1]), device, scale_plane=scale_plane)
-        if selected_guard is not None:
-            selected_guard.check('after_selected_encoder_factors:'+name)
-        return kwargs
+    _activation_kwargs_for = _activation_kwargs_memo(calibration_source, weights, device,
+        max_entries=args.anchor_batch_size if selected_source else None,
+        resource_check=None if selected_guard is None else selected_guard.check,
+        factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
+                              if selected_source else 0))
 
     cache = ProductionWeightCache(
         weights={}, levers={"tessera_campaign": True},
         cache_dir=str(cache_dir),
-        metadata={"schema": SCHEMA, "menu_mode": mode},
+        metadata={"schema": SCHEMA, "menu_mode": mode,
+                  **({'release_completed_anchor_file_pages': True} if selected_source else {})},
     )
     menus = expand_menus_for_targets(
         weights, targets, mode=mode, tp_degree=args.tp_degree,
@@ -4289,6 +4326,10 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     # capture is then the whole scope's H under the whole scope's counts --
     # exactly the object a whole-scope run writes -- and the merge can prove it
     # by recomputing the digest.
+    if selected_guard is not None:
+        phase = selected_resources['phases']['export_inputs']
+        selected_guard.check('before_selected_export_input_write', reserve_bytes=
+            phase['export_input_file_bytes']+phase['serialization_scratch_bytes'])
     hessian_capture_path, input_scales_path, capture_sha256 = write_export_inputs(
         cache_dir,
         hessians=hessians if want_h else None,
@@ -4296,6 +4337,9 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         hessian_identity=hessian_identity,
         static_scales=static_scales,
         static_scale_policy=static_scale_policy,
+        **(dict(release_file_pages=True,
+                resource_check=None if selected_guard is None else selected_guard.check)
+           if selected_source else {}),
     )
 
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --

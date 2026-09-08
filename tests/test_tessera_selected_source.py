@@ -88,17 +88,22 @@ def test_selected_admission_excludes_unselected_source_and_forward_owners(monkey
         body_layer_bytes={'0': 1000, '1': 10000, '2': 2000},
         body_loader_transient_bytes={'0': 100, '1': 1000, '2': 200},
         body_source_file_bytes={'0': 900, '1': 9000, '2': 1800},
+        unit_source_weight_bytes={'layers.0.proj': 24, 'layers.2.proj': 24},
         full_hessian_bytes=128, full_prefix_bytes=64, source_header_sha256='a'*64))
     plan = autoscale.selected_anchor_resources('/source',
         unit_shapes={'layers.0.proj': [3, 4], 'layers.2.proj': [3, 4]},
         counts={'layers.0.proj': 9, 'layers.2.proj': 9}, max_act_rows=2,
         cache_slots=2, prefetch_workers=1, headroom_gb=0)
     assert plan['selected_layers'] == ['0', '2']
-    source, anchors = plan['phases'].values()
+    source, export, anchors = plan['phases'].values()
     assert source['source_window_bytes'] == 3000
     assert source['loader_transient_bytes'] == 200
     assert anchors['selected_hessian_bytes'] == 128
     assert anchors['selected_prefix_bytes'] == 64
+    assert export['export_input_file_bytes'] == 128+2*16384
+    assert export['serialization_scratch_bytes'] == 2*4**2*4
+    assert anchors['encoder_memo_bytes'] == 4*4*4+4*8
+    assert plan['encoder_memo_capacity'] == 1
     assert 'nonbody_source_bytes' not in anchors
     assert all('boundary' not in key for phase in plan['phases'].values() for key in phase)
     assert plan['memory_bytes'] == max(map(lambda phase: sum(phase.values()), plan['phases'].values()))
@@ -129,6 +134,99 @@ def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monke
     assert '--calibration-cache-sha256' in rows[0]['argv']
     plan = json.loads((tmp_path/'plan.json').read_text())
     assert plan['rows'][0]['resources']['selected_layers'] == ['0']
+
+
+def test_bounded_encoder_memo_releases_evicted_factors_and_recomputes_identically(monkeypatch):
+    import weakref
+    import torch
+    from prismaquant import tessera_campaign as campaign
+    refs = []
+    def encoder(source, name, columns, device, *, scale_plane):
+        result = dict(ldl=torch.eye(columns)*(int(name)+1),
+                      refit_metric=torch.full((columns,), float(scale_plane)))
+        refs.append(weakref.ref(result['ldl']))
+        return result
+    monkeypatch.setattr(campaign.th, 'encoder_kwargs', encoder)
+    weights = {str(i): torch.empty(2, 4) for i in range(6)}
+    results = []
+    for capacity, expected_live in ((None, 12), (2, 2)):
+        memo = campaign._activation_kwargs_memo(None, weights, 'cpu', max_entries=capacity)
+        outputs = []
+        for repeat in range(2):
+            for plane in (1, 2):
+                for name in weights:
+                    kwargs = memo(name, plane)
+                    outputs.append((kwargs['ldl'].tolist(), kwargs['refit_metric'].tolist()))
+                    del kwargs
+                    assert sum(ref() is not None for ref in refs) <= (12 if capacity is None else 2)
+        assert sum(ref() is not None for ref in refs) == expected_live
+        results.append(outputs)
+        memo.cache_clear()
+        assert all(ref() is None for ref in refs)
+        del memo
+    assert results[0] == results[1]
+
+
+@pytest.mark.skipif(not __import__('torch').cuda.is_available(), reason='real encoder memo qualification requires CUDA')
+def test_native_bounded_encoder_memo_keeps_wire_and_price_bytes(tmp_path, monkeypatch):
+    import json
+    import os
+    import weakref
+    from pathlib import Path
+    import torch
+    from types import SimpleNamespace
+    from prismaquant import tessera_campaign as campaign
+    generator = torch.Generator().manual_seed(370)
+    weights = {f'unit{i}': torch.randn(16, 256, generator=generator).to('cuda', torch.bfloat16)
+               for i in range(3)}
+    acts = {name: torch.randn(7, 256, generator=generator).cuda() for name in weights}
+    hs = {name: torch.eye(256, device='cuda')*(i+1) for i, name in enumerate(weights)}
+    identity = campaign.th.calibration_identity('bounded memo', [torch.ones(1, 256, dtype=torch.long)],
+                                               fit_tokens=256)
+    source = campaign.th.activation_source(hs, identity)
+    original = campaign.th.encoder_kwargs
+    shared = {value.untyped_storage().data_ptr() for value in hs.values()}
+    refs = []
+    def tracked(*args, **kwargs):
+        result = original(*args, **kwargs)
+        refs.extend(weakref.ref(value) for value in result.values()
+                    if isinstance(value, torch.Tensor) and value.untyped_storage().data_ptr() not in shared)
+        return result
+    monkeypatch.setattr(campaign.th, 'encoder_kwargs', tracked)
+    outputs = []
+    measurements = []
+    for capacity in (None, 1):
+        memo = campaign._activation_kwargs_memo(source, weights, 'cuda', max_entries=capacity)
+        root = tmp_path/str(capacity)
+        root.mkdir()
+        cache = SimpleNamespace(weights={}, cache_dir=str(root))
+        rows = []
+        peak_owned_bytes = 0
+        for fmt in ('TESSERA_E4M3_K1_R1024', 'TESSERA_E4M3_K1_R1280'):
+            for name, weight in weights.items():
+                anchor = campaign._measure_anchor(qname=name, weight=weight, activations=acts[name],
+                    format_name=fmt, cache=cache, wire_dir=root,
+                    activation_kwargs_for=memo, hessian_required=True)
+                row = vars(anchor).copy()
+                row.pop('seconds')
+                rows.append(row)
+                alive = [ref() for ref in refs]
+                live = {value.untyped_storage().data_ptr(): value.untyped_storage().nbytes()
+                        for value in alive if value is not None}
+                peak_owned_bytes = max(peak_owned_bytes, sum(live.values()))
+                del alive, live
+        wires = {path.name: path.read_bytes() for path in root.glob('*.tessera')}
+        outputs.append((rows, wires))
+        assert memo.cache_info().currsize == (3 if capacity is None else 1)
+        measurements.append(dict(capacity=capacity, retained_entries=memo.cache_info().currsize,
+                                 peak_owned_factor_bytes_after_anchor=peak_owned_bytes))
+        memo.cache_clear()
+    assert outputs[0] == outputs[1]
+    assert measurements[1]['peak_owned_factor_bytes_after_anchor'] < measurements[0]['peak_owned_factor_bytes_after_anchor']
+    if os.environ.get('PRISMAQUANT_SELECTED_SOURCE_PROFILE'):
+        path = Path(os.environ['PRISMAQUANT_SELECTED_SOURCE_PROFILE'])/'memo-parity.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict(measurements=measurements, wire_and_price_parity=True), indent=2)+'\n')
 
 
 def test_selected_capture_cli_reaches_existing_streamed_source(monkeypatch, tmp_path):

@@ -284,11 +284,31 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
             '--calibration-census', str(census), '--calibration-cache', str(shared_manifest),
             '--calibration-cache-sha256', capture.sha256(shared_manifest),
             '--max-rounds', '1']
-        assert campaign.main(selected_argv) == 0
+        profile_root = os.environ.get('PRISMAQUANT_SELECTED_SOURCE_PROFILE')
+        if profile_root:
+            import time
+            profile_root = Path(profile_root)
+            profile_root.mkdir(parents=True, exist_ok=True)
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            if torch.cuda.is_available():
+                activities.append(torch.profiler.ProfilerActivity.CUDA)
+                torch.cuda.reset_peak_memory_stats()
+            started = time.time()
+            with torch.profiler.profile(activities=activities, profile_memory=True,
+                                       record_shapes=True) as prof:
+                assert campaign.main(selected_argv) == 0
+            prof.export_chrome_trace(str(profile_root/'selected-anchor.trace.json'))
+            (profile_root/'window.json').write_text(json.dumps(dict(start_unix=started,
+                end_unix=time.time(), cuda_max_allocated_bytes=(
+                    torch.cuda.max_memory_allocated() if torch.cuda.is_available() else None))))
+        else:
+            assert campaign.main(selected_argv) == 0
         with selected_out.open('rb') as handle:
             selected = pickle.load(handle)
         assert set(selected['costs']) == set(names)
         receipt = selected['provenance']['selected_source_preparation']
+        if profile_root:
+            (profile_root/'selected-source-receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
         assert receipt['source_forward_count'] == 0
         assert receipt['full_source_initialization_repeated'] is False
         assert all(row['source'] != 'cold' for row in receipt['layers'])
@@ -342,13 +362,14 @@ def test_selected_glm_source_copies_dense_and_logical_expert_without_forward(glm
     expert = profile_declared_packed_expert_projections(reference, profile)[0]
     dense = next(name for name, module in reference.named_modules()
                  if isinstance(module, torch.nn.Linear) and '.layers.0.mlp.' in name)
-    expected = {dense: dict(reference.named_modules())[dense].weight, expert.qname: expert.weight}
+    expected = {dense: dict(reference.named_modules())[dense].weight.to(torch.bfloat16),
+                expert.qname: expert.weight.to(torch.bfloat16)}
     shapes = {name: list(value.shape) for name, value in expected.items()}
     resources = selected_anchor_resources(source, unit_shapes=shapes,
         counts={name: 257 for name in shapes}, max_act_rows=7,
         cache_slots=2, prefetch_workers=1, headroom_gb=0)
     runner = build_streamed_causal_lm(str(source), device=torch.device('cpu'),
-        dtype=torch.float32, offload_folder=str(tmp_path/'selected-offload'),
+        dtype=torch.bfloat16, offload_folder=str(tmp_path/'selected-offload'),
         profile=profile, max_cache_slots=2, prefetch_workers=1,
         prefetch_min_available_gb=0, cache_headroom_gb=0,
         prefetch_lookahead=1, require_prefetched_residency=True,

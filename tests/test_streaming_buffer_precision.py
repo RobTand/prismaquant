@@ -73,8 +73,8 @@ def test_streaming_cache_preserves_declared_buffer_precision(tmp_path, prefetch)
         context.shutdown()
 
 
-@pytest.mark.parametrize('mode', ['resident', 'cold', 'prefetch'])
-def test_checkpoint_strict_fp32_parameters_keep_source_bytes(tmp_path, mode):
+@pytest.mark.parametrize('mode', ['resident', 'cold', 'prefetch', 'selected'])
+def test_checkpoint_strict_fp32_parameters_keep_source_bytes(tmp_path, mode, monkeypatch):
     from transformers import PreTrainedModel
 
     class PolicyModel(nn.Module):
@@ -92,7 +92,7 @@ def test_checkpoint_strict_fp32_parameters_keep_source_bytes(tmp_path, mode):
     with torch.no_grad():
         layer.strict.weight.copy_(value)
         layer.ordinary.weight.copy_(value)
-    path = tmp_path / 'strict.safetensors'
+    path = tmp_path / 'model.safetensors'
     save_file(model.state_dict(), str(path))
     keys = {name: name for name in model.state_dict()}
     shards = dict.fromkeys(keys, str(path))
@@ -112,9 +112,37 @@ def test_checkpoint_strict_fp32_parameters_keep_source_bytes(tmp_path, mode):
         layers_prefix='layers.', num_layers=1,
         install_resolvers=[_build_install_resolver(model, 'layers.0')],
         weight_shard=shards, weight_ckpt=keys,
-        layer_cache=LayerCache(max_bytes=1024), prefetch_pool=ThreadPoolExecutor(max_workers=1),
+        layer_cache=LayerCache(max_bytes=1024, max_entries=2), prefetch_pool=ThreadPoolExecutor(max_workers=1),
         device=torch.device('cpu'), dtype=torch.bfloat16, offload_folder=str(tmp_path))
     try:
+        if mode == 'selected':
+            import json
+            from prismaquant import autoscale, model_profiles, streaming_model
+            from prismaquant.cost_streaming import StreamedCausalLM
+            from prismaquant.model_profiles import DefaultProfile
+            profile = DefaultProfile()
+            monkeypatch.setattr(profile, 'body_layer_prefix', lambda: 'layers')
+            monkeypatch.setattr(model_profiles, 'detect_profile', lambda _: profile)
+            monkeypatch.setattr(streaming_model, '_resolve_declared_model_cls', lambda *_: PolicyModel)
+            (tmp_path/'config.json').write_text(json.dumps(dict(model_type='llama',
+                hidden_size=1, num_hidden_layers=1, num_attention_heads=1,
+                num_key_value_heads=1, intermediate_size=1, vocab_size=8)))
+            shapes = {'layers.0.strict': [1, 1], 'layers.0.ordinary': [1, 1]}
+            plan = autoscale.selected_anchor_resources(tmp_path, unit_shapes=shapes,
+                counts=dict.fromkeys(shapes, 1), max_act_rows=1, cache_slots=2,
+                prefetch_workers=1, headroom_gb=0)
+            assert plan['selected_source_weight_bytes'] == 6
+            runner = StreamedCausalLM(context, profile, prefetch_lookahead=1,
+                                     require_prefetched_residency=True)
+            weights, receipt = runner.snapshot_selected_weights(
+                ['layers.0.strict', 'layers.0.ordinary'],
+                max_resident_bytes=plan['selected_source_weight_bytes'])
+            assert receipt['resident_bytes'] == 6
+            assert weights['layers.0.strict'].dtype == torch.float32
+            assert torch.equal(weights['layers.0.strict'], value)
+            assert weights['layers.0.ordinary'].dtype == torch.bfloat16
+            assert all(parameter.is_meta for parameter in layer.parameters())
+            return
         if mode == 'prefetch':
             context.schedule_prefetch(0)
         context.install(0, require_prefetched=mode == 'prefetch')

@@ -73,6 +73,31 @@ def test_selected_prefetch_guards_and_advises_verified_files(capture, monkeypatc
     assert torch.equal(values[1]['a'], hessians['a'])
 
 
+def test_export_input_page_release_preserves_existing_file_bytes(capture, monkeypatch, tmp_path):
+    from prismaquant import tessera_campaign as campaign, perturbed_x_cache
+    _root, _path, census, identity, _acts, hessians, _record = capture
+    calls = []
+    original = perturbed_x_cache.release_activation_cache_file_pages
+    def release(path, *, expected_stat):
+        calls.append(path.name)
+        return original(path, expected_stat=expected_stat)
+    monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages', release)
+    outcomes = []
+    for bounded in (False, True):
+        root = tmp_path/str(bounded)
+        root.mkdir()
+        observed = []
+        path, _scales, digest = campaign.write_export_inputs(root, hessians=hessians,
+            hessian_rows=census['counts'], hessian_identity=identity['calibration'],
+            static_scales={}, static_scale_policy='fixture', release_file_pages=bounded,
+            resource_check=(lambda label, **kwargs: observed.append(label)) if bounded else None)
+        outcomes.append((path.read_bytes(), digest))
+        if bounded:
+            assert observed[-1] == 'after_selected_export_input_write'
+    assert outcomes[0] == outcomes[1]
+    assert calls == ['hessian_capture.pt']
+
+
 @pytest.mark.parametrize('change',['artifact','manifest','source','draw','geometry','scope'])
 def test_prefetch_refuses_drift(capture,change):
     root,path,census,identity,acts,hessians,record = capture
@@ -152,6 +177,9 @@ def test_layer_writer_refuses_insufficient_disk(capture, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('streamed_selection', [False, True])
 def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,streamed_selection):
+    # This synthetic orchestration fixture has no source CUDA allocations;
+    # the real GLM test exercises the finite-cgroup guard on the native lane.
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
     from test_tessera_campaign_resume import _main_fixture,UNIT
     tc,_,argv,model,inputs = _main_fixture(monkeypatch,tmp_path)
     model.config = SimpleNamespace(_attn_implementation='eager')
@@ -196,7 +224,8 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
             shutdown=lambda: source_calls.append('shutdown'))
         monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *a, **k: runner)
         monkeypatch.setattr(autoscale, 'selected_anchor_resources', lambda *a, **k: dict(
-            memory_bytes=1024**3, selected_source_weight_bytes=32768))
+            memory_bytes=1024**3, selected_source_weight_bytes=32768,
+            phases={'resident_anchors': {'factorization_scratch_bytes': 4*256**2*4}}))
         selection = tmp_path/'units.json'
         selection.write_text(json.dumps(dict(schema=tc.UNITS_SCHEMA,
             groups=[dict(key='u:'+UNIT, members=[UNIT])])))
