@@ -4,9 +4,9 @@ RobTand/prismaquant#389: every CLI test in this tree drives dense or fused
 anchor groups, so the completed-anchor page release in
 ``tessera_campaign._finish_anchor`` had no end-to-end cover.  That branch is
 guarded by the production cache's ``release_completed_anchor_file_pages``
-metadata, which only a selected-source row sets, and it is the only thing that
-keeps a long row from accumulating an unbounded page-cache owner over the
-render shard and the ``.tessera`` wire of every rung it completes.
+metadata, which only a selected-source row sets. The branch requests page
+release for the render shard and the ``.tessera`` wire of each completed rung;
+this test observes the advice call and file identity, not physical eviction.
 
 This module runs the real census, the real capture and then the real
 selected-source row of ``prismaquant.tessera_campaign.main`` on the tiny GLM
