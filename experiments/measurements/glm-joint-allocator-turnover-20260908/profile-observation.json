@@ -1,0 +1,158 @@
+[
+  {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-allocator-turnover-01/native-01/before_allocator_retirement.trace.json",
+    "sha256": "76ff2f76c7d164d87305f2b05efd9aae77be8ad4293f09f43584ccac49594c3d",
+    "bytes": 2637616,
+    "categories": {
+      "metadata": 60,
+      "user_annotation": 1,
+      "cpu_op": 27,
+      "overhead": 11,
+      "cuda_runtime": 94,
+      "ac2g": 6603,
+      "cuda_driver": 6458,
+      "kernel": 49,
+      "gpu_memcpy": 2,
+      "gpu_user_annotation": 1,
+      "Trace": 1
+    },
+    "category_duration_us": {
+      "user_annotation": 4199744.048,
+      "cpu_op": 4016866.3250000007,
+      "overhead": 4397.147,
+      "cuda_runtime": 240261.14999999997,
+      "cuda_driver": 3774106.4569999697,
+      "kernel": 348001.9059999999,
+      "gpu_memcpy": 4.32,
+      "gpu_user_annotation": 2959113.021,
+      "Trace": 4200017.231
+    },
+    "regions": [
+      {
+        "name": "before_allocator_retirement",
+        "duration_us": 4199744.048
+      }
+    ],
+    "cuda_api_total_us": [
+      [
+        "cuMemCreate",
+        3771252.4270000067
+      ],
+      [
+        "cudaDeviceSynchronize",
+        173056.97
+      ],
+      [
+        "cudaDeviceGetStreamPriorityRange",
+        57189.231
+      ],
+      [
+        "cudaLaunchKernel",
+        9902.037
+      ],
+      [
+        "cuMemMap",
+        2854.029999999976
+      ],
+      [
+        "cudaMemcpyAsync",
+        74.784
+      ],
+      [
+        "cudaStreamSynchronize",
+        19.616
+      ],
+      [
+        "cudaGetDriverEntryPointByVersion",
+        13.072000000000008
+      ],
+      [
+        "cudaStreamIsCapturing",
+        4.128
+      ],
+      [
+        "cudaGetDeviceProperties",
+        1.312
+      ]
+    ],
+    "scope": "Raw event observations; nested durations overlap. Before includes allocation/touch and old guard; after includes retirement and sampled identity. No comparable throughput delta is inferred."
+  },
+  {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-allocator-turnover-01/native-01/after_allocator_retirement.trace.json",
+    "sha256": "504bca6020612d702a8a0bd312b9fad8a73de3863ba5fda2fe7b101035aefa86",
+    "bytes": 1258470,
+    "categories": {
+      "metadata": 60,
+      "user_annotation": 1,
+      "cpu_op": 23,
+      "overhead": 1,
+      "cuda_runtime": 12,
+      "ac2g": 3297,
+      "cuda_driver": 3282,
+      "gpu_memcpy": 2,
+      "kernel": 1,
+      "gpu_user_annotation": 1,
+      "Trace": 1
+    },
+    "category_duration_us": {
+      "user_annotation": 144501.915,
+      "cpu_op": 1304.3359999999993,
+      "overhead": 1112.783,
+      "cuda_runtime": 119.82299999999998,
+      "cuda_driver": 90984.63299999996,
+      "gpu_memcpy": 3.008,
+      "kernel": 7.36,
+      "gpu_user_annotation": 156.514,
+      "Trace": 144675.962
+    },
+    "regions": [
+      {
+        "name": "after_allocator_retirement",
+        "duration_us": 144501.915
+      }
+    ],
+    "cuda_api_total_us": [
+      [
+        "cuMemRelease",
+        47760.063000000024
+      ],
+      [
+        "cuMemUnmap",
+        43102.809999999976
+      ],
+      [
+        "cuMemCreate",
+        115.2
+      ],
+      [
+        "cudaMemcpyAsync",
+        42.416
+      ],
+      [
+        "cudaLaunchKernel",
+        27.312
+      ],
+      [
+        "cudaDeviceSynchronize",
+        24.959
+      ],
+      [
+        "cudaStreamSynchronize",
+        22.416
+      ],
+      [
+        "cuMemMap",
+        6.56
+      ],
+      [
+        "cudaStreamIsCapturing",
+        2.464
+      ],
+      [
+        "cudaGetDeviceProperties",
+        0.256
+      ]
+    ],
+    "scope": "Raw event observations; nested durations overlap. Before includes allocation/touch and old guard; after includes retirement and sampled identity. No comparable throughput delta is inferred."
+  }
+]
