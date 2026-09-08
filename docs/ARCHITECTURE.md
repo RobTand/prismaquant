@@ -17,6 +17,30 @@ projection arithmetic remain unchanged. The planner does not execute replay or
 admit source, boundary, graph, candidate or allocator memory. Gates:
 `tests/test_joint_statistics_plan.py` plus existing joint lease/projection tests.
 
+Re-stamped (2026-09-08, `integration/glm-probe-memory`) for the combined
+integration of issues #374, #377, #380 and #381. The reviewed operator-statistics,
+Hessian writer, consumed-source-page and PWC window changes retain their
+individual contracts and measurement scopes below. This integration resolves
+architecture stamps only; it does not enable the experimental policies or claim
+that a complete GLM capture, joint probe or served artifact has passed.
+
+Re-stamped (2026-09-08, `fix/bounded-hessian-sidecar`) for within-file Hessian
+sidecar page ownership (#377). Selected-source export keeps Torch's existing
+path writer, archive record names and serializer, pausing after each tensor
+record to pass its stable visible prefix through the existing inode/size/time
+checks, durability fence and page advice. It changes no tensor, archive byte,
+content seal or publication order; failures retain the previous published pair.
+The v2 selected-anchor resource plan charges one largest H record plus metadata
+as the export file-page window, while all selected H/X/weights and serialization
+scratch remain charged. The physical cgroup guard remains decisive because page
+advice alone is not evidence of release. Resident-source serialization retains
+its previous policy. The bounded writer is byte-qualified against the supported
+Torch runtimes, including shared storage and noncontiguous views; it does not
+establish a full GLM fit or change an exact anchor quantum.
+Gates: `tests/test_bounded_hessian_sidecar.py`, existing capture byte/identity
+checks, and before/after native writer memory traces with both Sparks' Netdata.
+
+
 Re-stamped (2026-09-08, `research/joint-operator-statistics`) for the explicit
 one-probe `JointOperatorStatisticsLease` (issue #374). It extends the existing
 joint-AURA source hooks and packed Linear observers. A finite matrix budget
@@ -39,6 +63,7 @@ Gate: `tests/test_joint_operator_statistics.py` and existing joint lease/oracle
 and packed-source tests.
 The [primitive measurement](measurements/joint-operator-statistics-2026-09-08.md)
 records the synthetic native before/after profiles and explicit integration limits.
+
 
 Re-stamped (2026-09-08, `fix/selected-source-anchors`) for bounded selected
 encoder-factor ownership (#370). The existing `(unit, scale_plane)` memo in a
@@ -84,6 +109,38 @@ rows whose deterministic union covers all 36,423 units. Its 42 routed-stack
 groups each contain 864 logical units. The current planner cannot subdivide an
 exact full-stack group into smaller independently measured rows; statistical
 stack sampling is a different contract and does not fill that gap.
+
+
+Re-stamped (2026-09-08, `fix/coalesced-source-page-release`) for consumed
+source-page release (#380). The existing CUDA reader chunk validates selected
+safetensors spans, merges adjacent or overlapping consumed bytes, then advises
+only complete pages of each union. This releases internal tensor-boundary
+pages while preserving headers, unread gaps and outer partial pages. The
+existing completed-copy fence, mapping lifetime and source-identity checks
+remain unchanged. No global page drop, admission allowance or source cache is
+introduced; advice remains best effort. Gates cover adjacency, unread gaps,
+invalid-span refusal, CUDA lifecycle and a bounded real-checkpoint native
+profile. A full canonical capture still requires its own successful receipt.
+
+
+Re-stamped (2026-09-08, `codex/pwc-resident-windows`) for opt-in candidate
+windows through `ProductionWeightCache` (#381). `plan_resident_windows`
+resolves aliases in input order and bounds each finite quantum by a declared
+byte cap and loader count. `resident_window` uses the existing prefetch pool;
+`get_resident` refuses missing or evicted entries and preserves CB integrity
+and active file-load receipts. Whole backing storages count, including views,
+aliases and unrelated resident entries. Incoming standard uncompressed Torch
+archives have a conservative file-size bound plus storage-record preflight;
+opaque/compressed inputs refuse. Serialized load buffers have a separate
+aggregate cap. Nested windows and LRU eviction of other entries refuse.
+Context completion or failure releases the selected disk-backed cache owners
+through the existing release mechanism. Optional checked file-page advice
+follows the verified load, without changing artifact bytes or promising
+physical reclaim. Callers still admit allocator overhead, borrowed references
+and projection workspaces separately. Legacy cache defaults, pipeline order,
+quantization arithmetic and serving gates are unchanged. CPU lifecycle and
+budget gates are in `tests/test_pwc_resident_windows.py`; this API is not a
+full-model fit or throughput qualification.
 
 
 Re-stamped (2026-09-08, `fix/joint-boundary-residency`) for the explicit
