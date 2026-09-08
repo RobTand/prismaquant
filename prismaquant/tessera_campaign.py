@@ -3702,7 +3702,7 @@ def selected_source_read_set(runner, targets, *, census):
     return derived
 
 
-def prepare_selected_source(runner, targets, *, census_path, calibration,
+def prepare_selected_source(runner, targets, *, census, census_path, calibration,
                             max_act_rows, model_load_contract,
                             attention_implementation, calibration_cache,
                             calibration_cache_sha256, selected_resources,
@@ -3710,26 +3710,56 @@ def prepare_selected_source(runner, targets, *, census_path, calibration,
     """Bind a selected-source row to the canonical capture and copy its weights.
 
     Returns ``(capture_identity, selected_weights, selected_source_preparation)``.
-    The row byte-verifies only the shards it reads (#388): the selected layers'
-    shards and the fixed-state shards, derived by :func:`selected_source_read_set`.
-    Every other shard's digest is inherited from the census-sealed roster, and
-    the recomputed identity must still equal the pinned canonical manifest's
-    identity before any selected layer installs; that equality is the
-    attestation that the canonical capture byte-verified the inherited digests.
-    ``selected_source_preparation['source_verification']`` records what this row
-    verified and what it inherited. ``runner`` is shut down once the selected
-    weights are copied.
+    ``census`` is the already-parsed census dict and ``census_path`` its file,
+    which the identity hashes. The row's verification mode follows the census:
+
+    * ``roster-inherit`` when the census seals a producer source roster
+      (``expert_projection.producer.source``): the row byte-verifies only the
+      shards it reads (#388), the selected layers' shards and the fixed-state
+      shards, derived by :func:`selected_source_read_set`. Every other shard's
+      digest is inherited from the roster, so the recomputed identity must equal
+      the canonical manifest's identity before any selected layer installs, and
+      that manifest must be hash-pinned (``calibration_cache_sha256``): identity
+      equality with the pinned manifest is the only attestation of the inherited
+      digests, so an unpinned manifest refuses.
+    * ``full-root`` when the census seals no roster (dense-only models declare
+      no packed expert projection): nothing can be inherited, so the row hashes
+      the whole source root exactly as the canonical capture did.
+
+    ``selected_source_preparation['source_verification']`` records the mode and
+    what this row verified or inherited. ``runner`` is shut down once the
+    selected weights are copied.
     """
     from . import tessera_calibration_cache as calibration_store
-    census = json.loads(Path(census_path).read_text())
-    read_set = selected_source_read_set(runner, targets, census=census)
-    verify_shards = frozenset(read_set['layer_shards']) | frozenset(read_set['fixed_state_shards'])
-    capture_identity, verification = calibration_store.capture_identity_with_verification(
-        census_path, calibration=calibration,
-        max_act_rows=max_act_rows, model_load_contract=model_load_contract,
-        attention_implementation=attention_implementation,
-        resource_check=resource_check, release_read_pages=True,
-        verify_shards=verify_shards)
+    source = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
+    roster_present = bool(isinstance(source.get('files'), Mapping) and source['files'] and
+                          isinstance(source.get('tensors'), Mapping) and source['tensors'])
+    if roster_present:
+        if calibration_cache_sha256 is None:
+            raise RuntimeError('selected source inherits shard digests from the census roster; '
+                               'the canonical capture manifest must be pinned by sha256')
+        read_set = selected_source_read_set(runner, targets, census=census)
+        verify_shards = frozenset(read_set['layer_shards']) | frozenset(read_set['fixed_state_shards'])
+        capture_identity, verification = calibration_store.capture_identity_with_verification(
+            census_path, calibration=calibration,
+            max_act_rows=max_act_rows, model_load_contract=model_load_contract,
+            attention_implementation=attention_implementation,
+            resource_check=resource_check, release_read_pages=True,
+            verify_shards=verify_shards)
+        verification = dict(mode='roster-inherit', roster_present=True, **verification)
+    else:
+        read_set = runner.selected_source_shards(targets)
+        capture_identity = calibration_store.capture_identity(
+            census_path, calibration=calibration,
+            max_act_rows=max_act_rows, model_load_contract=model_load_contract,
+            attention_implementation=attention_implementation,
+            resource_check=resource_check, release_read_pages=True)
+        hashed = sorted(capture_identity['source_files'])
+        verification = dict(mode='full-root', roster_present=False,
+            byte_verified=[name for name in hashed if name.endswith('.safetensors')],
+            inherited_from_census_roster=[],
+            byte_verified_auxiliary=[name for name in hashed if not name.endswith('.safetensors')],
+            roster_origin=SELECTED_SOURCE_ROSTER_ORIGIN)
     manifest = calibration_store.require_capture_contract(calibration_cache,
         expected_sha256=calibration_cache_sha256)
     if manifest['identity'] != capture_identity:
@@ -4134,7 +4164,7 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         require_census_draw(census, bound_calibration, where="calibration capture")
         if selected_source:
             capture_identity, selected_weights, selected_source_preparation = (
-                prepare_selected_source(runner, targets,
+                prepare_selected_source(runner, targets, census=census,
                     census_path=args.calibration_census, calibration=bound_calibration,
                     max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
                     attention_implementation=attention_implementation,

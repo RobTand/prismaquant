@@ -189,3 +189,85 @@ def test_verify_shards_refuses_without_a_sealed_roster(sharded_source):
         identity_with_verification(path, census, verify_shards={SHARDS[1]})
     # The default path is unchanged by the missing roster: it still hashes everything.
     assert set(identity(path, census)['source_files']) == {*SHARDS, *GLOBBED_SMALL}
+
+
+def fake_runner(targets, *, tensors):
+    """A runner whose read set is layer 1 plus the fixed-state shard."""
+    from types import SimpleNamespace
+    calls = []
+    read_set = dict(layers=[1], layer_shards=[SHARDS[1]], fixed_state_shards=[SHARDS[2]],
+        tensors={k: v for k, v in tensors.items() if k != 'model.layers.0.proj.weight'})
+    return SimpleNamespace(calls=calls,
+        selected_source_shards=lambda names: read_set,
+        snapshot_selected_weights=lambda names, **kw: ({name: None for name in names},
+            dict(schema='prismaquant.selected_source_weights.v1', source_forward_count=0)),
+        shutdown=lambda: calls.append('shutdown')), read_set
+
+
+def canonical_manifest(tmp_path, path, census):
+    import torch
+    canonical = identity(path, census)
+    units = sorted(census['counts'])
+    return canonical, cc.publish_capture(tmp_path/'capture', census_path=path, identity=canonical,
+        acts={name: torch.zeros(2, census['unit_shapes'][name][1]) for name in units},
+        hessians={name: torch.eye(census['unit_shapes'][name][1]) for name in units},
+        counts=census['counts'], maxima=census['max_abs'])
+
+
+def prepare(runner, path, census, record, **extra):
+    from prismaquant import tessera_campaign as campaign
+    kwargs = dict(census=census, census_path=path, calibration={'fit_ids_sha256': 'draw'},
+        max_act_rows=2, model_load_contract=census['model_load_contract'],
+        attention_implementation='eager', calibration_cache=record['path'],
+        calibration_cache_sha256=record['sha256'],
+        selected_resources=dict(selected_source_weight_bytes=1))
+    return campaign.prepare_selected_source(runner, ['model.layers.1.proj'], **(kwargs | extra))
+
+
+def test_prepare_selected_source_stamps_roster_inherit_when_the_census_seals_a_roster(
+        sharded_source, tmp_path, monkeypatch):
+    source, path, census = sharded_source
+    canonical, record = canonical_manifest(tmp_path, path, census)
+    tensors = census['expert_projection']['producer']['source']['tensors']
+    runner, read_set = fake_runner(['model.layers.1.proj'], tensors=tensors)
+    log = HashLog(monkeypatch)
+    result, _weights, preparation = prepare(runner, path, census, record)
+    assert result == canonical and runner.calls == ['shutdown']
+    assert [n for n in log.names() if n.endswith('.safetensors')] == [SHARDS[1], SHARDS[2]]
+    assert preparation['source_verification'] == dict(mode='roster-inherit', roster_present=True,
+        byte_verified=[SHARDS[1], SHARDS[2]], inherited_from_census_roster=[SHARDS[0]],
+        byte_verified_auxiliary=sorted(SMALL), roster_origin=ROSTER_ORIGIN,
+        canonical_manifest_sha256=record['sha256'], selected_layers=[1],
+        layer_shards=[SHARDS[1]], fixed_state_shards=[SHARDS[2]])
+
+
+def test_prepare_selected_source_refuses_to_inherit_from_an_unpinned_manifest(
+        sharded_source, tmp_path, monkeypatch):
+    source, path, census = sharded_source
+    _canonical, record = canonical_manifest(tmp_path, path, census)
+    tensors = census['expert_projection']['producer']['source']['tensors']
+    runner, _read_set = fake_runner(['model.layers.1.proj'], tensors=tensors)
+    log = HashLog(monkeypatch)
+    with pytest.raises(RuntimeError, match='must be pinned by sha256'):
+        prepare(runner, path, census, record, calibration_cache_sha256=None)
+    assert log.events == [] and runner.calls == []
+
+
+def test_prepare_selected_source_hashes_the_full_root_without_a_roster(
+        sharded_source, tmp_path, monkeypatch):
+    """Dense-only censuses seal no roster: nothing to inherit, so hash every shard."""
+    source, path, census = sharded_source
+    tensors = census['expert_projection']['producer']['source']['tensors']
+    census = rewrite_census(path, census, lambda c: c.update(expert_projection=None))
+    canonical, record = canonical_manifest(tmp_path, path, census)
+    runner, _read_set = fake_runner(['model.layers.1.proj'], tensors=tensors)
+    log = HashLog(monkeypatch)
+    result, _weights, preparation = prepare(runner, path, census, record)
+    assert result == canonical
+    assert [n for n in log.names() if n.endswith('.safetensors')] == list(SHARDS)
+    assert log.shard_bytes() == sum((source/name).stat().st_size for name in SHARDS)
+    assert preparation['source_verification'] == dict(mode='full-root', roster_present=False,
+        byte_verified=list(SHARDS), inherited_from_census_roster=[],
+        byte_verified_auxiliary=list(GLOBBED_SMALL), roster_origin=ROSTER_ORIGIN,
+        canonical_manifest_sha256=record['sha256'], selected_layers=[1],
+        layer_shards=[SHARDS[1]], fixed_state_shards=[SHARDS[2]])

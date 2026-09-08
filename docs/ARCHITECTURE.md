@@ -23,8 +23,15 @@ row refuses when the roster is missing, a read shard is not on disk or not
 sealed, a read shard's bytes differ from the roster, or an on-disk shard is
 neither read nor sealed. The roster is absent whenever the census declares no
 packed expert projection (`expert_projection` is `null` for a dense-only
-model), so a dense-only streamed selected row refuses until its census carries
-a producer source roster. What each row verified is stamped into its payload,
+model); a dense-only selected row then has nothing to inherit and falls back
+to hashing the whole source root exactly as the canonical capture did, stamped
+`mode="full-root"`, `roster_present=false` (the roster path stamps
+`mode="roster-inherit"`, `roster_present=true`). Inheriting is attested only
+by identity equality with the canonical manifest, so the roster path refuses
+when that manifest is not pinned by `calibration_cache_sha256`. Bound on the
+real GLM-5.3-Flash census: the fixed state spans 2 of 120 shards (9.5 GB,
+shards 00001 and 00120), so a typical row reads 5 shards / 25.6 GB of the
+642.7 GB source instead of hashing all of it. What each row verified is stamped into its payload,
 not its identity: `selected_source_preparation.source_verification` lists
 `byte_verified`, `inherited_from_census_roster`, `byte_verified_auxiliary`,
 `roster_origin`, `canonical_manifest_sha256`, `selected_layers`,

@@ -142,7 +142,7 @@ def test_selected_glm_row_byte_verifies_only_the_shards_it_reads(tmp_path, monke
         attn_implementation='eager')
     events.append(('row', 'prepare_selected_source', None))
     identity, weights, preparation = campaign.prepare_selected_source(runner, targets,
-        census_path=census_path, calibration=calibration, max_act_rows=4,
+        census=census, census_path=census_path, calibration=calibration, max_act_rows=4,
         model_load_contract=contract, attention_implementation='eager',
         calibration_cache=record['path'], calibration_cache_sha256=record['sha256'],
         selected_resources=resources)
@@ -169,6 +169,7 @@ def test_selected_glm_row_byte_verifies_only_the_shards_it_reads(tmp_path, monke
         f'expected only {sorted([layer1, fixed])}')
     assert sum(hashed.values()) == sum((source/name).stat().st_size for name in (layer1, fixed))
     assert preparation['source_verification'] == dict(
+        mode='roster-inherit', roster_present=True,
         byte_verified=[layer1, fixed], inherited_from_census_roster=[layer0],
         byte_verified_auxiliary=sorted(name for name in identity['source_files']
                                        if not name.endswith('.safetensors')),

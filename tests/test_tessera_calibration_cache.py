@@ -272,12 +272,6 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
     calibration = tc.th.calibration_identity(inputs['text'],inputs['tokens'],fit_tokens=4,
         source='wikitext-2-raw-v1/train',split_role='calibration',model=str(source),
         seed=0,nsamples=32,seqlen=512,fit_tokens_min=4)
-    if streamed_selection:
-        # A selected row inherits unread shard digests from the sealed roster (#388).
-        fields['expert_projection'] = dict(producer=dict(source=dict(
-            files={'model.safetensors': cc.sha256(source/'model.safetensors')},
-            auxiliary_sha256={}, config_sha256=cc.sha256(source/'config.json'),
-            tensors={UNIT+'.weight': 'model.safetensors'})))
     census = tc.calibration_census({UNIT:4},{UNIT:3.},args=SimpleNamespace(model=str(source),
         nsamples=32,seqlen=512,seed=0,layer_stride=1),groups={'u:'+UNIT:[UNIT]},
         dense_targets=[UNIT],expert_targets=[],shapes={UNIT:[32,256]},identity=calibration,**fields)
@@ -309,9 +303,29 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
             groups=[dict(key='u:'+UNIT, members=[UNIT])])))
         argv += ['--streaming', '--units', str(selection),
                  '--calibration-cache-sha256', cc.sha256(root/'capture_manifest.json')]
+        # This synthetic census seals no producer roster (dense-only: no packed
+        # experts), so the row cannot inherit digests and must hash every shard
+        # under the source root (#388 full-root fallback), and say so.
+        prepared, hashed_shards = [], []
+        real_prepare, real_sha256 = tc.prepare_selected_source, cc.sha256
+        def prepare(*a, **k):
+            result = real_prepare(*a, **k)
+            prepared.append(result[2])
+            return result
+        monkeypatch.setattr(tc, 'prepare_selected_source', prepare)
+        def sha256(path, **k):
+            if str(path).endswith('.safetensors'):
+                hashed_shards.append(Path(path).name)
+            return real_sha256(path, **k)
+        monkeypatch.setattr(cc, 'sha256', sha256)
     assert tc.main([*argv,'--calibration-cache',str(root/'capture_manifest.json')]) == tc.EXIT_EMPTY_MENU
     if streamed_selection:
         assert source_calls == [[UNIT], 'shutdown']
+        verification = prepared[0]['source_verification']
+        assert verification['mode'] == 'full-root' and verification['roster_present'] is False
+        assert verification['byte_verified'] == ['model.safetensors']
+        assert verification['inherited_from_census_roster'] == []
+        assert set(hashed_shards) == {p.name for p in source.glob('*.safetensors')} == {'model.safetensors'}
 
 
 def test_driver_capture_and_plan_bind_one_complete_capture(capture):
