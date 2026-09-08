@@ -1,7 +1,21 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/glm-source-derivative-20260908`. Stamps
+As of: 2026-09-08 · `integrate/glm-six-variant-intake-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `plan/glm-six-variant-recipes`) for validated-frontier
+metadata ownership. Before writing any selection output, the selector refuses
+to carry a destination recipe's Tessera metadata, expert population or measured
+serving claims into a different canonical assignment, including changes to its
+BF16 units. For an unchanged assignment the selector preserves existing claims;
+downstream provenance and export gates still validate them. The
+Pareto/validation payload chain does not yet publish selected Tessera wire and
+scale provenance; an older destination is not an authority for a changed pick.
+Until that handoff exists, publish each such recipe through the allocator's
+existing metadata and selected-wire gates. CB and whole-artifact-budget stamps
+continue to come from the selected payload. This changes a metadata refusal,
+not runtime pricing, GPU execution, or serving qualification.
+Gate: `tests/test_select_validated_frontier.py`.
 
 Re-stamped (2026-09-08, `codex/joint-operator-windows-profile`) for the opt-in
 GLM KDA derivative contract. The GLM profile declares a closed, source-pinned

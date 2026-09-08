@@ -1,0 +1,228 @@
+{
+  "collection_owner": "prismaquant.artifact_collection:make_target_profile,make_collection_contract; offline records only",
+  "common": {
+    "allocation_cost_handoff": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "calibration": {
+      "fit_ids_sha256": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+      "nsamples": 512,
+      "seed": 0,
+      "seqlen": 512,
+      "text_sha256": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5"
+    },
+    "calibration_input": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/exact-calibration-input-01/calibration_tokens.safetensors",
+      "sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329"
+    },
+    "campaign_plan": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "campaign_receipts": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "canonical_capture": {
+      "path": null,
+      "sha256": null,
+      "status": "AWAIT_ORIGINAL_COMPLETE_CAPTURE_AND_ROOT_SEAL"
+    },
+    "census": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/census.json",
+      "sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd"
+    },
+    "export_hessian": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "heldout_validation_contract": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "input_scales": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "joint_cost": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "joint_plan": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "merged_checkpoint": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "merged_cost": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    },
+    "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+    "prepared_completion": {
+      "path": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_OR_NOT_BOUND_BY_THIS_INTAKE"
+    }
+  },
+  "hessian_sizes": {
+    "path": "hessian-sizes.json",
+    "sha256": "7e0e365e6fc4e55ffd275a90d995eafd2ed2b6fb7ff670b3e0f9b4c3ff56c6e5"
+  },
+  "historical_serving_inventory": {
+    "mtime_ns": 1788859433399610799,
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/serving-readiness-01/readiness.json",
+    "scope": "Historical source/receipt inventory; root reports newer source integration but no new native06 TP2+MoE measurement.",
+    "sha256": "b29678344b62c0043803331e777056a1fb8b788a84c93a3af2cb1924e04428a9"
+  },
+  "new_native_execution_authorized": false,
+  "one_shared_probe": true,
+  "runtime_v2_admission_issue": "https://github.com/RobTand/prismaquant/issues/420",
+  "schema": "prismaquant.glm_six_recipe_intake.v1",
+  "selected_pareto_metadata_handoff": "UNIMPLEMENTED_RETAIN_INDIVIDUAL_ALLOCATOR_RECIPES",
+  "selector_metadata_issue": "https://github.com/RobTand/prismaquant/issues/421",
+  "selector_safety_fix_commit": "26b97c6a4a",
+  "shared_allocation_cli_bindings": {
+    "--costs": "common.allocation_cost_handoff",
+    "--probe": "common.allocation_cost_handoff"
+  },
+  "shipping_certified": false,
+  "source_basis": "058bcc32a7966066a15a24aa744c14ec1bb1598a",
+  "speed_hints": "DECLARED_PROXY_NOT_MEASURED_PREFILL",
+  "status": "PREPARATION_ONLY_NOT_EXECUTABLE",
+  "variants": [
+    {
+      "artifact_byte_ceiling": null,
+      "assignment_output": null,
+      "decode_operator_sum_budget_ms": null,
+      "explicit_pareto_grid_bpp": null,
+      "export_output": null,
+      "heldout_quality_acceptance": null,
+      "id": "spark1_low_prefill_high_accuracy",
+      "kv_bytes": null,
+      "measured_runtime_table": null,
+      "prefill_operator_sum_budget_ms": null,
+      "runtime_context": null,
+      "scratch_bytes": null,
+      "source_probe_reused": true,
+      "sparks": 1,
+      "status": "INPUTS_UNBOUND_NOT_EXECUTABLE",
+      "target_profile": null,
+      "topology": null,
+      "usable_device_bytes": null
+    },
+    {
+      "artifact_byte_ceiling": null,
+      "assignment_output": null,
+      "decode_operator_sum_budget_ms": null,
+      "explicit_pareto_grid_bpp": null,
+      "export_output": null,
+      "heldout_quality_acceptance": null,
+      "id": "spark1_high_prefill_lower_accuracy",
+      "kv_bytes": null,
+      "measured_runtime_table": null,
+      "prefill_operator_sum_budget_ms": null,
+      "runtime_context": null,
+      "scratch_bytes": null,
+      "source_probe_reused": true,
+      "sparks": 1,
+      "status": "INPUTS_UNBOUND_NOT_EXECUTABLE",
+      "target_profile": null,
+      "topology": null,
+      "usable_device_bytes": null
+    },
+    {
+      "artifact_byte_ceiling": null,
+      "assignment_output": null,
+      "decode_operator_sum_budget_ms": null,
+      "explicit_pareto_grid_bpp": null,
+      "export_output": null,
+      "heldout_quality_acceptance": null,
+      "id": "spark1_balanced",
+      "kv_bytes": null,
+      "measured_runtime_table": null,
+      "prefill_operator_sum_budget_ms": null,
+      "runtime_context": null,
+      "scratch_bytes": null,
+      "source_probe_reused": true,
+      "sparks": 1,
+      "status": "INPUTS_UNBOUND_NOT_EXECUTABLE",
+      "target_profile": null,
+      "topology": null,
+      "usable_device_bytes": null
+    },
+    {
+      "artifact_byte_ceiling": null,
+      "assignment_output": null,
+      "decode_operator_sum_budget_ms": null,
+      "explicit_pareto_grid_bpp": null,
+      "export_output": null,
+      "heldout_quality_acceptance": null,
+      "id": "spark2_low_prefill_high_accuracy",
+      "kv_bytes": null,
+      "measured_runtime_table": null,
+      "prefill_operator_sum_budget_ms": null,
+      "runtime_context": null,
+      "scratch_bytes": null,
+      "source_probe_reused": true,
+      "sparks": 2,
+      "status": "INPUTS_UNBOUND_NOT_EXECUTABLE",
+      "target_profile": null,
+      "topology": null,
+      "usable_device_bytes": null
+    },
+    {
+      "artifact_byte_ceiling": null,
+      "assignment_output": null,
+      "decode_operator_sum_budget_ms": null,
+      "explicit_pareto_grid_bpp": null,
+      "export_output": null,
+      "heldout_quality_acceptance": null,
+      "id": "spark2_high_prefill_lower_accuracy",
+      "kv_bytes": null,
+      "measured_runtime_table": null,
+      "prefill_operator_sum_budget_ms": null,
+      "runtime_context": null,
+      "scratch_bytes": null,
+      "source_probe_reused": true,
+      "sparks": 2,
+      "status": "INPUTS_UNBOUND_NOT_EXECUTABLE",
+      "target_profile": null,
+      "topology": null,
+      "usable_device_bytes": null
+    },
+    {
+      "artifact_byte_ceiling": null,
+      "assignment_output": null,
+      "decode_operator_sum_budget_ms": null,
+      "explicit_pareto_grid_bpp": null,
+      "export_output": null,
+      "heldout_quality_acceptance": null,
+      "id": "spark2_balanced",
+      "kv_bytes": null,
+      "measured_runtime_table": null,
+      "prefill_operator_sum_budget_ms": null,
+      "runtime_context": null,
+      "scratch_bytes": null,
+      "source_probe_reused": true,
+      "sparks": 2,
+      "status": "INPUTS_UNBOUND_NOT_EXECUTABLE",
+      "target_profile": null,
+      "topology": null,
+      "usable_device_bytes": null
+    }
+  ]
+}

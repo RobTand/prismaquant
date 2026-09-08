@@ -18,7 +18,7 @@ from prismaquant.layer_config import (
     LAYER_CONFIG_META_KEY,
     canonicalize_format,
     is_layer_config_meta_key,
-    read_layer_config_metadata,
+    layer_config_metadata,
 )
 from prismaquant.saturation_select import find_saturation_bpp
 from prismaquant.nvfp4_cb_footprint import (
@@ -72,6 +72,37 @@ def _saturation_pick(frontier: Sequence[Mapping], z: float) -> tuple[int, dict]:
 def _load_assignment(path: str | Path) -> dict[str, str]:
     payload = _load_json(path)
     return _assignment_from_payload(payload, where=str(path))
+
+
+def _destination_metadata_for_assignment(
+    path: Path, assignment: Mapping[str, str],
+) -> dict:
+    """Keep destination claims only for the exact assignment that owned them.
+
+    Pareto validation does not yet carry selected Tessera wire/scale or serving
+    provenance. An old destination cannot supply those claims for a new pick.
+    Compare the complete canonical assignment, including retained BF16 units;
+    comparing only selected Tessera names would miss changed fixed resources.
+    """
+    if not path.exists():
+        return {}
+    payload = _load_json(path)
+    metadata = layer_config_metadata(payload)
+    coupled = sorted(
+        key for key in metadata
+        if key.startswith("tessera_") or key in {
+            "population", "serving_lane_provenance", "serve_constraints",
+            "measured_runtime_search",
+        }
+    )
+    if coupled and _assignment_from_payload(payload, where=str(path)) != dict(assignment):
+        raise ValueError(
+            "destination assignment-coupled metadata cannot describe the selected "
+            f"assignment: {', '.join(coupled)}; publish a recipe from the allocator "
+            "for this exact assignment with its verified wire, scale and serving "
+            "provenance before frontier selection"
+        )
+    return metadata
 
 
 def _assignment_from_payload(
@@ -1311,7 +1342,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # the allocator's reserved metadata forward — the exporter reads the
     # resolved serving profile from there (re-vet R11), and dropping it would
     # re-open the allocator/export profile split this run just closed.
-    carried = dict(read_layer_config_metadata(layer_config_path))
+    carried = _destination_metadata_for_assignment(layer_config_path, assignment)
     # The selected payload, not the overwritten destination file, owns
     # assignment-coupled identities.  Otherwise selecting a non-CB point after
     # a CB allocator run carries a stale global stamp while dropping every
