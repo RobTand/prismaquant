@@ -61,3 +61,12 @@ CAS receipt SHA-256:
 PrismaQuant #420 and Tessera #399 remain open for implementation and qualified
 measurements. Their incomplete fixed-resource model is not a new mandatory
 shipping stage for the direct six-variant comparison.
+
+Root independently checked the actual canonical CAS receipt and result, successful
+terminal cleanup and invoked checkout snapshot. Compared with `584a7df4ec`,
+that snapshot differs only in the PB closure and this measurement report. The
+subsequent formula correction is prose only. Root also checked the current
+`admit_fixed_resources` refusal and the complete feasibility expression,
+including the explicit caller reserves. The integration retains all existing
+architecture stamps and changes no runtime code. Root CAS/source audit:
+`experiments/measurements/glm-six-variant-recipes-20260908/root-runtime-design-cas-source-audit.json`.
