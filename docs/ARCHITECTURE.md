@@ -25,25 +25,11 @@ qualified. Legacy preparation, formats, numerical checks and serving gates
 retain their defaults. Gates: `tests/test_joint_qualification_windows.py` and
 existing joint-anchor, capture and PWC integrity tests; native qualification
 must establish exact records and memory behavior before a full-model fit claim.
-
-Re-stamped (2026-09-08, `codex/pwc-resident-windows`) for opt-in candidate
-windows through `ProductionWeightCache` (#381). `plan_resident_windows`
-resolves aliases in input order and bounds each finite quantum by a declared
-byte cap and loader count. `resident_window` uses the existing prefetch pool;
-`get_resident` refuses missing or evicted entries and preserves CB integrity
-and active file-load receipts. Whole backing storages count, including views,
-aliases and unrelated resident entries. Incoming standard uncompressed Torch
-archives have a conservative file-size bound plus storage-record preflight;
-opaque/compressed inputs refuse. Serialized load buffers have a separate
-aggregate cap. Nested windows and LRU eviction of other entries refuse.
-Context completion or failure releases the selected disk-backed cache owners
-through the existing release mechanism. Optional checked file-page advice
-follows the verified load, without changing artifact bytes or promising
-physical reclaim. Callers still admit allocator overhead, borrowed references
-and projection workspaces separately. Legacy cache defaults, pipeline order,
-quantization arithmetic and serving gates are unchanged. CPU lifecycle and
-budget gates are in `tests/test_pwc_resident_windows.py`; this API is not a
-full-model fit or throughput qualification.
+The [tiny native qualification](../experiments/measurements/glm-joint-qualification-20260908/README.md)
+preserved 26 verified cells across 50 invocations and reduced simultaneous
+X/H/PWC ownership from 6.75 to 1.375 MiB. Instrumented latency regressed and
+CUDA allocation peaks were unchanged; this is an ownership qualification,
+with no production speed or full-GLM fit claim.
 
 Re-stamped (2026-09-08, `integration/glm-probe-memory`) for the combined
 integration of issues #374, #377, #380 and #381. The reviewed operator-statistics,
@@ -139,8 +125,6 @@ exact full-stack group into smaller independently measured rows; statistical
 stack sampling is a different contract and does not fill that gap.
 
 
-
-
 Re-stamped (2026-09-08, `fix/coalesced-source-page-release`) for consumed
 source-page release (#380). The existing CUDA reader chunk validates selected
 safetensors spans, merges adjacent or overlapping consumed bytes, then advises
@@ -171,7 +155,6 @@ and projection workspaces separately. Legacy cache defaults, pipeline order,
 quantization arithmetic and serving gates are unchanged. CPU lifecycle and
 budget gates are in `tests/test_pwc_resident_windows.py`; this API is not a
 full-model fit or throughput qualification.
-
 
 
 Re-stamped (2026-09-08, `fix/joint-boundary-residency`) for the explicit
