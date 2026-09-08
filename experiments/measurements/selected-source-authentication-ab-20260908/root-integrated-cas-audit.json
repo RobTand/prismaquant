@@ -1,0 +1,12 @@
+[
+  {
+    "action": "0ebefe499232cb03167b979be2b25a5db91236a604d5adae2f71abfebc01e86d",
+    "receipt": "a5370a75eefdfdbc045c0e4c4d7601ddb53198be2de7401a390f0d73d5ffa0a8",
+    "payload_sha256": "0e177f2cd3672112d909ec85e32d5c6553219bb5893be054ae2c02be4d176292",
+    "snapshot": "998b1bc453a62257d00dfeb6d95b97d8fd5f1ce5",
+    "source_diff_from_commit": [
+      ".pbrun-closure.1b7744168784fac2.json"
+    ],
+    "stdout_tail": "..............................                                           [100%]\n=============================== warnings summary ===============================\ntests/test_selected_source_authentication_ab.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n30 passed, 14 warnings in 6.17s\n"
+  }
+]
