@@ -106,3 +106,25 @@ Root: `/mnt/shared/tessera-measurements/glm-canonical-census-20260908/`.
   canonical success CAS receipts and actual test output.
 - `full-capture-retry-invocation-02.json` and `full-capture-profile-02/`:
   retry declaration and live profiler/host evidence.
+
+## Second worker and merged-source qualification
+
+After merging the menu-pricing change from PR #368, source `f65c117e6`
+passed 34 native tests on Sparklina (`24e642c1bb11`, 35.48 seconds, no skips).
+The selection covers tiny-GLM source/census/capture parity, the original CUDA
+profiler windows, bounded launch environment and architecture. PB reserved four
+CPUs, 24 GiB total physical memory and a 16 GiB GPU subset; two pytest workers
+ran with native threads limited to one. Actual affinity was `[5,6,7,8]`, scope
+peak 4,311,883,776 bytes, exit zero, no OOM, and containment cleanup completed.
+This is environment/integration qualification, not a throughput comparison.
+
+Docker's source image uses OCI index identity `cf3f7f83e682...`; the second
+worker's legacy image store reports configuration identity `9f9b9f05b175...`
+after `docker save`/`load`. The complete ordered RootFS layer hashes and runtime
+configuration match. Both inspection records are retained in
+`producer-second-box-image-inspection.json`; the invocation binds the full
+second-worker identity. `producer-second-box-native-root-audit-01.json` verifies
+the canonical CAS receipt and payload, and the full checkout snapshot against
+`f65c117e6` (only the PB closure differs). The separate observer final-state
+regression also has an independently checked receipt/source record in
+`capture-observer-final-state-root-audit-01.json`.
