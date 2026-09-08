@@ -3526,10 +3526,12 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             record['settled_prefetch'] = settled_prefetch
             record['physical_memory_guard'] = None if guard is None else guard.snapshot()
         telemetry.append(record)
-        print(json.dumps({'streamed_calibration_layer': record}), flush=True)
         del acts, hessians
         if runner.device.type == 'cuda':
             torch.cuda.empty_cache()
+        if guard is not None:
+            record['released_capture_memory'] = guard.check('after_capture_output_release')
+        print(json.dumps({'streamed_calibration_layer': record}), flush=True)
 
     try:
         runner.visit_layer_batches(tokens, visit)
@@ -3732,9 +3734,9 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             "H-aware encoder branch is merged."
         )
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    if (args.streaming_capture_policy == "shared-inputs-bounded-v1" and device == "cuda"
-            and os.environ.get("PRISMAQUANT_RELEASE_SOURCE_PAGES") != "1"):
-        raise RuntimeError("bounded CUDA capture requires PRISMAQUANT_RELEASE_SOURCE_PAGES=1")
+    if args.streaming_capture_policy == "shared-inputs-bounded-v1" and device == "cuda":
+        from .autoscale import require_bounded_capture_environment
+        require_bounded_capture_environment(os.environ)
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     wire_dir = cache_dir / "wire"

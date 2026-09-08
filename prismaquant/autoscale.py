@@ -55,6 +55,23 @@ DEFAULT_FULL_GRAPH_ACT_MULT = 48   # 64 layers × sqrt ≈ 8 × 6 (per-layer-mix
 DEFAULT_FIXED_OVERHEAD_GB = 15.0   # HF transformers + tokenizer + Python heap floor
 
 
+# Bounded capture reuses one layer's physical CPU budget. Torch wheels may
+# statically link mimalloc, whose delayed purge otherwise retains completed H/X
+# even after every tensor owner is gone. Set this in the child environment before
+# importing Torch; libc trimming and pinned-host cache release do not reach it.
+BOUNDED_CAPTURE_ENV = {
+    'PRISMAQUANT_RELEASE_SOURCE_PAGES': '1',
+    'MIMALLOC_PURGE_DELAY': '0',
+}
+
+
+def require_bounded_capture_environment(environ):
+    """Require the release policy underlying the bounded physical phase plan."""
+    for name, expected in BOUNDED_CAPTURE_ENV.items():
+        if environ.get(name) != expected:
+            raise RuntimeError(f'bounded CUDA capture requires {name}={expected} before process startup')
+
+
 def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
                                    prefetch_workers, headroom_gb,

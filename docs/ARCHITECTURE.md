@@ -1,7 +1,18 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `feat/streamed-capture-admission`. Stamps
+As of: 2026-09-08 · `fix/capture-memory-lifetime`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/capture-memory-lifetime`) for the bounded capture
+allocator contract (issue #366). The dispatcher seals `MIMALLOC_PURGE_DELAY=0`
+and source-page release into both the PB action and its container environment
+before Python starts; an explicitly conflicting setting refuses. Direct bounded
+CUDA capture requires the same environment. This releases completed CPU H/X
+from Torch wheels with statically linked mimalloc, whose delayed purge can
+otherwise retain an entire layer after all tensor owners expire. The physical
+guard also samples after output deletion, before the next layer is installed.
+Admission limits, source prefetch, per-unit tensor bytes and canonical calibration
+identity retain their contracts. This remains the opt-in bounded policy.
 
 Re-stamped (2026-09-08, `feat/streamed-capture-admission`) for experimental
 `--streaming-capture-policy shared-inputs-bounded-v1`. The legacy and prior
@@ -14,8 +25,8 @@ short draws; independent CPU sibling outputs remain fully charged. The
 existing prefetch futures settle before capture growth and again before
 completed-source release, retaining successor cache/delivery ownership.
 
-CUDA execution requires `PRISMAQUANT_RELEASE_SOURCE_PAGES=1` and a finite
-cgroup v2 budget. The shared memory guard adds the entire CUDA reservation to
+CUDA execution requires `PRISMAQUANT_RELEASE_SOURCE_PAGES=1`,
+`MIMALLOC_PURGE_DELAY=0` at process startup, and a finite cgroup v2 budget. The shared memory guard adds the entire CUDA reservation to
 the cgroup charge conservatively, preserves a 2 GiB margin and 8 GiB host
 available-memory floor, and reserves upcoming growth before allocation.
 It checks bounded source-hash reads, source projection checks, original
