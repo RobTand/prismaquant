@@ -96,10 +96,12 @@ _GOLD_PRODUCER_COMMON_FILES = (
 )
 _GOLD_PRODUCER_TOOL_FILES = {
     "measure_vllm_full_kl": (
+        "tools/gold_engine_options.py",
         "tools/full_kl_teacher_payload.py",
         "tools/measure_vllm_full_kl.py",
     ),
     "measure_vllm_wikitext_ppl": (
+        "tools/gold_engine_options.py",
         "tools/full_kl_teacher_payload.py",
         "tools/measure_vllm_wikitext_ppl.py",
     ),
