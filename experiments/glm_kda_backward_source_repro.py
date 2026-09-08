@@ -54,7 +54,7 @@ def run_case(functions, *, length, gate, dtype, use_norm, state):
     # The oracle receives exactly representable copies of each low-precision input.
     values = [x.to(dtype) for x in values]
     stimulus = torch.randn(shape, generator=generator).to(dtype)
-    outputs, gradients, rows = {}, {}, {}
+    outputs, finals, gradients, rows = {}, {}, {}, {}
     for name, function in functions.items():
         target_dtype = torch.float64 if name == 'float64_oracle' else dtype
         inputs = [x.to(target_dtype).detach().clone().requires_grad_() for x in values]
@@ -64,11 +64,15 @@ def run_case(functions, *, length, gate, dtype, use_norm, state):
         if state:
             loss = loss + final.sum() * .125
         loss.backward()
-        outputs[name], gradients[name] = output, [x.grad for x in inputs]
+        outputs[name], finals[name], gradients[name] = output, final, [x.grad for x in inputs]
         rows[name] = dict(output=stats(output), output_sha256=digest(output),
+                          final_state=None if final is None else dict(statistics=stats(final), sha256=digest(final)),
                           gradients={key: stats(x.grad) for key, x in zip(('q', 'k', 'v', 'g', 'beta', 'state'), inputs)})
     assert torch.equal(outputs['original'], outputs['premask']), 'forward bytes changed'
     assert digest(outputs['original']) == digest(outputs['premask'])
+    if state:
+        assert torch.equal(finals['original'], finals['premask']), 'final state bytes changed'
+        assert digest(finals['original']) == digest(finals['premask'])
     assert torch.isfinite(outputs['original']).all()
     assert all(torch.isfinite(x).all() for x in gradients['premask'])
     assert all(torch.isfinite(x).all() for x in gradients['float64_oracle'])
@@ -88,6 +92,7 @@ def run_case(functions, *, length, gate, dtype, use_norm, state):
         assert not original_finite, 'strong-gate source regression did not reproduce'
     return dict(length=length, gate=gate, dtype=str(dtype), use_norm=use_norm, initial_state=state,
                 original_all_gradients_finite=bool(original_finite), forward_byte_equal=True,
+                final_state_byte_equal=True if state else None,
                 variants=rows, premask_vs_float64_gradient_errors=errors)
 
 
@@ -99,7 +104,7 @@ def expression_repro():
         cumulative = g.cumsum(0)
         delta = cumulative[:, None] - cumulative[None, :]
         mask = torch.triu(torch.ones(64, 64, dtype=torch.bool), diagonal=0)
-        exponent = (delta.masked_fill(mask, 0) if name == 'premask' else delta).exp()
+        exponent = (delta.masked_fill(mask.triu(diagonal=1), 0) if name == 'premask' else delta).exp()
         used = exponent.masked_fill(mask, 0)
         used.sum().backward()
         rows[name] = dict(delta_min=float(delta.detach().min()), delta_max=float(delta.detach().max()),

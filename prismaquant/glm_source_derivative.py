@@ -1,0 +1,169 @@
+"""Closed opt-in GLM KDA derivative identity; never mutates model code or dispatch."""
+from __future__ import annotations
+
+import hashlib
+import inspect
+import json
+import marshal
+import math
+import os
+from pathlib import Path
+import types
+import weakref
+
+VERSION = 'glm_kda_causal_exp_v1'
+SCHEMA = 'prismaquant.glm_source_derivative.v1'
+ORIGINAL_MODELING_SHA256 = '2092bbb4efa2a8087b74f4a4da37635c503fe1df9ae73f1e6e8342af8b4b8e8b'
+CORRECTED_MODELING_SHA256 = '416bd6168b3c42858c0e22622dd2e85ff04e9460703eadf64e5abef84aac24a3'
+ORIGINAL_IMAGE_CONTENT_SHA256 = 'eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd'
+ORIGINAL_EXPRESSION = '(g.unsqueeze(-2) - g.unsqueeze(-3)).exp().float()'
+CORRECTED_EXPRESSION = '(g.unsqueeze(-2) - g.unsqueeze(-3)).masked_fill(mask.triu(diagonal=1).unsqueeze(-1), 0).exp().float()'
+_BINDINGS = weakref.WeakKeyDictionary()
+
+
+def _require(ok, message):
+    if not ok:
+        raise ValueError('GLM source derivative: ' + message)
+
+
+def sha256(path):
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def bound_json(binding, label):
+    _require(isinstance(binding, dict) and set(binding) == {'path', 'sha256'}, label + ' requires path/SHA256')
+    raw = Path(binding['path']).read_bytes()
+    _require(hashlib.sha256(raw).hexdigest() == binding['sha256'], label + ' bytes changed')
+    return json.loads(raw)
+
+
+def declaration():
+    return dict(schema=SCHEMA, version=VERSION,
+                original_modeling_sha256=ORIGINAL_MODELING_SHA256,
+                corrected_modeling_sha256=CORRECTED_MODELING_SHA256,
+                original_image_content_sha256=ORIGINAL_IMAGE_CONTENT_SHA256,
+                transform='strict_upper_triangle_zero_before_exp_preserve_diagonal',
+                dispatch='original_decorated_torch_fallback')
+
+
+def normalize_source_derivative(value):
+    if value is None:
+        return None
+    _require(isinstance(value, dict) and set(value) == {'schema', 'version', 'image_build'}, 'closed policy required')
+    _require(value['schema'] == SCHEMA and value['version'] == VERSION, 'unknown derivative contract')
+    build = value['image_build']
+    _require(isinstance(build, dict) and set(build) == {'path', 'sha256'}, 'image build must be byte-bound')
+    return json.loads(json.dumps(value, allow_nan=False))
+
+
+def corrected_source(raw):
+    _require(hashlib.sha256(raw).hexdigest() == ORIGINAL_MODELING_SHA256, 'original modeling source differs')
+    old, new = ORIGINAL_EXPRESSION.encode(), CORRECTED_EXPRESSION.encode()
+    _require(raw.count(old) == 1, 'reviewed source expression is not unique')
+    result = raw.replace(old, new, 1)
+    _require(hashlib.sha256(result).hexdigest() == CORRECTED_MODELING_SHA256, 'corrected source differs')
+    return result
+
+
+def _code_at(root, names):
+    for name in names:
+        matches = [x for x in root.co_consts if isinstance(x, types.CodeType) and x.co_name == name]
+        _require(len(matches) == 1, 'ambiguous original callable code')
+        root = matches[0]
+    return root
+
+
+def _require_code(function, expected, label):
+    _require(isinstance(function, types.FunctionType) and
+             marshal.dumps(function.__code__) == marshal.dumps(expected), label + ' callable code changed')
+
+
+def _observe(model, build):
+    """Inspect real closure dispatch and live gates without calling unwrapped code."""
+    from transformers.models.glm5_next import modeling_glm5_next as modeling
+    from transformers.integrations import hub_kernels
+    model_path, hub_path = Path(modeling.__file__), Path(hub_kernels.__file__)
+    raw, hub_raw = model_path.read_bytes(), hub_path.read_bytes()
+    _require(hashlib.sha256(raw).hexdigest() == CORRECTED_MODELING_SHA256, 'actual modeling source differs')
+    _require(hashlib.sha256(hub_raw).hexdigest() == build['hub_kernels_sha256'], 'actual dispatch source differs')
+    compiled = compile(raw, str(model_path), 'exec')
+    hub_compiled = compile(hub_raw, str(hub_path), 'exec')
+    function = modeling.chunk_kimi_delta_attention
+    _require_code(function, _code_at(hub_compiled, ('use_kernel_func_from_hub_with_fallback', 'decorator', 'wrapped')),
+                  'decorated fallback')
+    closure = inspect.getclosurevars(function).nonlocals
+    original = closure.get('torch_function')
+    _require(closure.get('implementation') is original and closure.get('is_new_implementation') is False,
+             'actual KDA dispatch is not the decorated Torch fallback')
+    _require_code(original, _code_at(compiled, ('chunk_kimi_delta_attention',)), 'Torch fallback')
+    _require(original.__globals__ is vars(modeling), 'fallback globals differ')
+    gates = {}
+    for name, module in model.named_modules():
+        if type(module).__name__ != 'Glm5NextTextLinearAttention':
+            continue
+        _require(type(module) is modeling.Glm5NextTextLinearAttention, 'attention class substitution')
+        forward = module.forward
+        _require('forward' not in vars(module), 'instance forward substitution')
+        _require_code(forward.__func__, _code_at(compiled, ('Glm5NextTextLinearAttention', 'forward')), 'attention forward')
+        _require(forward.__func__.__globals__ is vars(modeling), 'attention dispatch globals differ')
+        gate = module.forget_gate
+        _require(type(gate) is modeling.Glm5NextTextForgetGate, 'forget-gate class substitution')
+        _require('forward' not in vars(gate), 'instance gate forward substitution')
+        _require_code(gate.forward.__func__, _code_at(compiled, ('Glm5NextTextForgetGate', 'forward')), 'forget gate')
+        config = getattr(model.config, 'text_config', model.config)
+        configured = getattr(config, 'linear_lower_bound', 'missing')
+        bound = gate.safe_gate_lower_bound
+        _require(configured == bound, 'live gate bound differs from actual config')
+        if bound is not None:
+            _require(type(bound) in (int, float) and math.isfinite(bound) and bound <= 0,
+                     'gate lower bound must be finite and nonpositive')
+            proof = dict(branch='safe_lower_bound_times_sigmoid', lower_bound=bound)
+        else:
+            proof = dict(branch='negative_exp_A_times_nonnegative_softplus', lower_bound=None)
+        gates[name] = dict(**proof, heads=gate.num_heads, head_dim=gate.head_dim)
+    _require(bool(gates), 'no actual GLM KDA modules observed')
+    return dict(declaration=declaration(), modeling_sha256=CORRECTED_MODELING_SHA256,
+                hub_kernels_sha256=build['hub_kernels_sha256'], gates=gates,
+                image_content_sha256=build['corrected_image_content_sha256'])
+
+
+def bind_source_derivative(model, profile, value):
+    """Issue a model-local binding only after observing the declared runtime."""
+    policy = normalize_source_derivative(value)
+    if policy is None:
+        _require(model not in _BINDINGS, 'cannot remove a live derivative binding')
+        return None
+    _require(profile.source_derivative_contract() == declaration(), 'profile does not declare this correction')
+    build = bound_json(policy['image_build'], 'image build')
+    _require(build.get('schema') == 'prismaquant.glm_derivative_image_build.v1' and build.get('status') == 'complete',
+             'complete corrected image build required')
+    _require(build.get('original_image_content_sha256') == ORIGINAL_IMAGE_CONTENT_SHA256 and
+             build.get('original_modeling_sha256') == ORIGINAL_MODELING_SHA256 and
+             build.get('corrected_modeling_sha256') == CORRECTED_MODELING_SHA256 and
+             build.get('changed_payload_files') == [build.get('modeling_path')], 'unreviewed image change')
+    _require(os.environ.get('PRISMAQUANT_CONTAINER_CONTENT_SHA256') == build['corrected_image_content_sha256'],
+             'actual container image content differs from build')
+    observed = _observe(model, build)
+    identity = dict(**observed, image_build_sha256=policy['image_build']['sha256'])
+    prior = _BINDINGS.get(model)
+    _require(prior is None or prior['identity'] == identity, 'cannot change a live derivative binding')
+    _BINDINGS[model] = dict(identity=identity, policy=policy, build=build)
+    return json.loads(json.dumps(identity))
+
+
+def source_derivative_identity(model):
+    try:
+        binding = _BINDINGS.get(model)
+    except TypeError:
+        return None  # Legacy identity accepts lightweight non-weakrefable model fixtures.
+    if binding is None:
+        return None
+    build = bound_json(binding['policy']['image_build'], 'image build')
+    _require(build == binding['build'], 'image build changed after binding')
+    _require(os.environ.get('PRISMAQUANT_CONTAINER_CONTENT_SHA256') == build['corrected_image_content_sha256'],
+             'actual image evidence changed after binding')
+    observed = _observe(model, build)
+    identity = dict(**observed, image_build_sha256=binding['policy']['image_build']['sha256'])
+    _require(identity == binding['identity'], 'source derivative execution changed')
+    return identity

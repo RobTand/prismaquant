@@ -3,6 +3,18 @@
 As of: 2026-09-08 · `feat/joint-operator-windows`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `codex/joint-operator-windows-profile`) for the opt-in
+GLM KDA derivative contract. The GLM profile declares a closed, source-pinned
+strictly upper-triangular premask of the fallback decay exponent; declaring it
+does not activate it. Binding verifies a separate image build, the actual
+decorated Torch fallback and live nonpositive gate configuration. Corrected
+models emit `source_execution.v2` with the derivative identity, and every
+identity reread checks that binding. Unbound callers retain exact v1 identity.
+The original image and canonical capture remain separate producer artifacts;
+no compatibility or native correction qualification follows from CPU numerical
+evidence. This remains research-only and introduces no serving or format gate.
+Evidence: `experiments/measurements/glm-kda-backward-source-repro-20260908/`.
+
 Re-stamped (2026-09-08, `fix/layer-major-boundary-capture`) for explicit
 `prismaquant.aura.boundary_storage.v2` with `capture_order: "layer_major"`
 (#394). The existing layer visitor installs each baseline source layer once
