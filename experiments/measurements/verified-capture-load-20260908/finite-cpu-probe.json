@@ -1,0 +1,285 @@
+{
+  "torch": "2.13.0+cu130",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "cuda": "13.0",
+  "device": "cpu",
+  "threads": 1,
+  "semantic_cases": [
+    {
+      "size": 0,
+      "position": null,
+      "value": "finite",
+      "finite": true
+    },
+    {
+      "size": 0,
+      "position": null,
+      "value": "negative",
+      "finite": true
+    },
+    {
+      "size": 0,
+      "position": null,
+      "value": "nan",
+      "finite": true
+    },
+    {
+      "size": 0,
+      "position": null,
+      "value": "positive_inf",
+      "finite": true
+    },
+    {
+      "size": 0,
+      "position": null,
+      "value": "negative_inf",
+      "finite": true
+    },
+    {
+      "size": 1,
+      "position": 0,
+      "value": "finite",
+      "finite": true
+    },
+    {
+      "size": 1,
+      "position": 0,
+      "value": "negative",
+      "finite": true
+    },
+    {
+      "size": 1,
+      "position": 0,
+      "value": "nan",
+      "finite": false
+    },
+    {
+      "size": 1,
+      "position": 0,
+      "value": "positive_inf",
+      "finite": false
+    },
+    {
+      "size": 1,
+      "position": 0,
+      "value": "negative_inf",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 0,
+      "value": "finite",
+      "finite": true
+    },
+    {
+      "size": 33,
+      "position": 0,
+      "value": "negative",
+      "finite": true
+    },
+    {
+      "size": 33,
+      "position": 0,
+      "value": "nan",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 0,
+      "value": "positive_inf",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 0,
+      "value": "negative_inf",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 16,
+      "value": "finite",
+      "finite": true
+    },
+    {
+      "size": 33,
+      "position": 16,
+      "value": "negative",
+      "finite": true
+    },
+    {
+      "size": 33,
+      "position": 16,
+      "value": "nan",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 16,
+      "value": "positive_inf",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 16,
+      "value": "negative_inf",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 32,
+      "value": "finite",
+      "finite": true
+    },
+    {
+      "size": 33,
+      "position": 32,
+      "value": "negative",
+      "finite": true
+    },
+    {
+      "size": 33,
+      "position": 32,
+      "value": "nan",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 32,
+      "value": "positive_inf",
+      "finite": false
+    },
+    {
+      "size": 33,
+      "position": 32,
+      "value": "negative_inf",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 0,
+      "value": "finite",
+      "finite": true
+    },
+    {
+      "size": 4099,
+      "position": 0,
+      "value": "negative",
+      "finite": true
+    },
+    {
+      "size": 4099,
+      "position": 0,
+      "value": "nan",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 0,
+      "value": "positive_inf",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 0,
+      "value": "negative_inf",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 2049,
+      "value": "finite",
+      "finite": true
+    },
+    {
+      "size": 4099,
+      "position": 2049,
+      "value": "negative",
+      "finite": true
+    },
+    {
+      "size": 4099,
+      "position": 2049,
+      "value": "nan",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 2049,
+      "value": "positive_inf",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 2049,
+      "value": "negative_inf",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 4098,
+      "value": "finite",
+      "finite": true
+    },
+    {
+      "size": 4099,
+      "position": 4098,
+      "value": "negative",
+      "finite": true
+    },
+    {
+      "size": 4099,
+      "position": 4098,
+      "value": "nan",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 4098,
+      "value": "positive_inf",
+      "finite": false
+    },
+    {
+      "size": 4099,
+      "position": 4098,
+      "value": "negative_inf",
+      "finite": false
+    }
+  ],
+  "allocations": [
+    {
+      "input_bytes": 4194304,
+      "positive_self_cpu_allocation_bytes": 8,
+      "allocating_events": [
+        {
+          "name": "aten::aminmax",
+          "self_cpu_memory_bytes": 8,
+          "cpu_memory_bytes": 8
+        }
+      ]
+    },
+    {
+      "input_bytes": 67108864,
+      "positive_self_cpu_allocation_bytes": 8,
+      "allocating_events": [
+        {
+          "name": "aten::aminmax",
+          "self_cpu_memory_bytes": 8,
+          "cpu_memory_bytes": 8
+        }
+      ]
+    },
+    {
+      "input_bytes": 629145600,
+      "positive_self_cpu_allocation_bytes": 8,
+      "allocating_events": [
+        {
+          "name": "aten::aminmax",
+          "self_cpu_memory_bytes": 8,
+          "cpu_memory_bytes": 8
+        }
+      ]
+    }
+  ],
+  "limits": "Profiler accounts Torch CPU allocations; non-Torch allocator bookkeeping is runtime overhead. No latency claim."
+}

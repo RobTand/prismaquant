@@ -1,0 +1,1007 @@
+{
+  "schema": "prismaquant.verified_capture_native_analysis.v1",
+  "source_root": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/verified-capture-load-native-03",
+  "source_sha256": {
+    "arm-2-verified-replay.cprofile": "36a0976dc83a8e23ba548e937089640513df1d14403d8c131cd194f3b9388529",
+    "arm-1-verified-seal.cprofile.txt": "6bc57bd8448c95b2015e6899437cfb656efc164cb6ea2a541505b4dac5b7c8d0",
+    "inputs.json": "a46f2197c4b35332ae5381feae2ad54c74e7c3e9375539661e2719acfa77379f",
+    "arm-1-verified-prefetch.cprofile.txt": "864c336a0be93c6985e264f105152346e1224163d28d2b0e6ebf7843f067c090",
+    "arm-1-verified-replay.cprofile": "117a97ab3f50a84edb6eebc047c86a30cca3f32ef63568e890f3ce02fd25abe7",
+    "summary.json": "aa35c1250522ee969234c00d32206613ecdeb0e699a6d3423c23929835b66e4f",
+    "arm-1-verified-replay.cprofile.txt": "28337fbe2c333f7fe5f453d98a30ac32500d4002b5497e605929ccc811a227c0",
+    "arm-2-verified-replay.json": "498d0a592d0849d371280c51c07f52fb0956de95f1493f187454acabf8b3d1c5",
+    "arm-3-legacy-replay.trace.json": "2846c05724d6c171b9fc2cceaeef3302d97e7032e4b3dea666b03af34ef5ed42",
+    "arm-1-verified-prefetch.trace.json": "2292dd2f234cfdd69eb17440613dc35a86804893fdaabe724e927ee322405e90",
+    "arm-2-verified-seal.json": "286d1757f63016cb65f6a707740c725b768d224529706f007c8ab96abb01d326",
+    "arm-0-legacy-replay.cprofile": "757bfe9b7c6041a91fd57d704ac0aa8ec49eb0f5c338d187d0bcf025d5d55a90",
+    "arm-2-verified-seal.cprofile": "b99fa534d8aef1cdb10562123abd96d769c2412b0f2838a655fbfdc5e3137214",
+    "arm-2-verified-prefetch.json": "329d6f582ceb0589eb492607aa0dc46cbf9023c560a2b470f80ae3672cb1522a",
+    "arm-0-legacy-replay.trace.json": "9af4ab458aa9d9b46cd1958ac224ad40c74a05ad9cf8c34506d59b61ec8a86a3",
+    "arm-0-legacy-prefetch.json": "3741b628dead01529aa5ad52a4c9b96c6e1749501e3249f359d11e2f26c30b2d",
+    "arm-0-legacy-prefetch.cprofile": "c65a7d230c4fe34c46e64dad4762d5cea5cc444cbf640291bc5ac0d81437689a",
+    "arm-0-legacy-seal.cprofile": "f4ef55102cec09a63f781526c773e224a06d3565286eba8e886192d7247e4e97",
+    "netdata.jsonl": "46474f153d7b087d74b417246d7c440a14310188692883f2ebdba238bc186cef",
+    "arm-3-legacy-prefetch.cprofile": "d293937d5cae5b087c6f236ca82a12624d650756232ed901c4017ecdff129cd6",
+    "arm-0-legacy-seal.json": "e2ddc4a7d8a3944da1d66297100406e014be47fc4380fde1718440a8696e6d23",
+    "arm-2-verified-prefetch.trace.json": "e97f0042338f98164de8be7660903bf8c510e7fcdaf9573d9902babe19bd6625",
+    "arm-2-verified-seal.cprofile.txt": "d36bc50533d9b52027d1d057c97951280751a25794ddbf9a4565ecff548015ec",
+    "arm-3-legacy-seal.json": "4c8e519937ae82762a0f61b62ec2e1990a774d021c5e05511fa719d6956e013a",
+    "arm-2-verified-replay.cprofile.txt": "ee08cb36e6bf5d5d2555b0174bf9fc4706aaa7c4b2cc23ebc570067df7ecd2a8",
+    "arm-0-legacy-replay.json": "d51fe9672dd44344820f633fa2d3d8dfec538a22f809e11ec33dc12e05b2cddd",
+    "arm-1-verified-prefetch.json": "3d37956c8cc33c642705306252408ebf6b3ea483962bfc92510050add768f7bf",
+    "arm-1-verified-seal.cprofile": "aa58a1a0fdb12bd3b0bd3b91bf8b20f0bf7ecd0bc12bf76633c74477240254c3",
+    "arm-3-legacy-replay.cprofile": "69adbfb393ee3234cfba36575b01d0893a5e2271520201b3bd29d36940dbce57",
+    "arm-0-legacy-seal.trace.json": "735b9dea5edc3bc6bcae0176779543fd15b3c745798b85268ea478405727f94d",
+    "arm-1-verified-replay.trace.json": "e8a4f3d939c5ffbee30f8f0e087ffc3db1137a616aad48acbd2a152cda2b1c38",
+    "pqteld-slice.json": "7309072a5daafd7952adc8fc099987b69664035fe8b798db8423e31fd45c610f",
+    "arm-3-legacy-seal.cprofile": "2642796bba2e05cc4bb17285c355ec7f05aa552b848a04cd9b5362895b2e994b",
+    "arm-3-legacy-prefetch.trace.json": "8b233286620268da09699a27b1e03912f429c8f173566d5bc5d1cde00282d49c",
+    "arm-3-legacy-prefetch.json": "055f2de3ccf1eae779f1fe800f3be814b8da1b70c36a9b8d42ee39f6d14be7b3",
+    "arm-1-verified-seal.json": "e45f212e7af6428a1f289d858c0bc454bf2a6f55a298288d26743147c0fa4aee",
+    "arm-3-legacy-seal.cprofile.txt": "dc361ab71719d931d155141b07c704ac67907caa3dd7e91bb13f61f0678bee4e",
+    "arm-3-legacy-replay.cprofile.txt": "5007a6a49fd6fea5c232a4d346627ce924f3b13b7b67c92b83ebfccc630fce1e",
+    "arm-1-verified-seal.trace.json": "34f8648a8e216eb6d393d20c5557a6e60569f44343c01d25d6d334db548579cd",
+    "arm-3-legacy-prefetch.cprofile.txt": "86397a284922e224a13a4efabe49e7dee46958f45135fd89bd682e5e2b766429",
+    "arm-2-verified-prefetch.cprofile": "7936362d9af99d02a321bbced5c57a2a9abc166aefbb915597ac640334072d4f",
+    "subset-census.json": "40680f64c7ca3f2d01c5a2364bb1c2e246cbf464b448237238bad9281838636d",
+    "arm-0-legacy-seal.cprofile.txt": "b54b8941c26787b517d953719aea3c54c75724b6d5eb6919f5b5488cde885c7f",
+    "arm-2-verified-prefetch.cprofile.txt": "09573c7d27e13670ee19c1efa3e24928530a85096834bac05c7eecf45fc36af4",
+    "arm-2-verified-seal.trace.json": "f6ade841ba988480289720b5f14e30f2a463193172f843d18b40a97cd8fd64c6",
+    "arm-0-legacy-prefetch.trace.json": "c05a505595d782c000653ae1b355920573d7931679e5de3f15bfb0876dc10dbe",
+    "arm-3-legacy-replay.json": "482bbe86e2086e523d99f9b8e54ba54b8067f026c8d981b4c269d978973d124d",
+    "arm-3-legacy-seal.trace.json": "2b47fdaa548da78eaee3d7b296844c01ebfd80734ae4115a6f55823a8631b35c",
+    "arm-2-verified-replay.trace.json": "c1de34f1f10255e04a989d5a987af1896efa67b882ea628700abc041f3ffe0d8",
+    "arm-0-legacy-prefetch.cprofile.txt": "5f012ff8fc45823fa6b3e35dfc7349934c37485d91df3d2e9402080822922aec",
+    "arm-0-legacy-replay.cprofile.txt": "15d85e041f2ebbf6c67e260ac9ae05607c10edab02d8c2ed97beeef6fec19f85",
+    "arm-1-verified-replay.json": "072e7044f63839419b3601b131b555b49cb75fb85bf688bf8ca62b08ed521197",
+    "arm-1-verified-prefetch.cprofile": "5f5a4e35417508bb614def7b3a2888b427ab8c655355836d6b7275ab2dbdf29f"
+  },
+  "rows": [
+    {
+      "arm": 0,
+      "mode": "legacy",
+      "operation": "replay",
+      "elapsed_s": 1.4935977458953857,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1470054178,
+        "read_bytes": 758513664,
+        "syscr": 1338,
+        "syscw": 18,
+        "wchar": 46450,
+        "write_bytes": 45056
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 8,
+          "inclusive_s": 0.40320273700000003,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 8,
+          "inclusive_s": 0.15896602199999998,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 4,
+      "cprofile_guard_cumulative_s": 0.002008189,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881247.303,
+          "watts": 4.23
+        },
+        {
+          "time": 1788881247.803,
+          "watts": 4.23
+        },
+        {
+          "time": 1788881248.303,
+          "watts": 4.34
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 1448730624,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 1448730624,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 1891635018,
+        "host_mem_available_bytes": 122827309056,
+        "label": "before_diagnostic_phase:replay",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 0,
+      "mode": "legacy",
+      "operation": "seal",
+      "elapsed_s": 1.0269451141357422,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1469488104,
+        "read_bytes": 704667648,
+        "syscr": 752,
+        "syscw": 9,
+        "wchar": 62415,
+        "write_bytes": 65536
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.202802679,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.07844242900000001,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 4,
+      "cprofile_guard_cumulative_s": 0.0019445410000000002,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881249.303,
+          "watts": 5.33
+        },
+        {
+          "time": 1788881249.803,
+          "watts": 5.33
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 905375744,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 905375744,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 1891635018,
+        "host_mem_available_bytes": 123326922752,
+        "label": "before_diagnostic_phase:seal",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 0,
+      "mode": "legacy",
+      "operation": "prefetch",
+      "elapsed_s": 1.318070650100708,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1416187321,
+        "read_bytes": 1409294336,
+        "syscr": 824,
+        "syscw": 10,
+        "wchar": 58237,
+        "write_bytes": 61440
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.20637659699999997,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.078761787,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 92,
+      "cprofile_guard_cumulative_s": 0.033966554,
+      "gpu_transfer_count": 4,
+      "gpu_transfer_s": 0.028164582,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881250.303,
+          "watts": 11.09
+        },
+        {
+          "time": 1788881250.803,
+          "watts": 11.09
+        },
+        {
+          "time": 1788881251.303,
+          "watts": 11.49
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 914022400,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 914022400,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 2516584357,
+        "host_mem_available_bytes": 123348549632,
+        "label": "before_diagnostic_phase:prefetch",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 1,
+      "mode": "verified",
+      "operation": "replay",
+      "elapsed_s": 1.5318214893341064,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 758585842,
+        "read_bytes": 704651264,
+        "syscr": 396,
+        "syscw": 10,
+        "wchar": 69305,
+        "write_bytes": 69632
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.205609477,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 4,
+          "inclusive_s": 0.025775428,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.07860833199999999,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 55,
+      "cprofile_guard_cumulative_s": 0.024733526000000002,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881252.303,
+          "watts": 11.61
+        },
+        {
+          "time": 1788881252.803,
+          "watts": 11.61
+        },
+        {
+          "time": 1788881253.303,
+          "watts": 11.52
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 1661124608,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 1661124608,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 1891635018,
+        "host_mem_available_bytes": 122782031872,
+        "label": "before_diagnostic_phase:replay",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 1,
+      "mode": "verified",
+      "operation": "seal",
+      "elapsed_s": 1.150392770767212,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 758617926,
+        "read_bytes": 704667648,
+        "syscr": 399,
+        "syscw": 9,
+        "wchar": 62381,
+        "write_bytes": 61440
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::aminmax": {
+          "calls": 4,
+          "inclusive_s": 0.02586482,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::all": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        }
+      },
+      "cprofile_guard_calls": 55,
+      "cprofile_guard_cumulative_s": 0.024182839,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881254.303,
+          "watts": 11.52
+        },
+        {
+          "time": 1788881254.803,
+          "watts": 11.52
+        },
+        {
+          "time": 1788881255.303,
+          "watts": 11.49
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 955490304,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 955490304,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 1891635018,
+        "host_mem_available_bytes": 122820141056,
+        "label": "before_diagnostic_phase:seal",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 1,
+      "mode": "verified",
+      "operation": "prefetch",
+      "elapsed_s": 1.0055644512176514,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 704766009,
+        "read_bytes": 704651264,
+        "syscr": 393,
+        "syscw": 9,
+        "wchar": 46407,
+        "write_bytes": 45056
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::aminmax": {
+          "calls": 4,
+          "inclusive_s": 0.025752853,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::all": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        }
+      },
+      "cprofile_guard_calls": 55,
+      "cprofile_guard_cumulative_s": 0.025357986000000002,
+      "gpu_transfer_count": 4,
+      "gpu_transfer_s": 0.027702725,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881255.803,
+          "watts": 11.49
+        },
+        {
+          "time": 1788881256.302,
+          "watts": 11.46
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 957980672,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 957980672,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 2516584357,
+        "host_mem_available_bytes": 122873364480,
+        "label": "before_diagnostic_phase:prefetch",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 2,
+      "mode": "verified",
+      "operation": "replay",
+      "elapsed_s": 1.4739291667938232,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 758585843,
+        "read_bytes": 704651264,
+        "syscr": 396,
+        "syscw": 10,
+        "wchar": 69418,
+        "write_bytes": 69632
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.203627447,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 4,
+          "inclusive_s": 0.025837876,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.07893246000000001,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 55,
+      "cprofile_guard_cumulative_s": 0.025932279000000003,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881257.803,
+          "watts": 11.61
+        },
+        {
+          "time": 1788881258.302,
+          "watts": 11.59
+        },
+        {
+          "time": 1788881258.802,
+          "watts": 11.59
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 1671233536,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 1671233536,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 1891635018,
+        "host_mem_available_bytes": 122178699264,
+        "label": "before_diagnostic_phase:replay",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 2,
+      "mode": "verified",
+      "operation": "seal",
+      "elapsed_s": 1.1424689292907715,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 758618099,
+        "read_bytes": 704667648,
+        "syscr": 401,
+        "syscw": 11,
+        "wchar": 85484,
+        "write_bytes": 86016
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::aminmax": {
+          "calls": 4,
+          "inclusive_s": 0.025676036,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::all": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        }
+      },
+      "cprofile_guard_calls": 55,
+      "cprofile_guard_cumulative_s": 0.024663236,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881259.302,
+          "watts": 11.63
+        },
+        {
+          "time": 1788881259.803,
+          "watts": 11.63
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 954454016,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 954454016,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 1891635018,
+        "host_mem_available_bytes": 122221416448,
+        "label": "before_diagnostic_phase:seal",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 2,
+      "mode": "verified",
+      "operation": "prefetch",
+      "elapsed_s": 1.0127298831939697,
+      "source_reads": {
+        "bytes": 704646986,
+        "opens": 2
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 704766010,
+        "read_bytes": 704651264,
+        "syscr": 393,
+        "syscw": 9,
+        "wchar": 46366,
+        "write_bytes": 45056
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::aminmax": {
+          "calls": 4,
+          "inclusive_s": 0.025745748000000002,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::all": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        }
+      },
+      "cprofile_guard_calls": 55,
+      "cprofile_guard_cumulative_s": 0.033639808,
+      "gpu_transfer_count": 4,
+      "gpu_transfer_s": 0.027619492000000002,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881260.803,
+          "watts": 11.64
+        },
+        {
+          "time": 1788881261.303,
+          "watts": 11.63
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 958267392,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 958267392,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 2516584357,
+        "host_mem_available_bytes": 122796732416,
+        "label": "before_diagnostic_phase:prefetch",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 3,
+      "mode": "legacy",
+      "operation": "replay",
+      "elapsed_s": 1.3880202770233154,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1469456369,
+        "read_bytes": 704651264,
+        "syscr": 753,
+        "syscw": 10,
+        "wchar": 69274,
+        "write_bytes": 65536
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 8,
+          "inclusive_s": 0.41030209100000004,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 8,
+          "inclusive_s": 0.156366921,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 4,
+      "cprofile_guard_cumulative_s": 0.002042239,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881262.302,
+          "watts": 11.65
+        },
+        {
+          "time": 1788881262.803,
+          "watts": 11.65
+        },
+        {
+          "time": 1788881263.303,
+          "watts": 11.63
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 1670238208,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 1670238208,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 1891635018,
+        "host_mem_available_bytes": 122768523264,
+        "label": "before_diagnostic_phase:replay",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 3,
+      "mode": "legacy",
+      "operation": "seal",
+      "elapsed_s": 1.0116589069366455,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1469488282,
+        "read_bytes": 704667648,
+        "syscr": 754,
+        "syscw": 9,
+        "wchar": 62411,
+        "write_bytes": 65536
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.205934836,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.080389163,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 4,
+      "cprofile_guard_cumulative_s": 0.0019635340000000003,
+      "gpu_transfer_count": 0,
+      "gpu_transfer_s": 0.0,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881263.803,
+          "watts": 11.63
+        },
+        {
+          "time": 1788881264.303,
+          "watts": 11.72
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 962670592,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 962670592,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 1891635018,
+        "host_mem_available_bytes": 123479027712,
+        "label": "before_diagnostic_phase:seal",
+        "refusal_threshold_bytes": 4294967296
+      }
+    },
+    {
+      "arm": 3,
+      "mode": "legacy",
+      "operation": "prefetch",
+      "elapsed_s": 1.2558839321136475,
+      "source_reads": {
+        "bytes": 1409300910,
+        "opens": 4
+      },
+      "proc_io_delta": {
+        "cancelled_write_bytes": 0,
+        "rchar": 1415773549,
+        "read_bytes": 1409294336,
+        "syscr": 649,
+        "syscw": 11,
+        "wchar": 69560,
+        "write_bytes": 69632
+      },
+      "live_serialized_buffers": 0,
+      "cpu_events": {
+        "aten::isfinite": {
+          "calls": 4,
+          "inclusive_s": 0.20653826,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "aten::aminmax": {
+          "calls": 0,
+          "inclusive_s": 0.0,
+          "threads": []
+        },
+        "aten::all": {
+          "calls": 4,
+          "inclusive_s": 0.07972141899999999,
+          "threads": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      },
+      "cprofile_guard_calls": 92,
+      "cprofile_guard_cumulative_s": 0.034518731000000004,
+      "gpu_transfer_count": 4,
+      "gpu_transfer_s": 0.027815714,
+      "gpu_kernel_count": 0,
+      "gpu_power_observations": [
+        {
+          "time": 1788881265.303,
+          "watts": 11.68
+        },
+        {
+          "time": 1788881265.803,
+          "watts": 11.68
+        }
+      ],
+      "phase_preflight": {
+        "cap_bytes": 6442450944,
+        "cgroup_current_bytes": 966815744,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 966815744,
+        "cuda_reserved_bytes": 0,
+        "future_allocation_bytes": 2516584357,
+        "host_mem_available_bytes": 123476267008,
+        "label": "before_diagnostic_phase:prefetch",
+        "refusal_threshold_bytes": 4294967296
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "operation": "replay",
+      "mean_elapsed_s": {
+        "legacy": 1.4408090114593506,
+        "verified": 1.5028753280639648
+      },
+      "verified_over_legacy_elapsed": 1.0430774072836686
+    },
+    {
+      "operation": "seal",
+      "mean_elapsed_s": {
+        "legacy": 1.0193020105361938,
+        "verified": 1.1464308500289917
+      },
+      "verified_over_legacy_elapsed": 1.1247214644714798
+    },
+    {
+      "operation": "prefetch",
+      "mean_elapsed_s": {
+        "legacy": 1.2869772911071777,
+        "verified": 1.0091471672058105
+      },
+      "verified_over_legacy_elapsed": 0.7841219687238212
+    }
+  ],
+  "netdata_hosts": {
+    "sparky": {
+      "samples": 36,
+      "cpu_busy_mean": 8.852337997222222,
+      "cpu_busy_peak": 19.0187152,
+      "gpu_power_w_unique_samples": [
+        [
+          1788881240,
+          41.0
+        ],
+        [
+          1788881250,
+          42.0
+        ],
+        [
+          1788881260,
+          42.0
+        ]
+      ]
+    },
+    "sparklina": {
+      "samples": 36,
+      "cpu_busy_mean": 5.058361666666666,
+      "cpu_busy_peak": 5.970898099999999,
+      "gpu_power_w_unique_samples": [
+        [
+          1788881230,
+          4.0
+        ],
+        [
+          1788881240,
+          4.0
+        ],
+        [
+          1788881250,
+          11.0
+        ]
+      ]
+    }
+  },
+  "energy_limit": "Only a few 2 Hz pqteld observations fall inside each short operation. Preserve raw timestamps; do not interpolate arm boundaries or rank per-operation work/J. Host/CPU energy is unmeasured.",
+  "limits": "One instrumented ABBA; cProfile background thread/wait and nested totals cannot be summed as exclusive wall costs. Torch inclusive scopes also overlap. Netdata GPU power updates every 10 s; pqteld supplies finer power observations, but still insufficient per-operation energy coverage. No production/full-model fit/serving/KL claim."
+}

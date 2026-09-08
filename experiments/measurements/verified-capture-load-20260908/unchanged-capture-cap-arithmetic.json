@@ -1,0 +1,26 @@
+{
+  "classification": "source-derived phase arithmetic after separate full-F kernel-source-page pricing; not a measured peak or authorization to change frozen run",
+  "before_resource_path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/capture-resources.json",
+  "before_resource_sha256": "73300c3f775b5c020c075f17622e301ff9ba47ecb33d22165fe4244af8317614",
+  "policy": {
+    "schema": "prismaquant.verified_activation_load.v1",
+    "max_buffer_bytes": 1073741824,
+    "max_scratch_bytes": 4194304
+  },
+  "before_phase_bytes": {
+    "forward": 110786000560,
+    "materialization": 103358885720,
+    "source_validation": 97857568264
+  },
+  "after_phase_bytes": {
+    "forward": 110786000560,
+    "materialization": 105510563672,
+    "source_validation": 97857568264,
+    "seal": 85133637296
+  },
+  "before_max_bytes": 110786000560,
+  "after_max_bytes": 110786000560,
+  "unchanged_physical_cap_bytes": 111669149696,
+  "qualified": false,
+  "limits": "No source traversal/capture rerun. Explicit file cap must still preflight every selected existing file; physical guard remains authoritative."
+}
