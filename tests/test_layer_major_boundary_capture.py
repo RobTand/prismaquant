@@ -1,6 +1,9 @@
 """Layer-major baseline capture preserves each original source batch exactly."""
+from concurrent.futures import Future
+import gc
 import hashlib
 from pathlib import Path
+import weakref
 import pytest
 import torch
 
@@ -278,3 +281,55 @@ def test_actual_shared_state_profile_keeps_every_batch_and_shared_adjoint(tmp_pa
     with pytest.raises(RuntimeError, match='auxiliary/shared-state'):
         _shared_run(tmp_path/'refused', layer_major=True, aux=1024)
     assert not list(tmp_path.rglob('*.pt'))
+
+
+class _DeliveredFutures(_FakeStreamingContext):
+    """schedule_prefetch hands out real delivered futures, dropped at install.
+
+    This is the runner's ownership shape: `_prefetch_worker` returns the layer
+    tensors as the future's result and `_claim_inflight` drops that future at
+    install. Every reference the visitor keeps past that point is a second
+    owner of the layer's source bytes.
+    """
+
+    def __init__(self, model):
+        super().__init__(model)
+        self.in_flight = {}
+        self.refs = {}
+        self.dead_at_install = []
+
+    def schedule_prefetch(self, layer):
+        super().schedule_prefetch(layer)
+        layer = int(layer)
+        if layer in self.in_flight:
+            return self.in_flight[layer]
+        future = Future()
+        future.set_result({'weight': torch.zeros(4)})
+        self.in_flight[layer] = future
+        self.refs[layer] = weakref.ref(future)
+        return future
+
+    def install(self, layer, *, require_prefetched=False, prefetch_following=True):
+        layer = int(layer)
+        self.in_flight.pop(layer, None)
+        gc.collect()
+        self.dead_at_install.append(
+            [index for index, ref in sorted(self.refs.items()) if index < layer and ref() is None])
+        return super().install(layer, require_prefetched=require_prefetched)
+
+
+def test_visitor_holds_no_reference_to_a_claimed_speculative_read(tmp_path):
+    torch.manual_seed(85)
+    model = _DenseTinyLM().eval()
+    for layer in model.model.layers:
+        layer._fixture_requires_stream_residency = True
+    context = _DeliveredFutures(model)
+    runner = StreamedCausalLM(context, DefaultProfile(), prefetch_lookahead=1,
+                              require_prefetched_residency=True)
+    with owner(tmp_path) as storage:
+        batches = runner.capture_layer_major_boundaries([row[None] for row in draw()], storage=storage)
+        assert len(batches) == 5
+    # By the install of layer 1 the fake has claimed layer 0's future; the
+    # visitor must not be the owner keeping its delivered tensors alive.
+    assert context.dead_at_install == [[], [0]]
+    assert runner.layer_major_prefetch_retries == ()
