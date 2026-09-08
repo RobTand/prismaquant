@@ -259,3 +259,13 @@ attempt's source parent is `f7b617024f15727edb4b3c7308f757f0b4bc365b` and its
 actual PB snapshot is `dddf8c771a8acdd272c8c25703b062375485df79`;
 `native-negative-audit-02.json` verifies all 13 frozen source hashes and records
 the retained negative evidence.
+
+The frozen diagnostic invocation also records bounds derived from the pinned
+layer-0 shapes: the largest observed boundary is 8,388,608 BF16 elements
+([1,512,4,4096], 16 MiB); the FP32 forget-gate output has 4,194,304 elements
+([1,512,64,128], also 16 MiB). No selected branch tensor is larger. Each
+boolean mask is at most 8 MiB and each same-dtype `where` result at most
+16 MiB; a full identity's CPU transfer plus byte digest buffer is at most
+32 MiB. These are per-tensor bounds, not a measured combined temporary peak.
+Operator-internal temporaries remain charged within the existing 16-GiB
+workspace reserve. Only scalar summaries and hashes persist after observation.

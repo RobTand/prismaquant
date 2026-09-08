@@ -53,5 +53,35 @@
     "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-diagnostic-01"
   ],
   "scope": "Diagnostic only: original row0/layer0/seed7000, one real baseline backward with transparent tensor hooks. Source config remains45layers, actual consumed source fixed+layers0/1; no512metadata repeat, forks/finals/fullgraph/statistics/PWC/quality or serving claim.",
-  "supersedes_failed_action": "d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e"
+  "supersedes_failed_action": "d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e",
+  "diagnostic_tensor_bounds": {
+    "derivation": "Pinned original layer0 config: B1,S512,H4096,HC4,KDA64heads x128; inspected selected module inputs/outputs and their same-dtype gradients.",
+    "maximum_observed_elements": 8388608,
+    "maximum_observed_tensor_bytes": 16777216,
+    "largest_boundaries": {
+      "shape": [
+        1,
+        512,
+        4,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "bytes": 16777216
+    },
+    "largest_fp32_gate": {
+      "shape": [
+        1,
+        512,
+        64,
+        128
+      ],
+      "dtype": "float32",
+      "bytes": 16777216
+    },
+    "maximum_boolean_mask_bytes": 8388608,
+    "maximum_where_result_bytes": 16777216,
+    "maximum_cpu_identity_transfer_and_digest_bytes": 33554432,
+    "existing_workspace_reserve_bytes": 17179869184,
+    "scope": "Per-tensor derived bounds, not a measured combined temporary peak. Operator-internal temporaries remain charged inside the unchanged16GiB workspace; only scalar summaries and hashes persist."
+  }
 }
