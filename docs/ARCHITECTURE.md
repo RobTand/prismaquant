@@ -13,6 +13,20 @@ content seals, source identity checks and production defaults are unchanged.
 Regression gates are `tests/test_bounded_hessian_sidecar.py` and
 `tests/test_tessera_calibration_cache.py`; this establishes no measured speedup.
 
+Re-stamped (2026-09-08, `qualification/joint-statistics-native-scale`) for
+native statistics-storage qualification following #392. Two existing operator
+leases each held 1,023 distinct FP32 matrices totaling 31.96875 GiB on the
+original GLM census's layer-three projection shapes. Eight-row fixture operands
+passed sampled FP64 contractions and exact cotangent checks; every matrix owner
+expired before the next window. Frozen Linear shape stand-ins plus a geometry
+remainder held the planned 33,315,763,888-byte source footprint. The existing
+allocator cleanup released retired reservations under unchanged 104 GiB physical
+and 92 GiB GPU admission. This qualifies the tested matrix-storage and lifetime
+behavior; original GLM source graphs, packed routing, PWC candidates and the full
+calibration draw remain separate gates. Evidence and limits:
+`experiments/measurements/glm-joint-statistics-scale-20260908/README.md` and
+`experiments/measurements/glm-joint-allocator-turnover-20260908/README.md`.
+
 Re-stamped (2026-09-08, `fix/layer-major-boundary-capture`) for explicit
 `prismaquant.aura.boundary_storage.v2` with `capture_order: "layer_major"`
 (#394). The existing layer visitor installs each baseline source layer once
@@ -62,8 +76,9 @@ three-layer original-layout GLM fixture passed 21 complete probe calls with
 exact cotangents and fixed signed-component tolerances, including v2 boundaries,
 source turnover beyond two cache slots, and real 256 MiB allocator retirement.
 The instrumented small fixture was slower and completed fewer calls per GPU
-joule than the legacy path. Full GLM fit, a 32 GiB statistics phase and production
-throughput remain unqualified. Evidence and limits are recorded in
+joule than the legacy path. Full GLM fit and production throughput remain
+unqualified; the separate near-32 GiB shape-fixture gate is described above.
+Evidence and limits are recorded in
 `experiments/measurements/glm-joint-operator-windows-20260908/final-runtime.md`.
 The joint campaign's `execution.operator_windows` carries the same closed
 policy into cost execution, requires exact boundary storage and keeps its PWC
