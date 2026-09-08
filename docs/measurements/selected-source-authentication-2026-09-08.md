@@ -59,3 +59,23 @@ checkpoint hash, GPU run, menu, serving gate, or calibration draw changed.
 Native selected-row I/O, memory and timing qualification waits for the original
 complete manifest and a matched before/after run with in-process profiling and
 both hosts' telemetry. No full-model speed or fit result is claimed here.
+
+## Root integration qualification
+
+Integration with the verified capture loader at `3a94d7520b67` passed **355
+CPU tests across 23 files, with one CUDA-only encoder-memo skip and two passing
+subtests**. The root audit verified all 23 successful terminal records, result
+receipts and source CAS snapshots; each source tree differs from that integration
+commit only by its PB closure manifest. The invocation and consolidated coverage
+are recorded beside the earlier evidence in
+`root-integrated-cpu-invocation-01.json`,
+`root-integrated-cpu-consolidated.json`, and
+`root-integrated-positive-cas-audit.json`.
+
+One initial shard reserved one CPU while its qualification-window fixture
+explicitly requested two cache workers. The affinity guard correctly rejected
+that fixture. Only that file was retried with two CPUs and passed nine tests
+in action `568bfcd59e2238c4cd06e8220af80a5edec31efc1716cd3de4bb6db85926d771`.
+The original failure and reservation diagnosis are retained in
+`root-integrated-cpu-affinity-negative.json`; no runtime change was needed.
+Native GLM measurements required by #388 remain outstanding.
