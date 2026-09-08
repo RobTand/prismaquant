@@ -63,6 +63,7 @@ def _make_ctx(
     ctx.fp8_scale_inv_map = {}
     ctx.expert_packer = None
     ctx.concat_merger = None
+    ctx.source_authentication = None
     ctx.estimated_layer_bytes = LAYER_BYTES
     ctx.prefetch_workers = workers
     ctx.prefetch_min_available_bytes = pressure_floor

@@ -79,3 +79,16 @@ in action `568bfcd59e2238c4cd06e8220af80a5edec31efc1716cd3de4bb6db85926d771`.
 The original failure and reservation diagnosis are retained in
 `root-integrated-cpu-affinity-negative.json`; no runtime change was needed.
 Native GLM measurements required by #388 remain outstanding.
+
+The first full CI run (`34251207739`) found nine failures in the older
+prefetch-scheduling fixture: it bypasses `StreamingContext.__init__` and omitted
+the new optional authentication field. PB action `4e244dd5b4b0…` independently
+reproduced all nine failures. Initializing that fixture field to `None` restores
+the ordinary unauthenticated scheduling tests without changing runtime code.
+PB action `2057d00854c6e2c24b962054f7bd5595ff4d6b0f5a9ac2f54cc97c7280d5e361`
+then passed all **32 tests** in the scheduling and streamed-admission files,
+with five admitted CPUs for the main thread and four fixture readers, one native
+thread per reader, and 4 GiB. The original CI result (6,870 passed, nine failed,
+201 skipped, three xfailed, 192 passing subtests) is retained as a failed run.
+The root evidence is `root-prefetch-fixture-negative.json` and
+`root-prefetch-fixture-positive-cas-audit.json` beside the earlier receipts.
