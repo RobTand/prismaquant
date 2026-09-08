@@ -248,7 +248,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         capture_policy=capture_policy, input_groups=groups, phases=phases,
         memory_bytes=max(sum(phase.values()) for phase in phases.values()),
         transient_status='checked shared input groups; settled prefetch window and completed source release before materialization')
-    # v1's additive terms are retained only in its own schema. v2 carries two
+    # v1's additive terms are retained only in its own schema. v2 carries three
     # mutually exclusive phase maps, with the maximum defining admission.
     del result['terms']
     return result
