@@ -13,7 +13,7 @@ import torch.nn.functional as F
 PIN = '2092bbb4efa2a8087b74f4a4da37635c503fe1df9ae73f1e6e8342af8b4b8e8b'
 ROOT = Path(__file__).parent / 'measurements/glm-kda-backward-source-repro-20260908'
 OLD = '(g.unsqueeze(-2) - g.unsqueeze(-3)).exp().float()'
-NEW = '(g.unsqueeze(-2) - g.unsqueeze(-3)).masked_fill(mask.unsqueeze(-1), 0).exp().float()'
+NEW = '(g.unsqueeze(-2) - g.unsqueeze(-3)).masked_fill(mask.triu(diagonal=1).unsqueeze(-1), 0).exp().float()'
 
 
 def load_functions():
