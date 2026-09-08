@@ -83,7 +83,26 @@ def decoder_targets(modules, prefix='model.language_model.layers.'):
     return result
 
 
-def build_fixture(root, device):
+def fixture_config(config, source_layers):
+    if source_layers not in (2, 3):
+        raise ValueError('native fixture supports two or three genuine source layers')
+    if source_layers == 3:
+        text = config.text_config
+        text.num_hidden_layers = 3
+        text.layer_types = [*text.layer_types, 'linear_attention']
+        text.mlp_layer_types = [*text.mlp_layer_types, 'dense']
+        text.indexer_types = [*text.indexer_types, 'full']
+    return config
+
+
+def make_boundary_policy(directory):
+    return dict(schema='prismaquant.aura.boundary_storage.v2', capture_order='layer_major',
+        directory=str(directory), max_resident_bytes=2 * 1024**2,
+        max_auxiliary_bytes=2 * 1024**2, max_artifact_bytes=16 * 1024**2,
+        prefetch_batches=1)
+
+
+def build_fixture(root, device, *, source_layers=2, boundary_storage='resident'):
     from prismaquant import aura_cost, format_registry as fr
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
     from prismaquant.production_weight_cache import _cache_weight_filename
@@ -91,12 +110,13 @@ def build_fixture(root, device):
     tests = Path(__file__).resolve().parents[1] / 'tests'
     sys.path.insert(0, str(tests))
     try:
-        from test_glm5_next_streamed_forward_parity import _build_tiny_model
+        from test_glm5_next_streamed_forward_parity import _build_model, _tiny_config
         from test_glm_campaign_streaming import write_original_layout_checkpoint
     finally:
         sys.path.remove(str(tests))
     root.mkdir(parents=True, exist_ok=False)
-    model = _build_tiny_model().to(torch.bfloat16)
+    torch.manual_seed(20260826)
+    model = _build_model(fixture_config(_tiny_config(), source_layers)).to(torch.bfloat16)
     source, pwc = root / 'source', root / 'pwc'
     write_original_layout_checkpoint(model, source)
     pwc.mkdir()
@@ -134,7 +154,8 @@ def build_fixture(root, device):
         donors='existing registry RTN weights, stored BF16; no exported or served artifact',
         activation_max_abs=None, activation_policy='existing dynamic activation QDQ; no static clipping override',
         formats=list(FORMATS), probe_ids=list(range(SEED_BASE, SEED_BASE + PROBES)),
-        probe_microbatch=1, boundary_storage=None)
+        probe_microbatch=1, source_layers=source_layers, source_cache_slots=2,
+        source_prefetch_lookahead=1, boundary_storage=boundary_storage)
     write_json(root / 'fixture.json', fixture)
     return fixture, ids
 
@@ -180,6 +201,38 @@ def physical_snapshot(device):
             cuda_peak_allocated_bytes=torch.cuda.max_memory_allocated(device),
             cuda_peak_reserved_bytes=torch.cuda.max_memory_reserved(device))
     return result
+
+
+def check_native_allocator_transition(device):
+    """Exercise real inactive CUDA retirement while retaining a live owner."""
+    from prismaquant.joint_statistics_replay import check_operator_allocation
+    from prismaquant.memory_management import CaptureMemoryGuard
+    if device.type != 'cuda':
+        raise ValueError('allocator transition requires actual CUDA')
+    torch.cuda.empty_cache()
+    guard = CaptureMemoryGuard(device)
+    guard.check('before_native_allocator_fixture', reserve_bytes=258 * 1024**2)
+    live = torch.full((256 * 1024,), 7., device=device, dtype=torch.float32)
+    retired = torch.empty(64 * 1024**2, device=device, dtype=torch.float32)
+    retired.fill_(3.)
+    torch.cuda.synchronize(device)
+    allocated = physical_snapshot(device)
+    del retired
+    before = physical_snapshot(device)
+    if before['cuda_reserved_bytes'] - before['cuda_allocated_bytes'] < 256 * 1024**2:
+        raise RuntimeError('native fixture did not create the retired allocator reservation')
+    checkpoint = check_operator_allocation(guard, 'native_retired_allocator_transition',
+                                           reserve_bytes=256 * 1024**2)
+    after = physical_snapshot(device)
+    if before['cuda_reserved_bytes'] - after['cuda_reserved_bytes'] < 256 * 1024**2:
+        raise RuntimeError('guarded allocation did not return the native retired reservation')
+    if after['cuda_allocated_bytes'] != before['cuda_allocated_bytes'] or not bool((live == 7.).all()):
+        raise RuntimeError('allocator retirement changed the live tensor owner')
+    del live
+    torch.cuda.empty_cache()
+    return dict(status='complete', retired_tensor_bytes=256 * 1024**2,
+                allocated=allocated, before=before, after=after, checkpoint=checkpoint,
+                scope='bounded native allocator transition; not a full-scale 32-GiB admission')
 
 
 class StorageObserver:
@@ -274,6 +327,8 @@ class ProbeObserver(StorageObserver):
         super().__init__()
         self.mode, self.device, self.policy = mode, device, policy
         self.source_reads = Counter()
+        self.source_reads_by_phase = Counter()
+        self.phase = 'initialization'
         self.leases, self.cotangents, self.tail_cotangents, self.forward_calls = [], [], [], []
         self.gradient_calls = 0
 
@@ -285,6 +340,7 @@ class ProbeObserver(StorageObserver):
         original_read = sm._read_layer_to_device
         def read(prefix, *args, **kwargs):
             observer.source_reads[str(prefix)] += 1
+            observer.source_reads_by_phase[f'{observer.phase}:{prefix}'] += 1
             return original_read(prefix, *args, **kwargs)
         self.stack.enter_context(patch.object(sm, '_read_layer_to_device', read))
         original_load = ProductionWeightCache._record_file_load
@@ -353,6 +409,16 @@ class ProbeObserver(StorageObserver):
         # decoder checkpoint reads attributable to the complete probe action.
         self.initialization_reads = dict(self.source_reads)
         self.source_reads.clear()
+        self.source_reads_by_phase.clear()
+        self.phase = 'probe'
+        capture = runner.capture_layer_major_boundaries
+        def observed_capture(*args, **kwargs):
+            self.phase = 'capture'
+            try:
+                return capture(*args, **kwargs)
+            finally:
+                self.phase = 'reverse'
+        runner.capture_layer_major_boundaries = observed_capture
         batches = {tensor_identity(row.reshape(1, -1))['sha256']: index for index, row in enumerate(ids)}
         tail_counts = Counter()
         tail = runner.tail_logits
@@ -399,6 +465,8 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled, reference=None
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
     from prismaquant.production_weight_cache import ProductionWeightCache
     policy = make_policy(fixture)
+    boundary_policy = (make_boundary_policy(out / 'boundaries')
+                       if fixture['boundary_storage'] == 'layer-major' else None)
     cache = ProductionWeightCache(weights={(row['name'], row['format']): row['path'] for row in fixture['entries']},
         levers={}, cache_dir=fixture['pwc'], activation_max_abs=None)
     with ProbeObserver(mode, device, policy) as observer:
@@ -438,7 +506,7 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled, reference=None
                         min_free_gib=0, production_cache=cache, joint_activation=True,
                         collect_col_energy=True, include_routed_experts=True,
                         formats_by_qname={name: FORMATS for name in fixture['shapes']},
-                        model_identity=model_identity, profile=profile,
+                        model_identity=model_identity, profile=profile, boundary_storage=boundary_policy,
                         **({'operator_windows': policy} if mode == 'window' else {}))
                 if device.type == 'cuda':
                     torch.cuda.synchronize(device)
@@ -446,6 +514,7 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled, reference=None
             result['after'] = physical_snapshot(device)
             result.update(cost_rows=cost_rows(payload), provenance=payload['provenance'],
                 source_reads=dict(observer.source_reads), initialization_reads=observer.initialization_reads,
+                source_reads_by_phase=dict(observer.source_reads_by_phase), boundary_storage=boundary_policy,
                 cotangents=observer.cotangents, tail_cotangents=observer.tail_cotangents,
                 source_forward_calls=observer.forward_calls, leases=observer.leases,
                 ownership_events=observer.events, peak_storage_bytes=dict(observer.peaks),
@@ -456,6 +525,8 @@ def run_once(fixture, ids, mode, device, out, index, *, profiled, reference=None
             expected_prefixes = {f'{runner.context.layers_prefix}{layer}.' for layer in range(runner.num_layers)}
             if set(observer.source_reads) != expected_prefixes:
                 raise RuntimeError('actual source checkpoint read prefix coverage differs')
+            if boundary_policy is not None and max(observer.source_reads.values()) > 2:
+                raise RuntimeError('layer-major source was reread beyond capture and reverse passes')
             if len(observer.tail_cotangents) != ROWS * PROBES:
                 raise RuntimeError('tail probe cotangent coverage differs')
             if mode == 'window':
@@ -520,11 +591,16 @@ def main(argv=None):
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--seconds', type=float, default=10.)
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
+    parser.add_argument('--source-layers', type=int, choices=(2, 3), default=2)
+    parser.add_argument('--boundary-storage', choices=('resident', 'layer-major'), default='resident')
+    parser.add_argument('--allocator-transition', action='store_true')
     args = parser.parse_args(argv)
     if not 1 <= args.seconds <= 30:
         parser.error('--seconds must be between 1 and 30')
     if args.device == 'cuda' and not torch.cuda.is_available():
         parser.error('native CUDA probe requires an admitted GPU')
+    if args.allocator_transition and args.device != 'cuda':
+        parser.error('--allocator-transition requires CUDA')
     args.out.mkdir(parents=True, exist_ok=False)
     device = torch.device(args.device)
     torch.set_num_threads(1)
@@ -551,7 +627,11 @@ def main(argv=None):
     try:
         with ExitStack() as stack:
             record['fixture_forward_kernels'] = reference_kernels(stack)
-            fixture, ids = build_fixture(args.out / 'fixture', device)
+            if args.allocator_transition:
+                record['allocator_transition'] = check_native_allocator_transition(device)
+                write_json(args.out / 'allocator-transition.json', record['allocator_transition'])
+            fixture, ids = build_fixture(args.out / 'fixture', device,
+                source_layers=args.source_layers, boundary_storage=args.boundary_storage)
             inventory = input_inventory(fixture)
             record.update(fixture=fixture, input_inventory=inventory, input_inventory_sha256=canonical_sha(inventory))
             reference = None

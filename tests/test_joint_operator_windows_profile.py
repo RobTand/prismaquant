@@ -1,13 +1,37 @@
 """CPU instrumentation checks; native operator qualification runs separately."""
 import copy
+from types import SimpleNamespace
 
 import pytest
 import torch
 
 from experiments.joint_operator_windows_profile import (
     ATOL, PROBES, StorageObserver, make_policy, require_cost_parity,
-    require_cotangent_parity, decoder_targets,
+    require_cotangent_parity, decoder_targets, fixture_config, make_boundary_policy,
 )
+
+
+def test_three_layer_fixture_extends_both_attention_and_mlp_rosters():
+    config = SimpleNamespace(text_config=SimpleNamespace(num_hidden_layers=2,
+        layer_types=['linear_attention', 'deepseek_sparse_attention'],
+        mlp_layer_types=['dense', 'sparse'], indexer_types=['full', 'full']))
+    original = copy.deepcopy(config)
+    assert fixture_config(config, 2) == original
+    extended = fixture_config(config, 3).text_config
+    assert extended.num_hidden_layers == 3
+    assert extended.layer_types == [*original.text_config.layer_types, 'linear_attention']
+    assert extended.mlp_layer_types == ['dense', 'sparse', 'dense']
+    assert extended.indexer_types == ['full'] * 3
+    with pytest.raises(ValueError, match='two or three'):
+        fixture_config(config, 4)
+
+
+def test_boundary_policy_uses_closed_exact_layer_major_schema(tmp_path):
+    from prismaquant.cost_streaming import normalize_boundary_storage
+    policy = make_boundary_policy(tmp_path)
+    assert normalize_boundary_storage(policy) == policy
+    assert policy['capture_order'] == 'layer_major'
+    assert policy['prefetch_batches'] == 1
 
 
 def test_decoder_roster_excludes_visual_targets_from_generic_linear_collector():
