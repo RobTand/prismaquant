@@ -295,3 +295,49 @@ def test_native_glm_projection_shapes_match_independent_fp64_outputs(shape):
         actual = lease.project({('u', 'synthetic'): delta})[('u', 'synthetic')]
         _assert_projection(actual, expected)
         lease.finish_projections()
+
+
+def test_caught_backward_qdq_failure_poisoned_observation_cannot_be_retried():
+    layer = _linear(torch.ones(4, 3))
+    fail = True
+    def qdq(x):
+        if fail:
+            raise RuntimeError('transient QDQ failure')
+        return x + 1
+    spec = _spec('transient', qdq)
+    with _lease({'u': layer}, {'u': {'transient': spec}}) as lease:
+        lease.begin_probe()
+        output = layer(torch.ones(2, 3))
+        with pytest.raises(RuntimeError, match='transient QDQ failure'):
+            output.sum().backward(retain_graph=True)
+        fail = False
+        with pytest.raises(RuntimeError, match='active observation'):
+            output.sum().backward()
+        with pytest.raises(RuntimeError, match='not active'):
+            lease.finish_observations()
+        assert lease.resident_statistics_bytes == 0
+        assert not layer._forward_hooks
+
+
+@pytest.mark.parametrize('abort', [False, True])
+def test_retained_output_does_not_retain_observer_input_after_consumption_or_abort(abort):
+    observed = []
+    def qdq(x):
+        observed.append(weakref.ref(x))
+        if abort:
+            raise RuntimeError('abort observation')
+        return x + 1
+    layer = _linear(torch.ones(4, 3))
+    spec = _spec('observed', qdq)
+    with _lease({'u': layer}, {'u': {'observed': spec}}) as lease:
+        lease.begin_probe()
+        output = layer(torch.ones(2, 3))
+        if abort:
+            with pytest.raises(RuntimeError, match='abort observation'):
+                output.sum().backward()
+        else:
+            output.sum().backward()
+            lease.finish_observations()
+        gc.collect()
+        assert observed and observed[0]() is None
+    assert output.shape == (2, 4)

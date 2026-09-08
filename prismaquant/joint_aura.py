@@ -494,6 +494,7 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         self._activation_terms = {}
         self._results = {}
         self._pending_backwards = 0
+        self._observation_inputs = {}
         self._phase = 'new'
         self.telemetry.update(statistics_capacity_bytes=self.statistics_capacity_bytes,
                               peak_statistics_bytes=0, projected_candidates=0,
@@ -546,13 +547,18 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         self.telemetry['peak_statistics_bytes'] = max(
             self.telemetry['peak_statistics_bytes'], self.resident_statistics_bytes)
 
+    def _release_observation_inputs(self):
+        for inputs in self._observation_inputs.values():
+            inputs.clear()
+        self._observation_inputs.clear()
+
     def _observe(self, name, source_weight, x, output, output_slice=None, row_slice=None):
         if self._phase != 'observing' or not self.active:
             raise RuntimeError("joint statistics forward outside active observation")
         self._require_source(name, source_weight)
         if not isinstance(x, torch.Tensor) or not isinstance(output, torch.Tensor):
             raise TypeError(f"joint statistics Linear {name} needs Tensor input/output")
-        x = x.detach()
+        inputs = [x.detach(), source_weight]
         consumed = False
 
         @torch.no_grad()
@@ -560,35 +566,50 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
             nonlocal consumed
             if self._phase != 'observing' or not self.active or consumed:
                 raise RuntimeError("joint statistics backward outside active observation")
-            self._require_source(name, source_weight)
-            selected = gradient if row_slice is None else gradient[row_slice]
-            selected = selected if output_slice is None else selected[..., output_slice]
-            if x.device != selected.device or x.device != source_weight.device:
-                raise RuntimeError(f"joint statistics residency mismatch for {name}")
-            if (x.shape[:-1] != selected.shape[:-1] or x.shape[-1] != source_weight.shape[1]
-                    or selected.shape[-1] != source_weight.shape[0]):
-                raise RuntimeError(f"joint statistics Linear geometry/shape mismatch for {name}")
-            x2 = x.reshape(-1, x.shape[-1]).float()
-            g2 = selected.reshape(-1, selected.shape[-1]).float()
-            self._accumulate((name, None), g2.T @ x2)
-            self.telemetry['operator_gemms'] += 1
-            for index, (spec, _) in enumerate(self.groups[name]):
-                if not spec.act_quant_changes_input:
-                    continue
-                quantized = _activation_qdq(x, spec, self.activation_max_abs, name)
-                if (not isinstance(quantized, torch.Tensor) or quantized.shape != x.shape
-                        or quantized.device != x.device or quantized.dtype != x.dtype):
-                    raise RuntimeError(f"joint statistics QDQ changed residency/dtype/shape for {name}")
-                dx = quantized.reshape_as(x2).float() - x2
-                self._accumulate((name, index), g2.T @ dx)
-                self.telemetry['qdq_calls'] += 1
+            try:
+                x, source_weight = inputs
+                self._require_source(name, source_weight)
+                selected = gradient if row_slice is None else gradient[row_slice]
+                selected = selected if output_slice is None else selected[..., output_slice]
+                if x.device != selected.device or x.device != source_weight.device:
+                    raise RuntimeError(f"joint statistics residency mismatch for {name}")
+                if (x.shape[:-1] != selected.shape[:-1] or x.shape[-1] != source_weight.shape[1]
+                        or selected.shape[-1] != source_weight.shape[0]):
+                    raise RuntimeError(f"joint statistics Linear geometry/shape mismatch for {name}")
+                x2 = x.reshape(-1, x.shape[-1]).float()
+                g2 = selected.reshape(-1, selected.shape[-1]).float()
+                self._accumulate((name, None), g2.T @ x2)
                 self.telemetry['operator_gemms'] += 1
-            consumed = True
-            self._pending_backwards -= 1
+                for index, (spec, _) in enumerate(self.groups[name]):
+                    if not spec.act_quant_changes_input:
+                        continue
+                    quantized = _activation_qdq(x, spec, self.activation_max_abs, name)
+                    if (not isinstance(quantized, torch.Tensor) or quantized.shape != x.shape
+                            or quantized.device != x.device or quantized.dtype != x.dtype):
+                        raise RuntimeError(f"joint statistics QDQ changed residency/dtype/shape for {name}")
+                    dx = quantized.reshape_as(x2).float() - x2
+                    self._accumulate((name, index), g2.T @ dx)
+                    self.telemetry['qdq_calls'] += 1
+                    self.telemetry['operator_gemms'] += 1
+                consumed = True
+                self._pending_backwards -= 1
+            except BaseException:
+                # A QDQ/GEMM may fail after an earlier operator committed.
+                # Never allow a caught backward failure to become a retry.
+                self._phase, self.active = 'failed', False
+                self._remove_observers()
+                self.modules.clear()
+                self._operators.clear()
+                self._release_observation_inputs()
+                raise
+            finally:
+                inputs.clear()
+                self._observation_inputs.pop(id(inputs), None)
             return gradient
 
         if output.requires_grad:
             self._pending_backwards += 1
+            self._observation_inputs[id(inputs)] = inputs
             output.register_hook(collect)
 
     @torch.no_grad()
@@ -672,6 +693,7 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
     def __exit__(self, *_args):
         super().__exit__(*_args)
         self.modules.clear()
+        self._release_observation_inputs()
         self._operators.clear()
         self._activation_terms.clear()
         self._results.clear()
