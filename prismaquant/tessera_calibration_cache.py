@@ -204,14 +204,11 @@ def _verified_capture_entry(path, name, *, expected_sha256, census, max_rows,
         if not x.is_contiguous() or not h.is_contiguous():
             raise RuntimeError(f'{name}: verified capture requires contiguous canonical tensors')
         if check_finite:
-            import torch
-            # Keep the temporary finite mask within the explicit scratch slot.
-            chunk = max(1, policy['max_scratch_bytes']//16)
+            from .perturbed_x_cache import bounded_cpu_float32_isfinite
             for tensor in (x, h):
-                flat = tensor.view(-1)
-                for start in range(0, flat.numel(), chunk):
-                    if not torch.isfinite(flat[start:start+chunk]).all():
-                        raise RuntimeError(f'{name}: calibration capture contains nonfinite tensors')
+                if not bounded_cpu_float32_isfinite(tensor,
+                        max_scratch_bytes=policy['max_scratch_bytes']):
+                    raise RuntimeError(f'{name}: calibration capture contains nonfinite tensors')
     payload, receipt = load_verified_activation_cache_entry(path,
         expected_sha256=expected_sha256, policy=policy,
         max_storage_bytes=_capture_storage_bytes(name, census, max_rows),

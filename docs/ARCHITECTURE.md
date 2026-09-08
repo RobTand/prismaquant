@@ -16,13 +16,20 @@ allocations and extension lookup before the C unpickler is constructed. Inert
 pickle reconstruction then checks declared storage sizes against ZIP records
 before any Torch allocation, including each view’s extent within its own storage
 record. A metadata pass checks tensor geometry before CPU reconstruction; the CPU pass checks unique backing
-storage, and finite masks use bounded chunks.
+storage. Verified CPU finite validation requires contiguous FP32 and reduces
+each full tensor to two scalar extrema, preserving NaN/Inf refusal without
+tensor-sized masks. Its scalar/thread reduction scratch is explicitly checked
+inside M; legacy finite validation retains its prior path. Source reads use up to 16 MiB
+views of the admitted byte buffer, with memory/identity/page-advice checks at
+every read boundary. A separate full-file F term conservatively prices kernel
+source-page retention despite best-effort advice; page rounding and bookkeeping
+remain covered by the physical guard's runtime margin.
 The raw buffer expires before CPU results can transfer to CUDA. File changes,
 unknown owners, overbudget storage and unsupported copying reads refuse.
 
 `--capture-load-policy` accepts that JSON only with streamed
 `shared-inputs-bounded-v1` capture. Materialization and final sealing price
-serialized buffer and scratch separately; forward/source-validation phases
+private serialized buffer, full-file source-page exposure and scratch separately; forward/source-validation phases
 retain their existing terms. The unchanged physical cap must admit the maximum
 phase. Joint preparation accepts the same top-level `capture_load_policy` only
 with explicit qualification windows and adds these terms to its physical guard;

@@ -357,3 +357,85 @@ def test_pickle_view_cannot_resize_one_storage_within_aggregate_cap(tmp_path, mo
         lambda *a, **k: pytest.fail('resizing tensor geometry reached Torch allocation'))
     with pytest.raises(RuntimeError, match='geometry.*declared backing'):
         load(path, max_storage_bytes=8)
+
+
+def test_source_read_views_share_private_buffer_and_price_kernel_pages(tmp_path, monkeypatch):
+    path = tmp_path/'source-window.pt'
+    expected = torch.zeros(17*1024**2//4, dtype=torch.float32)
+    torch.save({'inputs': expected}, path)
+    file_bytes, storage_bytes = path.stat().st_size, expected.numel()*4
+    views, owners, guards = [], set(), []
+    original = px.os.fdopen
+    class Observed:
+        def __init__(self, handle): self.handle = handle
+        def __getattr__(self, key): return getattr(self.handle, key)
+        def __enter__(self): return self
+        def __exit__(self, *args): return self.handle.__exit__(*args)
+        def readinto(self, target):
+            assert isinstance(target, memoryview) and isinstance(target.obj, bytearray)
+            assert len(target.obj) == file_bytes
+            views.append(len(target)); owners.add(id(target.obj))
+            return self.handle.readinto(target)
+    monkeypatch.setattr(px.os, 'fdopen', lambda *a, **k: Observed(original(*a, **k)))
+    value, receipt = load(path, max_storage_bytes=storage_bytes,
+        policy=policy(buffer=file_bytes, scratch=4*1024**2),
+        resource_check=lambda label, **kwargs: guards.append((label, kwargs['reserve_bytes'])))
+    assert torch.equal(value['inputs'], expected)
+    assert len(owners) == 1 and sum(views) == file_bytes
+    assert 4*1024**2 < max(views) <= 16*1024**2
+    assert guards[0][1] == 2*file_bytes + storage_bytes + 4*1024**2
+    assert all(reserve == file_bytes+storage_bytes+4*1024**2
+        for label, reserve in guards if label.startswith('before_verified_capture_read'))
+    assert receipt['source_page_cache_reserve_bytes'] == file_bytes
+
+
+def test_kernel_page_exposure_refuses_before_private_buffer_allocation(capture, monkeypatch):
+    path = capture[0]/'inputs/a.pt'
+    f = path.stat().st_size
+    opened = []
+    original = px.os.fdopen
+    monkeypatch.setattr(px.os, 'fdopen', lambda *a, **k: opened.append(True) or original(*a, **k))
+    def guard(label, reserve_bytes=0):
+        if label.startswith('before_verified_capture_buffer') and reserve_bytes > 2*f+4*1024**2+1024**2-1:
+            raise RuntimeError('priced source pages exceed remaining physical room')
+    with pytest.raises(RuntimeError, match='priced source pages'):
+        load(path, resource_check=guard)
+    assert not opened
+
+
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), -float('inf'),
+    torch.finfo(torch.float32).max, -torch.finfo(torch.float32).max,
+    2.0**-149, -2.0**-149, 0.0, -0.0])
+@pytest.mark.parametrize('position', [0, 16, 32])
+def test_scalar_finite_reduction_preserves_special_values(value, position):
+    tensor = torch.zeros(33, dtype=torch.float32)
+    tensor[position] = value
+    assert px.bounded_cpu_float32_isfinite(tensor, max_scratch_bytes=1024**2) == bool(
+        torch.isfinite(tensor).all())
+
+
+def test_scalar_finite_reduction_empty_and_constant_allocation():
+    assert px.bounded_cpu_float32_isfinite(torch.empty(0), max_scratch_bytes=1024**2)
+    for count in (1, 2*1024**2):
+        tensor = torch.ones(count, dtype=torch.float32)
+        with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU],
+                profile_memory=True) as profile:
+            assert px.bounded_cpu_float32_isfinite(tensor, max_scratch_bytes=1024**2)
+        # A scalar result may allocate; a temporary proportional to the source
+        # would violate the separate metadata slot for large canonical Hessians.
+        allocated = sum(max(0, event.self_cpu_memory_usage) for event in profile.events())
+        assert allocated <= 64
+
+
+@pytest.mark.parametrize('tensor', [torch.ones(3, 3).T, torch.ones(3, dtype=torch.float64),
+    torch.ones(3, device='meta'), torch.ones(3, requires_grad=True)])
+def test_scalar_finite_reduction_refuses_unaccountable_input(tensor):
+    with pytest.raises(RuntimeError, match='contiguous CPU float32'):
+        px.bounded_cpu_float32_isfinite(tensor, max_scratch_bytes=1024**2)
+
+
+def test_scalar_finite_reduction_prices_native_thread_partials(monkeypatch):
+    monkeypatch.setattr(torch, 'get_num_threads', lambda: 1024**2)
+    monkeypatch.setattr(torch, 'aminmax', lambda *a, **k: pytest.fail('reduced before scratch check'))
+    with pytest.raises(RuntimeError, match='scratch budget'):
+        px.bounded_cpu_float32_isfinite(torch.ones(1), max_scratch_bytes=1024**2)

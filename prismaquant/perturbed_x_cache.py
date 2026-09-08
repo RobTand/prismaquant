@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 import json
 import os
 import pickle
@@ -517,6 +518,31 @@ class _VerifiedBufferReader(io.RawIOBase):
         super().close()
 
 
+def bounded_cpu_float32_isfinite(tensor, *, max_scratch_bytes):
+    """Validate a resident canonical tensor with two scalar reduction outputs.
+
+    The qualified CPU aminmax kernel propagates NaNs, preserves infinities and
+    uses vector accumulators plus one scalar pair per native thread. Contiguity
+    is required before the kernel's contiguous() call can create a hidden copy.
+    Torch tensor allocation is eight bytes; conservatively charge reduction
+    pairs and Python/Tensor metadata within M. Native thread-pool bookkeeping
+    remains runtime overhead, independently covered by the physical guard.
+    """
+    if (not isinstance(tensor, torch.Tensor) or tensor.device.type != 'cpu' or
+            tensor.dtype != torch.float32 or tensor.layout != torch.strided or
+            not tensor.is_contiguous() or tensor.requires_grad):
+        raise RuntimeError('bounded finite reduction requires contiguous CPU float32 storage')
+    # The pinned CPU parallel_reduce uses SmallVector<pair<float,float>,64>.
+    # This overprices its pair payload and reserves independent scalar metadata.
+    reduction_bytes = 1024 + 16*max(64, torch.get_num_threads())
+    if type(max_scratch_bytes) is not int or reduction_bytes > max_scratch_bytes//2:
+        raise RuntimeError('bounded finite reduction exceeds metadata scratch budget')
+    if tensor.numel() == 0:
+        return True  # Match isfinite(empty).all() without invoking empty aminmax.
+    minimum, maximum = torch.aminmax(tensor)
+    return math.isfinite(minimum.item()) and math.isfinite(maximum.item())
+
+
 def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
     """Charge complete backing storage and refuse opaque or oversized metadata."""
     pending, visited, storages = [payload], set(), {}
@@ -587,7 +613,12 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     raw = reader = value = payload = None
     try:
         unchanged(descriptor)
-        check('before_verified_capture_buffer', before.st_size + max_storage_bytes + scratch)
+        # Buffered file I/O can retain all source contents in the kernel even
+        # when advice is requested. Price that full F separately from private F
+        # and metadata M; page rounding/bookkeeping remain in the guard margin.
+        source_page_cache_bytes = before.st_size
+        check('before_verified_capture_buffer',
+              before.st_size + source_page_cache_bytes + max_storage_bytes + scratch)
         if release_file_pages:
             # Complete durability once, then advise only verified consumed ranges.
             os.fsync(descriptor)
@@ -595,10 +626,13 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         raw = bytearray(before.st_size)
         digest = hashlib.sha256()
         consumed = advised = 0
-        block_bytes = min(16*1024**2, scratch // 4)
+        # These are views of the already admitted F allocation, not M-sized
+        # owned scratch copies. Every bounded read retains guard/stat/advice.
+        block_bytes = 16*1024**2
         with os.fdopen(descriptor, 'rb', buffering=0, closefd=False) as handle:
             while consumed < len(raw):
-                check('before_verified_capture_read', max_storage_bytes + scratch)
+                check('before_verified_capture_read',
+                      source_page_cache_bytes + max_storage_bytes + scratch)
                 view = memoryview(raw)[consumed:min(len(raw), consumed+block_bytes)]
                 try:
                     size = handle.readinto(view)
@@ -628,7 +662,8 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         if archive_storage > max_storage_bytes:
             raise RuntimeError('verified activation archive backing storage exceeds its budget')
         for device in ('meta', 'cpu'):
-            check('before_verified_capture_decode', max_storage_bytes + scratch)
+            check('before_verified_capture_decode',
+                  source_page_cache_bytes + max_storage_bytes + scratch)
             reader.seek(0)
             value = torch.load(reader, map_location=device, weights_only=True)
             observed = _verified_payload_storage(value, max_storage_bytes=max_storage_bytes,
@@ -659,6 +694,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     execution = dict(schema=VERIFIED_ACTIVATION_LOAD_SCHEMA, policy=policy,
         artifact_sha256=expected_sha256, file_bytes=before.st_size,
         storage_cap_bytes=max_storage_bytes, archive_storage_bytes=archive_storage,
+        source_page_cache_reserve_bytes=source_page_cache_bytes,
         file_signature=signature, source_read_bytes=consumed, live_buffer_bytes=0)
     execution['identity_sha256'] = hashlib.sha256(json.dumps(
         {key: execution[key] for key in ('schema', 'policy', 'artifact_sha256', 'file_bytes',
