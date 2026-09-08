@@ -111,6 +111,8 @@ def run_arm(source, cache, ids, out, index, mode):
                 probe_microbatch=1, seed_base=7000, min_free_gib=0,
                 production_cache=cache, joint_activation=True,
                 collect_col_energy=True, include_routed_experts=True,
+                formats_by_qname={name: ['FP8_DYNAMIC', 'NVFP4A16', 'BF16']
+                                  for name, _fmt in cache.weights},
                 model_identity=identity, profile=profile,
                 boundary_storage=policy if mode == 'exact' else None)
             torch.cuda.synchronize()
