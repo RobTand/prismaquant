@@ -253,7 +253,8 @@ def calibrated_maxima(data, profile):
 
 
 def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_source,
-                         projected_unit, static_scales, bound_unit=None, reader=None):
+                         projected_unit, static_scales, bound_unit=None, reader=None,
+                         release_file_pages=False):
     """Re-derive encoder inputs from actual source/H and compare decoded bytes."""
     import torch
     from tessera.unit_artifact import read_unit_artifact
@@ -273,13 +274,18 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         calibration_source=calibration_source, static_scales=static_scales,
         projected_units={} if projected_unit is None else {name: projected_unit},
         **({} if bound_unit is None else {"bound_unit": bound_unit}))
-    blob = Path(cell["wire"]).read_bytes()
+    wire_path = Path(cell["wire"])
+    wire_stat = wire_path.stat() if release_file_pages else None
+    blob = wire_path.read_bytes()
     verifier = tc._checkpoint_identity_api() if reader is None else reader
     verifier.verify_cached_unit(blob, cell["record"], expected)
     decode = read_unit_artifact if reader is None else reader.read_unit_artifact
     decoded = decode(blob, device=str(rendered_weight.device)).to(torch.bfloat16)
     _require(torch.equal(decoded, rendered_weight), f"{name}@{fmt}: decoded wire differs from original PWC render")
     del decoded
+    if release_file_pages:
+        from .perturbed_x_cache import release_activation_cache_file_pages
+        release_activation_cache_file_pages(wire_path, expected_stat=wire_stat)
     return {"source_weight": (_cb_cache_tensor_identity(source_weight)
                               if source_receipt is None else source_receipt),
             "rendered_weight": _cb_cache_tensor_identity(rendered_weight),
@@ -307,7 +313,39 @@ def _prepare_file_read_bound(data, *, max_render_bytes):
     return maximum
 
 
-def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4):
+QUALIFICATION_WINDOW_SCHEMA = "prismaquant.joint_anchor_qualification.v1"
+
+
+def normalize_qualification_window(config):
+    if config is None:
+        return None
+    fields = {"schema", "max_capture_resident_bytes", "max_load_buffer_bytes",
+              "workspace_reserve_bytes"}
+    _require(isinstance(config, dict) and set(config) == fields and
+             config.get("schema") == QUALIFICATION_WINDOW_SCHEMA,
+             "joint anchor qualification requires a complete v1 window policy")
+    for key in fields - {"schema"}:
+        _require(type(config[key]) is int and config[key] > 0,
+                 f"qualification window requires positive finite {key}")
+    return dict(config)
+
+
+def _qualification_capture_sizes(data, identity, policy):
+    """Validate the whole roster before a first unit's X/H can be loaded."""
+    sizes = {}
+    for name in data.formats_by_qname:
+        columns = data.census["unit_shapes"][name][1]
+        rows = min(data.census["counts"][name], identity["max_act_rows"])
+        _require(type(columns) is int and columns > 0 and type(rows) is int and rows >= 0,
+                 f"{name}: invalid canonical capture geometry")
+        sizes[name] = 4 * (columns * columns + rows * columns)
+        _require(sizes[name] <= policy["max_capture_resident_bytes"],
+                 f"{name}: canonical capture exceeds qualification budget")
+    return sizes
+
+
+def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
+                  qualification_window=None):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
@@ -315,6 +353,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     even though the merged renders have more than one original directory.
     """
     import torch
+    from contextlib import nullcontext
     from . import tessera_calibration_cache as cc, tessera_hessian as th, tessera_campaign as tc
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .production_weight_cache import ProductionWeightCache
@@ -322,6 +361,15 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     from . import format_registry as fr
 
     _require(type(max_render_bytes) is int and max_render_bytes > 0, "positive PWC residency budget required")
+    policy = normalize_qualification_window(qualification_window)
+    guard = None
+    if policy is not None and str(runner.device).startswith('cuda'):
+        import os
+        from .autoscale import require_bounded_capture_environment
+        from .memory_management import CaptureMemoryGuard
+        require_bounded_capture_environment(os.environ)
+        guard = CaptureMemoryGuard(runner.device)
+        guard.check('before_joint_qualification_identity')
     capture_path = _bound(capture, "canonical capture")
     stamped_capture = data.payload["provenance"].get("calibration_cache")
     _same(capture, stamped_capture, "priced canonical capture")
@@ -334,9 +382,13 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
         calibration=data.payload["provenance"]["hessian"]["calibration_identity"],
         max_act_rows=recorded["max_act_rows"],
         model_load_contract=data.census["model_load_contract"],
-        attention_implementation=data.census["attention_implementation"])
+        attention_implementation=data.census["attention_implementation"],
+        **(dict(resource_check=None if guard is None else guard.check,
+                release_read_pages=True) if policy is not None else {}))
     _same(expected, recorded, "current source/canonical capture")
     _same(data.manifest["identity"]["calibration"], recorded["calibration"], "journal/canonical draw")
+    capture_sizes = (None if policy is None else
+                     _qualification_capture_sizes(data, expected, policy))
     maxima, scales = calibrated_maxima(data, runner.profile)
     cache = ProductionWeightCache(
         weights={pair: cell["render"] for pair, cell in data.cells.items()},
@@ -344,7 +396,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
         metadata={"schema": PREPARED_SCHEMA, "inputs": data.inputs,
                   "reader_identity": None if reader is None else reader.identity})
     cache.enable_lru(max_render_bytes)
-    max_file_bytes = _prepare_file_read_bound(data, max_render_bytes=max_render_bytes)
+    max_file_bytes = _prepare_file_read_bound(data, max_render_bytes=(max_render_bytes
+        if policy is None else min(max_render_bytes, policy["max_load_buffer_bytes"])))
     cache.enable_file_load_receipts(max_file_bytes=max_file_bytes)
     targets = _live_targets(runner, data.formats_by_qname)
     layers = defaultdict(list)
@@ -366,47 +419,85 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             targets.update({member.qname: member for member in refresh_packed_expert_projections(members, runner.profile)})
             if not names:
                 continue
-            (acts, hessians, _counts, _maxima), _receipt = cc.prefetch_capture(capture_path,
-                expected_sha256=capture["sha256"], expected_identity=expected,
-                census=data.census, names=names, device=runner.device)
-            calibration_source = th.activation_source(hessians, expected["calibration"])
-            stats = prefetch_joint_cache(cache, names, renders, max_resident_bytes=max_render_bytes,
-                                         max_workers=file_load_workers)
-            for name in names:
-                source_weight = targets[name].weight.detach()
-                anchors = [tc.CampaignAnchor(**data.cells[name, fmt]["anchor"]) for fmt in renders[name]]
-                with tc.bind_checkpoint_unit_identity(anchors, source_weight=source_weight,
-                        calibration_source=calibration_source, projected_unit=projected.get(name),
-                        static_scales=scales) as bound_unit:
-                    for fmt in renders[name]:
-                        cell = data.cells[name, fmt]
-                        resident = cache.get(name, fmt)
-                        receipt = cache.file_load_receipt((name, fmt), resident)
-                        if "render_file_sha256" in cell:
-                            _same(receipt["sha256"], cell["render_file_sha256"], f"{name}: original render file changed")
-                        cell["render_file_sha256"] = receipt["sha256"]
-                        rendered = resident.to(runner.device)
-                        record = verify_anchor_render(cell, source_weight, rendered,
-                            calibration_source=calibration_source,
-                            projected_unit=projected.get(name), static_scales=scales,
-                            bound_unit=bound_unit, reader=reader)
-                        activation = activation_identity(fr.get_format(fmt), cache.activation_max_abs, name)
-                        _same(activation["input_global_scale"], cell["anchor"].get("input_global_scale"),
-                              f"{name}@{fmt}: joint/campaign static scale")
-                        record["activation"] = activation
-                        verified[name, fmt] = record
-                        del rendered, resident
+            if policy is not None:
+                runner.context.settle_prefetched_layers(range(layer + 1,
+                    min(runner.num_layers, layer + 1 + runner.prefetch_lookahead)))
+            capture_windows = [names] if policy is None else [(name,) for name in names]
+            layer_stats = []
+            for unit_names in capture_windows:
+                acts = hessians = calibration_source = source_weight = None
+                resident = rendered = bound_unit = None
+                try:
+                    if guard is not None:
+                        guard.check('before_joint_qualification_unit:' + unit_names[0], reserve_bytes=
+                            2 * capture_sizes[unit_names[0]] + max_render_bytes +
+                            policy['max_load_buffer_bytes'] + policy['workspace_reserve_bytes'])
+                    (acts, hessians, _counts, _maxima), _receipt = cc.prefetch_capture(capture_path,
+                        expected_sha256=capture["sha256"], expected_identity=expected,
+                        census=data.census, names=unit_names, device=runner.device,
+                        **(dict(resource_check=None if guard is None else guard.check,
+                                release_file_pages=True) if policy is not None else {}))
+                    calibration_source = th.activation_source(hessians, expected["calibration"])
+                    if policy is None:
+                        layer_stats.append(prefetch_joint_cache(cache, unit_names, renders,
+                            max_resident_bytes=max_render_bytes, max_workers=file_load_workers))
+                    for name in unit_names:
+                        source_weight = targets[name].weight.detach()
+                        anchors = [tc.CampaignAnchor(**data.cells[name, fmt]["anchor"]) for fmt in renders[name]]
+                        keys = tuple((name, fmt) for fmt in renders[name])
+                        windows = ((keys,) if policy is None else cache.plan_resident_windows(keys,
+                            max_resident_bytes=min(max_render_bytes, policy['max_load_buffer_bytes']),
+                            max_workers=file_load_workers))
+                        with tc.bind_checkpoint_unit_identity(anchors, source_weight=source_weight,
+                                calibration_source=calibration_source, projected_unit=projected.get(name),
+                                static_scales=scales) as bound_unit:
+                            for window in windows:
+                                owner = (nullcontext() if policy is None else cache.resident_window(window,
+                                    max_resident_bytes=max_render_bytes, max_workers=file_load_workers,
+                                    max_load_buffer_bytes=policy['max_load_buffer_bytes'], release_file_pages=True))
+                                with owner as window_receipt:
+                                    if window_receipt is not None:
+                                        layer_stats.append(dict(unit=name, **window_receipt))
+                                    for _, fmt in window:
+                                        cell = data.cells[name, fmt]
+                                        resident = (cache.get(name, fmt) if policy is None else cache.get_resident(name, fmt))
+                                        receipt = cache.file_load_receipt((name, fmt), resident)
+                                        if "render_file_sha256" in cell:
+                                            _same(receipt["sha256"], cell["render_file_sha256"], f"{name}: original render file changed")
+                                        cell["render_file_sha256"] = receipt["sha256"]
+                                        rendered = resident.to(runner.device)
+                                        record = verify_anchor_render(cell, source_weight, rendered,
+                                            calibration_source=calibration_source,
+                                            projected_unit=projected.get(name), static_scales=scales,
+                                            bound_unit=bound_unit, reader=reader,
+                                            **({'release_file_pages': True} if policy is not None else {}))
+                                        activation = activation_identity(fr.get_format(fmt), cache.activation_max_abs, name)
+                                        _same(activation["input_global_scale"], cell["anchor"].get("input_global_scale"),
+                                              f"{name}@{fmt}: joint/campaign static scale")
+                                        record["activation"] = activation
+                                        verified[name, fmt] = record
+                                        resident = rendered = None
+                                    if guard is not None:
+                                        guard.check('after_joint_qualification_window:' + name)
+                finally:
+                    acts = hessians = calibration_source = source_weight = None
+                    resident = rendered = bound_unit = None
+                if guard is not None:
+                    guard.check('after_joint_qualification_unit:' + unit_names[0])
+            stats = layer_stats[0] if policy is None else {'windows': layer_stats}
             telemetry.append({"layer": layer, **stats})
             print(json.dumps({"qualified_layer": layer, "qualified_cells": len(verified),
                               "total_cells": len(data.cells), "prefetch": stats}), flush=True)
-            del acts, hessians, calibration_source, source_weight
         finally:
             cache.compact_for_pickle()
             runner.context.unload(layer)
             targets.update({member.qname: member for member in refresh_packed_expert_projections(members, runner.profile)})
     _same(set(verified), set(data.cells), "complete qualified wire/render roster")
     cache.disable_file_load_receipts()
-    cache.metadata.update({"verified_cells": verified, "prefetch": telemetry})
+    cache.metadata.update({"verified_cells": verified, "prefetch": telemetry,
+        **({"qualification_window": policy, "capture_resident_bytes": capture_sizes,
+            "qualification_memory_guard": None if guard is None else guard.snapshot()}
+           if policy is not None else {})})
     return cache
 
 
@@ -437,6 +528,7 @@ def _load_plan(path, digest):
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
     _source_prefetch(config)
     execution = config["execution"]
+    normalize_qualification_window(config.get("qualification_window"))
     from .joint_projection_backend import normalize_projection_backend
     normalize_projection_backend(execution.get("projection_backend"))
     from .cost_streaming import normalize_boundary_storage
@@ -557,8 +649,9 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                                                identity_cache_path=root / "source-identity.json")
         source_execution = source_execution_identity(runner.model)
         layer_bytes = data.layer_render_bytes(runner.layer_index_for_qname)
-        _require(max(layer_bytes.values()) <= config["max_render_bytes"],
-                 "largest measured candidate layer exceeds explicit PWC budget")
+        if command != "prepare" or config.get("qualification_window") is None:
+            _require(max(layer_bytes.values()) <= config["max_render_bytes"],
+                     "largest measured candidate layer exceeds explicit PWC budget")
         result.update(source_model_identity=source, source_execution=source_execution,
                       units=len(data.formats_by_qname), measured_cells=len(data.cells),
                       layer_render_bytes=layer_bytes)
@@ -572,7 +665,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             _require(not completion_path.exists(), "prepared completion already exists; use its bound record")
             cache = prepare_cache(runner, data, capture=config["canonical_capture"],
                                   max_render_bytes=config["max_render_bytes"], reader=reader,
-                                  file_load_workers=file_hash_workers)
+                                  file_load_workers=file_hash_workers,
+                                  qualification_window=config.get("qualification_window"))
             cache.metadata.update(plan_sha256=plan_sha256, source_model_identity=source,
                                   source_execution=source_execution, implementation_sha256=implementation,
                                   projection_backend=projection_backend.identity)
