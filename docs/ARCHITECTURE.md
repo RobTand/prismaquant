@@ -1,7 +1,17 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `feat/joint-operator-windows`. Stamps
+As of: 2026-09-08 · `integrate/capture-followups-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `integrate/capture-followups-20260908`) for Hessian
+writer refusal and completed-file page release (#395, #396). A tensor-bearing
+sidecar that produces no stable `data/*` record refuses publication and removes
+its temporary payload, preserving the previous published pair. Completed anchor
+and sidecar page release uses the existing descriptor identity check, fsync and
+page advice without a second discarded hash pass. Successful archive bytes,
+content seals, source identity checks and production defaults are unchanged.
+Regression gates are `tests/test_bounded_hessian_sidecar.py` and
+`tests/test_tessera_calibration_cache.py`; this establishes no measured speedup.
 
 Re-stamped (2026-09-08, `fix/layer-major-boundary-capture`) for explicit
 `prismaquant.aura.boundary_storage.v2` with `capture_order: "layer_major"`
