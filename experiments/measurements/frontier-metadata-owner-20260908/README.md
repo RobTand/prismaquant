@@ -35,3 +35,24 @@ Terminal records, actual log digests, source bundle comparisons and native CAS
 receipt/result verification are in `pb-audit.json`. Failed red has no success
 CAS receipt. Full sanitized audit files and log locators remain under
 `/mnt/shared/tessera-measurements/glm-canonical-census-20260908/six-variant-recipe-intake-01/`.
+
+## Root integration review
+
+Root reviewed the changed selector, all eight regression cases, both incidental
+allocator comments and the intake helper. The actual negative source snapshot
+has the unchanged regression tests and the original selector; its seven wrong
+successful writes and unchanged-assignment control were verified in the hashed
+attempt log. The green and compile snapshots match the supplied code; their
+other differences are receipt/report files and the sizing helper. Canonical CAS
+receipt bodies, payload digests, source bundles and terminal cleanup were checked
+independently.
+
+Integration `86e85c0eaf` retains all derivative, dispatch and selector architecture
+stamps. Runtime and regression files are byte-identical to the reviewed branch.
+The combined documentation gates passed 19 tests across two PB CPU shards
+(1 CPU, 2 GiB each, native threads 1): `c4409bfe817e` and `fb28082f1b8f`. Their
+source snapshots differ from that integration only by the PB closure record;
+actual outputs and cleanup passed. The subsequent intake-only clarification
+distinguishes direct served candidate comparison from optional runtime-v2
+prediction, and calls the reviewed Tessera PR head a head rather than a merge.
+No new GPU, export, probe or serving result is implied.
