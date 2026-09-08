@@ -110,3 +110,106 @@ def test_native_entry_point_has_no_unauthenticated_source_fallback():
         pass
     cc.prefetch_capture = verified
     require_source_api(cc, tc, authenticated)
+
+
+def test_two_early_netdata_samples_then_failure_cannot_pass():
+    from experiments.glm_native_wire_screen import telemetry_coverage
+    samples = _observations([0, 1])
+    phases = [dict(phase='encode', started_monotonic=0.5, finished_monotonic=3599)]
+    healthy = _observations(range(0, 3601, 10))
+    assert telemetry_coverage(healthy, phases, [], thread_complete=True)['passed']
+    errors = [dict(host='sparky', unix=2, error='endpoint stopped')]
+    failed_reads = telemetry_coverage(healthy, phases, errors, thread_complete=True)
+    assert failed_reads['failures'] == ['one or more required telemetry reads/writes failed']
+    assert not failed_reads['passed']
+    assert not telemetry_coverage(samples, phases, [], thread_complete=True)['passed']
+    gap = telemetry_coverage(_observations([0, 1, 3600]), phases, [], thread_complete=True)
+    assert any('coverage gap' in reason for reason in gap['failures'])
+    assert not gap['passed']
+
+
+def _observations(times):
+    return {host: [dict(time=value, monotonic=value, oldest_chart_age_seconds=10,
+                       max_future_chart_seconds=0) for value in times]
+            for host in ('sparky', 'sparklina')}
+
+
+def test_telemetry_requires_fresh_bracketed_continuous_coverage_on_both_hosts():
+    from experiments.glm_native_wire_screen import telemetry_coverage
+    phases = [dict(phase='encode', started_monotonic=1, finished_monotonic=39)]
+    samples = _observations([0, 10, 20, 30, 40])
+    assert telemetry_coverage(samples, phases, [], thread_complete=True)['passed']
+    for broken in (_observations([0, 40]), _observations([10, 20, 30, 40]),
+                   _observations([0, 10, 20, 30])):
+        assert not telemetry_coverage(broken, phases, [], thread_complete=True)['passed']
+    samples['sparklina'][2]['oldest_chart_age_seconds'] = 21
+    assert not telemetry_coverage(samples, phases, [], thread_complete=True)['passed']
+
+
+@pytest.mark.parametrize('changed', ['source_weight', 'hessian', 'inputs'])
+def test_unversioned_input_write_is_caught_by_final_byte_gate(changed):
+    import torch
+    from experiments.glm_native_wire_screen_evidence import require_original_input_bytes
+    from prismaquant.production_weight_cache import _cb_cache_tensor_identity as identity
+    from prismaquant.tessera_campaign import _bound_tensor_signature
+    tensors = dict(source_weight=torch.ones(2, 2, dtype=torch.bfloat16),
+                   hessian=torch.eye(2), inputs=torch.ones(2, 2))
+    expected = {name: identity(value) for name, value in tensors.items()}
+    signatures = {name: _bound_tensor_signature(value) for name, value in tensors.items()}
+    assert require_original_input_bytes(tensors, expected, identity=identity) == expected
+    tensors[changed].view(torch.uint8).numpy()[0, 0] ^= 1
+    assert signatures == {name: _bound_tensor_signature(value) for name, value in tensors.items()}
+    with pytest.raises(RuntimeError, match=changed):
+        require_original_input_bytes(tensors, expected, identity=identity)
+
+
+def test_telemetry_chart_freshness_checks_the_actual_required_charts():
+    from experiments.glm_native_wire_screen_evidence import telemetry_sample
+    from experiments.workspace_netdata import REQUIRED_CHARTS, REQUIRED_GPU_SUFFIXES
+    names = set(REQUIRED_CHARTS) | {'nvidia_smi.gpu0_power_draw'}
+    names.update('nvidia_smi.gpu0_'+suffix for suffix in REQUIRED_GPU_SUFFIXES)
+    sample = dict(host='sparky', time=100,
+                  metrics={name: dict(last_updated=90) for name in names})
+    assert telemetry_sample(sample, monotonic=50)['oldest_chart_age_seconds'] == 10
+    sample['metrics']['nvidia_smi.gpu0_power_draw']['last_updated'] = 79
+    with pytest.raises(ValueError, match='stale'):
+        telemetry_sample(sample, monotonic=51)
+    sample['metrics']['nvidia_smi.gpu0_power_draw']['last_updated'] = 103
+    with pytest.raises(ValueError, match='clock-skewed'):
+        telemetry_sample(sample, monotonic=51)
+
+
+def _environment():
+    activation = dict(PRISMAQUANT_PROD_ACT_SCALES='0',
+        PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES='0', PRISMAQUANT_TESSERA_DEV_PIN='')
+    return activation, dict(activation, OMP_NUM_THREADS='1', MKL_NUM_THREADS='1',
+        OPENBLAS_NUM_THREADS='1', PRISMAQUANT_LAYER_READ_THREADS='4',
+        PRISMAQUANT_RELEASE_SOURCE_PAGES='1', MIMALLOC_PURGE_DELAY='0',
+        PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE='0')
+
+
+def test_cpu_preflight_checks_actual_integrated_api_and_frozen_environment():
+    import torch
+    from experiments.glm_native_wire_screen import integrated_cpu_preflight
+    activation, environment = _environment()
+    result = integrated_cpu_preflight(environment, activation, environ=environment)
+    assert result['passed'] and not result['gpu_initialized']
+    assert not torch.cuda.is_initialized()
+    for name in environment:
+        missing = dict(environment); missing.pop(name)
+        with pytest.raises(ValueError, match='omits a required'):
+            integrated_cpu_preflight(missing, activation, environ=environment)
+        changed = dict(environment, **{name: 'different'})
+        with pytest.raises(ValueError, match='environment differs'):
+            integrated_cpu_preflight(environment, activation, environ=changed)
+
+
+def test_actual_integrated_authenticator_refuses_partial_capture_before_source_read(tmp_path):
+    import json
+    from prismaquant import tessera_calibration_cache as cc
+    capture = tmp_path/'capture.json'
+    capture.write_text(json.dumps(dict(schema=cc.SCHEMA, status='partial', identity={}, entries={})))
+    with pytest.raises((ValueError, RuntimeError), match='complete|identity|canonical'):
+        cc.authenticate_selected_capture_source(tmp_path/'absent-census.json', capture,
+            expected_sha256=cc.sha256(capture), model='unopened-model', max_act_rows=512,
+            attention_implementation='eager')

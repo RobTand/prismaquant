@@ -20,5 +20,15 @@
     "live_processes": 0,
     "lesson": "Invoke the repository module with python -m so import resolution includes the checkout.",
     "disposition": "corrected; final checks pass"
+  },
+  {
+    "action_key": "381889e31acb90db0817b5dd610dcf9be1c60e135d02f7dd180da473d4921ee8",
+    "returncode": 1,
+    "stdout": "F                                                                        [100%]\n=================================== FAILURES ===================================\n___________ test_two_early_netdata_samples_then_failure_cannot_pass ____________\n\n    def test_two_early_netdata_samples_then_failure_cannot_pass():\n        from experiments.glm_native_wire_screen import telemetry_coverage\n        samples = {host: [dict(time=0), dict(time=1)] for host in ('sparky', 'sparklina')}\n        phases = [dict(phase='encode', started_unix=0, finished_unix=3600)]\n        errors = [dict(host='sparky', unix=2, error='endpoint stopped')]\n>       assert not telemetry_coverage(samples, phases, errors, thread_complete=True)['passed']\nE       assert not True\n\ntests/test_glm_native_wire_screen_plan.py:120: AssertionError\n=============================== warnings summary ===============================\ntests/test_glm_native_wire_screen_plan.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_glm_native_wire_screen_plan.py::test_two_early_netdata_samples_then_failure_cannot_pass\n1 failed, 8 deselected, 14 warnings in 4.72s\n",
+    "cleanup_complete": true,
+    "oom_kill": 0,
+    "live_processes": 0,
+    "lesson": "Two early samples plus a stopped thread did not prove phase coverage. Final regression now also uses valid timestamps, healthy control, gap-only and error-only failures.",
+    "disposition": "reproduced and fixed"
   }
 ]

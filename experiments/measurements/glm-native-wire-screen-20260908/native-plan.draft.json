@@ -3,7 +3,7 @@
   "status": "NOT_FROZEN_NOT_SUBMITTED",
   "resources": {
     "path": "/workspace/experiments/measurements/glm-native-wire-screen-20260908/resource-plan.json",
-    "sha256": "ee7ec9a8178caf5e4713bf3b3a5202af7e056c813be3f22c2a2efe0b886baa75"
+    "sha256": "558b8e66643267f400f620e641b16d9ef75a012c19fffb6fe098efd2ae09a494"
   },
   "capture": {
     "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",

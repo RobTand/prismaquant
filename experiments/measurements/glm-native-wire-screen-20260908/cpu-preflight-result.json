@@ -1,0 +1,19 @@
+{
+  "schema": "prismaquant.glm_screen_cpu_preflight.v1",
+  "passed": true,
+  "gpu_initialized": false,
+  "source_api_module": "prismaquant.tessera_calibration_cache",
+  "checked_environment": {
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "PRISMAQUANT_LAYER_READ_THREADS": "4",
+    "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
+    "MIMALLOC_PURGE_DELAY": "0",
+    "PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE": "0",
+    "PRISMAQUANT_PROD_ACT_SCALES": "0",
+    "PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES": "0",
+    "PRISMAQUANT_TESSERA_DEV_PIN": ""
+  },
+  "capture_acceptance": "No capture accepted; native execution still requires the complete public contract."
+}

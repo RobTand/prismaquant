@@ -15,11 +15,12 @@ import json
 import math
 import os
 from pathlib import Path
-import threading
 import time
 from types import SimpleNamespace
 
 from experiments.glm_native_wire_screen_plan import sealed_json, validate_cells
+from experiments.glm_native_wire_screen_evidence import (
+    ScreenTelemetry, telemetry_coverage, require_original_input_bytes)
 
 
 def write_json(path, value):
@@ -37,13 +38,46 @@ def require_source_api(cc, tc, build):
         raise RuntimeError('verified capture loader is not integrated')
 
 
+def require_frozen_environment(environment, activation_environment, environ):
+    required = dict(activation_environment, OMP_NUM_THREADS='1', MKL_NUM_THREADS='1',
+        OPENBLAS_NUM_THREADS='1', PRISMAQUANT_LAYER_READ_THREADS='4',
+        PRISMAQUANT_RELEASE_SOURCE_PAGES='1', MIMALLOC_PURGE_DELAY='0',
+        PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE='0')
+    if any(environment.get(name) != value for name, value in required.items()):
+        raise ValueError('frozen environment omits a required activation/thread/release contract')
+    for name, expected in environment.items():
+        if environ.get(name, '') != expected:
+            raise ValueError(f'frozen screen environment differs: {name}')
+
+
+def integrated_cpu_preflight(environment, activation_environment, *, environ):
+    """Check actual reviewed APIs and environment without opening a capture."""
+    import torch
+    from prismaquant import tessera_calibration_cache as cc, tessera_campaign as tc
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.autoscale import require_bounded_capture_environment
+    if torch.cuda.is_initialized():
+        raise RuntimeError('CPU preflight must precede CUDA initialization')
+    require_source_api(cc, tc, build_streamed_causal_lm)
+    require_frozen_environment(environment, activation_environment, environ)
+    require_bounded_capture_environment(environ)
+    return dict(schema='prismaquant.glm_screen_cpu_preflight.v1', passed=True,
+        gpu_initialized=False, source_api_module=cc.authenticate_selected_capture_source.__module__,
+        checked_environment=dict(environment),
+        capture_acceptance='No capture accepted; native execution still requires the complete public contract.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--plan-sha256', required=True)
+    parser.add_argument('--cpu-preflight', action='store_true')
     args = parser.parse_args()
     plan = sealed_json(args.plan, args.plan_sha256)
-    if plan.get('schema') != 'prismaquant.glm_native_wire_screen.frozen.v1':
+    schemas = {'prismaquant.glm_native_wire_screen.frozen.v1'}
+    if args.cpu_preflight:
+        schemas.add('prismaquant.glm_native_wire_screen.draft.v1')
+    if plan.get('schema') not in schemas:
         raise ValueError('native execution requires the reviewed frozen screen envelope')
     resources = sealed_json(plan['resources']['path'], plan['resources']['sha256'])
     source_inputs = resources['inputs']
@@ -57,15 +91,11 @@ def main():
         raise ValueError('resource and native proposal rosters differ')
     if any(census.get(key) != value for key, value in dict(nsamples=512, seqlen=512, seed=0).items()):
         raise ValueError('screen requires the original 512 by 512 seed-zero census')
-    for name, expected in plan['environment'].items():
-        if os.environ.get(name, '') != expected:
-            raise ValueError(f'frozen screen environment differs: {name}')
-    required_env = dict(union['activation_operators']['explicit_environment_for_binding'],
-        OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
-        PRISMAQUANT_LAYER_READ_THREADS='4', PRISMAQUANT_RELEASE_SOURCE_PAGES='1',
-        MIMALLOC_PURGE_DELAY='0')
-    if any(plan['environment'].get(name) != value for name, value in required_env.items()):
-        raise ValueError('frozen environment omits a required activation/thread/release contract')
+    preflight = integrated_cpu_preflight(plan['environment'],
+        union['activation_operators']['explicit_environment_for_binding'], environ=os.environ)
+    if args.cpu_preflight:
+        print(json.dumps(preflight))
+        return
 
     import torch
     from prismaquant import tessera_calibration_cache as cc, tessera_campaign as tc
@@ -107,63 +137,44 @@ def main():
         candidates=[dict(qname=cell['qname'], format=cell['format'], status='pending')
                     for cell in proposal['cells']],
         scope='28 diagnostic original-wire cells; no complete-group or serving qualification',
-        environment=dict(torch=str(torch.__version__), cuda=torch.version.cuda),
+        environment=dict(torch=str(torch.__version__), cuda=torch.version.cuda), cpu_preflight=preflight,
         producer=dict(encoder_source_sha256=plan['encoder_source_sha256'],
             contract_sha256=plan['producer_contract_sha256'],
             container=union['fixed']['producer_container']),
         resource_plan=resources, capture=plan['capture'], started_unix=time.time())
 
     def check(label, **kwargs):
+        telemetry.require_healthy()
         value = guard.check(label, **kwargs)
         if torch.cuda.memory_reserved() > resources['gpu_gib']*1024**3:
             raise RuntimeError('screen CUDA reservation exceeds its frozen GPU subset cap')
         return value
 
-    def phase(label, function, *, trace=False):
+    def phase(label, function):
+        telemetry.collect(); telemetry.require_healthy()
         torch.cuda.synchronize(); torch.cuda.reset_peak_memory_stats()
-        start = time.time()
+        start, start_mono = time.time(), time.monotonic()
         cpu = cProfile.Profile(); cpu.enable()
         try:
-            if trace:
-                with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
-                        torch.profiler.ProfilerActivity.CUDA]) as profiler:
-                    value = function(); torch.cuda.synchronize()
-                profiler.export_chrome_trace(str(output/(label+'.trace.json')))
-                (output/(label+'.operators.txt')).write_text(profiler.key_averages().table(
-                    sort_by='self_device_time_total', row_limit=80))
-            else:
-                value = function(); torch.cuda.synchronize()
+            value = function(); torch.cuda.synchronize()
             return value
         finally:
+            end, end_mono = time.time(), time.monotonic()
             cpu.disable(); cpu.dump_stats(str(output/(label+'.cprofile')))
+            telemetry.collect()
             result['phases'].append(dict(phase=label, started_unix=start,
-                finished_unix=time.time(), torch_profile=trace,
+                finished_unix=end, started_monotonic=start_mono, finished_monotonic=end_mono,
+                profiler='cProfile', gpu_kernel_attribution='unavailable',
                 max_cuda_allocated_bytes=torch.cuda.max_memory_allocated(),
                 max_cuda_reserved_bytes=torch.cuda.max_memory_reserved(),
-                guard=check('after_'+label)))
+                guard=guard.snapshot()))
             write_json(output/'partial-result.json', result)
+            check('after_'+label)
 
-    from experiments.workspace_netdata import NetdataWriter, sample_netdata
-    stop = threading.Event()
-    telemetry_errors = []
-    telemetry_samples = dict(sparky=0, sparklina=0)
-
-    def observe():
-        with (output/'netdata.jsonl').open('w') as stream:
-            writer = NetdataWriter(stream)
-            while not stop.is_set():
-                for host in ('sparky', 'sparklina'):
-                    try:
-                        writer.write(sample_netdata(host))
-                        telemetry_samples[host] += 1
-                    except Exception as error:
-                        telemetry_errors.append(dict(host=host, error=str(error), unix=time.time()))
-                stop.wait(1)
-
-    observer = threading.Thread(target=observe, daemon=True)
-    observer.start()
+    telemetry = ScreenTelemetry(output/'netdata.jsonl')
     active_candidate = None
     try:
+        telemetry.start()
         profile = detect_profile(census['model'])
         with ExitStack() as scope:
             owner = scope.enter_context(cc.authenticate_selected_capture_source(
@@ -239,8 +250,7 @@ def main():
                 anchor = phase(f'unit-{unit_index}-encode-{index}', lambda: tc._measure_anchor(
                     qname=name, weight=weights[name], activations=acts[name], format_name=fmt,
                     cache=cache, wire_dir=wire_dir, activation_kwargs_for=memo,
-                    hessian_required=True, static_input_scale=scales.get(name)),
-                    trace=index in (0, len(selected)-1))
+                    hessian_required=True, static_input_scale=scales.get(name)))
                 if (anchor.memory_bytes != cell['memory_bytes'] or not math.isfinite(anchor.dloss) or
                         anchor.wire_bytes > min(resources['max_original_wire_file_bytes'],
                                                cell['memory_bytes']+64*1024**2)):
@@ -270,14 +280,18 @@ def main():
                         return verify_anchor_render(cell, weights[name], rendered,
                             calibration_source=calibration, projected_unit=projected.get(name),
                             static_scales=scales, bound_unit=bound, release_file_pages=True)
-                    cell['qualification'] = phase(f'unit-{unit_index}-qualify-{index}', qualify,
-                                                  trace=index in (0, len(anchors)-1))
+                    cell['qualification'] = phase(f'unit-{unit_index}-qualify-{index}', qualify)
                     require_original_inputs()
                     if cell['qualification']['source_weight'] != inputs['source_weight']:
                         raise RuntimeError('qualified wire source differs from the original source snapshot')
                     result['cells'].append(cell)
                     active_candidate['status'] = 'qualified'
                     active_candidate = None
+            result.setdefault('final_input_identities', {})[name] = phase(
+                f'unit-{unit_index}-final-input-identity', lambda: require_original_input_bytes(
+                    dict(source_weight=weights[name], hessian=hessians[name], inputs=acts[name]),
+                    {key: inputs[key] for key in ('source_weight', 'hessian', 'inputs')},
+                    identity=_cb_cache_tensor_identity))
             memo.cache_clear()
         if len(result['cells']) != 28:
             raise RuntimeError('native screen did not qualify all 28 cells')
@@ -288,13 +302,12 @@ def main():
             active_candidate.update(status='failed', failure=result['failure'])
         raise
     finally:
-        stop.set(); observer.join(timeout=15)
-        result.update(finished_unix=time.time(), telemetry_errors=telemetry_errors,
-                      telemetry_samples=telemetry_samples,
-                      telemetry_thread_complete=not observer.is_alive(), guard=guard.snapshot())
+        coverage = telemetry.finish(result['phases'])
+        result.update(finished_unix=time.time(), telemetry_errors=telemetry.errors,
+                      telemetry_samples={host: len(rows) for host, rows in telemetry.samples.items()},
+                      telemetry_coverage=coverage, guard=guard.snapshot())
         result['wire_cells_passed'] = result['passed']
-        result['passed'] = (result['passed'] and not observer.is_alive() and
-                            all(count >= 2 for count in telemetry_samples.values()))
+        result['passed'] = result['passed'] and coverage['passed']
         write_json(output/'result.json', result)
     print(json.dumps(dict(passed=result['passed'], cells=len(result['cells']),
                          result_sha256=cc.sha256(output/'result.json'))))

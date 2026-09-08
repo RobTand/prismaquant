@@ -1,5 +1,15 @@
 # GLM v3 original-wire screen preparation — 2026-09-08
 
+**Current revision:** root-review fixes are described in “Review follow-up” at
+the end. The current plan is [`resource-plan.json`](resource-plan.json), SHA256
+`558b8e66643267f400f620e641b16d9ef75a012c19fffb6fe098efd2ae09a494`.
+It retains 56 GiB nominal physical and 40 GiB GPU bounds, with a **98 GiB**
+conservative guard reservation. GPU tracing is disabled; encode GPU kernel
+attribution and performance qualification remain unavailable. No native run
+has occurred. The original preparation below is retained as dated history.
+
+## Initial preparation, superseded where noted below
+
 CPU preparation only. **No native run or fit qualification has been performed.**
 The experimental entry point refuses execution without a frozen envelope, the
 reviewed selected-source authentication API, and a hash-bound complete canonical
@@ -12,7 +22,7 @@ the four selected original GLM units and all 28 cells against the sealed v3
 **complete-group initial rung grids**. It ignores the superseded per-shape
 screen suggestion retained in the group inventory. The complete v3 union
 proposal, native proposal, census and group contract are content-bound in
-[`resource-plan.json`](resource-plan.json). Its SHA256 is
+[`resource-plan-initial.json`](resource-plan-initial.json). Its SHA256 is
 `ee7ec9a8178caf5e4713bf3b3a5202af7e056c813be3f22c2a2efe0b886baa75`.
 
 The selected shapes are L0 down `[4096,12288]`, L0 gate `[12288,4096]`,
@@ -138,3 +148,77 @@ The reviewable, unsubmitted inputs are
 [`native-plan.draft.json`](native-plan.draft.json) and
 [`native-invocation.draft.json`](native-invocation.draft.json). Pending seals and
 the draft schema must be replaced only after those prerequisites are satisfied.
+
+## Review follow-up
+
+The reviewed source-auth integration `c75f259fefb56433d0c7882795d09536a0a9d807`
+is merged. `prismaquant/` and `docs/ARCHITECTURE.md` are byte-identical to that
+integration. This revision only changes experimental evidence/acceptance code,
+tests and evidence artifacts.
+
+Telemetry now uses the existing bounded Netdata reader/writer with one
+serialized collector. Both hosts receive explicit observations before and after
+every measured phase, plus background samples at a two-second interval. The
+acceptance report requires monotonic phase brackets and no inter-sample gap
+over 15 seconds. Required CPU, memory, NFS/probe and GPU charts must be at most
+20 seconds old, with at most two seconds of future clock skew. Any read/write
+error, missing bracket, stale chart, excessive gap, or unfinished collector
+prevents a pass. Errors are sticky and stop additional work at the next
+checkpoint. Retention is capped at 2,000 timing records per host, eight errors,
+and a 256 MiB JSONL file. The plan prices 32 MiB of response/timing state and
+the full 256 MiB possible output-page owner in each physical phase.
+
+The former acceptance rule was reproduced failing through PB action
+`381889e31acb90db0817b5dd610dcf9be1c60e135d02f7dd180da473d4921ee8`.
+The final regression uses valid timing records and a healthy, bracketed
+control; it separately refuses two early-only samples, a long interior gap,
+and a read error despite otherwise complete coverage. Chart freshness is also
+tested against the actual required chart roster.
+
+After each unit's encodes and wire qualifications, the existing tensor identity
+helper rehashes source, H and X once. These final identities must equal their
+initial byte identities. Storage/version guards remain between rungs; the final
+byte gate additionally catches unversioned writes. CPU regressions mutate each
+of source/H/X through an unversioned NumPy byte view, demonstrate unchanged
+storage/version signatures, and require the final hash gate to refuse it.
+The existing helper's CPU tensor plus byte-copy staging is explicitly priced:
+1,207,959,552 B at the largest selected H, in addition to the other conservative
+encoding-phase terms.
+
+All whole-encode Torch-profiler scopes are removed, so retained Torch trace
+state is **zero**. Per-phase cProfile aggregate statistics are the in-process
+instrument. Both-host continuous Netdata, phase wall intervals and CUDA peaks
+remain observations of the eventual correctness run. There is no PB GPU trace:
+the existing bounded Nsight mode has a shorter settlement limit than this
+screen's intended action deadline. The screen retains its 3,600-second hard
+deadline and one attempt. No encode GPU kernel attribution, throughput
+optimization, work-per-joule ranking, saturation or kernel-performance gate is
+being certified. No synthetic encode or alternate kernel is introduced.
+
+Updated phase arithmetic is:
+
+| Phase | Physical bound, B | GPU subset, B | Guard envelope, B |
+|---|---:|---:|---:|
+| Source preparation | 59,872,129,584 | 42,390,270,512 | 104,409,883,744 |
+| Resident encoding and qualification | 59,174,466,096 | 13,971,324,928 | 75,293,274,672 |
+| Capture prefetch | 33,801,895,936 | 10,255,073,280 | 46,204,452,864 |
+
+These remain derived bounds, not native fit evidence. The physical maximum
+rounds to 56 GiB, the GPU subset to 40 GiB, and the guard envelope to a 98 GiB
+PB memory reservation. The three quantities retain their distinct meanings.
+
+The final 16 CPU checks pass through PB action
+`93501ffddf45064728bcd17c7c6fd6a8b4e061775c9a85b6cc9db923a0579c93`.
+They include actual integrated source/loader API checks, every required frozen
+environment field, and rejection of a partial capture by the actual public
+authenticator before source access. A standalone `--cpu-preflight` action
+checks those APIs and required environment values in the actual admitted CPU
+process, without CUDA initialization or accepting a capture. Its exact
+CPU-only input is [`cpu-preflight-plan.json`](cpu-preflight-plan.json).
+
+The updated resource probe is PB action
+`5fb9b9304616b6a190c339c96d00c9af5f7086d84494039fcdcffb3bf1b7c91b`.
+The separate preflight is PB action
+`3b43b6508b0c13bd26f340d0ef95fb49cacff5b722d8a3a6bbcc8121896c2501`.
+Their actual terminal/CAS/cleanup evidence is appended to `receipts.json`.
+Native capture/producer seals and root freeze remain required.

@@ -67,6 +67,9 @@ def resource_plan(base, shapes, counts, cells):
                 for name, shape in shapes.items()}
     total, largest = sum(storages.values()), max(storages.values())
     largest_render = max(math.prod(shape)*2 for shape in shapes.values())
+    identity_staging = 2*max(largest_render,
+        max(shape[1]**2*4 for shape in shapes.values()),
+        max(min(counts[name], 512)*shape[1]*4 for name, shape in shapes.items()))
     file_cap, scratch_cap = GIB, 64*MIB
     # This is an enforced file cap, not an assertion about future file sizes.
     if largest > file_cap:
@@ -93,7 +96,13 @@ def resource_plan(base, shapes, counts, cells):
         capture_source_page_cache_bytes=len(shapes)*file_cap,
         capture_load_scratch_bytes=scratch_cap,
         completed_artifact_page_cache_bytes=sum(
-            math.prod(cell['shape'])*2 + cell['memory_bytes'] + 64*MIB for cell in cells))
+            math.prod(cell['shape'])*2 + cell['memory_bytes'] + 64*MIB for cell in cells),
+        final_input_identity_staging_bytes=identity_staging)
+    # One serialized Netdata reader; only bounded timing/freshness summaries
+    # remain in Python. Charge the entire permitted JSONL page owner as well.
+    for terms in phases.values():
+        terms.update(telemetry_state_and_response_bytes=32*MIB,
+                     telemetry_output_page_cache_bytes=256*MIB)
     gpu_headroom = 8*GIB
     prep = phases['source_preparation']
     # Loader transients are conservatively charged wholly to the GPU subset;
@@ -137,6 +146,11 @@ def resource_plan(base, shapes, counts, cells):
         max_capture_file_bytes=file_cap, max_validation_scratch_bytes=scratch_cap,
         max_original_wire_file_bytes=wire_cap,
         max_resident_render_bytes=largest_render,
+        final_input_identity_staging_bytes=identity_staging,
+        profiler_policy=dict(in_process='per-phase cProfile aggregate statistics',
+            torch_event_retention_bytes=0, gpu_trace='disabled',
+            encode_gpu_kernel_attribution='unavailable',
+            scope='wire correctness; no kernel-performance or saturation qualification'),
         execution_deadline_seconds=3600,
         deadline_semantics='PB hard termination cap; completion time is unmeasured',
         max_attempts=1, source_forward_count=0,

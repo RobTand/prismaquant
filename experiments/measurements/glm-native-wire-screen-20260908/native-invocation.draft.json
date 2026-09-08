@@ -1,7 +1,7 @@
 {
   "status": "NOT_AUTHORIZED_NOT_SUBMITTED",
   "prerequisites": [
-    "Root review/integration of selected-source authentication and this harness",
+    "Root review of revised evidence contracts; runtime source-auth integration is byte-identical to c75f259",
     "Complete canonical capture manifest and exact hash",
     "Producer API source digest",
     "Frozen plan SHA and root review of this exact invocation"
@@ -18,7 +18,7 @@
     "--cpus",
     "6",
     "--demand",
-    "mem_gb=97",
+    "mem_gb=98",
     "--gpu-memory-gb",
     "40",
     "--priority",
