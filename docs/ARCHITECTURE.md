@@ -1,7 +1,27 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `fix/glm-streamed-gold-companion`. Stamps
+As of: 2026-09-08 · `triage/container-gpu-declaration`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `triage/container-gpu-declaration`) for **the campaign
+container's GPU attachment contract** (§4.10, #430). The launcher no longer
+maps the device because nobody said not to. `--gpus all` is withheld when any
+declaration withholds it: an explicit `--cpu-only`, an empty
+`CUDA_VISIBLE_DEVICES` in the action environment, which is exactly what
+`pbrun` sets when it granted no GPU slots, or an empty `CUDA_VISIBLE_DEVICES`
+in the spec's own `env` block. Otherwise the device is attached, as before.
+The two checks are not redundant with the variable itself: an empty
+`CUDA_VISIBLE_DEVICES` hides the device from CUDA inside the container but
+does not stop the runtime attaching and initialising it, so a row that
+reserved no GPU could still own one while PrismaBuild's GPU tokens stayed
+unspent, and a power reading taken beside it had a second owner it could not
+see. An unset variable is not a declaration: a run outside `pbrun` has no
+grant to read and keeps the behaviour it had, where `--cpu-only` remains the
+way to withhold the device. The launcher's existing JSON line now carries
+`gpu_attached` and `gpu_decision`, so the choice and the declaration that made
+it are readable rather than inferred. No serving pin, wire recipe, cost
+currency, format menu or ship-gate change. Gate:
+`tests/test_tessera_campaign_container.py`.
 
 Re-stamped (2026-09-08, `fix/glm-streamed-gold-companion`) for the opt-in
 streamed gold companion (#437). The existing v1 8×512 seed-42 WikiText
