@@ -1,0 +1,7 @@
+.......................................................................  [100%]
+
+tessera surface: NO CUDA -- torch 2.11.0+cpu reports no CUDA device
+tessera surface: 0 test(s) skipped, 0 module(s) not collected
+tessera surface: this run did not exercise the CUDA-gated surface. Its pass count is not coverage of it.
+tessera surface: 0 test(s) allocated on the device
+71 passed in 17.15s

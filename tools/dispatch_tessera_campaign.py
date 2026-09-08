@@ -94,7 +94,7 @@ SHARED_PROVENANCE = (
 #: own units, and reconciling it is what the merge is for.
 SHARED_HESSIAN = (
     "supplied", "text_sha", "token_count", "text_sha256", "fit_ids_sha256",
-    "fit_tokens", "kwarg",
+    "fit_tokens", "kwarg", "reference_binding",
 )
 
 
@@ -906,6 +906,52 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
     return payload
 
 
+def _merge_export_hessian_references(row_dirs, payloads, *, out_cache, identity,
+                                     policy, static_scales, census):
+    from prismaquant import tessera_calibration_cache as store
+    from prismaquant.tessera_campaign import write_export_inputs
+
+    def accepted_rows():
+        for row_id in sorted(row_dirs):
+            path = Path(row_dirs[row_id])/'cache'/'hessian_capture.references.json'
+            payload = payloads[row_id]
+            with store.open_hessian_reference(path) as owner:
+                owner.require_census(census)
+                owner.require_provenance({**identity,'hessian_role':'fit'})
+                descriptor = owner.descriptor
+                provenance = payload['provenance']
+                if provenance.get('calibration_cache') != descriptor['canonical_capture']:
+                    raise MergeRefused(f'{row_id}: reference does not bind the row canonical capture')
+                if provenance['hessian'].get('reference_binding') != owner.binding():
+                    raise MergeRefused(f'{row_id}: reference binding differs from the row provenance')
+                identities = _hessian_identities(payload)
+                if (not identities or any(row.get('capture_sha256') != descriptor['capture_sha256'] or
+                        row.get('reference_binding') != owner.binding() for row in identities)):
+                    raise MergeRefused(f'{row_id}: reference commitments do not bind the exact priced row seals')
+                groups = (provenance.get('unit_selection') or {}).get('groups')
+                if not isinstance(groups, list) or not groups:
+                    raise MergeRefused(f'{row_id}: reference row has no selected unit roster')
+                expected = {name for group in groups for name in group.get('sampled', group['members'])}
+                if set(owner) != expected:
+                    raise MergeRefused(f'{row_id}: reference H roster differs from the exact selected members')
+                if owner.receipt()['loaded_entries'] != 0:
+                    raise MergeRefused('Hessian reference merge unexpectedly consumed tensor bytes')
+            yield descriptor
+
+    try:
+        descriptor = store.merge_hessian_reference_descriptors(accepted_rows())
+        out_cache.mkdir(parents=True, exist_ok=True)
+        path = out_cache/'hessian_capture.references.json'
+        digest = store.write_hessian_reference(path, descriptor)
+        _, scales, _ = write_export_inputs(out_cache, hessians=None, hessian_rows=census['counts'],
+            hessian_identity=identity, static_scales=static_scales, static_scale_policy=policy)
+    except (ValueError, RuntimeError, OSError) as error:
+        if isinstance(error, MergeRefused):
+            raise
+        raise MergeRefused(f'canonical Hessian reference merge refused: {error}') from error
+    return path, scales, digest
+
+
 def merge_export_inputs(row_dirs: dict, payloads: dict, *, out_cache: Path,
                         identity: dict, policy: str, static_scales: dict,
                         census: dict):
@@ -922,6 +968,13 @@ def merge_export_inputs(row_dirs: dict, payloads: dict, *, out_cache: Path,
     digested triple; no unit may be captured twice with different bytes; and
     the union's ``counts`` must be the census's, over the census's roster.
     """
+    reference_modes = [(payloads[row].get('provenance',{}).get('hessian') or {}).get('reference_binding')
+                       for row in sorted(row_dirs)]
+    if any(value is not None for value in reference_modes):
+        if any(value is None for value in reference_modes):
+            raise MergeRefused('cannot merge legacy and canonical-reference Hessian handoffs')
+        return _merge_export_hessian_references(row_dirs, payloads, out_cache=out_cache,
+            identity=identity, policy=policy, static_scales=static_scales, census=census)
     import torch
 
     from prismaquant.tessera_campaign import write_export_inputs

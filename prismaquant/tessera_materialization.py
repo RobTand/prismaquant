@@ -62,6 +62,9 @@ def _request(path):
         raise RuntimeError('selected-wire cost input changed')
     with Path(request['cost_path']).open('rb') as handle:
         cost = pickle.load(handle)
+    if (cost.get('provenance', {}).get('hessian') or {}).get('reference_binding') is not None:
+        raise RuntimeError('canonical Hessian references require complete priced wires; '
+                           'sampled selected-wire materialization has no bounded reference union yet')
     assignment = canonicalize_assignment(request['layer_config'])
     if assignment != request['assignment']:
         raise RuntimeError('selected-wire assignment changed')

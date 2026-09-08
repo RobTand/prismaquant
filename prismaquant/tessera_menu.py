@@ -1751,9 +1751,14 @@ def assert_uniform_hessian_identity(costs: "dict") -> dict:
                 legacy_rows += 1
             else:
                 schema = "modern"
+            reference = ident.get('reference_binding')
+            if reference is not None:
+                import json
+                from tessera.hessian_capture import normalize_reference_binding
+                reference = json.dumps(normalize_reference_binding(reference), sort_keys=True)
             key = (schema, modern, bool(ident.get("supplied")),
                    ident.get("text_sha"), ident.get("token_count"),
-                   ident.get("kwarg"), ident.get("capture_sha256"))
+                   ident.get("kwarg"), ident.get("capture_sha256"), reference)
             seen[key] = seen.get(key, 0) + 1
     if len(seen) > 1:
         raise ValueError(
@@ -1763,7 +1768,7 @@ def assert_uniform_hessian_identity(costs: "dict") -> dict:
                 f"supplied={k[2]} text_sha={str(k[3])[:12]} "
                 f"tokens={k[4]} kwarg={k[5]} "
                 f"capture_sha256={None if k[6] is None else str(k[6])[:12]} "
-                f"({n} rows)"
+                f"reference_binding={k[7]} ({n} rows)"
                 for k, n in sorted(seen.items(), key=lambda kv: -kv[1]))
             + ". Rows priced with and without a Hessian, on different "
               "calibration draws, or against different captures of one draw, "
@@ -1780,6 +1785,7 @@ def assert_uniform_hessian_identity(costs: "dict") -> dict:
         "kwarg": None if key is None else key[5],
         **triple,
         "capture_sha256": None if key is None else key[6],
+        **({'reference_binding':json.loads(key[7])} if key is not None and key[7] is not None else {}),
         "identity_schema": None if key is None else key[0],
         "stamped_rows": sum(seen.values()),
         "legacy_rows": int(legacy_rows),

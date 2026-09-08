@@ -1,0 +1,45 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_public_reader_binds_commitments_without_loading_h_then_verifies_access __
+
+reference = (PosixPath('/home/rob/tmp/pytest-of-rob/pytest-3239/test_public_reader_binds_commi0/hessian_capture.references.json'),...75227d'}, 'b': {'path': 'inputs/b.pt', 'sha256': '31e2fe19d0c2a9c575b0c2bc28908f1c3ab3ca149ea7d825c950807ff16aeeea'}}})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x72c6fb8bc510>
+
+    def test_public_reader_binds_commitments_without_loading_h_then_verifies_access(reference, monkeypatch):
+        handoff,payload,H,_,_=reference
+        original=torch.load;loads=[]
+        def observed(path,*args,**kwargs):
+            assert not str(path).endswith('.json'), 'reference JSON must not take the eager torch.load route'
+            loads.append((str(path),dict(kwargs)))
+            return original(path,*args,**kwargs)
+        monkeypatch.setattr(torch,'load',observed)
+>       source=ActivationSource.from_capture(handoff)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_hessian_reference_capture.py:68:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/tessera/export.py:771: in from_capture
+    payload = _torch.load(str(path), map_location="cpu", weights_only=False)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = '/home/rob/tmp/pytest-of-rob/pytest-3239/test_public_reader_binds_commi0/hessian_capture.references.json'
+args = (), kwargs = {'map_location': 'cpu', 'weights_only': False}
+
+    def observed(path,*args,**kwargs):
+>       assert not str(path).endswith('.json'), 'reference JSON must not take the eager torch.load route'
+E       AssertionError: reference JSON must not take the eager torch.load route
+E       assert not True
+E        +  where True = <built-in method endswith of str object at 0x72c6f91e12c0>('.json')
+E        +    where <built-in method endswith of str object at 0x72c6f91e12c0> = '/home/rob/tmp/pytest-of-rob/pytest-3239/test_public_reader_binds_commi0/hessian_capture.references.json'.endswith
+E        +      where '/home/rob/tmp/pytest-of-rob/pytest-3239/test_public_reader_binds_commi0/hessian_capture.references.json' = str('/home/rob/tmp/pytest-of-rob/pytest-3239/test_public_reader_binds_commi0/hessian_capture.references.json')
+
+tests/test_hessian_reference_capture.py:64: AssertionError
+
+tessera surface: NO CUDA -- torch 2.11.0+cpu reports no CUDA device
+tessera surface: 0 test(s) skipped, 0 module(s) not collected
+tessera surface: this run did not exercise the CUDA-gated surface. Its pass count is not coverage of it.
+tessera surface: 0 test(s) allocated on the device
+=========================== short test summary info ============================
+FAILED tests/test_hessian_reference_capture.py::test_public_reader_binds_commitments_without_loading_h_then_verifies_access
+1 failed in 1.70s

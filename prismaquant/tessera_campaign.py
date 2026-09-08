@@ -1240,6 +1240,7 @@ def campaign_cost_payload(
         # the allocation binds to the payload and not only to the draw's
         # triple (RobTand/prismaquant#204); None on a weights-only campaign.
         "capture_sha256": _h.get("capture_sha256"),
+        **({'reference_binding':dict(_h['reference_binding'])} if _h.get('reference_binding') is not None else {}),
         "kwarg": tuple(_h.get("kwargs", ())) or _h.get("kwarg"),
     }
 
@@ -3392,7 +3393,8 @@ def _save_hessian_capture_with_page_release(payload, path, *, resource_check=Non
 
 def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
                         hessian_identity, static_scales, static_scale_policy,
-                        release_file_pages=False, resource_check=None):
+                        release_file_pages=False, resource_check=None,
+                        hessian_reference=None):
     """Write the exporter's ``--hessian`` and ``--input-scales`` inputs.
 
     ``(hessian_capture_path | None, input_scales_path | None,
@@ -3400,7 +3402,7 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
     campaign's table is priced under exactly these Hessians and these static
     activation scales, so the export leg must be handed them back or the
     artifact built is not the artifact priced (RobTand/prismaquant#193).
-    Both files are in the shapes Tessera's exporter consumes:
+    Legacy files use the shapes Tessera's exporter consumes:
 
     * ``hessian_capture.pt`` -- ``{"H": {unit: XᵀX}, "counts", "provenance"}``,
       what ``ActivationSource.from_capture`` loads; the H tensors are the
@@ -3420,6 +3422,10 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
       scalar per unit, the exporter's stock-NVFP4 spelling, valued exactly as
       the W4A4 costs were scored.
 
+    Opt-in ``hessian_reference`` writes only a canonical reference JSON with
+    the same H content seal and explicit load bounds. The producer verifies
+    actual H bytes on consumption; metadata intake does not verify untouched H.
+
     ``hessians=None`` is the deliberate weights-only campaign: no capture is
     written, matching the ``supplied=false`` stamp the rows carry.
     """
@@ -3431,7 +3437,20 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
 
     hessian_capture_path = None
     capture_sha256 = None
-    if hessians is not None:
+    if hessian_reference is not None:
+        from . import tessera_calibration_cache as capture_store
+        if hessians is None or set(hessian_reference) != {'canonical_capture', 'census_path', 'load_policy'}:
+            raise RuntimeError('Hessian reference requires resident H and its canonical capture/census/load policy')
+        descriptor = capture_store.canonical_hessian_reference_descriptor(
+            hessians=hessians, counts=hessian_rows,
+            provenance={**dict(hessian_identity), 'hessian_role':'fit'}, **hessian_reference)
+        hessian_capture_path = cache_dir/'hessian_capture.references.json'
+        capture_sha256 = capture_store.write_hessian_reference(hessian_capture_path, descriptor)
+        if resource_check is not None:
+            resource_check('after_selected_export_reference_write')
+        print(f'[campaign] wrote {hessian_capture_path} '
+              f'({len(descriptor["hessians"])} H commitments; no copied H payloads)', flush=True)
+    elif hessians is not None:
         hessian_capture_path = cache_dir / "hessian_capture.pt"
         capture_provenance = {**dict(hessian_identity), "hessian_role": "fit"}
         saved_hessians = {name: h for name, h in hessians.items()
@@ -3819,6 +3838,8 @@ def _main(argv, *, source_scope) -> int:
                     help="Opt-in shared capture; bounded also checks phase ownership and physical memory.")
     ap.add_argument("--capture-load-policy", type=json.loads, default=None,
                     help="Explicit verified activation load v1 JSON policy; requires bounded capture.")
+    ap.add_argument('--export-hessian-reference-policy', type=json.loads, default=None,
+                    help='Opt-in canonical H reference load-policy JSON; requires selected reuse of a complete capture.')
     ap.add_argument("--capture-calibration-out", default=None,
                     help="Capture full-census float32 prefix X and uncapped H once, then exit.")
     ap.add_argument("--calibration-cache", default=None,
@@ -3840,6 +3861,14 @@ def _main(argv, *, source_scope) -> int:
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if args.export_hessian_reference_policy is not None:
+        if not selected_source:
+            ap.error('--export-hessian-reference-policy requires selected reuse of a hash-bound complete capture')
+        try:
+            from tessera.hessian_capture import normalize_reference_load_policy
+            args.export_hessian_reference_policy = normalize_reference_load_policy(args.export_hessian_reference_policy)
+        except (ImportError, ValueError) as error:
+            ap.error(f'canonical H references need a compatible producer and valid load policy: {error}')
     if args.streaming and not selected_source and (
             not (args.census_out or args.capture_calibration_out) or args.units):
         ap.error("--streaming requires full-scope census/capture or --units with a hash-bound complete calibration cache")
@@ -4457,6 +4486,9 @@ def _main(argv, *, source_scope) -> int:
         hessian_identity=hessian_identity,
         static_scales=static_scales,
         static_scale_policy=static_scale_policy,
+        **(dict(hessian_reference=dict(canonical_capture=calibration_cache,
+                census_path=args.calibration_census,load_policy=args.export_hessian_reference_policy))
+           if args.export_hessian_reference_policy is not None else {}),
         **(dict(release_file_pages=True,
                 resource_check=None if selected_guard is None else selected_guard.check)
            if selected_source else {}),
@@ -4904,6 +4936,9 @@ def _main(argv, *, source_scope) -> int:
                 # for the export leg's --hessian input; None on --hessian off.
                 "capture_path": (None if hessian_capture_path is None
                                  else str(hessian_capture_path)),
+                **({'reference_binding':calibration_store.hessian_reference_binding(
+                    calibration_cache['sha256'],capture_identity['census_sha256'])}
+                   if args.export_hessian_reference_policy is not None else {}),
                 # The content digest of that payload (Tessera's own seal
                 # rule), stamped on every row so the allocation binds to
                 # the capture BY CONTENT, not by the draw's triple alone
