@@ -14,7 +14,8 @@ No second teacher forward, fitting capture or residency subsystem is introduced.
 Default v1 payload/meta/evidence semantics remain unchanged. V2 retains the
 existing fields and adds `final_logprobs` (tensor `[8,V]`, or null without the
 companion), observed `source_execution`, `producer_identity`,
-`wikitext_inputs_sha256`, and `fit_overlap_status: "unverified"`. Semantic
+`wikitext_inputs_sha256`, normalized original `model_identity`, and
+`fit_overlap_status: "unverified"`. Semantic
 descriptors bind the final tensor as well as all three existing tensors. Final
 rows must be finite, nonpositive, full-vocabulary FP32 log probabilities and
 normalize within the existing 1e-6 mass tolerance. Top-K coverage/fidelity still
@@ -58,8 +59,9 @@ PB owns admission and placement; vLLM students use Rob's direct-run exemption.
 
 V2 student replay requires `--teacher-meta` before loading. It compares the
 candidate's actual tokenizer identity with the teacher and compares normalized
-model family/vocabulary with the authenticated source config, permitting
-quantization-config additions. Use `--score-positions final` for the companion
+model family/vocabulary with the original input model domain, permitting
+quantization-config additions. The streamer's staged text-only runtime config
+remains independently bound; it is not mistaken for the full outer GLM config. Use `--score-positions final` for the companion
 or `--score-positions all` for existing top-K scoring. Requesting final from a
 v2 payload with a null companion refuses. V1 all-position payloads retain their
 historical routing. Final v2 results retain `teacher_evidence`, explicit
@@ -95,3 +97,33 @@ in 41.12 seconds. DL CPU4/native1 used 6,220,759,040 peak cgroup bytes under
 12 GiB admission. Its CAS receipt, actual result and source bundle are verified
 in `legacy-contract-audit.json`. The separate archived full-KL math file with a
 path-based collection skip was not counted as validation.
+
+
+The model-bound reader implementation is integrated from `1a41c04c`, with
+canonical cached Salesforce/WikiText fingerprint fix `ddb9e2af`. The accepted
+materialization locator is
+`/mnt/shared/tessera-measurements/glm-canonical-census-20260908/model-bound-wikitext-inputs-01/glm-wikitext-inputs.v2.json`,
+SHA `eb7c36a6211796bdaf523c20ca3583cbe4794e9583a11f3ec5f124641b374652`.
+Raman owns its PB materialization and source/CAS audits. Its full-KL tensor SHA
+is `d6549876d0bdef6ab5c5882003447ab4cd1df9bb05f1b4190ae4ed6294f595aa`.
+The fixed input is not disjoint from fitting: the overlap audit reports gold
+window 5 tokens `[280:512]` equal original fit window 176 tokens `[0:232]`,
+a 232-token exact substring. No entire 512-token gold window is identical.
+The test PPL prefix's longest exact substring is 12 tokens. These are exact
+substring findings, not a statistical independence claim. Audit
+`overlap-audit.json` beside the input has SHA
+`30a0261a304c16a7e914b293bd06b5749290711ab147eefb59752a5d7b35048e`.
+The requested fixed draw is retained without resampling. V2's conservative
+`fit_overlap_status: "unverified"` is not a no-overlap assertion; the separate
+factual audit carries the stronger observed overlap finding.
+
+Final combined validation action
+`08b37f82d47e69e3006b4beb62bfbd12a027c2742bbab39ba85c3b7acc5bcec8`
+compiled all nine touched tools/test files and passed 186 tests, zero skips,
+56 Torch deprecation warnings, in 42.18 seconds. It covers the final teacher,
+reader/PPL integration, topology/provenance and architecture/staleness checks.
+DL CPU4/native1 peak cgroup memory was 3,256,373,248 bytes under 12 GiB admission.
+Canonical CAS receipt, actual result bytes and source bundle were verified;
+the tested snapshot differs from implementation head `8c82e9d53` only by the
+PB-generated closure. No `prismaquant/` bytes differ from frozen `21ae7d28`.
+The attached `final-integration-audit.json` contains the exact identities.
