@@ -3,6 +3,16 @@
 As of: 2026-09-08 · `integrate/glm-bounded-handoff-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `integrate/glm-bounded-handoff-20260908`) for the
+synchronized development/serving dependency pin to Tessera `9d2314819f02`
+(#429), required by bounded canonical H references. The exact packaged
+contract SHA is `a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212`.
+Its only structural change from the prior pin is LFM construction output
+sizes; the allocator admission answer, serving-cell and native-extension
+tables are unchanged. Version `0.1.0` remains advisory with
+`version_is_release=false`. The explicit research TP2 controls do not promote
+a runtime cell. New priced wires bind the final producer source identity.
+
 Re-stamped (2026-09-08, `fix/bounded-export-handoff`) for the opt-in
 canonical Hessian reference handoff. Selected reuse may declare
 `--export-hessian-reference-policy` with explicit metadata/file/H byte caps.
@@ -19,7 +29,7 @@ Legacy `.pt` handoffs keep their eager behavior. Sampled selected-wire
 materialization explicitly refuses reference inputs until it has a bounded
 reference union; complete priced wires remain the supported reference scope.
 This adds no cache or scheduler, changes no row resident-prefetch estimator,
-serving pin, wire format or ship gate. It requires the reviewed producer reader
+wire format or ship gate. It requires the reviewed producer reader
 and a fresh producer source identity for new prices; old wire identities are
 not reused under the changed producer hash. CPU contract validation does not
 establish native throughput, GPU residency or full-model serving performance.

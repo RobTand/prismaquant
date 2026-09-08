@@ -168,7 +168,7 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: the same commit.  Re-check it against the COMMIT rather than a past HEAD,
 #: which nobody can re-run::
 #:
-#:     git -C "$TS" cat-file -p ba582d476a3b6db9057ebd1385dc52926f171451:src/tessera/serving/runtime_contract.json | sha256sum
+#:     git -C "$TS" cat-file -p 9d2314819f027e53ba169039a10cd27594d36670:src/tessera/serving/runtime_contract.json | sha256sum
 #:
 #: Re-pinned 2026-09-05 to ba582d4 (Tessera #356) for the priced-input
 #: exporter snapshot API required by PrismaQuant #231. The v22 contract bytes
@@ -177,12 +177,17 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: No git tag names this commit, so ``version_is_release`` stays false in the
 #: JSON beside this module: ``0.1.0`` is what the checkout's ``pyproject``
 #: says, not a cut release.
+#: Re-pinned 2026-09-08 to 9d2314819 (Tessera #429) for the bounded
+#: canonical Hessian reader and FIFO refusal. The raw contract additionally
+#: carries LFM construction output sizes; the admission answer, native
+#: extensions and serving-cell table are unchanged. Native TP2 remains an
+#: explicit research construction with no runtime-cell promotion.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "ba582d476a3b6db9057ebd1385dc52926f171451"
+    "9d2314819f027e53ba169039a10cd27594d36670"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "719daa02da1564b56a141ca2702ae29d4fda553460978efbb6510ddcd1824927"
+    "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the
