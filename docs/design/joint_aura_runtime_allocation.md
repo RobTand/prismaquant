@@ -276,3 +276,56 @@ parent and subset calibration hashes and sample index in the frozen panel and
 observation; the subset hash is the joint currency. Full-draw probes omit the
 subset receipt and carry null `probe_scope`. A subset screen cannot be reported
 as full-draw quality evidence.
+
+
+## Exact boundary working storage (opt-in)
+
+`compute_aura_cost_streamed(..., boundary_storage=policy)`, CLI
+`--boundary-storage-config policy.json`, or the Tessera joint plan's
+`execution.boundary_storage` accepts the closed policy:
+
+```json
+{
+  "schema": "prismaquant.aura.boundary_storage.v1",
+  "directory": "/run/exact-boundaries",
+  "max_resident_bytes": 1073741824,
+  "max_auxiliary_bytes": 1073741824,
+  "max_artifact_bytes": 536870912000,
+  "prefetch_batches": 2
+}
+```
+
+These illustrative caps are not a GLM admission plan. The resident cap charges
+all exact tensors in the current prefetched CPU window plus one compact CPU
+writer copy; source replay/gradients, decoded candidates and allocator/runtime
+scratch still need their independent memory reservation and free-memory floor.
+On Spark CPU and GPU ownership share physical memory. The auxiliary cap counts
+all retained input/mask/position/shared-state storage, including full backing
+storages of views, and conservatively reserves one >=FP32 shared-state
+cotangent per captured occurrence per probe. Opaque state owners refuse.
+Nothing samples, reshapes, rounds or reorders a boundary.
+
+Each invocation starts a fresh generation only after input/checkpoint identity
+validation. The ordinary atomic activation writer publishes exact tensors and
+immutable receipts. A whole bounded window is loaded and checked before model
+replay; window lookups have no lazy-read path. Outgoing cotangents publish to
+new coordinates before retiring their consumed predecessor. Completed layer
+boundaries retire after all original probes consume them. Working entries are
+removed on normal completion or an ordinary exception; a killed process can
+leave an isolated incomplete generation, which is never accepted as resume
+input. Existing signed cost checkpoints own resume. A completed-checkpoint
+resume skips boundary generation entirely. The policy is checkpoint-bound but
+does not change the probe arithmetic identity or signed samples.
+
+The exact files and verified page advice make I/O explicit; advice does not
+establish physical release. Profile read/write barriers independently and keep
+actual physical memory checks. The initial implementation preserves the source
+loop to make byte/order parity reviewable. Its batch-major capture still
+traverses all decoder layers per calibration batch. With two source slots,
+512 B1 samples do not get a whole-model resident reuse window: layer-level
+source payload is fetched repeatedly. This source-derived traffic observation
+is unmeasured, not a timing estimate. Production qualification separately needs
+layer-major boundary capture through `StreamedCausalLM.visit_layer_batches`,
+keeping each batch's own source state and per-layer numerical sequence, and
+bounded PWC/delta/diagnostic lifetimes. The mode stays default-off until these
+remaining production gates are satisfied.
