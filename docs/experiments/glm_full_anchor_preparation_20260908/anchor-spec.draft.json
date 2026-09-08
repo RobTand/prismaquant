@@ -1,0 +1,96 @@
+{
+  "box_memory_gb": 104,
+  "campaign_argv": [
+    "--menu-mode",
+    "readable",
+    "--nsamples",
+    "512",
+    "--seqlen",
+    "512",
+    "--seed",
+    "0",
+    "--max-act-rows",
+    "512",
+    "--layer-stride",
+    "1",
+    "--anchors",
+    "3",
+    "--anchor-budget",
+    "12",
+    "--loo-gate",
+    "0.25",
+    "--max-artifact-bpp",
+    "0",
+    "--hessian",
+    "require",
+    "--tp-degree",
+    "1",
+    "--attention-implementation",
+    "eager",
+    "--streaming",
+    "--streaming-cache-slots",
+    "2",
+    "--streaming-prefetch-workers",
+    "1",
+    "--streaming-cache-headroom-gb",
+    "24",
+    "--anchor-batch-size",
+    "1",
+    "--max-rounds",
+    "0",
+    "--export-hessian-reference-policy",
+    "{\"max_file_bytes\":629147557,\"max_hessian_bytes\":603979776,\"max_metadata_bytes\":134217728,\"schema\":\"tessera.hessian_reference_load.v1\"}"
+  ],
+  "container": {
+    "content_sha256": "eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd",
+    "image": "prismaquant-glm-producer:content-qualified-20260908",
+    "mounts": [
+      {
+        "source": "/mnt/shared",
+        "target": "/mnt/shared"
+      },
+      {
+        "readonly": true,
+        "source": "/home/rob/.cache/huggingface",
+        "target": "/hf-cache"
+      },
+      {
+        "readonly": true,
+        "source": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/producer-source-9d2314819",
+        "target": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/producer-source-9d2314819"
+      }
+    ]
+  },
+  "cpus": 6,
+  "cwd": "/home/rob/tmp/pq-bounded-handoff-integration",
+  "draft_status": "PREPARATION_ONLY: capture SHA pending; reviewed producer9d231 is prospective until root resolves full-engine serving ownership and freezes final producer/PQ source. Qualification instrumentation requires approved +4GiB per row and native evidence; no GPU launch performed.",
+  "env": {
+    "HF_DATASETS_CACHE": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/hf-datasets",
+    "HF_DATASETS_OFFLINE": "1",
+    "HF_HOME": "/hf-cache",
+    "HF_HUB_OFFLINE": "1",
+    "MIMALLOC_PURGE_DELAY": "0",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "PRISMAQUANT_DETERMINISTIC": "1",
+    "PRISMAQUANT_LAYER_READ_THREADS": "4",
+    "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
+    "PRISMAQUANT_TMPDIR": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/staging",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "/workspace:/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/producer-source-9d2314819/src:/mnt/shared/tessera-measurements/first-model-20260907/inputs/container-compatible-deps",
+    "PYTORCH_ALLOC_CONF": "expandable_segments:True",
+    "TESSERA_REPO": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/producer-source-9d2314819",
+    "TORCHINDUCTOR_CACHE_DIR": "/tmp/glm-canonical-inductor",
+    "TRITON_CACHE_DIR": "/tmp/glm-canonical-triton",
+    "XDG_CACHE_HOME": "/tmp/glm-canonical-cache"
+  },
+  "headroom_gb": 24,
+  "max_act_rows": 512,
+  "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+  "python": "python3",
+  "tags": [
+    "gb10"
+  ]
+}

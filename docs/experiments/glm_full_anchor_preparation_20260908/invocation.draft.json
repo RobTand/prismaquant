@@ -1,0 +1,145 @@
+{
+  "canonical_capture": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+    "sha256": null
+  },
+  "census": {
+    "groups": 132,
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/census.json",
+    "sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+    "units": 36423
+  },
+  "decisions": {
+    "hessian_reference_policy": {
+      "max_file_bytes": 629147557,
+      "max_hessian_bytes": 603979776,
+      "max_metadata_bytes": 134217728,
+      "schema": "tessera.hessian_reference_load.v1"
+    },
+    "max_artifact_bpp": {
+      "authorized": 0,
+      "meaning": "Whole legal readable measured envelope; six downstream allocations choose budgets from the measured curve."
+    },
+    "pb_timeout_s": {
+      "actual_full_row_completion_time_measured": false,
+      "basis": "Existing dispatcher default; operational bound only. No measured full-shape completion estimate.",
+      "recommended": 14400
+    },
+    "producer_pin": "Reviewed pin1228c352 integrated by root; development pin environment stays unset. Final campaign source may change with full-engine serving fix."
+  },
+  "exclusions": [
+    "No --stack-sample",
+    "No --rate-band",
+    "No --seed-checkpoint or --seed-wire-dir from another encoder source",
+    "No --deadline-seconds",
+    "No selected forward/recapture",
+    "No manual host routing"
+  ],
+  "plan_argv": [
+    "python3",
+    "tools/dispatch_tessera_campaign.py",
+    "plan",
+    "--spec",
+    "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/anchor-spec.frozen.json",
+    "--workspace",
+    "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/workspace",
+    "--calibration-cache",
+    "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+    "--groups-per-row",
+    "1",
+    "--rows-per-box",
+    "1",
+    "--timeout-s",
+    "14400"
+  ],
+  "qualification": {
+    "draft_manifest": "qualification-manifest.draft.json",
+    "host_class": "gb10",
+    "keyed_row_policy": "Instrument the two master rows once, then copy those exact row objects into the two-item qualification manifest. Preserve all keys and paths for later master submission. PB alone places and retries.",
+    "measurement": true,
+    "monitor_threads": 2,
+    "netdata_byte_cap": 3221225472,
+    "netdata_hosts": [
+      "sparky",
+      "sparklina"
+    ],
+    "netdata_interval_s": 5,
+    "no_new_anchor_disposition": "Observer reports no_new_anchors and native_anchor_profiled=false for a journal-only retry; that receipt is reuse, not a new CUDA measurement. Qualification must retain prior attributable CUDA windows.",
+    "observer_argv_prefix": [
+      "--selected-anchors",
+      "--anchor-profile-calls",
+      "0,31",
+      "--anchor-trace-max-bytes",
+      "536870912"
+    ],
+    "observer_evidence_path_rule": "<original-row-dir>/profile",
+    "observer_module": "experiments.glm_full_capture_profile",
+    "observer_reserve_status": "Root approved a provisional 4 GiB admission allowance for each instrumented row. The exported trace cap does not bound live profiler memory. Native fit and CUDA events remain qualification gates.",
+    "python_sampler_byte_cap": 536870912,
+    "python_sampler_interval_s": 1,
+    "reuse": "Copy the two exact approved master manifest row objects into a two-item qualification manifest. Preserve argv, cwd, env, demand, timeout, measurement, host_class and all other keyed fields when later submitting the master manifest. Keep the original whole-group units and row paths. An identical successful PB action reuses its receipt; failed/retried work resumes its verified journal.",
+    "rows": [
+      {
+        "base_mem_gb": 99,
+        "cpus": 8,
+        "group": "s:model.language_model.layers.4.mlp.experts",
+        "initial_distinct_pairs": 6048,
+        "maximum_distinct_pairs": 21600,
+        "observer_mem_gb": 4,
+        "row_id": "row-0076",
+        "total_mem_gb": 103,
+        "units": 864
+      },
+      {
+        "base_mem_gb": 31,
+        "cpus": 8,
+        "group": "u:model.language_model.layers.0.mlp.down_proj",
+        "initial_distinct_pairs": 7,
+        "maximum_distinct_pairs": 25,
+        "observer_mem_gb": 4,
+        "row_id": "row-0087",
+        "shape": [
+          4096,
+          12288
+        ],
+        "total_mem_gb": 35,
+        "units": 1
+      }
+    ],
+    "submission_stdout_path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/workspace/qualification-submissions.jsonl",
+    "submit_argv": [
+      "python3",
+      "/mnt/shared/prismabuild-fleet/repo/tools/pbcampaign.py",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/workspace/qualification-manifest.json",
+      "--detach"
+    ],
+    "timeout_disposition": "A timeout is partial/failed until full row completion and output validation. No sampling, reduced budget or max-rounds cap to manufacture a pass."
+  },
+  "remaining_gates": [
+    "Root accepts complete original capture and freezes its SHA",
+    "Root freezes final raw producer/PQ sources after full-engine serving route decision; rerun identity/menu checks for changed bytes",
+    "Check final canonical/descriptor/census metadata sizes against explicit 128 MiB cap",
+    "Root reviews the 14,400-second operational deadline and final keyed two-row observer manifest",
+    "Run actual dispatcher plan through PB CPU after freeze; require 132 admissible rows and 36,423 distinct original units and no sampling",
+    "Root submits two real qualification rows, verifies native CUDA windows, both-box telemetry, actual peaks under reservations, terminal receipts and complete outputs",
+    "Identical qualified rows remain in full 132-row master manifest; merge only after all full rows complete"
+  ],
+  "schema": "prismaquant.glm_full_anchor_route_draft.v1",
+  "source": {
+    "campaign_freeze_status": "Prospective raw source9d231; final source may change for registered full-engine serving ownership. Freeze before pricing; re-audit changed source, never relabel existing wires.",
+    "prismaquant_base": "62453a5175675c55bd8377958dda6ab0f8155200",
+    "producer_reviewed": "9d2314819f027e53ba169039a10cd27594d36670",
+    "reviewed_pin_commit": "1228c352"
+  },
+  "status": "PREPARATION_ONLY_NOT_EXECUTABLE",
+  "submit_argv": [
+    "python3",
+    "tools/dispatch_tessera_campaign.py",
+    "submit",
+    "--workspace",
+    "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/workspace",
+    "--wait-s",
+    "ROOT_REVIEWED_FINITE_WAIT_SECONDS"
+  ],
+  "workspace": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-anchor-preparation-01/workspace"
+}
