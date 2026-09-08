@@ -1,0 +1,34 @@
+[
+  {
+    "action_key": "c368921936405b543a8be14a8eb000ea2fa2eee9dc320b79b935bfa2a64232dc",
+    "returncode": 1,
+    "stdout": "...F...                                                                  [100%]\n=================================== FAILURES ===================================\n_ test_untrusted_screen_roster_refuses_drift[membership-complete source group] _\n\nchange = 'membership', match = 'complete source group'\n\n    @pytest.mark.parametrize('change,match', [\n        ('duplicate', 'duplicate'), ('shape', 'original census'),\n        ('membership', 'complete source group'), ('missing', '28 distinct')])\n    def test_untrusted_screen_roster_refuses_drift(change, match):\n        proposal, census, groups = roster()\n        if change == 'duplicate':\n            proposal['cells'][1] = copy.deepcopy(proposal['cells'][0])\n        elif change == 'shape':\n            proposal['cells'][0]['shape'] = [4, 8]\n        elif change == 'membership':\n            groups['groups']['complete']['members'].pop()\n        else:\n            proposal['cells'].pop()\n>       with pytest.raises(ValueError, match=match):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       AssertionError: Regex pattern did not match.\nE         Expected regex: 'complete source group'\nE         Actual message: 'screen must contain four units and 28 distinct cells'\n\ntests/test_glm_native_wire_screen_plan.py:50: AssertionError\n=============================== warnings summary ===============================\ntests/test_glm_native_wire_screen_plan.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_glm_native_wire_screen_plan.py::test_untrusted_screen_roster_refuses_drift[membership-complete source group]\n1 failed, 6 passed, 14 warnings in 5.05s\n",
+    "stderr": "Traceback (most recent call last):\n  File \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py\", line 72, in <module>\n    raise SystemExit(main(worker_launcher_identity=_WORKER_LAUNCHER_IDENTITY))\n                     ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py\", line 6978, in main\n    result = run_local_action(\n        action,\n    ...<5 lines>...\n        initial_miss_rendezvous=args.initial_miss_rendezvous,\n    )\n  File \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py\", line 6666, in run_local_action\n    raise LocalActionError(\n    ...<5 lines>...\n    )\nprismabuild.core.LocalActionError: action argv exited with status 1\n",
+    "cleanup_complete": true,
+    "oom_kill": 0,
+    "live_processes": 0,
+    "lesson": "Separate mutable member/proposal lists in the negative fixture.",
+    "disposition": "corrected; final checks pass"
+  },
+  {
+    "action_key": "ede66235376f14ef88f8c834e781d6eb38bf2358706533987a93a17909cb25ac",
+    "returncode": 1,
+    "stdout": "Traceback (most recent call last):\n  File \"/home/rob/tmp/prismabuild-checkouts/ede66235376f.nvhgglnf/checkout/experiments/glm_native_wire_screen_plan.py\", line 164, in <module>\n    main()\n  File \"/home/rob/tmp/prismabuild-checkouts/ede66235376f.nvhgglnf/checkout/experiments/glm_native_wire_screen_plan.py\", line 149, in main\n    from prismaquant.autoscale import selected_anchor_resources\nModuleNotFoundError: No module named 'prismaquant'\n",
+    "stderr": "Traceback (most recent call last):\n  File \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py\", line 72, in <module>\n    raise SystemExit(main(worker_launcher_identity=_WORKER_LAUNCHER_IDENTITY))\n                     ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py\", line 6978, in main\n    result = run_local_action(\n        action,\n    ...<5 lines>...\n        initial_miss_rendezvous=args.initial_miss_rendezvous,\n    )\n  File \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py\", line 6666, in run_local_action\n    raise LocalActionError(\n    ...<5 lines>...\n    )\nprismabuild.core.LocalActionError: action argv exited with status 1\n",
+    "cleanup_complete": true,
+    "oom_kill": 0,
+    "live_processes": 0,
+    "lesson": "Invoke the repository module with python -m so import resolution includes the checkout.",
+    "disposition": "corrected; final checks pass"
+  },
+  {
+    "action_key": "381889e31acb90db0817b5dd610dcf9be1c60e135d02f7dd180da473d4921ee8",
+    "returncode": 1,
+    "stdout": "F                                                                        [100%]\n=================================== FAILURES ===================================\n___________ test_two_early_netdata_samples_then_failure_cannot_pass ____________\n\n    def test_two_early_netdata_samples_then_failure_cannot_pass():\n        from experiments.glm_native_wire_screen import telemetry_coverage\n        samples = {host: [dict(time=0), dict(time=1)] for host in ('sparky', 'sparklina')}\n        phases = [dict(phase='encode', started_unix=0, finished_unix=3600)]\n        errors = [dict(host='sparky', unix=2, error='endpoint stopped')]\n>       assert not telemetry_coverage(samples, phases, errors, thread_complete=True)['passed']\nE       assert not True\n\ntests/test_glm_native_wire_screen_plan.py:120: AssertionError\n=============================== warnings summary ===============================\ntests/test_glm_native_wire_screen_plan.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_glm_native_wire_screen_plan.py::test_two_early_netdata_samples_then_failure_cannot_pass\n1 failed, 8 deselected, 14 warnings in 4.72s\n",
+    "cleanup_complete": true,
+    "oom_kill": 0,
+    "live_processes": 0,
+    "lesson": "Two early samples plus a stopped thread did not prove phase coverage. Final regression now also uses valid timestamps, healthy control, gap-only and error-only failures.",
+    "disposition": "reproduced and fixed"
+  }
+]

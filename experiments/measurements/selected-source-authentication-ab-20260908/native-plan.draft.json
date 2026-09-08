@@ -1,0 +1,62 @@
+{
+  "capture": {
+    "path": null,
+    "sha256": null
+  },
+  "container": {
+    "content_sha256": "eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd",
+    "image": "prismaquant-glm-producer:content-qualified-20260908"
+  },
+  "environment": {
+    "HF_DATASETS_CACHE": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/hf-datasets",
+    "HF_HOME": "/hf-cache",
+    "HF_HUB_OFFLINE": "1",
+    "MAX_JOBS": "1",
+    "MIMALLOC_PURGE_DELAY": "0",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "PRISMAQUANT_DETERMINISTIC": "1",
+    "PRISMAQUANT_LAYER_READ_THREADS": "4",
+    "PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES": "0",
+    "PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE": "0",
+    "PRISMAQUANT_PROD_ACT_SCALES": "0",
+    "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
+    "PRISMAQUANT_TESSERA_DEV_PIN": "",
+    "PRISMAQUANT_TMPDIR": "/tmp/glm-source-authentication-ab",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "/workspace:/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97/src:/mnt/shared/tessera-measurements/first-model-20260907/inputs/container-compatible-deps:/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/capture-pytest-tools",
+    "PYTORCH_ALLOC_CONF": "expandable_segments:True",
+    "TESSERA_REPO": "/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97",
+    "TORCHINDUCTOR_CACHE_DIR": "/tmp/glm-canonical-inductor",
+    "TORCHINDUCTOR_COMPILE_THREADS": "1",
+    "TRITON_CACHE_DIR": "/tmp/glm-canonical-triton",
+    "XDG_CACHE_HOME": "/tmp/glm-canonical-cache"
+  },
+  "frozen_schema": "prismaquant.selected_source_authentication_ab.frozen.v1",
+  "output": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/selected-source-authentication-ab-native-01",
+  "resources": {
+    "path": "/workspace/experiments/measurements/selected-source-authentication-ab-20260908/resource-plan.json",
+    "sha256": "272da75e558c3696f541cc754f8744fc9e929ea798494aa93b17a90e2a49c23a"
+  },
+  "schema": "prismaquant.selected_source_authentication_ab.draft.v1",
+  "source_files": {
+    "experiments/glm_native_wire_screen_evidence.py": "905971404b3cf4d0547387e81865c1a6e927ccd5e7b20e3118c00f2661e546af",
+    "experiments/selected_source_authentication_ab.py": "d1891cae5dac462314ab73439ba3dce6e6aeafe286aaee5ec6512577205f4ec6",
+    "experiments/selected_source_authentication_ab_plan.py": "17f28e54ecbc457e48bd7f1c80251b49bdafeae371d6d74b06717fa1193ee807",
+    "experiments/workspace_netdata.py": "938db1c5d613990324b0397a364439159eb3e4da7daa824f790d96722d4e3361",
+    "prismaquant/calibration_data.py": "8d4de9438871d719f727a8e8f776a197e4773f15c27acef5602dd1a42cabc1c3",
+    "prismaquant/cost_streaming.py": "d043022eddeb60f3e627a5cb39c08677d1add2ef5f13069f15bd94f15fec86a1",
+    "prismaquant/layer_streaming.py": "f8718f4c72fd95dc4414677790eddfb54dec4089f9d882a30858c4628f0cdee0",
+    "prismaquant/memory_management.py": "e19bea17082ad4fc07972c28f7988c46aaa95c9b7a353c5650f64ff2ad16384c",
+    "prismaquant/production_weight_cache.py": "eea37d757a16afe0b8d8f35ebb7a9f61a9b5bdf014a883299e781b55c5fff279",
+    "prismaquant/streaming_model.py": "e5f4661e7e5018922ac68872ec7413820ec851d59d79c7bd31decd75af564ada",
+    "prismaquant/tessera_calibration_cache.py": "b07457d08e1b6c36f11d097166e64c5793892e9af17dbcf62473dc7fcbabdd20",
+    "prismaquant/tessera_campaign.py": "dacb192fbd13dcc4dbb509c29a3c41022d7d615efdb27c07fa18739a871e3c91",
+    "prismaquant/tessera_expert_projection.py": "4a72b332a6d3efe63095d517627ea33bf782bafeca4832bd160c76bb1309a149",
+    "tools/container_runtime_identity.py": "28a215446e101f41f203db72bc0e0a4c3edfa566e7b5419defff92b684a102fe",
+    "tools/tessera_campaign_container.py": "fe6db7007d7896bffaa813575d0e8cb811511a5cebb2de25d6f65def1217df46"
+  },
+  "status": "AWAIT_ORIGINAL_COMPLETE_CAPTURE_AND_ROOT_FREEZE"
+}

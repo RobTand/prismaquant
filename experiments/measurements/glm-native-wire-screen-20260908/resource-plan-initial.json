@@ -1,0 +1,510 @@
+{
+  "schema": "prismaquant.glm_native_screen_resource_plan.v1",
+  "status": "DERIVED_UNMEASURED",
+  "physical_phases": {
+    "source_preparation": {
+      "selected_source_weight_bytes": 234881024,
+      "declared_headroom_bytes": 25769803776,
+      "nonbody_source_bytes": 3664816128,
+      "source_window_bytes": 15404730928,
+      "loader_transient_bytes": 14495907840
+    },
+    "export_inputs": {
+      "selected_source_weight_bytes": 234881024,
+      "declared_headroom_bytes": 25769803776,
+      "selected_hessian_bytes": 754974720,
+      "selected_prefix_bytes": 46137344,
+      "export_input_page_window_bytes": 1200734208,
+      "serialization_scratch_bytes": 1207959552
+    },
+    "resident_anchors": {
+      "selected_source_weight_bytes": 234881024,
+      "declared_headroom_bytes": 25769803776,
+      "selected_hessian_bytes": 754974720,
+      "selected_prefix_bytes": 46137344,
+      "encoder_memo_bytes": 604078080,
+      "factorization_scratch_bytes": 2415919104,
+      "compatible_batch_weight_bytes": 805306368,
+      "entry_validation_bytes": 1258291200,
+      "source_validation_bytes": 15605664304,
+      "render_qualification_bytes": 402653184,
+      "original_wire_buffer_and_pages_bytes": 352321536,
+      "capture_serialized_buffer_bytes": 1073741824,
+      "capture_source_page_cache_bytes": 4294967296,
+      "capture_load_scratch_bytes": 67108864,
+      "completed_artifact_page_cache_bytes": 3978668032
+    },
+    "capture_prefetch": {
+      "selected_source_weight_bytes": 234881024,
+      "declared_headroom_bytes": 25769803776,
+      "selected_device_capture_bytes": 801112064,
+      "decoded_cpu_entry_bytes": 629145600,
+      "transfer_destination_bytes": 629145600,
+      "serialized_private_buffer_bytes": 1073741824,
+      "source_page_cache_bytes": 4294967296,
+      "validation_scratch_bytes": 67108864
+    }
+  },
+  "gpu_phases": {
+    "source_preparation": {
+      "selected_source_weight_bytes": 234881024,
+      "nonbody_source_bytes": 3664816128,
+      "source_window_bytes": 15404730928,
+      "loader_transient_bytes": 14495907840,
+      "device_headroom_bytes": 8589934592
+    },
+    "resident_anchors": {
+      "selected_source_weight_bytes": 234881024,
+      "selected_hessian_bytes": 754974720,
+      "selected_prefix_bytes": 46137344,
+      "encoder_memo_bytes": 604078080,
+      "factorization_scratch_bytes": 2415919104,
+      "compatible_batch_weight_bytes": 805306368,
+      "device_headroom_bytes": 8589934592,
+      "render_qualification_bytes": 402653184,
+      "original_wire_decode_bytes": 117440512
+    },
+    "capture_prefetch": {
+      "selected_source_weight_bytes": 234881024,
+      "selected_device_capture_bytes": 801112064,
+      "transfer_destination_bytes": 629145600,
+      "device_headroom_bytes": 8589934592
+    }
+  },
+  "physical_bytes": 59570139696,
+  "gpu_bytes": 42390270512,
+  "physical_gib": 56,
+  "gpu_gib": 40,
+  "guard_envelope_bytes": 104107893856,
+  "guard_phase_envelopes": {
+    "source_preparation": 104107893856,
+    "resident_anchors": 73783325232,
+    "capture_prefetch": 45902462976
+  },
+  "requested_mem_gib": 97,
+  "cpu_reservation": 6,
+  "cpu_roles": {
+    "main": 1,
+    "source_read_workers": 4,
+    "prefetch": 1
+  },
+  "native_threads_per_worker": 1,
+  "cache_slots": 2,
+  "prefetch_workers": 1,
+  "encoder_memo_capacity": 1,
+  "selected_source_weight_bytes": 234881024,
+  "selected_capture_bytes": 801112064,
+  "max_capture_storage_bytes": 629145600,
+  "max_capture_file_bytes": 1073741824,
+  "max_validation_scratch_bytes": 67108864,
+  "max_original_wire_file_bytes": 117440512,
+  "max_resident_render_bytes": 100663296,
+  "execution_deadline_seconds": 3600,
+  "deadline_semantics": "PB hard termination cap; completion time is unmeasured",
+  "max_attempts": 1,
+  "source_forward_count": 0,
+  "limitations": [
+    "No measured native peak or completion prediction.",
+    "GPU source transients conservatively retain the whole existing loader bound.",
+    "Complete-capture source authentication and frozen review remain prerequisites.",
+    "28 cells do not qualify the 864-member expert group or serving."
+  ],
+  "inputs": {
+    "proposal": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/reuse-plan-01/candidate-contract-v3/native-screen.proposal.json",
+      "sha256": "e88c8dbe863ebb546246eae201fb31bdf8bd72bd107b4eb2dbc4ea2925f540e8"
+    },
+    "census": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/census.json",
+      "sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd"
+    },
+    "group_contract": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/reuse-plan-01/candidate-contract-v3/group-contract.json",
+      "sha256": "c5296ded47bb66265180f09552407c60b9bd33652a1c67d634eaab5318092829"
+    },
+    "union_proposal": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/reuse-plan-01/candidate-contract-proposal.v3.json",
+      "sha256": "8430b57990aeabd02f2b4a54dcc48efd6f5cfe754923b73794670f918e7b2272"
+    }
+  },
+  "selected_anchor_resources": {
+    "schema": "prismaquant.selected_anchor_resources.v2",
+    "phases": {
+      "source_preparation": {
+        "selected_source_weight_bytes": 234881024,
+        "declared_headroom_bytes": 25769803776,
+        "nonbody_source_bytes": 3664816128,
+        "source_window_bytes": 15404730928,
+        "loader_transient_bytes": 14495907840
+      },
+      "export_inputs": {
+        "selected_source_weight_bytes": 234881024,
+        "declared_headroom_bytes": 25769803776,
+        "selected_hessian_bytes": 754974720,
+        "selected_prefix_bytes": 46137344,
+        "export_input_page_window_bytes": 1200734208,
+        "serialization_scratch_bytes": 1207959552
+      },
+      "resident_anchors": {
+        "selected_source_weight_bytes": 234881024,
+        "declared_headroom_bytes": 25769803776,
+        "selected_hessian_bytes": 754974720,
+        "selected_prefix_bytes": 46137344,
+        "encoder_memo_bytes": 604078080,
+        "factorization_scratch_bytes": 2415919104,
+        "compatible_batch_weight_bytes": 805306368,
+        "entry_validation_bytes": 1258291200,
+        "source_validation_bytes": 15605664304
+      }
+    },
+    "memory_bytes": 59570139696,
+    "selected_source_weight_bytes": 234881024,
+    "selected_layers": [
+      "0",
+      "6"
+    ],
+    "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c",
+    "export_input_writer_policy": "verified-tensor-record-prefix",
+    "encoder_memo_policy": "compatible-anchor-batch-width",
+    "encoder_memo_capacity": 1,
+    "source_forward_count": 0
+  },
+  "cells": [
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.gate_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        2048,
+        4096
+      ],
+      "format": "TESSERA_BF16_K1_R256",
+      "memory_bytes": 1085440,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.gate_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        2048,
+        4096
+      ],
+      "format": "TESSERA_BF16_K1_R1147",
+      "memory_bytes": 4734976,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.gate_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        2048,
+        4096
+      ],
+      "format": "TESSERA_BF16_K1_R2038",
+      "memory_bytes": 8384512,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.gate_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        2048,
+        4096
+      ],
+      "format": "TESSERA_E2M1_K2_R896",
+      "memory_bytes": 4194816,
+      "activation_group": 2,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.gate_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        2048,
+        4096
+      ],
+      "format": "TESSERA_E4M3_K1_R256",
+      "memory_bytes": 1069056,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.gate_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        2048,
+        4096
+      ],
+      "format": "TESSERA_E4M3_K1_R1149",
+      "memory_bytes": 4726784,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.gate_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        2048,
+        4096
+      ],
+      "format": "TESSERA_E4M3_K1_R2042",
+      "memory_bytes": 8384512,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.down_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        4096,
+        2048
+      ],
+      "format": "TESSERA_BF16_K1_R256",
+      "memory_bytes": 1089536,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.down_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        4096,
+        2048
+      ],
+      "format": "TESSERA_BF16_K1_R1147",
+      "memory_bytes": 4739072,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.down_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        4096,
+        2048
+      ],
+      "format": "TESSERA_BF16_K1_R2038",
+      "memory_bytes": 8388608,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.down_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        4096,
+        2048
+      ],
+      "format": "TESSERA_E2M1_K2_R896",
+      "memory_bytes": 4194816,
+      "activation_group": 2,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.down_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        4096,
+        2048
+      ],
+      "format": "TESSERA_E4M3_K1_R256",
+      "memory_bytes": 1073152,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.down_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        4096,
+        2048
+      ],
+      "format": "TESSERA_E4M3_K1_R1149",
+      "memory_bytes": 4730880,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.6.mlp.experts.0.down_proj",
+      "source_group": "s:model.language_model.layers.6.mlp.experts",
+      "shape": [
+        4096,
+        2048
+      ],
+      "format": "TESSERA_E4M3_K1_R2042",
+      "memory_bytes": 8388608,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.down_proj",
+      "source_group": "u:model.language_model.layers.0.mlp.down_proj",
+      "shape": [
+        4096,
+        12288
+      ],
+      "format": "TESSERA_BF16_K1_R256",
+      "memory_bytes": 6332416,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.down_proj",
+      "source_group": "u:model.language_model.layers.0.mlp.down_proj",
+      "shape": [
+        4096,
+        12288
+      ],
+      "format": "TESSERA_BF16_K1_R1151",
+      "memory_bytes": 28327936,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.down_proj",
+      "source_group": "u:model.language_model.layers.0.mlp.down_proj",
+      "shape": [
+        4096,
+        12288
+      ],
+      "format": "TESSERA_BF16_K1_R2046",
+      "memory_bytes": 50323456,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.down_proj",
+      "source_group": "u:model.language_model.layers.0.mlp.down_proj",
+      "shape": [
+        4096,
+        12288
+      ],
+      "format": "TESSERA_E2M1_K2_R896",
+      "memory_bytes": 25166336,
+      "activation_group": 2,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.down_proj",
+      "source_group": "u:model.language_model.layers.0.mlp.down_proj",
+      "shape": [
+        4096,
+        12288
+      ],
+      "format": "TESSERA_E4M3_K1_R256",
+      "memory_bytes": 6316032,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.down_proj",
+      "source_group": "u:model.language_model.layers.0.mlp.down_proj",
+      "shape": [
+        4096,
+        12288
+      ],
+      "format": "TESSERA_E4M3_K1_R1152",
+      "memory_bytes": 28336128,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.down_proj",
+      "source_group": "u:model.language_model.layers.0.mlp.down_proj",
+      "shape": [
+        4096,
+        12288
+      ],
+      "format": "TESSERA_E4M3_K1_R2047",
+      "memory_bytes": 50331648,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.gate_proj",
+      "source_group": "g:model.language_model.layers.0.mlp.gate_up_proj",
+      "shape": [
+        12288,
+        4096
+      ],
+      "format": "TESSERA_BF16_K1_R256",
+      "memory_bytes": 6348800,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.gate_proj",
+      "source_group": "g:model.language_model.layers.0.mlp.gate_up_proj",
+      "shape": [
+        12288,
+        4096
+      ],
+      "format": "TESSERA_BF16_K1_R1150",
+      "memory_bytes": 28319744,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.gate_proj",
+      "source_group": "g:model.language_model.layers.0.mlp.gate_up_proj",
+      "shape": [
+        12288,
+        4096
+      ],
+      "format": "TESSERA_BF16_K1_R2045",
+      "memory_bytes": 50315264,
+      "activation_group": 1,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.gate_proj",
+      "source_group": "g:model.language_model.layers.0.mlp.gate_up_proj",
+      "shape": [
+        12288,
+        4096
+      ],
+      "format": "TESSERA_E2M1_K2_R896",
+      "memory_bytes": 25166336,
+      "activation_group": 2,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.gate_proj",
+      "source_group": "g:model.language_model.layers.0.mlp.gate_up_proj",
+      "shape": [
+        12288,
+        4096
+      ],
+      "format": "TESSERA_E4M3_K1_R256",
+      "memory_bytes": 6332416,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.gate_proj",
+      "source_group": "g:model.language_model.layers.0.mlp.gate_up_proj",
+      "shape": [
+        12288,
+        4096
+      ],
+      "format": "TESSERA_E4M3_K1_R1151",
+      "memory_bytes": 28327936,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    },
+    {
+      "qname": "model.language_model.layers.0.mlp.gate_proj",
+      "source_group": "g:model.language_model.layers.0.mlp.gate_up_proj",
+      "shape": [
+        12288,
+        4096
+      ],
+      "format": "TESSERA_E4M3_K1_R2046",
+      "memory_bytes": 50323456,
+      "activation_group": 0,
+      "source": "Existing PB-derived complete-group round_one_rungs_q256; bounded screen only, not a partial fused campaign."
+    }
+  ]
+}

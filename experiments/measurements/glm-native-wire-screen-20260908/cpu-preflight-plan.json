@@ -1,0 +1,20 @@
+{
+  "schema": "prismaquant.glm_native_wire_screen.draft.v1",
+  "purpose": "CPU preflight only: required environmental subset, no capture accepted",
+  "resources": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/native-wire-screen-design-01/resource-plan-04.json",
+    "sha256": "558b8e66643267f400f620e641b16d9ef75a012c19fffb6fe098efd2ae09a494"
+  },
+  "environment": {
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "PRISMAQUANT_LAYER_READ_THREADS": "4",
+    "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
+    "MIMALLOC_PURGE_DELAY": "0",
+    "PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE": "0",
+    "PRISMAQUANT_PROD_ACT_SCALES": "0",
+    "PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES": "0",
+    "PRISMAQUANT_TESSERA_DEV_PIN": ""
+  }
+}

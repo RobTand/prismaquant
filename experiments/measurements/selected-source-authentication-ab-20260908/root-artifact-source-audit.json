@@ -1,0 +1,33 @@
+{
+  "files_index_sha256": "7064330ea7808281fc87d8e3d3940c5caafda281b2c262af8e500ae7a913e0c0",
+  "verified_files": [
+    "2909e1917790.log",
+    "61500b06ffda.log",
+    "69297a2aac17.log",
+    "README.md",
+    "audit_receipts.py",
+    "b5c3ed08a9bd.log",
+    "b79c60d7ce65.log",
+    "dac10ac21aa7.log",
+    "f3943c9859b8.log",
+    "inputs.json",
+    "native-invocation.draft.json",
+    "native-plan.draft.json",
+    "pb-audit.json",
+    "resource-plan-initial.json",
+    "resource-plan.json",
+    "source-audit.json"
+  ],
+  "negative_action": "69297a2aac17f97a013df6170a158e5e6a1355954eb3ac08c3e7a415e96dbdc7",
+  "negative_terminal": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/69297a2aac17f97a013df6170a158e5e6a1355954eb3ac08c3e7a415e96dbdc7.json",
+    "bytes": 13529,
+    "sha256": "65c3eeaef75e18510433d7c8a9e99b9d739b5e0ba41ae5b501a8eb421624dc74"
+  },
+  "negative_returncode": 1,
+  "negative_cleanup_complete": true,
+  "negative_source_sha256": "f604bebffa967d5e856579ae1b0bac7fedf836676b78835f22e535e711cc5b0c",
+  "final_test_source": "e33eaf817c9639b32f485f6007f175e4801d0ef7",
+  "final_commit": "717f174f6e46b8d6623217d03201e2b96fbb6c0c",
+  "final_harness_diff": "process-wide I/O scope annotation and final artifact seals only; plan and tests unchanged"
+}
