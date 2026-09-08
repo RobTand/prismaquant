@@ -47,8 +47,14 @@ The arithmetic and complete policy enter probe/checkpoint identity; legacy
 scalar rows cannot silently mix with summed FP32 operator rows. Default behavior
 is unchanged. Gates include dense/packed FP64 residual oracles, exact replay
 cotangents, shared-state forks, PWC file/alias ownership and interrupted resume
-in `tests/test_joint_operator_windows.py`. Native end-to-end profiling and full
-GLM fit remain pending; this CPU gate alone establishes neither.
+in `tests/test_joint_operator_windows.py`. Native qualification on a genuine
+three-layer original-layout GLM fixture passed 21 complete probe calls with
+exact cotangents and fixed signed-component tolerances, including v2 boundaries,
+source turnover beyond two cache slots, and real 256 MiB allocator retirement.
+The instrumented small fixture was slower and completed fewer calls per GPU
+joule than the legacy path. Full GLM fit, a 32 GiB statistics phase and production
+throughput remain unqualified. Evidence and limits are recorded in
+`experiments/measurements/glm-joint-operator-windows-20260908/final-runtime.md`.
 The joint campaign's `execution.operator_windows` carries the same closed
 policy into cost execution, requires exact boundary storage and keeps its PWC
 cap within campaign admission. It replaces whole-layer candidate admission

@@ -107,3 +107,37 @@ Evidence: [summary](final-summary.json), [native audit](final-native-audit.json)
 CSV, Netdata, generations and signed rows remain under
 `/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-operator-windows-01/native-06/`.
 The [initial two-layer result](README.md) remains bounded prior evidence.
+
+
+## Root integration verification
+
+The complete CPU population covered 422 test files: 6,758 passed, 187 skipped,
+and three expected failures. The fifteen profiling-harness checks cover the
+additional test file separately, with zero skips. The CPU environment used
+Torch 2.10.0 and Python 3.12 on dl380g10; native evidence above uses the pinned
+CUDA container. CUDA-only skips are not native passes.
+
+The first PB fanout reserved 5 GiB for each two-worker shard. Six shards hit
+that cgroup limit and exited 137 with confirmed local OOM events and complete
+cleanup. Only their 159 incomplete files were resubmitted through PB fanout,
+using 12 GiB per two-worker shard. All six completed. The ten successful original
+shards were retained. Snapshot, CAS payload, terminal and exact file-population
+checks cover all sixteen successful quanta; no interrupted shard is counted.
+
+The root independently checked all 21 native call records, 91 immutable input
+files, four trace hashes and trace-analysis receipts, source/render/probe
+identities, signed-component tolerances, cotangent hashes and owner expiration.
+Independent integration of the retained power CSV reproduces the four GPU
+energy values above. The actual native snapshot matches `fbdeadf954` except
+for PB's closure declaration. The allocator and exact-lookahead regressions
+both failed before their fixes and passed afterward.
+
+Root records remain under
+`/mnt/shared/tessera-measurements/glm-canonical-census-20260908/`:
+`joint-operator-combined-full-cpu-root-audit-01.json`,
+`joint-operator-combined-full-cpu-oom-evidence-01.json`,
+`joint-operator-allocator-root-audit-01.json`, and
+`joint-operator-lookahead-root-audit-01.json`. Native records are in the
+`joint-operator-windows-01/` subdirectory:
+`root-native-06-pb-audit.json`, `root-native-06-artifact-audit.json`, and
+`root-native-06-energy-audit.json`.
