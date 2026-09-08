@@ -1,0 +1,115 @@
+{
+  "scope": "first source layer over all25 ordered B1 windows; no repeated profiling forward",
+  "trace_path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/tr3-teacher-04/artifact/first-layer.trace.json",
+  "trace_sha256": "b9ee29f32d6d06d845979754cae0971a557b73c9b614bbbd6856326bda601da9",
+  "trace_bytes": 136280505,
+  "events": 377938,
+  "categories": {
+    "": 60,
+    "user_annotation": 1,
+    "cpu_op": 148198,
+    "cpu_instant_event": 72050,
+    "overhead": 1063,
+    "cuda_runtime": 38489,
+    "ac2g": 78282,
+    "gpu_memcpy": 1227,
+    "kernel": 36491,
+    "gpu_memset": 75,
+    "cuda_driver": 2000,
+    "gpu_user_annotation": 1,
+    "Trace": 1
+  },
+  "top_gpu_events_by_accumulated_duration": [
+    {
+      "category": "kernel",
+      "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+      "calls": 6625,
+      "accumulated_microseconds": 2688582.892999997
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::vectorized_elementwise_kernel<4, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 3ul> >(int, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 3ul>)",
+      "calls": 175,
+      "accumulated_microseconds": 1414558.903999999
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::vectorized_elementwise_kernel<4, at::native::exp_kernel_cuda(at::TensorIteratorBase&)::{lambda()#2}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::exp_kernel_cuda(at::TensorIteratorBase&)::{lambda()#2}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>)",
+      "calls": 900,
+      "accumulated_microseconds": 900149.4670000001
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4>)",
+      "calls": 2625,
+      "accumulated_microseconds": 880709.5800000009
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctor_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctor_add<float> const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctor_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctor_add<float> const&)::{lambda(int)#1})",
+      "calls": 1700,
+      "accumulated_microseconds": 586729.3729999999
+    },
+    {
+      "category": "kernel",
+      "name": "nvjet_sm121_tst_mma_128x208x64_2_32x104x64_tmaAB_bz_TNNN",
+      "calls": 125,
+      "accumulated_microseconds": 280981.095
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1})",
+      "calls": 5600,
+      "accumulated_microseconds": 260163.56799999936
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+      "calls": 381,
+      "accumulated_microseconds": 141832.71300000013
+    },
+    {
+      "category": "kernel",
+      "name": "nvjet_sm121_tst_mma_192x144x64_2_48x72x64_tmaAB_bz_TNNN",
+      "calls": 50,
+      "accumulated_microseconds": 128527.20199999996
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::vectorized_elementwise_kernel<4, at::native::(anonymous namespace)::pow_tensor_scalar_kernel_impl<float, float>(at::TensorIteratorBase&, float)::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::(anonymous namespace)::pow_tensor_scalar_kernel_impl<float, float>(at::TensorIteratorBase&, float)::{lambda(float)#1}, std::array<char*, 2ul>)",
+      "calls": 125,
+      "accumulated_microseconds": 83636.94200000001
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::vectorized_elementwise_kernel<4, at::native::bfloat16_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::bfloat16_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda(float)#1}, std::array<char*, 2ul>)",
+      "calls": 283,
+      "accumulated_microseconds": 72715.72800000006
+    },
+    {
+      "category": "gpu_memcpy",
+      "name": "Memcpy DtoD (Device -> Device)",
+      "calls": 1000,
+      "accumulated_microseconds": 64514.7350000001
+    },
+    {
+      "category": "kernel",
+      "name": "void cutlass::Kernel2<cutlass_80_simt_sgemm_64x128_8x5_tn_align1>(cutlass_80_simt_sgemm_64x128_8x5_tn_align1::Params)",
+      "calls": 50,
+      "accumulated_microseconds": 60139.86
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::(anonymous namespace)::conv_depthwise2d_forward_kernel_generic<float, int>(torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, float const, 3ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<4ul, int>, float const, 4ul, torch::headeronly::DefaultPtrTraits, int>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, float, 3ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<4ul, int>, float, 4ul, torch::headeronly::DefaultPtrTraits, int>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, float const, 3ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<4ul, int>, float const, 4ul, torch::headeronly::DefaultPtrTraits, int>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, float const, 0ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<1ul, int>, float const, 1ul, torch::headeronly::DefaultPtrTraits, int>, bool, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int)",
+      "calls": 25,
+      "accumulated_microseconds": 56243.312
+    },
+    {
+      "category": "kernel",
+      "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1} const&)::{lambda(int)#1})",
+      "calls": 150,
+      "accumulated_microseconds": 52002.871000000014
+    }
+  ],
+  "interpretation_limit": "event durations are accumulated kernel time, not a before/after speed comparison or proof of host saturation"
+}

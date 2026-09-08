@@ -184,3 +184,55 @@ the auto-to-fp8_ds_mla transition for FLASHINFER_MLA_SPARSE_SM120 at lines
 expectation does not replace the pending native qualification.
 `resolved-kv-cpu-audit.json` verifies the actual CAS receipt/result and all
 five current implementation/test files in snapshot `8426a765b2689de9c956fbd752694ea361d9ddfd`.
+
+## Completed teacher evidence added 23:29 UTC
+
+Teacher action `90a36b449ef47cf5fbeb967400a59a7468281d661b05ac5bc60f3dac77ce4d2e`
+completed with return code zero and confirmed resource cleanup. Action wall
+time was 986.594 seconds; the builder's traversal/emission timer was 970.654
+seconds. The original BF16 source initialization contract completed all 45
+layers and 1,262 persistent text-source tensors, with zero derived buffers.
+The final manifest is
+`/mnt/shared/tessera-measurements/glm-canonical-census-20260908/tr3-teacher-04/artifact/teacher.json`,
+SHA256 `1cc798a32a3457f996e859f778fe61fd987561b91490fe2953b698457ea747ae`.
+Its source checkpoint identity equals the independently authenticated original.
+
+`teacher-completion-audit.json` independently verifies the terminal return
+code/cleanup, canonical CAS receipt and actual log artifact, the source bundle,
+all nine gold-tool closure files, all five experiment/observer files and all
+231 PrismaQuant package files. The full package hash is
+`5a507741716b7a7a7f50dd8f650852e2f5b910d245e9325244b9ccf736c64a53`.
+The producing snapshot is `7882eda3a87fd6a45a1142de140aa17c49a8021e`.
+The teacher's helper/scorer file predates subsequent worker-KV observer
+hardening; the builder and core panel/logits code are unchanged.
+
+A separate portable CPU1/2-GiB PB action
+`ec8d349dc358d06f6dd56f716352c4b1539f5764653f117fa7272c6076a3d0ad`
+ran on dl380g10 and reread all 25 array bodies in 101.486 seconds. Every
+SHA256 and NPY header matched: little-endian FP32, C order, `[2047,154880]`.
+Total file bytes are 31,703,939,200, including 25 128-byte headers. The
+independent action's canonical CAS receipt and actual output are verified
+in `teacher-array-cas-audit.json`; this was an artifact read, not another
+model forward.
+
+The existing host observer completed with zero errors and retained 194
+Netdata samples per host plus 945 main-thread stack/IO samples. Both hosts'
+maximum sampling gap was below 6.883 seconds. On the source host, the 99
+distinct power updates span 980 seconds: 24.031 W time-weighted gross mean,
+44 W peak and approximately 23,550 J by trapezoidal integration. These are
+whole-device readings and do not establish a GPU-bound teacher path. Sparky
+carried separate qualification work during this interval. The GB10 Netdata
+framebuffer chart has empty dimensions, so it supplies no GPU memory estimate.
+`teacher-host-telemetry-summary.json` retains those limitations and values.
+
+The first-layer trace is 136,280,505 bytes and parses into 377,938 events,
+including 36,491 CUDA kernels and 1,227 GPU copy events. Actual FP32
+elementwise multiply, exponential and reduction kernels carry the largest
+accumulated durations. `teacher-first-layer-profile-summary.json` binds the
+trace hash and its top event totals. There is no before/after speed claim.
+
+The verified teacher is ready for the native EXL3 hook qualification. A clean,
+self-contained scorer checkout is retained at adjacent `tr3-score-source-01`,
+commit `38ef485559a70d0d3e15f5fce620ae6976321f6b`. The sealed adapter and
+argument hashes are in `tr3-exl3-offline-adapter-01/handoff.json`. No native
+EXL3 hook or complete paired quality score has run as of this entry.
