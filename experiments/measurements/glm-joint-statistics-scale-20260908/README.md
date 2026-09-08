@@ -152,3 +152,10 @@ was outside the repository. The same bounded parser was recorded as
 analysis quanta passed. Nothing bypassed admission. The first receipt reads
 preceded shared CAS directory visibility; subsequent audits verified the
 published bytes without repeating either analysis or native execution.
+
+The coordinator also checked both CPU gates and both trace-analysis receipts
+against their exact source snapshots. Each saved trace summary equals its
+CAS-backed JSON output and matches the native result's trace identity. See
+[root CPU audit](root-cpu-pb-audit.json),
+[root trace PB audit](root-trace-pb-audit.json) and
+[root trace artifact audit](root-trace-artifact-audit.json).
