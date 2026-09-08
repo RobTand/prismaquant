@@ -1,7 +1,29 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `fix/verified-capture-load`. Stamps
+As of: 2026-09-08 · `integrate/selected-source-authentication-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/selected-source-authentication`) for selected
+source authentication from a hash-bound complete canonical capture (#388).
+The full source roster, calibration identity and capture identity stay byte
+identical. Before model construction, the campaign validates that complete
+manifest against the census and freshly hashes its metadata and producer
+auxiliaries. Existing streaming readers authenticate each consumed shard once
+per selected invocation through a held read-only descriptor, including early
+nonbody state, FP8 scales and projected expert reads. Header-only inspection of
+an unconsumed shard does not hash its payload. The descriptor owner is shared
+by existing reader/prefetch threads and remains alive through their completion;
+source mutation or pathname replacement fails closed. Files must remain stable
+through these read leases; stat fences reject changes and never authorize a
+cached digest. The preparation receipt reports consumed-file authentication
+separately from the unchanged canonical identity. There is no persistent hash
+cache, new source residency mechanism, or relaxed partial-capture acceptance.
+CPU regression and tamper/thread/descriptor tests qualify this ownership
+contract; native selected-row I/O, memory and timing still require a matched
+before/after run with the original complete GLM manifest and both profiler and
+host telemetry. No full-GLM speed or fit gain is claimed by this change.
+Gate: `tests/test_selected_source_authentication.py` and existing selected,
+streaming reader, capture and campaign tests.
 
 Re-stamped (2026-09-08, `fix/verified-capture-load`) for explicit capture load
 policy `prismaquant.verified_activation_load.v1` (#405). Canonical capture

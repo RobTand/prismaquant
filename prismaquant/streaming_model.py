@@ -68,6 +68,7 @@ from .layer_streaming import (
     _build_concat_merger,
     _model_tensor_dtypes,
     _source_tensor_dtypes,
+    _source_json,
     _build_expert_packer,
     _build_install_resolver,
     _build_weight_map,
@@ -198,7 +199,7 @@ class _StreamingInitializationAudit:
         })
 
 
-def _bypass_hf_fp8_module_rewrite(model_path: str) -> bool:
+def _bypass_hf_fp8_module_rewrite(model_path: str, *, source_authentication=None) -> bool:
     """True when HF's FP8 pre-load module rewrite must be skipped here.
 
     Two independent conditions, and they belong in different places:
@@ -216,9 +217,10 @@ def _bypass_hf_fp8_module_rewrite(model_path: str) -> bool:
     reads the source fp8 bytes and applies `.weight_scale_inv` inline.
     """
     try:
-        with open(os.path.join(model_path, "config.json")) as f:
-            cfg = json.load(f)
+        cfg = _source_json(os.path.join(model_path, "config.json"), source_authentication)
     except Exception:
+        if source_authentication is not None:
+            raise
         return False
     qc = cfg.get("quantization_config") or {}
     if qc.get("quant_method") != "fp8" or "weight_block_size" not in qc:
@@ -411,6 +413,7 @@ def _estimate_layer_cache_bytes(
     target_dtype: torch.dtype,
     fp4_experts: bool = False,
     tensor_dtypes: dict[str, torch.dtype] | None = None,
+    source_authentication=None,
 ) -> tuple[int, list[int]]:
     """Estimate dequanted cache bytes per decoder layer without loading data.
 
@@ -437,7 +440,9 @@ def _estimate_layer_cache_bytes(
     sizes = [0 for _ in range(num_layers)]
     try:
         for shard, pairs in by_shard.items():
-            with safe_open(shard, framework="pt") as f:
+            context = (safe_open(shard, framework="pt") if source_authentication is None else
+                       source_authentication.safe_open(safe_open, shard, framework="pt"))
+            with context as f:
                 for idx, ckpt_name, fp4_packed, load_dtype in pairs:
                     sl = f.get_slice(ckpt_name)
                     n = 1
@@ -447,6 +452,8 @@ def _estimate_layer_cache_bytes(
                         sl.get_dtype(), load_dtype,
                         fp4_packed=fp4_packed)
     except Exception:
+        if source_authentication is not None:
+            raise
         return 0, sizes
     nonzero = [s for s in sizes if s > 0]
     return (max(nonzero) if nonzero else 0), sizes
@@ -542,7 +549,7 @@ class StreamingContext:
                  prefetch_workers: int = 3,
                  prefetch_min_available_bytes: int = 0,
                  expert_packer=None,
-                 concat_merger=None):
+                 concat_merger=None, source_authentication=None):
         self.model = model
         self.base_model = base_model
         self.layers = layers
@@ -589,6 +596,7 @@ class StreamingContext:
         # `concat_merges`). None for every other checkpoint/model (zero
         # behavior change). Built once in `_build_streaming_context`.
         self.concat_merger = concat_merger
+        self.source_authentication = source_authentication
         self._inflight: dict[int, Any] = {}
         self._inflight_lock = threading.Lock()
         # Sequential-walk tracking for the automatic prefetch top-up.
@@ -649,7 +657,9 @@ class StreamingContext:
             self.device, fp8_scale_inv_map=self.fp8_scale_inv_map,
             pack_experts=self.expert_packer,
             merge_concat=self.concat_merger,
-            buffer_dtypes=self.buffer_dtypes)
+            buffer_dtypes=self.buffer_dtypes,
+            **({'source_authentication': self.source_authentication}
+               if self.source_authentication is not None else {}))
         # The cache may still decline to RETAIN the layer under its dynamic
         # budget (or evict it as `pinned_until_read` before the consumer
         # arrives). That is a retention decision, not a delivery decision:
@@ -848,7 +858,9 @@ class StreamingContext:
             self.device, fp8_scale_inv_map=self.fp8_scale_inv_map,
             pack_experts=self.expert_packer,
             merge_concat=self.concat_merger,
-            buffer_dtypes=self.buffer_dtypes)
+            buffer_dtypes=self.buffer_dtypes,
+            **({'source_authentication': self.source_authentication}
+               if self.source_authentication is not None else {}))
         self.layer_cache.put(L, tensors)
         return tensors, "cold"
 
@@ -1375,6 +1387,7 @@ def _build_streaming_context(model_path: str, *,
                              multimodal: bool = False,
                              visual_requires_grad: bool = False,
                              attn_implementation: str | None = None,
+                             source_authentication=None,
                              ) -> StreamingContext:
     """One-time setup: AutoConfig + empty skeleton, then manually
     materialize only the always-resident head pieces. Decoder layers
@@ -1410,6 +1423,11 @@ def _build_streaming_context(model_path: str, *,
     import psutil
     from transformers import AutoConfig, AutoModelForCausalLM
 
+    authenticated = ({} if source_authentication is None else
+                     {'source_authentication': source_authentication})
+    if source_authentication is not None:
+        source_authentication.require_unchanged()
+
     from .sensitivity_probe import stage_multimodal, stage_text_only
 
     if not multimodal:
@@ -1430,7 +1448,7 @@ def _build_streaming_context(model_path: str, *,
     if multimodal:
         staged = stage_multimodal(model_path)
     else:
-        bypass_hf_fp8_rewrite = _bypass_hf_fp8_module_rewrite(model_path)
+        bypass_hf_fp8_rewrite = _bypass_hf_fp8_module_rewrite(model_path, **authenticated)
         staged = stage_text_only(model_path)
         if bypass_hf_fp8_rewrite:
             print(f"{log_prefix} manual meta streaming load avoids HF fp8 "
@@ -1476,7 +1494,7 @@ def _build_streaming_context(model_path: str, *,
         p.requires_grad_(False)
     base_model, layers = _get_layer_list(model)
 
-    weight_shard, weight_ckpt = _build_weight_map(model_path, multimodal=multimodal)
+    weight_shard, weight_ckpt = _build_weight_map(model_path, multimodal=multimodal, **authenticated)
     # Native-FP8 source dequant map. Populated only for checkpoints that
     # ship `.weight_scale_inv` siblings (MiniMax-M2/M2.7, DeepSeek-V3).
     # Empty dict for plain BF16 checkpoints — `_read_layer_to_device`
@@ -1486,7 +1504,7 @@ def _build_streaming_context(model_path: str, *,
     # leaving every downstream pass operating on raw codes (range ±448)
     # instead of true weights (range ±0.2).
     fp8_scale_inv_map = _build_fp8_scale_inv_map(
-        model_path, multimodal=multimodal)
+        model_path, multimodal=multimodal, **authenticated)
     if fp8_scale_inv_map:
         print(f"{log_prefix} fp8 scale_inv map: {len(fp8_scale_inv_map)} "
               f"weights will be dequanted inline at layer-load",
@@ -1501,6 +1519,7 @@ def _build_streaming_context(model_path: str, *,
         device,
         dtype,
         fp8_scale_inv_map=fp8_scale_inv_map,
+        **authenticated,
     )
     # Weight tying: a `tie_word_embeddings` checkpoint ships no
     # `lm_head.weight`, so `_materialize` above has nothing to install and
@@ -1567,7 +1586,7 @@ def _build_streaming_context(model_path: str, *,
                 visual_prefix + ".",
                 weight_shard, weight_ckpt, dtype, device,
                 fp8_scale_inv_map=fp8_scale_inv_map,
-                buffer_dtypes=_model_tensor_dtypes(model, dtype))
+                buffer_dtypes=_model_tensor_dtypes(model, dtype), **authenticated)
             print(f"{log_prefix} materializing visual tower: "
                   f"{len(tensors)}/{len(vis_keys)} tensors -> {device}", flush=True)
             if _module_has_meta_tensors(visual_module):
@@ -1659,6 +1678,7 @@ def _build_streaming_context(model_path: str, *,
         target_dtype=dtype,
         fp4_experts=declared_fp4_expert_dtype(model_path),
         tensor_dtypes=_source_tensor_dtypes(model, dtype, concat_merger),
+        **authenticated,
     )
     worker_count, worker_src = _auto_prefetch_workers(
         cache_bytes, estimated_layer_bytes, requested=prefetch_workers)
@@ -1686,6 +1706,9 @@ def _build_streaming_context(model_path: str, *,
     prefetch_pool = ThreadPoolExecutor(
         max_workers=worker_count, thread_name_prefix="prefetch")
 
+    if source_authentication is not None:
+        source_authentication.require_unchanged()
+
     return StreamingContext(
         model=model, base_model=base_model, layers=layers,
         layers_prefix=layers_prefix, num_layers=num_layers,
@@ -1702,4 +1725,5 @@ def _build_streaming_context(model_path: str, *,
         prefetch_min_available_bytes=min_available_bytes,
         expert_packer=_build_expert_packer(model, weight_ckpt),
         concat_merger=concat_merger,
+        **authenticated,
     )
