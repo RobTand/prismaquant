@@ -94,3 +94,18 @@ can retain a full 40.5 GiB sidecar while H/X/weights remain resident, so this ro
 must refuse a 104 GiB worker. Within-file bounded serialization and/or a supported
 exact smaller quantum require separate work. No partial capture becomes
 canonical, no joint scope is narrowed, and no serving format, menu or pin changes.
+
+## Final integration qualification
+
+After dtype-budget, whole-file export accounting and completed-page advice
+changes, action `61a9da5bbf86` passed 60 native cases with no skips in 39.65
+seconds on Sparklina under the same image and reservation. This included the
+strict FP32 source regression, exact Hessian sidecar byte parity, real GLM
+selected-source/capture/anchor/resume and native memo wire/price comparisons.
+The PB terminal and CAS result both report exit zero, cleanup completed, and an
+independent Docker listing was empty. `native-final-invocation.json` binds the
+launch to source `ff839e4cf`; `final-audit.json` verifies its receipt and payload.
+
+After merging the portable-image adapter from main, action `ad8f283959ed`
+passed all 34 architecture, staleness and image-content cases on CPU. The final
+report addition is prose only. The full GLM fit limitation above is unchanged.
