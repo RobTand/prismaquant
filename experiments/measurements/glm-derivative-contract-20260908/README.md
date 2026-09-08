@@ -182,7 +182,7 @@ full-model cost or quality, or serving. Original-capture compatibility remains
 a separate gate requiring the original capture action to complete; no
 compatibility receipt or full-model consumer run was created by this work.
 
-## Mainline integration — 17:08 UTC
+## Mainline integration — 17:04 UTC
 
 Integration commit `5806aae588596298657034565261cb31cf6a9a34` combines the
 reviewed derivative implementation with the selected source authentication and
@@ -197,7 +197,7 @@ reader-thread fixtures, four GiB memory and one native thread. All ran on
 dl380g10 under Python 3.12/Torch 2.10, with CUDA disabled. The skips comprise
 36 missing-vLLM registry cases, 24 unconfigured checkpoint cases, 12 profile
 documentation/default cases, and one real-encoder CUDA case. The existing
-profile-spec expected failure is retained. Scope peaks were 369–457 MiB, all
+serving-profile field-reader expected failure is retained. Scope peaks were 369–457 MiB, all
 exit statuses were zero, and all cleanup records were complete.
 
 `root-integrated-cpu-cas-audit.json` binds all six actual outputs, receipts and
@@ -208,3 +208,8 @@ finite gradients, source hashes, nine trace files and both-host telemetry.
 The initial CPU submission was rejected for unsupported pytest `-q` forwarding;
 no action ran from that rejected submission. The corrected invocation used
 pbtest's supported defaults and completed all six shards.
+
+The 13 changed implementation modules also passed PB compileall action
+`d9b6fa26cbd6a33d8570c15ad406825db326fd171e7592469d62d60e4182389e`
+under one CPU/one GiB, with exit 0 and verified source/CAS/cleanup evidence in
+`root-integrated-compile-cas-audit.json`.
