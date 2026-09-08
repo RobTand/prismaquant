@@ -150,6 +150,7 @@ def test_prewarmer_device_scope_cannot_be_reused_for_another_device():
 def _plan(tmp_path):
     from prismaquant.tessera_joint_aura import SCHEMA
     return {'schema': SCHEMA, 'model': 'fixture', 'inputs': {}, 'output_root': str(tmp_path),
+        'canonical_capture': {'path': 'fixture-capture', 'sha256': 'b' * 64},
         'calibration_input': {'path': 'fixture', 'sha256': 'a' * 64},
         'execution': {'n_calib_samples': 512, 'calib_seqlen': 512, 'probe_microbatch': 1,
                       'n_probes': 4, 'seed_base': 7000, 'token_scope': 'all', 'temperature': 1.0,

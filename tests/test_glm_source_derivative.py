@@ -176,7 +176,7 @@ def test_incomplete_capture_refuses_before_any_producer_proof(tmp_path, monkeypa
     capture = write_bound(tmp_path/'capture.json', {'schema': cache.SCHEMA, 'status': 'running'})
     value = dict(schema=compatibility.SCHEMA, version=derivative.VERSION, capture=capture,
                  derivative_identity_sha256=compatibility._digest({}), producer={}, forward_equivalence={})
-    with pytest.raises(RuntimeError, match='not a complete canonical capture'):
+    with pytest.raises(RuntimeError, match='not a complete canonical calibration capture'):
         compatibility._verify(value, capture=capture, derivative={})
 
 

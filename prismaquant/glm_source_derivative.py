@@ -98,6 +98,12 @@ def _code_at(root, names):
 
 
 def _require_code(function, expected, label):
+    if isinstance(function, types.FunctionType) and marshal.dumps(function.__code__) != marshal.dumps(expected):
+        actual = function.__code__
+        fields = [name for name in dir(actual) if name.startswith('co_') and
+                  not callable(getattr(actual, name)) and getattr(actual, name) != getattr(expected, name)]
+        print(json.dumps(dict(callable_auth_diagnostic=label, unequal_fields=fields,
+                              code_equal=actual == expected)), flush=True)
     _require(isinstance(function, types.FunctionType) and
              marshal.dumps(function.__code__) == marshal.dumps(expected), label + ' callable code changed')
 
