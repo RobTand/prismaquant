@@ -1,0 +1,12 @@
+[
+  {
+    "action": "fb948aafb61ee9717e4439187a95bfea7991a4c197eab5009fc33fccb3533332",
+    "receipt": "82a07c237d00e323a94e8e259bd186f0e002fc0d6b9da6d491b66957980fc1f5",
+    "payload_sha256": "9235670ab42095917a5caf7a717e3e349beea6820383bc8169361d7d763528a4",
+    "snapshot": "3559c3995fa6ab88f189bb9c4608a654a053730a",
+    "source_diff_from_commit": [
+      ".pbrun-closure.a35e8b785e74ea2b.json"
+    ],
+    "stdout_tail": "{\"producer_archive_sha256\": \"956bbafeab40fca1144672c3af35900daaeac693d777b0c3f243de73354d4c75\", \"producer_commit\": \"07ad344c3275bb2fa7ce2432f93d89945d66f4c2\", \"producer_module\": \"/home/rob/tmp/bounded-hessian-producer-msj1p53p/src/tessera/__init__.py\"}\nbringing up nodes...\nbringing up nodes...\n\n........................s............................................... [ 36%]\n........................................................................ [ 73%]\n...........................s........................                     [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n194 passed, 2 skipped, 56 warnings in 9.90s\n"
+  }
+]
