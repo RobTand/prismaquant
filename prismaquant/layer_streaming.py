@@ -1394,13 +1394,25 @@ def _advise_consumed_safetensors_pages(shard: str, keys: list[str],
         header = json.loads(os.pread(fd, header_size, 8))
         base = 8 + header_size
         page = os.sysconf('SC_PAGE_SIZE')
+        spans = []
         for key in sorted(set(keys)):
             begin, end = header[key]['data_offsets']
             if (type(begin) is not int or type(end) is not int
                     or not 0 <= begin <= end <= source_stat.st_size - base):
                 raise ValueError('invalid tensor span for consumed-page release')
-            first = ((base + begin + page - 1) // page) * page
-            last = ((base + end) // page) * page
+            spans.append((base + begin, base + end))
+        # Merge bytes before page alignment: a page shared by two consumed
+        # tensors is consumed in full. Per-tensor alignment would retain each
+        # boundary page (and potentially its entire large file-cache folio).
+        merged = []
+        for begin, end in sorted(spans):
+            if merged and begin <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((begin, end))
+        for begin, end in merged:
+            first = ((begin + page - 1) // page) * page
+            last = (end // page) * page
             if first < last:
                 os.posix_fadvise(fd, first, last - first, os.POSIX_FADV_DONTNEED)
     finally:
