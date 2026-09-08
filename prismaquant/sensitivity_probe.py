@@ -1834,6 +1834,34 @@ class SharedStateCotangents:
                     yield pos, item
 
     # -- diagnostics ------------------------------------------------------
+    def fork_for_replay(self, *, max_resident_bytes: int) -> "SharedStateCotangents":
+        """Fork completed adjoints for one disposable target replay.
+
+        The budget covers the fork's new compact tensor storages only; the
+        caller still owns and charges this original accumulator. ``graft``,
+        ``produced_roots`` and ``harvest`` may mutate the fork freely. Only a
+        final committed replay should use the original owner. No live graph,
+        mutable accumulator storage or diagnostic list crosses the fork.
+        """
+        if self._live or self._containers or self._live_ids:
+            raise RuntimeError("shared cotangent replay requires a quiescent owner")
+        if type(max_resident_bytes) is not int or max_resident_bytes < 0:
+            raise ValueError("shared cotangent replay requires a nonnegative tensor byte cap")
+        needed = sum(t.numel() * t.element_size() for t in self._acc.values())
+        if needed > max_resident_bytes:
+            raise RuntimeError("shared cotangent replay exceeds its tensor residency budget")
+        fork = type(self)(enabled=self.enabled)
+        try:
+            for slot, tensor in self._acc.items():
+                fork._acc[slot] = tensor.detach().clone(memory_format=torch.contiguous_format)
+            for name in ("n_grafted", "n_harvested", "n_seeded", "n_no_grad"):
+                setattr(fork, name, getattr(self, name))
+            fork.nondifferentiable = list(self.nondifferentiable)
+            return fork
+        except BaseException:
+            fork.release_resident_state()
+            raise
+
     def resident_tensors(self) -> tuple[torch.Tensor, ...]:
         """Expose retained shared adjoints for the streamed owner's byte cap.
 

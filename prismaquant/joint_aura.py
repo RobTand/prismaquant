@@ -569,12 +569,8 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         return sum(value.numel() * value.element_size() for value in self._operators.values())
 
     def arithmetic_identity(self, measurement_dtype):
-        identity = arithmetic_identity(measurement_dtype, self.projection_backend)
-        identity.update(
-            weight_projection='summed_output_operator_fp32_gemm',
-            operator_accumulation='sum_fp32_matrices_in_backward_invocation_order',
-            contraction_order='sum_operators_then_project_each_signed_component')
-        return identity
+        from .joint_statistics_replay import statistics_arithmetic_identity
+        return statistics_arithmetic_identity(measurement_dtype, self.projection_backend)
 
     def begin_probe(self):
         if self._phase != 'new' or not (self.handles or self.forward_originals):
@@ -679,6 +675,40 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         self._remove_observers()
         self.modules.clear()
         self._phase, self.active = 'ready', False
+
+    @torch.no_grad()
+    def operator_diagnostics(self, *, collect_col_energy: bool):
+        """Reduce complete FP32 GW sums without materializing leaf gradients.
+
+        This is a different diagnostic arithmetic from accumulating gradients
+        rounded to a BF16 parameter dtype. Returned column vectors own compact
+        CPU storage; no operator matrix escapes its existing lease lifetime.
+        One per-target squared-matrix temporary belongs to caller admission.
+        """
+        if self._phase != 'ready':
+            raise RuntimeError('joint statistics diagnostics require a ready observation seal')
+        if type(collect_col_energy) is not bool:
+            raise ValueError('joint statistics column-energy request must be boolean')
+        result = {}
+        for name, (shape, _) in self._geometry.items():
+            operator = self._operators.get((name, None))
+            if operator is None:
+                row = {'g_trace': 0.0}
+                if collect_col_energy:
+                    row['col_energy'] = torch.zeros(shape[1], dtype=torch.float32, device='cpu')
+            else:
+                squared = operator.square()
+                trace = float(squared.sum())
+                if not math.isfinite(trace):
+                    raise RuntimeError(f'joint statistics nonfinite diagnostic for {name}')
+                row = {'g_trace': trace}
+                if collect_col_energy:
+                    row['col_energy'] = squared.sum(dim=0).to('cpu', copy=True)
+                    if not bool(torch.isfinite(row['col_energy']).all()):
+                        raise RuntimeError(f'joint statistics nonfinite column diagnostic for {name}')
+                del squared
+            result[name] = row
+        return result
 
     @torch.no_grad()
     def project(self, delta_weights):

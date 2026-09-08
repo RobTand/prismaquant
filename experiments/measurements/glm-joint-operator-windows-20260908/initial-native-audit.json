@@ -1,0 +1,306 @@
+{
+  "key": "f7a7f5cf766a8b27fc74fbb2c06c1a75d1d77e5419c563891ddf7a6cd0577598",
+  "returncode": 0,
+  "terminal": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/done/f7a7f5cf766a8b27fc74fbb2c06c1a75d1d77e5419c563891ddf7a6cd0577598.json",
+    "sha256": "a5ad393a13ca6e206f8ad703481fff7aa5bf6b9c7989a1657a4ffc41c247ba72"
+  },
+  "snapshot": {
+    "commit": "132a7593833458073d6e5a349e8a56e3ea05c350",
+    "input": {
+      "bytes": 26323904,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "a4cb5c3319fc68b7b26cf01545fe9536420f5a6508629d19105d5fbafc87d4be"
+    },
+    "parent": "6a786a7120c40298188cf07a77958bfcd180f343",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff": "A\t.pbrun-closure.e98252fc207293e1.json\n",
+  "receipt": {
+    "action_key": "f7a7f5cf766a8b27fc74fbb2c06c1a75d1d77e5419c563891ddf7a6cd0577598",
+    "action_manifest_sha256": "9165a31cfd2388053f4346a8e98c84c14a198b6f2db339f52f2a85f44391840f",
+    "producer": {
+      "action_key": "f7a7f5cf766a8b27fc74fbb2c06c1a75d1d77e5419c563891ddf7a6cd0577598",
+      "attestation_sha256": "042a1eeb0a1395988a4b1046d1a01fc398a1f93e2ac50e2cd63f8a0f02a1873d",
+      "evidence": {
+        "accelerators": [
+          {
+            "compute_capability": "12.1",
+            "driver_version": "595.84",
+            "kind": "nvidia",
+            "name": "NVIDIA GB10",
+            "uuid": "GPU-b1eceeea-fec7-371e-2cf3-cd10f2e7b705"
+          }
+        ],
+        "hostname": "sparklina",
+        "libc": "glibc-2.39",
+        "machine": "aarch64",
+        "slurm": null,
+        "source": "local",
+        "system": "linux"
+      },
+      "executable": {
+        "bytes": 1543048,
+        "path": "/bin/bash",
+        "resolved_path": "/usr/bin/bash",
+        "sha256": "af955ef55333c8fc9c5aa50df91ad1a629d9a79a9afa125cd5e9629585f78015"
+      },
+      "host_class": null,
+      "inputs": [
+        {
+          "bytes": 26323904,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "a4cb5c3319fc68b7b26cf01545fe9536420f5a6508629d19105d5fbafc87d4be"
+        }
+      ],
+      "platform_key": "linux-aarch64-sm121",
+      "runtime": {
+        "core": {
+          "bytes": 283089,
+          "path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py",
+          "resolved_path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py",
+          "sha256": "31825990dec609e2b8c719ee5a3fd04a17739a9f744bbe1438fc3bd6315a09a9"
+        },
+        "launch_kind": "script",
+        "launcher": {
+          "bytes": 2285,
+          "path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py",
+          "resolved_path": "/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py",
+          "sha256": "9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418"
+        },
+        "runtime_sha256": "4f8eec2f6a2b8d0b7807d5c1aa430f7830a9912055629d3b8f743e395ba2c3d6",
+        "schema": "prismaquant.prismabuild.worker_runtime.v1"
+      },
+      "schema": "prismaquant.prismabuild.worker_attestation.v2",
+      "toolchain": {
+        "declared": {
+          "accelerator_models.sha256": "07c864957e19987cb708c47f3df1d81799a4191ba13461005284880553c67029",
+          "argv0.bytes": "1543048",
+          "argv0.sha256": "af955ef55333c8fc9c5aa50df91ad1a629d9a79a9afa125cd5e9629585f78015",
+          "cuda_compute_capability": "12.1",
+          "libc": "glibc-2.39",
+          "machine": "aarch64",
+          "nvidia_driver": "595.84",
+          "system": "linux"
+        },
+        "verified": {
+          "accelerator_models.sha256": "07c864957e19987cb708c47f3df1d81799a4191ba13461005284880553c67029",
+          "argv0.bytes": "1543048",
+          "argv0.sha256": "af955ef55333c8fc9c5aa50df91ad1a629d9a79a9afa125cd5e9629585f78015",
+          "cuda_compute_capability": "12.1",
+          "libc": "glibc-2.39",
+          "machine": "aarch64",
+          "nvidia_driver": "595.84",
+          "system": "linux"
+        }
+      },
+      "worker_id": "sparklina"
+    },
+    "receipt_sha256": "0327b11e118d6523929f201b7cbc0e87f876e23bc802d7508bc66e11e81329bb",
+    "result": {
+      "bytes": 44833,
+      "sha256": "ddf8a4dc36c457d0fce9833d3b6bfa741de3e08975e30ffc5fe42f22168957d5"
+    },
+    "schema": "prismaquant.prismabuild.cas_receipt.v3"
+  },
+  "claims": [
+    {
+      "abandoned_readers": [],
+      "attestation_verified": null,
+      "cas_root": "/mnt/shared/prismabuild-fleet/cas",
+      "checks": {
+        "claim_addressed_correctly": true,
+        "claim_digest_matches_body": true,
+        "claim_present": true,
+        "payload_bytes_match": true,
+        "payload_present": true,
+        "payload_sha256_match": null,
+        "receipt_binds_the_claims_manifest": true,
+        "receipt_present": true,
+        "receipt_self_consistent": true
+      },
+      "checks_passed": true,
+      "claim": {
+        "action_key": "f7a7f5cf766a8b27fc74fbb2c06c1a75d1d77e5419c563891ddf7a6cd0577598",
+        "action_manifest_sha256": "9165a31cfd2388053f4346a8e98c84c14a198b6f2db339f52f2a85f44391840f",
+        "checkout_root": "/home/rob/tmp/prismabuild-checkouts/f7a7f5cf766a.p_tqhion/checkout",
+        "claim_sha256": "292b22318c37c2dc563095ed7cb3e3e8fcb8676d9b3f41fb32f0a48fcd8d0da2",
+        "result_path": "pbrun_result.e98252fc207293e1.txt",
+        "schema": "prismaquant.prismabuild.local_result_claim.v1",
+        "working_directory": "."
+      },
+      "claim_path": "/mnt/shared/prismabuild-fleet/cas/local-results/v1/29/292b22318c37c2dc563095ed7cb3e3e8fcb8676d9b3f41fb32f0a48fcd8d0da2.json",
+      "complete": true,
+      "deadline_s": 5.0,
+      "generated_unix": 1788871377.0076618,
+      "generation": "437ad81b1129-1788868060-209c40b934b6",
+      "generation_stale": false,
+      "not_checked": [
+        "worker attestation (needs the full action manifest; core.PrismaBuildCAS.lookup is the verifier)"
+      ],
+      "payload": {
+        "bytes": 44833,
+        "present": true,
+        "sha256": null
+      },
+      "payload_path": "/mnt/shared/prismabuild-fleet/cas/blobs/dd/ddf8a4dc36c457d0fce9833d3b6bfa741de3e08975e30ffc5fe42f22168957d5",
+      "receipt_path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/f7/f7a7f5cf766a8b27fc74fbb2c06c1a75d1d77e5419c563891ddf7a6cd0577598.json",
+      "schema": "prismaquant.prismabuild.pbmcp.v1",
+      "sha256": "292b22318c37c2dc563095ed7cb3e3e8fcb8676d9b3f41fb32f0a48fcd8d0da2",
+      "started_from_generation": true,
+      "timed_out": [],
+      "tool": "pb_verify_claim",
+      "unavailable": []
+    }
+  ],
+  "cleanup": {
+    "checked_unix": 1788871189.2162833,
+    "complete": true,
+    "nonce": "1a7456b57e474c958a56d8708cb4d9bf",
+    "released": {
+      "ok": true,
+      "scope_id": "prismabuild-job6a1fe3f87012f08765c5f51011552e67.slice",
+      "stop_reason": "executed",
+      "stopped_unix": 1788871189.1239996
+    },
+    "telemetry": {
+      "action_key": "f7a7f5cf766a8b27fc74fbb2c06c1a75d1d77e5419c563891ddf7a6cd0577598",
+      "complete": true,
+      "cpu_seconds": 84.358156,
+      "cpu_system_seconds": 16.976062,
+      "cpu_user_seconds": 67.382093,
+      "errors": [],
+      "gpu_memory_max_bytes": 4294967296,
+      "host": "sparklina",
+      "memory_current_bytes": 1526693888,
+      "memory_max_bytes": 8589934592,
+      "memory_peak_bytes": 5307764736,
+      "nonce": "1a7456b57e474c958a56d8708cb4d9bf",
+      "oom_kill": 0,
+      "oom_local": 0,
+      "process_io": {
+        "live": {},
+        "members": [
+          1252932,
+          1252966,
+          1252967,
+          1252968,
+          1252990,
+          1253031,
+          1257606
+        ],
+        "processes_live": 0,
+        "processes_observed": 7,
+        "processes_unreadable": 0,
+        "rchar": 2114816765,
+        "read_bytes": 1369563136,
+        "retired": {
+          "rchar": 2114816765,
+          "read_bytes": 1369563136,
+          "syscr": 130788,
+          "syscw": 154548,
+          "wchar": 2063096993,
+          "write_bytes": 2062606336
+        },
+        "source": "proc_io",
+        "syscr": 130788,
+        "syscw": 154548,
+        "wchar": 2063096993,
+        "write_bytes": 2062606336
+      },
+      "sampled_unix": 1788871189.1729953,
+      "scope_unit": "prismabuild-job6a1fe3f87012f08765c5f51011552e67.slice",
+      "shape_key": "ed47522378621ed8a25bf0e924ec782f8e4c3302055e0c4d867228347ef04b4a",
+      "termination_reason": "executed",
+      "wall_seconds": 91.407873129996
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 6.539447194736842,
+        "busy_percent_peak": 13.80522,
+        "psi_some_avg10_max": 0.14,
+        "psi_some_avg10_samples": 93,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 95,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788871189.0191026,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.09214285714285715,
+        "power_reference_scope": "soc_tdp",
+        "power_reference_source": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html",
+        "power_reference_w": 140.0,
+        "power_w_mean": 11.323043478260873,
+        "power_w_peak": 12.9,
+        "samples": 184,
+        "source": "pqteld",
+        "temperature_c_peak": 48.0,
+        "utilization_percent_mean": 4.782608695652174,
+        "utilization_percent_peak": 20.0,
+        "utilization_samples": 184,
+        "uvm_residual_bytes_peak": 4140535808,
+        "uvm_residual_samples": 184
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 10.76,
+        "psi_mem_full_avg10_max": 0.0,
+        "samples": 184,
+        "source": "pqteld",
+        "unified_available_bytes_min": 120201277440,
+        "unified_total_bytes": 130595991552,
+        "unified_used_bytes_peak": 10394714112
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1788871096.87659
+    },
+    "finished_unix": 1788871189.0191026,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 7,
+      "processes_unreadable": 0,
+      "rchar": 2114816765,
+      "read_bytes": 1369563136,
+      "source": "proc_io",
+      "syscr": 130788,
+      "syscw": 154548,
+      "wchar": 2063096993,
+      "write_bytes": 2062606336
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 2,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 101040128,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.01807100000000017,
+      "user_seconds": 0.06425200000000153,
+      "voluntary_context_switches": 21
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 84.358156,
+      "cpu_system_seconds": 16.976062,
+      "cpu_user_seconds": 67.382093,
+      "memory_current_bytes": 1526800384,
+      "memory_peak_bytes": 5307764736,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788871096.87659,
+    "wall_seconds": 92.14251255989075
+  },
+  "output": {
+    "path": "/mnt/shared/prismabuild-fleet/cas/blobs/dd/ddf8a4dc36c457d0fce9833d3b6bfa741de3e08975e30ffc5fe42f22168957d5",
+    "sha256": "ddf8a4dc36c457d0fce9833d3b6bfa741de3e08975e30ffc5fe42f22168957d5",
+    "bytes": 44833
+  }
+}

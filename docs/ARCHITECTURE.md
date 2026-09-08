@@ -1,7 +1,76 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `feat/joint-statistics-target-windows`. Stamps
+As of: 2026-09-08 · `feat/joint-operator-windows`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/layer-major-boundary-capture`) for explicit
+`prismaquant.aura.boundary_storage.v2` with `capture_order: "layer_major"`
+(#394). The existing layer visitor installs each baseline source layer once
+and dispatches the original complete batches in order. It keeps each batch's
+original source kwargs/pass state, leases exact input windows from the existing
+activation owner and writes the original output boundary before advancing.
+No full-draw hidden tensor plane is added. Metadata and all live forward/shared
+states remain under the auxiliary cap; physical admission remains separate.
+V1 and default callers preserve batch-major capture. The reverse/probe order,
+source arithmetic, RNG coordinates of Fisher probes, candidate formats and
+serving gates are unchanged. The new capture requires evaluation mode and
+refuses observed Torch CPU or runner-device CUDA RNG consumption during
+preparation/source calls. Other mutable custom-model state is outside this
+qualification; no blanket stateful-model equivalence is claimed. Gates include
+`tests/test_layer_major_boundary_capture.py`, actual shared-state regressions,
+and a paired original-layout GLM source-read/profile qualification with Netdata
+from both hosts. This remains default-off and establishes no full-GLM fit.
+
+Re-stamped (2026-09-08, `feat/joint-operator-windows`) for opt-in streamed
+operator windows (#392). A closed `operator_windows` v1 policy bounds GW/GA,
+one FP32 candidate delta, PWC residency and serialized load buffers, workspace
+and one replay cotangent fork. The existing target planner supplies whole-target
+windows. Each window observes every calibration batch before projection; all
+signed components sum before squaring. The installed source and its settled
+lookahead remain owned by the existing streaming cache across all windows and
+probes. Reverse installation disables adaptive top-up and explicitly schedules
+only the configured successor range before settling it; spare cache slots do
+not enlarge that reservation. PWC owns identity preparation and candidate read windows; no complete
+layer dW menu or parameter-gradient plane is created. Earlier windows use one
+quiescent shared-cotangent fork per batch; only the final window advances the
+original shared adjoints and outgoing boundary. Eval mode is required, observed
+Torch RNG consumption refuses, and source fingerprints remain sealed across
+windows/probes. This assumes the profile's source forward is deterministic;
+it does not certify arbitrary mutable user modules. CUDA execution requires the
+bounded source environment and the conservative cgroup-plus-CUDA physical
+guard. Each guarded allocation phase first returns inactive CUDA allocator
+blocks through the existing streamed cleanup helper, retaining all live source,
+statistics and candidate owners. This prevents retired blocks being charged
+again alongside the next phase reservation; it does not relax physical caps.
+Workspace/source/graph fit remains a measured admission requirement.
+The arithmetic and complete policy enter probe/checkpoint identity; legacy
+scalar rows cannot silently mix with summed FP32 operator rows. Default behavior
+is unchanged. Gates include dense/packed FP64 residual oracles, exact replay
+cotangents, shared-state forks, PWC file/alias ownership and interrupted resume
+in `tests/test_joint_operator_windows.py`. Native qualification on a genuine
+three-layer original-layout GLM fixture passed 21 complete probe calls with
+exact cotangents and fixed signed-component tolerances, including v2 boundaries,
+source turnover beyond two cache slots, and real 256 MiB allocator retirement.
+The instrumented small fixture was slower and completed fewer calls per GPU
+joule than the legacy path. Full GLM fit, a 32 GiB statistics phase and production
+throughput remain unqualified. Evidence and limits are recorded in
+`experiments/measurements/glm-joint-operator-windows-20260908/final-runtime.md`.
+The joint campaign's `execution.operator_windows` carries the same closed
+policy into cost execution, requires exact boundary storage and keeps its PWC
+cap within campaign admission. It replaces whole-layer candidate admission
+only for that explicit run policy, checking every donor's read bound first.
+Every selected target must have a measured candidate; a passthrough-only target
+refuses before capture rather than emitting an unmeasured zero diagnostic.
+Preparation retains its independent qualification policy. No other stage or
+legacy configuration inherits the new mode.
+
+Re-stamped (2026-09-08, `feat/joint-operator-windows`) for sealed operator
+diagnostics (#392). The statistics lease reduces each complete FP32 GW sum
+into a trace and optional independently owned CPU column vector. It requires
+no parameter-gradient plane, and cancellation occurs before squaring. This
+arithmetic differs from norms of BF16 leaf gradients; a caller must identify
+that difference and admit one matrix scratch separately. This accessor alone
+does not enable streamed replay. Gate: `tests/test_joint_operator_diagnostics.py`.
 
 Re-stamped (2026-09-08, `feat/joint-statistics-target-windows`) for whole-target
 operator-statistics planning (#385). The planner and both existing joint
@@ -17,12 +86,42 @@ projection arithmetic remain unchanged. The planner does not execute replay or
 admit source, boundary, graph, candidate or allocator memory. Gates:
 `tests/test_joint_statistics_plan.py` plus existing joint lease/projection tests.
 
+Re-stamped (2026-09-08, `fix/joint-qualification-windows`) for explicit
+`prismaquant.joint_anchor_qualification.v1` (#383). Joint anchor preparation
+can qualify one canonical unit's X/H at a time, with exact candidate renders
+leased through existing PWC windows. It checks the complete roster's capture
+sizes and donor file bounds before loading; source prefetch futures settle
+before growing unit state. Every format retains its original source/H/settings,
+wire decode, render-byte and activation-scale checks, with one bound identity
+per complete unit roster. Unit tensors and candidate owners expire before the
+next unit/window, including on failure. The existing verified page helper
+advises completed capture, PWC and wire files.
+
+The opt-in policy declares finite capture-resident and serialized-load caps
+plus a separate verification workspace reserve. Source/fixed state, loader
+transients and allocator overhead remain part of physical admission. CUDA
+requires the existing finite-cgroup guard, source-page policy and immediate
+host-allocator purge; advice alone never certifies reclamation. This bounds
+preparation ownership only. The cost stage still enforces its existing
+whole-layer candidate limit until a separate phased probe implementation is
+qualified. Legacy preparation, formats, numerical checks and serving gates
+retain their defaults. Gates: `tests/test_joint_qualification_windows.py` and
+existing joint-anchor, capture and PWC integrity tests; native qualification
+must establish exact records and memory behavior before a full-model fit claim.
+The [tiny native qualification](../experiments/measurements/glm-joint-qualification-20260908/README.md)
+preserved 26 verified cells across 50 invocations and reduced simultaneous
+X/H/PWC ownership from 6.75 to 1.375 MiB. Instrumented latency regressed and
+CUDA allocation peaks were unchanged; this is an ownership qualification,
+with no production speed or full-GLM fit claim.
+
+
 Re-stamped (2026-09-08, `integration/glm-probe-memory`) for the combined
 integration of issues #374, #377, #380 and #381. The reviewed operator-statistics,
 Hessian writer, consumed-source-page and PWC window changes retain their
 individual contracts and measurement scopes below. This integration resolves
 architecture stamps only; it does not enable the experimental policies or claim
 that a complete GLM capture, joint probe or served artifact has passed.
+
 
 Re-stamped (2026-09-08, `fix/bounded-hessian-sidecar`) for within-file Hessian
 sidecar page ownership (#377). Selected-source export keeps Torch's existing
@@ -39,6 +138,7 @@ Torch runtimes, including shared storage and noncontiguous views; it does not
 establish a full GLM fit or change an exact anchor quantum.
 Gates: `tests/test_bounded_hessian_sidecar.py`, existing capture byte/identity
 checks, and before/after native writer memory traces with both Sparks' Netdata.
+
 
 Re-stamped (2026-09-08, `research/joint-operator-statistics`) for the explicit
 one-probe `JointOperatorStatisticsLease` (issue #374). It extends the existing

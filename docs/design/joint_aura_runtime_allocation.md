@@ -280,6 +280,15 @@ as full-draw quality evidence.
 
 ## Exact boundary working storage (opt-in)
 
+For bounded target replay, `SharedStateCotangents.fork_for_replay` accepts a
+mandatory `max_resident_bytes` cap for the fork's newly allocated compact
+adjoint tensors. It requires a quiescent owner after harvest, deep-copies all
+accumulators, and keeps diagnostic lists independent. The original adjoints
+remain separately charged. Earlier target windows may consume/harvest one
+batch's disposable fork and release it; only the final target window may use
+the original owner and commit outgoing cotangents. This helper does not itself
+schedule replay or change reverse-pass behavior.
+
 `compute_aura_cost_streamed(..., boundary_storage=policy)`, CLI
 `--boundary-storage-config policy.json`, or the Tessera joint plan's
 `execution.boundary_storage` accepts the closed policy:
@@ -318,15 +327,33 @@ input. Existing signed cost checkpoints own resume. A completed-checkpoint
 resume skips boundary generation entirely. The policy is checkpoint-bound but
 does not change the probe arithmetic identity or signed samples.
 
+To opt into layer-major baseline capture, use the same fields with
+`schema: "prismaquant.aura.boundary_storage.v2"` and the required additional
+field `capture_order: "layer_major"`. V1 remains closed and unchanged.
+`capture_layer_major_boundaries(input_batches, storage=owner)` consumes the
+existing `visit_layer_batches(..., boundary_storage=owner)` traversal. Source
+layers install/prefetch once, original batches remain in order, exact input
+windows are verified before source calls, and outputs are written immediately.
+All boundary receipts remain available for the ordinary reverse pass.
+
+Global forward order becomes layer/batch; each batch's original layer sequence,
+shape, masks, positions and distinct profile state remain intact. V2 requires
+evaluation mode and prefetched source delivery. It refuses observed Torch CPU
+or active-runner CUDA RNG consumption around preparation, source calls and
+profile state creation/capture. Python/NumPy RNG, other CUDA devices and
+arbitrary mutable custom-model state are not certified; supported source
+identity and equivalence remain qualification gates. Probe RNG and global row
+coordinates are unchanged. All simultaneous live per-batch shared states and
+transient final CPU copies are charged to the auxiliary cap, including
+potential per-probe adjoints.
+
 The exact files and verified page advice make I/O explicit; advice does not
 establish physical release. Profile read/write barriers independently and keep
-actual physical memory checks. The initial implementation preserves the source
-loop to make byte/order parity reviewable. Its batch-major capture still
+actual physical memory checks. V1 preserves the source loop to make
+byte/order parity reviewable. Its batch-major capture still
 traverses all decoder layers per calibration batch. With two source slots,
 512 B1 samples do not get a whole-model resident reuse window: layer-level
 source payload is fetched repeatedly. This source-derived traffic observation
-is unmeasured, not a timing estimate. Production qualification separately needs
-layer-major boundary capture through `StreamedCausalLM.visit_layer_batches`,
-keeping each batch's own source state and per-layer numerical sequence, and
-bounded PWC/delta/diagnostic lifetimes. The mode stays default-off until these
+is unmeasured, not a timing estimate. V2 addresses the initial capture traversal; production qualification still
+needs full-scale physical memory and bounded PWC/delta/diagnostic lifetimes. The mode stays default-off until these
 remaining production gates are satisfied.

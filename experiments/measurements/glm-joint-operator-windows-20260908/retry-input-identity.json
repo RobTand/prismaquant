@@ -1,0 +1,374 @@
+{
+  "source_runs": [
+    "native-05",
+    "native-06"
+  ],
+  "identical_relative_file_inventory": true,
+  "files": 91,
+  "inventory": {
+    "pwc/model_language_model_layers_0_mlp_down_proj__FP8_E4M3.pt": {
+      "bytes": 18411,
+      "sha256": "e24c38b0b9f53f895a820fb64bfff11c53b4848e817379ddca3402214300f594"
+    },
+    "pwc/model_language_model_layers_0_mlp_down_proj__NVFP4A16.pt": {
+      "bytes": 18411,
+      "sha256": "ad61e6eb198c17131a188b3868d0aed34fd35e847ddf72072c63c8643dfc4c75"
+    },
+    "pwc/model_language_model_layers_0_mlp_gate_proj__FP8_E4M3.pt": {
+      "bytes": 18411,
+      "sha256": "1a292097c71f1bee82eaf64cc0c817345aa68b7cb8b94cc6af31c5436b46c6e9"
+    },
+    "pwc/model_language_model_layers_0_mlp_gate_proj__NVFP4A16.pt": {
+      "bytes": 18411,
+      "sha256": "bcac9607ba35c50980854ac3bf386ad01f82dad5fe3e31a2234e34f95414be14"
+    },
+    "pwc/model_language_model_layers_0_mlp_up_proj__FP8_E4M3.pt": {
+      "bytes": 18397,
+      "sha256": "bef22c8c8506cb1c8dca05a4e56ce848d52835af0a4bd8a04bef7253d635a841"
+    },
+    "pwc/model_language_model_layers_0_mlp_up_proj__NVFP4A16.pt": {
+      "bytes": 18397,
+      "sha256": "985bfaceeab81ac8258491b2c86777c236b9560cff82bcad1bed0e1a8bf2b4da"
+    },
+    "pwc/model_language_model_layers_0_self_attn_forget_gate_f_a_proj__FP8_E4M3.pt": {
+      "bytes": 4450,
+      "sha256": "bc9576dea0ca7fe5b0c174a47e2a118b200655ac3de9c194f4d5ae2086bdb747"
+    },
+    "pwc/model_language_model_layers_0_self_attn_forget_gate_f_a_proj__NVFP4A16.pt": {
+      "bytes": 4450,
+      "sha256": "d13883822ff360c0921a85de46b7b8bf288b95f41bcae5d0c759461c1f0b1a4e"
+    },
+    "pwc/model_language_model_layers_0_self_attn_forget_gate_f_b_proj__FP8_E4M3.pt": {
+      "bytes": 4450,
+      "sha256": "f1488d0fcee0266d9d22e98cba0409fc326802427683f80f5de2adaaa1e64406"
+    },
+    "pwc/model_language_model_layers_0_self_attn_forget_gate_f_b_proj__NVFP4A16.pt": {
+      "bytes": 4450,
+      "sha256": "54723bf839b0e89ee778b0ba406556e5d605dea97e29d54192bf73f5c1b6c9a0"
+    },
+    "pwc/model_language_model_layers_0_self_attn_g_a_proj__FP8_E4M3.pt": {
+      "bytes": 4174,
+      "sha256": "bcbda2543ad92df1695a8affdf38d065bf8b66ea9446e8f82f25f07ebb32748b"
+    },
+    "pwc/model_language_model_layers_0_self_attn_g_a_proj__NVFP4A16.pt": {
+      "bytes": 4174,
+      "sha256": "c7c1df9ecd5cb432b12b45a0eef4fac89e5ac1dd43ce940790590bce8e34f281"
+    },
+    "pwc/model_language_model_layers_0_self_attn_g_b_proj__FP8_E4M3.pt": {
+      "bytes": 4174,
+      "sha256": "e22913a8f2b397bae753d33792facdad8169e7dcb48f6f96d233c11ca5091277"
+    },
+    "pwc/model_language_model_layers_0_self_attn_g_b_proj__NVFP4A16.pt": {
+      "bytes": 4174,
+      "sha256": "5e8f1032fc27975dc894d3ffc9518250a63dfad92c920bbeb07dab67b37b7ad9"
+    },
+    "pwc/model_language_model_layers_0_self_attn_k_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "c0391b095b4448794eaf562a0a89dc8b1d5bec2fc185adbe75b19c450214bdcc"
+    },
+    "pwc/model_language_model_layers_0_self_attn_k_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "4db1840d769c4a7a49eef8ae296a18917238af5c0a3739490a2c538b6c08e07a"
+    },
+    "pwc/model_language_model_layers_0_self_attn_o_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "2a8a71552c312ab36452e67f7af64a3b93c28fcedcc4a20499d6c440c88b426f"
+    },
+    "pwc/model_language_model_layers_0_self_attn_o_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "3e664e23793933cd9932ce69483be1289dd3f58738ebcc5508910b42466acda7"
+    },
+    "pwc/model_language_model_layers_0_self_attn_q_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "342c55cc8157cbd24556148cf809ae56c0b25beb08e77d42a2967069c4021503"
+    },
+    "pwc/model_language_model_layers_0_self_attn_q_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "a83929e9d19124f13a9820117bc3b6a73f45428d29a4585eec5d56e3b8cd1cfe"
+    },
+    "pwc/model_language_model_layers_0_self_attn_v_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "30bf067fd7ab88684e4f604da212370d2c2cc322c85c6e42efbcb719e56ab8e6"
+    },
+    "pwc/model_language_model_layers_0_self_attn_v_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "a8724fd7678205f862f65c2fe684168758f2d7412d42e4efbd86dc83fd2f891c"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_0_down_proj__FP8_E4M3.pt": {
+      "bytes": 6321,
+      "sha256": "3dfe1dd58cba80e41ab9a742058e0fabde6297444622ab482463ff5418d4e83c"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_0_down_proj__NVFP4A16.pt": {
+      "bytes": 6321,
+      "sha256": "2d0ea45fc9c000294f0330bad487f51e4720523b190f7ebc50432ad62c23de52"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_0_gate_proj__FP8_E4M3.pt": {
+      "bytes": 6321,
+      "sha256": "49c39aeff3decbe6b41d82aeda71d5802a8e384eb8d7a1c3123c87181fc36f25"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_0_gate_proj__NVFP4A16.pt": {
+      "bytes": 6321,
+      "sha256": "c3840037097f502c18ac8badb6399057a75184c8a2f87d49e3a8eef1f3f8c04d"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_0_up_proj__FP8_E4M3.pt": {
+      "bytes": 6307,
+      "sha256": "ed63d8b61c595635ec34e758789f48a155b509636b3008d611ba5e8f30527dfd"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_0_up_proj__NVFP4A16.pt": {
+      "bytes": 6307,
+      "sha256": "05330354d3d8601e124f8dfc17c4ab1b9097f75685132c7788376d299c0e61d1"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_1_down_proj__FP8_E4M3.pt": {
+      "bytes": 6321,
+      "sha256": "f2128b37248b934978af92d5fea6d562fefc9be6d7bb11f97e6af15d78a5fdb1"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_1_down_proj__NVFP4A16.pt": {
+      "bytes": 6321,
+      "sha256": "46b334cf9cb2acee95f74a2ee186258503cc4dc1dc9f973b83bbf757da0fca8e"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_1_gate_proj__FP8_E4M3.pt": {
+      "bytes": 6321,
+      "sha256": "f2cd21150eefaa62099a737822bee12708415d3e1384739aea730b34aa9f4df3"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_1_gate_proj__NVFP4A16.pt": {
+      "bytes": 6321,
+      "sha256": "d84ea05012bdd81f5c5eaa63ab3e6b64c553ad1f9b12ed30fd454c73d4bd9b7a"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_1_up_proj__FP8_E4M3.pt": {
+      "bytes": 6307,
+      "sha256": "57385660f4301eb8c9a64c41ec047bd1bf6fc22599564d7d7ca822992e99c6f3"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_1_up_proj__NVFP4A16.pt": {
+      "bytes": 6307,
+      "sha256": "1eab7f6e97c6bffcfb9c353e7dfe63fbffdc6d3e26ad5c35c6bf0c8acd47c9ce"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_2_down_proj__FP8_E4M3.pt": {
+      "bytes": 6321,
+      "sha256": "5bf4aff96f0583aa653285c228ec94fb94de9db52d42d10ff61e1c546c756df9"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_2_down_proj__NVFP4A16.pt": {
+      "bytes": 6321,
+      "sha256": "5e5665cf45c3c99bc37b4e96d08c54debf1241758218735800f34667a5542290"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_2_gate_proj__FP8_E4M3.pt": {
+      "bytes": 6321,
+      "sha256": "2be53cc8f1a35aa6fa24ff7231f912af2aee74832bf61b25a8614bca17528fc5"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_2_gate_proj__NVFP4A16.pt": {
+      "bytes": 6321,
+      "sha256": "a7cf8fd544020acd36990112072836323c330ce79c6ee464be0291e59967c755"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_2_up_proj__FP8_E4M3.pt": {
+      "bytes": 6307,
+      "sha256": "6e92fa07151b2fcc92e2d15fd0587562862eaa772cd180134bb621ef623410b3"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_2_up_proj__NVFP4A16.pt": {
+      "bytes": 6307,
+      "sha256": "4fe34dce217896a1bce5a6d27db794c5ad11142e8782e5c3c0bad62afba2081f"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_3_down_proj__FP8_E4M3.pt": {
+      "bytes": 6321,
+      "sha256": "8de4299cf15ec0941d0111c3eaaf3c3f8d82a2df73a5f986ee09cf00cb22abfa"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_3_down_proj__NVFP4A16.pt": {
+      "bytes": 6321,
+      "sha256": "7d2c56dd4514c278a5cf99874e7ae867cef8142bf1fc611a21cf105e940f2903"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_3_gate_proj__FP8_E4M3.pt": {
+      "bytes": 6321,
+      "sha256": "a03b301688371c4757ef449e6d91a0b3518bf10505ba6932416574c807964082"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_3_gate_proj__NVFP4A16.pt": {
+      "bytes": 6321,
+      "sha256": "bb1c4eab32fc7d4c36e5b69c36aa07be511d6d5459a71aca20cd8541e5d344c7"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_3_up_proj__FP8_E4M3.pt": {
+      "bytes": 6307,
+      "sha256": "7969da5e40087b9ff490e75c067888445b25f3d236d9b55c9d6fec6303f63c91"
+    },
+    "pwc/model_language_model_layers_1_mlp_experts_3_up_proj__NVFP4A16.pt": {
+      "bytes": 6307,
+      "sha256": "8eb877cc89c0089785b1d6fe3198779660efe275c816ce8fecd52efbad0b599b"
+    },
+    "pwc/model_language_model_layers_1_mlp_shared_experts_down_proj__FP8_E4M3.pt": {
+      "bytes": 6484,
+      "sha256": "bb307f4731b65768ced00190c0cdd84b89fdbf9d70b9eb363ae176b1c9509b40"
+    },
+    "pwc/model_language_model_layers_1_mlp_shared_experts_down_proj__NVFP4A16.pt": {
+      "bytes": 6484,
+      "sha256": "1a6999cac317cd13625be696bfc0cb3feba1318692ce16307a913bf18a2b85c9"
+    },
+    "pwc/model_language_model_layers_1_mlp_shared_experts_gate_proj__FP8_E4M3.pt": {
+      "bytes": 6484,
+      "sha256": "4828cac7c9d5edbce5d3c6cbc74a3f75575d6a5c17afc4d6c0e08166e3442c5a"
+    },
+    "pwc/model_language_model_layers_1_mlp_shared_experts_gate_proj__NVFP4A16.pt": {
+      "bytes": 6484,
+      "sha256": "e84b7b9c521e0065fab799b6936defca81806774abfab344a1b6d8c7a147a4db"
+    },
+    "pwc/model_language_model_layers_1_mlp_shared_experts_up_proj__FP8_E4M3.pt": {
+      "bytes": 6406,
+      "sha256": "bdac01e25a13c0adb0e7218e1d43428a980fd51c473870061289d1ccdf9ca4f7"
+    },
+    "pwc/model_language_model_layers_1_mlp_shared_experts_up_proj__NVFP4A16.pt": {
+      "bytes": 6406,
+      "sha256": "47a2d4aa18647dad862bfb74ddcb32bf9f52740ad0fe4f4e5d3c782367178f05"
+    },
+    "pwc/model_language_model_layers_1_self_attn_indexer_wk__FP8_E4M3.pt": {
+      "bytes": 4252,
+      "sha256": "630c349af6bd2f0f9e1542c6acfc6d933a0c35b9a5abdedfb23114d8883ebbdf"
+    },
+    "pwc/model_language_model_layers_1_self_attn_indexer_wk__NVFP4A16.pt": {
+      "bytes": 4252,
+      "sha256": "6aa6d499eb8fb8c87d94260725843ce2b88574b0f862f8a1fdaaf216c4c32e4e"
+    },
+    "pwc/model_language_model_layers_1_self_attn_indexer_wq_b__FP8_E4M3.pt": {
+      "bytes": 4266,
+      "sha256": "448b056baa6bad974db017028532517e7b64b4412e748420400a6984bbcee535"
+    },
+    "pwc/model_language_model_layers_1_self_attn_indexer_wq_b__NVFP4A16.pt": {
+      "bytes": 4266,
+      "sha256": "4294a01a5640b84a8b3f1a16444682f31adefccfc3519b1b14b73db9faf76192"
+    },
+    "pwc/model_language_model_layers_1_self_attn_kv_a_proj_with_mqa__FP8_E4M3.pt": {
+      "bytes": 4436,
+      "sha256": "7e144d637cf4e66d1ebff0b121e71af2616b4934efc3bb53dfd02c0d9ca8e233"
+    },
+    "pwc/model_language_model_layers_1_self_attn_kv_a_proj_with_mqa__NVFP4A16.pt": {
+      "bytes": 4436,
+      "sha256": "e0e0e0c7330ee778aeab9aeae3f53014944785118cac582ebc14bead23fa7567"
+    },
+    "pwc/model_language_model_layers_1_self_attn_kv_b_proj__FP8_E4M3.pt": {
+      "bytes": 6293,
+      "sha256": "46c4c317ab2a4c0d9f8ba046afff20ae970896eaf9b7d0fd6b9f8bfcfa87f344"
+    },
+    "pwc/model_language_model_layers_1_self_attn_kv_b_proj__NVFP4A16.pt": {
+      "bytes": 6293,
+      "sha256": "da19abc6dad830c88bf6de635a2100757c5a6ca6b3998102e70a739df6ec86a2"
+    },
+    "pwc/model_language_model_layers_1_self_attn_o_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "ec987af141896a8ced7e55f2feac0d97e3548d51f90f9569f8571e1f596b8e61"
+    },
+    "pwc/model_language_model_layers_1_self_attn_o_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "968874307a951ab5e6deb7f910569952e2a5ee78f6a1a5e25fdd67f08e470f5a"
+    },
+    "pwc/model_language_model_layers_1_self_attn_q_a_proj__FP8_E4M3.pt": {
+      "bytes": 6222,
+      "sha256": "ecdce26c42f46880f2281bd05401f8d74de703f48193f9792c775d76e4be24d0"
+    },
+    "pwc/model_language_model_layers_1_self_attn_q_a_proj__NVFP4A16.pt": {
+      "bytes": 6222,
+      "sha256": "c6b7974f82e55115d9ff56c50a26cbd411b05d635136839f48cd3578b03b35a2"
+    },
+    "pwc/model_language_model_layers_1_self_attn_q_b_proj__FP8_E4M3.pt": {
+      "bytes": 6222,
+      "sha256": "815bfeb2902348582b534562e9500e8cfaec2faa9f15864dd8d540e3fe051b59"
+    },
+    "pwc/model_language_model_layers_1_self_attn_q_b_proj__NVFP4A16.pt": {
+      "bytes": 6222,
+      "sha256": "08d154cfccf41fa250fe07c4e1ec4c3f32d688db8b7f2dfca45816643d65e169"
+    },
+    "pwc/model_language_model_layers_2_mlp_down_proj__FP8_E4M3.pt": {
+      "bytes": 18411,
+      "sha256": "a338ff66b1d35e1610f9b9c97a6369d0b5284af3f59e3e835b6e4fff2c908281"
+    },
+    "pwc/model_language_model_layers_2_mlp_down_proj__NVFP4A16.pt": {
+      "bytes": 18411,
+      "sha256": "15279dd50fb8b50a558adc889e1d6c611da8fb4935ae04a31c4b876161d52172"
+    },
+    "pwc/model_language_model_layers_2_mlp_gate_proj__FP8_E4M3.pt": {
+      "bytes": 18411,
+      "sha256": "e5a7969acadcb9c59c470d8dfe84ede7e7a4cdb8ec57897a614db7d9b3144394"
+    },
+    "pwc/model_language_model_layers_2_mlp_gate_proj__NVFP4A16.pt": {
+      "bytes": 18411,
+      "sha256": "d25de76070957b11e6127bf8a1e33b422ec50b7a59902de3f3679245b0347e49"
+    },
+    "pwc/model_language_model_layers_2_mlp_up_proj__FP8_E4M3.pt": {
+      "bytes": 18397,
+      "sha256": "ad193c8b75d1eb45fa56b1dd80450d6feb3d190450d078afe8054e4cd322539d"
+    },
+    "pwc/model_language_model_layers_2_mlp_up_proj__NVFP4A16.pt": {
+      "bytes": 18397,
+      "sha256": "7385b0467bb240328e660aa9222d50228fdcc3ac019fdb5f2d755bdf4b2ea1c6"
+    },
+    "pwc/model_language_model_layers_2_self_attn_forget_gate_f_a_proj__FP8_E4M3.pt": {
+      "bytes": 4450,
+      "sha256": "fd633cfa22a92870b9593845af7f836910f4c21279ceb348698f6ab064379fcf"
+    },
+    "pwc/model_language_model_layers_2_self_attn_forget_gate_f_a_proj__NVFP4A16.pt": {
+      "bytes": 4450,
+      "sha256": "c834bb9e4b71c02a8e4d1abe76a2b676b361a1e3c5cb9f6966b34f8ae981990d"
+    },
+    "pwc/model_language_model_layers_2_self_attn_forget_gate_f_b_proj__FP8_E4M3.pt": {
+      "bytes": 4450,
+      "sha256": "c19e872e9d5b235b91153911d3f2902e397a18eda5e3b382504c85bb03eaac89"
+    },
+    "pwc/model_language_model_layers_2_self_attn_forget_gate_f_b_proj__NVFP4A16.pt": {
+      "bytes": 4450,
+      "sha256": "213dde267b6e909fdbf093c4ab1e04c1b7634f29b1c5d4a76638ac7202231274"
+    },
+    "pwc/model_language_model_layers_2_self_attn_g_a_proj__FP8_E4M3.pt": {
+      "bytes": 4174,
+      "sha256": "ed692883dad4c49424c7d6c08acb18bbdc28d01e1d30fcd2ade96196a75d7371"
+    },
+    "pwc/model_language_model_layers_2_self_attn_g_a_proj__NVFP4A16.pt": {
+      "bytes": 4174,
+      "sha256": "8834521afb3b71efc5f9ce05b6e7f266693af6406dc60f8db80fb1126eb70f6d"
+    },
+    "pwc/model_language_model_layers_2_self_attn_g_b_proj__FP8_E4M3.pt": {
+      "bytes": 4174,
+      "sha256": "979601d10db2b25d7edf2182b73481e1addd02b3dcf6788c091bc73f463be096"
+    },
+    "pwc/model_language_model_layers_2_self_attn_g_b_proj__NVFP4A16.pt": {
+      "bytes": 4174,
+      "sha256": "ab319ab2a530d6ba95d62e2200b629fa67156a78c05f49f122d65f3b15a58862"
+    },
+    "pwc/model_language_model_layers_2_self_attn_k_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "269b0dfb3ab3d87a05c454db8c723d7a24209eec36565e57078c84158a771abf"
+    },
+    "pwc/model_language_model_layers_2_self_attn_k_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "baf53cce1527d7bd29dd8b31b7473f33eccf2cd31f4b292775b46840f65aa8b0"
+    },
+    "pwc/model_language_model_layers_2_self_attn_o_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "6bd6a7393495bd128f7e272fd6ad0669d1cb5a2dd81a55094d35d4d4b8ab925b"
+    },
+    "pwc/model_language_model_layers_2_self_attn_o_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "8f275d3e7ed517b43592e5ae807ed746e8edbbcde7d76426d6a802a5f8e1ee0f"
+    },
+    "pwc/model_language_model_layers_2_self_attn_q_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "9ba0bcb1fcb53611bf2333d31e1a3f5037df281896207390c4339ef054391381"
+    },
+    "pwc/model_language_model_layers_2_self_attn_q_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "c84151cb3290fa2a0aad95e3e5b91a727c9d5f6bee26dac73008f38f41c743d8"
+    },
+    "pwc/model_language_model_layers_2_self_attn_v_proj__FP8_E4M3.pt": {
+      "bytes": 10304,
+      "sha256": "b39febe3f6b3df94c47e67b0a0768c7c35a16e22652ed9cdea34905e7bd996f2"
+    },
+    "pwc/model_language_model_layers_2_self_attn_v_proj__NVFP4A16.pt": {
+      "bytes": 10304,
+      "sha256": "04941c0ae1273142122ae7e40a7f4d9be759a1f6d09e0c9783047e9eabcb3efe"
+    },
+    "source/config.json": {
+      "bytes": 2801,
+      "sha256": "5434fda05488e3a4a90d80619a349f2b7f77190ab1353562161f3ae791022091"
+    },
+    "source/generation_config.json": {
+      "bytes": 195,
+      "sha256": "2a9736c3d3a24836d662195c61e61b2a216c14c07c527b6f562f7437a6b83184"
+    },
+    "source/model.safetensors": {
+      "bytes": 543348,
+      "sha256": "0bae4178b2e8fe02626db7432364a2c4766c109b69129b307192b6c49736bb84"
+    }
+  }
+}
