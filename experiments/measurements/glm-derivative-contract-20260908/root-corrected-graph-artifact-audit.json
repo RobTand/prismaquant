@@ -1,0 +1,135 @@
+{
+  "schema": "prismaquant.root_corrected_graph_artifact_audit.v1",
+  "result": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/result.json",
+    "sha256": "4126fe86231a1c4ae8dbaee6026bc2781de7ee0a458b2e9a84dd22daadb47e2f",
+    "bytes": 6362692
+  },
+  "backward_calls": 72,
+  "primary_outputs": 6,
+  "numerical_groups": 24,
+  "routed_groups": 16,
+  "minimum_nonzero_gradient_elements": 8388309,
+  "each_gradient_elements": 8388608,
+  "source_files": 16,
+  "source_authenticated_bytes": 73884166070,
+  "source_owners_expired": true,
+  "profiles": [
+    {
+      "bytes": 11439151,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer0_unobserved_isolated_baseline.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "1a5fc62f72722363fca8967f8540c2ebe3099ea4f72bb0917500de05a9d84a6b",
+      "events": 34038,
+      "kernel_events": 3358
+    },
+    {
+      "bytes": 11383421,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer0_nonfinal_fork_replay.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "0137d674323c2c5354d8fc0742c7ff430e72846e3db1972c594cc9fa8f1a7f0d",
+      "events": 33705,
+      "kernel_events": 3358
+    },
+    {
+      "bytes": 11408154,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer0_final_original_owner_replay.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "cf5ce9f772861034f65b3e0eccc94cbb2f320d53cd7f94948131354ef5a3657f",
+      "events": 33769,
+      "kernel_events": 3358
+    },
+    {
+      "bytes": 10603325,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer3_unobserved_isolated_baseline.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "3d186fc7647aa88de891134791dfc537d99837cef00377e791e019bcb5d485b3",
+      "events": 34496,
+      "kernel_events": 2750
+    },
+    {
+      "bytes": 10607956,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer3_nonfinal_fork_replay.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "595b43d8fb4e651830096808136b0da3177574ebdad49aeb4a03c214dd75cb82",
+      "events": 34500,
+      "kernel_events": 2750
+    },
+    {
+      "bytes": 10610860,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer3_final_original_owner_replay.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "8f874151741f2dc4e98c621898cd8d4598a800d431e8a18d75999d2290b2c61d",
+      "events": 34500,
+      "kernel_events": 2750
+    },
+    {
+      "bytes": 17769135,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer4_unobserved_isolated_baseline.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "4cf3a5f9dc4201e0039a2a5bfd2ae557d8b34a9b6d86cd050e3dddda27c3bdf8",
+      "events": 55515,
+      "kernel_events": 4822
+    },
+    {
+      "bytes": 17838326,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer4_nonfinal_fork_replay.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "044e4909203818d7d9c303f61d04c033260f3b32ad326789f5c636345a009172",
+      "events": 55917,
+      "kernel_events": 4822
+    },
+    {
+      "bytes": 17823184,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-corrected-graph-01/layer4_final_original_owner_replay.trace.json",
+      "profile_memory": false,
+      "record_shapes": false,
+      "sha256": "77af7e89e8af793f3196a71d357030e86fb85305d1cf49103ac59cf4fd979c76",
+      "events": 55826,
+      "kernel_events": 4822
+    }
+  ],
+  "netdata": {
+    "sparky": {
+      "samples": 177,
+      "first": 1788886075.0033522,
+      "last": 1788886254.6564167,
+      "max_gap_s": 1.213519811630249
+    },
+    "sparklina": {
+      "samples": 177,
+      "first": 1788886075.0111206,
+      "last": 1788886254.663168,
+      "max_gap_s": 1.2127039432525635
+    }
+  },
+  "metadata": {
+    "graph_calls": 0,
+    "metadata_owners_expired": true,
+    "rows": 512,
+    "telemetry": {
+      "hot_read_misses": 0,
+      "live_artifact_bytes": 0,
+      "peak_artifact_bytes": 0,
+      "peak_auxiliary_bytes": 272891904,
+      "peak_resident_tensor_bytes": 0,
+      "peak_shared_cotangent_reservation_bytes": 0,
+      "prefetch_windows": 0,
+      "read_tensor_bytes": 0,
+      "resident_tensor_bytes": 0,
+      "retired_entries": 0,
+      "written_entries": 0,
+      "written_tensor_bytes": 0
+    }
+  },
+  "peak_cuda_allocated_bytes": 43081193984,
+  "peak_cuda_reserved_bytes": 48043655168
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "action": "d7096b059aaff26d2b84875db6bf768716b87edfc7e233854014c8b632791c80",
+    "receipt": "45712e40b4a327efbda19a02fca888481b98407a2cff02b14a83c80d09f5717f",
+    "payload_sha256": "6608d6c7e8788b0b72355b39ccbc927e204600743698dc1320adbb6ddb65b56e",
+    "snapshot": "517a4ddf8b1dd185618e7ced0bbd56134a9ffd7c",
+    "source_diff_from_commit": [
+      ".pbrun-closure.b98cde0c57e99e8d.json"
+    ],
+    "stdout_tail": ".........................                                                [100%]\n=============================== warnings summary ===============================\ntests/test_glm_original_graph_profile.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n25 passed, 14 warnings in 5.27s\n"
+  },
+  {
+    "action": "b2739f6322304663fdd1b5479d901aa0ce55f8aa4ae225b69a4478b7b6d552a6",
+    "receipt": "1231dd9b443a55b44c220ca9c32018258fe05fa7c5b0316753f8878cdff115ff",
+    "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "snapshot": "de3a8d05cf10e42a199bb54ae30c05e5222f5b25",
+    "source_diff_from_commit": [
+      ".pbrun-closure.dbfd388ec220eb68.json"
+    ],
+    "stdout_tail": ""
+  }
+]

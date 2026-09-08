@@ -1,5 +1,6 @@
 """A portable tag may resolve differently, but its executable content is fixed."""
 from copy import deepcopy
+from subprocess import CompletedProcess
 import json
 
 import pytest
@@ -45,11 +46,11 @@ def test_resolved_image_is_executed_after_content_check(monkeypatch, capsys):
     inspected, executed = [], []
     def inspect(argv, **kwargs):
         inspected.append(argv)
-        return json.dumps([observed])
+        return CompletedProcess(argv, 0, stdout=json.dumps([observed]), stderr="")
     def execute(binary, argv):
         executed.append(argv)
         raise SystemExit(0)
-    monkeypatch.setattr(runner.subprocess, "check_output", inspect)
+    monkeypatch.setattr(runner.subprocess, "run", inspect)
     monkeypatch.setattr(runner.os, "execvp", execute)
     spec = {"container": {"image": "qualified:portable", "content_sha256": digest}}
     with pytest.raises(SystemExit) as stopped:
@@ -66,7 +67,8 @@ def test_changed_portable_tag_refuses_before_container_launch(monkeypatch):
     expected = identity.image_content_sha256(inspection())
     observed = inspection()
     observed["Config"]["Env"] = ["PATH=/changed"]
-    monkeypatch.setattr(runner.subprocess, "check_output", lambda *a, **k: json.dumps([observed]))
+    monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs:
+                        CompletedProcess(argv, 0, stdout=json.dumps([observed]), stderr=""))
     def forbidden(*args):
         pytest.fail("changed runtime reached container launch")
     monkeypatch.setattr(runner.os, "execvp", forbidden)

@@ -1,0 +1,87 @@
+{
+  "schema": "prismaquant.glm_original_graph_invocation.v1",
+  "status": "LAYER0_DIAGNOSTIC_FROZEN_FOR_ROOT_REVIEW_NOT_SUBMITTED",
+  "source": "aa46075ce824ef8629824e5d07a1e580a9654e84",
+  "runtime_commit": "34388d2bfeea0e76830645aab92d15132f766bcf",
+  "source_files_sha256": {
+    "experiments/glm_original_graph_profile.py": "d89a465ea7d9a3ba58a543e553387258a9b38095c5e1f8a7d169bf750bb5f3a3",
+    "experiments/glm_original_graph_source.py": "21bb03c8176285fa3439fe61caf348b8b3f883a58d801020a249bf371070ad86",
+    "tests/test_glm_original_graph_profile.py": "0bae400278a840c7691ba3f5daf82502635ac63d6e543f57cfeeea2d4e3dcc0d",
+    "prismaquant/cost_streaming.py": "3f0ddfc73a4c5d63d48ae0563cb8939946a920964368a84d804efc8ccc353d12",
+    "prismaquant/streaming_model.py": "4d4b75edc2cbf2fde3b5bb0e4c331b8b3705fef77b24700ef3a18cc315de90f9",
+    "prismaquant/layer_streaming.py": "c92b68cbd43124af7d3428d92a0c3ae26efe3ae856890589b94120d07d93f0a9",
+    "prismaquant/sensitivity_probe.py": "647ee0b19d9376a26af6d55e4cbd42a32795d750f543e3fcb303bc3e62ae1491",
+    "prismaquant/perturbed_x_cache.py": "b4b7374513eb631218ada192699d3b62228b671426241f3c1969b81c99c4444c",
+    "prismaquant/memory_management.py": "e19bea17082ad4fc07972c28f7988c46aaa95c9b7a353c5650f64ff2ad16384c",
+    "experiments/joint_operator_windows_profile.py": "2e2b7f44c99adb44f90a08363772a7d754626ce19e81ca77b34717091d33faa6",
+    "experiments/joint_allocator_turnover_profile.py": "e12ba70aa00634529d043d382f691792f4afe56e97d73c59cb09740fb402fb10",
+    "experiments/workspace_netdata.py": "938db1c5d613990324b0397a364439159eb3e4da7daa824f790d96722d4e3361",
+    "experiments/measurements/glm-joint-original-graph-plan-20260908/plan.json": "9ebfb0300a94a07ff6309ad34542be967d668873a9fab396111b40726a7be618"
+  },
+  "command": [
+    "python3",
+    "/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
+    "--cwd",
+    "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "--gpu",
+    "--measurement",
+    "--host-class",
+    "gb10",
+    "--cpus",
+    "6",
+    "--demand",
+    "mem_gb=104",
+    "--gpu-memory-gb",
+    "92",
+    "--priority",
+    "-10",
+    "--timeout-s",
+    "1800",
+    "--detach",
+    "--",
+    "python3",
+    "-m",
+    "tools.tessera_campaign_container",
+    "--spec",
+    "{\"container\":{\"content_sha256\":\"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\",\"image\":\"prismaquant-glm-producer:content-qualified-20260908\",\"mounts\":[{\"source\":\"/mnt/shared\",\"target\":\"/mnt/shared\"},{\"readonly\":true,\"source\":\"/home/rob/.cache/huggingface\",\"target\":\"/hf-cache\"},{\"readonly\":true,\"source\":\"/mnt/shared/models/GLM-5.3-Flash-BF16\",\"target\":\"/mnt/shared/models/GLM-5.3-Flash-BF16\"}]},\"env\":{\"HF_DATASETS_CACHE\":\"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/hf-datasets\",\"HF_HOME\":\"/hf-cache\",\"HF_HUB_OFFLINE\":\"1\",\"MAX_JOBS\":\"1\",\"MIMALLOC_PURGE_DELAY\":\"0\",\"MKL_NUM_THREADS\":\"1\",\"NUMEXPR_NUM_THREADS\":\"1\",\"OMP_NUM_THREADS\":\"1\",\"OPENBLAS_NUM_THREADS\":\"1\",\"PRISMAQUANT_DETERMINISTIC\":\"1\",\"PRISMAQUANT_LAYER_READ_THREADS\":\"4\",\"PRISMAQUANT_RELEASE_SOURCE_PAGES\":\"1\",\"PRISMAQUANT_TMPDIR\":\"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-diagnostic-01/staging\",\"PYTHONDONTWRITEBYTECODE\":\"1\",\"PYTHONPATH\":\"/workspace:/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97/src:/mnt/shared/tessera-measurements/first-model-20260907/inputs/container-compatible-deps:/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/capture-pytest-tools\",\"PYTORCH_ALLOC_CONF\":\"expandable_segments:True\",\"TESSERA_REPO\":\"/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97\",\"TORCHINDUCTOR_CACHE_DIR\":\"/tmp/glm-canonical-inductor\",\"TORCHINDUCTOR_COMPILE_THREADS\":\"1\",\"TRITON_CACHE_DIR\":\"/tmp/glm-canonical-triton\",\"XDG_CACHE_HOME\":\"/tmp/glm-canonical-cache\"}}",
+    "--",
+    "python3",
+    "-m",
+    "experiments.glm_original_graph_profile",
+    "--diagnostic-layer0",
+    "--out",
+    "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-diagnostic-01"
+  ],
+  "scope": "Diagnostic only: original row0/layer0/seed7000, one real baseline backward with transparent tensor hooks. Source config remains45layers, actual consumed source fixed+layers0/1; no512metadata repeat, forks/finals/fullgraph/statistics/PWC/quality or serving claim.",
+  "supersedes_failed_action": "d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e",
+  "diagnostic_tensor_bounds": {
+    "derivation": "Pinned original layer0 config: B1,S512,H4096,HC4,KDA64heads x128; inspected selected module inputs/outputs and their same-dtype gradients.",
+    "maximum_observed_elements": 8388608,
+    "maximum_observed_tensor_bytes": 16777216,
+    "largest_boundaries": {
+      "shape": [
+        1,
+        512,
+        4,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "bytes": 16777216
+    },
+    "largest_fp32_gate": {
+      "shape": [
+        1,
+        512,
+        64,
+        128
+      ],
+      "dtype": "float32",
+      "bytes": 16777216
+    },
+    "maximum_boolean_mask_bytes": 8388608,
+    "maximum_where_result_bytes": 16777216,
+    "maximum_cpu_identity_transfer_and_digest_bytes": 33554432,
+    "existing_workspace_reserve_bytes": 17179869184,
+    "scope": "Per-tensor derived bounds, not a measured combined temporary peak. Operator-internal temporaries remain charged inside the unchanged16GiB workspace; only scalar summaries and hashes persist."
+  }
+}

@@ -885,6 +885,7 @@ def build_streamed_causal_lm(
     require_prefetched_residency: bool = False,
     attn_implementation: str | None = None,
     source_authentication=None,
+    source_derivative=None,
 ) -> StreamedCausalLM:
     """Build the repository's existing streaming context and wrap it."""
     from prismaquant.streaming_model import _build_streaming_context
@@ -902,18 +903,26 @@ def build_streamed_causal_lm(
         attn_implementation=attn_implementation,
         **({'source_authentication': source_authentication} if source_authentication is not None else {}),
     )
-    effective_lookahead = max(0, int(prefetch_lookahead))
-    if context.max_cache_slots is not None:
-        effective_lookahead = min(
-            effective_lookahead,
-            max(0, context.max_cache_slots - 1),
+    runner = None
+    try:
+        effective_lookahead = max(0, int(prefetch_lookahead))
+        if context.max_cache_slots is not None:
+            effective_lookahead = min(
+                effective_lookahead,
+                max(0, context.max_cache_slots - 1),
+            )
+        runner = StreamedCausalLM(
+            context,
+            profile,
+            prefetch_lookahead=effective_lookahead,
+            require_prefetched_residency=require_prefetched_residency,
         )
-    return StreamedCausalLM(
-        context,
-        profile,
-        prefetch_lookahead=effective_lookahead,
-        require_prefetched_residency=require_prefetched_residency,
-    )
+        from .glm_source_derivative import bind_source_derivative
+        bind_source_derivative(runner.model, profile, source_derivative)
+    except BaseException:
+        (context if runner is None else runner).shutdown()
+        raise
+    return runner
 
 
 def _file_sha256(path: Path) -> str:
