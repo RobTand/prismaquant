@@ -681,6 +681,40 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         self._phase, self.active = 'ready', False
 
     @torch.no_grad()
+    def operator_diagnostics(self, *, collect_col_energy: bool):
+        """Reduce complete FP32 GW sums without materializing leaf gradients.
+
+        This is a different diagnostic arithmetic from accumulating gradients
+        rounded to a BF16 parameter dtype. Returned column vectors own compact
+        CPU storage; no operator matrix escapes its existing lease lifetime.
+        One per-target squared-matrix temporary belongs to caller admission.
+        """
+        if self._phase != 'ready':
+            raise RuntimeError('joint statistics diagnostics require a ready observation seal')
+        if type(collect_col_energy) is not bool:
+            raise ValueError('joint statistics column-energy request must be boolean')
+        result = {}
+        for name, (shape, _) in self._geometry.items():
+            operator = self._operators.get((name, None))
+            if operator is None:
+                row = {'g_trace': 0.0}
+                if collect_col_energy:
+                    row['col_energy'] = torch.zeros(shape[1], dtype=torch.float32, device='cpu')
+            else:
+                squared = operator.square()
+                trace = float(squared.sum())
+                if not math.isfinite(trace):
+                    raise RuntimeError(f'joint statistics nonfinite diagnostic for {name}')
+                row = {'g_trace': trace}
+                if collect_col_energy:
+                    row['col_energy'] = squared.sum(dim=0).to('cpu', copy=True)
+                    if not bool(torch.isfinite(row['col_energy']).all()):
+                        raise RuntimeError(f'joint statistics nonfinite column diagnostic for {name}')
+                del squared
+            result[name] = row
+        return result
+
+    @torch.no_grad()
     def project(self, delta_weights):
         if self._phase != 'ready':
             raise RuntimeError("joint statistics is not ready for candidate projection")

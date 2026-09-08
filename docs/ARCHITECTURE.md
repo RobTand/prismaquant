@@ -1,7 +1,15 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `feat/joint-statistics-target-windows`. Stamps
+As of: 2026-09-08 · `feat/joint-operator-windows`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `feat/joint-operator-windows`) for sealed operator
+diagnostics (#392). The statistics lease reduces each complete FP32 GW sum
+into a trace and optional independently owned CPU column vector. It requires
+no parameter-gradient plane, and cancellation occurs before squaring. This
+arithmetic differs from norms of BF16 leaf gradients; a caller must identify
+that difference and admit one matrix scratch separately. This accessor alone
+does not enable streamed replay. Gate: `tests/test_joint_operator_diagnostics.py`.
 
 Re-stamped (2026-09-08, `feat/joint-statistics-target-windows`) for whole-target
 operator-statistics planning (#385). The planner and both existing joint
