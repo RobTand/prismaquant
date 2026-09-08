@@ -21,10 +21,13 @@ The integrated source at `623fc3a4ce027a01cc2f0155f8714a410f1ac19c` passed
 2.10.0+cpu. PB distributed eight independent focused files, one CPU and 4 GiB
 per action, and one original-layout GLM file, one CPU and 16 GiB. Native math
 threads were one. The focused files passed 142 tests; the streamed GLM file
-passed all 12 tests in 238.40 seconds. The four skips were the opt-in native
-writer profile, native selected-encoder memo check, and CUDA-only priced-input
-and materialization checks. They are not CPU coverage. No module was missing
-from collection. The touched runtime module also passed a portable PB compile.
+passed all 12 tests in 238.40 seconds. Each of the bounded-sidecar,
+selected-source, priced-export-input and materialization files reported one
+skip. The first two are the explicit native writer profile and CUDA memo gate;
+the latter files have producer-dependent checks, whose exact skip reasons were
+not retained by this invocation's report options. Skips are not coverage. All
+nine requested files collected tests. The touched runtime module also passed
+a portable PB compile.
 
 The root independently checked terminal exits, cleanup, canonical CAS receipts,
 result bytes and executed Git snapshots. Every integrated snapshot differs from
