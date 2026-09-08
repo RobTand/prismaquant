@@ -316,6 +316,28 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     This extends the source loader's header/dtype accounting. No source
     forward or calibration accumulation occurs. The existing plane-keyed
     encoder memo retains at most one compatible batch's factors.
+
+    **Every charge is a delta, and every delta is a traced allocation.** Each
+    term below names the line that allocates what it bounds and the shape and
+    dtype that line allocates, so a reviewer can read the charge against the
+    code rather than against a multiplier's plausibility
+    (RobTand/prismaquant#390). Two terms are not traceable from this
+    repository and stay as the conservative bounds they were, each with a
+    comment naming its gap: the export archive's pickle-and-directory
+    metadata, whose size is a function of pickle framing rather than of any
+    shape or dtype, and the producer's own encoder working set inside
+    ``tessera.export.encode_linear``.
+
+    **What this plan cannot state, and says so instead.** A delta plan is over
+    a process floor -- interpreter, torch, the CUDA runtime, the pages the
+    process has touched -- and that floor is a property of the box and the
+    run, not of the roster. Nothing here can measure it: the planner runs in
+    the dispatcher's process, not the row's. So the pre-run term stays exactly
+    what it was, the caller's ``headroom_gb``, and ``baseline_policy`` says
+    so; the row measures its own floor at its first
+    ``CaptureMemoryGuard.check`` and stamps it beside this plan. Inventing a
+    torch-plus-CUDA constant here would have been a third quantity, unmeasured
+    on the box it was spent on.
     """
     import math
     if not unit_shapes or type(anchor_batch_size) is not int or anchor_batch_size < 1:
@@ -329,8 +351,15 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     weights = sum(source['unit_source_weight_bytes'].values())
     widest_weight = max(math.prod(shape)*4 for shape in unit_shapes.values())
     widest_h = max(shape[1]**2*4 for shape in unit_shapes.values())
-    widest_x = max(min(counts[name], max_act_rows)*shape[1]*4
-                   for name, shape in unit_shapes.items())
+    # One capture entry as the loader holds it, in the loader's own arithmetic:
+    # tessera_calibration_cache._capture_storage_bytes, which is the FP32 H
+    # ([in, in]) plus the FP32 X ([min(count, max_act_rows), in]) of ONE unit.
+    # Summing a widest H and a widest X measured on different units would
+    # charge an entry no unit has.
+    widest_capture_entry = max(
+        4*(shape[1]**2 + min(counts[name], max_act_rows)*shape[1])
+        for name, shape in unit_shapes.items())
+    memo_capacity = anchor_batch_size
     terms = source['terms']
     common = dict(selected_source_weight_bytes=weights,
                   declared_headroom_bytes=terms['declared_headroom_bytes'])
@@ -341,20 +370,68 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                                           reverse=True)[:min(prefetch_workers, cache_slots)]))
     encoding = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
-        encoder_memo_bytes=anchor_batch_size*max(
+        # What one memo entry RETAINS, from the keywords
+        # tessera.export.ActivationSource.for_unit returns: 'ldl', the
+        # [in, in] FP32 factor tessera.compensate.block_ldl builds, and up to
+        # two FP32 [in] refit metrics, the base and trailing diagonal powers
+        # (h/h.mean()).pow(alpha). Four bytes an element gives in**2*4 + in*8.
+        # A 'hessian' objective binds the resident H itself by reference and
+        # adds nothing. Sized by the capacity the plan publishes, not by the
+        # anchor batch width directly, so the memo policy has one owner and a
+        # change to it (RobTand/prismaquant#389) moves one field.
+        encoder_memo_bytes=memo_capacity*max(
             shape[1]**2*4+shape[1]*8 for shape in unit_shapes.values()),
-        factorization_scratch_bytes=4*widest_h,
+        # What one for_unit call holds TRANSIENTLY, beyond the retained factor
+        # above. Two stages, and they are sequential rather than concurrent:
+        # tessera.cached_unit.tensor_identity, which the capture seal and the
+        # per-unit seal check both call, materialises one CPU FP32 copy of H
+        # and then its bytes object; and the factorisation holds
+        # tessera.compensate.regularize_hessian's H.float().clone() while
+        # tessera.compensate.block_ldl's triangular solve writes an
+        # [in, block] FP32 output, block <= in. Each stage peaks at two FP32
+        # copies of the widest H.
+        factorization_scratch_bytes=2*widest_h,
+        # GAP, left at its previous bound. The PrismaQuant-side copies are
+        # traceable and come to eight bytes an element: the BF16 device copy
+        # at the anchor call site, the FP32 reconstruction
+        # tessera.decode.reconstruct_unit returns, and the BF16 cast in
+        # tessera_render.encode_tessera_unit. What is NOT traceable from here
+        # is the producer's own working set inside encode_linear, so the
+        # sixteen bytes an element this has always charged stays as the
+        # conservative bound rather than being replaced by a smaller number
+        # that omits the encoder (RobTand/prismaquant#390).
         compatible_batch_weight_bytes=anchor_batch_size*widest_weight*4,
-        entry_validation_bytes=2*(widest_h+widest_x),
+        # tessera_calibration_cache.prefetch_capture's legacy branch: one
+        # entry's CPU payload from torch.load and the device copy made by
+        # 'acts[name], hessians[name] = x.to(device), h.to(device)' are both
+        # live until the following 'del payload'. The finite check in
+        # _validate_tensors allocates BOOL masks, one byte an element and one
+        # at a time under the short-circuiting 'or', so it never raises this
+        # peak above the two FP32 copies.
+        entry_validation_bytes=2*widest_capture_entry,
         source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight)
     export_inputs = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
-        # The unchanged Torch serializer pauses after each tensor record;
-        # verified prefix advice bounds visible file pages to one record.
-        # Counts retain the whole census, not this subset. The metadata bound
-        # also covers the writer's small buffered tail and central directory.
+        # tessera_campaign._save_hessian_capture_with_page_release pauses the
+        # unchanged Torch serializer after each 'data/' record and advises the
+        # stable prefix, so the visible file pages are one tensor record: the
+        # widest FP32 [in, in] H, the dtype tessera_calibration_cache.
+        # _validate_tensors requires.
+        #
+        # GAP in the second half. len(counts)*16384 bounds data.pkl and the
+        # records the release helper does not advise, plus the zip central
+        # directory. That size is a function of pickle framing and of the
+        # roster's name lengths, not of any shape or dtype, so there is no
+        # allocation to derive it from and it is left as it was
+        # (RobTand/prismaquant#390). Counts retain the whole census, not this
+        # subset.
         export_input_page_window_bytes=widest_h+len(counts)*16384,
-        serialization_scratch_bytes=2*widest_h)
+        # torch.serialization._save stages ONE CPU copy per non-CPU storage
+        # before write_record, either storage.cpu() or a pinned
+        # torch.empty(num_bytes, uint8) it copies into, and it is live only
+        # across that record. The selected row's Hessians are on the device,
+        # so the copy happens; one copy, not two.
+        serialization_scratch_bytes=widest_h)
     phases = dict(source_preparation=preparation, export_inputs=export_inputs,
                   resident_anchors=encoding)
     return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases,
@@ -363,7 +440,11 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         source_header_sha256=source['source_header_sha256'],
         export_input_writer_policy='verified-tensor-record-prefix',
         encoder_memo_policy='compatible-anchor-batch-width',
-        encoder_memo_capacity=anchor_batch_size,
+        encoder_memo_capacity=memo_capacity,
+        # The only pre-run term is the caller's declared headroom. The row
+        # measures its own process floor and stamps it beside this plan; see
+        # the docstring for why nothing here invents one.
+        baseline_policy='declared-headroom-pre-run-measured-in-row',
         source_forward_count=0)
 
 

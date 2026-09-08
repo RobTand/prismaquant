@@ -158,6 +158,19 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     * the selection's retained scoring rows, ``max_act_rows x in`` in fp32.
 
     plus the spec's declared headroom for the forward pass and the encoder.
+
+    **No process baseline is charged here, deliberately.** A phase plan states
+    deltas, and the floor those deltas sit on -- interpreter, torch, the CUDA
+    runtime, the pages the row's process has touched -- is a property of the
+    box the row lands on, which this planner never enters. The two honest
+    options were a baseline recorded from a prior receipt with its host and
+    runtime scope, and leaving the spec's declared headroom as the only
+    pre-run term. This takes the second: no receipt at this head carries a
+    scoped baseline, and a torch-plus-CUDA constant invented here would be a
+    third quantity, unmeasured on the box it was spent on. The selected plan
+    records that choice in ``baseline_policy``, and the row measures its own
+    floor at its first ``CaptureMemoryGuard.check`` and stamps it on its
+    receipt (RobTand/prismaquant#390).
     """
     gib = 1024 ** 3
     if "--streaming" in spec['campaign_argv']:

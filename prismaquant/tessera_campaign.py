@@ -4094,9 +4094,21 @@ def _main(argv, *, source_scope) -> int:
             headroom_gb=args.streaming_cache_headroom_gb,
             anchor_batch_size=args.anchor_batch_size)
         if device == 'cuda':
-            if selected_resources['memory_bytes'] > selected_guard.cap_bytes:
-                raise RuntimeError('selected anchor cgroup budget is smaller than its checked phase plan')
+            # Read first, then admit. The plan states DELTAS over whatever this
+            # process already holds -- interpreter, torch, the CUDA runtime,
+            # every page touched so far -- while the cap is an absolute cgroup
+            # limit, so admitting a plan against the raw cap compared two
+            # different quantities and left the difference to declared headroom
+            # (RobTand/prismaquant#390). The guard's first reading is that
+            # floor, measured in this row's own process. The guard's own
+            # refusal arithmetic needs no change: its readings are already
+            # absolute, so current + reserved + reserve_bytes against
+            # cap - margin is one unit throughout, and subtracting the baseline
+            # there would count the floor twice.
             selected_guard.check('before_selected_capture_identity')
+            if (selected_resources['memory_bytes'] >
+                    selected_guard.cap_bytes - selected_guard.baseline_bytes()):
+                raise RuntimeError('selected anchor cgroup budget is smaller than its checked phase plan')
     if args.capture_calibration_out or args.calibration_cache:
         from . import tessera_calibration_cache as calibration_store
         hi, lo = census_token_counts(census, {})
@@ -4235,7 +4247,11 @@ def _main(argv, *, source_scope) -> int:
         calibration_source = th.activation_source(hessians, hessian_identity)
 
     _activation_kwargs_for = _activation_kwargs_memo(calibration_source, weights, device,
-        max_entries=args.anchor_batch_size if selected_source else None,
+        # The capacity the plan CHARGED, not the batch width it was derived
+        # from, so the memo policy has one owner (RobTand/prismaquant#389 can
+        # move it without the charge and the construction drifting apart).
+        max_entries=(selected_resources['encoder_memo_capacity']
+                     if selected_source else None),
         resource_check=None if selected_guard is None else selected_guard.check,
         factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
                               if selected_source else 0))

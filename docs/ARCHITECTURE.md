@@ -1,7 +1,36 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integrate/dispatch-admissible-partition-20260908`. Stamps
+As of: 2026-09-08 · `triage/selected-anchor-plan-baseline`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `triage/selected-anchor-plan-baseline`) for the
+selected-anchor plan's derived terms and its measured process baseline (#390).
+Every charge in `autoscale.selected_anchor_resources` now names the line that
+allocates what it bounds and the shape and dtype that line allocates: the
+export file-page window is one FP32 `[in, in]` Hessian record, serialization
+scratch is the single CPU staging copy `torch.serialization._save` makes per
+device storage, entry validation is one capture entry's CPU payload beside its
+device copy at the loader's own `_capture_storage_bytes` arithmetic, the
+factorization transient is two FP32 copies of the widest Hessian across the
+producer's sequential seal and factorise stages, and the encoder memo is sized
+by the capacity the plan publishes rather than by the anchor batch width, so
+the charge and the memo's construction have one owner. Two terms are stated as
+gaps and left unchanged: the export archive's pickle-and-directory metadata,
+whose size follows pickle framing rather than any shape or dtype, and the
+producer's own working set inside `encode_linear`.
+The plan states deltas; `CaptureMemoryGuard` reads absolute process bytes.
+The guard now records its first reading as a measured baseline and reports
+`peak_checkpoint` and a per-phase-prefix peak map, the selected row stamps
+that baseline beside its plan, and selected admission compares the plan with
+the cap less the baseline instead of with the raw cap. The guard's own refusal
+arithmetic is unchanged: its readings are already absolute. No pre-run baseline
+is invented for the dispatcher; `baseline_policy` records that declared
+headroom remains its only pre-run term.
+Gates: `tests/test_tessera_selected_source.py` and the native GLM selected
+row in `tests/test_glm_campaign_streaming.py`, which asserts the guard's peak
+less the measured baseline against the plan with declared headroom pinned to
+zero. This bounds attribution and admission arithmetic; it is not a full-GLM
+fit claim and it does not price process growth the plan does not own.
 
 Re-stamped (2026-09-08, `integrate/dispatch-admissible-partition-20260908`)
 for failed-fit replan preservation. The dispatcher derives all proposed
