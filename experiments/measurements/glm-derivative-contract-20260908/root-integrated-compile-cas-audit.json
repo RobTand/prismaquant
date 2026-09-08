@@ -1,0 +1,16 @@
+[
+  {
+    "action": "d9b6fa26cbd6a33d8570c15ad406825db326fd171e7592469d62d60e4182389e",
+    "receipt": "3d5d5783dbc7932ada956cb0c41d82f33cce67d730821d9ed9e72386e8ce943c",
+    "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "snapshot": "343122d37d24233dc38cc8341c47cbc21b9148be",
+    "source_diff_from_commit": [
+      ".pbrun-closure.c4069a2d7fca90e8.json",
+      "experiments/measurements/glm-derivative-contract-20260908/README.md",
+      "experiments/measurements/glm-derivative-contract-20260908/root-corrected-graph-artifact-audit.json",
+      "experiments/measurements/glm-derivative-contract-20260908/root-corrected-graph-cas-audit.json",
+      "experiments/measurements/glm-derivative-contract-20260908/root-integrated-cpu-cas-audit.json"
+    ],
+    "stdout_tail": ""
+  }
+]

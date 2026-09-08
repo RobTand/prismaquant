@@ -59,7 +59,7 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False):
         install=lambda layer, **kw: events.append(('install', layer)),
         unload=lambda layer: events.append(('unload', layer)),
         settle_prefetched_layers=lambda indices: events.append(('settled', tuple(indices))))
-    runner = SimpleNamespace(context=context, num_layers=1, prefetch_lookahead=1,
+    runner = SimpleNamespace(model=torch.nn.Module(), context=context, num_layers=1, prefetch_lookahead=1,
         require_prefetched_residency=True, profile=object(), device='cpu',
         layer_index_for_qname=lambda name: 0)
     monkeypatch.setattr(bridge, '_bound', lambda record, label: tmp_path / 'capture.json')

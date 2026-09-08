@@ -1,0 +1,148 @@
+{
+  "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/cpu-preflight-final-01/result.json",
+  "sha256": "c01724489bba2a2c59732be48895ca2cda1653a3cfe35f1a9e2fb30de210bc15",
+  "bytes": 458317,
+  "status": "cpu_preflight_complete_native_not_run",
+  "source_files": 14,
+  "source_keys": 3103,
+  "source_bytes": 73880076968,
+  "cpu_authenticated": [
+    {
+      "actual_sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943",
+      "bytes_hashed": 5939,
+      "descriptor_identity": {
+        "bytes": 5939,
+        "ctime_ns": 1788063256321354815,
+        "device": 54,
+        "inode": 1370,
+        "mtime_ns": 1788063256321354815
+      },
+      "expected_sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943",
+      "maximum_hash_buffer_bytes": 8388608,
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/config.json"
+    },
+    {
+      "actual_sha256": "e6007bd58fb7e07f9fe69544257ee2713f252ef5855bbf685b48c991d524ef0f",
+      "bytes_hashed": 4083163,
+      "descriptor_identity": {
+        "bytes": 4083163,
+        "ctime_ns": 1788064861054600302,
+        "device": 54,
+        "inode": 4574,
+        "mtime_ns": 1788064861054600302
+      },
+      "expected_sha256": "e6007bd58fb7e07f9fe69544257ee2713f252ef5855bbf685b48c991d524ef0f",
+      "maximum_hash_buffer_bytes": 8388608,
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model.safetensors.index.json"
+    }
+  ],
+  "descriptors_open": 0,
+  "violations": [],
+  "selected_payload_files": [
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00001-of-00120.safetensors",
+      "bytes": 5358221856,
+      "expected_sha256": "235676346453d461485e6be4677d03efe7bc72fc6e2f63e82e8c289e89bdbbbc",
+      "key_count": 54,
+      "keys_sha256": "349d42cff1b407d888ef895c540ff2f54ead9d1694c962ee5a5028ee983000d5"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00029-of-00120.safetensors",
+      "bytes": 5362731784,
+      "expected_sha256": "56ef332e7e31bc0c0412c442a343d57e6a9db52679235712f040f5e8209a4845",
+      "key_count": 26,
+      "keys_sha256": "ade0e0de01b447f712c7437101ed352ccf9b96a321331f72948c6b9634560e42"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00057-of-00120.safetensors",
+      "bytes": 5353688600,
+      "expected_sha256": "096a5ea11d64dcb97e2c13dfb5f584f1ab3bf43b7eeb1a024c1499df1154fb31",
+      "key_count": 314,
+      "keys_sha256": "3ddf8542a792da5ce1b536011c31a62a571319cfed910d5058ec29f42b1feded"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00058-of-00120.safetensors",
+      "bytes": 5368753872,
+      "expected_sha256": "d9554ddd98762c1e2065d52ffc267f2237843d9a3d937068e804110770f7c7fd",
+      "key_count": 320,
+      "keys_sha256": "25ccf7254b83f730f096c6d67622af01399026eb47dfaf6bd2dfd1fe8a3cd0e7"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00059-of-00120.safetensors",
+      "bytes": 5354097856,
+      "expected_sha256": "2d38c61b4ff9df2dd83c74c7ac22781c7ce6fd26eab8e12a34428bcc69fc968b",
+      "key_count": 257,
+      "keys_sha256": "7d18441fa30dd6dc069987acaa19d297563799aa3dd045a1ccc9933991f2842c"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00087-of-00120.safetensors",
+      "bytes": 5354098040,
+      "expected_sha256": "906baa145573015fbeb7c50167d3cc43d1dcda0146eba727aabf49ed28f06792",
+      "key_count": 194,
+      "keys_sha256": "b564b9bfbae57c4a6a107feda22cf9c1c69506d42480f15bc2f27eab65e61d32"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00088-of-00120.safetensors",
+      "bytes": 5368753864,
+      "expected_sha256": "f863d001895a3db588c76f41fbee804110ec5db1638badda9c2c264a298444bc",
+      "key_count": 320,
+      "keys_sha256": "323598976f3581e0b86f6af938e62bbdf16653bab4a55f26629a31ebcf731931"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00089-of-00120.safetensors",
+      "bytes": 5368753680,
+      "expected_sha256": "f21b7b2f204ecb817c71c62056b05d0e83fe93ed1319b730be96945b289cca72",
+      "key_count": 320,
+      "keys_sha256": "ffdb930e1f095be3abdec6ae4f2432ad46c36574bf03267ea9c93e3972fb1e4d"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00090-of-00120.safetensors",
+      "bytes": 5362973128,
+      "expected_sha256": "2f2c6bb9b1dd5d0c19841379c6e9c7de3b2a71d6303db48deac80adfc6fafbe8",
+      "key_count": 58,
+      "keys_sha256": "bce0cef669e43f05bec0c03a655c89f8fd1b8c980c81d844c65bfdd113f42367"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00106-of-00120.safetensors",
+      "bytes": 5354106360,
+      "expected_sha256": "b6f76d74f4b614c8a68986b24d9a2ec7a95c649a1144c10bab00d9957e6d320f",
+      "key_count": 84,
+      "keys_sha256": "ccc7e56f64b682b81fd7e65bfc3e4cc7ded4662f50171cc6c1e89bee78a83a31"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00107-of-00120.safetensors",
+      "bytes": 5368753872,
+      "expected_sha256": "4b71427a2684c8ca9970f10528b2cbc852eaaea31d1a69b0819d8a4a6ff3af4e",
+      "key_count": 320,
+      "keys_sha256": "6d4dbe537b1b6e6948c5b529c921a977a8364e8414cab8fc886cb7ae4dd1943d"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00108-of-00120.safetensors",
+      "bytes": 5368753784,
+      "expected_sha256": "ebbd4704500f68a0f8b1a623fa986c5a188376fa08457b0b245b1a90258e58d4",
+      "key_count": 320,
+      "keys_sha256": "b50967d86a63aa7ce8538ec078d6af6436a44789795e1b8520c0ebaa2f72a2ac"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00109-of-00120.safetensors",
+      "bytes": 5362972744,
+      "expected_sha256": "ff79a0d3f8a641e74eafc78b91251118c5db278de3cb5545bccbfdb60fc1c0b7",
+      "key_count": 168,
+      "keys_sha256": "f3aa03e1f165bdbf14739120ab3e8f272e686d2600191a5c78efc0f1f03a3b0f"
+    },
+    {
+      "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00120-of-00120.safetensors",
+      "bytes": 4173417528,
+      "expected_sha256": "0c65310ff08488ae4385d2e146f325f73a87f46cb9abbe0742fb6a24a0dae9de",
+      "key_count": 348,
+      "keys_sha256": "df9424af4c3756b589b453f5d9b0a4af492b1b7a298c1076cd0b6e9f44c395f8"
+    }
+  ],
+  "unselected_manifest_files": [
+    "/mnt/shared/models/GLM-5.3-Flash-BF16/chat_template.jinja",
+    "/mnt/shared/models/GLM-5.3-Flash-BF16/generation_config.json",
+    "/mnt/shared/models/GLM-5.3-Flash-BF16/processor_config.json",
+    "/mnt/shared/models/GLM-5.3-Flash-BF16/tokenizer.json",
+    "/mnt/shared/models/GLM-5.3-Flash-BF16/tokenizer_config.json"
+  ]
+}

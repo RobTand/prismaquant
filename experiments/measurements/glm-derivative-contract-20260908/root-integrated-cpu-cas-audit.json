@@ -1,0 +1,62 @@
+[
+  {
+    "action": "957404e3642555c67a9e74829a100f664efb5ea04bebd2d36f153095f9f7a64f",
+    "receipt": "0f372cf82592072c09ca9691e2560dd8051e2de5f7842cca79f4c4825e595fb9",
+    "payload_sha256": "5ed71294a4dc659bcd4d3a8d603779a4c512814e38d4688ded8d235903883520",
+    "snapshot": "309f253b760030b50976892d67d3d2b5245daec5",
+    "source_diff_from_commit": [
+      ".pbrun-closure.25bde9519aa214b2.json"
+    ],
+    "stdout_tail": "ative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\n  /home/rob/tmp/prismabuild-checkouts/957404e36425.qw4bwfbj/checkout/prismaquant/glm_source_derivative.py:109: DeprecationWarning: co_lnotab is deprecated, use co_lines instead.\n    not callable(getattr(actual, name))]\n\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[co_filename]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[co_filename]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[co_flags]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[co_flags]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\ntests/test_glm_source_derivative.py::test_callable_auth_compares_source_metadata_flags_constants_and_nested_code[none]\n  /home/rob/tmp/prismabuild-checkouts/957404e36425.qw4bwfbj/checkout/prismaquant/glm_source_derivative.py:110: DeprecationWarning: co_lnotab is deprecated, use co_lines instead.\n    return all(equal(getattr(actual, name), getattr(wanted, name)) for name in fields)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n371 passed, 73 skipped, 1 xfailed, 31 warnings in 15.71s\n"
+  },
+  {
+    "action": "aeb47e8e2fb3d9d3cc90bd29d395d825299ac6b96936c1adc68623b1b6fa52fe",
+    "receipt": "480693b3d900057617a26e18dc1c3db772eec0dad251d870570bc0994f807b57",
+    "payload_sha256": "6087a28a0f19c6a3f69dacca78acb7a4341009f4abca6abd326f9612d0cfd63e",
+    "snapshot": "2c55ddedbd9653f5f02e9a3ff81d273ea831b113",
+    "source_diff_from_commit": [
+      ".pbrun-closure.bfd5ea98da62179b.json"
+    ],
+    "stdout_tail": "..................................................                       [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n50 passed, 14 warnings in 6.06s\n"
+  },
+  {
+    "action": "12ba8977d5b89a175047e7f208e50418c7fa67826f72e97405d3e41f5e502191",
+    "receipt": "a89260ccb9068b07c55821e5b70777ca178424dd3e7312bf91101ade4953e044",
+    "payload_sha256": "8c5af322c80749f17c4c95c6d8850910bdc8f36dba290fcf93145b6a6b4576f1",
+    "snapshot": "783edeb4f71392c0d81d4f3d69abc87aa43d76c6",
+    "source_diff_from_commit": [
+      ".pbrun-closure.9db30d4f62e7401d.json"
+    ],
+    "stdout_tail": "...................................                                      [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n35 passed, 14 warnings in 6.31s\n"
+  },
+  {
+    "action": "4c54f4d5da0158d62936a5c5e13e820f6859e3ce0b4315fe9856777b1432ba6b",
+    "receipt": "4275d8720be92644c42a5be1b813e9d35c3d2d6bc17e773ea1ec70dd4089c1bf",
+    "payload_sha256": "87b712a941820689907e4870be9c4738e2ae42a89cbc64419f39c2ab593a2742",
+    "snapshot": "ce112ffb6993428a33f3f4001aa749e5626b7331",
+    "source_diff_from_commit": [
+      ".pbrun-closure.e23d993c09364e0a.json"
+    ],
+    "stdout_tail": ".......................................................                  [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\ntests/test_selected_source_authentication.py::test_fifo_source_replacement_refuses_without_blocking\n  /home/rob/.local/share/uv/python/cpython-3.12.11-linux-x86_64-gnu/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=2917442) is multi-threaded, use of fork() may lead to deadlocks in the child.\n    self.pid = os.fork()\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n55 passed, 15 warnings in 7.38s\n"
+  },
+  {
+    "action": "639886956cfa87d36839d7c073898bc10b57034de6b9265dcea83cd75cd7ebeb",
+    "receipt": "d6fadab265a3fbea17a8b1c3216716cec30a3b5c1afd4ef2e32f29ecfaed1470",
+    "payload_sha256": "790b330bb0edc4097907b01cf29f5e41909dae40c16c2c799c5e317eb6746e1a",
+    "snapshot": "6bf7443d971fe9255f9e0ca27448a76d2548b636",
+    "source_diff_from_commit": [
+      ".pbrun-closure.5fcdd83b538e82b1.json"
+    ],
+    "stdout_tail": "........................................................................ [ 91%]\n.......                                                                  [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\ntests/test_verified_capture_load.py::test_archive_layout_refuses_before_cpu_decode[duplicate]\n  /home/rob/.local/share/uv/python/cpython-3.12.11-linux-x86_64-gnu/lib/python3.12/zipfile/__init__.py:1611: UserWarning: Duplicate name: 'archive/data/0'\n    return self._open_to_write(zinfo, force_zip64=force_zip64)\n\ntests/test_verified_capture_load.py::test_scalar_finite_reduction_empty_and_constant_allocation\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/profiler/profiler.py:217: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.\n    _warn_once(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n79 passed, 16 warnings in 6.01s\n"
+  },
+  {
+    "action": "44ad4c67917824e54a5ab28e1f37894dfc75c8284d648ec630df1ed6a35cbcbd",
+    "receipt": "43739bf9a033b4a7d9dfbb0bc25123b3e5bc3f333a31009e4de38884403c900e",
+    "payload_sha256": "ee274504f6375bef7a4f5bed432d27f6f446b88501189f8b5838bb37d7efbf6c",
+    "snapshot": "3d1d04bdba20e6285c85dc41d79ad55f3ffbb1c2",
+    "source_diff_from_commit": [
+      ".pbrun-closure.fba449ebf7d79762.json"
+    ],
+    "stdout_tail": "..........................................                               [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n42 passed, 14 warnings in 7.88s\n"
+  }
+]
