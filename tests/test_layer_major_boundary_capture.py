@@ -166,6 +166,20 @@ def test_v2_policy_is_closed_and_v1_default_cannot_change_order(tmp_path):
             normalize_boundary_storage(altered)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA token-device regression')
+def test_original_cpu_tokens_compare_with_prepared_cuda_tokens(tmp_path):
+    _, context, runner, _ = fixture()
+    prepare = runner._prepare
+    def prepare_cuda_ids(ids):
+        prepared, positions, hidden, embeddings, mask = prepare(ids)
+        return prepared.cuda(), positions, hidden, embeddings, mask
+    runner._prepare = prepare_cuda_ids
+    with owner(tmp_path) as storage:
+        batches = runner.capture_layer_major_boundaries([draw()[0:1]], storage=storage)
+        assert len(batches) == 1
+    assert context.active == set()
+
+
 def test_actual_shared_state_profile_keeps_every_batch_and_shared_adjoint(tmp_path, monkeypatch):
     from test_streamed_boundary_artifacts import _shared_run
     seen = []

@@ -789,7 +789,7 @@ class StreamedCausalLM:
                                 if next_batch >= len(states):
                                     raise RuntimeError("layer visitor repeated a calibration batch")
                                 ids, hidden, pass_state = states[next_batch]
-                                if not torch.equal(input_ids, ids):
+                                if not torch.equal(input_ids.to(device=ids.device), ids):
                                     raise RuntimeError("layer visitor changed calibration batch order or tokens")
                                 if exact:
                                     index, batch, cpu_hidden, _unused = next(resident)
