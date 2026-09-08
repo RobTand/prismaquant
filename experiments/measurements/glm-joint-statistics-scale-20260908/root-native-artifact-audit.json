@@ -1,0 +1,39 @@
+{
+  "schema": "prismaquant.root_statistics_scale_artifact_audit.v1",
+  "complete": true,
+  "result_sha256": "58e237a0d2df0864981fa94efbb8050a755bdbd0a9f18f49a51af2344a59f389",
+  "windows": [
+    {
+      "index": 0,
+      "sampled_values_verified": 65472,
+      "max_absolute_sample_error": 6.984919309616089e-09,
+      "matrix_bytes": 34326183936,
+      "projected_rows": 682,
+      "native_asserted_exact_cotangents": 341,
+      "native_asserted_expired_matrix_backings": 1023
+    },
+    {
+      "index": 1,
+      "sampled_values_verified": 65472,
+      "max_absolute_sample_error": 5.587935447692871e-09,
+      "matrix_bytes": 34326183936,
+      "projected_rows": 682,
+      "native_asserted_exact_cotangents": 341,
+      "native_asserted_expired_matrix_backings": 1023
+    }
+  ],
+  "second_admission_released_reserved_bytes": 34351349760,
+  "final_native_asserted_owner_expiration": [
+    869,
+    869
+  ],
+  "final_residual_allocated_bytes": 67109376,
+  "netdata": {
+    "sha256": "f59c9134d64ebc26eb8ced6225b63304b3206acebf02ae7bf38a1e495f95a77d",
+    "host_samples": {
+      "sparky": 13,
+      "sparklina": 13
+    }
+  },
+  "scope": "Independent saved scalar/oracle and artifact/geometry audit bound to canonical source/receipt. Full cotangent and weak-owner observations were native assertions in the reviewed harness, not a second native run. Shape fixture only, no actual GLM/PWC/quality claim."
+}

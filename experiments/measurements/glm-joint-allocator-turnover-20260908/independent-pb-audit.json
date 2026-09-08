@@ -1,0 +1,12 @@
+[
+  {
+    "action": "b95221b1984bddbae27475fe0b788b2d596ca191d6c526b43ef7ee74654e3cb2",
+    "receipt": "209019a0d5187fbc6cf3c052f28f87479e7e2e8ff9e55e541fc2d8efd1e2b0eb",
+    "payload_sha256": "6bb20c25ee6d2ef0156d76b398e7a7adae189922018417bf416c1469faa1652e",
+    "snapshot": "74ea90449636d31260270aeb7ab84d484ceed185",
+    "source_diff_from_commit": [
+      ".pbrun-closure.3b6171035cad8430.json"
+    ],
+    "stdout_tail": "{\"schema\": \"prismaquant.tessera_campaign_container.v1\", \"requested_image\": \"prismaquant-glm-producer:content-qualified-20260908\", \"image_id\": \"sha256:9f9b9f05b17531399ba66dc6415b054cf5d68c82270626d0e9150e75c808435f\", \"image_content_sha256\": \"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\", \"declared_content_sha256\": \"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\", \"uid\": 1000, \"gid\": 1000}\nUSDT:2026-09-08 13:16:06 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 13:16:10 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\nUSDT:2026-09-08 13:16:10 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\nUSDT:2026-09-08 13:16:10 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\n{\"status\": \"complete\", \"path\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-allocator-turnover-01/native-01/result.json\", \"sha256\": \"e1e91478c4c089ee7f834da3180e7ff1065fec4d64d8b9d4aca6f7b604691ea2\"}\n"
+  }
+]

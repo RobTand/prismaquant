@@ -1,0 +1,82 @@
+[
+  {
+    "action": "c1caf4d9ff3ca12450a4b28b304daf71b3cbc5c2536a1d8e7b59d00fc558d747",
+    "receipt": "c083193fcdf416fe62328b78ec41cf2a1cb00a725de2d3878f5188d20d870d95",
+    "payload_sha256": "03432fd4a4873cc7ed45a928f218431468335144d5eea83dc0f23f0536ef60a0",
+    "snapshot": "f6469e318f0d1d823dc88873f4d6b448241d166a",
+    "source_diff_from_commit": [
+      ".pbrun-closure.bf01fb336f590d54.json"
+    ],
+    "stdout_tail": "..................................                                       [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n34 passed, 14 warnings in 7.53s\n"
+  },
+  {
+    "action": "0c557be5c006f76cdea767b10b003b3041f5235791b02bcbb0a2a47d3dc05ddf",
+    "receipt": "eee543717dab79fdea26e0bddd3cd5694257bc0d1299f54b932e289cb2102b1e",
+    "payload_sha256": "b5452f526291ccb3f07fa9a70d613d64f4563e1bea617bf1dadb308f2c5e2236",
+    "snapshot": "3d77a569ed3d1ddae9b2e107855bcc52d1bcab8c",
+    "source_diff_from_commit": [
+      ".pbrun-closure.b918bd64707e29f8.json"
+    ],
+    "stdout_tail": "......s....                                                              [100%]\n=============================== warnings summary ===============================\ntests/test_bounded_hessian_sidecar.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n10 passed, 1 skipped, 14 warnings in 5.60s\n"
+  },
+  {
+    "action": "fc361ec5fb48a6d598a9e3785811d3e5626964c16b2902038d25a5517cb63cef",
+    "receipt": "c2eaa8bb7270e3c25e292c02ca24e1c9e3da3b0ec3c1aed06618dfcb6f080535",
+    "payload_sha256": "5f9c1de2850f821839fde98d1555b401eec97329bad38581a38d745b80508ec2",
+    "snapshot": "2575c095ba98e484d99b55d7978d054c62f78aba",
+    "source_diff_from_commit": [
+      ".pbrun-closure.40b664a2272b8aeb.json"
+    ],
+    "stdout_tail": ".........s.                                                              [100%]\n=============================== warnings summary ===============================\ntests/test_tessera_selected_source.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n10 passed, 1 skipped, 14 warnings in 5.88s\n"
+  },
+  {
+    "action": "a875cc5fef7a3ef7e7b4ef963a0ae80ea1596b573cbde84a2f95565d642f853a",
+    "receipt": "0bae55146db0ed2801e89d71f753b61a055e473938872d42b2bded4d5f99c21e",
+    "payload_sha256": "bd3fcf1b5aca349677243959c145c1cb97d6644df3a44014dc37534c5087e1e6",
+    "snapshot": "43bb92ab29677bc73f18a4ad6f2b868ef8db2872",
+    "source_diff_from_commit": [
+      ".pbrun-closure.fb05d6f1e16d76d2.json"
+    ],
+    "stdout_tail": ".............s..........................                                 [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n39 passed, 1 skipped, 14 warnings in 5.85s\n"
+  },
+  {
+    "action": "d8fb57407ae3de31c56e8f10ddc33589f6883dc112900a46363deac2b52fae92",
+    "receipt": "874eae0b910ab490780ecbe89e410426ba248d9456540d92131e00b8f577d044",
+    "payload_sha256": "2ef8d259d0eb86bcef6a0f7812aac5ffde1f0835f375b41e298aa8e2e89356ec",
+    "snapshot": "e441085dd13abe9f169a3e53cbdb2f10b3ecdfbb",
+    "source_diff_from_commit": [
+      ".pbrun-closure.4c96f66379dff04a.json"
+    ],
+    "stdout_tail": "..................s.......                                               [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n25 passed, 1 skipped, 14 warnings in 8.96s\n"
+  },
+  {
+    "action": "391a583bf59a349d2f2ca6f24ef9df051c4b522c210a3aa7ea1e954362851525",
+    "receipt": "82a931c4bf0c13fdca3e96f5a81feb2bb843275606487380b2cd07f8d70b6b9c",
+    "payload_sha256": "ae7d53436711530b94685f8a656b603e002142adc5c379b7e2ec1c03355df012",
+    "snapshot": "956a287fd1552609523c9f18a4c23941a09f2d1b",
+    "source_diff_from_commit": [
+      ".pbrun-closure.7fed4f34142a4e13.json"
+    ],
+    "stdout_tail": ".....                                                                    [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n5 passed, 14 warnings in 6.02s\n"
+  },
+  {
+    "action": "f1c48346cda110d2cc1f03317701d884d77feb29eb22d7266b38d012f8d01dcc",
+    "receipt": "4a728807d834524f8fed4c055664533195bfb3757ff72ef2588871ae9659d852",
+    "payload_sha256": "fa055e6fa6526acd8faf576dac39c082ef192db509c145d14bb2561ea98ad50c",
+    "snapshot": "10b2345bd948648e4eea5945e63c04714a28e0ec",
+    "source_diff_from_commit": [
+      ".pbrun-closure.792a892dce0d7bbc.json"
+    ],
+    "stdout_tail": ".............                                                            [100%]\n=============================== warnings summary ===============================\ntests/test_architecture_doc.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n13 passed, 14 warnings in 5.41s\n"
+  },
+  {
+    "action": "0666c57d28805bb7e97dc5957b9b9be34189b8ba1b349a708d3d5078bb685132",
+    "receipt": "8ea3e1b21734bfbc8086a6ae60666d191c4ebc4024a48972e49bf5cb413561a5",
+    "payload_sha256": "d968b4a7e0e0022a15e2dec02d46a7e7c3e096540b55f111669037c1f302d73b",
+    "snapshot": "7b1e90f64b1c4c6f3e2cf9e590e889e52fed6195",
+    "source_diff_from_commit": [
+      ".pbrun-closure.09be8bacc162e887.json"
+    ],
+    "stdout_tail": "......                                                                   [100%]\n=============================== warnings summary ===============================\ntests/test_docs_staleness.py: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n6 passed, 14 warnings in 5.08s\n"
+  }
+]

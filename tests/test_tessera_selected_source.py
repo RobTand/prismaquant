@@ -234,8 +234,13 @@ def test_native_bounded_encoder_memo_keeps_wire_and_price_bytes(tmp_path, monkey
 def test_selected_capture_cli_reaches_existing_streamed_source(monkeypatch, tmp_path):
     from test_tessera_campaign_resume import _main_fixture
     from prismaquant import cost_streaming
+    from prismaquant.autoscale import BOUNDED_CAPTURE_ENV
     campaign, _, argv, _, _ = _main_fixture(monkeypatch, tmp_path)
     argv[argv.index('--hessian') + 1] = 'require'
+    # On a CUDA host the CLI checks the bounded-capture release policy before
+    # it reaches the streamed source; the dispatcher sets this for real runs.
+    for name, value in BOUNDED_CAPTURE_ENV.items():
+        monkeypatch.setenv(name, value)
 
     class SelectedSourceReached(Exception):
         pass

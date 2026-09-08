@@ -1,0 +1,350 @@
+{
+  "schema": "prismaquant.joint_statistics_scale_artifact_audit.v1",
+  "status": "complete",
+  "source": "a833c18db12c734bf981c4d16880f449669879d4",
+  "result": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/native-01/result.json",
+    "sha256": "58e237a0d2df0864981fa94efbb8050a755bdbd0a9f18f49a51af2344a59f389",
+    "bytes": 12622055
+  },
+  "geometry": {
+    "candidate_storage_bytes": 33554432,
+    "future_reserve_bytes": 51539607552,
+    "future_statistics_bytes": 34359738368,
+    "future_workspace_bytes": 17179869184,
+    "gpu_subset_admission_bytes": 98784247808,
+    "max_candidate_bytes": 268435456,
+    "physical_admission_bytes": 111669149696,
+    "replay_allowance_bytes": 268435456,
+    "retired_statistics_bytes": 34359738368,
+    "shape_source_bytes": 14545846272,
+    "source_bytes": 33315763888,
+    "source_remainder_bytes": 18769917616
+  },
+  "oracle_tolerance": {
+    "absolute": 2e-09,
+    "rationale": "FP32 sums of eight products; independent FP64 sampled contraction of the exact BF16/FP32 operands; no full matrix oracle",
+    "relative": 3e-05
+  },
+  "windows": [
+    {
+      "index": 0,
+      "statistics_bytes": 34326183936,
+      "exact_cotangent_count": 341,
+      "expired_statistics_backings": 1023,
+      "nonzero_projected_terms": {
+        "activation": 682,
+        "mixed": 682,
+        "weight": 682
+      },
+      "lease_telemetry": {
+        "operator_gemms": 1023,
+        "peak_candidate_storage_bytes": 33554432,
+        "peak_statistics_bytes": 34326183936,
+        "persistent_cache_entries": 0,
+        "projected_candidates": 682,
+        "qdq_calls": 682,
+        "statistics_capacity_bytes": 34326183936
+      },
+      "admission": {
+        "cap_bytes": 111669149696,
+        "cgroup_current_bytes": 985305088,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 34350993408,
+        "cuda_reserved_bytes": 33365688320,
+        "future_allocation_bytes": 51774488576,
+        "host_mem_available_bytes": 89725452288,
+        "label": "before_planned_statistics_window",
+        "refusal_threshold_bytes": 109521666048
+      },
+      "backward_admission": {
+        "cap_bytes": 111669149696,
+        "cgroup_current_bytes": 1956081664,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 35435016192,
+        "cuda_reserved_bytes": 33478934528,
+        "future_allocation_bytes": 51506053120,
+        "host_mem_available_bytes": 89058488320,
+        "label": "before_planned_statistics_backward",
+        "refusal_threshold_bytes": 109521666048
+      },
+      "projection_admission": {
+        "cap_bytes": 111669149696,
+        "cgroup_current_bytes": 2303520768,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 70064599040,
+        "cuda_reserved_bytes": 67761078272,
+        "future_allocation_bytes": 17179869184,
+        "host_mem_available_bytes": 53963087872,
+        "label": "before_controlled_candidate_projection",
+        "refusal_threshold_bytes": 109521666048
+      },
+      "profile": {
+        "bytes": 126350409,
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/native-01/window_0.trace.json",
+        "profile_memory": false,
+        "record_shapes": false,
+        "sha256": "5f19ca006c9221e389274981bb9dc8005ccf6f813822ec3e0a925eac1b11b3cc"
+      },
+      "first_target": "model.language_model.layers.3.mlp.experts.0.down_proj",
+      "last_target": "model.language_model.layers.3.mlp.experts.20.gate_proj",
+      "duration_seconds": 6.832884788513184,
+      "sample_count": 65472,
+      "max_absolute_error": 6.984919309616089e-09,
+      "max_relative_error_above_atol": 5.673597912115968e-06,
+      "before": {
+        "cuda_allocated_bytes": 33349318656,
+        "cuda_peak_allocated_bytes": 33349320704,
+        "cuda_peak_reserved_bytes": 33367785472,
+        "cuda_reserved_bytes": 33367785472,
+        "memory.current": 975605760,
+        "memory.peak": 975605760
+      },
+      "after_admission": {
+        "cuda_allocated_bytes": 33349318656,
+        "cuda_peak_allocated_bytes": 33349320704,
+        "cuda_peak_reserved_bytes": 33367785472,
+        "cuda_reserved_bytes": 33365688320,
+        "memory.current": 985305088,
+        "memory.peak": 985305088
+      },
+      "all_statistics_live": {
+        "cuda_allocated_bytes": 67809655296,
+        "cuda_peak_allocated_bytes": 67809917440,
+        "cuda_peak_reserved_bytes": 67828187136,
+        "cuda_reserved_bytes": 67828187136,
+        "memory.current": 2193358848,
+        "memory.peak": 2193399808
+      },
+      "after": {
+        "cuda_allocated_bytes": 33416428032,
+        "cuda_peak_allocated_bytes": 67880975360,
+        "cuda_peak_reserved_bytes": 67891101696,
+        "cuda_reserved_bytes": 67782049792,
+        "memory.current": 2309812224,
+        "memory.peak": 2309812224
+      }
+    },
+    {
+      "index": 1,
+      "statistics_bytes": 34326183936,
+      "exact_cotangent_count": 341,
+      "expired_statistics_backings": 1023,
+      "nonzero_projected_terms": {
+        "activation": 682,
+        "mixed": 682,
+        "weight": 682
+      },
+      "lease_telemetry": {
+        "operator_gemms": 1023,
+        "peak_candidate_storage_bytes": 33554432,
+        "peak_statistics_bytes": 34326183936,
+        "persistent_cache_entries": 0,
+        "projected_candidates": 682,
+        "qdq_calls": 682,
+        "statistics_capacity_bytes": 34326183936
+      },
+      "admission": {
+        "cap_bytes": 111669149696,
+        "cgroup_current_bytes": 2829713408,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 36260413440,
+        "cuda_reserved_bytes": 33430700032,
+        "future_allocation_bytes": 51774488576,
+        "host_mem_available_bytes": 88505352192,
+        "label": "before_planned_statistics_window",
+        "refusal_threshold_bytes": 109521666048
+      },
+      "backward_admission": {
+        "cap_bytes": 111669149696,
+        "cgroup_current_bytes": 2843459584,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 36322394112,
+        "cuda_reserved_bytes": 33478934528,
+        "future_allocation_bytes": 51506053120,
+        "host_mem_available_bytes": 88447991808,
+        "label": "before_planned_statistics_backward",
+        "refusal_threshold_bytes": 109521666048
+      },
+      "projection_admission": {
+        "cap_bytes": 111669149696,
+        "cgroup_current_bytes": 2868670464,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 70629748736,
+        "cuda_reserved_bytes": 67761078272,
+        "future_allocation_bytes": 17179869184,
+        "host_mem_available_bytes": 53598576640,
+        "label": "before_controlled_candidate_projection",
+        "refusal_threshold_bytes": 109521666048
+      },
+      "profile": {
+        "bytes": 124669841,
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/native-01/window_1.trace.json",
+        "profile_memory": false,
+        "record_shapes": false,
+        "sha256": "b5ac02f8211f9728e39e2f56e7c251703660ce0916cc60b974109371da829220"
+      },
+      "first_target": "model.language_model.layers.3.mlp.experts.20.up_proj",
+      "last_target": "model.language_model.layers.3.mlp.experts.44.down_proj",
+      "duration_seconds": 3.673779010772705,
+      "sample_count": 65472,
+      "max_absolute_error": 5.587935447692871e-09,
+      "max_relative_error_above_atol": 6.007557507344239e-06,
+      "before": {
+        "cuda_allocated_bytes": 33416428032,
+        "cuda_peak_allocated_bytes": 67880975360,
+        "cuda_peak_reserved_bytes": 67891101696,
+        "cuda_reserved_bytes": 67782049792,
+        "memory.current": 2829713408,
+        "memory.peak": 2836520960
+      },
+      "after_admission": {
+        "cuda_allocated_bytes": 33416428032,
+        "cuda_peak_allocated_bytes": 67880975360,
+        "cuda_peak_reserved_bytes": 67891101696,
+        "cuda_reserved_bytes": 33430700032,
+        "memory.current": 2829713408,
+        "memory.peak": 2836520960
+      },
+      "all_statistics_live": {
+        "cuda_allocated_bytes": 67809655296,
+        "cuda_peak_allocated_bytes": 67880975360,
+        "cuda_peak_reserved_bytes": 67891101696,
+        "cuda_reserved_bytes": 67828187136,
+        "memory.current": 2848522240,
+        "memory.peak": 2848522240
+      },
+      "after": {
+        "cuda_allocated_bytes": 33416428032,
+        "cuda_peak_allocated_bytes": 67880975360,
+        "cuda_peak_reserved_bytes": 67891101696,
+        "cuda_reserved_bytes": 67782049792,
+        "memory.current": 2874585088,
+        "memory.peak": 2874585088
+      }
+    }
+  ],
+  "source_backings_expired": 869,
+  "final_cuda": {
+    "cuda_allocated_bytes": 67109376,
+    "cuda_peak_allocated_bytes": 67880975360,
+    "cuda_peak_reserved_bytes": 67891101696,
+    "cuda_reserved_bytes": 85983232,
+    "memory.current": 3395801088,
+    "memory.max": 111669149696,
+    "memory.peak": 3420749824,
+    "memory.stat": {
+      "active_anon": 2199695360,
+      "active_file": 59703296,
+      "anon": 2147188736,
+      "anon_thp": 0,
+      "file": 1200267264,
+      "file_dirty": 205799424,
+      "file_mapped": 84611072,
+      "file_thp": 150994944,
+      "file_writeback": 0,
+      "inactive_anon": 0,
+      "inactive_file": 1089744896,
+      "kernel": 45502464,
+      "kernel_stack": 163840,
+      "numa_hint_faults": 0,
+      "numa_pages_migrated": 0,
+      "numa_pte_updates": 0,
+      "pagetables": 6721536,
+      "percpu": 7832,
+      "pgactivate": 0,
+      "pgdeactivate": 0,
+      "pgdemote_direct": 0,
+      "pgdemote_khugepaged": 0,
+      "pgdemote_kswapd": 0,
+      "pgdemote_proactive": 0,
+      "pgfault": 770871,
+      "pglazyfree": 0,
+      "pglazyfreed": 0,
+      "pgmajfault": 382,
+      "pgpromote_success": 0,
+      "pgrefill": 0,
+      "pgscan": 0,
+      "pgscan_direct": 0,
+      "pgscan_khugepaged": 0,
+      "pgscan_kswapd": 0,
+      "pgscan_proactive": 0,
+      "pgsteal": 0,
+      "pgsteal_direct": 0,
+      "pgsteal_khugepaged": 0,
+      "pgsteal_kswapd": 0,
+      "pgsteal_proactive": 0,
+      "pswpin": 0,
+      "pswpout": 0,
+      "sec_pagetables": 0,
+      "shmem": 50802688,
+      "shmem_thp": 0,
+      "slab": 38583320,
+      "slab_reclaimable": 37897320,
+      "slab_unreclaimable": 686000,
+      "sock": 0,
+      "swapcached": 0,
+      "swpin_zero": 0,
+      "swpout_zero": 0,
+      "thp_collapse_alloc": 0,
+      "thp_fault_alloc": 3,
+      "thp_swpout": 0,
+      "thp_swpout_fallback": 0,
+      "unevictable": 0,
+      "vmalloc": 8192,
+      "workingset_activate_anon": 0,
+      "workingset_activate_file": 0,
+      "workingset_nodereclaim": 0,
+      "workingset_refault_anon": 0,
+      "workingset_refault_file": 0,
+      "workingset_restore_anon": 0,
+      "workingset_restore_file": 0,
+      "zswap": 0,
+      "zswapped": 0,
+      "zswpin": 0,
+      "zswpout": 0,
+      "zswpwb": 0
+    },
+    "process_io": "rchar: 1125478154\nwchar: 479572870\nsyscr: 25276\nsyscw: 29660\nread_bytes: 929243136\nwrite_bytes: 478822400\ncancelled_write_bytes: 376832\n",
+    "smaps_bytes": {
+      "AnonHugePages": 0,
+      "Anonymous": 2147188736,
+      "FilePmdMapped": 0,
+      "KSM": 0,
+      "LazyFree": 0,
+      "Locked": 0,
+      "Private_Clean": 454787072,
+      "Private_Dirty": 2160422912,
+      "Private_Hugetlb": 0,
+      "Pss": 2616308736,
+      "Pss_Anon": 2147188736,
+      "Pss_Dirty": 2160422912,
+      "Pss_File": 418321408,
+      "Pss_Shmem": 50798592,
+      "Referenced": 2614902784,
+      "Rss": 2618552320,
+      "Shared_Clean": 3342336,
+      "Shared_Dirty": 0,
+      "Shared_Hugetlb": 0,
+      "ShmemPmdMapped": 0,
+      "Swap": 0,
+      "SwapPss": 0
+    },
+    "time_unix": 1788875281.8896575
+  },
+  "telemetry": {
+    "sparky": {
+      "samples": 13,
+      "first": 1788875266.6776106,
+      "last": 1788875281.3012686,
+      "cpu_nonidle_mean_percent": 8.9061633,
+      "cpu_nonidle_peak_percent": 18.007081400000004
+    },
+    "sparklina": {
+      "samples": 13,
+      "first": 1788875266.683912,
+      "last": 1788875281.3103137,
+      "cpu_nonidle_mean_percent": 6.7835302076923085,
+      "cpu_nonidle_peak_percent": 7.927747100000005
+    }
+  },
+  "netdata": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/native-01/netdata.jsonl",
+    "sha256": "f59c9134d64ebc26eb8ced6225b63304b3206acebf02ae7bf38a1e495f95a77d",
+    "bytes": 299108
+  }
+}

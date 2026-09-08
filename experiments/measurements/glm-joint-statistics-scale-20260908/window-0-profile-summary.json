@@ -1,0 +1,158 @@
+{
+  "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-statistics-scale-01/native-01/window_0.trace.json",
+  "sha256": "5f19ca006c9221e389274981bb9dc8005ccf6f813822ec3e0a925eac1b11b3cc",
+  "bytes": 126350409,
+  "event_count": 399158,
+  "categories": {
+    "metadata": 62,
+    "cpu_op": 186184,
+    "fwdbwd": 1366,
+    "user_annotation": 57,
+    "kernel": 28473,
+    "ac2g": 105724,
+    "overhead": 39,
+    "cuda_runtime": 57188,
+    "cuda_driver": 8075,
+    "gpu_memcpy": 9260,
+    "gpu_memset": 2728,
+    "gpu_user_annotation": 1,
+    "Trace": 1
+  },
+  "category_duration_us": {
+    "cpu_op": 50019590.16000657,
+    "user_annotation": 6841863.5040000025,
+    "kernel": 1754172.4650000252,
+    "overhead": 10690.657000000003,
+    "cuda_runtime": 1598039.2369999862,
+    "cuda_driver": 813914.035999998,
+    "gpu_memcpy": 5901.373000000241,
+    "gpu_memset": 1049.6000000000147,
+    "gpu_user_annotation": 6759023.77,
+    "Trace": 6840794.545
+  },
+  "top_kernel_total_us": [
+    [
+      "void at::native::vectorized_elementwise_kernel<4, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 3ul> >(int, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 3ul>)",
+      814472.3940000006
+    ],
+    [
+      "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4>)",
+      350213.9510000007
+    ],
+    [
+      "void cutlass::Kernel2<cutlass_80_simt_sgemm_128x64_8x5_nt_align1>(cutlass_80_simt_sgemm_128x64_8x5_nt_align1::Params)",
+      155162.54800000007
+    ],
+    [
+      "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+      125558.74300000013
+    ],
+    [
+      "void at::native::vectorized_elementwise_kernel<4, at::native::(anonymous namespace)::pow_tensor_scalar_kernel_impl<float, float>(at::TensorIteratorBase&, float)::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::(anonymous namespace)::pow_tensor_scalar_kernel_impl<float, float>(at::TensorIteratorBase&, float)::{lambda(float)#1}, std::array<char*, 2ul>)",
+      80266.5059999999
+    ],
+    [
+      "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)",
+      52518.95199999997
+    ],
+    [
+      "void cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_128x2_tn_align8>(cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_128x2_tn_align8::Params)",
+      38384.60599999999
+    ],
+    [
+      "void at::native::reduce_kernel<128, 4, at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4>)",
+      37498.74199999998
+    ],
+    [
+      "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x64_64x3_nn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x64_64x3_nn_align8::Params)",
+      33351.07599999999
+    ],
+    [
+      "void cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_64x2_nn_align8>(cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_64x2_nn_align8::Params)",
+      20563.178999999996
+    ],
+    [
+      "void cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_128x1_tn_align8>(cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_128x1_tn_align8::Params)",
+      17728.326
+    ],
+    [
+      "void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1}>(long, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1})",
+      5702.395000000077
+    ],
+    [
+      "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::MaxNanFunctor<float> >, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::MaxNanFunctor<float> >, unsigned int, float, 4, 4>)",
+      2745.7229999999886
+    ],
+    [
+      "void at::native::vectorized_elementwise_kernel<4, at::native::(anonymous namespace)::launch_clamp_scalar(at::TensorIteratorBase&, c10::Scalar, c10::Scalar, at::native::detail::ClampLimits)::{lambda()#1}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::(anonymous namespace)::launch_clamp_scalar(at::TensorIteratorBase&, c10::Scalar, c10::Scalar, at::native::detail::ClampLimits)::{lambda()#1}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>)",
+      2461.2449999999785
+    ],
+    [
+      "triton_poi_fused__to_copy_abs_clamp_max_clamp_min_div_index_lt_mul_sub_view_where_2",
+      2343.358999999992
+    ]
+  ],
+  "top_cpu_op_total_us": [
+    [
+      "dynamo",
+      2549128.427
+    ],
+    [
+      "entire_frame_compile",
+      2548157.309
+    ],
+    [
+      "_compile.compile_inner (dynamo_timed)",
+      2548125.645
+    ],
+    [
+      "compile_attempt_0",
+      2504227.179
+    ],
+    [
+      "compile_attempt_0 (dynamo_timed)",
+      2504199.323
+    ],
+    [
+      "backend_compile",
+      2169940.017
+    ],
+    [
+      "OutputGraph.call_user_compiler (dynamo_timed)",
+      2169878.513
+    ],
+    [
+      "autograd::engine::evaluate_function: MmBackward0",
+      1661714.2309999983
+    ],
+    [
+      "aten::mm",
+      1500945.4080000024
+    ],
+    [
+      "create_aot_dispatcher_function",
+      1487614.122
+    ],
+    [
+      "create_aot_dispatcher_function (dynamo_timed)",
+      1487515.514
+    ],
+    [
+      "aten::matmul",
+      1455445.1119999997
+    ],
+    [
+      "compile_fx.<locals>.fw_compiler_base",
+      1364321.518
+    ],
+    [
+      "compile_fx.<locals>.fw_compiler_base (dynamo_timed)",
+      1364092.43
+    ],
+    [
+      "aten::item",
+      1337330.624999999
+    ]
+  ],
+  "scope": "Durations are summed trace events; nested CPU events overlap and are not self time. No GPU annotation is counted as a kernel."
+}

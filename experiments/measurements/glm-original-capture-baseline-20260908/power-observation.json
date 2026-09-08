@@ -1,0 +1,41 @@
+{
+  "schema": "prismaquant.partial_capture_power_observation.v1",
+  "scope": "Single run, complete instrumented collector intervals only, no A/B speed claim, no idle subtraction or full-system energy claim. Exact full-run capture remains incomplete.",
+  "source": "/home/rob/pqtel/csv/pqteld-sparky-20260908.s2.csv",
+  "retained_csv_sha256": "44db963ae90664b7da7edf7f71c5d14db0b44ab18588ce12f77232728c27fdc2",
+  "collections": [
+    {
+      "collection": 0,
+      "start": 1788869915.1859374,
+      "end": 1788869969.7670665,
+      "wall_seconds": 54.58112907409668,
+      "batches": 512,
+      "gpu_joules": 2657.4974942350414,
+      "batches_per_gpu_joule": 0.19266245823775605,
+      "mean_gpu_w": 48.688943217487356,
+      "max_sample_gap_s": 0.500999927520752
+    },
+    {
+      "collection": 3,
+      "start": 1788870133.959335,
+      "end": 1788870456.1582363,
+      "wall_seconds": 322.19890117645264,
+      "batches": 512,
+      "gpu_joules": 13123.100192279813,
+      "batches_per_gpu_joule": 0.03901517114844588,
+      "mean_gpu_w": 40.72981051258437,
+      "max_sample_gap_s": 0.500999927520752
+    },
+    {
+      "collection": 4,
+      "start": 1788870703.1399076,
+      "end": 1788871062.0606663,
+      "wall_seconds": 358.92075872421265,
+      "batches": 512,
+      "gpu_joules": 14449.370932898491,
+      "batches_per_gpu_joule": 0.035434068540262376,
+      "mean_gpu_w": 40.25783012456265,
+      "max_sample_gap_s": 0.500999927520752
+    }
+  ]
+}

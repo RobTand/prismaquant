@@ -1,0 +1,12 @@
+[
+  {
+    "action": "242b22b88cf55f566e590dee77c7a393809eea57815e961929c0b367b8c55ad9",
+    "receipt": "3eb5a23fbfae3cecbfd7ed2574dc035512bcb5aba35d95be20beb5c4cd3695ea",
+    "payload_sha256": "3db4e8a4f556d367f6ab8c2459903d3f71aae8233b10630aca99b27eab718b8a",
+    "snapshot": "1b95a81c23377e2ccd1e7dbf30f285e67cc989a2",
+    "source_diff_from_commit": [
+      ".pbrun-closure.6376508895255712.json"
+    ],
+    "stdout_tail": "...........                                                              [100%]\n=============================== warnings summary ===============================\ntests/test_tessera_selected_source.py: 14 warnings\n  /home/rob/dq-runs/venvs/prismaquant-cu130/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n11 passed, 14 warnings in 7.15s\n"
+  }
+]
