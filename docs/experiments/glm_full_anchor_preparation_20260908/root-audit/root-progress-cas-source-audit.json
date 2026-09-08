@@ -1,0 +1,44 @@
+[
+  {
+    "action": "2caaba804d2fee3aaac53aef414d2bf94ca7780ab4b7cd939e5958c3d3f26b60",
+    "receipt": "a363454f22c8ebcfeee5b380435e0651568cd7e720492bee93ccda0a10463609",
+    "payload_sha256": "d1c1a47cd495be080c86e681d80004e43fa0333d818e223e4c0543bd6a05bf50",
+    "snapshot": "b30040d80865fa86b9d00f4030087b6a310f8cda",
+    "source_diff_from_commit": [
+      ".pbrun-closure.84500e8f09f1e2cf.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/anchor-spec.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/invocation.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/preflight.py",
+      "docs/experiments/tessera_adaptive_progress_20260908.md"
+    ],
+    "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n...............................                                          [100%]\n=============================== warnings summary ===============================\ntests/test_tessera_campaign_resume.py: 14 warnings\ntests/test_tessera_campaign_progress.py: 42 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n31 passed, 56 warnings in 127.27s (0:02:07)\n"
+  },
+  {
+    "action": "c947a6e982aef7f444ba87f0518203f6bc82cb64232885f5a2f136fa8e730d28",
+    "receipt": "40a6ee6949bbd73cec8f606600577b782b3cfffc9cc8033dcbc8c8e6257be194",
+    "payload_sha256": "2ed7faaeef814648073338a5ccb73413d81723c5f116e4b304631e0e820dad3e",
+    "snapshot": "af1d99b81b6474fc0c1f459fb06955f9894a8e76",
+    "source_diff_from_commit": [
+      ".pbrun-closure.924b11173fb9285b.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/anchor-spec.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/invocation.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/preflight.py",
+      "docs/experiments/tessera_adaptive_progress_20260908.md"
+    ],
+    "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n...................                                                      [100%]\n=============================== warnings summary ===============================\ntests/test_architecture_doc.py: 28 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n19 passed, 28 warnings in 8.25s\n"
+  },
+  {
+    "action": "3596c742d91e8aef33e7b6ba03670c45a64c33544dadca2bf71ad3d573bca5e3",
+    "receipt": "ce06651c740f637b9223d5804b8a73bceca64db89c2c875e9572e522e289d49b",
+    "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "snapshot": "7e108557117c027aca0ff0af2fa94f18fc5d8448",
+    "source_diff_from_commit": [
+      ".pbrun-closure.32e503499890abe1.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/anchor-spec.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/invocation.draft.json",
+      "docs/experiments/glm_full_anchor_preparation_20260908/preflight.py",
+      "docs/experiments/tessera_adaptive_progress_20260908.md"
+    ],
+    "stdout_tail": ""
+  }
+]
