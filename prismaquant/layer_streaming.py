@@ -1319,13 +1319,9 @@ def fill_packed_experts_from_source(
 # --------------------------------------------------------------------------
 # Intra-layer parallel gather.
 #
-# One streamed layer of a large MoE checkpoint is thousands of small
-# tensors (GLM-5.3-Flash: 1759 tensors / ~7 GB of FP8 source per body
-# layer, spread over two shards). Reading them one at a time is a single
-# mmap page-in stream plus a single H2D copy stream — measured at
-# ~1.3 GB/s on the GB10 NVMe while the device sat at 5% utilisation,
-# against a ~5 GB/s parallel-read floor for the same disk. That is disk
-# pressure on a hot path, i.e. a bug under design principle 7.
+# A large MoE layer can contain thousands of small source tensors. The
+# bounded gather overlaps source reads and copy submission across reader
+# chunks while the existing layer prefetch path owns residency.
 #
 # The gather below is the ONLY change to the read: the same tensors, the
 # same dtype cast, the same contiguity fix, the same post-gather FP8
