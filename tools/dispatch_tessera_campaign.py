@@ -147,7 +147,9 @@ def _model_bytes(model: str) -> int:
 def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_source=False) -> int:
     """The row's memory demand, from what the row actually holds.
 
-    Three terms, each a measured quantity rather than a guess:
+    Streaming rows use the phase resource plan, including the selected-source
+    plan when requested. These are derived byte bounds, not measured peaks.
+    The resident-source fallback charges three quantities:
 
     * the checkpoint, which is loaded whole in ``bfloat16`` and is the same for
       every row;
