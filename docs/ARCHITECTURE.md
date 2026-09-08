@@ -3,6 +3,14 @@
 As of: 2026-09-08 · `integrate/glm-six-variant-intake-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `audit/glm-full-stack-admission`) to distinguish the
+historical v1 writer limit from current v2 admission. A metadata-only replay
+of all 132 original GLM groups (36,423 units), one group per row and encoder
+batch size one, derives a 98.041521 GiB maximum, rounded to 99 GiB under the
+104 GiB box budget. No sampling, H alias discount or production code change
+is involved. This is a derived plan, not a full-stack native fit qualification.
+Evidence: `experiments/measurements/glm-full-stack-admission-20260908/`.
+
 Re-stamped (2026-09-08, `codex/glm-capture-compatibility-issuance`) for the
 explicit GLM compatibility issuance CLI. A hash-bound closed plan binds the
 original config, corrected image policy, existing native/CPU proofs and
@@ -91,9 +99,11 @@ planning or crash-atomic publication.
 Re-stamped (2026-09-08, `triage/dispatch-admissible-partition`) for the
 campaign dispatcher's **admissible partition** (§4.10, the campaign fanout's
 rows-per-box paragraph; #391). The fit check was all-or-nothing: one row wider than the
-worker refused every row, so the GLM plan's 864-unit routed stacks, deriving
-124.783 GiB against a 104 GiB worker, blocked the 90 rows that fit beside
-them. `plan` now partitions on the same arithmetic: the manifest holds the
+worker refused every row. Under the historical v1 whole-file Hessian writer,
+the GLM plan's 864-unit routed stacks derived 124.783 GiB against a 104 GiB
+worker and blocked the 90 smaller rows. That motivating number is superseded
+by the bounded writer's v2 accounting (#379), not a current routed-stack limit.
+`plan` partitions on the current resource arithmetic: the manifest holds the
 admissible rows, `plan.json` keeps the whole layout with an `admissible` flag
 per row and an `inadmissible_rows` record carrying each declined row's derived
 demand, multiplier, box and reason, and only a plan with nothing admissible
