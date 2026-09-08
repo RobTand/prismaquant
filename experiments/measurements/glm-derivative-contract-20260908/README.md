@@ -130,3 +130,54 @@ prefix graph is the next independent gate. Its invocation is frozen separately
 for review in `native-corrected-graph-invocation.json`; it is not authorized by
 this record. The original capture is still running, and no original-capture
 compatibility receipt has been issued.
+
+## Subsequent corrected 72-call bounded graph — 16:50 UTC
+
+Root reviewed and authorized exactly `native-corrected-graph-invocation.json`.
+PB action `abad03ae5f0d53afc801b6a206501a41b9a52bebb8bc850a130a6da1ed6ff91d`
+ran once on Sparklina and exited 0 in 190.60 s. The unchanged six-CPU,
+104/92-GiB measurement reservation was used. Snapshot
+`7376380fbbc40fae586e9ef001b83c1fc6dd1051` is closure-only above
+`591772439`; all 24 frozen source-file hashes and the exact requested command
+match. `native-corrected-graph-audit.json` binds the actual result and complete
+source/CAS/producer/claim, numerical, route, ownership, profiler and telemetry
+checks.
+
+The exact 72 scheduled backwards completed across layers 0/3/4, original rows
+0/511, seeds 7000–7003 and isolated baseline/nonfinal fork/final original-owner
+arms. All six primary outputs are finite. The original row0/layer0 primary
+record still equals the unmodified native reference. All 72 leaf cotangents
+have 8,388,608 finite elements and a positive nonzero-element count; the three
+arms have identical cotangent and stimulus bytes in every one of the 24 groups.
+All replay output bytes equal their primary output.
+
+All 16 routed groups have identical fork/final routing and activity, with 4,096
+expert assignments covering all 512×8 token/choice slots. Layer3 rows0/511 touch
+286/287 of 288 experts; layer4 touches 287 in each row. The original 45-layer
+configuration, dense layer0 MLP, DSA layer3, KDA layer4 and shared expert paths
+remain the actual source paths. No shared adjoints were produced or retained.
+
+The 512-row metadata check had zero graph calls and released every metadata
+owner. Six measured source-residency snapshots cover current plus prefetched
+lookahead at each tested layer/row. Sixteen original source files were hashed
+(73,884,166,070 bytes), and all expected content hashes matched; all held
+file descriptors closed, source owners expired and source violations stayed
+empty. CUDA allocated/reserved peaks were 43,081,193,984 / 48,043,655,168 bytes;
+after cleanup they were 67,108,864 / 104,857,600 bytes. The existing boundary
+store recorded zero hot-read misses and zero remaining resident tensor bytes.
+Its 201,352,428 bytes of bounded prefix artifacts are retained as experiment
+evidence, alongside the result, traces and telemetry; they are not a new cache.
+
+All nine layer/arm Torch traces contain CUDA kernels and autograd events and
+passed size/SHA256 verification. Both-box Netdata has 177 samples per host,
+maximum gap 1.214 s. Whole-action host telemetry records 9.63 W mean / 28.99 W
+peak GPU power and 8.52% mean CPU busy. These totals include source content
+hashing and metadata preparation; they are not evidence of GPU saturation or
+production throughput. This experiment qualifies numerical/replay behavior,
+not performance. The native result is 6,362,692 bytes with SHA256
+`4126fe86231a1c4ae8dbaee6026bc2781de7ee0a458b2e9a84dd22daadb47e2f`.
+
+The bounded graph gate passes. This does not qualify all 45 layer derivatives,
+full-model cost or quality, or serving. Original-capture compatibility remains
+a separate gate requiring the original capture action to complete; no
+compatibility receipt or full-model consumer run was created by this work.
