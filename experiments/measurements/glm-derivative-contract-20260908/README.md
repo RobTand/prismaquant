@@ -88,3 +88,45 @@ changes the original capture identity or overrides its runtime validation.
 row0/layer0/seed7000 baseline backward, bound to the original native layer0 forward
 bytes and the separate image. It is **not submitted** and awaits root review.
 The 72-call corrected graph and any compatibility receipt remain subsequent gates.
+
+## Subsequent native layer0 diagnostic — 16:41 UTC
+
+Root reviewed and authorized exactly the frozen diagnostic above. PB action
+`37056154d67ef1e47ca0a5079e4d6f01e226c0e313fd1925387e22fd1a0c092a`
+executed once on Sparklina, with six CPUs, 104 GiB total memory and a 92 GiB GPU
+subset under measurement admission. It exited 0 in 31.32 s. Snapshot
+`416410f93925525d4a8ecd8b332e622815f0daa7` is closure-only above
+`0475656fd3`; all 24 frozen source-file hashes and the exact invoked command
+were checked. `native-corrected-diagnostic-audit.json` binds the terminal,
+canonical CAS payload/producer receipt, source snapshot, actual result, original
+reference, profiler traces and both-box telemetry. Root independently reviewed
+the same action and artifacts.
+
+Exactly one `(layer0, original-row0, seed7000, baseline)` backward completed.
+The entire primary output record, including BF16 output SHA256 `f0215afb…`,
+equals the original native diagnostic. All 8,388,608 leaf-gradient elements are
+finite; 8,388,322 are nonzero and 286 are zero. The original leaf gradient had
+8,388,608 NaNs. All 60 observed branch forward/backward tensors in the corrected
+run are finite. The native derivative identity equals the actual-image meta
+identity, including original decorated fallback/accelerate dispatch and all 34
+live gate configurations.
+
+All four consumed original source-file hashes match, held descriptors close,
+and source owners expire. Peak CUDA allocated/reserved bytes were
+11,080,388,096 / 11,465,129,984; after cleanup, 67,108,864 / 104,857,600.
+The final PB scope cleanup is complete, with no reported source violations or
+telemetry/cleanup errors.
+
+The before/after Torch traces contain 4,521 / 4,558 CUDA kernel events and full
+autograd events. The corrected trace is 15,761,804 bytes, SHA256 `37ae5676…`.
+Both-box Netdata has 17 original samples per host and 21 corrected samples per
+host. Corrected whole-action host power averaged 6.67 W and peaked at 21.03 W,
+with mean CPU busy 7.08%; this short diagnostic is not a GPU saturation or
+throughput comparison. Numerical finiteness with equal forward bytes is the
+measured result; no performance improvement is claimed.
+
+This passes only the native layer0 diagnostic. The corrected 72-call bounded
+prefix graph is the next independent gate. Its invocation is frozen separately
+for review in `native-corrected-graph-invocation.json`; it is not authorized by
+this record. The original capture is still running, and no original-capture
+compatibility receipt has been issued.
