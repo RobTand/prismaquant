@@ -90,3 +90,15 @@ identical in the author green, author mutation and integrated run:
 `63cc445ba3d6414d252ad73001b8998210a23290`.
 All ten author attempts have completed cleanup, released scopes, zero live
 processes and zero OOM counters.
+
+## Coordinator verification and integration
+
+The coordinator independently checked the integrated native CAS payload and
+source bundle, the author's original positive CPU result, and the mutated
+negative. The mutation changes exactly the release condition to `if False and`
+and preserves the test bytes; its failure reports zero releases for expected
+wires, against one required release. Those three root audits are copied here.
+The integration changes only the test's introductory prose to limit its claim
+to page-advice calls and file identity. Executable test behavior is unchanged.
+The dispatcher partition and failed-fit publication changes have their own CPU
+regressions; the native receipt predates those planner changes.

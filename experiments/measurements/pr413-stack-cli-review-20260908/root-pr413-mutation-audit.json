@@ -1,0 +1,20 @@
+{
+  "action": "5fbc49d94157c5cff886f04c45fbe124bff7dc7124c41a7cda41c20baa3f968c",
+  "returncode": 1,
+  "cleanup_complete": true,
+  "terminal_sha256": "2030d758fd126ce3a0b1e224fcf955defab1ff40cd2a1ab6782e7c4340830632",
+  "source": {
+    "commit": "e67de4e20dc8275f4e64a7083a54ae34bf11458c",
+    "input": {
+      "bytes": 26537024,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "bf1e2e8d3e16ab889d537471258f1206bc559158200fa24841bb77858efd083f"
+    },
+    "parent": "449a7a22eaa74903772083d56fd4d4ed9e4614fe",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "production_and_test_diff_from_author_head": "diff --git a/prismaquant/tessera_campaign.py b/prismaquant/tessera_campaign.py\nindex 2a69b39046..b153688fcb 100644\n--- a/prismaquant/tessera_campaign.py\n+++ b/prismaquant/tessera_campaign.py\n@@ -514,7 +514,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,\n     tmp = wire_path.with_suffix(\".tessera.tmp\")\n     tmp.write_bytes(blob)\n     os.replace(tmp, wire_path)\n-    if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):\n+    if False and getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):\n         # The existing PWC entry is already disk-backed. Completed anchor\n         # files must not accumulate an unbounded page-cache owner across rungs.\n         # The release helper checks the entry's identity, fsyncs and advises\n",
+  "stdout_tail": "aign] round 1: 12 anchors\n[campaign] r1 1/12 batch=1 TESSERA_BF16_K1_R256 encode_seconds=91.599\n[campaign] r1 11/12 batch=1 TESSERA_BF16_K1_R256 encode_seconds=32.743\n[campaign] --max-rounds 1 reached\n[campaign] wrote /home/rob/tmp/pytest-of-rob/pytest-3138/popen-gw0/test_selected_source_row_price0/selected-cost.pkl: 2 units, 4 priced rungs, 2 distinct formats\n[389] pending order [('model.language_model.layers.1.mlp.experts.0.down_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.down_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.0.gate_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.gate_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.0.up_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.up_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.1.gate_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.1.gate_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.1.up_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.1.up_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.3.down_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.3.down_proj', 'TESSERA_BF16_K1_R257')]\n[389] encoder factorizations 6 over 6 distinct units, memo CacheInfo(hits=6, misses=6, maxsize=1, currsize=1)\n----------------------------- Captured stderr call -----------------------------\n\nWriting model shards:   0%|          | 0/1 [00:00<?, ?it/s]\nWriting model shards: 100%|\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588| 1/1 [00:00<00:00, 173.86it/s]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_tessera_stack_group_cli.py::test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor\n1 failed, 56 warnings in 488.21s (0:08:08)\n"
+}

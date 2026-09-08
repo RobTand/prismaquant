@@ -1,0 +1,42 @@
+[
+  {
+    "action": "a7dbca9839fc2bed520c1ef50ae1e4b7a518c51ef278b89029adc0fcb4690a76",
+    "terminal_sha256": "1356f91f1c859f9068502f6ac675a44ac664a756a8516fcf456bad2e90b8a2e9",
+    "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/a7dbca9839fc2bed520c1ef50ae1e4b7a518c51ef278b89029adc0fcb4690a76.json",
+    "returncode": 1,
+    "cleanup_complete": true,
+    "snapshot": {
+      "commit": "a67ad0f90646e93b9311b9559d568b83227a4cd0",
+      "input": {
+        "bytes": 26526547,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "afce8b557b5f5971d235da9ea7a3bbe42aac5e766ae1321f6a29140cb1136d30"
+      },
+      "parent": "4fcd8450b74639a93809c7fdcba098c2c3e67843",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "log_path": null
+  },
+  {
+    "action": "d7bbd0aa04229ed6bdaa50efd45dff7d4d99193b40cb724f52a13d9ff8a21a57",
+    "terminal_sha256": "366e6f433c813eb67983f00958b453ec9115e9f37b7dd1af798813e6514ee6c1",
+    "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/d7bbd0aa04229ed6bdaa50efd45dff7d4d99193b40cb724f52a13d9ff8a21a57.json",
+    "returncode": 1,
+    "cleanup_complete": true,
+    "snapshot": {
+      "commit": "6eae3edcbd3b23f21a46dad4e9ff8bd4af693e65",
+      "input": {
+        "bytes": 26526545,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "683763339c0114bd8dbead0ef4ba985d51877cc4b030cc06bb77b1ab1013170f"
+      },
+      "parent": "4fcd8450b74639a93809c7fdcba098c2c3e67843",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "log_path": null
+  }
+]
