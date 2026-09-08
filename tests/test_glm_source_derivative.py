@@ -180,6 +180,54 @@ def test_incomplete_capture_refuses_before_any_producer_proof(tmp_path, monkeypa
         compatibility._verify(value, capture=capture, derivative={})
 
 
+def native_schedule_fixture():
+    result = dict(backwards=[], replay_diagnostics=[], primary_outputs=[])
+    for layer in (0, 3, 4):
+        for row in (0, 511):
+            output = dict(sha256=f'output-{layer}-{row}')
+            result['primary_outputs'].append(dict(layer=layer, original_row=row,
+                statistics=dict(nonfinite=0), identity=output))
+            for seed in range(7000, 7004):
+                for arm in ('unobserved_isolated_baseline', 'nonfinal_fork_replay', 'final_original_owner_replay'):
+                    key = dict(layer=layer, original_row=row, seed=seed, arm=arm)
+                    result['backwards'].append(dict(**key, output=output,
+                        cotangent=dict(sha256=f'gradient-{layer}-{row}-{seed}'), stimulus=dict(sha256=f'stimulus-{seed}'),
+                        activity=None if arm == 'unobserved_isolated_baseline' else dict(router='same-route')))
+                    result['replay_diagnostics'].append(dict(**key, output_identity=output,
+                        output_matches_primary=True, backward_completed=True, output=dict(nonfinite=0),
+                        leaf_gradient=dict(nonfinite=0, finite_nonzero=1)))
+    return result
+
+
+def test_native_receipt_consumption_rechecks_complete_schedule_and_equal_arms():
+    compatibility._verify_native_schedule(native_schedule_fixture(), diagnostic=False)
+
+
+@pytest.mark.parametrize('mutation', ['duplicate', 'omit', 'diagnostic_schedule', 'cotangent', 'stimulus',
+                                    'route', 'output', 'nonfinite', 'allzero', 'incomplete', 'primary'])
+def test_native_receipt_refuses_partial_or_changed_measured_evidence(mutation):
+    result = native_schedule_fixture()
+    if mutation == 'duplicate':
+        result['backwards'][-1] = result['backwards'][0]
+    elif mutation == 'omit':
+        result['backwards'].pop()
+    elif mutation == 'diagnostic_schedule':
+        result['replay_diagnostics'][-1]['seed'] = 7000
+    elif mutation in ('cotangent', 'stimulus', 'output'):
+        result['backwards'][1][mutation] = dict(sha256='changed')
+    elif mutation == 'route':
+        result['backwards'][1]['activity'] = dict(router='different-route')
+    elif mutation in ('nonfinite', 'allzero'):
+        result['replay_diagnostics'][0]['leaf_gradient'][
+            'nonfinite' if mutation == 'nonfinite' else 'finite_nonzero'] = 1 if mutation == 'nonfinite' else 0
+    elif mutation == 'incomplete':
+        result['replay_diagnostics'][0]['backward_completed'] = False
+    else:
+        result['primary_outputs'][0]['original_row'] = 511
+    with pytest.raises(ValueError):
+        compatibility._verify_native_schedule(result, diagnostic=False)
+
+
 def test_completed_capture_validation_is_not_replaced_with_runtime_overrides(tmp_path, monkeypatch):
     from prismaquant import tessera_calibration_cache as cache
     from prismaquant import tessera_joint_aura as bridge

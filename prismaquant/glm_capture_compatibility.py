@@ -12,7 +12,8 @@ from pathlib import Path
 
 from .glm_source_derivative import (
     VERSION, ORIGINAL_IMAGE_CONTENT_SHA256, ORIGINAL_MODELING_SHA256,
-    CORRECTED_MODELING_SHA256, bound_json, _require, source_derivative_identity,
+    CORRECTED_MODELING_SHA256, ORIGINAL_EXPRESSION, CORRECTED_EXPRESSION,
+    bound_json, _require, source_derivative_identity,
 )
 
 SCHEMA = 'prismaquant.glm_capture_derivative_compatibility.v1'
@@ -115,12 +116,20 @@ def _forward_and_graph(evidence, derivative):
              cpu.get('source', {}).get('modeling_source_sha256') == ORIGINAL_MODELING_SHA256,
              'CPU source evidence differs')
     cases = cpu.get('cases', [])
+    expected_cases = [(64, -5., 'torch.float32', False, False), (65, -5., 'torch.float32', True, True),
+                      (64, -.1, 'torch.float32', True, False), (65, -.1, 'torch.float32', False, True),
+                      (64, -5., 'torch.bfloat16', True, False), (65, -5., 'torch.bfloat16', True, True)]
+    _require(cpu.get('proposed_expression') == dict(before=ORIGINAL_EXPRESSION, after=CORRECTED_EXPRESSION) and
+             [tuple(row.get(key) for key in ('length', 'gate', 'dtype', 'use_norm', 'initial_state')) for row in cases] == expected_cases,
+             'CPU transform or exact case roster differs')
     _require(len(cases) == 6 and all(row.get('forward_byte_equal') is True and
              (not row.get('initial_state') or row.get('final_state_byte_equal') is True) for row in cases),
              'core and final-state forward byte equivalence is incomplete')
     original = bound_json(evidence['original_layer0'], 'original native layer0')
     corrected = bound_json(evidence['corrected_layer0'], 'corrected native layer0')
     graph = bound_json(evidence['corrected_graph'], 'corrected native graph')
+    _require(all(result.get('schema') == 'prismaquant.glm_original_graph_qualification.v1'
+                 for result in (original, corrected, graph)), 'native graph schema differs')
     _require(original.get('mode') == corrected.get('mode') == 'layer0_diagnostic_not_qualification',
              'native forward comparison must use the actual layer0 diagnostic')
     _require(corrected.get('status') == 'diagnostic_complete_not_qualification' and
@@ -133,6 +142,13 @@ def _forward_and_graph(evidence, derivative):
     _require(graph.get('status') == 'complete' and graph.get('mode') == 'bounded_prefix_qualification' and
              graph.get('source_derivative') == derivative and len(graph.get('backwards', [])) == 72 and
              graph.get('source_owners_expired') is True, 'corrected native graph qualification is incomplete')
+    for result, diagnostic in [(corrected, True), (graph, False)]:
+        _require(result.get('runtime_modeling_sha256') == CORRECTED_MODELING_SHA256 and
+                 result.get('runtime_image_content_sha256') == derivative['image_content_sha256'] and
+                 result.get('source_execution', {}).get('source_derivative') == derivative and
+                 not result.get('cleanup_errors') and not result.get('telemetry_errors'),
+                 'corrected native execution or cleanup differs')
+        _verify_native_schedule(result, diagnostic=diagnostic)
     for name, result in [('original', original), ('corrected', corrected), ('graph', graph)]:
         source = result.get('source_final', {})
         _require(source.get('descriptors_open') == 0 and not source.get('violations'), name + ' source lifetime is unverified')
@@ -143,6 +159,43 @@ def _forward_and_graph(evidence, derivative):
     # argument. Native equality above is a layer0 check, not a full-model A/B.
     return dict(scope='closed_causal_expression_proof_plus_native_layer0_and_bounded_graph',
                 corrected_modeling_sha256=CORRECTED_MODELING_SHA256)
+
+
+def _verify_native_schedule(result, *, diagnostic):
+    """Recheck measured rows, numerical identities and gradients at consumption."""
+    layers, rows, seeds = ((0,), (0,), (7000,)) if diagnostic else ((0, 3, 4), (0, 511), (7000, 7001, 7002, 7003))
+    arms = ('unobserved_isolated_baseline',) if diagnostic else (
+        'unobserved_isolated_baseline', 'nonfinal_fork_replay', 'final_original_owner_replay')
+    expected = [(layer, row, seed, arm) for layer in layers for row in rows for seed in seeds for arm in arms]
+    keys = ('layer', 'original_row', 'seed', 'arm')
+    backwards, diagnostics = result.get('backwards', []), result.get('replay_diagnostics', [])
+    _require(all([tuple(row.get(key) for key in keys) for row in sequence] == expected
+                 for sequence in (backwards, diagnostics)), 'native backward/diagnostic schedule differs')
+    primary = result.get('primary_outputs', [])
+    _require([(row.get('layer'), row.get('original_row')) for row in primary] ==
+             [(layer, row) for layer in layers for row in rows] and
+             all(row.get('statistics', {}).get('nonfinite') == 0 for row in primary), 'native primary schedule or finiteness differs')
+    outputs = {(row['layer'], row['original_row']): row['identity'] for row in primary}
+    baselines = {}
+    for row, observed in zip(backwards, diagnostics):
+        group = tuple(row[key] for key in keys[:3])
+        output = outputs[group[:2]]
+        gradient = observed.get('leaf_gradient', {})
+        _require(row.get('output') == output == observed.get('output_identity') and
+                 observed.get('output_matches_primary') is True and observed.get('backward_completed') is True and
+                 observed.get('output', {}).get('nonfinite') == 0 and gradient.get('nonfinite') == 0 and
+                 type(gradient.get('finite_nonzero')) is int and gradient['finite_nonzero'] > 0,
+                 'native forward or finite nonzero backward evidence differs')
+        if row['arm'] == arms[0]:
+            baselines[group] = row
+        else:
+            baseline = baselines[group]
+            _require(row.get('cotangent') == baseline.get('cotangent') and row.get('stimulus') == baseline.get('stimulus'),
+                     'native replay cotangent or stimulus differs from baseline')
+            _require(row.get('activity') is not None, 'native replay activity evidence is absent')
+    if not diagnostic:
+        _require(all(backwards[index+1]['activity'] == backwards[index+2]['activity']
+                     for index in range(0, len(backwards), 3)), 'native fork/final route activity differs')
 
 
 def _verify(record, *, capture, derivative):

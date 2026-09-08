@@ -19,6 +19,7 @@ CORRECTED_MODELING_SHA256 = '416bd6168b3c42858c0e22622dd2e85ff04e9460703eadf64e5
 ORIGINAL_IMAGE_CONTENT_SHA256 = 'eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd'
 CORRECTED_IMAGE_CONTENT_SHA256 = 'd0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026'
 ORIGINAL_HUB_KERNELS_SHA256 = 'fa5143bbbc6a928c70f7e05580b358caae16e88f53f49059c7002f0d01f6c832'
+ORIGINAL_ACCELERATE_INTEGRATION_SHA256 = '4469496da61fdc632faf9cacfc128729b12030eb03c5ef4bb70a66b6012b3a82'
 ORIGINAL_EXPRESSION = '(g.unsqueeze(-2) - g.unsqueeze(-3)).exp().float()'
 CORRECTED_EXPRESSION = '(g.unsqueeze(-2) - g.unsqueeze(-3)).masked_fill(mask.triu(diagonal=1).unsqueeze(-1), 0).exp().float()'
 _BINDINGS = weakref.WeakKeyDictionary()
@@ -112,6 +113,7 @@ def _observe(model, build):
     """Inspect real closure dispatch and live gates without calling unwrapped code."""
     from transformers.models.glm5_next import modeling_glm5_next as modeling
     from transformers.integrations import hub_kernels
+    from transformers.integrations import accelerate
     model_path, hub_path = Path(modeling.__file__), Path(hub_kernels.__file__)
     raw, hub_raw = model_path.read_bytes(), hub_path.read_bytes()
     _require(hashlib.sha256(raw).hexdigest() == CORRECTED_MODELING_SHA256, 'actual modeling source differs')
@@ -120,6 +122,11 @@ def _observe(model, build):
     # verifier's future-annotations flag into unrelated Transformers modules.
     compiled = compile(raw, str(model_path), 'exec', dont_inherit=True)
     hub_compiled = compile(hub_raw, str(hub_path), 'exec', dont_inherit=True)
+    accelerate_path = Path(accelerate.__file__)
+    accelerate_raw = accelerate_path.read_bytes()
+    _require(hashlib.sha256(accelerate_raw).hexdigest() == ORIGINAL_ACCELERATE_INTEGRATION_SHA256,
+             'actual accelerate wrapper source differs')
+    accelerate_compiled = compile(accelerate_raw, str(accelerate_path), 'exec', dont_inherit=True)
     function = modeling.chunk_kimi_delta_attention
     _require_code(function, _code_at(hub_compiled, ('use_kernel_func_from_hub_with_fallback', 'decorator', 'wrapped')),
                   'decorated fallback')
@@ -136,12 +143,19 @@ def _observe(model, build):
         _require(type(module) is modeling.Glm5NextTextLinearAttention, 'attention class substitution')
         forward = module.forward
         _require('forward' not in vars(module), 'instance forward substitution')
-        _require_code(forward.__func__, _code_at(compiled, ('Glm5NextTextLinearAttention', 'forward')), 'attention forward')
-        _require(forward.__func__.__globals__ is vars(modeling), 'attention dispatch globals differ')
+        _require_code(forward.__func__, _code_at(accelerate_compiled,
+            ('force_accelerate_hooks', 'decorator', 'wrapped')), 'attention accelerate wrapper')
+        _require(forward.__func__.__globals__ is vars(accelerate), 'attention wrapper globals differ')
+        attention_closure = inspect.getclosurevars(forward.__func__).nonlocals
+        _require(attention_closure.get('child_module_names') == ['conv1d'], 'attention wrapper child list differs')
+        attention_forward = attention_closure.get('forward_func')
+        _require_code(attention_forward, _code_at(compiled, ('Glm5NextTextLinearAttention', 'forward')), 'attention forward')
+        _require(attention_forward.__globals__ is vars(modeling), 'attention dispatch globals differ')
         gate = module.forget_gate
         _require(type(gate) is modeling.Glm5NextTextForgetGate, 'forget-gate class substitution')
         _require('forward' not in vars(gate), 'instance gate forward substitution')
         _require_code(gate.forward.__func__, _code_at(compiled, ('Glm5NextTextForgetGate', 'forward')), 'forget gate')
+        _require(gate.forward.__func__.__globals__ is vars(modeling), 'forget gate globals differ')
         config = getattr(model.config, 'text_config', model.config)
         configured = getattr(config, 'linear_lower_bound', 'missing')
         bound = gate.safe_gate_lower_bound
@@ -156,6 +170,7 @@ def _observe(model, build):
     _require(bool(gates), 'no actual GLM KDA modules observed')
     return dict(declaration=declaration(), modeling_sha256=CORRECTED_MODELING_SHA256,
                 hub_kernels_sha256=build['hub_kernels_sha256'], gates=gates,
+                accelerate_integration_sha256=ORIGINAL_ACCELERATE_INTEGRATION_SHA256,
                 image_content_sha256=build['corrected_image_content_sha256'])
 
 

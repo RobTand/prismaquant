@@ -77,6 +77,15 @@ def main():
         refuses('instance_forward_override', lambda: source_execution_identity(model), 'instance forward substitution')
     finally:
         del first.forward
+    attention_cells = dict(zip(first.forward.__func__.__code__.co_freevars, first.forward.__func__.__closure__))
+    for key, replacement, match in [('child_module_names', ['foreign'], 'wrapper child list differs'),
+                                  ('forward_func', lambda *a, **k: None, 'attention forward callable code changed')]:
+        prior = attention_cells[key].cell_contents
+        try:
+            attention_cells[key].cell_contents = replacement
+            refuses('attention_wrapper_'+key, lambda: source_execution_identity(model), match)
+        finally:
+            attention_cells[key].cell_contents = prior
     refuses('remove_binding', lambda: bind_source_derivative(model, Glm5NextProfile(), None), 'cannot remove')
     image = os.environ['PRISMAQUANT_CONTAINER_CONTENT_SHA256']
     try:
