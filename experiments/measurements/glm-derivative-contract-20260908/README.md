@@ -181,3 +181,30 @@ The bounded graph gate passes. This does not qualify all 45 layer derivatives,
 full-model cost or quality, or serving. Original-capture compatibility remains
 a separate gate requiring the original capture action to complete; no
 compatibility receipt or full-model consumer run was created by this work.
+
+## Mainline integration — 17:08 UTC
+
+Integration commit `5806aae588596298657034565261cb31cf6a9a34` combines the
+reviewed derivative implementation with the selected source authentication and
+verified capture loader. Both builder policies and both preparation policies
+remain explicit. The builder regression checks authenticated context creation
+before derivative binding and runner cleanup on refusal. The original-capture
+compatibility receipt remains unavailable until that producer completes.
+
+PB split 15 related test files into six independent CPU shards: **632 passed,
+73 skipped, one expected failure**. Each shard reserved five CPUs to cover the
+reader-thread fixtures, four GiB memory and one native thread. All ran on
+dl380g10 under Python 3.12/Torch 2.10, with CUDA disabled. The skips comprise
+36 missing-vLLM registry cases, 24 unconfigured checkpoint cases, 12 profile
+documentation/default cases, and one real-encoder CUDA case. The existing
+profile-spec expected failure is retained. Scope peaks were 369–457 MiB, all
+exit statuses were zero, and all cleanup records were complete.
+
+`root-integrated-cpu-cas-audit.json` binds all six actual outputs, receipts and
+source bundles; each snapshot differs from the integration commit only by PB's
+closure file. The coordinator's native CAS and artifact audits are also copied
+here; they independently check the exact 72-call schedule, per-arm equality,
+finite gradients, source hashes, nine trace files and both-host telemetry.
+The initial CPU submission was rejected for unsupported pytest `-q` forwarding;
+no action ran from that rejected submission. The corrected invocation used
+pbtest's supported defaults and completed all six shards.
