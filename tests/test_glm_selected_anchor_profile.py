@@ -278,3 +278,28 @@ def test_entrypoint_wraps_batch_and_restores_both_after_campaign_error(
             '--anchor-cuda-only', '--', *command])
     assert caught.value is error
     assert campaign._measure_anchor is scalar and campaign._measure_anchor_batch is batch
+
+
+def test_native_cuda_only_batch_trace_has_actual_events(tmp_path, monkeypatch):
+    if not torch.cuda.is_available():
+        pytest.skip('native CUDA-only observer qualification')
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4*1024**2,
+                                 command=selected()+['--anchor-batch-size', '8'], cuda_only=True)
+    ready = monitor_readiness(obs, monkeypatch)
+    weights = torch.ones((8, 64, 64), device='cuda', dtype=torch.bfloat16)
+    outputs = []
+    def original(**kwargs):
+        result = torch.bmm(kwargs['weights'], kwargs['weights'])
+        outputs.append(result)
+        return result
+    with obs:
+        for kind, event in ready.items():
+            assert event.wait(timeout=15), f'{kind} did not produce native-run evidence'
+        actual = obs.wrap_anchor(original)(qnames=[f'expert.{i}' for i in range(8)],
+            weights=weights, format_name='observer-bmm-smoke')
+    assert len(outputs) == 1 and actual is outputs[0]
+    assert torch.equal(actual, torch.full_like(actual, 64))
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'complete' and result['native_anchor_profiled']
+    assert result['anchors'][0]['cuda_events'] > 0
+    assert 0 < result['anchors'][0]['trace']['bytes'] <= 4*1024**2
