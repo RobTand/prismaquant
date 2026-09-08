@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `fix/glm-model-bound-wikitext-inputs`. Stamps
+As of: 2026-09-08 · `fix/glm-streamed-gold-companion`. Stamps
 follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-08, `fix/glm-streamed-gold-companion`) for the opt-in
@@ -16,17 +16,6 @@ Fitting overlap remains unverified in this payload; full-vocabulary scope is
 not a held-out claim. This tools-only extension changes no pricing package,
 streaming residency mechanism, fitting capture, quantization or serving gate.
 
-Re-stamped (2026-09-08, `fix/glm-gold-topology`) for explicit stock-vLLM
-topology in the offline gold KL/PPL tools (#434). Shared closed arguments
-forward TP degree, node count, rank-0 rendezvous, MP backends and an optional
-MoE backend to the existing LLM construction; omitted arguments retain TP1.
-The gold coordinator does not launch remote nodes. Multi-node runs require
-separately launched stock headless workers, explicit compatible MP settings,
-and per-node runtime evidence. Configured topology and the helper's source
-bytes join existing gold provenance. Full-vocab final-position KL remains
-distinct from HTTP top-K KL. This instrument change touches no frozen pricing
-package input, Tessera producer, serving qualification or performance claim.
-
 Re-stamped (2026-09-08, `fix/glm-model-bound-wikitext-inputs`) for the
 explicit offline `prismaquant.model_wikitext_inputs/2` input contract.
 The existing materializer opts in with `--input-schema model-v2`; its default
@@ -39,6 +28,17 @@ and digest-bound. PPL consumes these pre-tokenized inputs before engine load;
 source config bytes are provenance, while source/candidate pairing uses the
 shared token domain. This CPU preparation does not establish held-out status,
 model fidelity, serving qualification or a measured quality improvement.
+
+Re-stamped (2026-09-08, `fix/glm-gold-topology`) for explicit stock-vLLM
+topology in the offline gold KL/PPL tools (#434). Shared closed arguments
+forward TP degree, node count, rank-0 rendezvous, MP backends and an optional
+MoE backend to the existing LLM construction; omitted arguments retain TP1.
+The gold coordinator does not launch remote nodes. Multi-node runs require
+separately launched stock headless workers, explicit compatible MP settings,
+and per-node runtime evidence. Configured topology and the helper's source
+bytes join existing gold provenance. Full-vocab final-position KL remains
+distinct from HTTP top-K KL. This instrument change touches no frozen pricing
+package input, Tessera producer, serving qualification or performance claim.
 
 Re-stamped (2026-09-08, `integrate/glm-packed-source-20260908`) for the
 synchronized development/serving dependency pin to Tessera `07ad344c3275`
