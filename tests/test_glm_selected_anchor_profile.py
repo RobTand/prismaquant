@@ -359,3 +359,43 @@ def test_timed_window_requires_cuda_only(tmp_path):
     with pytest.raises(ValueError, match='CUDA-only'):
         observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
             command=selected(), window_seconds=.01)
+
+
+def test_native_timed_cuda_window_excludes_later_work(tmp_path, monkeypatch):
+    if not torch.cuda.is_available():
+        pytest.skip('native timed CUDA observer qualification')
+    stopped = threading.Event()
+    toggle = torch.profiler.profile.toggle_collection_dynamic
+    def observed_toggle(self, *args, **kwargs):
+        result = toggle(self, *args, **kwargs)
+        stopped.set()
+        return result
+    monkeypatch.setattr(torch.profiler.profile, 'toggle_collection_dynamic', observed_toggle)
+    weights = torch.ones((8, 64, 64), device='cuda', dtype=torch.bfloat16)
+    torch.bmm(weights, weights)  # Resolve the library before testing the timed window.
+    torch.cuda.synchronize()
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4*1024**2,
+        command=selected(), cuda_only=True, window_seconds=.25)
+    ready = monitor_readiness(obs, monkeypatch)
+    calls = []
+    def original(**kwargs):
+        first = torch.bmm(weights, weights)
+        torch.cuda.synchronize()
+        assert stopped.wait(15), 'native CUDA collection did not stop'
+        later = torch.bmm(weights, weights)
+        torch.cuda.synchronize()
+        result = [first, later]
+        calls.append(result)
+        return result
+    with obs:
+        for event in ready.values():
+            assert event.wait(15)
+        result = obs.wrap_anchor(original)(qnames=['a', 'b'], format_name='window-test')
+    assert len(calls) == 1 and result is calls[0]
+    assert all(torch.equal(value, torch.full_like(value, 64)) for value in result)
+    record, = obs.result['anchors']
+    assert record['status'] == 'complete'
+    assert record['collection_window']['stopped_by'] == 'deadline'
+    trace = json.loads((obs.out/record['trace']['path']).read_text())
+    kernels = [event for event in trace['traceEvents'] if event.get('cat') == 'kernel']
+    assert len(kernels) == 1, 'CUDA work after the deadline was also collected'
