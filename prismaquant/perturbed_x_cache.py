@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 import json
 import os
 import pickle
@@ -515,6 +516,31 @@ class _VerifiedBufferReader(io.RawIOBase):
             self._view.release()
             self._view = None
         super().close()
+
+
+def bounded_cpu_float32_isfinite(tensor, *, max_scratch_bytes):
+    """Validate a resident canonical tensor with two scalar reduction outputs.
+
+    The qualified CPU aminmax kernel propagates NaNs, preserves infinities and
+    uses vector accumulators plus one scalar pair per native thread. Contiguity
+    is required before the kernel's contiguous() call can create a hidden copy.
+    Torch tensor allocation is eight bytes; conservatively charge reduction
+    pairs and Python/Tensor metadata within M. Native thread-pool bookkeeping
+    remains runtime overhead, independently covered by the physical guard.
+    """
+    if (not isinstance(tensor, torch.Tensor) or tensor.device.type != 'cpu' or
+            tensor.dtype != torch.float32 or tensor.layout != torch.strided or
+            not tensor.is_contiguous() or tensor.requires_grad):
+        raise RuntimeError('bounded finite reduction requires contiguous CPU float32 storage')
+    # The pinned CPU parallel_reduce uses SmallVector<pair<float,float>,64>.
+    # This overprices its pair payload and reserves independent scalar metadata.
+    reduction_bytes = 1024 + 16*max(64, torch.get_num_threads())
+    if type(max_scratch_bytes) is not int or reduction_bytes > max_scratch_bytes//2:
+        raise RuntimeError('bounded finite reduction exceeds metadata scratch budget')
+    if tensor.numel() == 0:
+        return True  # Match isfinite(empty).all() without invoking empty aminmax.
+    minimum, maximum = torch.aminmax(tensor)
+    return math.isfinite(minimum.item()) and math.isfinite(maximum.item())
 
 
 def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):

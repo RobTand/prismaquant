@@ -16,7 +16,10 @@ allocations and extension lookup before the C unpickler is constructed. Inert
 pickle reconstruction then checks declared storage sizes against ZIP records
 before any Torch allocation, including each view’s extent within its own storage
 record. A metadata pass checks tensor geometry before CPU reconstruction; the CPU pass checks unique backing
-storage, and finite masks use bounded chunks. Source reads use up to 16 MiB
+storage. Verified CPU finite validation requires contiguous FP32 and reduces
+each full tensor to two scalar extrema, preserving NaN/Inf refusal without
+tensor-sized masks. Its scalar/thread reduction scratch is explicitly checked
+inside M; legacy finite validation retains its prior path. Source reads use up to 16 MiB
 views of the admitted byte buffer, with memory/identity/page-advice checks at
 every read boundary. A separate full-file F term conservatively prices kernel
 source-page retention despite best-effort advice; page rounding and bookkeeping
