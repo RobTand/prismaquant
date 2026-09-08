@@ -109,3 +109,14 @@ launch to source `ff839e4cf`; `final-audit.json` verifies its receipt and payloa
 After merging the portable-image adapter from main, action `ad8f283959ed`
 passed all 34 architecture, staleness and image-content cases on CPU. The final
 report addition is prose only. The full GLM fit limitation above is unchanged.
+
+
+## Later same-day supersession of the writer admission limit
+
+The v1 124.783 GiB export phase above remains the historical result for its
+original writer. PR #379 subsequently bounded completed tensor-record file
+pages; its measurements and v2 resource derivation are recorded in
+[bounded-hessian-writer-2026-09-08.md](bounded-hessian-writer-2026-09-08.md).
+The current all-group metadata replay at main `9ff3b97f7` admits all 132 original
+GLM groups under 104 GiB, with a 98.041521 GiB maximum. No native full-stack fit
+is implied. See `experiments/measurements/glm-full-stack-admission-20260908/`.

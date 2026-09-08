@@ -2418,12 +2418,10 @@ def main():
               f"({tessera_hessian_identity['stamped_rows']} stamped, "
               f"{tessera_hessian_identity['unstamped_rows']} unstamped rows)")
 
-    # Which runtime contract admitted this run's Tessera routes, if any. Empty
-    # when no Tessera contract is pinned -- production, where the attested menu
-    # is empty and nothing here is reached. Non-empty means the development
-    # override was in force, and the block names the exact Tessera commit and
-    # the sha256 of the contract file the reader consumed, so a shipcard can
-    # say which table attested its routes rather than that some table did.
+    # Which runtime contract answered this run's Tessera route queries, if any.
+    # The block names the exact Tessera commit and consumed contract digest;
+    # its presence does not by itself identify a development override or prove
+    # that every candidate route was attested for the requested context.
     # Read through tessera_menu's ONE read, not through load_tessera_contract
     # directly: the menu's every attestation goes through that function, and
     # a provenance block that read the pin a second time could name a table
@@ -3681,9 +3679,9 @@ def main():
         Same resolution order as ``selection_serving_lane_provenance``: prefer
         the ``Candidate`` the DP actually saw, and re-resolve from the target
         profile for expanded members of aggregated super items, which have no
-        candidate of their own. This is what makes the constraint axis price a
-        rung whose fused lane the pinned Gridbook version does NOT instantiate
-        with its FALLBACK route's numbers instead of the fused lane's.
+        candidate of their own. The constraint axis prices the route actually
+        resolved for that serving context, including a declared fallback when
+        the requested fused route is unavailable.
         """
         for cand in candidates.get(name, ()):
             if cand.fmt == fmt:

@@ -1,0 +1,34 @@
+[
+  {
+    "action": "b597d4bfad1fd360ef215a4452e4f00d86d7d724803e0df70095271b44fe1546",
+    "receipt": "8cbca06c0d9d0eecc08256df6b7542c312652e214ded5a085d0bdab11a1cd4e5",
+    "payload_sha256": "2e9a8404502aa9c76db05c5b482bb279e432485e43903ed57fa519918b8d707f",
+    "snapshot": "2798000542a4618f5285f2c1461e36a86cc8e628",
+    "source_diff_from_commit": [
+      ".pbrun-closure.a0fa29de37cabb8a.json",
+      "docs/ARCHITECTURE.md",
+      "docs/measurements/bounded-hessian-writer-2026-09-08.md",
+      "docs/measurements/selected-source-anchors-2026-09-08.md",
+      "experiments/measurements/glm-full-stack-admission-20260908/README.md",
+      "experiments/measurements/glm-full-stack-admission-20260908/pb-audit.json",
+      "experiments/measurements/glm-full-stack-admission-20260908/resource-summary.json"
+    ],
+    "stdout_tail": "[dispatch] widest row demands 99 GB; --rows-per-box 1 needs 99 GB per box (spec declares 104 GB)\n[dispatch] 132 of 132 rows are admissible, 0 declined\n{\"output\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-stack-admission-inspection-01/resource-inspection.json\", \"sha256\": \"d66555b4895bd63da5c87eca104d38da34c48903fc10de5bb5018edd6e22b307\", \"groups\": 132, \"units\": 36423, \"admissible\": 132, \"declined\": 0, \"maximum_bytes\": 105271281496}\n"
+  },
+  {
+    "action": "7f7ca771153ac269681e8447ecab2ccdf4e446517bc0a54f4543e02be20c79c3",
+    "receipt": "4987aea52b2d8595b5287c8406a5ed3be2dafb88eee5ccc998d6dc34800a31a8",
+    "payload_sha256": "a32df96d61b9c82f657f6570a5c5848a42f1f4a99003c1d097a85775ac8e71ca",
+    "snapshot": "1dbbeca05ef0b9acac8920ad776243ac71c3bf1e",
+    "source_diff_from_commit": [
+      ".pbrun-closure.efd574377e43c04d.json",
+      "docs/ARCHITECTURE.md",
+      "docs/measurements/bounded-hessian-writer-2026-09-08.md",
+      "docs/measurements/selected-source-anchors-2026-09-08.md",
+      "experiments/measurements/glm-full-stack-admission-20260908/README.md",
+      "experiments/measurements/glm-full-stack-admission-20260908/pb-audit.json",
+      "experiments/measurements/glm-full-stack-admission-20260908/resource-summary.json"
+    ],
+    "stdout_tail": "{\"torch\": \"2.10.0+cpu\", \"transformers\": \"5.16.1\", \"cuda_initialized\": false}\n"
+  }
+]
