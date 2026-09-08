@@ -1,0 +1,110 @@
+[
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows",
+    "argv": [
+      "python3",
+      "-c",
+      "import hashlib,pathlib,runpy; p=pathlib.Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-operator-windows-01/analyze_trace.py'); assert hashlib.sha256(p.read_bytes()).hexdigest()=='4fa25632bbf810c54910d60ef41ac0d79f80c7707cd3bf5077edec5a6c19cb3e'; runpy.run_path(str(p),run_name=\"__main__\")",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-profile-03/collection-00-window-00.trace.json",
+      "67a586add299eea0ce8252334df1c433bb797e382513debe2058b07d8aa7b647",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-00-window-00.trace.summary.json"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 1
+    },
+    "anywhere": true,
+    "priority": -10,
+    "timeout_s": 300
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows",
+    "argv": [
+      "python3",
+      "-c",
+      "import hashlib,pathlib,runpy; p=pathlib.Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-operator-windows-01/analyze_trace.py'); assert hashlib.sha256(p.read_bytes()).hexdigest()=='4fa25632bbf810c54910d60ef41ac0d79f80c7707cd3bf5077edec5a6c19cb3e'; runpy.run_path(str(p),run_name=\"__main__\")",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-profile-03/collection-00-window-01.trace.json",
+      "121841e06c5904f9772fec9f42870ddcddc37e1cd2adf5a5075e0130d8ccd842",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-00-window-01.trace.summary.json"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 1
+    },
+    "anywhere": true,
+    "priority": -10,
+    "timeout_s": 300
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows",
+    "argv": [
+      "python3",
+      "-c",
+      "import hashlib,pathlib,runpy; p=pathlib.Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-operator-windows-01/analyze_trace.py'); assert hashlib.sha256(p.read_bytes()).hexdigest()=='4fa25632bbf810c54910d60ef41ac0d79f80c7707cd3bf5077edec5a6c19cb3e'; runpy.run_path(str(p),run_name=\"__main__\")",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-profile-03/collection-03-window-00.trace.json",
+      "f95d2086792d485c0e0a0fdbfb38c688b9dfce1ef7250aaaa9f1e9ee4c90e4ac",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-03-window-00.trace.summary.json"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 1
+    },
+    "anywhere": true,
+    "priority": -10,
+    "timeout_s": 300
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows",
+    "argv": [
+      "python3",
+      "-c",
+      "import hashlib,pathlib,runpy; p=pathlib.Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-operator-windows-01/analyze_trace.py'); assert hashlib.sha256(p.read_bytes()).hexdigest()=='4fa25632bbf810c54910d60ef41ac0d79f80c7707cd3bf5077edec5a6c19cb3e'; runpy.run_path(str(p),run_name=\"__main__\")",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-profile-03/collection-03-window-01.trace.json",
+      "4e30a60acfd79f541cf568053639073383e6be7b42ed46a8b074e9306ad481d1",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-03-window-01.trace.summary.json"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 1
+    },
+    "anywhere": true,
+    "priority": -10,
+    "timeout_s": 300
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows",
+    "argv": [
+      "python3",
+      "-c",
+      "import hashlib,pathlib,runpy; p=pathlib.Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-operator-windows-01/analyze_trace.py'); assert hashlib.sha256(p.read_bytes()).hexdigest()=='4fa25632bbf810c54910d60ef41ac0d79f80c7707cd3bf5077edec5a6c19cb3e'; runpy.run_path(str(p),run_name=\"__main__\")",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-profile-03/collection-04-window-00.trace.json",
+      "1940ae2aef2f12e5804bea752e3f6eea2213152bc0c24fdbd91e429cf0f6f8e3",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-04-window-00.trace.summary.json"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 1
+    },
+    "anywhere": true,
+    "priority": -10,
+    "timeout_s": 300
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows",
+    "argv": [
+      "python3",
+      "-c",
+      "import hashlib,pathlib,runpy; p=pathlib.Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-operator-windows-01/analyze_trace.py'); assert hashlib.sha256(p.read_bytes()).hexdigest()=='4fa25632bbf810c54910d60ef41ac0d79f80c7707cd3bf5077edec5a6c19cb3e'; runpy.run_path(str(p),run_name=\"__main__\")",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-profile-03/collection-04-window-01.trace.json",
+      "bc8345290cb553cfb77a765d82936914b72e3c89aceaee0f768856a760d8fb54",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-04-window-01.trace.summary.json"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 1
+    },
+    "anywhere": true,
+    "priority": -10,
+    "timeout_s": 300
+  }
+]

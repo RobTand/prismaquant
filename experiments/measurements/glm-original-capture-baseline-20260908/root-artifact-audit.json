@@ -1,0 +1,55 @@
+{
+  "schema": "prismaquant.partial_capture_trace_audit.v1",
+  "complete": true,
+  "summaries_match_cas_results": [
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-00-window-00.trace.summary.json",
+      "sha256": "ab92d2dfb004c504054ab054cdcef699023ef6b98bbb71ba26ccec60ec639617",
+      "action": "368240046a6d2fe67bfde7edaa7bd3ea5a8ec2b9c0bd3d8e4ced532edc9aa01e",
+      "raw_trace_sha256": "67a586add299eea0ce8252334df1c433bb797e382513debe2058b07d8aa7b647",
+      "kernel_count": 1939,
+      "kernel_total_us": 196075.89199999976
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-00-window-01.trace.summary.json",
+      "sha256": "8d0ddff03306c9e84baec2959fb3a0445df2a33ffef27aa9806e81c863e75b61",
+      "action": "fe45406c88fb8e71cca1018fe293d01fab6fa75b8f6b0e231b95abd46083ba63",
+      "raw_trace_sha256": "121841e06c5904f9772fec9f42870ddcddc37e1cd2adf5a5075e0130d8ccd842",
+      "kernel_count": 1936,
+      "kernel_total_us": 201236.7389999995
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-03-window-00.trace.summary.json",
+      "sha256": "59200e0ed15b75b1db37fb83c578d475e6ae17918fdd0313282bd16582442536",
+      "action": "917eb15e5a22b6d41a3b9267f7c36cd51fedf8e8e32c0ef69e4e7cfc1bbd8872",
+      "raw_trace_sha256": "f95d2086792d485c0e0a0fdbfb38c688b9dfce1ef7250aaaa9f1e9ee4c90e4ac",
+      "kernel_count": 18327,
+      "kernel_total_us": 866374.3900000275
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-03-window-01.trace.summary.json",
+      "sha256": "2e4cd6c21c9f3de49e1c3d94d0e333282d0939d4a5bff5c422c91ce90deb6859",
+      "action": "21f3e6d4f4aec5e345015e21f144580ac18f97379420903f09fc44aa36f572e7",
+      "raw_trace_sha256": "4e30a60acfd79f541cf568053639073383e6be7b42ed46a8b074e9306ad481d1",
+      "kernel_count": 17970,
+      "kernel_total_us": 1135572.0780000302
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-04-window-00.trace.summary.json",
+      "sha256": "48eab39f3480960399b43f3867b9e1d43ad002143ada50a32930f67a9d599ffc",
+      "action": "cf39a847c1d93603e7778fa3860e4dd3d9b8f8b1edc2a7fb4dfeba5bac910f66",
+      "raw_trace_sha256": "1940ae2aef2f12e5804bea752e3f6eea2213152bc0c24fdbd91e429cf0f6f8e3",
+      "kernel_count": 19331,
+      "kernel_total_us": 992583.3180000207
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/full-capture-trace-analysis-01/collection-04-window-01.trace.summary.json",
+      "sha256": "eda2d02c6f9a725f748bae001d9890e0574733205921abddbd81124bb9182ac7",
+      "action": "434489b2feb64986f6edbfc896a6f63cf51150c30d2291d6c1f55446dd77ff76",
+      "raw_trace_sha256": "bc8345290cb553cfb77a765d82936914b72e3c89aceaee0f768856a760d8fb54",
+      "kernel_count": 18948,
+      "kernel_total_us": 1290824.0620000013
+    }
+  ],
+  "scope": "Six immutable trace summaries verified against their CAS logs and reviewed hash-checking parser. Full capture still running."
+}
