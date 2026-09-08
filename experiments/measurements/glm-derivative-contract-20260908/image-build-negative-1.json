@@ -1,0 +1,117 @@
+{
+  "action_key": "26ceef570f0d7509c005a95ec0696b8e5df0a1e8cc4624274d56657b9e98a2c4",
+  "returncode": 1,
+  "terminal": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/26ceef570f0d7509c005a95ec0696b8e5df0a1e8cc4624274d56657b9e98a2c4.json",
+    "sha256": "d001867adac3d7134c93aee5a03d0468a824dcbb215e8c57249e3c74b68239f9"
+  },
+  "source_snapshot": {
+    "commit": "918bff8cf45e71681865d0042f53cbc9a1f77b8b",
+    "input": {
+      "bytes": 26634932,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "2a0170ddb3598e7b0fe953b51965e6807928f762bc2beae9465616bb971bab0a"
+    },
+    "parent": "9acb758d385bf8cebf97952534feec701839b6d9",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff": "A\t.pbrun-closure.b3aabe323c830c0a.json\nM\texperiments/glm_kda_backward_source_repro.py\nA\tprismaquant/glm_source_derivative.py\nM\tprismaquant/joint_aura.py\nM\tprismaquant/model_profiles/base.py\nM\tprismaquant/model_profiles/glm5_next.py\nA\ttools/build_glm_derivative_image.py\n",
+  "build_source_checks": {
+    "tools/build_glm_derivative_image.py": "5d9ab336ced5df0fb010e70891fee50851045821d8ebfe5273387b2e24401ceb",
+    "prismaquant/glm_source_derivative.py": "f5e7e3d76966567f8602a9d31972bf7ee496049f2a071a98afc331f512112725"
+  },
+  "cleanup": {
+    "checked_unix": 1788882298.8233778,
+    "complete": true,
+    "released": {
+      "ok": true,
+      "scope_id": "prismabuild-job46672608a81c410c3b735caf3627059c.slice",
+      "stop_reason": "failed",
+      "stopped_unix": 1788882298.756099
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 2.596299725,
+        "busy_percent_peak": 5.4718876000000005,
+        "psi_some_avg10_max": 0.0,
+        "psi_some_avg10_samples": 4,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 4,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788882298.6196468,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.0295,
+        "power_reference_scope": "soc_tdp",
+        "power_reference_source": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html",
+        "power_reference_w": 140.0,
+        "power_w_mean": 4.114999999999999,
+        "power_w_peak": 4.13,
+        "samples": 4,
+        "source": "pqteld",
+        "temperature_c_peak": 45.0,
+        "utilization_percent_mean": 0.0,
+        "utilization_percent_peak": 0.0,
+        "utilization_samples": 4,
+        "uvm_residual_bytes_peak": 3318407168,
+        "uvm_residual_samples": 4
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 6.79,
+        "psi_mem_full_avg10_max": 0.0,
+        "samples": 4,
+        "source": "pqteld",
+        "unified_available_bytes_min": 124495196160,
+        "unified_total_bytes": 130595991552,
+        "unified_used_bytes_peak": 6100795392
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1788882296.7100701
+    },
+    "finished_unix": 1788882298.6196468,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 0,
+      "processes_unreadable": 0,
+      "rchar": 0,
+      "read_bytes": 0,
+      "source": "proc_io",
+      "syscr": 0,
+      "syscw": 0,
+      "wchar": 0,
+      "write_bytes": 0
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 0,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 104845312,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.016837000000000213,
+      "user_seconds": 0.04258700000000104,
+      "voluntary_context_switches": 21
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 0.451199,
+      "cpu_system_seconds": 0.114072,
+      "cpu_user_seconds": 0.337126,
+      "memory_current_bytes": 1388544,
+      "memory_peak_bytes": 76267520,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788882296.7100701,
+    "wall_seconds": 1.909576654434204
+  },
+  "stdout": "docker shim: this Docker command can start work outside the PB job's memory slice; use docker run/create, including an owned container for a builder\nTraceback (most recent call last):\n  File \"<frozen runpy>\", line 198, in _run_module_as_main\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/rob/tmp/prismabuild-checkouts/26ceef570f0d.ebog5bzd/checkout/tools/build_glm_derivative_image.py\", line 94, in <module>\n    main()\n  File \"/home/rob/tmp/prismabuild-checkouts/26ceef570f0d.ebog5bzd/checkout/tools/build_glm_derivative_image.py\", line 58, in main\n    subprocess.run(['docker', 'build', '--network=none', '--tag', image, str(context)], check=True)\n  File \"/usr/lib/python3.12/subprocess.py\", line 571, in run\n    raise CalledProcessError(retcode, process.args,\nsubprocess.CalledProcessError: Command '['docker', 'build', '--network=none', '--tag', 'prismaquant-glm-derivative:causal-exp-v1-20260908', '/home/rob/tmp/glm-derivative-build-3lts3lm4']' returned non-zero exit status 125.\n"
+}

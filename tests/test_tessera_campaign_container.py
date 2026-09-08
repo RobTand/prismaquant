@@ -65,3 +65,36 @@ def test_host_rows_remain_direct():
     del data["container"]
     assert dispatch._row(data, [], mem_gb=40, timeout_s=60)["argv"] == [
         "python3", "-u", "-m", "prismaquant.tessera_campaign"]
+
+
+def test_actual_image_content_cannot_be_overridden_and_cpu_mode_requests_no_gpu():
+    runner = importlib.import_module('tools.tessera_campaign_container')
+    data = spec()
+    argv = runner.docker_command(data, ['python3'], cwd='/snapshot', uid=1, gid=1,
+        image_id='sha256:resolved', content_sha256='a'*64, with_gpu=False)
+    assert '--gpus' not in argv
+    assert 'PRISMAQUANT_CONTAINER_CONTENT_SHA256='+'a'*64 in argv
+    data['env']['PRISMAQUANT_CONTAINER_CONTENT_SHA256'] = 'b'*64
+    with pytest.raises(RuntimeError, match='inspected launcher'):
+        runner.validate_container(data)
+
+
+def test_image_archive_requires_content_digest_and_refuses_changed_bytes(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    runner = importlib.import_module('tools.tessera_campaign_container')
+    data = spec()
+    path = tmp_path/'image.tar'
+    path.write_bytes(b'changed archive')
+    data['container']['archive'] = dict(path=str(path), sha256='a'*64)
+    with pytest.raises(RuntimeError, match='image content digest'):
+        runner.validate_container(data)
+    data['container']['content_sha256'] = 'b'*64
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert argv[:3] == ['docker', 'image', 'inspect']
+        return SimpleNamespace(returncode=1, stdout='', stderr='absent')
+    monkeypatch.setattr(runner.subprocess, 'run', run)
+    with pytest.raises(RuntimeError, match='archive bytes changed'):
+        runner.inspect_or_load(data['container'])
+    assert len(calls) == 1

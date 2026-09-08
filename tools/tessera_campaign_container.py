@@ -6,6 +6,7 @@ maps the worker's sealed checkout and explicit data mounts into the container.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -17,8 +18,8 @@ from tools.container_runtime_identity import image_content_sha256
 
 def validate_container(spec: dict) -> None:
     container = spec.get("container")
-    if not isinstance(container, dict) or set(container) - {"image", "mounts", "content_sha256"}:
-        raise RuntimeError("container must declare image and optional mounts/content_sha256 only")
+    if not isinstance(container, dict) or set(container) - {"image", "mounts", "content_sha256", "archive"}:
+        raise RuntimeError("container must declare image and optional mounts/content_sha256/archive only")
     image = container.get("image")
     if not isinstance(image, str) or not image or image.startswith("-"):
         raise RuntimeError("container.image must name a Docker image")
@@ -26,6 +27,14 @@ def validate_container(spec: dict) -> None:
         digest = container["content_sha256"]
         if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise RuntimeError("container.content_sha256 must be a lowercase SHA256 digest")
+    if 'archive' in container:
+        bound = container['archive']
+        if (not isinstance(bound, dict) or set(bound) != {'path', 'sha256'} or
+                not isinstance(bound.get('path'), str) or not bound['path'].startswith('/') or
+                str(PurePosixPath(bound['path'])) != bound['path'] or '..' in PurePosixPath(bound['path']).parts or
+                not isinstance(bound.get('sha256'), str) or re.fullmatch(r'[0-9a-f]{64}', bound['sha256']) is None or
+                'content_sha256' not in container):
+            raise RuntimeError('container archive requires canonical path/SHA256 and image content digest')
     mounts = container.get("mounts", [])
     if not isinstance(mounts, list):
         raise RuntimeError("container.mounts must be a list")
@@ -53,12 +62,14 @@ def validate_container(spec: dict) -> None:
             not isinstance(k, str) or not k or "=" in k or "\x00" in k
             or not isinstance(v, str) or "\x00" in v for k, v in env.items()):
         raise RuntimeError("container env must map environment names to strings")
+    if 'PRISMAQUANT_CONTAINER_CONTENT_SHA256' in env:
+        raise RuntimeError('actual container content is supplied by the inspected launcher')
 
 
 def docker_command(spec: dict, command: list[str], *, cwd: str,
-                   uid: int, gid: int, image_id: str) -> list[str]:
+                   uid: int, gid: int, image_id: str, content_sha256=None, with_gpu=True) -> list[str]:
     validate_container(spec)
-    argv = ["docker", "run", "--rm", "--gpus", "all", "--ipc=host",
+    argv = ["docker", "run", "--rm", *(["--gpus", "all"] if with_gpu else []), "--ipc=host",
             "--user", f"{uid}:{gid}", "--workdir", "/workspace",
             "--entrypoint", "", "--mount",
             f"type=bind,src={cwd},dst=/workspace,readonly"]
@@ -69,12 +80,34 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
         argv += ["--mount", value]
     for key, value in sorted(spec.get("env", {}).items()):
         argv += ["--env", f"{key}={value}"]
+    if content_sha256 is not None:
+        argv += ['--env', 'PRISMAQUANT_CONTAINER_CONTENT_SHA256=' + content_sha256]
     return [*argv, image_id, *command]
+
+
+def inspect_or_load(container):
+    requested = container['image']
+    found = subprocess.run(['docker', 'image', 'inspect', requested], capture_output=True, text=True)
+    if found.returncode:
+        bound = container.get('archive')
+        if bound is None:
+            raise RuntimeError('declared container image is unavailable: ' + found.stderr)
+        with Path(bound['path']).open('rb') as stream:
+            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if actual != bound['sha256']:
+            raise RuntimeError('declared image archive bytes changed')
+        subprocess.run(['docker', 'load', '--input', bound['path']], check=True)
+        found = subprocess.run(['docker', 'image', 'inspect', requested], capture_output=True, text=True, check=True)
+    rows = json.loads(found.stdout)
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        raise RuntimeError('Docker returned no unique image inspection')
+    return rows
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", required=True)
+    parser.add_argument('--cpu-only', action='store_true', help='Run admitted CPU checks without requesting a GPU')
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     spec = json.loads(args.spec)
@@ -83,8 +116,7 @@ def main(argv=None) -> int:
     if not command:
         parser.error("a container command is required")
     requested = spec["container"]["image"]
-    inspected = json.loads(subprocess.check_output(
-        ["docker", "image", "inspect", requested], text=True))
+    inspected = inspect_or_load(spec['container'])
     if not isinstance(inspected, list) or len(inspected) != 1 or not isinstance(inspected[0], dict):
         raise RuntimeError("Docker returned no unique image inspection")
     image_id = inspected[0].get("Id")
@@ -101,7 +133,8 @@ def main(argv=None) -> int:
                       "declared_content_sha256": declared,
                       "uid": os.getuid(), "gid": os.getgid()}), flush=True)
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
-                            uid=os.getuid(), gid=os.getgid(), image_id=image_id)
+                            uid=os.getuid(), gid=os.getgid(), image_id=image_id,
+                            content_sha256=content_digest, with_gpu=not args.cpu_only)
     os.execvp(docker[0], docker)
     return 1  # exec never returns
 

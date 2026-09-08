@@ -1,0 +1,462 @@
+{
+  "schema": "prismaquant.glm_original_graph_negative_attempt.v1",
+  "action_key": "5dac548ddf0844d62873aefb9201bbc42e72a85a07a9615e3b50cd609a30c17a",
+  "status": "failed_before_original_layer_forward",
+  "native_result": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-01/result.json",
+    "sha256": "28685cb8e7e774e51530aab6dd7a4238e629168752a7a7104682545347699ced",
+    "bytes": 616184
+  },
+  "terminal": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/5dac548ddf0844d62873aefb9201bbc42e72a85a07a9615e3b50cd609a30c17a.json",
+    "sha256": "19d43b4fb7f0a7c57911202a8d3e3347bf6a98cf70f1e9150ec1b0c133a53f54",
+    "returncode": 1
+  },
+  "source_snapshot": {
+    "commit": "e3c40be969bac23bf18b4e045c9c4f819b0216c9",
+    "input": {
+      "bytes": 26550990,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "e5ad0daaba3980872ffb1defc269aee44b09992406a32a5bb4d1abebf552eb79"
+    },
+    "parent": "2bdec238606d63d659662898c1df46954af60770",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff": "A\t.pbrun-closure.f9ed6eba59991c1e.json\n",
+  "frozen_source_checks": {
+    "experiments/glm_original_graph_profile.py": "ed990145bb047f00e3e9bb7bfea69b5293a7b0a469608f281866da0498bcfdcd",
+    "experiments/glm_original_graph_source.py": "21bb03c8176285fa3439fe61caf348b8b3f883a58d801020a249bf371070ad86",
+    "tests/test_glm_original_graph_profile.py": "8162fc5d572a58f5353e9b61c39a0ce72fefa11ab16d3eefba2a0693f4bd7233",
+    "prismaquant/cost_streaming.py": "3f0ddfc73a4c5d63d48ae0563cb8939946a920964368a84d804efc8ccc353d12",
+    "prismaquant/streaming_model.py": "4d4b75edc2cbf2fde3b5bb0e4c331b8b3705fef77b24700ef3a18cc315de90f9",
+    "prismaquant/layer_streaming.py": "c92b68cbd43124af7d3428d92a0c3ae26efe3ae856890589b94120d07d93f0a9",
+    "prismaquant/sensitivity_probe.py": "647ee0b19d9376a26af6d55e4cbd42a32795d750f543e3fcb303bc3e62ae1491",
+    "prismaquant/perturbed_x_cache.py": "b4b7374513eb631218ada192699d3b62228b671426241f3c1969b81c99c4444c",
+    "prismaquant/memory_management.py": "e19bea17082ad4fc07972c28f7988c46aaa95c9b7a353c5650f64ff2ad16384c",
+    "experiments/joint_operator_windows_profile.py": "2e2b7f44c99adb44f90a08363772a7d754626ce19e81ca77b34717091d33faa6",
+    "experiments/joint_allocator_turnover_profile.py": "e12ba70aa00634529d043d382f691792f4afe56e97d73c59cb09740fb402fb10",
+    "experiments/workspace_netdata.py": "938db1c5d613990324b0397a364439159eb3e4da7daa824f790d96722d4e3361",
+    "experiments/measurements/glm-joint-original-graph-plan-20260908/plan.json": "9ebfb0300a94a07ff6309ad34542be967d668873a9fab396111b40726a7be618"
+  },
+  "cleanup": {
+    "checked_unix": 1788879110.0353787,
+    "complete": true,
+    "nonce": "b29de9dd354547fd8bedea31bf9643e7",
+    "released": {
+      "ok": true,
+      "retired": true,
+      "scope_id": "prismabuild-job6f9038c1148b6cfe0cb1132bf4a00fbc.slice"
+    },
+    "telemetry": {
+      "action_key": "5dac548ddf0844d62873aefb9201bbc42e72a85a07a9615e3b50cd609a30c17a",
+      "complete": true,
+      "cpu_seconds": 58.317287,
+      "cpu_system_seconds": 18.067096,
+      "cpu_user_seconds": 40.250191,
+      "errors": [],
+      "gpu_memory_max_bytes": 98784247808,
+      "host": "sparklina",
+      "memory_current_bytes": 2915704832,
+      "memory_max_bytes": 111669149696,
+      "memory_peak_bytes": 6384881664,
+      "nonce": "b29de9dd354547fd8bedea31bf9643e7",
+      "oom_kill": 0,
+      "oom_local": 0,
+      "process_io": {
+        "live": {},
+        "members": [
+          1526146,
+          1526163,
+          1526164,
+          1526165,
+          1526187,
+          1526233
+        ],
+        "processes_live": 0,
+        "processes_observed": 6,
+        "processes_unreadable": 0,
+        "rchar": 74181454735,
+        "read_bytes": 78546485248,
+        "retired": {
+          "rchar": 74181454735,
+          "read_bytes": 78546485248,
+          "syscr": 49525,
+          "syscw": 520,
+          "wchar": 38571926,
+          "write_bytes": 37720064
+        },
+        "source": "proc_io",
+        "syscr": 49525,
+        "syscw": 520,
+        "wchar": 38571926,
+        "write_bytes": 37720064
+      },
+      "sampled_unix": 1788879110.0291731,
+      "scope_unit": "prismabuild-job6f9038c1148b6cfe0cb1132bf4a00fbc.slice",
+      "shape_key": "e62c53afa4c129bb72aa77f6812d5a6472f3f6a9f75abf3ac5c77098edf5daa0",
+      "termination_reason": "failed",
+      "wall_seconds": 161.14193844399415
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 7.358582990853657,
+        "busy_percent_peak": 13.1089913,
+        "psi_some_avg10_max": 0.18,
+        "psi_some_avg10_samples": 164,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 164,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788879109.8692966,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.09842857142857142,
+        "power_reference_scope": "soc_tdp",
+        "power_reference_source": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html",
+        "power_reference_w": 140.0,
+        "power_w_mean": 4.507692307692306,
+        "power_w_peak": 13.78,
+        "samples": 325,
+        "source": "pqteld",
+        "temperature_c_peak": 47.0,
+        "utilization_percent_mean": 0.7384615384615385,
+        "utilization_percent_peak": 96.0,
+        "utilization_samples": 325,
+        "uvm_residual_bytes_peak": 10650959872,
+        "uvm_residual_samples": 325
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 61.62,
+        "psi_mem_full_avg10_max": 0.0,
+        "samples": 325,
+        "source": "pqteld",
+        "unified_available_bytes_min": 115402784768,
+        "unified_total_bytes": 130595991552,
+        "unified_used_bytes_peak": 15193206784
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1788878947.7850149
+    },
+    "finished_unix": 1788879109.8692966,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 6,
+      "processes_unreadable": 0,
+      "rchar": 74181454735,
+      "read_bytes": 78546485248,
+      "source": "proc_io",
+      "syscr": 49525,
+      "syscw": 520,
+      "wchar": 38571926,
+      "write_bytes": 37720064
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 1,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 104034304,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.02013100000000012,
+      "user_seconds": 0.058378999999998626,
+      "voluntary_context_switches": 21
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 58.317287,
+      "cpu_system_seconds": 18.067096,
+      "cpu_user_seconds": 40.250191,
+      "memory_current_bytes": 2916110336,
+      "memory_peak_bytes": 6384881664,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788878947.7850149,
+    "wall_seconds": 162.08428168296814
+  },
+  "traceback": "Traceback (most recent call last):\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 458, in run_native\n    runner.visit_layer_batches(observer.tokens, observer.visit, boundary_storage=storage)\n  File \"/workspace/prismaquant/cost_streaming.py\", line 816, in visit_layer_batches\n    visitor(layer, forward_batch)\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 253, in visit\n    forward_batch(tokens)\n  File \"/workspace/prismaquant/cost_streaming.py\", line 804, in forward_batch\n    output = checked(self._call, layer, hidden, batch=batch, pass_state=pass_state)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/prismaquant/cost_streaming.py\", line 729, in checked\n    result = function(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 210, in __call__\n    with unchanged_execution(self.runner.layers[layer], batch, pass_state):\n  File \"/usr/lib/python3.12/contextlib.py\", line 137, in __enter__\n    return next(self.gen)\n           ^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 91, in unchanged_execution\n    before_module = module_identity(module)\n                    ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 79, in module_identity\n    shape=list(value.shape), dtype=str(value.dtype), samples=tensor_identity(flat[indices]))\n                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/joint_operator_windows_profile.py\", line 61, in tensor_identity\n    value = value.detach().to('cpu').contiguous()\n            ^^^^^^^^^^^^^^^^^^^^^^^^\ntorch.AcceleratorError: CUDA error: device-side assert triggered\nSearch for `cudaErrorAssert' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1\n\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 419, in run_native\n    with source.reader_binding(all_indexed_shards=shards), ExitStack() as cleanup:\n  File \"/usr/lib/python3.12/contextlib.py\", line 610, in __exit__\n    raise exc_details[1]\n  File \"/usr/lib/python3.12/contextlib.py\", line 595, in __exit__\n    if cb(*exc_details):\n       ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/contextlib.py\", line 478, in _exit_wrapper\n    callback(*args, **kwds)\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 410, in cleanup_source\n    owned = close_source(runner, observer)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 298, in close_source\n    runner.context.reset_between_chunks(retain_cache=False)\n  File \"/workspace/prismaquant/streaming_model.py\", line 1077, in reset_between_chunks\n    torch.cuda.empty_cache()\n  File \"/usr/local/lib/python3.12/dist-packages/torch/cuda/memory.py\", line 228, in empty_cache\n    torch._C._cuda_emptyCache()\ntorch.AcceleratorError: CUDA error: device-side assert triggered\nSearch for `cudaErrorAssert' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1\n\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 358, in main\n    run_native(args, plan, source, profile, tokens, shards, result)\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 466, in run_native\n    cleanup_source()\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 410, in cleanup_source\n    owned = close_source(runner, observer)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 298, in close_source\n    runner.context.reset_between_chunks(retain_cache=False)\n  File \"/workspace/prismaquant/streaming_model.py\", line 1077, in reset_between_chunks\n    torch.cuda.empty_cache()\n  File \"/usr/local/lib/python3.12/dist-packages/torch/cuda/memory.py\", line 228, in empty_cache\n    torch._C._cuda_emptyCache()\ntorch.AcceleratorError: CUDA error: device-side assert triggered\nSearch for `cudaErrorAssert' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1\n\n",
+  "backward_calls": 0,
+  "metadata": {
+    "graph_calls": 0,
+    "metadata_owners_expired": true,
+    "rows": 512,
+    "telemetry": {
+      "hot_read_misses": 0,
+      "live_artifact_bytes": 0,
+      "peak_artifact_bytes": 0,
+      "peak_auxiliary_bytes": 272891904,
+      "peak_resident_tensor_bytes": 0,
+      "peak_shared_cotangent_reservation_bytes": 0,
+      "prefetch_windows": 0,
+      "read_tensor_bytes": 0,
+      "resident_tensor_bytes": 0,
+      "retired_entries": 0,
+      "written_entries": 0,
+      "written_tensor_bytes": 0
+    }
+  },
+  "source": {
+    "authenticated": [
+      {
+        "actual_sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943",
+        "bytes_hashed": 5939,
+        "descriptor_identity": {
+          "bytes": 5939,
+          "ctime_ns": 1788063256321354815,
+          "device": 88,
+          "inode": 1370,
+          "mtime_ns": 1788063256321354815
+        },
+        "expected_sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/config.json"
+      },
+      {
+        "actual_sha256": "e6007bd58fb7e07f9fe69544257ee2713f252ef5855bbf685b48c991d524ef0f",
+        "bytes_hashed": 4083163,
+        "descriptor_identity": {
+          "bytes": 4083163,
+          "ctime_ns": 1788064861054600302,
+          "device": 88,
+          "inode": 4574,
+          "mtime_ns": 1788064861054600302
+        },
+        "expected_sha256": "e6007bd58fb7e07f9fe69544257ee2713f252ef5855bbf685b48c991d524ef0f",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model.safetensors.index.json"
+      },
+      {
+        "actual_sha256": "235676346453d461485e6be4677d03efe7bc72fc6e2f63e82e8c289e89bdbbbc",
+        "bytes_hashed": 5358221856,
+        "descriptor_identity": {
+          "bytes": 5358221856,
+          "ctime_ns": 1788063368825961508,
+          "device": 88,
+          "inode": 1368,
+          "mtime_ns": 1788063368825961508
+        },
+        "expected_sha256": "235676346453d461485e6be4677d03efe7bc72fc6e2f63e82e8c289e89bdbbbc",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00001-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "56ef332e7e31bc0c0412c442a343d57e6a9db52679235712f040f5e8209a4845",
+        "bytes_hashed": 5362731784,
+        "descriptor_identity": {
+          "bytes": 5362731784,
+          "ctime_ns": 1788064160855219233,
+          "device": 88,
+          "inode": 2156,
+          "mtime_ns": 1788064160855219233
+        },
+        "expected_sha256": "56ef332e7e31bc0c0412c442a343d57e6a9db52679235712f040f5e8209a4845",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00029-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "096a5ea11d64dcb97e2c13dfb5f584f1ab3bf43b7eeb1a024c1499df1154fb31",
+        "bytes_hashed": 5353688600,
+        "descriptor_identity": {
+          "bytes": 5353688600,
+          "ctime_ns": 1788065882194283142,
+          "device": 88,
+          "inode": 4153,
+          "mtime_ns": 1788065881699305737
+        },
+        "expected_sha256": "096a5ea11d64dcb97e2c13dfb5f584f1ab3bf43b7eeb1a024c1499df1154fb31",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00057-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "d9554ddd98762c1e2065d52ffc267f2237843d9a3d937068e804110770f7c7fd",
+        "bytes_hashed": 5368753872,
+        "descriptor_identity": {
+          "bytes": 5368753872,
+          "ctime_ns": 1788065880261314430,
+          "device": 88,
+          "inode": 4152,
+          "mtime_ns": 1788065879832310366
+        },
+        "expected_sha256": "d9554ddd98762c1e2065d52ffc267f2237843d9a3d937068e804110770f7c7fd",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00058-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "2d38c61b4ff9df2dd83c74c7ac22781c7ce6fd26eab8e12a34428bcc69fc968b",
+        "bytes_hashed": 5354097856,
+        "descriptor_identity": {
+          "bytes": 5354097856,
+          "ctime_ns": 1788065885347232103,
+          "device": 88,
+          "inode": 5097,
+          "mtime_ns": 1788065883567301133
+        },
+        "expected_sha256": "2d38c61b4ff9df2dd83c74c7ac22781c7ce6fd26eab8e12a34428bcc69fc968b",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00059-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "906baa145573015fbeb7c50167d3cc43d1dcda0146eba727aabf49ed28f06792",
+        "bytes_hashed": 5354098040,
+        "descriptor_identity": {
+          "bytes": 5354098040,
+          "ctime_ns": 1788065871716452717,
+          "device": 88,
+          "inode": 2390,
+          "mtime_ns": 1788065871371948288
+        },
+        "expected_sha256": "906baa145573015fbeb7c50167d3cc43d1dcda0146eba727aabf49ed28f06792",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00087-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "f863d001895a3db588c76f41fbee804110ec5db1638badda9c2c264a298444bc",
+        "bytes_hashed": 5368753864,
+        "descriptor_identity": {
+          "bytes": 5368753864,
+          "ctime_ns": 1788065862975594139,
+          "device": 88,
+          "inode": 2391,
+          "mtime_ns": 1788065862528906872
+        },
+        "expected_sha256": "f863d001895a3db588c76f41fbee804110ec5db1638badda9c2c264a298444bc",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00088-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "f21b7b2f204ecb817c71c62056b05d0e83fe93ed1319b730be96945b289cca72",
+        "bytes_hashed": 5368753680,
+        "descriptor_identity": {
+          "bytes": 5368753680,
+          "ctime_ns": 1788065924781593348,
+          "device": 88,
+          "inode": 3529,
+          "mtime_ns": 1788065923096189467
+        },
+        "expected_sha256": "f21b7b2f204ecb817c71c62056b05d0e83fe93ed1319b730be96945b289cca72",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00089-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "2f2c6bb9b1dd5d0c19841379c6e9c7de3b2a71d6303db48deac80adfc6fafbe8",
+        "bytes_hashed": 5362973128,
+        "descriptor_identity": {
+          "bytes": 5362973128,
+          "ctime_ns": 1788065942117312322,
+          "device": 88,
+          "inode": 2654,
+          "mtime_ns": 1788065941563275154
+        },
+        "expected_sha256": "2f2c6bb9b1dd5d0c19841379c6e9c7de3b2a71d6303db48deac80adfc6fafbe8",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00090-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "b6f76d74f4b614c8a68986b24d9a2ec7a95c649a1144c10bab00d9957e6d320f",
+        "bytes_hashed": 5354106360,
+        "descriptor_identity": {
+          "bytes": 5354106360,
+          "ctime_ns": 1788066325377072388,
+          "device": 88,
+          "inode": 6050,
+          "mtime_ns": 1788066322669006068
+        },
+        "expected_sha256": "b6f76d74f4b614c8a68986b24d9a2ec7a95c649a1144c10bab00d9957e6d320f",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00106-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "4b71427a2684c8ca9970f10528b2cbc852eaaea31d1a69b0819d8a4a6ff3af4e",
+        "bytes_hashed": 5368753872,
+        "descriptor_identity": {
+          "bytes": 5368753872,
+          "ctime_ns": 1788066320741148106,
+          "device": 88,
+          "inode": 6053,
+          "mtime_ns": 1788066319874993579
+        },
+        "expected_sha256": "4b71427a2684c8ca9970f10528b2cbc852eaaea31d1a69b0819d8a4a6ff3af4e",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00107-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "ebbd4704500f68a0f8b1a623fa986c5a188376fa08457b0b245b1a90258e58d4",
+        "bytes_hashed": 5368753784,
+        "descriptor_identity": {
+          "bytes": 5368753784,
+          "ctime_ns": 1788066327738033825,
+          "device": 88,
+          "inode": 3069,
+          "mtime_ns": 1788066327270026630
+        },
+        "expected_sha256": "ebbd4704500f68a0f8b1a623fa986c5a188376fa08457b0b245b1a90258e58d4",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00108-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "ff79a0d3f8a641e74eafc78b91251118c5db278de3cb5545bccbfdb60fc1c0b7",
+        "bytes_hashed": 5362972744,
+        "descriptor_identity": {
+          "bytes": 5362972744,
+          "ctime_ns": 1788066342321795596,
+          "device": 88,
+          "inode": 4588,
+          "mtime_ns": 1788066341903091985
+        },
+        "expected_sha256": "ff79a0d3f8a641e74eafc78b91251118c5db278de3cb5545bccbfdb60fc1c0b7",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00109-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "0c65310ff08488ae4385d2e146f325f73a87f46cb9abbe0742fb6a24a0dae9de",
+        "bytes_hashed": 4173417528,
+        "descriptor_identity": {
+          "bytes": 4173417528,
+          "ctime_ns": 1788066569437427504,
+          "device": 88,
+          "inode": 2676,
+          "mtime_ns": 1788066562327472245
+        },
+        "expected_sha256": "0c65310ff08488ae4385d2e146f325f73a87f46cb9abbe0742fb6a24a0dae9de",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00120-of-00120.safetensors"
+      }
+    ],
+    "selected_payload_files": 14,
+    "selected_payload_bytes": 73880076968,
+    "descriptors_open": 0,
+    "violations": [],
+    "metadata_only_files": 104,
+    "metadata_only_payload_bytes": 0
+  },
+  "netdata": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-01/netdata.jsonl",
+    "sha256": "90b76895956d7f8d48fc3b585fcbf1caec2c7820b4e9e77274a0fa9afa027e49",
+    "bytes": 3406307,
+    "hosts": {
+      "sparky": {
+        "samples": 148,
+        "first_unix": 1788878957.3855433,
+        "last_unix": 1788879107.1066282
+      },
+      "sparklina": {
+        "samples": 148,
+        "first_unix": 1788878957.3919632,
+        "last_unix": 1788879107.1207137
+      }
+    }
+  },
+  "profiler": "No replay profile: failure in observer sampling before first original layer call",
+  "unavailable": [
+    "in-process memory ring and final CUDA peaks were suppressed by poisoned-context cleanup in the original helper",
+    "original graph qualification",
+    "full-statistics or PWC qualification"
+  ]
+}

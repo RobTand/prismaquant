@@ -156,6 +156,11 @@ def source_execution_identity(model) -> dict:
                     getattr(config, field), sort_keys=True, allow_nan=False))
         if selectors:
             modules[name] = selectors
+    from .glm_source_derivative import source_derivative_identity
+    derivative = source_derivative_identity(model)
+    if derivative is not None:
+        return {"schema": "prismaquant.joint_aura.source_execution.v2", "modules": modules,
+                "source_derivative": derivative}
     return {"schema": "prismaquant.joint_aura.source_execution.v1", "modules": modules}
 
 

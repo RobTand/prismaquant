@@ -1,0 +1,746 @@
+{
+  "schema": "prismaquant.glm_original_graph_negative_attempt.v1",
+  "action_key": "d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e",
+  "status": "failed_first_layer0_backward_combined_cotangent_predicate",
+  "native_result": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-02/result.json",
+    "sha256": "8265a92c7eca8a07477b95d5e229b7d53ce30688ac15fd2d5c507ef46e1de5ad",
+    "bytes": 2831162
+  },
+  "terminal": {
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/failed/d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e.json",
+    "sha256": "cc2a0e03586487a770427c804d356ea9e6eeb30ad6bd222227fb6f3249c5e7c3",
+    "returncode": 1
+  },
+  "source_snapshot": {
+    "commit": "dddf8c771a8acdd272c8c25703b062375485df79",
+    "input": {
+      "bytes": 26566915,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "9a4bc347724fc7ef657e8e749d830dd2bf60dff845e7ce25312602c5d9819c46"
+    },
+    "parent": "f7b617024f15727edb4b3c7308f757f0b4bc365b",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_diff": "A\t.pbrun-closure.c46406d715b33063.json\n",
+  "frozen_source_checks": {
+    "experiments/glm_original_graph_profile.py": "7f3659756614e323537fa67cef2c163d811c95170424e62a8bcded7ec55a82e1",
+    "experiments/glm_original_graph_source.py": "21bb03c8176285fa3439fe61caf348b8b3f883a58d801020a249bf371070ad86",
+    "tests/test_glm_original_graph_profile.py": "97fee33d4eec0e52bee8d65d4ef57f24d14b7faa02a3711b724855d80e2e221c",
+    "prismaquant/cost_streaming.py": "3f0ddfc73a4c5d63d48ae0563cb8939946a920964368a84d804efc8ccc353d12",
+    "prismaquant/streaming_model.py": "4d4b75edc2cbf2fde3b5bb0e4c331b8b3705fef77b24700ef3a18cc315de90f9",
+    "prismaquant/layer_streaming.py": "c92b68cbd43124af7d3428d92a0c3ae26efe3ae856890589b94120d07d93f0a9",
+    "prismaquant/sensitivity_probe.py": "647ee0b19d9376a26af6d55e4cbd42a32795d750f543e3fcb303bc3e62ae1491",
+    "prismaquant/perturbed_x_cache.py": "b4b7374513eb631218ada192699d3b62228b671426241f3c1969b81c99c4444c",
+    "prismaquant/memory_management.py": "e19bea17082ad4fc07972c28f7988c46aaa95c9b7a353c5650f64ff2ad16384c",
+    "experiments/joint_operator_windows_profile.py": "2e2b7f44c99adb44f90a08363772a7d754626ce19e81ca77b34717091d33faa6",
+    "experiments/joint_allocator_turnover_profile.py": "e12ba70aa00634529d043d382f691792f4afe56e97d73c59cb09740fb402fb10",
+    "experiments/workspace_netdata.py": "938db1c5d613990324b0397a364439159eb3e4da7daa824f790d96722d4e3361",
+    "experiments/measurements/glm-joint-original-graph-plan-20260908/plan.json": "9ebfb0300a94a07ff6309ad34542be967d668873a9fab396111b40726a7be618"
+  },
+  "cleanup": {
+    "checked_unix": 1788879852.8459373,
+    "complete": true,
+    "nonce": "87a6607bd62a42e5800ec4149388744e",
+    "released": {
+      "ok": true,
+      "retired": true,
+      "scope_id": "prismabuild-jobbda6e44f715b06d0bc6d64ff6e605dda.slice"
+    },
+    "telemetry": {
+      "action_key": "d3afc4eea473d32e7451a425f041ac1b2373399bdb75006054d6279db3c1f32e",
+      "complete": true,
+      "cpu_seconds": 54.104954,
+      "cpu_system_seconds": 13.124981,
+      "cpu_user_seconds": 40.979972,
+      "errors": [],
+      "gpu_memory_max_bytes": 98784247808,
+      "host": "sparklina",
+      "memory_current_bytes": 2588315648,
+      "memory_max_bytes": 111669149696,
+      "memory_peak_bytes": 7088664576,
+      "nonce": "87a6607bd62a42e5800ec4149388744e",
+      "oom_kill": 0,
+      "oom_local": 0,
+      "process_io": {
+        "live": {},
+        "members": [
+          1547997,
+          1548020,
+          1548021,
+          1548022,
+          1548043,
+          1548088
+        ],
+        "processes_live": 0,
+        "processes_observed": 6,
+        "processes_unreadable": 0,
+        "rchar": 74179801421,
+        "read_bytes": 75905859584,
+        "retired": {
+          "rchar": 74179801421,
+          "read_bytes": 75905859584,
+          "syscr": 41107,
+          "syscw": 1677,
+          "wchar": 254430196,
+          "write_bytes": 253620224
+        },
+        "source": "proc_io",
+        "syscr": 41107,
+        "syscw": 1677,
+        "wchar": 254430196,
+        "write_bytes": 253620224
+      },
+      "sampled_unix": 1788879852.8331115,
+      "scope_unit": "prismabuild-jobbda6e44f715b06d0bc6d64ff6e605dda.slice",
+      "shape_key": "9db7750a4bb0e95acd79e57534b5d3cdd98baed84e29a53e59c9dcaab27ead16",
+      "termination_reason": "failed",
+      "wall_seconds": 88.05706831099815
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 7.3134139120879125,
+        "busy_percent_peak": 12.5565039,
+        "psi_some_avg10_max": 0.77,
+        "psi_some_avg10_samples": 90,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 91,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788879852.5378177,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.12285714285714285,
+        "power_reference_scope": "soc_tdp",
+        "power_reference_source": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html",
+        "power_reference_w": 140.0,
+        "power_w_mean": 5.097191011235956,
+        "power_w_peak": 17.2,
+        "samples": 178,
+        "source": "pqteld",
+        "temperature_c_peak": 48.0,
+        "utilization_percent_mean": 0.6741573033707865,
+        "utilization_percent_peak": 46.0,
+        "utilization_samples": 178,
+        "uvm_residual_bytes_peak": 16141836288,
+        "uvm_residual_samples": 178
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 32.53,
+        "psi_mem_full_avg10_max": 0.0,
+        "samples": 178,
+        "source": "pqteld",
+        "unified_available_bytes_min": 107314348032,
+        "unified_total_bytes": 130595991552,
+        "unified_used_bytes_peak": 23281643520
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1788879763.7626228
+    },
+    "finished_unix": 1788879852.5378177,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 6,
+      "processes_unreadable": 0,
+      "rchar": 74179801421,
+      "read_bytes": 75905859584,
+      "source": "proc_io",
+      "syscr": 41107,
+      "syscw": 1677,
+      "wchar": 254430196,
+      "write_bytes": 253620224
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 1,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 103837696,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.016704000000000052,
+      "user_seconds": 0.0609219999999997,
+      "voluntary_context_switches": 21
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 54.104954,
+      "cpu_system_seconds": 13.124981,
+      "cpu_user_seconds": 40.979972,
+      "memory_current_bytes": 2588360704,
+      "memory_peak_bytes": 7088664576,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788879763.7626228,
+    "wall_seconds": 88.77519488334656
+  },
+  "traceback": "Traceback (most recent call last):\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 389, in main\n    run_native(args, plan, source, profile, tokens, shards, result)\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 502, in run_native\n    runner.visit_layer_batches(observer.tokens, observer.visit, boundary_storage=storage)\n  File \"/workspace/prismaquant/cost_streaming.py\", line 816, in visit_layer_batches\n    visitor(layer, forward_batch)\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 254, in visit\n    forward_batch(tokens)\n  File \"/workspace/prismaquant/cost_streaming.py\", line 804, in forward_batch\n    output = checked(self._call, layer, hidden, batch=batch, pass_state=pass_state)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/prismaquant/cost_streaming.py\", line 729, in checked\n    result = function(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 230, in __call__\n    value, profile = profile_phase(self.out, f'layer{layer}_{arm}', call)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/joint_allocator_turnover_profile.py\", line 70, in profile_phase\n    value = body()\n            ^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 228, in <lambda>\n    call = lambda: self.replay(self.runner, layer, hidden, batch, pass_state, seed, arm, owner)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/experiments/glm_original_graph_profile.py\", line 189, in replay_arm\n    raise RuntimeError('original graph input cotangent is absent/nonfinite/zero')\nRuntimeError: original graph input cotangent is absent/nonfinite/zero\n",
+  "accepted_backward_calls": 0,
+  "metadata": {
+    "graph_calls": 0,
+    "metadata_owners_expired": true,
+    "rows": 512,
+    "telemetry": {
+      "hot_read_misses": 0,
+      "live_artifact_bytes": 0,
+      "peak_artifact_bytes": 0,
+      "peak_auxiliary_bytes": 272891904,
+      "peak_resident_tensor_bytes": 0,
+      "peak_shared_cotangent_reservation_bytes": 0,
+      "prefetch_windows": 0,
+      "read_tensor_bytes": 0,
+      "resident_tensor_bytes": 0,
+      "retired_entries": 0,
+      "written_entries": 0,
+      "written_tensor_bytes": 0
+    }
+  },
+  "source": {
+    "authenticated": [
+      {
+        "actual_sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943",
+        "bytes_hashed": 5939,
+        "descriptor_identity": {
+          "bytes": 5939,
+          "ctime_ns": 1788063256321354815,
+          "device": 88,
+          "inode": 1370,
+          "mtime_ns": 1788063256321354815
+        },
+        "expected_sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/config.json"
+      },
+      {
+        "actual_sha256": "e6007bd58fb7e07f9fe69544257ee2713f252ef5855bbf685b48c991d524ef0f",
+        "bytes_hashed": 4083163,
+        "descriptor_identity": {
+          "bytes": 4083163,
+          "ctime_ns": 1788064861054600302,
+          "device": 88,
+          "inode": 4574,
+          "mtime_ns": 1788064861054600302
+        },
+        "expected_sha256": "e6007bd58fb7e07f9fe69544257ee2713f252ef5855bbf685b48c991d524ef0f",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model.safetensors.index.json"
+      },
+      {
+        "actual_sha256": "235676346453d461485e6be4677d03efe7bc72fc6e2f63e82e8c289e89bdbbbc",
+        "bytes_hashed": 5358221856,
+        "descriptor_identity": {
+          "bytes": 5358221856,
+          "ctime_ns": 1788063368825961508,
+          "device": 88,
+          "inode": 1368,
+          "mtime_ns": 1788063368825961508
+        },
+        "expected_sha256": "235676346453d461485e6be4677d03efe7bc72fc6e2f63e82e8c289e89bdbbbc",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00001-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "56ef332e7e31bc0c0412c442a343d57e6a9db52679235712f040f5e8209a4845",
+        "bytes_hashed": 5362731784,
+        "descriptor_identity": {
+          "bytes": 5362731784,
+          "ctime_ns": 1788064160855219233,
+          "device": 88,
+          "inode": 2156,
+          "mtime_ns": 1788064160855219233
+        },
+        "expected_sha256": "56ef332e7e31bc0c0412c442a343d57e6a9db52679235712f040f5e8209a4845",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00029-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "096a5ea11d64dcb97e2c13dfb5f584f1ab3bf43b7eeb1a024c1499df1154fb31",
+        "bytes_hashed": 5353688600,
+        "descriptor_identity": {
+          "bytes": 5353688600,
+          "ctime_ns": 1788065882194283142,
+          "device": 88,
+          "inode": 4153,
+          "mtime_ns": 1788065881699305737
+        },
+        "expected_sha256": "096a5ea11d64dcb97e2c13dfb5f584f1ab3bf43b7eeb1a024c1499df1154fb31",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00057-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "d9554ddd98762c1e2065d52ffc267f2237843d9a3d937068e804110770f7c7fd",
+        "bytes_hashed": 5368753872,
+        "descriptor_identity": {
+          "bytes": 5368753872,
+          "ctime_ns": 1788065880261314430,
+          "device": 88,
+          "inode": 4152,
+          "mtime_ns": 1788065879832310366
+        },
+        "expected_sha256": "d9554ddd98762c1e2065d52ffc267f2237843d9a3d937068e804110770f7c7fd",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00058-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "2d38c61b4ff9df2dd83c74c7ac22781c7ce6fd26eab8e12a34428bcc69fc968b",
+        "bytes_hashed": 5354097856,
+        "descriptor_identity": {
+          "bytes": 5354097856,
+          "ctime_ns": 1788065885347232103,
+          "device": 88,
+          "inode": 5097,
+          "mtime_ns": 1788065883567301133
+        },
+        "expected_sha256": "2d38c61b4ff9df2dd83c74c7ac22781c7ce6fd26eab8e12a34428bcc69fc968b",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00059-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "906baa145573015fbeb7c50167d3cc43d1dcda0146eba727aabf49ed28f06792",
+        "bytes_hashed": 5354098040,
+        "descriptor_identity": {
+          "bytes": 5354098040,
+          "ctime_ns": 1788065871716452717,
+          "device": 88,
+          "inode": 2390,
+          "mtime_ns": 1788065871371948288
+        },
+        "expected_sha256": "906baa145573015fbeb7c50167d3cc43d1dcda0146eba727aabf49ed28f06792",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00087-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "f863d001895a3db588c76f41fbee804110ec5db1638badda9c2c264a298444bc",
+        "bytes_hashed": 5368753864,
+        "descriptor_identity": {
+          "bytes": 5368753864,
+          "ctime_ns": 1788065862975594139,
+          "device": 88,
+          "inode": 2391,
+          "mtime_ns": 1788065862528906872
+        },
+        "expected_sha256": "f863d001895a3db588c76f41fbee804110ec5db1638badda9c2c264a298444bc",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00088-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "f21b7b2f204ecb817c71c62056b05d0e83fe93ed1319b730be96945b289cca72",
+        "bytes_hashed": 5368753680,
+        "descriptor_identity": {
+          "bytes": 5368753680,
+          "ctime_ns": 1788065924781593348,
+          "device": 88,
+          "inode": 3529,
+          "mtime_ns": 1788065923096189467
+        },
+        "expected_sha256": "f21b7b2f204ecb817c71c62056b05d0e83fe93ed1319b730be96945b289cca72",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00089-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "2f2c6bb9b1dd5d0c19841379c6e9c7de3b2a71d6303db48deac80adfc6fafbe8",
+        "bytes_hashed": 5362973128,
+        "descriptor_identity": {
+          "bytes": 5362973128,
+          "ctime_ns": 1788065942117312322,
+          "device": 88,
+          "inode": 2654,
+          "mtime_ns": 1788065941563275154
+        },
+        "expected_sha256": "2f2c6bb9b1dd5d0c19841379c6e9c7de3b2a71d6303db48deac80adfc6fafbe8",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00090-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "b6f76d74f4b614c8a68986b24d9a2ec7a95c649a1144c10bab00d9957e6d320f",
+        "bytes_hashed": 5354106360,
+        "descriptor_identity": {
+          "bytes": 5354106360,
+          "ctime_ns": 1788066325377072388,
+          "device": 88,
+          "inode": 6050,
+          "mtime_ns": 1788066322669006068
+        },
+        "expected_sha256": "b6f76d74f4b614c8a68986b24d9a2ec7a95c649a1144c10bab00d9957e6d320f",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00106-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "4b71427a2684c8ca9970f10528b2cbc852eaaea31d1a69b0819d8a4a6ff3af4e",
+        "bytes_hashed": 5368753872,
+        "descriptor_identity": {
+          "bytes": 5368753872,
+          "ctime_ns": 1788066320741148106,
+          "device": 88,
+          "inode": 6053,
+          "mtime_ns": 1788066319874993579
+        },
+        "expected_sha256": "4b71427a2684c8ca9970f10528b2cbc852eaaea31d1a69b0819d8a4a6ff3af4e",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00107-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "ebbd4704500f68a0f8b1a623fa986c5a188376fa08457b0b245b1a90258e58d4",
+        "bytes_hashed": 5368753784,
+        "descriptor_identity": {
+          "bytes": 5368753784,
+          "ctime_ns": 1788066327738033825,
+          "device": 88,
+          "inode": 3069,
+          "mtime_ns": 1788066327270026630
+        },
+        "expected_sha256": "ebbd4704500f68a0f8b1a623fa986c5a188376fa08457b0b245b1a90258e58d4",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00108-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "ff79a0d3f8a641e74eafc78b91251118c5db278de3cb5545bccbfdb60fc1c0b7",
+        "bytes_hashed": 5362972744,
+        "descriptor_identity": {
+          "bytes": 5362972744,
+          "ctime_ns": 1788066342321795596,
+          "device": 88,
+          "inode": 4588,
+          "mtime_ns": 1788066341903091985
+        },
+        "expected_sha256": "ff79a0d3f8a641e74eafc78b91251118c5db278de3cb5545bccbfdb60fc1c0b7",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00109-of-00120.safetensors"
+      },
+      {
+        "actual_sha256": "0c65310ff08488ae4385d2e146f325f73a87f46cb9abbe0742fb6a24a0dae9de",
+        "bytes_hashed": 4173417528,
+        "descriptor_identity": {
+          "bytes": 4173417528,
+          "ctime_ns": 1788066569437427504,
+          "device": 88,
+          "inode": 2676,
+          "mtime_ns": 1788066562327472245
+        },
+        "expected_sha256": "0c65310ff08488ae4385d2e146f325f73a87f46cb9abbe0742fb6a24a0dae9de",
+        "maximum_hash_buffer_bytes": 8388608,
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00120-of-00120.safetensors"
+      }
+    ],
+    "selected_payload_files": 14,
+    "selected_payload_bytes": 73880076968,
+    "descriptors_open": 0,
+    "violations": []
+  },
+  "netdata": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-02/netdata.jsonl",
+    "sha256": "74408ddc2e26fbd91c9aa4f3fdbdb9a0a7fef9060a25d0013943d0df6f2f0904",
+    "bytes": 1751590,
+    "hosts": {
+      "sparky": {
+        "samples": 76,
+        "first_unix": 1788879773.2003944,
+        "last_unix": 1788879849.6591487
+      },
+      "sparklina": {
+        "samples": 76,
+        "first_unix": 1788879773.2068012,
+        "last_unix": 1788879849.6870184
+      }
+    }
+  },
+  "memory": {
+    "peak_allocated_bytes": 11080916992,
+    "peak_reserved_bytes": 11704205312,
+    "samples": 690,
+    "after_cleanup": {
+      "cuda_allocated_bytes": 3765506560,
+      "cuda_peak_allocated_bytes": 11080916992,
+      "cuda_peak_reserved_bytes": 11704205312,
+      "cuda_reserved_bytes": 3839885312,
+      "memory.current": 7012388864,
+      "memory.max": 111669149696,
+      "memory.peak": 7031021568,
+      "memory.stat": {
+        "active_anon": 4170694656,
+        "active_file": 2567282688,
+        "anon": 1622708224,
+        "anon_thp": 2097152,
+        "file": 5332959232,
+        "file_dirty": 204156928,
+        "file_mapped": 2544345088,
+        "file_thp": 2675965952,
+        "file_writeback": 0,
+        "inactive_anon": 0,
+        "inactive_file": 221347840,
+        "kernel": 51765248,
+        "kernel_stack": 229376,
+        "numa_hint_faults": 0,
+        "numa_pages_migrated": 0,
+        "numa_pte_updates": 0,
+        "pagetables": 10829824,
+        "percpu": 7832,
+        "pgactivate": 0,
+        "pgdeactivate": 0,
+        "pgdemote_direct": 0,
+        "pgdemote_khugepaged": 0,
+        "pgdemote_kswapd": 0,
+        "pgdemote_proactive": 0,
+        "pgfault": 1114412,
+        "pglazyfree": 0,
+        "pglazyfreed": 0,
+        "pgmajfault": 24,
+        "pgpromote_success": 0,
+        "pgrefill": 0,
+        "pgscan": 0,
+        "pgscan_direct": 0,
+        "pgscan_khugepaged": 0,
+        "pgscan_kswapd": 0,
+        "pgscan_proactive": 0,
+        "pgsteal": 0,
+        "pgsteal_direct": 0,
+        "pgsteal_khugepaged": 0,
+        "pgsteal_kswapd": 0,
+        "pgsteal_proactive": 0,
+        "pswpin": 0,
+        "pswpout": 0,
+        "sec_pagetables": 0,
+        "shmem": 2544312320,
+        "shmem_thp": 0,
+        "slab": 40663544,
+        "slab_reclaimable": 39877976,
+        "slab_unreclaimable": 785568,
+        "sock": 4096,
+        "swapcached": 0,
+        "swpin_zero": 0,
+        "swpout_zero": 0,
+        "thp_collapse_alloc": 0,
+        "thp_fault_alloc": 562,
+        "thp_swpout": 0,
+        "thp_swpout_fallback": 0,
+        "unevictable": 0,
+        "vmalloc": 8192,
+        "workingset_activate_anon": 0,
+        "workingset_activate_file": 0,
+        "workingset_nodereclaim": 0,
+        "workingset_refault_anon": 0,
+        "workingset_refault_file": 0,
+        "workingset_restore_anon": 0,
+        "workingset_restore_file": 0,
+        "zswap": 0,
+        "zswapped": 0,
+        "zswpin": 0,
+        "zswpout": 0,
+        "zswpwb": 0
+      },
+      "process_io": "rchar: 74132606317\nwchar: 251596009\nsyscr: 38808\nsyscw: 1627\nread_bytes: 75905855488\nwrite_bytes: 250773504\ncancelled_write_bytes: 4096\n",
+      "smaps_bytes": {
+        "AnonHugePages": 2097152,
+        "Anonymous": 1622695936,
+        "FilePmdMapped": 0,
+        "KSM": 0,
+        "LazyFree": 0,
+        "Locked": 0,
+        "Private_Clean": 434909184,
+        "Private_Dirty": 4129710080,
+        "Private_Hugetlb": 0,
+        "Pss": 4565718016,
+        "Pss_Anon": 1622695936,
+        "Pss_Dirty": 4129710080,
+        "Pss_File": 398713856,
+        "Pss_Shmem": 2544308224,
+        "Referenced": 4566253568,
+        "Rss": 4567961600,
+        "Shared_Clean": 3342336,
+        "Shared_Dirty": 0,
+        "Shared_Hugetlb": 0,
+        "ShmemPmdMapped": 0,
+        "Swap": 0,
+        "SwapPss": 0
+      },
+      "time_unix": 1788879850.0972664
+    },
+    "source_owners_expired": false,
+    "cleanup_errors": []
+  },
+  "profile": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/native-02/layer0_unobserved_isolated_baseline.trace.json",
+    "sha256": "69a0cf6fe1ec8f79c1d036f497008fd0c077cdb0cc45e5745e041207a596be4f",
+    "bytes": 10797411,
+    "event_count": 31804,
+    "categories": {
+      "metadata": 62,
+      "cpu_op": 13805,
+      "fwdbwd": 3114,
+      "user_annotation": 1,
+      "overhead": 156,
+      "cuda_runtime": 3526,
+      "ac2g": 7332,
+      "gpu_memcpy": 157,
+      "kernel": 3256,
+      "cuda_driver": 392,
+      "gpu_memset": 1,
+      "gpu_user_annotation": 1,
+      "Trace": 1
+    },
+    "category_duration_us": {
+      "cpu_op": 1678379.1790000037,
+      "user_annotation": 569237.362,
+      "overhead": 88357.66600000006,
+      "cuda_runtime": 116426.12799999988,
+      "gpu_memcpy": 6496.89,
+      "kernel": 427138.67400000023,
+      "cuda_driver": 91566.451,
+      "gpu_memset": 0.8,
+      "gpu_user_annotation": 567784.35,
+      "Trace": 569521.937
+    },
+    "top_kernel_total_us": [
+      [
+        "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<float>, std::array<char*, 3ul> >(int, at::native::CUDAFunctor_add<float>, std::array<char*, 3ul>)",
+        126470.29100000004
+      ],
+      [
+        "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+        103172.36600000007
+      ],
+      [
+        "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>)",
+        51012.77699999995
+      ],
+      [
+        "void at::native::vectorized_elementwise_kernel<4, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 3ul> >(int, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> >, std::array<char*, 3ul>)",
+        32813.21499999999
+      ],
+      [
+        "void at::native::reduce_kernel<128, 4, at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4>)",
+        28083.651
+      ],
+      [
+        "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1})",
+        15666.767000000003
+      ],
+      [
+        "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_functor<float, float, float>::operator()(at::TensorIterator&)::{lambda(float, float)#1}>, unsigned int, float, 4, 4>)",
+        10692.884000000011
+      ],
+      [
+        "void at::native::vectorized_elementwise_kernel<4, at::native::neg_kernel_cuda(at::TensorIteratorBase&)::{lambda()#2}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::neg_kernel_cuda(at::TensorIteratorBase&)::{lambda()#2}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>)",
+        9434.293000000001
+      ],
+      [
+        "void at::native::vectorized_elementwise_kernel<4, at::native::exp_kernel_cuda(at::TensorIteratorBase&)::{lambda()#2}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::exp_kernel_cuda(at::TensorIteratorBase&)::{lambda()#2}::operator()() const::{lambda()#2}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>)",
+        9259.703
+      ],
+      [
+        "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctor_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctor_add<float> const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctor_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctor_add<float> const&)::{lambda(int)#1})",
+        6655.0970000000025
+      ],
+      [
+        "void at::native::vectorized_elementwise_kernel<4, at::native::bfloat16_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::bfloat16_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda(float)#1}, std::array<char*, 2ul>)",
+        2195.263
+      ],
+      [
+        "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+        1987.616
+      ],
+      [
+        "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8::Params)",
+        1719.71
+      ],
+      [
+        "void cutlass::Kernel2<cutlass_80_simt_sgemm_64x64_8x5_tn_align1>(cutlass_80_simt_sgemm_64x64_8x5_tn_align1::Params)",
+        1602.8479999999997
+      ],
+      [
+        "nvjet_sm121_tst_mma_128x176x64_2_32x88x64_tmaAB_bz_TNNN",
+        1542.5910000000001
+      ]
+    ],
+    "top_cpu_op_total_us": [
+      [
+        "aten::mm",
+        89395.10600000003
+      ],
+      [
+        "autograd::engine::evaluate_function: MmBackward0",
+        88952.36900000002
+      ],
+      [
+        "MmBackward0",
+        88803.218
+      ],
+      [
+        "autograd::engine::evaluate_function: SelectBackward0",
+        87167.60100000001
+      ],
+      [
+        "SelectBackward0",
+        84386.94699999993
+      ],
+      [
+        "aten::zeros",
+        82130.24999999999
+      ],
+      [
+        "aten::select_backward",
+        77503.51400000004
+      ],
+      [
+        "aten::empty",
+        73469.63499999991
+      ],
+      [
+        "autograd::engine::evaluate_function: SliceBackward0",
+        70002.93199999996
+      ],
+      [
+        "SliceBackward0",
+        67207.62199999999
+      ],
+      [
+        "aten::slice_backward",
+        66989.87799999997
+      ],
+      [
+        "aten::mul",
+        60307.054999999986
+      ],
+      [
+        "aten::copy_",
+        55284.26999999997
+      ],
+      [
+        "autograd::engine::evaluate_function: SumBackward1",
+        51515.704999999994
+      ],
+      [
+        "SumBackward1",
+        50553.08199999998
+      ]
+    ],
+    "scope": "Durations are summed trace events; nested CPU events overlap and are not self time. No GPU annotation is counted as a kernel."
+  },
+  "dispatch": {
+    "trace_sha256": "69a0cf6fe1ec8f79c1d036f497008fd0c077cdb0cc45e5745e041207a596be4f",
+    "kernel_names": 88,
+    "matched_kernels": {},
+    "matched_cpu_ops": {
+      "autograd::engine::evaluate_function: MaskedFillBackward0": 9,
+      "MaskedFillBackward0": 9,
+      "autograd::engine::evaluate_function: ExpBackward0": 24,
+      "ExpBackward0": 24,
+      "autograd::engine::evaluate_function: CumsumBackward0": 1,
+      "CumsumBackward0": 1,
+      "aten::flatten": 2
+    },
+    "scope": "Full-name inventory is dispatch evidence only; it does not identify numerical values or prove the cause of nonfinite gradients."
+  },
+  "limits": [
+    "Combined predicate did not distinguish absent/nonfinite/zero; category and branch attribution remain unmeasured.",
+    "Source-owner false in the failed stack is not a successful ownership qualification.",
+    "No full prefix graph, full-statistics coupling, PWC, quality, or serving qualification."
+  ]
+}
