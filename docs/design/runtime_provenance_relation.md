@@ -3,7 +3,9 @@
 Research boundary for PrismaQuant #323. No measured runtime table is admitted by
 this change: the producer still lacks a qualified, recomputable full-engine fixed
 resource and timing partition (Tessera #399). Native operator evidence and raw
-engine ledgers retain their original scopes.
+engine ledgers retain their original scopes. The [fixed-resource design](runtime_fixed_resource_admission.md)
+specifies the exact observation, accounting and topology prerequisites for
+PrismaQuant #420; it does not add a positive admission path.
 
 `prismaquant.runtime_provenance_relation.v1` has an independent canonical JSON
 identity. A `prismaquant.measured_runtime_context.v2` binds that identity through

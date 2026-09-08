@@ -1,0 +1,13 @@
+[
+  {
+    "action": "8b3ab965cd63f7cdfcefbb8d3eaf75e3986efbda0dcdf5f5dd55b85b5f9993c1",
+    "receipt": "1aed0ad2dfe89388a0a50346847a5f179b86b1fb5e11e476fb4665a7702e6dcd",
+    "payload_sha256": "53705431db3d007474a813dd9f048283976bdbb55e4d9fe44dce781919f0f3ec",
+    "snapshot": "3f113aad7f031d6d4235dc676ae3b9df7579c3f3",
+    "source_diff_from_commit": [
+      ".pbrun-closure.97cea82f9d89c001.json",
+      "docs/measurements/runtime-fixed-resource-design-2026-09-08.md"
+    ],
+    "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 58%]\n....................................................                     [100%]\n=============================== warnings summary ===============================\n../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: 56 warnings\n  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n124 passed, 56 warnings in 9.55s\n"
+  }
+]

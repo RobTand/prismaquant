@@ -115,3 +115,15 @@ requires execution from the completed common canonical capture, verified
 physical residency and the unchanged quality/cost/wire gates before any full
 fit claim is made. This change adds no cache, dispatcher, format, serving lane,
 calibration policy or release pin.
+
+
+## Later same-day complete-roster metadata check
+
+The 28.140/30.141 GiB dense values above are representative layer-zero groups,
+not maxima over all original GLM layers. Replaying current v2 admission for all
+132 groups at main `9ff3b97f7` derives a 98.041521 GiB maximum for routed stacks,
+54.752041 GiB for dense fused groups and 54.736416 GiB for dense singletons;
+shared-expert selections still prepare their containing routed layer. All 132
+rows fit the declared 104 GiB planning budget without sampling. This extends
+metadata coverage only; full-stack native residency remains unqualified.
+Evidence: `experiments/measurements/glm-full-stack-admission-20260908/`.

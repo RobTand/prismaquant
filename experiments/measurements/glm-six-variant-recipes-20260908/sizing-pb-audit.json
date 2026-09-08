@@ -1,0 +1,157 @@
+{
+  "action_key": "2f047451fde4b09bd1dadc40e434ae4249c87032e073a34c8045b5d6ffa34adb",
+  "attempts": [
+    {
+      "attempt": 1,
+      "cpu_allocation": {
+        "fallback": [],
+        "preferred": [
+          0
+        ]
+      },
+      "logs": {
+        "stderr": {
+          "bytes": 0,
+          "path": "attempts/2f047451fde4b09bd1dadc40e434ae4249c87032e073a34c8045b5d6ffa34adb/4b8ac8ff52de59d4d378105493f9752e7c0dfbc02801d7053ce41ec29a952aa5/00000001.stderr.e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stdout": {
+          "bytes": 2745,
+          "path": "attempts/2f047451fde4b09bd1dadc40e434ae4249c87032e073a34c8045b5d6ffa34adb/4b8ac8ff52de59d4d378105493f9752e7c0dfbc02801d7053ce41ec29a952aa5/00000001.stdout.adc1c6e6a3295f98944811198e82452c114341448b75c8fba4ef5b521d6cd6d0.log",
+          "sha256": "adc1c6e6a3295f98944811198e82452c114341448b75c8fba4ef5b521d6cd6d0"
+        }
+      },
+      "oom_kill": 0,
+      "processes_live": 0,
+      "returncode": 0
+    }
+  ],
+  "cas_receipt_and_payload_verified": true,
+  "complete": true,
+  "needs_gpu": false,
+  "outcome": {
+    "action_returncode": null,
+    "action_signal": null,
+    "attempts": 1,
+    "claimed_by": "dl380g10:2758162:82076a22",
+    "claimed_host": "dl380g10",
+    "claimed_unix": 1788889516.8688474,
+    "elapsed_s": 1.3188233375549316,
+    "finished_host": "dl380g10",
+    "finished_unix": 1788889519.944212,
+    "reason": null,
+    "receipt_published": null,
+    "returncode": 0,
+    "status": "executed"
+  },
+  "priority": -10,
+  "receipt": {
+    "action_manifest_sha256": "543d57757b15f33ddbe38108fced4c6afc162e578f8b61cd45d9d6bc3291858f",
+    "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/2f/2f047451fde4b09bd1dadc40e434ae4249c87032e073a34c8045b5d6ffa34adb.json",
+    "present": true,
+    "receipt_sha256": "fc634cc6e604fe31cda7ba8107354ea6cb01459868bc3788b23266c8011c8391",
+    "result": {
+      "bytes": 264,
+      "sha256": "455b35eb284871f9e08c90cc8489a1b30747715c15626cdfe62762683c7cfa23"
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 2.22425564,
+        "busy_percent_peak": 7.0864163,
+        "psi_some_avg10_max": 0.0,
+        "psi_some_avg10_samples": 5,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 5,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788889519.8561337,
+      "errors": [
+        "no pqteld CSV for dl380g10 covering the window"
+      ],
+      "host": "dl380g10",
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata",
+      "start_unix": 1788889516.8688474
+    },
+    "finished_unix": 1788889519.8561337,
+    "host": "dl380g10",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 0,
+      "processes_unreadable": 0,
+      "rchar": 0,
+      "read_bytes": 0,
+      "source": "proc_io",
+      "syscr": 0,
+      "syscw": 0,
+      "wchar": 0,
+      "write_bytes": 0
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 0,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 138100736,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.018976999999999578,
+      "user_seconds": 0.1048720000000003,
+      "voluntary_context_switches": 3
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 1.058508,
+      "cpu_system_seconds": 0.181086,
+      "cpu_user_seconds": 0.877421,
+      "memory_current_bytes": 745472,
+      "memory_peak_bytes": 271249408,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788889516.8688474,
+    "wall_seconds": 2.987286329269409
+  },
+  "resources": {
+    "cpu": 1,
+    "mem_gb": 4
+  },
+  "schema": "prismaquant.glm_recipe_pb_audit.v1",
+  "snapshot": {
+    "commit": "8da67cb82913d4d3f346316a2c60747680549afb",
+    "input": {
+      "bytes": 26775387,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "460f382cc8a80481700e28a776d66907feab727d36de7b25a0ca0887cb78e824"
+    },
+    "parent": "058bcc32a7966066a15a24aa744c14ec1bb1598a",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "source_files": {
+    "docs/ARCHITECTURE.md": {
+      "matches_current": false,
+      "sha256": "5ab95e7ddc0679aa524aaa1f58c9a46bf5187a56429b5ef32c3e5b83d568a3dc"
+    },
+    "experiments/glm_recipe_intake_sizes.py": {
+      "matches_current": true,
+      "sha256": "3dba033507801380b479c23d2a88a3e25ef1a1cc76da5b68b37c73cf4f362b72"
+    },
+    "prismaquant/select_validated_frontier.py": {
+      "matches_current": false,
+      "sha256": "8f688dd42ff63d8b86043e9dd4d267edb3d074cabca5ef44bdc56506172b6c78"
+    },
+    "tests/test_select_validated_frontier.py": {
+      "matches_current": false,
+      "sha256": "422430539b502b8265c6eaf2a8dfd57aa8c17d46266912027bfa9c6eeb2edee8"
+    }
+  },
+  "state": "done",
+  "test_stdout_tail": [
+    "{\"output\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/six-variant-recipe-intake-01/hessian-sizes.json\", \"sha256\": \"7e0e365e6fc4e55ffd275a90d995eafd2ed2b6fb7ff670b3e0f9b4c3ff56c6e5\", \"full_hessian_logical_bytes\": 1834991222784, \"units\": 36423}",
+    "{\"local_result_claim_sha256\": \"f109dff5b298d03b12755364fd3067ed96d0e8e5317a638cbe6f5ac04060213a\", \"payload_path\": \"/mnt/shared/prismabuild-fleet/cas/blobs/45/455b35eb284871f9e08c90cc8489a1b30747715c15626cdfe62762683c7cfa23\", \"reaped_staging_files\": 0, \"receipt\": {\"action_key\": \"2f047451fde4b09bd1dadc40e434ae4249c87032e073a34c8045b5d6ffa34adb\", \"action_manifest_sha256\": \"543d57757b15f33ddbe38108fced4c6afc162e578f8b61cd45d9d6bc3291858f\", \"producer\": {\"action_key\": \"2f047451fde4b09bd1dadc40e434ae4249c87032e073a34c8045b5d6ffa34adb\", \"attestation_sha256\": \"5e021eb8af2112f158763c8e102b14b490d283489ed82094b9833a93b41c11f3\", \"evidence\": {\"accelerators\": [], \"hostname\": \"dl380g10\", \"libc\": \"glibc-2.43\", \"machine\": \"x86_64\", \"slurm\": null, \"source\": \"local\", \"system\": \"linux\"}, \"executable\": {\"bytes\": 1540520, \"path\": \"/bin/bash\", \"resolved_path\": \"/usr/bin/bash\", \"sha256\": \"3efccc187bafa75ff1e37d246270ab3e7aa559f242c7a52bf3ec2a1b5450bdbd\"}, \"host_class\": null, \"inputs\": [{\"bytes\": 26775387, \"id\": \"pbrun.checkout-snapshot\", \"sha256\": \"460f382cc8a80481700e28a776d66907feab727d36de7b25a0ca0887cb78e824\"}], \"platform_key\": \"linux-x86_64\", \"runtime\": {\"core\": {\"bytes\": 283089, \"path\": \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py\", \"resolved_path\": \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/src/prismabuild/core.py\", \"sha256\": \"31825990dec609e2b8c719ee5a3fd04a17739a9f744bbe1438fc3bd6315a09a9\"}, \"launch_kind\": \"script\", \"launcher\": {\"bytes\": 2285, \"path\": \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py\", \"resolved_path\": \"/mnt/shared/prismabuild-fleet/runtime-generations/437ad81b1129-1788868060-209c40b934b6/tools/prismabuild_worker.py\", \"sha256\": \"9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418\"}, \"runtime_sha256\": \"4f8eec2f6a2b8d0b7807d5c1aa430f7830a9912055629d3b8f743e395ba2c3d6\", \"schema\": \"prismaquant.prismabuild.worker_runtime.v1\"}, \"schema\": \"prismaquant.prismabuild.worker_attestation.v2\", \"toolchain\": {\"declared\": {}, \"verified\": {}}, \"worker_id\": \"dl380g10\"}, \"receipt_sha256\": \"fc634cc6e604fe31cda7ba8107354ea6cb01459868bc3788b23266c8011c8391\", \"result\": {\"bytes\": 264, \"sha256\": \"455b35eb284871f9e08c90cc8489a1b30747715c15626cdfe62762683c7cfa23\"}, \"schema\": \"prismaquant.prismabuild.cas_receipt.v3\"}, \"recovered_declared_result\": false, \"status\": \"published\"}"
+  ]
+}

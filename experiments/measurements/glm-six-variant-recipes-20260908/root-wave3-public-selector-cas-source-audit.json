@@ -1,0 +1,22 @@
+[
+  {
+    "action": "cc1b56ab65ee11a3a444fcbe96bbe682af8b8711772663c421091c3f79df096d",
+    "receipt": "1c95b971b4200a989647e281f02c1e62b86803de22ee2ea5f4810ef6c67bdd6e",
+    "payload_sha256": "5b270f2345f94d98a829be888a50850ca939c9e17ee0d977b98a98fee77efcf3",
+    "snapshot": "4cc1255372656810934f06bb529c485cc4835156",
+    "source_diff_from_commit": [
+      ".pbrun-closure.4294506594092225.json"
+    ],
+    "stdout_tail": "..............................                                           [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n30 passed, 14 warnings in 4.62s\n"
+  },
+  {
+    "action": "9c19393874f0b4f0a309a723ea2c2d08d490426d2bc467866504bbb03b382332",
+    "receipt": "8a42e15b0220633739f4809efd79867f3c64cd987e1b49c7831c5d0eb9971bea",
+    "payload_sha256": "431a7f4523aba1a8e445ddc3c3b26861d9e40fb710663ca3a64b3e76f5609f87",
+    "snapshot": "75d7cfe6db1fe0debbaa5d2e8d08de5aace749b7",
+    "source_diff_from_commit": [
+      ".pbrun-closure.491d12634ef788e0.json"
+    ],
+    "stdout_tail": "..............................................................           [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n62 passed, 14 warnings in 176.43s (0:02:56)\n"
+  }
+]

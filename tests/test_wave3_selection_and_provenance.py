@@ -180,10 +180,27 @@ def test_export_prefers_env_then_the_layer_config_stamp():
     assert env_at < stamp_at, "the env override must win over the stamp"
 
 
-def test_frontier_selection_carries_the_stamp_forward():
-    src = (ROOT / "prismaquant" / "select_validated_frontier.py").read_text()
-    assert "read_layer_config_metadata" in src
-    assert "LAYER_CONFIG_META_KEY" in src
+def test_frontier_selection_carries_the_stamp_forward(tmp_path):
+    rows = _rows(tmp_path, [("selected", 4.5, 0.04, 18.0)])
+    validation = tmp_path / "validation.json"
+    validation.write_text(json.dumps({"results": rows}))
+    layer_config = tmp_path / "layer_config.json"
+    layer_config.write_text(json.dumps({
+        "model.layers.0.self_attn.q_proj": "NVFP4",
+        LAYER_CONFIG_META_KEY: {"target_profile": "research"},
+    }))
+
+    assert svf.main([
+        "--validation-json", str(validation), "--mode", "best-kl",
+        "--output-layer-config", str(layer_config),
+        "--output-assignment", str(tmp_path / "selected.json"),
+        "--output-summary", str(tmp_path / "summary.json"),
+    ]) == 0
+
+    selected = json.loads(layer_config.read_text())
+    assert layer_config_metadata(selected)["target_profile"] == "research"
+    assert canonicalize_assignment(selected) == {
+        "model.layers.0.self_attn.q_proj": "NVFP4"}
 
 
 # -------------------------------------------------------------------- R24

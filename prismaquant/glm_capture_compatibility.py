@@ -20,6 +20,7 @@ SCHEMA = 'prismaquant.glm_capture_derivative_compatibility.v1'
 CAPTURE_ACTION = '8740a0b3456bb6cb334ae80b0e35fc3da31c62918abdda8c41ad226020c4e88a'
 CAPTURE_REQUEST_SHA256 = '31d64b92bcc26c3288976a5e7f540778e2cc3a95cf9748ca187d45f81155d082'
 CAPTURE_SOURCE = 'e22a0286a820b23f2aaaa6a9232912abf49394c5'
+ISSUANCE_PLAN_SCHEMA = 'prismaquant.glm_capture_compatibility_issuance_plan.v1'
 
 
 def _bytes(binding, label):
@@ -230,3 +231,151 @@ def create_capture_compatibility(*, capture, producer, forward_equivalence, mode
     with Path(output).open('xb') as stream:
         stream.write(raw)
     return dict(path=str(output), sha256=hashlib.sha256(raw).hexdigest())
+
+
+def _plan_binding(value, label):
+    _require(isinstance(value, dict) and set(value) == {'path', 'sha256'}, label + ' requires path/SHA256')
+    path, digest = value['path'], value['sha256']
+    _require(isinstance(path, str) and Path(path).is_absolute() and '..' not in Path(path).parts,
+             label + ' requires an absolute path without parent traversal')
+    _require(isinstance(digest, str) and len(digest) == 64 and
+             all(c in '0123456789abcdef' for c in digest), label + ' requires a SHA256 digest')
+
+
+def _issuance_plan(binding):
+    from .glm_source_derivative import normalize_source_derivative
+    _plan_binding(binding, 'issuance plan')
+    plan = bound_json(binding, 'issuance plan')
+    _require(isinstance(plan, dict) and set(plan) ==
+             {'schema', 'model_config', 'source_derivative', 'capture', 'producer', 'forward_equivalence', 'output'} and
+             plan['schema'] == ISSUANCE_PLAN_SCHEMA, 'closed issuance plan required')
+    _plan_binding(plan['model_config'], 'model config')
+    policy = normalize_source_derivative(plan['source_derivative'])
+    _require(policy is not None, 'issuance requires an explicit corrected derivative')
+    _plan_binding(policy['image_build'], 'image build')
+    _require(isinstance(plan['producer'], dict) and set(plan['producer']) ==
+             {'request', 'terminal', 'receipt', 'output', 'image_inspection', 'modeling_source'},
+             'closed issuance producer evidence required')
+    _require(isinstance(plan['forward_equivalence'], dict) and set(plan['forward_equivalence']) ==
+             {'cpu_reproduction', 'original_layer0', 'corrected_layer0', 'corrected_graph'},
+             'closed issuance native evidence required')
+    completion = {'capture': plan['capture'], **{
+        'producer.' + key: plan['producer'][key] for key in ('terminal', 'receipt', 'output')}}
+    pending = sorted(key for key, value in completion.items() if value is None)
+    _require(not pending or len(pending) == len(completion),
+             'original completion evidence must be entirely pending or entirely bound')
+    for label, value in completion.items():
+        if value is not None:
+            _plan_binding(value, label)
+    for group in ('producer', 'forward_equivalence'):
+        for key, value in plan[group].items():
+            if value is not None:
+                _plan_binding(value, group + '.' + key)
+    output = plan['output']
+    _require(isinstance(output, str) and Path(output).is_absolute() and '..' not in Path(output).parts,
+             'receipt output requires an absolute path without parent traversal')
+    return plan, pending
+
+
+def _issuance_static_inputs(plan):
+    """Check the available producer/config inputs without declaring completion."""
+    from tools.container_runtime_identity import image_content_sha256
+    evidence = plan['producer']
+    _require(evidence['request']['sha256'] == CAPTURE_REQUEST_SHA256,
+             'original capture request is not the reviewed action')
+    request = bound_json(evidence['request'], 'original capture request')
+    _require(request.get('action_key') == CAPTURE_ACTION and
+             request['params']['checkout_snapshot']['parent'] == CAPTURE_SOURCE,
+             'original producer action or source differs')
+    inspected = bound_json(evidence['image_inspection'], 'original image inspection')
+    _require(isinstance(inspected, dict) and any(isinstance(row, dict) and
+             image_content_sha256(row) == ORIGINAL_IMAGE_CONTENT_SHA256 for row in inspected.values()),
+             'original image inspection does not contain the pinned image')
+    _require(hashlib.sha256(_bytes(evidence['modeling_source'], 'original modeling source')).hexdigest() ==
+             ORIGINAL_MODELING_SHA256, 'original modeling source differs')
+    graph = bound_json(plan['forward_equivalence']['corrected_graph'], 'corrected graph config source')
+    config = plan['model_config']
+    authenticated = graph.get('source_final', {}).get('authenticated', [])
+    _require(Path(config['path']).name == 'config.json' and any(
+        row.get('path') == config['path'] and row.get('actual_sha256') == row.get('expected_sha256') == config['sha256']
+        for row in authenticated), 'model config differs from the actual native source config')
+    return bound_json(config, 'actual model config')
+
+
+def _require_cpu_issuance():
+    import torch
+    _require(not torch.cuda.is_available() and not torch.cuda.is_initialized(),
+             'compatibility issuance must run with CUDA unavailable and uninitialized')
+
+
+def _issuance_model(config_data, policy):
+    """Use the real streaming constructor and authenticated runtime, all on meta."""
+    from transformers import AutoConfig
+    from .streaming_model import build_streaming_skeleton
+    from .model_profiles.glm5_next import Glm5NextProfile
+    from .glm_source_derivative import bind_source_derivative
+    _require_cpu_issuance()
+    values = dict(config_data)
+    model_type = values.pop('model_type')
+    config = AutoConfig.for_model(model_type, **values)
+    profile = Glm5NextProfile()
+    model = build_streaming_skeleton(config, multimodal=profile.requires_multimodal_skeleton(),
+        log_prefix='[glm-compatibility]', attn_implementation='eager')
+    model.eval().requires_grad_(False)
+    _require(all(parameter.is_meta for parameter in model.parameters()), 'issuance materialized model weights')
+    bind_source_derivative(model, profile, policy)
+    _require_cpu_issuance()
+    return model
+
+
+def execute_issuance_plan(binding, *, issue=False):
+    """Preflight known evidence or issue once from a fully bound completed plan.
+
+    Pending original completion fields are allowed only for preflight. Neither
+    command computes a forward/backward pass or changes the original capture.
+    """
+    _require(type(issue) is bool, 'issuance mode must be explicit')
+    plan, pending = _issuance_plan(binding)
+    _require(not issue or not pending, 'original capture completion evidence is pending: ' + ', '.join(pending))
+    if issue:
+        _require(not Path(plan['output']).exists(), 'receipt output already exists')
+    if not pending:
+        from .tessera_calibration_cache import require_capture_contract
+        require_capture_contract(plan['capture']['path'], expected_sha256=plan['capture']['sha256'])
+        _producer(plan['producer'], plan['capture'])
+    config_data = _issuance_static_inputs(plan)
+    model = _issuance_model(config_data, plan['source_derivative'])
+    from .joint_aura import source_execution_identity
+    derivative = source_derivative_identity(model)
+    _require(derivative is not None, 'issuance requires the observed corrected runtime')
+    proof = _forward_and_graph(plan['forward_equivalence'], derivative)
+    execution = source_execution_identity(model)
+    graph = bound_json(plan['forward_equivalence']['corrected_graph'], 'corrected native execution')
+    _require(execution == graph['source_execution'], 'issuance execution differs from the qualified native model')
+    _require_cpu_issuance()
+    result = dict(schema='prismaquant.glm_capture_compatibility_issuance_execution.v1', plan=binding,
+        status='preflight_pending_original_capture' if pending else 'preflight_complete',
+        pending=pending, device='meta', cuda_initialized=False,
+        source_derivative_sha256=_digest(derivative), source_execution_sha256=_digest(execution),
+        authenticated_kda_modules=len(derivative['gates']), proof=proof, receipt=None)
+    if issue:
+        result['receipt'] = create_capture_compatibility(capture=plan['capture'], producer=plan['producer'],
+            forward_equivalence=plan['forward_equivalence'], model=model, output=plan['output'])
+        result['status'] = 'receipt_issued'
+    return result
+
+
+def main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description='CPU/meta issuance of a closed original GLM capture compatibility receipt.')
+    parser.add_argument('command', choices=('preflight', 'issue'))
+    parser.add_argument('--plan', required=True)
+    parser.add_argument('--plan-sha256', required=True)
+    args = parser.parse_args(argv)
+    result = execute_issuance_plan(dict(path=args.plan, sha256=args.plan_sha256), issue=args.command == 'issue')
+    print(json.dumps(result, sort_keys=True, allow_nan=False), flush=True)
+    return result
+
+
+if __name__ == '__main__':
+    main()
