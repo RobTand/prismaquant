@@ -2,7 +2,7 @@
 
 This is experiment instrumentation, not an alternate capture implementation.
 Python stacks cover the main thread at 1 Hz; selected original forward or
-scalar-anchor windows use torch.profiler. Both Sparks' host series use the existing Netdata contract
+scalar or batched anchor windows use torch.profiler. Both Sparks' host series use the existing Netdata contract
 at 5-second intervals, with explicit disk caps suitable for a 24-hour action.
 """
 from __future__ import annotations
@@ -154,13 +154,13 @@ class CaptureObserver:
 
 
 class AnchorObserver(CaptureObserver):
-    """Observe finite original scalar calls; retain no weight or activation tensors.
+    """Observe finite original anchor calls; retain no weight or activation tensors.
 
     Observation failures are reported after the campaign can journal successful
     anchors. They must not turn an encoded anchor into an apparent encoder
     failure, or make a retry encode that successful anchor again.
     """
-    def __init__(self, out, *, profile_calls, trace_max_bytes, command):
+    def __init__(self, out, *, profile_calls, trace_max_bytes, command, cuda_only=False):
         if (not profile_calls or 0 not in profile_calls or len(profile_calls) > 4
                 or any(type(i) is not int or i < 0 for i in profile_calls)
                 or len(set(profile_calls)) != len(profile_calls)):
@@ -172,10 +172,14 @@ class AnchorObserver(CaptureObserver):
         super().__init__(parent/('attempt-'+uuid.uuid4().hex), profile_layers=())
         self.profile_calls = set(profile_calls)
         self.trace_max_bytes = trace_max_bytes
+        self.activities = ([torch.profiler.ProfilerActivity.CUDA] if cuda_only else
+                           [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA])
         self.result.update(schema='prismaquant.glm_selected_anchor_profile.v1',
             mode='selected_anchors', campaign_argv=list(command), anchor_calls=0,
             anchors=[], profile_calls_zero_based=sorted(profile_calls),
             trace_max_bytes=trace_max_bytes, native_anchor_profiled=False,
+            profile_activities=['cuda'] if cuda_only else ['cpu', 'cuda'],
+            call_index_scope='Shared scalar and compatible-batch invocation sequence.',
             trace_cap_scope='Exported bytes per window; not a live profiler-memory bound.')
         self.result.pop('forward_windows_zero_based')
         self.result.pop('profile_layers')
@@ -192,14 +196,17 @@ class AnchorObserver(CaptureObserver):
             record = dict(call_index=index, qname=kwargs.get('qname'),
                 format_name=kwargs.get('format_name'), started_unix=time.time(),
                 status='running', cuda_events=0)
+            # Copy names only; the campaign retains sole ownership of weights,
+            # activations and output objects. A batch is one measured call.
+            names = list(kwargs['qnames']) if 'qnames' in kwargs else [kwargs.get('qname')]
+            record.update(qnames=names, batch_size=len(names))
             self.result['anchors'].append(record)
             called = False
             original_error = None
             value = None
             try:
                 try:
-                    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
-                            torch.profiler.ProfilerActivity.CUDA], record_shapes=False,
+                    with torch.profiler.profile(activities=self.activities, record_shapes=False,
                             profile_memory=False, with_stack=False) as profiler:
                         called = True
                         try:
@@ -271,8 +278,8 @@ def selected_anchor_command(command):
     args, _ = parser.parse_known_args(command)
     if not (args.streaming and args.units and args.calibration_cache
             and args.calibration_cache_sha256 and not args.census_out
-            and not args.capture_calibration_out and args.anchor_batch_size == 1):
-        raise ValueError('anchor observer requires selected canonical reuse and anchor batch size one')
+            and not args.capture_calibration_out and args.anchor_batch_size >= 1):
+        raise ValueError('anchor observer requires selected canonical reuse and positive anchor batch size')
 
 
 def main(argv=None):
@@ -280,9 +287,11 @@ def main(argv=None):
     parser.add_argument('--evidence-out', type=Path, required=True)
     parser.add_argument('--selected-anchors', action='store_true')
     parser.add_argument('--anchor-profile-calls',
-                        help='Explicit comma-separated scalar-call indices; includes zero, at most four.')
+                        help='Explicit comma-separated scalar/batch call indices; includes zero, at most four.')
     parser.add_argument('--anchor-trace-max-bytes', type=int,
                         help='Required exported-byte cap per selected-anchor trace; at most 2 GiB.')
+    parser.add_argument('--anchor-cuda-only', action='store_true',
+                        help='Collect CUDA activities only for anchors; retain the separate Python sampler.')
     parser.add_argument('campaign_argv', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = args.campaign_argv
@@ -296,25 +305,29 @@ def main(argv=None):
                 raise ValueError('selected anchors require an explicit trace byte cap')
         except (AttributeError, ValueError) as error:
             parser.error(str(error))
-    elif args.anchor_profile_calls is not None or args.anchor_trace_max_bytes is not None:
+    elif (args.anchor_profile_calls is not None or args.anchor_trace_max_bytes is not None
+          or args.anchor_cuda_only):
         parser.error('anchor profiling options require --selected-anchors')
     elif '--capture-calibration-out' not in command or '--streaming' not in command:
         parser.error('observer requires the streamed canonical capture action')
     if not torch.cuda.is_available():
         raise RuntimeError('full capture profiler requires CUDA')
     from prismaquant import tessera_campaign as campaign
-    method = '_measure_anchor' if args.selected_anchors else '_collect_activations'
-    original = getattr(campaign, method)
+    methods = ('_measure_anchor', '_measure_anchor_batch') if args.selected_anchors else ('_collect_activations',)
+    originals = {method: getattr(campaign, method) for method in methods}
     observer = (AnchorObserver(args.evidence_out, profile_calls=calls,
-                              trace_max_bytes=args.anchor_trace_max_bytes, command=command)
+                              trace_max_bytes=args.anchor_trace_max_bytes, command=command,
+                              cuda_only=args.anchor_cuda_only)
                 if args.selected_anchors else CaptureObserver(args.evidence_out))
     with observer:
-        setattr(campaign, method, observer.wrap_anchor(original) if args.selected_anchors
-                else observer.wrap_collector(original))
         try:
+            for method, original in originals.items():
+                setattr(campaign, method, observer.wrap_anchor(original) if args.selected_anchors
+                        else observer.wrap_collector(original))
             return campaign.main(command)
         finally:
-            setattr(campaign, method, original)
+            for method, original in originals.items():
+                setattr(campaign, method, original)
 
 
 if __name__ == '__main__':
