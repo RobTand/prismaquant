@@ -1,0 +1,207 @@
+{
+  "document_kind": "unsealed_downstream_intake",
+  "status": "pending_bound_inputs_not_an_artifact_collection_contract",
+  "source_basis": {
+    "prismaquant": "21ae7d28b7d313654beda6b4e622d732d4276a34",
+    "gold_instrument_commit": "0661c3e7eb",
+    "tessera": "07ad344c3275bb2fa7ce2432f93d89945d66f4c2",
+    "runtime_image": "vllm/vllm-openai@sha256:4e31c581716a5cb9ef31eddb0a425842b75cab07d5cd63fb9572e69ae8794c33"
+  },
+  "shared_inputs": {
+    "source_census_sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+    "fit_tokens_sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329",
+    "fit_draw": {
+      "samples": 512,
+      "seqlen": 512,
+      "seed": 0
+    },
+    "complete_capture_ref": null,
+    "source_compatibility_ref": null,
+    "measured_union_ref": null,
+    "joint_plan_ref": null,
+    "prepared_pwc_ref": null,
+    "joint_cost_ref": null,
+    "allocation_handoff_ref": null,
+    "bounded_hessian_refs": null,
+    "priced_scales_ref": null,
+    "teacher_payload_ref": null,
+    "teacher_meta_ref": null,
+    "heldout_tokens_ref": null,
+    "accounting_rule_ref": null
+  },
+  "input_owners": {
+    "capture_compatibility_and_shared_joint": "root campaign",
+    "first_complete_anchor_plan_and_wires": "Raman/root campaign",
+    "budgets_quality_limits_workload": "root/user inputs",
+    "teacher_schema_and_reuse": "pending reviewed bounded instrument plan",
+    "receipts": "existing artifact_collection record APIs"
+  },
+  "first_engine_gate_requires": [
+    "one_complete_whole_model_plan",
+    "all_selected_accepted_dense_and_expert_wires",
+    "original_bf16_passthrough",
+    "full_source_model_config_and_tokenizer",
+    "explicit_research_execution_json",
+    "runtime_and_package_identity_per_rank",
+    "declared_workload_and_resource_window",
+    "repaired_calibrated_packed_cached_export_intake"
+  ],
+  "first_engine_gate_does_not_wait_for": [
+    "joint_allocation_handoff",
+    "six_final_selections",
+    "runtime_v2_predictor",
+    "corrected_graph_source_compatibility"
+  ],
+  "variants": [
+    {
+      "variant_key": "spark1_low_prefill_high_accuracy",
+      "topology": {
+        "tensor_parallel_size": 1,
+        "nnodes": 1,
+        "gpus_per_node": 1,
+        "distributed_executor_backend": "mp",
+        "data_parallel_backend": "mp",
+        "moe_backend": "triton",
+        "serving_mode": "resident"
+      },
+      "artifact_byte_ceiling": null,
+      "usable_device_bytes_per_rank": null,
+      "quality_ceiling": null,
+      "prefill_limit": null,
+      "workload_ref": null,
+      "selected_layer_config_ref": null,
+      "selected_wire_manifest_ref": null,
+      "checkpoint_ref": null,
+      "full_engine_receipt_ref": null,
+      "quality_receipt_ref": null,
+      "performance_receipt_ref": null,
+      "uniform_control_ref": null
+    },
+    {
+      "variant_key": "spark1_high_prefill_lower_accuracy",
+      "topology": {
+        "tensor_parallel_size": 1,
+        "nnodes": 1,
+        "gpus_per_node": 1,
+        "distributed_executor_backend": "mp",
+        "data_parallel_backend": "mp",
+        "moe_backend": "triton",
+        "serving_mode": "resident"
+      },
+      "artifact_byte_ceiling": null,
+      "usable_device_bytes_per_rank": null,
+      "quality_ceiling": null,
+      "prefill_limit": null,
+      "workload_ref": null,
+      "selected_layer_config_ref": null,
+      "selected_wire_manifest_ref": null,
+      "checkpoint_ref": null,
+      "full_engine_receipt_ref": null,
+      "quality_receipt_ref": null,
+      "performance_receipt_ref": null,
+      "uniform_control_ref": null
+    },
+    {
+      "variant_key": "spark1_balanced",
+      "topology": {
+        "tensor_parallel_size": 1,
+        "nnodes": 1,
+        "gpus_per_node": 1,
+        "distributed_executor_backend": "mp",
+        "data_parallel_backend": "mp",
+        "moe_backend": "triton",
+        "serving_mode": "resident"
+      },
+      "artifact_byte_ceiling": null,
+      "usable_device_bytes_per_rank": null,
+      "quality_ceiling": null,
+      "prefill_limit": null,
+      "workload_ref": null,
+      "selected_layer_config_ref": null,
+      "selected_wire_manifest_ref": null,
+      "checkpoint_ref": null,
+      "full_engine_receipt_ref": null,
+      "quality_receipt_ref": null,
+      "performance_receipt_ref": null,
+      "uniform_control_ref": null
+    },
+    {
+      "variant_key": "spark2_low_prefill_high_accuracy",
+      "topology": {
+        "tensor_parallel_size": 2,
+        "nnodes": 2,
+        "gpus_per_node": 1,
+        "distributed_executor_backend": "mp",
+        "data_parallel_backend": "mp",
+        "moe_backend": "triton",
+        "serving_mode": "resident"
+      },
+      "artifact_byte_ceiling": null,
+      "usable_device_bytes_per_rank": null,
+      "quality_ceiling": null,
+      "prefill_limit": null,
+      "workload_ref": null,
+      "selected_layer_config_ref": null,
+      "selected_wire_manifest_ref": null,
+      "checkpoint_ref": null,
+      "full_engine_receipt_ref": null,
+      "quality_receipt_ref": null,
+      "performance_receipt_ref": null,
+      "uniform_control_ref": null
+    },
+    {
+      "variant_key": "spark2_high_prefill_lower_accuracy",
+      "topology": {
+        "tensor_parallel_size": 2,
+        "nnodes": 2,
+        "gpus_per_node": 1,
+        "distributed_executor_backend": "mp",
+        "data_parallel_backend": "mp",
+        "moe_backend": "triton",
+        "serving_mode": "resident"
+      },
+      "artifact_byte_ceiling": null,
+      "usable_device_bytes_per_rank": null,
+      "quality_ceiling": null,
+      "prefill_limit": null,
+      "workload_ref": null,
+      "selected_layer_config_ref": null,
+      "selected_wire_manifest_ref": null,
+      "checkpoint_ref": null,
+      "full_engine_receipt_ref": null,
+      "quality_receipt_ref": null,
+      "performance_receipt_ref": null,
+      "uniform_control_ref": null
+    },
+    {
+      "variant_key": "spark2_balanced",
+      "topology": {
+        "tensor_parallel_size": 2,
+        "nnodes": 2,
+        "gpus_per_node": 1,
+        "distributed_executor_backend": "mp",
+        "data_parallel_backend": "mp",
+        "moe_backend": "triton",
+        "serving_mode": "resident"
+      },
+      "artifact_byte_ceiling": null,
+      "usable_device_bytes_per_rank": null,
+      "quality_ceiling": null,
+      "prefill_limit": null,
+      "workload_ref": null,
+      "selected_layer_config_ref": null,
+      "selected_wire_manifest_ref": null,
+      "checkpoint_ref": null,
+      "full_engine_receipt_ref": null,
+      "quality_receipt_ref": null,
+      "performance_receipt_ref": null,
+      "uniform_control_ref": null
+    }
+  ],
+  "producer_intake_blocker": {
+    "source": "Tessera 07ad experiments/export_tessera_serving.py:1577",
+    "reason": "packed --hessian refused even with cached units; omission mismatches calibrated identity",
+    "disposition": "reported to root; no frozen source edits"
+  },
+  "teacher_draw_status": "fixed seed42 train WikiText; fitting overlap unverified"
+}
