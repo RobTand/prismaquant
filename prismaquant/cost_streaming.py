@@ -79,7 +79,8 @@ def _state_tensors(value):
             raise TypeError("exact boundary storage cannot account this state tensor")
         yield value
     elif isinstance(value, Mapping):
-        for item in value.values():
+        for key, item in value.items():
+            yield from _state_tensors(key)
             yield from _state_tensors(item)
     elif isinstance(value, (tuple, list)):
         for item in value:

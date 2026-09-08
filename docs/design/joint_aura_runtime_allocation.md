@@ -301,7 +301,8 @@ writer copy; source replay/gradients, decoded candidates and allocator/runtime
 scratch still need their independent memory reservation and free-memory floor.
 On Spark CPU and GPU ownership share physical memory. The auxiliary cap counts
 all retained input/mask/position/shared-state storage, including full backing
-storages of views, and conservatively reserves one >=FP32 shared-state
+storages of views and tensors in mapping keys as well as values, and
+conservatively reserves one >=FP32 shared-state
 cotangent per captured occurrence per probe. Opaque state owners refuse.
 Nothing samples, reshapes, rounds or reorders a boundary.
 

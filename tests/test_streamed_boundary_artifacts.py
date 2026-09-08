@@ -236,6 +236,18 @@ def test_exact_storage_policy_is_closed_and_complete(tmp_path):
         normalize_boundary_storage({**good, "prefetch_batches": True})
 
 
+def test_shared_state_mapping_keys_cannot_hide_tensor_or_opaque_owners(tmp_path):
+    from prismaquant.cost_streaming import StreamedForwardBoundaries
+    with _bound(tmp_path, aux=64) as owner:
+        key = torch.zeros(32)
+        batch = StreamedForwardBoundaries(None, None, None, None, [], {key: None})
+        with pytest.raises(RuntimeError, match="auxiliary/shared-state"):
+            owner.check_auxiliary([batch])
+        batch.shared_pass_state = {object(): None}
+        with pytest.raises(TypeError, match="opaque state"):
+            owner.check_auxiliary([batch])
+
+
 def test_rank_four_boundaries_keep_all_residual_streams_and_original_dtype(tmp_path):
     from prismaquant.model_profiles.default import DefaultProfile
     class FourStreams(DefaultProfile):
