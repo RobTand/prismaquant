@@ -6,7 +6,7 @@ unload all go through the existing streaming-model machinery.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
 import json
@@ -53,6 +53,7 @@ class StreamedForwardBoundaries:
 
 
 BOUNDARY_STORAGE_SCHEMA = "prismaquant.aura.boundary_storage.v1"
+LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA = "prismaquant.aura.boundary_storage.v2"
 
 
 def normalize_boundary_storage(config):
@@ -61,9 +62,17 @@ def normalize_boundary_storage(config):
         return None
     fields = {"schema", "directory", "max_resident_bytes", "max_auxiliary_bytes",
               "max_artifact_bytes", "prefetch_batches"}
-    if not isinstance(config, dict) or set(config) != fields or config.get("schema") != BOUNDARY_STORAGE_SCHEMA:
-        raise ValueError("exact boundary storage requires a complete v1 policy")
-    for key in fields - {"schema", "directory"}:
+    if not isinstance(config, dict):
+        raise ValueError("exact boundary storage requires a complete versioned policy")
+    if config.get("schema") == LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA:
+        fields.add("capture_order")
+        if config.get("capture_order") != "layer_major":
+            raise ValueError("exact boundary storage v2 requires layer_major capture_order")
+    elif config.get("schema") != BOUNDARY_STORAGE_SCHEMA:
+        raise ValueError("exact boundary storage requires a known policy schema")
+    if set(config) != fields:
+        raise ValueError("exact boundary storage requires a complete closed policy")
+    for key in fields - {"schema", "directory", "capture_order"}:
         if type(config[key]) is not int or config[key] <= 0:
             raise ValueError(f"exact boundary storage requires positive {key}")
     if not isinstance(config["directory"], str) or not config["directory"].strip():
@@ -149,7 +158,7 @@ class StreamedBoundaryArtifacts:
         if self.directory is None:
             return
         from .cost_stage_checkpoint import atomic_write_bytes
-        data = {"schema": BOUNDARY_STORAGE_SCHEMA, "session": self.session,
+        data = {"schema": self.config["schema"], "session": self.session,
                 "policy": self.identity, "status": self._status,
                 "working_artifacts_reusable": False, "telemetry": self.telemetry}
         atomic_write_bytes(self.directory / "generation.json",
@@ -676,63 +685,160 @@ class StreamedCausalLM:
     def shutdown(self) -> None:
         self.context.shutdown()
 
-    def visit_layer_batches(self, input_batches, visitor, *, output_consumer=None):
-        """Visit each resident layer over the original ordered microbatches.
+    def capture_layer_major_boundaries(self, input_batches, *, storage):
+        """Capture exact baseline boundaries through the existing layer visitor."""
+        if storage.config.get("capture_order") != "layer_major":
+            raise ValueError("layer-major boundary capture requires the explicit v2 policy")
+        input_batches = tuple(input_batches)
+        def visit(_layer, forward_batch):
+            for input_ids in input_batches:
+                forward_batch(input_ids)
+        return self.visit_layer_batches(input_batches, visit, boundary_storage=storage)
 
-        ``visitor(layer, forward_batch)`` may install collection hooks, drive
-        the ordinary sample loop through ``forward_batch``, and drain its
-        layer-owned results before returning. The callback must consume every
-        batch exactly once. Only each batch's current hidden state survives;
-        source residency remains owned by this runner's existing context.
-        Derived mask/position kwargs are rebuilt for one original batch at a
-        time through the same preparation path, then released. Masks, mHC adapters and one distinct pass-state per original batch are
-        the same as an ordinary streamed forward. Batches are never combined.
+    def visit_layer_batches(self, input_batches, visitor, *, output_consumer=None,
+                            boundary_storage=None):
+        """Visit one resident source layer over the original ordered batches.
+
+        The original visitor retains one current hidden tensor per batch. With
+        explicit v2 boundary storage, it instead leases exact input windows and
+        writes each original output through the existing activation owner. All
+        per-batch source kwargs/pass-state remain independent and unchanged.
+        The new path requires evaluation mode and observes Torch CPU plus this
+        runner's CUDA RNG state around preparation/source calls. RNG-consuming
+        sources refuse; this is not equivalence for arbitrary stateful models.
         """
         if self._pinned_layer is not None:
             raise RuntimeError("layer-batch traversal cannot start with a pinned layer")
-        states = []
-        with torch.no_grad():
-            for input_ids in input_batches:
-                ids, positions, hidden, embeddings, mask = self._prepare(input_ids)
-                states.append([ids, hidden, self.profile.new_forward_pass_state()])
-                del positions, embeddings, mask
-            if not states:
-                raise ValueError("layer-batch traversal requires calibration batches")
-            for depth in range(min(self.num_layers, self.prefetch_lookahead + 1)):
-                self.context.schedule_prefetch(depth)
-            for layer in range(self.num_layers):
-                self.context.install(layer, require_prefetched=self.require_prefetched_residency)
-                self.context.schedule_prefetch(layer + self.prefetch_lookahead)
-                next_batch = 0
+        exact = boundary_storage is not None
+        if exact:
+            if boundary_storage.config.get("capture_order") != "layer_major":
+                raise ValueError("layer visitor exact storage requires layer_major v2 policy")
+            if not self.require_prefetched_residency:
+                raise RuntimeError("layer-major capture requires prefetched source residency")
+            if any(module.training for module in self.model.modules()):
+                raise RuntimeError("layer-major capture requires evaluation mode")
+        states, batches = [], []
+        if exact:
+            boundary_storage.watch_auxiliary(batches, [])
 
-                def forward_batch(input_ids):
-                    nonlocal next_batch
-                    if next_batch >= len(states):
-                        raise RuntimeError("layer visitor repeated a calibration batch")
-                    ids, hidden, pass_state = states[next_batch]
-                    if not torch.equal(input_ids, ids):
-                        raise RuntimeError("layer visitor changed calibration batch order or tokens")
-                    # Recompute through the ordinary source preparation path:
-                    # position/mask values may depend on the original IDs or
-                    # embeddings. Retain no derived per-B1 tables across layers.
-                    _ids, positions, initial, embeddings, mask = self._prepare(ids)
-                    del initial
-                    batch = StreamedForwardBoundaries(_ids, positions, embeddings, mask, [], None)
-                    states[next_batch][1] = self._call(layer, hidden, batch=batch, pass_state=pass_state)
-                    next_batch += 1
+        def checked(function, *args, **kwargs):
+            if not exact:
+                return function(*args, **kwargs)
+            cpu_rng = torch.get_rng_state()
+            cuda_rng = torch.cuda.get_rng_state(self.device) if self.device.type == "cuda" else None
+            result = function(*args, **kwargs)
+            if (not torch.equal(cpu_rng, torch.get_rng_state()) or
+                    (cuda_rng is not None and not torch.equal(cuda_rng, torch.cuda.get_rng_state(self.device)))):
+                raise RuntimeError("layer-major capture observed source Torch RNG consumption")
+            return result
 
-                try:
-                    visitor(layer, forward_batch)
-                    if next_batch != len(states):
-                        raise RuntimeError("layer visitor omitted calibration batches")
-                finally:
-                    self.context.unload(layer)
-            if output_consumer is not None:
-                for index, (ids, hidden, _pass_state) in enumerate(states):
-                    _ids, positions, initial, embeddings, mask = self._prepare(ids)
-                    del initial
-                    batch = StreamedForwardBoundaries(_ids, positions, embeddings, mask, [], None)
-                    output_consumer(index, self.tail_logits(batch, hidden))
+        def check_state():
+            if exact:
+                boundary_storage.check_auxiliary(batches,
+                    extra=[state[2] for state in states],
+                    shared_extra=[state[2] for batch, state in zip(batches, states)
+                                  if batch.shared_pass_state is None])
+
+        scheduled = set()
+        def prefetch(layer):
+            if 0 <= layer < self.num_layers and layer not in scheduled:
+                self.context.schedule_prefetch(layer)
+                scheduled.add(layer)
+
+        try:
+            with torch.no_grad():
+                for batch_index, input_ids in enumerate(input_batches):
+                    check_state()
+                    ids, positions, hidden, embeddings, mask = checked(self._prepare, input_ids)
+                    pass_state = checked(self.profile.new_forward_pass_state)
+                    if exact:
+                        batch = StreamedForwardBoundaries(ids, positions, embeddings, mask, [], None)
+                        batches.append(batch)
+                        states.append([ids, None, pass_state])
+                        check_state()
+                        batch.activations_cpu.append(boundary_storage.write(hidden,
+                            batch_index=batch_index, boundary_index=0))
+                        del hidden, pass_state
+                    else:
+                        states.append([ids, hidden, pass_state])
+                    del positions, embeddings, mask
+                if not states:
+                    raise ValueError("layer-batch traversal requires calibration batches")
+                if exact:
+                    for depth in range(min(self.num_layers, max(1, self.prefetch_lookahead))):
+                        prefetch(depth)
+                else:
+                    for depth in range(min(self.num_layers, self.prefetch_lookahead + 1)):
+                        self.context.schedule_prefetch(depth)
+                for layer in range(self.num_layers):
+                    if exact:
+                        check_state()
+                        prefetch(layer)
+                        self.context.install(layer, require_prefetched=True, prefetch_following=False)
+                    else:
+                        self.context.install(layer, require_prefetched=self.require_prefetched_residency)
+                    try:
+                        if exact:
+                            prefetch(layer + self.prefetch_lookahead)
+                        else:
+                            self.context.schedule_prefetch(layer + self.prefetch_lookahead)
+                        next_batch = 0
+                        with prefetched_boundary_batches(boundary_storage, batches, layer) if exact else nullcontext() as resident:
+                            def forward_batch(input_ids):
+                                nonlocal next_batch
+                                if next_batch >= len(states):
+                                    raise RuntimeError("layer visitor repeated a calibration batch")
+                                ids, hidden, pass_state = states[next_batch]
+                                if not torch.equal(input_ids.to(device=ids.device), ids):
+                                    raise RuntimeError("layer visitor changed calibration batch order or tokens")
+                                if exact:
+                                    index, batch, cpu_hidden, _unused = next(resident)
+                                    if index != next_batch:
+                                        raise RuntimeError("exact boundary window changed batch order")
+                                    hidden = cpu_hidden.to(device=self.device, dtype=self.dtype)
+                                else:
+                                    _ids, positions, initial, embeddings, mask = self._prepare(ids)
+                                    del initial
+                                    batch = StreamedForwardBoundaries(_ids, positions, embeddings, mask, [], None)
+                                try:
+                                    output = checked(self._call, layer, hidden, batch=batch, pass_state=pass_state)
+                                    if exact:
+                                        check_state()
+                                        batch.activations_cpu.append(boundary_storage.write(output,
+                                            batch_index=next_batch, boundary_index=layer + 1))
+                                    else:
+                                        states[next_batch][1] = output
+                                    next_batch += 1
+                                finally:
+                                    hidden = output = None
+                                    if exact:
+                                        cpu_hidden = None
+                            visitor(layer, forward_batch)
+                            if next_batch != len(states):
+                                raise RuntimeError("layer visitor omitted calibration batches")
+                    finally:
+                        self.context.unload(layer)
+                if exact:
+                    for batch, state in zip(batches, states):
+                        batch.shared_pass_state = checked(self.profile.capture_forward_pass_state, state[2])
+                        check_state()  # Charge the CPU capture and still-live original state together.
+                        state[2] = None
+                    check_state()
+                    if output_consumer is not None:
+                        with prefetched_boundary_batches(boundary_storage, batches, self.num_layers) as resident:
+                            for index, batch, cpu_hidden, _unused in resident:
+                                hidden = cpu_hidden.to(device=self.device, dtype=self.dtype)
+                                output_consumer(index, checked(self.tail_logits, batch, hidden))
+                                del hidden, cpu_hidden
+                    return batches
+                if output_consumer is not None:
+                    for index, (ids, hidden, _pass_state) in enumerate(states):
+                        _ids, positions, initial, embeddings, mask = self._prepare(ids)
+                        del initial
+                        batch = StreamedForwardBoundaries(_ids, positions, embeddings, mask, [], None)
+                        output_consumer(index, self.tail_logits(batch, hidden))
+        finally:
+            states.clear()
 
 
 def build_streamed_causal_lm(

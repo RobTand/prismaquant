@@ -1908,11 +1908,12 @@ def compute_aura_cost_streamed(
     partitions with versioned global-row probes. Local signed terms and weight
     gradients sum across all partitions before squaring; full-vocabulary GPU
     tensors are bounded by the partition. By default CPU boundaries and shared
-    pass state cover the full calibration. Explicit ``boundary_storage`` v1
+    pass state cover the full calibration. Explicit ``boundary_storage`` v1/v2
     stores exact snapshots and rolling cotangents through the existing
     activation artifact owner, leases bounded resident input windows, and caps
-    metadata/shared-state residency. It preserves the original traversal and
-    scalar projection arithmetic; candidate/gradient and source traffic bounds
+    metadata/shared-state residency. V2 uses layer-major baseline capture with
+    the original per-batch source sequence; v1 preserves batch-major capture.
+    Both preserve scalar projection arithmetic; candidate/gradient bounds
     remain separate admission requirements. Checkpoints bind the execution partition
     because floating-point kernels may round differently with batch shape.
     The resident :func:`compute_aura_cost` path is deliberately unchanged.
@@ -2666,24 +2667,29 @@ def compute_aura_cost_streamed(
     batches = []
     if boundary_storage is not None:
         boundary_storage.watch_auxiliary(batches, [])
-    for batch_index, offset in enumerate(row_offsets):
-        available_gib = _free_gib()
-        if available_gib < min_free_gib:
-            raise RuntimeError(f"free UMA {available_gib:.1f} < floor {min_free_gib:.1f}; "
-                               f"abort before calibration row {offset}")
-        if boundary_storage is None:
-            batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows]))
-        else:
-            def write_boundary(depth, tensor):
-                return boundary_storage.write(tensor, batch_index=batch_index, boundary_index=depth)
+    if boundary_storage is not None and boundary_storage.config.get("capture_order") == "layer_major":
+        batches = runner.capture_layer_major_boundaries(
+            [calib_ids[offset:offset + batch_rows] for offset in row_offsets],
+            storage=boundary_storage)
+    else:
+        for batch_index, offset in enumerate(row_offsets):
+            available_gib = _free_gib()
+            if available_gib < min_free_gib:
+                raise RuntimeError(f"free UMA {available_gib:.1f} < floor {min_free_gib:.1f}; "
+                                   f"abort before calibration row {offset}")
+            if boundary_storage is None:
+                batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows]))
+            else:
+                def write_boundary(depth, tensor):
+                    return boundary_storage.write(tensor, batch_index=batch_index, boundary_index=depth)
 
-            def check_capture_state(current, state):
-                boundary_storage.check_auxiliary([*batches, current], extra=(state,),
-                    shared_extra=state if current.shared_pass_state is None else ())
+                def check_capture_state(current, state):
+                    boundary_storage.check_auxiliary([*batches, current], extra=(state,),
+                        shared_extra=state if current.shared_pass_state is None else ())
 
-            batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows],
-                boundary_writer=write_boundary, resource_check=check_capture_state))
-            boundary_storage.check_auxiliary(batches)
+                batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows],
+                    boundary_writer=write_boundary, resource_check=check_capture_state))
+                boundary_storage.check_auxiliary(batches)
     _log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} "
          f"min; starting {n_probes}-probe tail cotangents")
     device = runner.device
@@ -3752,7 +3758,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "routed experts need an empirical/hybrid expert-cost "
                         "path, not silent omission.")
     p.add_argument("--boundary-storage-config", default=None,
-                   help="Explicit v1 JSON policy for exact streamed boundary/cotangent "
+                   help="Explicit v1/v2 JSON policy for exact streamed boundary/cotangent "
                         "artifacts and bounded resident windows; streaming only, default off.")
     p.add_argument(
         "--include-routed-experts",

@@ -3,6 +3,24 @@
 As of: 2026-09-08 · `feat/joint-operator-windows`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `fix/layer-major-boundary-capture`) for explicit
+`prismaquant.aura.boundary_storage.v2` with `capture_order: "layer_major"`
+(#394). The existing layer visitor installs each baseline source layer once
+and dispatches the original complete batches in order. It keeps each batch's
+original source kwargs/pass state, leases exact input windows from the existing
+activation owner and writes the original output boundary before advancing.
+No full-draw hidden tensor plane is added. Metadata and all live forward/shared
+states remain under the auxiliary cap; physical admission remains separate.
+V1 and default callers preserve batch-major capture. The reverse/probe order,
+source arithmetic, RNG coordinates of Fisher probes, candidate formats and
+serving gates are unchanged. The new capture requires evaluation mode and
+refuses observed Torch CPU or runner-device CUDA RNG consumption during
+preparation/source calls. Other mutable custom-model state is outside this
+qualification; no blanket stateful-model equivalence is claimed. Gates include
+`tests/test_layer_major_boundary_capture.py`, actual shared-state regressions,
+and a paired original-layout GLM source-read/profile qualification with Netdata
+from both hosts. This remains default-off and establishes no full-GLM fit.
+
 Re-stamped (2026-09-08, `feat/joint-operator-windows`) for opt-in streamed
 operator windows (#392). A closed `operator_windows` v1 policy bounds GW/GA,
 one FP32 candidate delta, PWC residency and serialized load buffers, workspace
