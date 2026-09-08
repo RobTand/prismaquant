@@ -322,9 +322,12 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_chec
             assert receipt['resources']['phases']['source_preparation'][
                 'declared_headroom_bytes'] == 0
             growth = selected_guard['peak_conservative_bytes'] - baseline['bytes']
-            assert growth <= receipt['resources']['memory_bytes'], dict(
-                growth=growth, baseline=baseline, guard=selected_guard,
-                plan=receipt['resources'])
+            # A string, not a mapping: a failing plan has to name the phase
+            # that held the peak, and a repr of the guard is elided long
+            # before it reaches peak_by_checkpoint_prefix.
+            assert growth <= receipt['resources']['memory_bytes'], json.dumps(
+                dict(growth=growth, guard=selected_guard,
+                     plan=receipt['resources']), indent=2, sort_keys=True)
         else:
             assert selected_guard is None and baseline is None
         assert receipt['source_forward_count'] == 0
