@@ -154,3 +154,28 @@ def test_selected_legacy_reuse_keeps_its_path_and_has_no_load_receipt(capture, t
         census=census, names=['a'], device='cpu', resources={})
     assert torch.equal(values[0]['a'], acts['a']) and same_capture == record and execution is None
     assert not list((tmp_path/'selected-cache').glob('capture-load-execution-*.json'))
+
+
+@pytest.mark.parametrize('change', ['load_policy', 'source'])
+def test_selected_load_policy_and_source_keep_existing_resume_boundaries(tmp_path, monkeypatch, change):
+    from prismaquant import tessera_campaign as campaign, production_weight_cache as pwc
+    from prismaquant.cost_stage_checkpoint import prepare_journal
+    source = {'value': 'a'*64}
+    monkeypatch.setattr(pwc, '_production_cache_source_sha256', lambda: source['value'])
+    args = SimpleNamespace(capture_load_policy=policy(), cache_dir='/first-cache')
+    def identity():
+        return campaign._campaign_checkpoint_identity(weights={'a': torch.ones(2, 2)},
+            acts={'a': torch.ones(2, 2)}, hessians={'a': torch.eye(2)}, menus={'a': []},
+            args=args, calibration_identity={'fit_ids_sha256': 'original-draw'},
+            serving_scope=None, static_scales={}, static_scale_policy='fixture')
+    before = identity()
+    journal = tmp_path/'journal'
+    prepare_journal(journal, stage='Tessera campaign', resume=True, identity=before, qnames=['a'])
+    if change == 'load_policy':
+        args.capture_load_policy = policy(buffer=2*1024**2)
+    else:
+        source['value'] = 'b'*64
+    after = identity()
+    assert before['calibration'] == after['calibration'] and before['units'] == after['units']
+    with pytest.raises(RuntimeError, match='checkpoint identity mismatch'):
+        prepare_journal(journal, stage='Tessera campaign', resume=True, identity=after, qnames=['a'])
