@@ -62,6 +62,8 @@ def main():
     parser.add_argument("--tessera-source", type=Path, required=True)
     parser.add_argument("--base")
     parser.add_argument("--arm-source", type=Path)
+    parser.add_argument("--netdata-endpoints", type=json.loads,
+                        help="JSON mapping of sparky, sparklina and the measured hostname to reachable hosts/IPs")
     args = parser.parse_args()
     producer = args.tessera_source.resolve()
     if args.arm_source:
@@ -69,6 +71,10 @@ def main():
         return
     if not args.base:
         parser.error("--base is required for paired profiling")
+    hosts = ("sparky", "sparklina", socket.gethostname())
+    if (not isinstance(args.netdata_endpoints, dict) or set(args.netdata_endpoints) != set(hosts)
+            or not all(isinstance(v, str) and v for v in args.netdata_endpoints.values())):
+        parser.error("paired profiles require explicit --netdata-endpoints for both Sparks and this host")
     args.out.mkdir(parents=True, exist_ok=False)
     source = Path(__file__).resolve().parents[1]
     baseline = subprocess.check_output(["git", "rev-parse", args.base], cwd=source, text=True).strip()
@@ -96,7 +102,7 @@ def main():
                for context, dims in SERIES if host in ("sparky", "sparklina") or not context.startswith("nvidia_smi.")]
     def fetch(query):
         host, context, dims = query
-        return host, context, _fetch(host, context, dims, after, before, before - after)
+        return host, context, _fetch(args.netdata_endpoints[host], context, dims, after, before, before - after)
     with ThreadPoolExecutor(max_workers=4) as pool:
         records = list(pool.map(fetch, queries))
     telemetry = {host: {context: data for h, context, data in records if h == host}
@@ -107,7 +113,7 @@ def main():
     assert all(row["rows"] == 5635 for row in results), "unexpected menu population"
     result = dict(scope="complete readable GLM expert menu at 2048x4096, TP1; no forwards or encodes",
                   baseline_commit=baseline, producer_commit=producer_commit,
-                  arms=results, menus_identical=True)
+                  arms=results, menus_identical=True, netdata_endpoints=args.netdata_endpoints)
     (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
 
 
