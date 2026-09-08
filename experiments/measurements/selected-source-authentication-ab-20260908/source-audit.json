@@ -1,0 +1,105 @@
+{
+  "snapshot_checks": [
+    {
+      "action": "f3943c9859b8",
+      "path": "experiments/selected_source_authentication_ab.py",
+      "snapshot_sha256": "39d5fd6a10142950f3b42aaccbb715fe6c5ac0886e409a6513f8052c699dbfcc",
+      "review_sha256": "d1891cae5dac462314ab73439ba3dce6e6aeafe286aaee5ec6512577205f4ec6",
+      "identical": false,
+      "difference": "Reporting only: explicit overlapping process-I/O scope and final output artifact seals; final compile matches exactly."
+    },
+    {
+      "action": "f3943c9859b8",
+      "path": "experiments/selected_source_authentication_ab_plan.py",
+      "snapshot_sha256": "17f28e54ecbc457e48bd7f1c80251b49bdafeae371d6d74b06717fa1193ee807",
+      "review_sha256": "17f28e54ecbc457e48bd7f1c80251b49bdafeae371d6d74b06717fa1193ee807",
+      "identical": true,
+      "difference": null
+    },
+    {
+      "action": "f3943c9859b8",
+      "path": "tests/test_selected_source_authentication_ab.py",
+      "snapshot_sha256": "24814ccf39b9355c275aef4911c15183fd6a105660ea94ae12384ea8b3cec932",
+      "review_sha256": "24814ccf39b9355c275aef4911c15183fd6a105660ea94ae12384ea8b3cec932",
+      "identical": true,
+      "difference": null
+    },
+    {
+      "action": "f3943c9859b8",
+      "path": "experiments/glm_native_wire_screen_evidence.py",
+      "snapshot_sha256": "905971404b3cf4d0547387e81865c1a6e927ccd5e7b20e3118c00f2661e546af",
+      "review_sha256": "905971404b3cf4d0547387e81865c1a6e927ccd5e7b20e3118c00f2661e546af",
+      "identical": true,
+      "difference": null
+    },
+    {
+      "action": "dac10ac21aa7",
+      "path": "experiments/selected_source_authentication_ab.py",
+      "snapshot_sha256": "d1891cae5dac462314ab73439ba3dce6e6aeafe286aaee5ec6512577205f4ec6",
+      "review_sha256": "d1891cae5dac462314ab73439ba3dce6e6aeafe286aaee5ec6512577205f4ec6",
+      "identical": true,
+      "difference": null
+    },
+    {
+      "action": "dac10ac21aa7",
+      "path": "experiments/selected_source_authentication_ab_plan.py",
+      "snapshot_sha256": "17f28e54ecbc457e48bd7f1c80251b49bdafeae371d6d74b06717fa1193ee807",
+      "review_sha256": "17f28e54ecbc457e48bd7f1c80251b49bdafeae371d6d74b06717fa1193ee807",
+      "identical": true,
+      "difference": null
+    },
+    {
+      "action": "dac10ac21aa7",
+      "path": "tests/test_selected_source_authentication_ab.py",
+      "snapshot_sha256": "24814ccf39b9355c275aef4911c15183fd6a105660ea94ae12384ea8b3cec932",
+      "review_sha256": "24814ccf39b9355c275aef4911c15183fd6a105660ea94ae12384ea8b3cec932",
+      "identical": true,
+      "difference": null
+    },
+    {
+      "action": "dac10ac21aa7",
+      "path": "experiments/glm_native_wire_screen_evidence.py",
+      "snapshot_sha256": "905971404b3cf4d0547387e81865c1a6e927ccd5e7b20e3118c00f2661e546af",
+      "review_sha256": "905971404b3cf4d0547387e81865c1a6e927ccd5e7b20e3118c00f2661e546af",
+      "identical": true,
+      "difference": null
+    }
+  ],
+  "runtime": [
+    {
+      "path": "prismaquant/tessera_calibration_cache.py",
+      "sha256": "b07457d08e1b6c36f11d097166e64c5793892e9af17dbcf62473dc7fcbabdd20",
+      "identical_to_base": true
+    },
+    {
+      "path": "prismaquant/layer_streaming.py",
+      "sha256": "f8718f4c72fd95dc4414677790eddfb54dec4089f9d882a30858c4628f0cdee0",
+      "identical_to_base": true
+    },
+    {
+      "path": "prismaquant/streaming_model.py",
+      "sha256": "e5f4661e7e5018922ac68872ec7413820ec851d59d79c7bd31decd75af564ada",
+      "identical_to_base": true
+    },
+    {
+      "path": "prismaquant/cost_streaming.py",
+      "sha256": "d043022eddeb60f3e627a5cb39c08677d1add2ef5f13069f15bd94f15fec86a1",
+      "identical_to_base": true
+    },
+    {
+      "path": "prismaquant/tessera_campaign.py",
+      "sha256": "dacb192fbd13dcc4dbb509c29a3c41022d7d615efdb27c07fa18739a871e3c91",
+      "identical_to_base": true
+    },
+    {
+      "path": "prismaquant/tessera_expert_projection.py",
+      "sha256": "4a72b332a6d3efe63095d517627ea33bf782bafeca4832bd160c76bb1309a149",
+      "identical_to_base": true
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "5ab95e7ddc0679aa524aaa1f58c9a46bf5187a56429b5ef32c3e5b83d568a3dc",
+      "identical_to_base": true
+    }
+  ]
+}

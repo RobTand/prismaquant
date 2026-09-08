@@ -1,0 +1,36 @@
+{
+  "calibration": {
+    "fit_ids_sha256": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+    "nsamples": 512,
+    "seed": 0,
+    "seqlen": 512,
+    "text_sha256": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5"
+  },
+  "calibration_input": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/exact-calibration-input-01/calibration_tokens.safetensors",
+    "sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329"
+  },
+  "capture": {
+    "path": null,
+    "sha256": null,
+    "status": "AWAIT_ORIGINAL_COMPLETE_CAPTURE"
+  },
+  "census": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/census.json",
+    "sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd"
+  },
+  "container": {
+    "content_sha256": "eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd",
+    "image": "prismaquant-glm-producer:content-qualified-20260908"
+  },
+  "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+  "schema": "prismaquant.selected_source_authentication_ab.inputs.v1",
+  "scope": "Four-unit source preparation only; whole selected source layers and early nonbody, no X/H load, no source forward, no encoding",
+  "selected_units": [
+    "model.language_model.layers.0.mlp.down_proj",
+    "model.language_model.layers.0.mlp.gate_proj",
+    "model.language_model.layers.6.mlp.experts.0.down_proj",
+    "model.language_model.layers.6.mlp.experts.0.gate_proj"
+  ],
+  "source_commit": "c75f259fefb56433d0c7882795d09536a0a9d807"
+}
