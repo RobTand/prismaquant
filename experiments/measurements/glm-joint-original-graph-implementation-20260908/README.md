@@ -123,3 +123,59 @@ Evidence files in this directory include the final CPU campaign, two audited
 PB receipts, compact actual-input summary and frozen invocation. Full inputs,
 output and audit logs live under
 `/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/`.
+
+## Update at 14:59 UTC: first native attempt failed; helper corrected
+
+Following root review, the exact first invocation ran as PB action
+`5dac548ddf0844d62873aefb9201bbc42e72a85a07a9615e3b50cd609a30c17a` on
+Sparklina. It returned 1 after a 160.9-second action window. The failure
+happened before the first original layer forward, with zero backwards and
+no replay profiler traces. PB completed scope cleanup with zero OOM kills.
+This is negative harness evidence, not original-model graph qualification.
+
+The attempt authenticated all 14 selected payloads and the two metadata
+files against their content digests: 73,884,166,070 total bytes. All descriptor
+owners closed with no source-read violation. The actual 512-row metadata gate
+completed, retaining a peak 272,891,904 auxiliary bytes, reserving zero shared
+cotangent bytes for the empty original GLM state, and releasing its metadata
+owners. Both-host Netdata contains 148 samples per host. The original helper's
+poisoned-CUDA cleanup suppressed the in-process memory ring and final CUDA
+peaks; those measurements are unavailable for this attempt.
+
+The defect was in experiment instrumentation: `torch.linspace(...).long()`
+created sampling indices in FP32. For the actual dense weight's 50,331,648
+elements, endpoint 50,331,647 rounded up to 50,331,648. CUDA rejected the
+out-of-range gather. A CPU regression using the actual 12288-by-4096 BF16
+storage geometry reproduced precisely the same out-of-bounds index before
+the fix in PB action
+`68d1d4cece92a626b0747c17d4ed397918574171644e6bc83c153142bb80f51d`.
+
+Commit `dd910b9e1c` constructs the 64 coordinates with exact integer
+arithmetic and transfers them as int64. Separate commit `1be1d9eec5` preserves
+the original exception through cleanup failures, releases observer references
+in a finally block, attempts source cleanup once, always stops/joins telemetry,
+and records unavailable CUDA measurements as separate cleanup errors. A
+successful qualification still refuses any cleanup error or retained source
+owner. Source-authentication, metadata and per-layer progress records are now
+written outside the measured replay profiles. Exact-byte checks and resource
+limits remain unchanged.
+
+The revised committed code passed compile checks and **18 CPU tests** in
+5.92 seconds, without skips or xfails, under PB action
+`125d4019ab850a9d857fb49267f13aa2dc74b949020340047d4545b9e26a5b09`.
+The actual-input CPU preflight also passed again under
+`17b50b2e0e857d67edc2608b0f2edbcfc4574deb4a60b586472e833171d8b9c6`.
+Both revised actions have independently checked zero exit status, completed
+scope cleanup, CAS payload/claims and source-closure evidence. The added tests
+cover original-size integer sampling, observer release when cache cleanup
+raises, and preservation of the first error plus host observations when CUDA
+cleanup fails.
+
+`native-invocation-02.json` freezes source
+`1be1d9eec5` with the same admission, image, source descriptors, geometry,
+stimuli and comparisons; only the corrected helper and new output directory
+change. At this update it awaits root review and has not been submitted.
+`native-negative-audit-01.json` records the first attempt's actual source
+snapshot (`2bdec238606d63d659662898c1df46954af60770`), all 13 original frozen
+file-hash checks, terminal evidence, complete metadata result and Netdata
+identities. The raw failed result and log remain under the shared run directory.

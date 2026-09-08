@@ -1,0 +1,49 @@
+[
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 2,
+      "mem_gb": 4
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 180,
+    "priority": -10,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-c",
+      "from pathlib import Path\nimport pytest\nfor name in ['experiments/glm_original_graph_profile.py','experiments/glm_original_graph_source.py','tests/test_glm_original_graph_profile.py']:\n compile(Path(name).read_text(),name,'exec')\nraise SystemExit(pytest.main(['-q','-rs','tests/test_glm_original_graph_profile.py']))\n"
+    ]
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-joint-operator-windows-profile",
+    "demand": {
+      "cpu": 2,
+      "mem_gb": 4
+    },
+    "tags": [
+      "x86"
+    ],
+    "timeout_s": 180,
+    "priority": -10,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "experiments.glm_original_graph_profile",
+      "--cpu-preflight",
+      "--out",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/cpu-preflight-revision-01"
+    ]
+  }
+]
