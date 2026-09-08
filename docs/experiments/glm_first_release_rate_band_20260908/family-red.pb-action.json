@@ -1,0 +1,389 @@
+{
+  "abandoned_readers": [],
+  "action_key": "a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676",
+  "adopted_attempt": 1,
+  "attempts_detail": [
+    {
+      "action_key": "a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676",
+      "attempt": 1,
+      "claimed_by": "dl380g10:3265086:0f61cda4",
+      "claimed_host": "dl380g10",
+      "claimed_unix": 1788906214.37474,
+      "detail": {
+        "action_returncode": 1,
+        "argv": [
+          "/usr/bin/python3",
+          "/mnt/shared/prismabuild-fleet/runtime-generations/332fa43447a2-1788897868-578846e2a9ea/tools/resource_exec.py",
+          "--socket",
+          "/run/prismabuild/resources.sock",
+          "--action-key",
+          "a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676",
+          "--nonce",
+          "2fb1c03890c74dd8b82e310dafc45bc7",
+          "--token",
+          "9b7c3ea25f62499a49e0de2e74433306b596ee66fd94ba8da432970b4bf3c2ff",
+          "--",
+          "/usr/bin/taskset",
+          "--cpu-list",
+          "0",
+          "/home/rob/venvs/pb-cpu/bin/python",
+          "/mnt/shared/prismabuild-fleet/runtime-generations/332fa43447a2-1788897868-578846e2a9ea/tools/prismabuild_worker.py",
+          "run-local",
+          "--action",
+          "/mnt/shared/prismabuild-fleet/cas/requests/a1/a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676.json",
+          "--cas-root",
+          "/mnt/shared/prismabuild-fleet/cas",
+          "--checkout-root",
+          "/home/rob/tmp/prismabuild-checkouts/a11dd5c1c650.j_urhjkq/checkout"
+        ],
+        "cpu_allocation": {
+          "fallback": [],
+          "preferred": [
+            0
+          ]
+        },
+        "elapsed_s": 7.246232032775879,
+        "execution_observation": {
+          "last_output_unix": 1788906222.495563,
+          "launcher_alive": true,
+          "sampled_unix": 1788906222.495563,
+          "source": "launcher-pipes",
+          "stderr_bytes": 0,
+          "stdout_bytes": 79
+        },
+        "execution_timeout_ceiling_s": 3600.0,
+        "execution_timeout_clamped": false,
+        "execution_timeout_requested_s": 300.0,
+        "execution_timeout_s": 300.0,
+        "resource_profile": {
+          "box_window": {
+            "cpu": {
+              "busy_percent_mean": 9.060471318181818,
+              "busy_percent_peak": 14.1133591,
+              "psi_some_avg10_max": 0.0,
+              "psi_some_avg10_samples": 11,
+              "psi_some_avg10_update_every_s": 1,
+              "samples": 11,
+              "source": "netdata",
+              "time_group": "average",
+              "update_every_s": 1
+            },
+            "end_unix": 1788906223.7013483,
+            "errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "host": "dl380g10",
+            "schema": "prismabuild.box_window.v1",
+            "source": "netdata",
+            "start_unix": 1788906214.37474
+          },
+          "finished_unix": 1788906223.7013483,
+          "host": "dl380g10",
+          "process_io": {
+            "processes_live": 0,
+            "processes_observed": 4,
+            "processes_unreadable": 0,
+            "rchar": 49559306,
+            "read_bytes": 0,
+            "source": "proc_io",
+            "syscr": 2385,
+            "syscw": 11,
+            "wchar": 868,
+            "write_bytes": 472
+          },
+          "reaped_children": {
+            "involuntary_context_switches": 3,
+            "max_rss_bytes": null,
+            "max_rss_watermark_bytes": 133611520,
+            "scope": "this parent's launched child and the descendants it reaped",
+            "source": "getrusage_children",
+            "system_seconds": 0.01809799999999928,
+            "user_seconds": 0.13171300000000485,
+            "voluntary_context_switches": 3
+          },
+          "schema": "prismabuild.resource_profile.v1",
+          "scope": {
+            "cpu_seconds": 6.875369,
+            "cpu_system_seconds": 0.544791,
+            "cpu_user_seconds": 6.330577,
+            "memory_current_bytes": 2732032,
+            "memory_peak_bytes": 382988288,
+            "source": "cgroup"
+          },
+          "start_source": "claimed_unix",
+          "start_unix": 1788906214.37474,
+          "wall_seconds": 9.326608419418335
+        },
+        "resource_telemetry": {
+          "action_key": "a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676",
+          "complete": true,
+          "cpu_seconds": 6.875369,
+          "cpu_system_seconds": 0.544791,
+          "cpu_user_seconds": 6.330577,
+          "errors": [],
+          "gpu_memory_max_bytes": 4294967296,
+          "host": "dl380g10",
+          "memory_current_bytes": 2732032,
+          "memory_max_bytes": 4294967296,
+          "memory_peak_bytes": 382988288,
+          "nonce": "2fb1c03890c74dd8b82e310dafc45bc7",
+          "oom_kill": 0,
+          "oom_local": 0,
+          "process_io": {
+            "live": {},
+            "members": [
+              3562036,
+              3562069,
+              3562070,
+              3562071
+            ],
+            "processes_live": 0,
+            "processes_observed": 4,
+            "processes_unreadable": 0,
+            "rchar": 49559306,
+            "read_bytes": 0,
+            "retired": {
+              "rchar": 49559306,
+              "read_bytes": 0,
+              "syscr": 2385,
+              "syscw": 11,
+              "wchar": 868,
+              "write_bytes": 472
+            },
+            "source": "proc_io",
+            "syscr": 2385,
+            "syscw": 11,
+            "wchar": 868,
+            "write_bytes": 472
+          },
+          "sampled_unix": 1788906223.699737,
+          "scope_unit": "prismabuild-job585f272cda2da1b40a753249ba5a301f.slice",
+          "shape_key": "eacadbeda09c0312de8151144db686d1889b4d91b2a5af090f37a444e0a67bc3",
+          "wall_seconds": 7.344131624995498
+        },
+        "returncode": 1,
+        "status": "failed"
+      },
+      "disposition": "failed",
+      "finished_host": "dl380g10",
+      "finished_unix": 1788906223.781813,
+      "logs": {
+        "stderr": {
+          "bytes": 887,
+          "path": "attempts/a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676/f6c54011cfb28ae5a20ad659cba2d90dd7043f5906b3d84286536dd66506b58d/00000001.stderr.93de6977cb3601b7c91a72394c8c8586371bd2978948e3f067a53073900b899e.log",
+          "sha256": "93de6977cb3601b7c91a72394c8c8586371bd2978948e3f067a53073900b899e"
+        },
+        "stdout": {
+          "bytes": 2941,
+          "path": "attempts/a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676/f6c54011cfb28ae5a20ad659cba2d90dd7043f5906b3d84286536dd66506b58d/00000001.stdout.b8c9d3fe8c7e06e366872fc89abce4b0ec1cd9b1fe53569a644dadf7dfb95711.log",
+          "sha256": "b8c9d3fe8c7e06e366872fc89abce4b0ec1cd9b1fe53569a644dadf7dfb95711"
+        }
+      },
+      "max_attempts": 1,
+      "path": "/mnt/shared/prismabuild-fleet/pb-queue/attempts/a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676/f6c54011cfb28ae5a20ad659cba2d90dd7043f5906b3d84286536dd66506b58d/00000001.json",
+      "published_by": "sparky",
+      "published_unix": 1788906214.2582085,
+      "retry_safe": false,
+      "schema": "prismaquant.prismabuild.pool_attempt.v1",
+      "status": "failed"
+    }
+  ],
+  "complete": true,
+  "deadline_s": 5.0,
+  "found": true,
+  "generated_unix": 1788907269.5893483,
+  "generation": "ede56b66d004-1788906893-4e396141811f",
+  "generation_stale": false,
+  "key_prefix": "a11dd5c1c650",
+  "local_result_claim": {
+    "reason": "a checkout_snapshot submission materialises its checkout per box, and the resolved path the claim binds is not on the record. The worker prints the digest in its own result at the end of the attempt's stdout, which pb_log returns.",
+    "sha256": null
+  },
+  "log_tail": {
+    "attempt": 1,
+    "bytes_match": true,
+    "bytes_read": 2941,
+    "lines": [
+      "FF                                                                       [100%]",
+      "=================================== FAILURES ===================================",
+      "_____ test_same_shape_dense_and_routed_get_different_explicit_family_menus _____",
+      "",
+      "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x74e9bf537b60>",
+      "",
+      "    def test_same_shape_dense_and_routed_get_different_explicit_family_menus(monkeypatch):",
+      "        calls = []",
+      "    ",
+      "        def expand(shape, **kwargs):",
+      "            families = tuple(spec.name for spec in kwargs.get(\"families\", menu.menu_families()))",
+      "            calls.append(families)",
+      "            return [SimpleNamespace(family=f, route_status=\"unattested\") for f in families]",
+      "    ",
+      "        monkeypatch.setattr(menu, \"expand_tessera_menu\", expand)",
+      "        weights = {name: SimpleNamespace(shape=(32, 256)) for name in (\"a\", \"b\", \"c\")}",
+      ">       result = campaign.expand_menus_for_targets(",
+      "            weights, list(weights), mode=\"readable\", tp_degree=1, parallel_kind=\"none\",",
+      "            family_restriction=POLICY,",
+      "            structure_by_unit={\"a\": \"dense\", \"b\": \"routed_moe\", \"c\": \"dense\"})",
+      "E       TypeError: expand_menus_for_targets() got an unexpected keyword argument 'family_restriction'",
+      "",
+      "tests/test_tessera_campaign_family_restriction.py:26: TypeError",
+      "___________ test_restricted_seed_refuses_incompatible_routed_family ____________",
+      "",
+      "    def test_restricted_seed_refuses_incompatible_routed_family():",
+      "        state = {\"anchors\": [{\"qname\": \"expert\", \"family\": \"TESSERA_BF16_K1\",",
+      "            \"format_name\": \"TESSERA_BF16_K1_R896\", \"body_rate_q256\": 896}],",
+      "            \"wire_records\": {\"TESSERA_BF16_K1_R896\": {}}}",
+      "        with pytest.raises(RuntimeError, match=\"family restriction\"):",
+      ">           campaign.require_seed_family_scope(\"expert\", state,",
+      "            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+      "                family_restriction=POLICY, structure_by_unit={\"expert\": \"routed_moe\"},",
+      "                rate_band=(832, 1088))",
+      "E           AttributeError: module 'prismaquant.tessera_campaign' has no attribute 'require_seed_family_scope'",
+      "",
+      "tests/test_tessera_campaign_family_restriction.py:42: AttributeError",
+      "=============================== warnings summary ===============================",
+      "../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings",
+      "  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+      "    warnings.warn(",
+      "",
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "=========================== short test summary info ============================",
+      "FAILED tests/test_tessera_campaign_family_restriction.py::test_same_shape_dense_and_routed_get_different_explicit_family_menus",
+      "FAILED tests/test_tessera_campaign_family_restriction.py::test_restricted_seed_refuses_incompatible_routed_family",
+      "2 failed, 14 warnings in 4.99s"
+    ],
+    "lines_returned": 47,
+    "path": "/mnt/shared/prismabuild-fleet/pb-queue/attempts/a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676/f6c54011cfb28ae5a20ad659cba2d90dd7043f5906b3d84286536dd66506b58d/00000001.stdout.b8c9d3fe8c7e06e366872fc89abce4b0ec1cd9b1fe53569a644dadf7dfb95711.log",
+    "present": true,
+    "recorded_bytes": 2941,
+    "recorded_sha256": "b8c9d3fe8c7e06e366872fc89abce4b0ec1cd9b1fe53569a644dadf7dfb95711",
+    "stream": "stdout",
+    "total_bytes": 2941,
+    "truncated_head": false
+  },
+  "outcome": {
+    "action_returncode": 1,
+    "action_signal": null,
+    "attempts": 1,
+    "claimed_by": "dl380g10:3265086:0f61cda4",
+    "claimed_host": "dl380g10",
+    "claimed_unix": 1788906214.37474,
+    "elapsed_s": 7.246232032775879,
+    "finished_host": "dl380g10",
+    "finished_unix": 1788906223.781813,
+    "reason": null,
+    "receipt_published": null,
+    "returncode": 1,
+    "status": "failed"
+  },
+  "preemption": {
+    "preempted_by": null,
+    "requeued_as": null,
+    "unlocked_read": true
+  },
+  "receipt": {
+    "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/a1/a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676.json",
+    "present": false
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 9.060471318181818,
+        "busy_percent_peak": 14.1133591,
+        "psi_some_avg10_max": 0.0,
+        "psi_some_avg10_samples": 11,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 11,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788906223.7013483,
+      "errors": [
+        "no pqteld CSV for dl380g10 covering the window"
+      ],
+      "host": "dl380g10",
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata",
+      "start_unix": 1788906214.37474
+    },
+    "finished_unix": 1788906223.7013483,
+    "host": "dl380g10",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 4,
+      "processes_unreadable": 0,
+      "rchar": 49559306,
+      "read_bytes": 0,
+      "source": "proc_io",
+      "syscr": 2385,
+      "syscw": 11,
+      "wchar": 868,
+      "write_bytes": 472
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 3,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 133611520,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.01809799999999928,
+      "user_seconds": 0.13171300000000485,
+      "voluntary_context_switches": 3
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 6.875369,
+      "cpu_system_seconds": 0.544791,
+      "cpu_user_seconds": 6.330577,
+      "memory_current_bytes": 2732032,
+      "memory_peak_bytes": 382988288,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788906214.37474,
+    "wall_seconds": 9.326608419418335
+  },
+  "schema": "prismaquant.prismabuild.pbmcp.v1",
+  "sealed": {
+    "cas_root": "/mnt/shared/prismabuild-fleet/cas",
+    "checkout_root": null,
+    "checkout_snapshot": {
+      "commit": "16657100c8528f466f6795b59285d41534d1b979",
+      "input": {
+        "bytes": 27323851,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "4ac343f68c73161f4809b5e2fe53a81710a90e772a890263a86d561afa18475c"
+      },
+      "parent": "21ae7d28b7d313654beda6b4e622d732d4276a34",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "container_owner": "a2b591b742c71dbb740ed5c99cc6b5c9d8918362cabbb800e57e95bc5bd4d489",
+    "max_attempts": 1,
+    "needs_gpu": false,
+    "preempted_by": null,
+    "priority": -10,
+    "published_by": "sparky",
+    "published_unix": 1788906214.2582085,
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "retry_safe": false,
+    "supersedes_withdrawal": null,
+    "tags": [
+      "x86"
+    ],
+    "worker_script": "/mnt/shared/prismabuild-fleet/runtime-generations/332fa43447a2-1788897868-578846e2a9ea/tools/prismabuild_worker.py"
+  },
+  "started_from_generation": true,
+  "state": "failed",
+  "states": [
+    "failed"
+  ],
+  "timed_out": [],
+  "tool": "pb_action",
+  "unavailable": []
+}

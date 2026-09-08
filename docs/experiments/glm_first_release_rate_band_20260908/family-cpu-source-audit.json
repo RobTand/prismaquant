@@ -1,0 +1,96 @@
+{
+  "audits": [
+    {
+      "label": "family-red",
+      "action_key": "a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676",
+      "returncode": 1,
+      "stdout_sha256": "b8c9d3fe8c7e06e366872fc89abce4b0ec1cd9b1fe53569a644dadf7dfb95711",
+      "source_snapshot": {
+        "commit": "16657100c8528f466f6795b59285d41534d1b979",
+        "input": {
+          "bytes": 27323851,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "4ac343f68c73161f4809b5e2fe53a81710a90e772a890263a86d561afa18475c"
+        },
+        "parent": "21ae7d28b7d313654beda6b4e622d732d4276a34",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "exact_source_matches": [
+        "prismaquant/tessera_campaign.py equals frozen pre-implementation source"
+      ],
+      "checks_passed": null,
+      "receipt": {
+        "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/a1/a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676.json",
+        "present": false
+      }
+    },
+    {
+      "label": "family-green-core",
+      "action_key": "10baa5e75d279dfb81b5d18d6071698a723d44c5e41dbcb9403221f03a8b4a4c",
+      "returncode": 0,
+      "stdout_sha256": "2023d5ae2b4fda2ca97d6a8f11678524fda96b13867e324016400f28294f2612",
+      "source_snapshot": {
+        "commit": "4030123197c176ee965b234b93d69f800ccea362",
+        "input": {
+          "bytes": 27358062,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "ae63d3b9b67e80a1744cf92d3d2c3c3ced426d4c8d4b3393ca862daca463e529"
+        },
+        "parent": "f38590997fc94539d1ee89282fd1a006dc27468c",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "exact_source_matches": [],
+      "checks_passed": true,
+      "receipt": {
+        "action_manifest_sha256": "a6a90249b146e152d906877551f663b9927432273cadcbc71d343b316e6a3a6d",
+        "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/10/10baa5e75d279dfb81b5d18d6071698a723d44c5e41dbcb9403221f03a8b4a4c.json",
+        "present": true,
+        "receipt_sha256": "b3890e48f02c5e89e00a670a6c989a058f15eaf33a09701259b1cf91b2248332",
+        "result": {
+          "bytes": 725,
+          "sha256": "8b9d5d709f612bbdeaa50e46a3e5bf3d8b81ef560786aa44a16161af23ac88af"
+        }
+      }
+    },
+    {
+      "label": "family-green-broad",
+      "action_key": "cfde31ccffb7f33737b416da8b63a65c336276de807777bbd2019b3ddd9e51e8",
+      "returncode": 0,
+      "stdout_sha256": "28af4a6cd88d06e1e1d1a43647786da8f9bc0577f542862c96da23065afcb7a8",
+      "source_snapshot": {
+        "commit": "48f14f2f3a9156a5a34e5b3194e4ec5adb30d448",
+        "input": {
+          "bytes": 27361316,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "14f852b50810f5766ce4293a7fa50975e48262ef9c5edf873fb26896bd9ba98d"
+        },
+        "parent": "f38590997fc94539d1ee89282fd1a006dc27468c",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "exact_source_matches": [
+        "prismaquant/tessera_campaign.py",
+        "tools/dispatch_tessera_campaign.py",
+        "tests/test_tessera_campaign_family_restriction.py",
+        "docs/ARCHITECTURE.md"
+      ],
+      "checks_passed": true,
+      "receipt": {
+        "action_manifest_sha256": "57d0843d9175a8495ddc2c478e20a1928d32eccc7243727895a27c7c64cc3da2",
+        "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/cf/cfde31ccffb7f33737b416da8b63a65c336276de807777bbd2019b3ddd9e51e8.json",
+        "present": true,
+        "receipt_sha256": "cd38d26b39096e39a60e44d938ca618fac5f2a686a3c5e335f77212c9e85c174",
+        "result": {
+          "bytes": 1257,
+          "sha256": "19d44bc882fa5a4b00eb5cde38979de4f9e5a35de40c1924df609f573aeb108e"
+        }
+      }
+    }
+  ],
+  "limitation": "Read-only CAS verification does not independently verify worker attestation."
+}

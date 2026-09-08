@@ -1,0 +1,24 @@
+{
+  "action_key": "88376e4e88e4283ef56c8619d85653139d722dd10ca102c17c10e7028651e15e",
+  "source_snapshot": {
+    "commit": "2eb026c27979ebd75ab34b3a28042daaf7b0f121",
+    "input": {
+      "bytes": 27361319,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "69ae391a7959c1c5a0398aada168cbf0646dba21e66fc03f03462784c686c0dc"
+    },
+    "parent": "f38590997fc94539d1ee89282fd1a006dc27468c",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "exact_source_matches": [
+    "prismaquant/tessera_campaign.py",
+    "tools/dispatch_tessera_campaign.py",
+    "docs/experiments/glm_first_release_rate_band_20260908/check_restricted_plan.py"
+  ],
+  "checks_passed": true,
+  "stdout_sha256": "8ba25afd3f00b9bd1226330987070decbc7600a3005b07eef8263dc2fedb3bd6",
+  "artifact_sha256": "27b5f1f9c1c2ea7e9826bbcef983deafe17a4f49780a62df92000659d7c6c047",
+  "limitation": "Read-only CAS checks do not independently verify worker attestation."
+}

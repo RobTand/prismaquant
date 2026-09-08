@@ -131,3 +131,42 @@ retain the receipt pointers. The first physical follow-up attempt
 failed before analysis because the helper imported a source-hash function from
 the caller module instead of its owning module. Correcting the import produced
 the second successful action; no failing attempt is counted as evidence.
+
+## Implemented restriction and full-roster check
+
+Implementation commit `f9432892b9` adds the opt-in restriction through the
+existing campaign and fanout mechanisms described above. The pre-fix PB action
+`a11dd5c1c650099564b6714200ed1132cf1cb22e78e9d469e5a1481a29347676`
+reproduced two failures on the absent restriction and seed gate; its sealed
+campaign source was independently compared with frozen `21ae7d28`.
+
+The core CPU suite `10baa5e75d279dfb81b5d18d6071698a723d44c5e41dbcb9403221f03a8b4a4c`
+passed 134 tests and skipped the existing CUDA-only encoder CLI test at
+`tests/test_tessera_campaign_batch.py:65`. The broader suite
+`cfde31ccffb7f33737b416da8b63a65c336276de807777bbd2019b3ddd9e51e8`
+passed 143 tests and skipped five CUDA encode tests at
+`tests/test_tessera_campaign.py:194`, `:222`, `:248`, `:742`, and `:1350`.
+The suites overlap on the focused restriction tests; their counts are not
+added into a unique-test claim. Both reserved eight CPUs/16 GiB with native
+threads bounded to one. The broader source snapshot matches all four final
+implementation files exactly. Adjacent `family-cpu-source-audit.json` records
+stdout, source bundles and verified result receipts; no skip is a GPU pass.
+
+The actual new restricted menu was then expanded over the complete accepted
+census by `check_restricted_plan.py`, using the existing producer projection
+binder and profile-aware structure validator. Every unit agreed with the
+independent EXL3 common-surface roster. The result was exactly **135 dense +
+36,288 routed units**, **132 unchanged groups**, **73,251 initial anchors**
+and **six distinct menu-cache entries**. The all-E4M3 R1036 intrinsic witness
+still costs 155,546,148,864 bytes under the exact 155,668,854,528-byte budget.
+The report carries the reviewed band 832–1088 and batch width eight arguments.
+
+That check ran as CPU PB action
+`88376e4e88e4283ef56c8619d85653139d722dd10ca102c17c10e7028651e15e`,
+exit 0, with no weights, activation payloads, Hessian payloads or GPU access.
+`restricted-plan-check.json` SHA256 is
+`27b5f1f9c1c2ea7e9826bbcef983deafe17a4f49780a62df92000659d7c6c047`.
+Its actual source bundle, helper/source bytes, stdout, output, CAS receipt and
+result payload were independently checked; the adjacent source audit records
+their bindings. A new pricing source seal must follow integration with the
+separately reviewed batch observer. This check did not submit GPU rows.

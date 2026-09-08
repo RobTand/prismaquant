@@ -1,0 +1,101 @@
+{
+  "all_e4m3_q1036_intrinsic_bytes": 155546148864,
+  "band": [
+    832,
+    1088
+  ],
+  "baseline_batch_resource_check": {
+    "batch_size": 8,
+    "fits_104gib": true,
+    "fits_104gib_with_previous_4gib_observer": true,
+    "independently_checked_widest_resource": {
+      "encoder_memo_capacity": 8,
+      "encoder_memo_policy": "compatible-anchor-batch-width",
+      "export_input_writer_policy": "verified-tensor-record-prefix",
+      "memory_bytes": 106680797016,
+      "phases": {
+        "export_inputs": {
+          "declared_headroom_bytes": 25769803776,
+          "export_input_page_window_bytes": 663863296,
+          "selected_hessian_bytes": 43486543872,
+          "selected_prefix_bytes": 6039797760,
+          "selected_source_weight_bytes": 14495514624,
+          "serialization_scratch_bytes": 134217728
+        },
+        "resident_anchors": {
+          "compatible_batch_weight_bytes": 1073741824,
+          "declared_headroom_bytes": 25769803776,
+          "encoder_memo_bytes": 537133056,
+          "entry_validation_bytes": 150994944,
+          "factorization_scratch_bytes": 268435456,
+          "selected_hessian_bytes": 43486543872,
+          "selected_prefix_bytes": 6039797760,
+          "selected_source_weight_bytes": 14495514624,
+          "source_validation_bytes": 14858831704
+        },
+        "source_preparation": {
+          "declared_headroom_bytes": 25769803776,
+          "loader_transient_bytes": 14495907840,
+          "nonbody_source_bytes": 3664816128,
+          "selected_source_weight_bytes": 14495514624,
+          "source_window_bytes": 14825473880
+        }
+      },
+      "schema": "prismaquant.selected_anchor_resources.v2",
+      "selected_layers": [
+        "6"
+      ],
+      "selected_source_weight_bytes": 14495514624,
+      "source_forward_count": 0,
+      "source_header_sha256": "86d599d6f3be99a8cbf56777b1cd40f3e547b0c9594c46e93a269a2a951ab07c"
+    },
+    "maximum_memory_bytes": 106680797016,
+    "mem_gib": 100,
+    "rows_fitting": 132,
+    "widest_row": "row-0083"
+  },
+  "batch_width": 8,
+  "capture_sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c",
+  "census_sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+  "common_budget": {
+    "bpp": 4.070894713933706,
+    "parameters": 305915756544,
+    "tensor_payload_bytes": 155668854528,
+    "units": 36423
+  },
+  "common_budget_audit_sha256": "245bc10daacd7f0f2626b5d857d9ba1341ec89c9bab17cdb6fccf8927a611472",
+  "groups": 132,
+  "initial_per_linear_anchors": 73251,
+  "limits": [
+    "No sampling or row placement changes; all existing whole groups remain PB-owned quanta.",
+    "The source seal for new prices must be issued after integration with the separately owned observer change.",
+    "The witness is intrinsic byte feasibility only; final per-Linear allocation, outer-envelope audit, native fit and served quality remain unmeasured."
+  ],
+  "menu_cache_entries": 6,
+  "policy": {
+    "dense": [
+      "TESSERA_BF16_K1",
+      "TESSERA_E2M1_K2",
+      "TESSERA_E4M3_K1"
+    ],
+    "routed_moe": [
+      "TESSERA_E4M3_K1"
+    ],
+    "schema": "prismaquant.tessera_campaign_family_restriction.v1"
+  },
+  "reviewed_campaign_arguments": [
+    "--family-restriction",
+    "{\"dense\": [\"TESSERA_BF16_K1\", \"TESSERA_E2M1_K2\", \"TESSERA_E4M3_K1\"], \"routed_moe\": [\"TESSERA_E4M3_K1\"], \"schema\": \"prismaquant.tessera_campaign_family_restriction.v1\"}",
+    "--rate-band",
+    "832,1088",
+    "--anchor-batch-size",
+    "8"
+  ],
+  "schema": "prismaquant.glm_restricted_plan_check.v1",
+  "status": "CPU_CHECKED_NO_GPU_SUBMISSION",
+  "structures": {
+    "dense": 135,
+    "routed_moe": 36288
+  },
+  "units": 36423
+}
