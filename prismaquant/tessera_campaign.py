@@ -4636,11 +4636,10 @@ def _main(argv, *, source_scope) -> int:
                 # The grid is what EVERY member actually measured: one
                 # member's failed encode must not let the group think it has
                 # an anchor there.
-                grid = sorted(set.intersection(*[
-                    {a.body_rate_q256
-                     for a in measured.get(m, {}).get(family, [])}
-                    for m in members
-                ])) if members else []
+                member_rates = {
+                    m: {a.body_rate_q256 for a in measured.get(m, {}).get(family, [])}
+                    for m in members}
+                grid = sorted(set.intersection(*member_rates.values())) if members else []
                 if round_index == 1:
                     want = round_one_rates(allowed, band=rate_band,
                                            anchors=args.anchors, snap=_snap)
@@ -4650,8 +4649,7 @@ def _main(argv, *, source_scope) -> int:
                         rates = set(want)
                         if extra is not None and m in audit_units:
                             rates.add(extra)
-                        have = {a.body_rate_q256
-                                for a in measured.get(m, {}).get(family, [])}
+                        have = member_rates[m]
                         pending.extend((m, family, rate)
                                        for rate in sorted(rates - have))
                     continue
@@ -4699,8 +4697,15 @@ def _main(argv, *, source_scope) -> int:
                 if nxt is None or nxt in grid:
                     surface_stop.setdefault((key, family), "no_room")
                     continue
-                pending.extend((m, family, nxt) for m in members)
+                # A failed sibling does not invalidate an already measured
+                # member/rung or authorize overwriting its original cost.
+                pending.extend((m, family, nxt) for m in members
+                               if nxt not in member_rates[m])
         if not pending:
+            if round_index == 1 and measured:
+                # A resumed/seeded endpoint set still needs its adaptive gate
+                # checked; an empty bootstrap is not a completed surface.
+                continue
             print(f"[campaign] round {round_index}: nothing pending", flush=True)
             break
         print(f"[campaign] round {round_index}: {len(pending)} anchors",
@@ -4765,6 +4770,11 @@ def _main(argv, *, source_scope) -> int:
         flush_checkpoint()
         if stopped_early:
             break
+        if round_index > 1 and completed == 0:
+            raise RuntimeError(
+                f"campaign adaptive round {round_index} made no progress: "
+                "all pending anchors failed; successful anchors are journaled. "
+                "Refusing to repeat unchanged work; retry after resolving the failure.")
 
     loo: dict[str, dict[str, dict]] = {}
     for name, by_family in measured.items():

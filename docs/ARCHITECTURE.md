@@ -3,6 +3,18 @@
 As of: 2026-09-08 · `integrate/glm-bounded-handoff-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `plan/glm-full-anchor-campaign`) for adaptive anchor
+progress refusal. When a fused member fails at a shared refinement rung,
+later rounds schedule only members still missing that rung; existing measured
+costs and wire records remain unchanged. An adaptive round with pending work
+and zero successful anchors flushes the journal and refuses, allowing a retry
+to validate and reuse earlier successes. Initial unpriced-unit reporting and
+hard Hessian/activation contract refusals retain their existing semantics.
+An already journaled bootstrap proceeds to the adaptive gate; it does not
+mistake zero new endpoint work for a completed refinement surface.
+This prevents an unbounded no-progress refinement loop without shortening the
+full-roster scope, changing the anchor budget, or imposing a round-count cap.
+
 Re-stamped (2026-09-08, `fix/bounded-export-handoff`) for the opt-in
 canonical Hessian reference handoff. Selected reuse may declare
 `--export-hessian-reference-policy` with explicit metadata/file/H byte caps.
