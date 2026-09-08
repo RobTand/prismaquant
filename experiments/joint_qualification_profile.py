@@ -238,7 +238,7 @@ def input_inventory(fixture, data):
     paths.update(capture_path.parent / entry['path'] for entry in manifest['entries'].values())
     paths.update(Path(cell[kind]) for cell in data.cells.values() for kind in ('wire', 'render'))
     journal = Path(fixture['selected_checkpoint']['path'])
-    paths.update(path for path in journal.with_name(journal.name + '.parts').iterdir() if path.is_file())
+    paths.update(path for path in journal.with_name(journal.name + '.parts').rglob('*') if path.is_file())
     return {str(path): dict(bytes=path.stat().st_size, sha256=sha(path)) for path in sorted(paths)}
 
 
@@ -364,6 +364,8 @@ def qualify_once(kind, fixture, data, device, *, trace=None):
             profile=Glm5NextProfile(), max_cache_slots=2, prefetch_workers=1,
             prefetch_lookahead=1, require_prefetched_residency=True,
             cache_headroom_gb=0, prefetch_min_available_gb=0, attn_implementation='eager')
+        initialization_reads = dict(observer.source_reads)
+        observer.source_reads.clear()
         def forbid_forward(*_args, **_kwargs):
             raise RuntimeError('anchor qualifier attempted a source forward')
         handles = [module.register_forward_pre_hook(forbid_forward)
@@ -402,20 +404,24 @@ def qualify_once(kind, fixture, data, device, *, trace=None):
                 finished_unix=time.time(), verified_cells=records,
                 verified_cells_sha256=canonical_sha(records), candidate_roster=roster,
                 formats_by_qname=data.formats_by_qname,
+                initialization_source_read_counts=initialization_reads,
                 source_layer_load_counts=dict(observer.source_reads), source_forward_count=0,
                 source_layer_count=runner.num_layers, physical_before=before, physical_after=after,
                 live_storage_peak_bytes=dict(observer.peak_bytes), ownership_events=observer.events,
                 cache_prefetch=cache.metadata['prefetch'], max_render_bytes=render_cap,
                 qualification_window=policy if kind == 'window' else None,
                 physical_guard=cache.metadata.get('qualification_memory_guard'))
-            if set(observer.source_reads.values()) != {1} or len(observer.source_reads) != runner.num_layers:
-                raise RuntimeError('qualifier did not read each original source layer exactly once')
             if profiler is not None:
                 profiler.export_chrome_trace(str(trace))
                 result['profile'] = dict(path=str(trace), sha256=sha(trace), events=[
                     dict(key=item.key, calls=item.count, self_cpu_us=item.self_cpu_time_total,
                          self_device_us=item.self_device_time_total)
                     for item in profiler.key_averages()])
+            expected_reads = {f'{runner.context.layers_prefix}{index}.': 1
+                              for index in range(runner.num_layers)}
+            if dict(observer.source_reads) != expected_reads:
+                raise RuntimeError('qualifier source-layer reads differ: '
+                                   f'{dict(observer.source_reads)!r} != {expected_reads!r}')
             del cache
         finally:
             for handle in handles:
@@ -431,7 +437,8 @@ def qualify_once(kind, fixture, data, device, *, trace=None):
 
 def require_parity(reference, observed):
     for key in ('verified_cells', 'verified_cells_sha256', 'candidate_roster',
-                'formats_by_qname', 'source_layer_load_counts', 'source_forward_count'):
+                'formats_by_qname', 'initialization_source_read_counts',
+                'source_layer_load_counts', 'source_forward_count'):
         if observed[key] != reference[key]:
             raise RuntimeError(f'legacy/window qualification mismatch: {key}')
 

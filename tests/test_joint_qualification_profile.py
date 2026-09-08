@@ -42,11 +42,13 @@ def test_group_selection_refuses_to_manufacture_missing_packed_scope():
 
 
 @pytest.mark.parametrize('field', ['verified_cells', 'verified_cells_sha256',
-    'candidate_roster', 'formats_by_qname', 'source_layer_load_counts', 'source_forward_count'])
+    'candidate_roster', 'formats_by_qname', 'initialization_source_read_counts',
+    'source_layer_load_counts', 'source_forward_count'])
 def test_parity_requires_records_roster_and_real_source_loads(field):
     reference = dict(verified_cells=[{'unit': 'a', 'record': {'source': 'content-bound'}}],
         verified_cells_sha256='actual digest checked elsewhere', candidate_roster=[['a', 'fmt']],
-        formats_by_qname={'a': ['fmt', 'BF16']}, source_layer_load_counts={'layer0': 1},
+        formats_by_qname={'a': ['fmt', 'BF16']}, initialization_source_read_counts={'visual': 1},
+        source_layer_load_counts={'layer0': 1},
         source_forward_count=0)
     require_parity(reference, copy.deepcopy(reference))
     changed = copy.deepcopy(reference)
