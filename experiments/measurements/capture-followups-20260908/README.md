@@ -13,6 +13,8 @@ environment before invoking the CUDA-aware gate. This is a test correction,
 not a relaxation of the production gate. A separate comment correction removes
 an unsupported claim that completed anchor files had already been sealed in
 memory; no consumer used the removed hash result.
+The dispatcher's memory docstring was also corrected to distinguish its
+derived byte bounds from measured peaks and describe the streaming branch.
 
 ## Verification
 
