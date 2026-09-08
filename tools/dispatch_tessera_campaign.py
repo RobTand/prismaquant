@@ -144,7 +144,7 @@ def _model_bytes(model: str) -> int:
     return sum(path.stat().st_size for path in root.glob("*.safetensors"))
 
 
-def _row_memory_gb(spec: dict, members: list[str], census: dict) -> int:
+def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_source=False) -> int:
     """The row's memory demand, from what the row actually holds.
 
     Three terms, each a measured quantity rather than a guess:
@@ -159,7 +159,7 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict) -> int:
     """
     gib = 1024 ** 3
     if "--streaming" in spec['campaign_argv']:
-        resource = _streamed_resource_plan(spec, census, members)
+        resource = _streamed_resource_plan(spec, census, members, selected_source=selected_source)
         return int(math.ceil(resource['memory_bytes']/gib))
     shapes = census.get("unit_shapes") or {}
     hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
@@ -169,21 +169,25 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict) -> int:
     return int(math.ceil(total / gib)) + int(spec.get("headroom_gb", 24))
 
 
-def _streamed_resource_plan(spec, census, members):
-    from prismaquant.autoscale import streamed_calibration_resources
+def _streamed_resource_plan(spec, census, members, *, selected_source=False):
+    from prismaquant.autoscale import streamed_calibration_resources, selected_anchor_resources
     argv = spec['campaign_argv']
     def argument(name, default, convert=int):
         return convert(argv[argv.index(name)+1]) if name in argv else default
     shapes = census.get('unit_shapes') or {}
     counts = census.get('counts') or {}
-    return streamed_calibration_resources(spec['model'],
+    options = dict(
         unit_shapes={n: shapes[n] for n in members}, counts=counts,
-        nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
         max_act_rows=argument('--max-act-rows', int(spec.get('max_act_rows', 512))),
         cache_slots=argument('--streaming-cache-slots', 2),
         prefetch_workers=argument('--streaming-prefetch-workers', 1),
         headroom_gb=max(float(spec.get('headroom_gb', 24)),
-                        argument('--streaming-cache-headroom-gb', 24., float)),
+                        argument('--streaming-cache-headroom-gb', 24., float)))
+    if selected_source:
+        return selected_anchor_resources(spec['model'], **options,
+            anchor_batch_size=argument('--anchor-batch-size', 1))
+    return streamed_calibration_resources(spec['model'], **options,
+        nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
         capture_policy=argument('--streaming-capture-policy', 'legacy', str))
 
 
@@ -219,6 +223,8 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int,
     bounded = (policy_flag+'=shared-inputs-bounded-v1' in argv or
                (policy_flag in argv and
                 argv[argv.index(policy_flag)+1] == 'shared-inputs-bounded-v1'))
+    bounded = bounded or all(flag in argv for flag in
+        ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
     if bounded:
         from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
         env = {**BOUNDED_CAPTURE_ENV, **env}
@@ -474,6 +480,9 @@ def cmd_plan(args) -> int:
             f"{spec['model']!r}")
     calibration_cache = _calibration_cache_binding(
         getattr(args, "calibration_cache", None), workspace / "census.json")
+    selected_source = '--streaming' in spec['campaign_argv']
+    if selected_source and calibration_cache is None:
+        raise RuntimeError('streaming anchor rows require a hash-bound complete calibration cache')
     groups = census["anchor_groups"]
     if not groups:
         raise RuntimeError("census reports no anchor group to price")
@@ -541,14 +550,15 @@ def cmd_plan(args) -> int:
             if args.seed_wire_dir:
                 argv += ["--seed-wire-dir", str(args.seed_wire_dir)]
         rows.append(_row(spec, argv,
-                         mem_gb=_row_memory_gb(spec, members, census),
+                         mem_gb=_row_memory_gb(spec, members, census, selected_source=selected_source),
                          timeout_s=int(args.timeout_s)))
         planned.append({"row_id": row_id, "groups": bundle, "members": sorted(members),
-                        "dir": str(row_dir), "units": str(units_path)})
+                        "dir": str(row_dir), "units": str(units_path),
+                        **({'resources': _streamed_resource_plan(spec, census, members,
+                            selected_source=True)} if selected_source else {})})
 
-    # The dominant term in a row's demand today is the whole checkpoint every
-    # row loads, which is what a quantum holding only its own units' weights
-    # would remove; until then that term is the concurrency ceiling.
+    # PB alone admits and places these independently retryable rows according
+    # to their actual source/capture preparation and resident encoding demand.
     per_box = int(args.rows_per_box)
     require_rows_fit([int(row["demand"]["mem_gb"]) for row in rows],
                      per_box, spec.get("box_memory_gb"))

@@ -335,6 +335,26 @@ def _encode_and_render(weight, format_name: str, *, activation_kwargs=None,
     )
 
 
+def _activation_kwargs_memo(source, weights, device, *, max_entries=None,
+                            resource_check=None, factor_scratch_bytes=0):
+    """The campaign's existing plane-keyed memo, with an explicit owner bound."""
+    if max_entries is not None and (type(max_entries) is not int or max_entries < 1):
+        raise ValueError('encoder memo capacity must be positive or unbounded')
+
+    @functools.lru_cache(maxsize=max_entries)
+    def for_unit(name, scale_plane):
+        if resource_check is not None:
+            resource_check('before_selected_encoder_factors:'+name,
+                           reserve_bytes=factor_scratch_bytes)
+        kwargs = th.encoder_kwargs(source, name, int(weights[name].shape[1]),
+                                   device, scale_plane=scale_plane)
+        if resource_check is not None:
+            resource_check('after_selected_encoder_factors:'+name)
+        return kwargs
+
+    return for_unit
+
+
 def _measure_anchor(
     *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
     activation_kwargs_for=None, hessian_required: bool = True,
@@ -358,7 +378,8 @@ def _measure_anchor(
     wasteful: no rate reaches that call, and a twelve-anchor surface would
     otherwise factorise the same Hessian twelve times.  The plane is constant
     across every rung of a family and differs between families, so the bound is
-    one factorisation per unit per family-plane.
+    one factorisation per unit per family-plane while retained. Selected
+    source campaigns bound the memo to the compatible anchor batch width.
 
     A **missing key is a hard failure**, never a silently H-free encode: this
     codebase has already been bitten once by a render whose activation lookup
@@ -493,6 +514,16 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     tmp = wire_path.with_suffix(".tessera.tmp")
     tmp.write_bytes(blob)
     os.replace(tmp, wire_path)
+    if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
+        # The existing PWC entry is already disk-backed. Completed anchor
+        # files must not accumulate an unbounded page-cache owner across rungs.
+        from .perturbed_x_cache import release_activation_cache_file_pages
+        from .tessera_calibration_cache import sha256
+        rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
+        for path in (rendered_path, wire_path):
+            expected = path.stat()
+            sha256(path, release_read_pages=True)
+            release_activation_cache_file_pages(path, expected_stat=expected)
 
     bits = spec.bits_for_shape(tuple(weight.shape))
     return CampaignAnchor(
@@ -2939,7 +2970,8 @@ def _require_campaign_population(model, profile, layer_stride: int) -> ExpertPop
 
 def _project_expert_population(population: ExpertPopulation, *, weights, menus,
                                model_path, cache_dir: Path, measured=None,
-                               projection=None) -> tuple[dict, dict]:
+                               projection=None, resource_check=None,
+                               release_source_pages=False) -> tuple[dict, dict]:
     """Ask the producer to project every in-scope stack; bind it; check the bytes.
 
     Each request covers the whole campaign (the producer hashes the checkpoint
@@ -2994,7 +3026,8 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
         return carried, _checked_projected_units(
             bound, weights=weights, model_path=model_path,
             source=carried["producer"]["source"],
-            measured=measured)
+            measured=measured, resource_check=resource_check,
+            release_source_pages=release_source_pages)
 
     ladders: dict[str, list[tuple[str, int]]] = {}
     for stack, units in sorted(population.declared.items()):
@@ -3071,7 +3104,8 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
     carried["plan_attempts"] = attempts
     return carried, _checked_projected_units(
         bound, weights=weights, model_path=model_path,
-        source=answer["source"], measured=measured)
+        source=answer["source"], measured=measured,
+        resource_check=resource_check, release_source_pages=release_source_pages)
 
 
 def _checked_projected_units(bound, *, weights, model_path, source,
@@ -3298,7 +3332,8 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
 
 
 def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
-                        hessian_identity, static_scales, static_scale_policy):
+                        hessian_identity, static_scales, static_scale_policy,
+                        release_file_pages=False, resource_check=None):
     """Write the exporter's ``--hessian`` and ``--input-scales`` inputs.
 
     ``(hessian_capture_path | None, input_scales_path | None,
@@ -3362,6 +3397,14 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
             sidecar.unlink()
         os.replace(tmp_capture, hessian_capture_path)
         os.replace(tmp_sidecar, sidecar)
+        if release_file_pages:
+            from .perturbed_x_cache import release_activation_cache_file_pages
+            from .tessera_calibration_cache import sha256
+            expected = hessian_capture_path.stat()
+            sha256(hessian_capture_path, resource_check=resource_check, release_read_pages=True)
+            release_activation_cache_file_pages(hessian_capture_path, expected_stat=expected)
+        if resource_check is not None:
+            resource_check('after_selected_export_input_write')
         print(f"[campaign] wrote {hessian_capture_path} "
               f"({len(saved_hessians)} Hessians, capture_sha256 "
               f"{capture_sha256[:12]})", flush=True)
@@ -3681,7 +3724,7 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     ap.add_argument("--attention-implementation", choices=("eager", "sdpa"), default=None,
                     help="Explicit HF attention backend required for canonical census/capture.")
     ap.add_argument("--streaming", action="store_true",
-                    help="Use the existing source layer cache for canonical census/capture.")
+                    help="Use the source layer cache for census/capture or selected anchors from a complete capture.")
     ap.add_argument("--streaming-cache-slots", type=int, default=2)
     ap.add_argument("--streaming-prefetch-workers", type=int, default=1)
     ap.add_argument("--streaming-cache-headroom-gb", type=float, default=24)
@@ -3697,8 +3740,12 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     args = ap.parse_args(argv)
     if args.streaming_capture_policy != "legacy" and not (args.streaming and args.capture_calibration_out):
         ap.error("--streaming-capture-policy requires --streaming and --capture-calibration-out")
-    if args.streaming and (not (args.census_out or args.capture_calibration_out) or args.units):
-        ap.error("--streaming currently requires full-scope --census-out or --capture-calibration-out")
+    selected_source = bool(args.streaming and args.units and args.calibration_cache
+                           and args.calibration_cache_sha256
+                           and not (args.census_out or args.capture_calibration_out))
+    if args.streaming and not selected_source and (
+            not (args.census_out or args.capture_calibration_out) or args.units):
+        ap.error("--streaming requires full-scope census/capture or --units with a hash-bound complete calibration cache")
     if args.streaming and (args.streaming_cache_slots < 2 or args.streaming_prefetch_workers < 1):
         ap.error("streaming calibration requires at least two cache slots and one prefetch worker")
     if (args.census_out or args.capture_calibration_out or args.calibration_cache) and not args.attention_implementation:
@@ -3734,7 +3781,7 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             "H-aware encoder branch is merged."
         )
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    if args.streaming_capture_policy == "shared-inputs-bounded-v1" and device == "cuda":
+    if (args.streaming_capture_policy == "shared-inputs-bounded-v1" or selected_source) and device == "cuda":
         from .autoscale import require_bounded_capture_environment
         require_bounded_capture_environment(os.environ)
     cache_dir = Path(args.cache_dir)
@@ -3798,6 +3845,7 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             pinned.append(name)
             continue
         all_dense.append(name)
+    del module  # Do not retain the final non-body module after source teardown.
     dense_targets = _campaign_layer_scope(all_dense, args.layer_stride)
     expert_targets = population.qnames
     expert_members = {member.qname: member for member in population.members}
@@ -3892,6 +3940,9 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     want_h = args.hessian == "require" and not census_only
     calibration_cache = None
     capture_identity = None
+    selected_source_preparation = None
+    selected_weights = None
+    selected_guard = None
     if census is not None:
         # Validate the whole scope before a selected unit's artifact is read.
         if (set(census["counts"]) != set(census_targets) or
@@ -3903,7 +3954,7 @@ def main(argv: "Sequence[str] | None" = None) -> int:
                              for member in population.members})
         if census["unit_shapes"] != scope_shapes:
             raise RuntimeError("calibration census geometry differs from the loaded model")
-    if runner is not None:
+    if runner is not None and not selected_source:
         try:
             return _run_streamed_calibration(args, runner, profile, mode=mode, population=population,
                 dense_targets=census_dense_targets, expert_targets=census_expert_targets,
@@ -3912,6 +3963,26 @@ def main(argv: "Sequence[str] | None" = None) -> int:
                 capture_runtime=capture_runtime)
         finally:
             runner.shutdown()
+    if selected_source:
+        from .autoscale import selected_anchor_resources
+        if (census.get('model_load_contract') or {}).get('schema') != 'prismaquant.streaming_initialization.v1':
+            raise RuntimeError('selected source requires the qualified streaming census witness')
+        # This describes the historical complete capture. This sparse source
+        # preparation makes no claim to repeat the full initialization audit.
+        model_load_contract = census['model_load_contract']
+        selected_resources = selected_anchor_resources(args.model,
+            unit_shapes={name: census['unit_shapes'][name] for name in targets},
+            counts=census['counts'], max_act_rows=args.max_act_rows,
+            cache_slots=args.streaming_cache_slots,
+            prefetch_workers=args.streaming_prefetch_workers,
+            headroom_gb=args.streaming_cache_headroom_gb,
+            anchor_batch_size=args.anchor_batch_size)
+        if device == 'cuda':
+            from .memory_management import CaptureMemoryGuard
+            selected_guard = CaptureMemoryGuard(device)
+            if selected_resources['memory_bytes'] > selected_guard.cap_bytes:
+                raise RuntimeError('selected anchor cgroup budget is smaller than its checked phase plan')
+            selected_guard.check('before_selected_capture_identity')
     if args.capture_calibration_out or args.calibration_cache:
         from . import tessera_calibration_cache as calibration_store
         hi, lo = census_token_counts(census, {})
@@ -3924,7 +3995,34 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         capture_identity = calibration_store.capture_identity(
             args.calibration_census, calibration=bound_calibration,
             max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
-            attention_implementation=attention_implementation)
+            attention_implementation=attention_implementation,
+            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
+                    release_read_pages=True) if selected_source else {}))
+    if selected_source:
+        manifest = calibration_store.require_capture_contract(args.calibration_cache,
+            expected_sha256=args.calibration_cache_sha256)
+        if manifest['identity'] != capture_identity:
+            raise RuntimeError('selected source capture identity differs from the canonical census')
+        try:
+            selected_weights, selected_source_preparation = runner.snapshot_selected_weights(
+                targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
+                resource_check=None if selected_guard is None else selected_guard.check)
+        finally:
+            runner.shutdown()
+        selected_source_preparation.update(resources=selected_resources,
+            initialization_witness_origin='complete-canonical-capture',
+            full_source_initialization_repeated=False)
+        # Release fixed non-body state and the source context before selected
+        # H/X become resident. Packed members now reference only meta tensors.
+        del model, runner
+        runner = None
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        if selected_guard is not None:
+            selected_guard.check('before_selected_capture_prefetch', reserve_bytes=
+                selected_resources['phases']['resident_anchors']['selected_hessian_bytes']+
+                selected_resources['phases']['resident_anchors']['selected_prefix_bytes'])
     if args.capture_calibration_out:
         completed_capture = Path(args.capture_calibration_out) / "capture_manifest.json"
         if completed_capture.exists():
@@ -3937,8 +4035,12 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         values, calibration_cache = calibration_store.prefetch_capture(
             args.calibration_cache, expected_identity=capture_identity,
             census=census, names=targets, device=device,
-            expected_sha256=args.calibration_cache_sha256)
+            expected_sha256=args.calibration_cache_sha256,
+            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
+                    release_file_pages=True) if selected_source else {}))
         acts, hessians, hessian_rows, act_max_abs = values
+        if selected_guard is not None:
+            selected_guard.check('after_selected_capture_prefetch')
     else:
         acts, hessians, hessian_rows, act_max_abs = _collect_activations(
             model, targets, tokens, 0 if census_only else args.max_act_rows, device,
@@ -3981,13 +4083,14 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         act_max_abs if census is None else census_max_abs(census, act_max_abs),
         profile=profile)
 
-    weights = {name: dict(model.named_modules())[name].weight.detach()
-               for name in dense_targets}
-    for name, member in expert_members.items():
-        # The profile-declared 2-D view of the live packed parameter; checked
-        # byte-for-byte against the producer's source tensor below.
-        weights[name] = member.weight.detach()
-    del model
+    if selected_weights is not None:
+        weights = selected_weights
+    else:
+        weights = {name: dict(model.named_modules())[name].weight.detach()
+                   for name in dense_targets}
+        for name, member in expert_members.items():
+            weights[name] = member.weight.detach()
+        del model
     torch.cuda.empty_cache()
 
     # ONE ActivationSource for the whole campaign, and ONE set of encoder
@@ -3998,8 +4101,10 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     # keys the refit objective by plane (the exact quadratic on a CHANNEL row
     # scale, a diagonal power on the LUT plane's coupled blocks) and the two
     # measured answers disagree. The plane is a property of the family, not of
-    # the rung, so the memo is keyed by (unit, plane) and the bound is one
-    # factorisation per unit per family-plane. The source is built from the
+    # the rung, so the memo is keyed by (unit, plane). Selected-source rows
+    # retain at most one compatible batch's factors and deterministically
+    # recompute evicted entries; resident-source rows keep the historical
+    # memo. The source is built from the
     # same functions the production render calls (``tessera_hessian``), so the
     # campaign's price and the cache's render are one rendering of one draw
     # (principle 8).
@@ -4007,16 +4112,17 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     if want_h:
         calibration_source = th.activation_source(hessians, hessian_identity)
 
-    @functools.lru_cache(maxsize=None)
-    def _activation_kwargs_for(name: str, scale_plane) -> dict:
-        return th.encoder_kwargs(
-            calibration_source, name,
-            int(weights[name].shape[1]), device, scale_plane=scale_plane)
+    _activation_kwargs_for = _activation_kwargs_memo(calibration_source, weights, device,
+        max_entries=args.anchor_batch_size if selected_source else None,
+        resource_check=None if selected_guard is None else selected_guard.check,
+        factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
+                              if selected_source else 0))
 
     cache = ProductionWeightCache(
         weights={}, levers={"tessera_campaign": True},
         cache_dir=str(cache_dir),
-        metadata={"schema": SCHEMA, "menu_mode": mode},
+        metadata={"schema": SCHEMA, "menu_mode": mode,
+                  **({'release_completed_anchor_file_pages': True} if selected_source else {})},
     )
     menus = expand_menus_for_targets(
         weights, targets, mode=mode, tp_degree=args.tp_degree,
@@ -4054,7 +4160,9 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             population, weights=weights, menus=menus,
             model_path=args.model, cache_dir=cache_dir,
             measured=set(expert_targets),
-            projection=(None if census is None else census.get("expert_projection")))
+            projection=(None if census is None else census.get("expert_projection")),
+            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
+                    release_source_pages=True) if selected_source else {}))
         print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
               f"{len(projected_units)} expert units priced here", flush=True)
 
@@ -4218,6 +4326,10 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     # capture is then the whole scope's H under the whole scope's counts --
     # exactly the object a whole-scope run writes -- and the merge can prove it
     # by recomputing the digest.
+    if selected_guard is not None:
+        phase = selected_resources['phases']['export_inputs']
+        selected_guard.check('before_selected_export_input_write', reserve_bytes=
+            phase['export_input_file_bytes']+phase['serialization_scratch_bytes'])
     hessian_capture_path, input_scales_path, capture_sha256 = write_export_inputs(
         cache_dir,
         hessians=hessians if want_h else None,
@@ -4225,6 +4337,9 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         hessian_identity=hessian_identity,
         static_scales=static_scales,
         static_scale_policy=static_scale_policy,
+        **(dict(release_file_pages=True,
+                resource_check=None if selected_guard is None else selected_guard.check)
+           if selected_source else {}),
     )
 
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
@@ -4471,9 +4586,13 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             except (HessianContractError, ActivationScaleContractError):
                 raise
             except Exception as exc:
+                if selected_guard is not None and selected_guard.failure is not None:
+                    raise  # A physical memory refusal must stop the action.
                 print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
                       f"{exc}", flush=True)
                 continue
+            if selected_guard is not None:
+                selected_guard.check('after_selected_anchor_batch')
             for anchor in anchors:
                 name = anchor.qname
                 identity = _checkpoint_anchor_identity(
@@ -4638,6 +4757,9 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             # module (trellis_input_global_scale), so this block is what makes
             # "the priced A side is the served A side" checkable downstream.
             "calibration_cache": calibration_cache,
+            **({"selected_source_preparation": dict(selected_source_preparation,
+                  memory_guard=None if selected_guard is None else selected_guard.snapshot())}
+               if selected_source else {}),
             "activation_static_scales": {
                 "policy": str(static_scale_policy),
                 "source": "campaign_calibration_amax_fused_unified",

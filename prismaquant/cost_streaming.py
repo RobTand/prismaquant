@@ -411,6 +411,88 @@ class StreamedCausalLM:
             )
         return layer
 
+    def snapshot_selected_weights(self, names, *, max_resident_bytes: int,
+                                  resource_check=None):
+        """Copy selected source Linears from the existing resident layer cache.
+
+        This is preparation for a consumer that already owns its ``weights``
+        mapping and needs no source forward. The finite layer sequence is
+        prefetched through StreamingContext; ordinary adjacent-layer top-up
+        is disabled so a sparse selection never reads unrelated layers.
+        Independent copies prevent an expert view from pinning its complete
+        packed parent after the source layer has been released.
+        """
+        from .routed_experts import (
+            profile_declared_packed_expert_projections,
+            refresh_packed_expert_projections,
+        )
+
+        names = tuple(names)
+        if not names or len(set(names)) != len(names):
+            raise ValueError("selected source requires unique nonempty unit names")
+        if type(max_resident_bytes) is not int or max_resident_bytes <= 0:
+            raise ValueError("selected source requires a positive resident byte budget")
+        if self._pinned_layer is not None:
+            raise RuntimeError("selected source cannot start with a pinned layer")
+        modules = dict(self.model.named_modules())
+        projected = {member.qname: member for member in
+                     profile_declared_packed_expert_projections(self.model, self.profile)}
+        shapes, layers = {}, {}
+        for name in sorted(names):
+            layer = self.layer_index_for_qname(name)
+            if name in projected:
+                weight = projected[name].weight
+                parameter_name = projected[name].module_qname+'.'+projected[name].param_name
+            elif isinstance(modules.get(name), torch.nn.Linear):
+                weight = modules[name].weight
+                parameter_name = name+'.weight'
+            else:
+                raise RuntimeError(f"selected source unit is not a declared Linear: {name}")
+            dtype = getattr(self.context, 'buffer_dtypes', {}).get(parameter_name, self.dtype)
+            shapes[name] = (tuple(weight.shape), dtype,
+                            weight.numel()*torch.empty((), dtype=dtype).element_size())
+            layers.setdefault(layer, []).append(name)
+        del weight
+        required = sum(shape[2] for shape in shapes.values())
+        if required > max_resident_bytes:
+            raise RuntimeError("selected source weights exceed their resident byte budget")
+
+        ordered = sorted(layers)
+        window = max(1, min(self.prefetch_lookahead, self.context.max_cache_slots - 1))
+        weights, records = {}, []
+        for layer in ordered[:window]:
+            self.context.schedule_prefetch(layer)
+        for index, layer in enumerate(ordered):
+            source = self.context.install(layer, require_prefetched=True,
+                                          prefetch_following=False)
+            if index + window < len(ordered):
+                self.context.schedule_prefetch(ordered[index + window])
+            live = {}
+            try:
+                live = {member.qname: member for member in refresh_packed_expert_projections(
+                    [projected[name] for name in layers[layer] if name in projected], self.profile)}
+                with torch.no_grad():
+                    for name in layers[layer]:
+                        value = live[name].weight if name in live else modules[name].weight
+                        shape, dtype, nbytes = shapes[name]
+                        if value.is_meta or tuple(value.shape) != shape or value.dtype != dtype:
+                            raise RuntimeError(f"selected source has wrong resident tensor: {name}")
+                        if resource_check is not None:
+                            resource_check(f"before_selected_source_copy:{name}", reserve_bytes=nbytes)
+                        weights[name] = value.detach().clone(memory_format=torch.contiguous_format)
+                        del value
+                if self.device.type == "cuda":
+                    torch.cuda.synchronize(self.device)
+            finally:
+                live.clear()
+                self.context.release_completed_layer(layer)
+            records.append(dict(layer=layer, units=layers[layer], source=source))
+            if resource_check is not None:
+                resource_check(f"after_selected_source_release:{layer}")
+        return weights, dict(schema="prismaquant.selected_source_weights.v1",
+            units=sorted(weights), layers=records, resident_bytes=required,
+            source_forward_count=0, packed_parent_storage_retained=False)
+
     @contextmanager
     def pin_layer(self, layer: int) -> Iterator[None]:
         layer = int(layer)
