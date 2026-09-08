@@ -201,11 +201,14 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
 
 
 def release_activation_cache_file_pages(path, *, expected_stat):
-    """Advise only a completed, unchanged entry after its checksum is checked.
+    """Advise a verified unchanged file extent at a reader/writer boundary.
 
-    This optional capture-writer boundary leaves the artifact and all tensor
-    owners intact. Later consumers still use the ordinary activation prefetch.
-    Advice is not proof of physical release; the caller's guard remains final.
+    Readers check completed-entry hashes first. A serializer may also pause
+    after a synchronous tensor record and advise its stable visible prefix;
+    the same inode, size and timestamp checks and durability fence apply.
+    The artifact and tensor owners remain intact, and final publication still
+    requires the complete seal. Advice is not proof of physical release; the
+    caller's guard remains final.
     """
     import stat
     def identity(value):
