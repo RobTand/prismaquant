@@ -1348,6 +1348,24 @@ def _skeleton_config_and_class(config, *, multimodal: bool,
     return _resolve_text_only_skeleton(config, log_prefix=log_prefix)
 
 
+def build_streaming_skeleton(config, *, multimodal: bool,
+                             log_prefix: str = "[streaming]",
+                             attn_implementation: str | None = None):
+    """Construct the actual streaming model on meta, without loading weights."""
+    from transformers import AutoModelForCausalLM
+
+    config, model_cls = _skeleton_config_and_class(
+        config, multimodal=multimodal, log_prefix=log_prefix)
+    attention_kwargs = ({"attn_implementation": attn_implementation}
+                        if attn_implementation is not None else {})
+    with _mask_cuda_queries_during_meta_init(log_prefix):
+        with init_empty_weights():
+            if model_cls is AutoModelForCausalLM:
+                return AutoModelForCausalLM.from_config(
+                    config, trust_remote_code=True, **attention_kwargs)
+            return model_cls._from_config(config, **attention_kwargs)
+
+
 def _find_visual_module(model) -> tuple[Any | None, str]:
     """Return (visual_module, dotted_prefix) if the model has a visual
     tower; (None, '') otherwise. Handles the v5 multimodal umbrella
@@ -1421,7 +1439,7 @@ def _build_streaming_context(model_path: str, *,
         ):
             raise ValueError("max_cache_slots must be an integer >= 1 or None")
     import psutil
-    from transformers import AutoConfig, AutoModelForCausalLM
+    from transformers import AutoConfig
 
     authenticated = ({} if source_authentication is None else
                      {'source_authentication': source_authentication})
@@ -1456,18 +1474,8 @@ def _build_streaming_context(model_path: str, *,
                   "during layer loads", flush=True)
     config = AutoConfig.from_pretrained(staged, trust_remote_code=True)
 
-    config, model_cls = _skeleton_config_and_class(
-        config, multimodal=multimodal, log_prefix=log_prefix)
-
-    attention_kwargs = ({"attn_implementation": attn_implementation}
-                        if attn_implementation is not None else {})
-    with _mask_cuda_queries_during_meta_init(log_prefix):
-        with init_empty_weights():
-            if model_cls is AutoModelForCausalLM:
-                skeleton = AutoModelForCausalLM.from_config(
-                    config, trust_remote_code=True, **attention_kwargs)
-            else:
-                skeleton = model_cls._from_config(config, **attention_kwargs)
+    skeleton = build_streaming_skeleton(config, multimodal=multimodal,
+        log_prefix=log_prefix, attn_implementation=attn_implementation)
     skel_base, skel_layers = _get_layer_list(skeleton)
     base_prefix = _resolve_base_prefix(skeleton, skel_base)
     num_layers = len(skel_layers)

@@ -3,6 +3,21 @@
 As of: 2026-09-08 · `integrate/glm-source-derivative-20260908`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `codex/glm-capture-compatibility-issuance`) for the
+explicit GLM compatibility issuance CLI. A hash-bound closed plan binds the
+original config, corrected image policy, existing native/CPU proofs and
+original producer evidence. `python -m prismaquant.glm_capture_compatibility
+preflight` permits only the four original completion fields to remain pending;
+it constructs the actual corrected model through the shared streaming meta
+skeleton helper, verifies its live derivative and native execution identity,
+and writes no receipt. `issue` requires every completion field, validates the
+unchanged complete capture and producer before constructing the model, then
+calls the existing exclusive-create receipt API, which revalidates all gates.
+Both commands require CUDA unavailable and uninitialized and load no weights.
+They reuse the completed native measurements and do not compute new forward or
+backward passes. The ordinary streaming path uses the same extracted skeleton
+constructor before its unchanged resident-head materialization.
+
 Re-stamped (2026-09-08, `codex/joint-operator-windows-profile`) for the opt-in
 GLM KDA derivative contract. The GLM profile declares a closed, source-pinned
 strictly upper-triangular premask of the fallback decay exponent; declaring it
