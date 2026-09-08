@@ -3674,6 +3674,40 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     return 0
 
 
+def prepare_selected_source(runner, targets, *, census_path, calibration,
+                            max_act_rows, model_load_contract,
+                            attention_implementation, calibration_cache,
+                            calibration_cache_sha256, selected_resources,
+                            resource_check=None):
+    """Bind a selected-source row to the canonical capture and copy its weights.
+
+    Returns ``(capture_identity, selected_weights, selected_source_preparation)``.
+    The identity is recomputed against the current source bytes and must equal
+    the pinned canonical manifest's identity before any selected layer installs.
+    ``runner`` is shut down once the selected weights are copied.
+    """
+    from . import tessera_calibration_cache as calibration_store
+    capture_identity = calibration_store.capture_identity(
+        census_path, calibration=calibration,
+        max_act_rows=max_act_rows, model_load_contract=model_load_contract,
+        attention_implementation=attention_implementation,
+        resource_check=resource_check, release_read_pages=True)
+    manifest = calibration_store.require_capture_contract(calibration_cache,
+        expected_sha256=calibration_cache_sha256)
+    if manifest['identity'] != capture_identity:
+        raise RuntimeError('selected source capture identity differs from the canonical census')
+    try:
+        selected_weights, selected_source_preparation = runner.snapshot_selected_weights(
+            targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
+            resource_check=resource_check)
+    finally:
+        runner.shutdown()
+    selected_source_preparation.update(resources=selected_resources,
+        initialization_witness_origin='complete-canonical-capture',
+        full_source_initialization_repeated=False)
+    return capture_identity, selected_weights, selected_source_preparation
+
+
 def main(argv: "Sequence[str] | None" = None) -> int:
     import torch
 
@@ -4056,26 +4090,22 @@ def main(argv: "Sequence[str] | None" = None) -> int:
             model=str(args.model), seed=int(args.seed), nsamples=int(args.nsamples),
             seqlen=int(args.seqlen), fit_tokens_min=lo)
         require_census_draw(census, bound_calibration, where="calibration capture")
-        capture_identity = calibration_store.capture_identity(
-            args.calibration_census, calibration=bound_calibration,
-            max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
-            attention_implementation=attention_implementation,
-            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
-                    release_read_pages=True) if selected_source else {}))
+        if selected_source:
+            capture_identity, selected_weights, selected_source_preparation = (
+                prepare_selected_source(runner, targets,
+                    census_path=args.calibration_census, calibration=bound_calibration,
+                    max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
+                    attention_implementation=attention_implementation,
+                    calibration_cache=args.calibration_cache,
+                    calibration_cache_sha256=args.calibration_cache_sha256,
+                    selected_resources=selected_resources,
+                    resource_check=None if selected_guard is None else selected_guard.check))
+        else:
+            capture_identity = calibration_store.capture_identity(
+                args.calibration_census, calibration=bound_calibration,
+                max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
+                attention_implementation=attention_implementation)
     if selected_source:
-        manifest = calibration_store.require_capture_contract(args.calibration_cache,
-            expected_sha256=args.calibration_cache_sha256)
-        if manifest['identity'] != capture_identity:
-            raise RuntimeError('selected source capture identity differs from the canonical census')
-        try:
-            selected_weights, selected_source_preparation = runner.snapshot_selected_weights(
-                targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
-                resource_check=None if selected_guard is None else selected_guard.check)
-        finally:
-            runner.shutdown()
-        selected_source_preparation.update(resources=selected_resources,
-            initialization_witness_origin='complete-canonical-capture',
-            full_source_initialization_repeated=False)
         # Release fixed non-body state and the source context before selected
         # H/X become resident. Packed members now reference only meta tensors.
         del model, runner

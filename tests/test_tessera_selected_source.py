@@ -256,3 +256,52 @@ def test_selected_capture_cli_reaches_existing_streamed_source(monkeypatch, tmp_
             '--calibration-cache', str(tmp_path/'capture_manifest.json'),
             '--calibration-cache-sha256', 'a'*64,
             '--attention-implementation', 'eager'])
+
+
+def test_selected_source_shards_cover_selected_layers_and_fixed_state(selected_runner):
+    """The read set is whole layers holding selected units plus every non-layer shard."""
+    runner, _calls, _source = selected_runner
+    runner.context.weight_shard = {
+        'layers.0.proj.weight': '/src/a.safetensors', 'layers.1.proj.weight': '/src/b.safetensors',
+        'layers.2.proj.weight': '/src/b.safetensors', 'layers.3.proj.weight': '/src/c.safetensors',
+        'embed_tokens.weight': '/src/d.safetensors', 'norm.weight': '/src/a.safetensors'}
+    runner.context.weight_ckpt = {key: 'ckpt.'+key for key in runner.context.weight_shard}
+    shards = runner.selected_source_shards(['layers.3.proj', 'layers.1.proj'])
+    assert shards == dict(layers=[1, 3], layer_shards=['b.safetensors', 'c.safetensors'],
+        fixed_state_shards=['a.safetensors', 'd.safetensors'],
+        tensors={'ckpt.layers.1.proj.weight': 'b.safetensors',
+                 'ckpt.layers.3.proj.weight': 'c.safetensors',
+                 'ckpt.embed_tokens.weight': 'd.safetensors',
+                 'ckpt.norm.weight': 'a.safetensors'})
+    with pytest.raises(ValueError, match='unique nonempty'):
+        runner.selected_source_shards([])
+    del runner.context.weight_shard['layers.1.proj.weight']
+    with pytest.raises(RuntimeError, match='no source tensors for selected layer 1'):
+        runner.selected_source_shards(['layers.1.proj'])
+
+
+def test_selected_source_read_set_must_agree_with_the_census_roster(selected_runner):
+    from prismaquant.tessera_campaign import selected_source_read_set
+    runner, _calls, _source = selected_runner
+    runner.context.weight_shard = {'layers.1.proj.weight': '/src/b.safetensors',
+                                   'embed_tokens.weight': '/src/d.safetensors'}
+    runner.context.weight_ckpt = {key: 'ckpt.'+key for key in runner.context.weight_shard}
+    tensors = {'ckpt.layers.1.proj.weight': 'b.safetensors', 'ckpt.embed_tokens.weight': 'd.safetensors',
+               'ckpt.layers.0.proj.weight': 'a.safetensors'}
+    def census(**source):
+        return dict(expert_projection=dict(producer=dict(source=dict(
+            files={'a.safetensors': 'a'*64, 'b.safetensors': 'b'*64, 'd.safetensors': 'd'*64},
+            tensors=tensors, auxiliary_sha256={}, config_sha256='c'*64) | source)))
+    read = selected_source_read_set(runner, ['layers.1.proj'], census=census())
+    assert read['layer_shards'] == ['b.safetensors'] and read['fixed_state_shards'] == ['d.safetensors']
+    with pytest.raises(RuntimeError, match='disagrees with the census producer roster.*embed_tokens'):
+        selected_source_read_set(runner, ['layers.1.proj'],
+            census=census(tensors=tensors | {'ckpt.embed_tokens.weight': 'a.safetensors'}))
+    with pytest.raises(RuntimeError, match='disagrees with the census producer roster.*layers.1'):
+        selected_source_read_set(runner, ['layers.1.proj'],
+            census=census(tensors={k: v for k, v in tensors.items() if 'layers.1' not in k}))
+    with pytest.raises(RuntimeError, match='not sealed.*d.safetensors'):
+        selected_source_read_set(runner, ['layers.1.proj'],
+            census=census(files={'a.safetensors': 'a'*64, 'b.safetensors': 'b'*64}))
+    with pytest.raises(RuntimeError, match='census-sealed producer source roster'):
+        selected_source_read_set(runner, ['layers.1.proj'], census={})
