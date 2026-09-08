@@ -7,6 +7,7 @@ QDQ is the same owner used by PerturbedActivationCache and assignment KL.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import copy
 from dataclasses import dataclass
 import hashlib
 import json
@@ -234,13 +235,7 @@ class SignedJointProjectionLease:
             elif not isinstance(module, nn.Linear):
                 raise TypeError(f"joint AURA target {name} is not Linear")
             self.projection_backend.require_device(module.weight.device)
-            expected = {fmt for qname, fmt in self.deltas if qname == name}
-            if set(self.specs[name]) != expected:
-                raise ValueError(f"joint AURA render/spec coverage mismatch for {name}")
-            for fmt in expected:
-                delta = self.deltas[(name, fmt)]
-                if delta.device != module.weight.device or delta.shape != module.weight.shape:
-                    raise RuntimeError(f"joint AURA dW residency/shape differs for {name}@{fmt}")
+            self._validate_delta_coverage(name, module)
             grouped = {}
             for fmt, spec in self.specs[name].items():
                 receipt = activation_identity(spec, self.activation_max_abs, name)
@@ -255,6 +250,15 @@ class SignedJointProjectionLease:
                 group = (identity_sha256(receipt), callable_key)
                 grouped.setdefault(group, (spec, []))[1].append(fmt)
             self.groups[name] = tuple(grouped.values())
+
+    def _validate_delta_coverage(self, name, module):
+        expected = {fmt for qname, fmt in self.deltas if qname == name}
+        if set(self.specs[name]) != expected:
+            raise ValueError(f"joint AURA render/spec coverage mismatch for {name}")
+        for fmt in expected:
+            delta = self.deltas[(name, fmt)]
+            if delta.device != module.weight.device or delta.shape != module.weight.shape:
+                raise RuntimeError(f"joint AURA dW residency/shape differs for {name}@{fmt}")
 
     def __enter__(self):
         if self.handles or self.forward_originals:
@@ -274,14 +278,17 @@ class SignedJointProjectionLease:
         return self
 
     def __exit__(self, *_args):
+        self._remove_observers()
+        self.terms.clear()
+        self.active = False
+
+    def _remove_observers(self):
         for handle in self.handles:
             handle.remove()
         self.handles.clear()
         for module, original in reversed(self.forward_originals):
             module.forward = original
         self.forward_originals.clear()
-        self.terms.clear()
-        self.active = False
 
     def _install_packed_observer(self, members):
         """Observe the existing per-expert Linear slices without changing them.
@@ -436,6 +443,261 @@ class SignedJointProjectionLease:
             result[key] = {"weight": weight, "activation": activation, "mixed": mixed, "total": total}
         self.terms.clear()
         return result
+
+
+class JointOperatorStatisticsLease(SignedJointProjectionLease):
+    """Opt-in, one-probe deferred contraction using the shared source observers.
+
+    Retain sum(G.T @ X) and sum(G.T @ dX) per activation group, independent
+    of candidate count. After baseline backwards finish, seal observation,
+    release this lease's source references, and project caller-owned resident
+    candidate dW quanta. The caller's ProductionWeightCache owns candidate
+    prefetch and its physical budget. No candidate tensor is retained here.
+
+    ``max_statistics_bytes`` covers FP32 operator matrices only. Baseline
+    source/activations/cotangents, GEMM inputs and temporary matrices, source
+    conversion, projection workspaces, CUDA reservations and allocator overhead
+    still need separate phase admission. This primitive is not a full fit gate.
+    ``max_candidate_bytes`` charges complete backing storages, including any
+    unselected data kept alive by a caller's view, for each projection quantum.
+    Matrix accumulation changes rounding and has a distinct arithmetic identity.
+    """
+
+    def __init__(self, modules, specs_by_qname, *, max_statistics_bytes, max_candidate_bytes,
+                 activation_max_abs=None, projection_backend=None):
+        if type(max_statistics_bytes) is not int or max_statistics_bytes < 0:
+            raise ValueError("joint statistics budget must be a nonnegative integer")
+        if type(max_candidate_bytes) is not int or max_candidate_bytes <= 0:
+            raise ValueError("joint candidate budget must be a positive integer")
+        self.max_candidate_bytes = max_candidate_bytes
+        if not modules or set(modules) != set(specs_by_qname) or any(not specs for specs in specs_by_qname.values()):
+            raise ValueError("joint statistics module/spec coverage differs")
+        # FormatSpec is mutable; freeze its resolved fields for this lease.
+        specs = {name: {fmt: copy(spec) for fmt, spec in choices.items()}
+                 for name, choices in specs_by_qname.items()}
+        super().__init__(modules, specs, {}, activation_max_abs=activation_max_abs,
+                         projection_backend=projection_backend)
+        self._geometry = {name: (tuple(module.weight.shape), module.weight.device)
+                          for name, module in self.modules.items()}
+        self._sources = {name: self._source_fingerprint(module.weight)
+                         for name, module in self.modules.items()}
+        self._format_groups = {(name, fmt): index
+                               for name, groups in self.groups.items()
+                               for index, (_, formats) in enumerate(groups) for fmt in formats}
+        self.statistics_capacity_bytes = sum(
+            module.weight.numel() * 4 * (1 + sum(spec.act_quant_changes_input
+                                                 for spec, _ in self.groups[name]))
+            for name, module in self.modules.items())
+        if self.statistics_capacity_bytes > max_statistics_bytes:
+            raise RuntimeError("joint statistics matrices exceed statistics budget")
+        self._operators = {}
+        self._activation_terms = {}
+        self._results = {}
+        self._pending_backwards = 0
+        self._observation_inputs = {}
+        self._phase = 'new'
+        self.telemetry.update(statistics_capacity_bytes=self.statistics_capacity_bytes,
+                              peak_statistics_bytes=0, projected_candidates=0,
+                              peak_candidate_storage_bytes=0)
+
+    def _validate_delta_coverage(self, name, module):
+        # The exact candidate roster is sealed now; tensors arrive only after
+        # source observation, through project(), which checks each quantum.
+        if name not in self.specs or not self.specs[name]:
+            raise ValueError(f"joint statistics missing spec coverage for {name}")
+
+    @staticmethod
+    def _source_fingerprint(weight):
+        return (weight.data_ptr(), weight._version, tuple(weight.shape),
+                tuple(weight.stride()), weight.storage_offset(), weight.dtype, weight.device)
+
+    def _require_source(self, name, weight):
+        if self._source_fingerprint(weight) != self._sources[name]:
+            raise RuntimeError(f"joint statistics source weight changed for {name}")
+
+    @property
+    def resident_statistics_bytes(self):
+        return sum(value.numel() * value.element_size() for value in self._operators.values())
+
+    def arithmetic_identity(self, measurement_dtype):
+        identity = arithmetic_identity(measurement_dtype, self.projection_backend)
+        identity.update(
+            weight_projection='summed_output_operator_fp32_gemm',
+            operator_accumulation='sum_fp32_matrices_in_backward_invocation_order',
+            contraction_order='sum_operators_then_project_each_signed_component')
+        return identity
+
+    def begin_probe(self):
+        if self._phase != 'new' or not (self.handles or self.forward_originals):
+            raise RuntimeError("joint statistics requires one new entered lease per probe")
+        for name, module in self.modules.items():
+            self._require_source(name, module.weight)
+        self._phase, self.active = 'observing', True
+
+    def __enter__(self):
+        if self._phase != 'new':
+            raise RuntimeError("joint statistics cannot reenter a consumed lease")
+        return super().__enter__()
+
+    def _accumulate(self, key, matrix):
+        if key in self._operators:
+            self._operators[key].add_(matrix)
+        else:
+            self._operators[key] = matrix
+        self.telemetry['peak_statistics_bytes'] = max(
+            self.telemetry['peak_statistics_bytes'], self.resident_statistics_bytes)
+
+    def _release_observation_inputs(self):
+        for inputs in self._observation_inputs.values():
+            inputs.clear()
+        self._observation_inputs.clear()
+
+    def _observe(self, name, source_weight, x, output, output_slice=None, row_slice=None):
+        if self._phase != 'observing' or not self.active:
+            raise RuntimeError("joint statistics forward outside active observation")
+        self._require_source(name, source_weight)
+        if not isinstance(x, torch.Tensor) or not isinstance(output, torch.Tensor):
+            raise TypeError(f"joint statistics Linear {name} needs Tensor input/output")
+        inputs = [x.detach(), source_weight]
+        consumed = False
+
+        @torch.no_grad()
+        def collect(gradient):
+            nonlocal consumed
+            if self._phase != 'observing' or not self.active or consumed:
+                raise RuntimeError("joint statistics backward outside active observation")
+            try:
+                x, source_weight = inputs
+                self._require_source(name, source_weight)
+                selected = gradient if row_slice is None else gradient[row_slice]
+                selected = selected if output_slice is None else selected[..., output_slice]
+                if x.device != selected.device or x.device != source_weight.device:
+                    raise RuntimeError(f"joint statistics residency mismatch for {name}")
+                if (x.shape[:-1] != selected.shape[:-1] or x.shape[-1] != source_weight.shape[1]
+                        or selected.shape[-1] != source_weight.shape[0]):
+                    raise RuntimeError(f"joint statistics Linear geometry/shape mismatch for {name}")
+                x2 = x.reshape(-1, x.shape[-1]).float()
+                g2 = selected.reshape(-1, selected.shape[-1]).float()
+                self._accumulate((name, None), g2.T @ x2)
+                self.telemetry['operator_gemms'] += 1
+                for index, (spec, _) in enumerate(self.groups[name]):
+                    if not spec.act_quant_changes_input:
+                        continue
+                    quantized = _activation_qdq(x, spec, self.activation_max_abs, name)
+                    if (not isinstance(quantized, torch.Tensor) or quantized.shape != x.shape
+                            or quantized.device != x.device or quantized.dtype != x.dtype):
+                        raise RuntimeError(f"joint statistics QDQ changed residency/dtype/shape for {name}")
+                    dx = quantized.reshape_as(x2).float() - x2
+                    self._accumulate((name, index), g2.T @ dx)
+                    self.telemetry['qdq_calls'] += 1
+                    self.telemetry['operator_gemms'] += 1
+                consumed = True
+                self._pending_backwards -= 1
+            except BaseException:
+                # A QDQ/GEMM may fail after an earlier operator committed.
+                # Never allow a caught backward failure to become a retry.
+                self._phase, self.active = 'failed', False
+                self._remove_observers()
+                self.modules.clear()
+                self._operators.clear()
+                self._release_observation_inputs()
+                raise
+            finally:
+                inputs.clear()
+                self._observation_inputs.pop(id(inputs), None)
+            return gradient
+
+        if output.requires_grad:
+            self._pending_backwards += 1
+            self._observation_inputs[id(inputs)] = inputs
+            output.register_hook(collect)
+
+    @torch.no_grad()
+    def finish_observations(self):
+        if self._phase != 'observing':
+            raise RuntimeError("joint statistics observations are not active")
+        if self._pending_backwards:
+            raise RuntimeError("joint statistics has pending backward observations")
+        for name, module in self.modules.items():
+            self._require_source(name, module.weight)
+            for index, (spec, _) in enumerate(self.groups[name]):
+                operator = self._operators.get((name, index))
+                value = (float(self._projection_product_sum(operator, module.weight.float()))
+                         if operator is not None else 0.)
+                if not math.isfinite(value):
+                    raise RuntimeError(f"joint statistics nonfinite activation projection for {name}")
+                self._activation_terms[(name, index)] = value
+        self._remove_observers()
+        self.modules.clear()
+        self._phase, self.active = 'ready', False
+
+    @torch.no_grad()
+    def project(self, delta_weights):
+        if self._phase != 'ready':
+            raise RuntimeError("joint statistics is not ready for candidate projection")
+        if not isinstance(delta_weights, Mapping) or not delta_weights:
+            raise ValueError("joint statistics requires a nonempty candidate quantum")
+        storages = {}
+        for key, delta in delta_weights.items():
+            if key not in self._format_groups:
+                raise ValueError(f"joint statistics unknown candidate {key}")
+            if key in self._results:
+                raise ValueError(f"joint statistics duplicate candidate {key}")
+            shape, device = self._geometry[key[0]]
+            if (not isinstance(delta, torch.Tensor) or tuple(delta.shape) != shape
+                    or delta.device != device or not delta.is_floating_point()):
+                raise RuntimeError(f"joint statistics candidate residency/dtype/shape differs for {key}")
+            storage = delta.untyped_storage()
+            storages[(delta.device, storage.data_ptr())] = storage.nbytes()
+        candidate_bytes = sum(storages.values())
+        if candidate_bytes > self.max_candidate_bytes:
+            raise RuntimeError("joint statistics candidate storage exceeds candidate budget")
+        # Commit scalar results only after the whole quantum succeeds.
+        results = {}
+        for key, delta in delta_weights.items():
+            name, fmt = key
+            group = self._format_groups[key]
+            dw = delta.float()
+            gw = self._operators.get((name, None))
+            ga = self._operators.get((name, group))
+            if gw is None and not bool(torch.isfinite(dw).all()):
+                raise RuntimeError(f"joint statistics nonfinite unrouted candidate for {key}")
+            weight = float(self._projection_product_sum(gw, dw)) if gw is not None else 0.
+            activation = self._activation_terms[(name, group)]
+            mixed = float(self._projection_product_sum(ga, dw)) if ga is not None else 0.
+            total = weight + activation + mixed
+            if not all(math.isfinite(value) for value in (weight, activation, mixed, total)):
+                raise RuntimeError(f"joint statistics nonfinite signed projection for {key}")
+            results[key] = dict(weight=weight, activation=activation, mixed=mixed, total=total)
+        self._results.update(results)
+        self.telemetry['projected_candidates'] += len(results)
+        self.telemetry['peak_candidate_storage_bytes'] = max(
+            self.telemetry['peak_candidate_storage_bytes'], candidate_bytes)
+        return {key: dict(value) for key, value in results.items()}
+
+    def finish_projections(self):
+        if self._phase != 'ready':
+            raise RuntimeError("joint statistics is not ready to seal projections")
+        if set(self._results) != set(self._format_groups):
+            raise RuntimeError("joint statistics candidate coverage is incomplete")
+        result = {key: dict(value) for key, value in self._results.items()}
+        self._operators.clear()
+        self._activation_terms.clear()
+        self._results.clear()
+        self._phase = 'complete'
+        return result
+
+    def finish_probe(self):
+        raise RuntimeError("joint statistics requires observation and candidate projection seals")
+
+    def __exit__(self, *_args):
+        super().__exit__(*_args)
+        self.modules.clear()
+        self._release_observation_inputs()
+        self._operators.clear()
+        self._activation_terms.clear()
+        self._results.clear()
+        self._phase = 'closed'
 
 
 def validate_joint_aura_entry(entry: Mapping) -> bool:
