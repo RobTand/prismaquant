@@ -1,0 +1,36 @@
+{
+  "action": "1bd94ecd595b8c2930d6a9c81e751fe6c6fd488ba1ef7da1c6835f81adffea59",
+  "terminal_sha256": "b79e6d79635659ddbb30251ca1362a3f4626f4943ef6ec3c40944dee3cf84e77",
+  "returncode": 0,
+  "source_snapshot": {
+    "commit": "24f28f9b2277fa84712b71c1e667c369792d2509",
+    "input": {
+      "bytes": 27349474,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "bf9e01ddceec6c4a6e8d3707e73f8b9d4772171ae382b8077a32699aec32698e"
+    },
+    "parent": "716b35c3c18b0cf70001ed0ee32f15f48c4f9d51",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "worker": "dl380g10",
+  "resources": {
+    "cpu": 4,
+    "mem_gb": 12
+  },
+  "source_diff_from_base": [
+    ".pbrun-closure.5e21309e6664e767.json",
+    "tests/test_streamed_gold_companion.py",
+    "tools/build_streamed_full_kl_teacher.py",
+    "tools/full_kl_teacher_payload.py",
+    "tools/measure_vllm_full_kl.py",
+    "tools/serve_fingerprint.py"
+  ],
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 54%]\n............................................................             [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n132 passed, 56 warnings in 40.78s\n",
+  "receipt_sha256": "91c6e0861b6aee4d57843914fc3052caedbbdfc86a2c0a02ea1edcaa1c1fc55d",
+  "result": {
+    "bytes": 701,
+    "sha256": "8311d244d77f28ddb282285dc13afe6e14854a7a2c8b7ecb4cc154f51ee556df"
+  }
+}
