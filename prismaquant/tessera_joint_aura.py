@@ -439,6 +439,8 @@ def _load_plan(path, digest):
     execution = config["execution"]
     from .joint_projection_backend import normalize_projection_backend
     normalize_projection_backend(execution.get("projection_backend"))
+    from .cost_streaming import normalize_boundary_storage
+    normalize_boundary_storage(execution.get("boundary_storage"))
     _require(type(config.get("file_hash_workers", 1)) is int and config.get("file_hash_workers", 1) > 0,
              "positive file_hash_workers required")
     for name, minimum in (("n_calib_samples", 1), ("calib_seqlen", 1),
@@ -616,6 +618,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                 seed_base=execution["seed_base"], token_scope="all", temperature=1.0,
                 production_cache=cache, require_production_cache=True, joint_activation=True,
                 joint_projection_backend=projection_backend,
+                boundary_storage=execution.get("boundary_storage"),
                 **({"source_transition": source_transition} if source_transition is not None else {}),
                 include_routed_experts=True, include_lm_head=False, dw_dtype="float32",
                 min_free_gib=config["min_free_gib"], formats_by_qname=data.formats_by_qname,

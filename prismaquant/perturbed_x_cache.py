@@ -229,6 +229,162 @@ def release_activation_cache_file_pages(path, *, expected_stat):
         os.close(descriptor)
 
 
+EXACT_ACTIVATION_SCHEMA = "prismaquant.exact_activation_entry.v1"
+
+
+@dataclass(frozen=True)
+class ExactActivationReference:
+    """An immutable exact tensor receipt, never an activation sample/cache."""
+
+    path: str
+    name: str
+    metadata_json: str
+    shape: tuple[int, ...]
+    dtype: str
+    tensor_bytes: int
+    file_bytes: int
+    sha256: str
+
+
+def _exact_activation_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _activation_file_signature(path):
+    import stat
+    value = Path(path).lstat()
+    if not stat.S_ISREG(value.st_mode):
+        raise RuntimeError("exact activation entry is not a regular file")
+    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+
+def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
+                                       max_tensor_bytes, max_file_bytes,
+                                       release_file_pages=True):
+    """Extend the ordinary atomic writer with an exact tensor/identity receipt.
+
+    The caller reserves the one compact CPU copy before entering. No dtype,
+    row selection or shape change is allowed. Compact copying also prevents a
+    narrow view from serializing its entire source backing storage.
+    """
+    if not isinstance(inputs, torch.Tensor) or inputs.layout != torch.strided or inputs.is_meta:
+        raise TypeError("exact activation entry requires a materialized strided Tensor")
+    nbytes = inputs.numel() * inputs.element_size()
+    if not 0 < nbytes <= max_tensor_bytes:
+        raise RuntimeError("exact activation entry exceeds tensor residency budget")
+    metadata = {"schema": EXACT_ACTIVATION_SCHEMA, "identity": identity,
+                "shape": list(inputs.shape), "dtype": str(inputs.dtype), "tensor_bytes": nbytes}
+    encoded = _exact_activation_json(metadata)
+    path = Path(cache_dir) / activation_cache_filename(name)
+    if path.exists() or path.with_suffix(".pt.tmp").exists():
+        raise RuntimeError("exact activation entry already exists")
+    compact = None
+    try:
+        compact = inputs.detach().to(device="cpu", copy=True,
+            memory_format=torch.contiguous_format)
+        path = write_activation_cache_entry(cache_dir, name, compact,
+            source="exact_activation", durable=True, exact=metadata)
+        del compact
+        compact = None
+        published_stat = path.lstat()
+        signature = _activation_file_signature(path)
+        if signature[2] > max_file_bytes:
+            raise RuntimeError("exact activation entry exceeds file budget")
+        with path.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        if _activation_file_signature(path) != signature:
+            raise RuntimeError("exact activation entry changed during publication")
+        if release_file_pages:
+            release_activation_cache_file_pages(path, expected_stat=published_stat)
+        return ExactActivationReference(str(path), name, encoded, tuple(inputs.shape),
+            str(inputs.dtype), nbytes, signature[2], digest)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        path.with_suffix(".pt.tmp").unlink(missing_ok=True)
+        raise
+    finally:
+        compact = None
+
+
+class _ExactActivationPrefetch:
+    """One borrowed, closed resident window; lookups never perform I/O."""
+
+    def __init__(self):
+        self._tensors = {}
+        self.active = False
+
+    def get(self, reference):
+        if not self.active or reference not in self._tensors:
+            raise RuntimeError("exact activation window is not ready for this entry")
+        return self._tensors[reference]
+
+
+@contextmanager
+def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
+                                            expected_session, residency_check=None,
+                                            release_file_pages=True):
+    """Read/verify the entire bounded window before exposing any tensor.
+
+    This is the existing activation artifact owner's exact-input read seam.
+    The consumer owns no additional cache and receives no lazy-loading path.
+    ``residency_check`` reserves/releases these tensors in its aggregate owner.
+    """
+    references = tuple(references)
+    if any(not isinstance(ref, ExactActivationReference) for ref in references):
+        raise TypeError("exact activation prefetch requires immutable references")
+    if len(set(references)) != len(references):
+        raise ValueError("exact activation window repeats an entry")
+    nbytes = sum(ref.tensor_bytes for ref in references)
+    if nbytes > max_tensor_bytes:
+        raise RuntimeError("exact activation prefetch exceeds tensor residency budget")
+    window = _ExactActivationPrefetch()
+    reserved = False
+    payload = tensor = None
+    try:
+        if residency_check is not None:
+            residency_check(nbytes)
+            reserved = True
+        for ref in references:
+            metadata = json.loads(ref.metadata_json)
+            if (metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
+                    or metadata.get("identity", {}).get("session") != expected_session):
+                raise RuntimeError("exact activation reference has a different session identity")
+            path = Path(ref.path)
+            prefetched_stat = path.lstat()
+            signature = _activation_file_signature(path)
+            if signature[2] != ref.file_bytes:
+                raise RuntimeError("exact activation entry size changed")
+            with path.open("rb") as handle:
+                digest = hashlib.file_digest(handle, "sha256").hexdigest()
+            if digest != ref.sha256 or _activation_file_signature(path) != signature:
+                raise RuntimeError("exact activation entry checksum changed")
+            payload = torch.load(path, map_location="cpu", weights_only=True)
+            tensor = payload.get("inputs") if isinstance(payload, dict) else None
+            if (not isinstance(tensor, torch.Tensor) or tensor.layout != torch.strided
+                    or set(payload) != {"inputs", "name", "source", "exact"}
+                    or payload["name"] != ref.name or payload["source"] != "exact_activation"
+                    or _exact_activation_json(payload["exact"]) != ref.metadata_json
+                    or tuple(tensor.shape) != ref.shape or str(tensor.dtype) != ref.dtype
+                    or tensor.numel() * tensor.element_size() != ref.tensor_bytes
+                    or tensor.untyped_storage().nbytes() != ref.tensor_bytes
+                    or not tensor.is_contiguous() or tensor.requires_grad):
+                raise RuntimeError("exact activation entry tensor/metadata differs from its receipt")
+            if _activation_file_signature(path) != signature:
+                raise RuntimeError("exact activation entry changed during prefetch")
+            window._tensors[ref] = tensor
+            payload = tensor = None
+            if release_file_pages:
+                release_activation_cache_file_pages(path, expected_stat=prefetched_stat)
+        window.active = True
+        yield window
+    finally:
+        window.active = False
+        window._tensors.clear()
+        payload = tensor = None
+        if reserved:
+            residency_check(-nbytes)
+
+
 def _tensor_hash_update(h: "hashlib._Hash", tensor: torch.Tensor) -> None:
     t = tensor.detach().to("cpu").contiguous()
     h.update(str(tuple(t.shape)).encode())

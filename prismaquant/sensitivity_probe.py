@@ -1834,6 +1834,23 @@ class SharedStateCotangents:
                     yield pos, item
 
     # -- diagnostics ------------------------------------------------------
+    def resident_tensors(self) -> tuple[torch.Tensor, ...]:
+        """Expose retained shared adjoints for the streamed owner's byte cap.
+
+        Call at layer boundaries after harvest; a live graft belongs to the
+        current autograd graph, so treating it as completed state must refuse.
+        """
+        if self._live or self._containers:
+            raise RuntimeError("shared cotangent residency queried before harvest")
+        return tuple(self._acc.values())
+
+    def release_resident_state(self) -> None:
+        """Release adjoints/graph references when their entire sweep closes."""
+        self._acc.clear()
+        self._live.clear()
+        self._live_ids.clear()
+        self._containers.clear()
+
     def pending_keys(self) -> list[tuple]:
         """Accumulated cotangents no producer ever claimed. Non-empty means the
         sweep never forwarded the producing layer (or it stopped writing the

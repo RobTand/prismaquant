@@ -1844,6 +1844,24 @@ def _assemble_streamed_aura_payload(
     }
 
 
+def _with_boundary_artifacts(function):
+    """Keep temporary activation generations inside the public call lifetime."""
+    from functools import wraps
+
+    @wraps(function)
+    def run(*args, **kwargs):
+        config = kwargs.pop("boundary_storage", None)
+        if config is None:
+            return function(*args, **kwargs)
+        from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+        with StreamedBoundaryArtifacts(config) as storage:
+            result = function(*args, **kwargs, boundary_storage=storage)
+        result["provenance"]["streamed_boundary_storage"] = storage.receipt()
+        return result
+    return run
+
+
+@_with_boundary_artifacts
 def compute_aura_cost_streamed(
     runner,
     calib_ids: torch.Tensor,
@@ -1875,6 +1893,7 @@ def compute_aura_cost_streamed(
     joint_activation: bool = False,
     joint_projection_backend=None,
     source_transition=None,
+    boundary_storage=None,
     profile=None,
 ) -> dict:
     """Layer-streamed KL-adjoint with identity-bound per-Linear shards.
@@ -1887,8 +1906,13 @@ def compute_aura_cost_streamed(
     model. ``probe_microbatch > 0`` opts joint AURA into complete-sequence
     partitions with versioned global-row probes. Local signed terms and weight
     gradients sum across all partitions before squaring; full-vocabulary GPU
-    tensors are bounded by the partition. CPU boundaries and shared pass state
-    still cover the full calibration. Checkpoints bind the execution partition
+    tensors are bounded by the partition. By default CPU boundaries and shared
+    pass state cover the full calibration. Explicit ``boundary_storage`` v1
+    stores exact snapshots and rolling cotangents through the existing
+    activation artifact owner, leases bounded resident input windows, and caps
+    metadata/shared-state residency. It preserves the original traversal and
+    scalar projection arithmetic; candidate/gradient and source traffic bounds
+    remain separate admission requirements. Checkpoints bind the execution partition
     because floating-point kernels may round differently with batch shape.
     The resident :func:`compute_aura_cost` path is deliberately unchanged.
     """
@@ -1902,6 +1926,8 @@ def compute_aura_cost_streamed(
         raise ValueError("probe_microbatch must be a nonnegative integer")
     if calib_ids.ndim != 2 or min(calib_ids.shape) < 1:
         raise ValueError("streamed AURA needs nonempty [rows, sequence] calibration")
+    if boundary_storage is not None and model_identity is None:
+        raise ValueError("exact boundary storage requires exact model_identity")
     if joint_projection_backend is not None and not joint_activation:
         raise ValueError("joint_projection_backend requires joint_activation")
     if probe_microbatch and not joint_activation:
@@ -2333,6 +2359,7 @@ def compute_aura_cost_streamed(
             "streamed_cotangent_rollover",
             "streamed_boundary_release",
             "streamed_microbatch",
+            "streamed_boundary_storage",
         } & set(extra)
         if reserved:
             raise ValueError(
@@ -2342,6 +2369,8 @@ def compute_aura_cost_streamed(
         extra["streaming"] = True
         if execution_partition is not None:
             extra["streamed_microbatch"] = execution_partition
+        if boundary_storage is not None:
+            extra["streamed_boundary_storage"] = boundary_storage.identity
         if joint_activation:
             extra["joint_aura"] = joint_run_identity
         extra["streamed_model_identity"] = exact_model_identity
@@ -2576,55 +2605,95 @@ def compute_aura_cost_streamed(
 
     # Identity validation above is intentionally before the first model
     # forward: a mismatched resume is a refusal, never a recomputation.
+    from prismaquant.cost_streaming import prefetched_boundary_batches
+    if boundary_storage is not None:
+        from prismaquant.cost_streaming import validate_streamed_model_identity
+
+        def check_boundary_memory(label):
+            available = _free_gib()
+            if available < min_free_gib:
+                raise RuntimeError(f"free UMA {available:.1f} < floor {min_free_gib:.1f}; {label}")
+
+        boundary_storage.bind({
+            "source_model": validate_streamed_model_identity(model_identity, where="exact boundary storage"),
+            "producer_source_sha256": _aura_source_sha256(),
+            "calibration_sha256": hashlib.sha256(calib_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
+            "calibration_shape": list(calib_ids.shape), "calibration_dtype": str(calib_ids.dtype),
+            "n_probes": n_probes, "seed_base": seed_base, "token_scope": token_scope,
+            "temperature": temperature, "execution_partition": execution_partition,
+            "joint_probe_identity": joint_probe_identity,
+        }, n_probes=n_probes, check_memory=check_boundary_memory)
     _log(f"boundary capture: calib {tuple(calib_ids.shape)} in "
          f"{len(row_offsets)} partition(s) across {runner.num_layers} layers ...")
     capture_started = time.time()
     batches = []
-    for offset in row_offsets:
+    if boundary_storage is not None:
+        boundary_storage.watch_auxiliary(batches, [])
+    for batch_index, offset in enumerate(row_offsets):
         available_gib = _free_gib()
         if available_gib < min_free_gib:
             raise RuntimeError(f"free UMA {available_gib:.1f} < floor {min_free_gib:.1f}; "
                                f"abort before calibration row {offset}")
-        batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows]))
+        if boundary_storage is None:
+            batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows]))
+        else:
+            def write_boundary(depth, tensor):
+                return boundary_storage.write(tensor, batch_index=batch_index, boundary_index=depth)
+
+            def check_capture_state(current, state):
+                boundary_storage.check_auxiliary([*batches, current], extra=(state,),
+                    shared_extra=state if current.shared_pass_state is None else ())
+
+            batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows],
+                boundary_writer=write_boundary, resource_check=check_capture_state))
+            boundary_storage.check_auxiliary(batches)
     _log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} "
          f"min; starting {n_probes}-probe tail cotangents")
     device = runner.device
     dtype = runner.dtype
 
-    # Existing boundary and shared-state mechanisms, one instance per complete
-    # sequence partition. Host boundary/cotangent storage still scales with the
-    # full calibration; only GPU activations and full-vocabulary tensors are
-    # bounded by batch_rows. No second residency or spill cache is introduced.
+    # One existing shared-state instance per complete sequence/probe partition.
+    # Exact-artifact mode additionally caps these retained auxiliary tensors;
+    # the legacy mode keeps its original full-calibration host ownership.
     from prismaquant.sensitivity_probe import (
         SharedStateCotangents,
         kv_cotangent_path_enabled,
     )
     cotangents = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                   for _ in batches] for _ in range(n_probes)]
-    grad_outs: list[list[torch.Tensor]] = [[] for _ in range(n_probes)]
-    for batch_index, batch in enumerate(batches):
-        for probe_index in range(n_probes):
-            tail = batch.activations_cpu[-1].to(
-                device=device, dtype=dtype
-            ).detach().requires_grad_(True)
-            logits = runner.tail_logits(batch, tail)
-            if probe_layout is not None and list(logits.shape) != [
-                len(batch.input_ids), int(calib_ids.shape[1]), probe_layout["vocab_size"]
-            ]:
-                raise RuntimeError("streamed AURA tail differs from bound probe geometry")
-            probe = fisher_probe_scalar(
-                logits, seed=seed_base + probe_index, token_scope=token_scope,
-                temperature=temperature, distribution="rademacher",
-                **({"token_count_override": probe_layout["global_token_count"],
-                    "global_row_offset": row_offsets[batch_index]}
-                   if probe_layout is not None else {}),
-            )
-            probe.backward()
-            if tail.grad is None:
-                raise RuntimeError("streamed AURA tail produced no cotangent")
-            grad_outs[probe_index].append(tail.grad.detach().to("cpu"))
-            del logits, probe, tail
-        batch.activations_cpu[-1] = torch.empty(0)
+    grad_outs = [[] for _ in range(n_probes)]
+    if boundary_storage is not None:
+        boundary_storage.watch_auxiliary(batches, cotangents)
+        boundary_storage.check_auxiliary(batches, cotangents=cotangents)
+    with prefetched_boundary_batches(boundary_storage, batches, runner.num_layers) as tail_batches:
+        for batch_index, batch, tail_cpu, _unused in tail_batches:
+            try:
+                for probe_index in range(n_probes):
+                    tail = tail_cpu.to(device=device, dtype=dtype).detach().requires_grad_(True)
+                    logits = runner.tail_logits(batch, tail)
+                    if probe_layout is not None and list(logits.shape) != [
+                        len(batch.input_ids), int(calib_ids.shape[1]), probe_layout["vocab_size"]
+                    ]:
+                        raise RuntimeError("streamed AURA tail differs from bound probe geometry")
+                    probe = fisher_probe_scalar(
+                        logits, seed=seed_base + probe_index, token_scope=token_scope,
+                        temperature=temperature, distribution="rademacher",
+                        **({"token_count_override": probe_layout["global_token_count"],
+                            "global_row_offset": row_offsets[batch_index]}
+                           if probe_layout is not None else {}),
+                    )
+                    probe.backward()
+                    if tail.grad is None:
+                        raise RuntimeError("streamed AURA tail produced no cotangent")
+                    grad_outs[probe_index].append(tail.grad.detach().to("cpu") if boundary_storage is None
+                        else boundary_storage.write(tail.grad, batch_index=batch_index,
+                            boundary_index=runner.num_layers, probe_index=probe_index))
+                    del logits, probe, tail
+                if boundary_storage is not None:
+                    boundary_storage.retire(batch.activations_cpu[-1])
+                batch.activations_cpu[-1] = torch.empty(0)
+            finally:
+                tail_cpu = logits = probe = tail = None
 
     reverse_started = time.time()
     reverse_layers_done = 0
@@ -2962,57 +3031,68 @@ def compute_aura_cost_streamed(
                     accumulated_gradients.clear()
                     if joint_lease is not None:
                         joint_lease.begin_probe()
-                    for batch_index, batch in enumerate(batches):
-                        available_gib = _free_gib()
-                        if available_gib < min_free_gib:
-                            raise RuntimeError(
-                                f"free UMA {available_gib:.1f} < floor "
-                                f"{min_free_gib:.1f}; abort before streamed "
-                                f"layer {layer} probe {probe_index + 1}"
-                            )
-                        incoming_grad = grad_outs[probe_index][batch_index].to(device)
-                        x_in = batch.activations_cpu[layer].to(
-                            device=device, dtype=dtype
-                        ).detach().requires_grad_(True)
-                        isolated = profile.isolated_layer_pass_state(
-                            batch.shared_pass_state, runner.layers[layer]
-                        )
-                        isolated = cotangents[probe_index][batch_index].graft(isolated)
-                        out = runner.isolated_layer(
-                            batch, layer, x_in, pass_state=isolated
-                        )
-                        roots, root_grads = cotangents[probe_index][batch_index].produced_roots()
-                        if roots:
-                            torch.autograd.backward(
-                                [out, *roots],
-                                [incoming_grad, *root_grads],
-                            )
-                        else:
-                            out.backward(incoming_grad)
-                        cotangents[probe_index][batch_index].harvest()
-                        if x_in.grad is None:
-                            raise RuntimeError(
-                                f"streamed AURA layer {layer} produced no input "
-                                "cotangent"
-                            )
-                        # Replace this probe's consumed incoming cotangent now.
-                        # The former next_grad_outs list retained all 32 incoming
-                        # CPU tensors while growing a second complete outgoing
-                        # plane. In-place rollover bounds the CPU plane to 32
-                        # tensors plus the one result currently being copied.
-                        grad_outs[probe_index][batch_index] = x_in.grad.detach().to("cpu")
-                        for parameter_id, parameter in parameters.items():
-                            gradient = parameter.grad
-                            if gradient is not None:
-                                # Defensive straggler path for a backend that did
-                                # not invoke the post-accumulate hook. It performs
-                                # the identical reduction and still frees the
-                                # gradient before the next probe.
-                                for name in parameter_members[parameter_id]:
-                                    if name not in harvested:
-                                        _consume_streamed_gradient(name, _source_gradient(linears[name], gradient))
-                                parameter.grad = None
-                        del (out, x_in, incoming_grad, isolated, roots, root_grads)
+                    with prefetched_boundary_batches(boundary_storage, batches, layer,
+                            grad_outs[probe_index]) as reverse_batches:
+                        for batch_index, batch, boundary_cpu, incoming_cpu in reverse_batches:
+                            try:
+                                available_gib = _free_gib()
+                                if available_gib < min_free_gib:
+                                    raise RuntimeError(
+                                        f"free UMA {available_gib:.1f} < floor "
+                                        f"{min_free_gib:.1f}; abort before streamed "
+                                        f"layer {layer} probe {probe_index + 1}"
+                                    )
+                                incoming_grad = incoming_cpu.to(device)
+                                x_in = boundary_cpu.to(
+                                    device=device, dtype=dtype
+                                ).detach().requires_grad_(True)
+                                isolated = profile.isolated_layer_pass_state(
+                                    batch.shared_pass_state, runner.layers[layer]
+                                )
+                                isolated = cotangents[probe_index][batch_index].graft(isolated)
+                                out = runner.isolated_layer(
+                                    batch, layer, x_in, pass_state=isolated
+                                )
+                                roots, root_grads = cotangents[probe_index][batch_index].produced_roots()
+                                if roots:
+                                    torch.autograd.backward(
+                                        [out, *roots],
+                                        [incoming_grad, *root_grads],
+                                    )
+                                else:
+                                    out.backward(incoming_grad)
+                                cotangents[probe_index][batch_index].harvest()
+                                if x_in.grad is None:
+                                    raise RuntimeError(
+                                        f"streamed AURA layer {layer} produced no input "
+                                        "cotangent"
+                                    )
+                                # Replace this probe's consumed incoming cotangent now.
+                                # The former next_grad_outs list retained all 32 incoming
+                                # CPU tensors while growing a second complete outgoing
+                                # plane. In-place rollover bounds the CPU plane to 32
+                                # tensors plus the one result currently being copied.
+                                grad_outs[probe_index][batch_index] = (x_in.grad.detach().to("cpu")
+                                    if boundary_storage is None else boundary_storage.write(x_in.grad,
+                                        batch_index=batch_index, boundary_index=layer, probe_index=probe_index,
+                                        previous=grad_outs[probe_index][batch_index]))
+                                if boundary_storage is not None:
+                                    boundary_storage.check_auxiliary(batches, cotangents=cotangents)
+                                for parameter_id, parameter in parameters.items():
+                                    gradient = parameter.grad
+                                    if gradient is not None:
+                                        # Defensive straggler path for a backend that did
+                                        # not invoke the post-accumulate hook. It performs
+                                        # the identical reduction and still frees the
+                                        # gradient before the next probe.
+                                        for name in parameter_members[parameter_id]:
+                                            if name not in harvested:
+                                                _consume_streamed_gradient(name, _source_gradient(linears[name], gradient))
+                                        parameter.grad = None
+                                del (out, x_in, incoming_grad, isolated, roots, root_grads)
+                            finally:
+                                boundary_cpu = incoming_cpu = None
+                                out = x_in = incoming_grad = isolated = roots = root_grads = None
                     for name in list(accumulated_gradients):
                         _harvest_streamed_gradient(name, accumulated_gradients.pop(name))
                     for name in pending:
@@ -3066,6 +3146,8 @@ def compute_aura_cost_streamed(
             # Release it progressively instead of retaining all 44 DSv4
             # hc_mult=4 boundary snapshots to the end.
             for batch in batches:
+                if boundary_storage is not None:
+                    boundary_storage.retire(batch.activations_cpu[layer])
                 batch.activations_cpu[layer] = torch.empty(0)
 
             if checkpoint_root is not None:
@@ -3151,6 +3233,7 @@ def run_streamed_production_anchor_aura(
     collect_col_energy: bool = False,
     joint_activation: bool = False,
     joint_projection_backend=None,
+    boundary_storage=None,
     profile=None,
 ) -> dict:
     """Run one streamed KL adjoint over an exact production-anchor plan.
@@ -3339,6 +3422,7 @@ def run_streamed_production_anchor_aura(
         collect_col_energy=collect_col_energy,
         joint_activation=joint_activation,
         joint_projection_backend=joint_projection_backend,
+        boundary_storage=boundary_storage,
         checkpoint_dir=checkpoint_dir,
         resume=resume,
         model_identity=model_identity,
@@ -3529,6 +3613,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "artifact compatibility. Default is fail-fast because "
                         "routed experts need an empirical/hybrid expert-cost "
                         "path, not silent omission.")
+    p.add_argument("--boundary-storage-config", default=None,
+                   help="Explicit v1 JSON policy for exact streamed boundary/cotangent "
+                        "artifacts and bounded resident windows; streaming only, default off.")
     p.add_argument(
         "--include-routed-experts",
         action="store_true",
@@ -3548,6 +3635,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                    help="Pipeline COST_MODE stamped into "
                         "provenance['cost_mode'] (re-vet R2).")
     args = p.parse_args(argv)
+    boundary_storage_config = None
+    if args.boundary_storage_config:
+        if not args.streaming:
+            p.error("--boundary-storage-config requires --streaming")
+        from prismaquant.cost_streaming import normalize_boundary_storage
+        boundary_storage_config = normalize_boundary_storage(
+            json.loads(Path(args.boundary_storage_config).read_text()))
     if bool(args.calibration_input) != bool(args.calibration_input_sha256):
         p.error("--calibration-input and --calibration-input-sha256 are required together")
     if args.calibration_input and args.dataset:
@@ -3691,7 +3785,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if streamed_runner is not None:
         try:
             streamed_model_identity = None
-            if args.checkpoint_dir or args.joint_activation:
+            if args.checkpoint_dir or args.joint_activation or boundary_storage_config is not None:
                 from prismaquant.cost_streaming import (
                     build_streamed_model_identity,
                 )
@@ -3710,6 +3804,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 requested_formats,
                 n_probes=args.n_probes,
                 probe_microbatch=args.probe_microbatch,
+                boundary_storage=boundary_storage_config,
                 token_scope=args.token_scope,
                 temperature=args.temperature,
                 production_cache=cache,
