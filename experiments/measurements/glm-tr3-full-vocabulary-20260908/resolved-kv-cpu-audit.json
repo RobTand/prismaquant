@@ -1,0 +1,90 @@
+{
+  "action": "f6784b2e29c1fa0a227a12453d46a06ef51abe4d81660eff245bd1ccf5319a7a",
+  "returncode": 0,
+  "cleanup_complete": true,
+  "receipt_sha256": "e56f1911340ddf01eb40992e528c9a3090922b07f630b4e4168065f55bfa808e",
+  "result": {
+    "bytes": 619,
+    "sha256": "6fda7f0eb891a08addf102bb59568cdb8baa52a47f8768fe4ebeef024c3d11b5"
+  },
+  "source_snapshot": {
+    "commit": "8426a765b2689de9c956fbd752694ea361d9ddfd",
+    "input": {
+      "bytes": 27419364,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "9a05e27f03859f20b0b829350d6adc7fb39af16f1e8accef26ec05fa5c7aff52"
+    },
+    "parent": "da7e065687329419a8a6f38562b39619a922a6eb",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n................................................                         [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n48 passed, 56 warnings in 8.19s\n",
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 20.90304253076923,
+        "busy_percent_peak": 25.2983286,
+        "psi_some_avg10_max": 0.0,
+        "psi_some_avg10_samples": 12,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 13,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788909410.310339,
+      "errors": [
+        "no pqteld CSV for dl380g10 covering the window"
+      ],
+      "host": "dl380g10",
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata",
+      "start_unix": 1788909399.1892006
+    },
+    "finished_unix": 1788909410.310339,
+    "host": "dl380g10",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 8,
+      "processes_unreadable": 0,
+      "rchar": 34199437,
+      "read_bytes": 8192,
+      "source": "proc_io",
+      "syscr": 691,
+      "syscw": 11,
+      "wchar": 868,
+      "write_bytes": 472
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 72,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 134995968,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.017013999999999974,
+      "user_seconds": 0.13211500000000065,
+      "voluntary_context_switches": 3
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 32.470915,
+      "cpu_system_seconds": 2.493916,
+      "cpu_user_seconds": 29.976998,
+      "memory_current_bytes": 3129344,
+      "memory_peak_bytes": 1404268544,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788909399.1892006,
+    "wall_seconds": 11.121138334274292
+  },
+  "tested_file_sha256": {
+    "experiments/build_glm_tr3_teacher.py": "85138571a3dbbffc6cee9ba52c18906751a0e52018902d69f8fac07d34dfec94",
+    "experiments/measure_glm_tr3_vllm.py": "f6ca0e416fbc40e7771c5f6a34b7fd3f88f8a247a3b1b0353043b72efa2df654",
+    "experiments/glm_tr3_full_vocab.py": "1b2ad03e8ab70615b6d4ed04c40b73ac527cab8a03759b41e6f1459d1ab83db3",
+    "experiments/authenticate_glm_tr3_source.py": "78783f838e4d7385c37cd23cacac47c5c118f56ac583284898911f5a6e742614",
+    "tests/test_glm_tr3_full_vocab.py": "c14d7b4aafa6c80002260442314dfc2187afc5387e4be19dab7de43480eea6b8"
+  },
+  "source_bundle_verified": true
+}

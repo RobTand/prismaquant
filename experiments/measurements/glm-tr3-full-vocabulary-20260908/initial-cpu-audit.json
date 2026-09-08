@@ -1,0 +1,43 @@
+{
+  "action": "ae34d52a6fc412146fbee0628b7d9c8a35bb8c967e21dd0720350e52c3376c99",
+  "returncode": 0,
+  "receipt_sha256": "7fbea42089993798357911a1aeec30139ba7e7fd0c1fad4b5baab308454db827",
+  "result": {
+    "bytes": 570,
+    "sha256": "20883fe5688fc819e4f1bcaa7c676dd53faf8da26feaa59704e61db6b56d02fe"
+  },
+  "source_snapshot": {
+    "commit": "9b279837f97618492f8df02f6282c55acb5f25e0",
+    "input": {
+      "bytes": 27399564,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "fb1c0b036a619a60b33e9d669053bb2317069029b88cc668a1ce7b151be8366e"
+    },
+    "parent": "da7e065687329419a8a6f38562b39619a922a6eb",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "worker": "dl380g10",
+  "resources": {
+    "cpu": 8,
+    "mem_gb": 12
+  },
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n.......................................                                  [100%]\n=============================== warnings summary ===============================\ntests/test_glm_tr3_full_vocab.py: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n39 passed, 56 warnings in 6.90s\n",
+  "scope_resources": {
+    "cpu_seconds": 27.640258,
+    "cpu_system_seconds": 2.081764,
+    "cpu_user_seconds": 25.558493,
+    "memory_current_bytes": 17133568,
+    "memory_peak_bytes": 1417412608,
+    "source": "cgroup"
+  },
+  "tested_file_sha256": {
+    "experiments/authenticate_glm_tr3_source.py": "6e4469726d63e71b0569096126a5042af30ee5790860fb5791fc0cf1b0cc47d4",
+    "experiments/build_glm_tr3_teacher.py": "b588857b2a1b8100cfb4d7f365a0348275a5567f6af4435bc10b7acaa372be7a",
+    "experiments/glm_tr3_full_vocab.py": "1b2ad03e8ab70615b6d4ed04c40b73ac527cab8a03759b41e6f1459d1ab83db3",
+    "experiments/measure_glm_tr3_vllm.py": "2864a9dbbdf1d54679f21a9f2f78eef68f371414949c418ac6b535942a75ed23",
+    "tests/test_glm_tr3_full_vocab.py": "1664851399c7890bcc3e399de7d52ead82ffa325d23906478ae6547144205623"
+  },
+  "frozen_package_diff": []
+}
