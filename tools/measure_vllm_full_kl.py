@@ -22,6 +22,7 @@ from prismaquant_source_bootstrap import activate_prismaquant_source
 activate_prismaquant_source()
 
 try:  # package mode (`python -m tools.measure_vllm_full_kl`)
+    from .gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
     from .full_kl_teacher_payload import (
         load_teacher_evidence,
         safe_load_torch_payload,
@@ -29,6 +30,7 @@ try:  # package mode (`python -m tools.measure_vllm_full_kl`)
     from .serve_fingerprint import gold_producer_identity, self_manifest
     from .spec_decode_guard import refuse_if_spec_decode
 except ImportError:  # script mode (`python /repo/tools/measure_vllm_full_kl.py`)
+    from gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
     from full_kl_teacher_payload import (  # type: ignore
         load_teacher_evidence,
         safe_load_torch_payload,
@@ -100,6 +102,7 @@ def _provenance(args) -> dict:
         extra={
             "measurement_tool": "measure_vllm_full_kl",
             "producer_identity": producer,
+            "gold_engine_configuration": gold_engine_kwargs(args),
         },
         image=_resolve_serve_image(args),
     )
@@ -186,7 +189,7 @@ def _load_llm(args, *, max_model_len: int) -> "LLM":
         "model": args.model,
         "trust_remote_code": True,
         "dtype": args.dtype,
-        "tensor_parallel_size": 1,
+        **gold_engine_kwargs(args),
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_model_len": max_model_len,
         "max_num_seqs": 1,
@@ -678,6 +681,7 @@ def _student(args) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    add_gold_engine_arguments(parser)
     parser.add_argument("--mode", choices=["teacher", "student"], required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", required=True)
@@ -729,6 +733,7 @@ def main() -> int:
         help="RNG seed for the WikiText window draw (teacher mode only; "
         "students replay the windows stored in the teacher payload)")
     args = parser.parse_args()
+    validate_gold_engine_arguments(parser, args)
     # Resolve the image before anything loads a model: an unnamed image is a
     # reproducibility hole (R15), and discovering it only when the provenance
     # block is written would waste the whole measurement.

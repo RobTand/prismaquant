@@ -21,10 +21,12 @@ from prismaquant_source_bootstrap import activate_prismaquant_source
 activate_prismaquant_source()
 
 try:  # package mode (`python -m tools.measure_vllm_wikitext_ppl`)
+    from .gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
     from .dsv4_wikitext_inputs import load_dsv4_wikitext_inputs
     from .serve_fingerprint import gold_producer_identity, self_manifest
     from .spec_decode_guard import refuse_if_spec_decode
 except ImportError:  # script mode (`python /repo/tools/measure_vllm_wikitext_ppl.py`)
+    from gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
     from dsv4_wikitext_inputs import load_dsv4_wikitext_inputs  # type: ignore
     from serve_fingerprint import (  # type: ignore
         gold_producer_identity,
@@ -111,6 +113,7 @@ def _provenance(args) -> dict:
         extra={
             "measurement_tool": "measure_vllm_wikitext_ppl",
             "producer_identity": producer,
+            "gold_engine_configuration": gold_engine_kwargs(args),
         },
         image=_resolve_serve_image(args),
     )
@@ -354,7 +357,7 @@ def _load_llm(args) -> "LLM":
         "model": args.model,
         "trust_remote_code": True,
         "dtype": args.dtype,
-        "tensor_parallel_size": 1,
+        **gold_engine_kwargs(args),
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_model_len": int(args.seqlen) + 1,
         "max_num_seqs": 1,
@@ -411,6 +414,7 @@ def _logprob_value(entry, token_id: int) -> float:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_gold_engine_arguments(parser)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--dataset-cache-dir", default="/hfcache/datasets")
@@ -448,6 +452,7 @@ def main() -> int:
         "PQ_SERVE_IMAGE): the serve fingerprint is not evidence without it.",
     )
     args = parser.parse_args()
+    validate_gold_engine_arguments(parser, args)
 
     # Resolve the image before the tokenizer or the model loads: an unnamed
     # image is a reproducibility hole (R15), and discovering it only when the
