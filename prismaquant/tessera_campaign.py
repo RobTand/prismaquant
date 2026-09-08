@@ -4709,6 +4709,12 @@ def _main(argv, *, source_scope) -> int:
             names = [item[0] for item in batch]
             family, rung = batch[0][1:]
             fmt = f"{family}_R{rung}"
+            if selected_guard is not None:
+                # The lower bracket of the encode step. Without it the step's
+                # growth can only be read against whichever checkpoint
+                # happened to precede it, which is a different phase's charge
+                # (RobTand/prismaquant#390).
+                selected_guard.check('before_selected_anchor_batch')
             try:
                 common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
                     activation_kwargs_for=(

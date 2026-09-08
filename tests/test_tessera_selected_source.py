@@ -103,7 +103,7 @@ def test_selected_admission_excludes_unselected_source_and_forward_owners(monkey
     assert export['export_input_page_window_bytes'] == 64+2*16384
     assert plan['schema'] == 'prismaquant.selected_anchor_resources.v2'
     assert plan['export_input_writer_policy'] == 'verified-tensor-record-prefix'
-    assert export['serialization_scratch_bytes'] == 4**2*4
+    assert export['serialization_scratch_bytes'] == 2*4**2*4
     assert anchors['encoder_memo_bytes'] == 4*4*4+4*8
     assert plan['encoder_memo_capacity'] == 1
     assert 'nonbody_source_bytes' not in anchors
@@ -137,9 +137,11 @@ def test_selected_plan_terms_follow_the_allocations_they_bound(monkeypatch):
     anchors = plan['phases']['resident_anchors']
     export = plan['phases']['export_inputs']
     widest_h = 6**2*4
-    # torch.serialization._save stages exactly one CPU copy of a device
-    # storage per data/ record, not two.
-    assert export['serialization_scratch_bytes'] == widest_h
+    # The phase's peak is the capture digest, not the writer:
+    # hessian_capture_sha256 holds a CPU copy of one H and the bytes object
+    # of that copy at the same time, and the writer's own staging copy is one
+    # copy per record.
+    assert export['serialization_scratch_bytes'] == 2*widest_h
     # The seal/unit content hash and the regularise-plus-factorise stage are
     # sequential, and each peaks at two fp32 copies of the widest H.
     assert anchors['factorization_scratch_bytes'] == 2*widest_h

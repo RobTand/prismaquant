@@ -338,6 +338,18 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     ``CaptureMemoryGuard.check`` and stamps it beside this plan. Inventing a
     torch-plus-CUDA constant here would have been a third quantity, unmeasured
     on the box it was spent on.
+
+    **A second charge this plan does not own.** A row's first CUDA
+    factorisation and its first ``encode_linear`` load libraries and build
+    working buffers once, and that cost is a property of the runtime rather
+    than of the roster: on the streaming fixture it measured about 95 MB of
+    growth over the row's own baseline, roughly 70 MB of it resident host
+    pages and 25 MB of CUDA allocator segments, against a plan of 10.3 MB,
+    with the exact figure moving a few MB between runs, and it does not scale
+    with any shape in ``unit_shapes``. It is one-time and
+    size-independent, so on a production roster it is inside the guard's
+    margin, while on a small roster it dominates. The native row records the
+    number rather than covering it (RobTand/prismaquant#390).
     """
     import math
     if not unit_shapes or type(anchor_batch_size) is not int or anchor_batch_size < 1:
@@ -407,7 +419,13 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # live until the following 'del payload'. The finite check in
         # _validate_tensors allocates BOOL masks, one byte an element and one
         # at a time under the short-circuiting 'or', so it never raises this
-        # peak above the two FP32 copies.
+        # peak above the two FP32 copies. The loader asks for the same bound
+        # itself, once per entry, at both of its 'before_capture_prefetch'
+        # reserve_bytes call sites, so the plan and the loader's own reserve
+        # are the same number on the widest entry. Buffered read pages are
+        # not charged here: the loader releases them on the same path, and
+        # whether that release is complete is the loader's contract, not a
+        # term derivable from a shape.
         entry_validation_bytes=2*widest_capture_entry,
         source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight)
     export_inputs = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
@@ -426,12 +444,16 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # (RobTand/prismaquant#390). Counts retain the whole census, not this
         # subset.
         export_input_page_window_bytes=widest_h+len(counts)*16384,
-        # torch.serialization._save stages ONE CPU copy per non-CPU storage
-        # before write_record, either storage.cpu() or a pinned
-        # torch.empty(num_bytes, uint8) it copies into, and it is live only
-        # across that record. The selected row's Hessians are on the device,
-        # so the copy happens; one copy, not two.
-        serialization_scratch_bytes=widest_h)
+        # Two transient copies of the widest FP32 [in, in] H, because the
+        # phase's peak is the digest, not the writer. tessera_export_lane.
+        # hessian_capture_sha256 holds value = H.detach().cpu().contiguous()
+        # and then materializes value.view(uint8).numpy().tobytes(), a second
+        # full-size bytes object, before either is released; and across the
+        # loop's rebind the previous unit's copy is still referenced while the
+        # next one is built. torch.serialization._save then stages ONE CPU
+        # copy per non-CPU storage before write_record, live only across that
+        # record, so the writer's own transient is the smaller of the two.
+        serialization_scratch_bytes=2*widest_h)
     phases = dict(source_preparation=preparation, export_inputs=export_inputs,
                   resident_anchors=encoding)
     return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases,

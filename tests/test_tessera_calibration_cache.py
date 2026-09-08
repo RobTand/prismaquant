@@ -295,6 +295,9 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
         monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *a, **k: runner)
         monkeypatch.setattr(autoscale, 'selected_anchor_resources', lambda *a, **k: dict(
             memory_bytes=1024**3, selected_source_weight_bytes=32768,
+            # The campaign builds the encoder memo with the capacity the plan
+            # charged for, so a stub plan publishes one too.
+            encoder_memo_capacity=1,
             phases={'resident_anchors': {'factorization_scratch_bytes': 4*256**2*4}}))
         selection = tmp_path/'units.json'
         selection.write_text(json.dumps(dict(schema=tc.UNITS_SCHEMA,
