@@ -1,0 +1,18 @@
+[
+  {
+    "action": "1931f45f9fc1451ee64c92812fcf70ed8262b2ffa7b1ea1951c5fec49b30075c",
+    "receipt": "5d5fd0c73bc756371160333465cf27c14a34d34a13a9ae404bf11d3acacb6899",
+    "payload_sha256": "b2d4030e6f758cc833f15e3500fd89c22358a1a01bbb03adf2d5c48940f38761",
+    "snapshot": "029a3dd2bf54ef94cb8f3f4bb5fa9a82f7971c1f",
+    "source_diff_from_commit": [
+      ".pbrun-closure.e817fc75c8a58ae2.json",
+      "experiments/measurements/pr413-stack-cli-review-20260908/README.md",
+      "experiments/measurements/pr413-stack-cli-review-20260908/author-receipt-audit.json",
+      "experiments/measurements/pr413-stack-cli-review-20260908/integrated-invocation.json",
+      "experiments/measurements/pr413-stack-cli-review-20260908/integrated-receipt.json",
+      "experiments/measurements/pr413-stack-cli-review-20260908/integrated.stdout.log",
+      "experiments/measurements/pr413-stack-cli-review-20260908/reviewed-pr.patch"
+    ],
+    "stdout_tail": "'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.down_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.0.gate_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.gate_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.0.up_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.0.up_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.1.gate_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.1.gate_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.1.up_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.1.up_proj', 'TESSERA_BF16_K1_R257'), ('model.language_model.layers.1.mlp.experts.3.down_proj', 'TESSERA_BF16_K1_R256'), ('model.language_model.layers.1.mlp.experts.3.down_proj', 'TESSERA_BF16_K1_R257')]\n[389] encoder factorizations 6 over 6 distinct units, memo CacheInfo(hits=6, misses=6, maxsize=1, currsize=1)\n[389] release calls 31 over 24 anchor files, other advised files [PosixPath('/tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/selected-cache/hessian_capture.pt'), PosixPath('/tmp/pytest-of-ubuntu/pytest-0/test_selected_source_row_price0/selected-cache/hessian_capture.pt.tmp')]\n.\n=============================== warnings summary ===============================\n../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: 14 warnings\n  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 14 warnings in 35.41s\n"
+  }
+]

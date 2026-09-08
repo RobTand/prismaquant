@@ -193,29 +193,54 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
         capture_policy=argument('--streaming-capture-policy', 'legacy', str))
 
 
-def require_rows_fit(mem_gb: "list[int]", per_box: int, budget) -> int:
-    """Check that a box can hold ``per_box`` of these rows, and say so.
+def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
+                          budget) -> "tuple[list[str], list[dict]]":
+    """Split the planned rows into the ones a box holds and the ones it does not.
 
     Concurrency is a property of the row's demand, not a flag: PrismaBuild
     admits as many rows as a box's memory holds.  So this checks rather than
     sets -- shrinking a row's declared demand to force co-residency would be
-    reserving less than the row holds.  Returns the widest demand.
+    reserving less than the row holds.
+
+    A row wider than the box is **declined**, not a reason to refuse the
+    campaign.  The rows that fit are work the fleet can do now, and the ones
+    that do not are a demand to report at the width it was derived at, while
+    the limit they name is worked separately.  Returns the admissible row ids
+    in plan order and one record per declined row.  A plan with nothing
+    admissible refuses: there is no campaign to submit.
     """
     if per_box < 1:
         raise RuntimeError("--rows-per-box must be at least 1")
-    widest = max(mem_gb)
-    if budget is not None and widest * per_box > int(budget):
-        raise RuntimeError(
-            f"--rows-per-box {per_box} does not fit: the widest row demands "
-            f"{widest} GB and the spec declares a {int(budget)} GB box, so at "
-            f"most {int(budget) // widest} of these rows are co-resident. "
-            "Reduce --groups-per-row, or make the quantum hold less than the "
-            "whole checkpoint.")
+    widest = max(row_memory_gb.values())
     print(f"[dispatch] widest row demands {widest} GB; "
           f"--rows-per-box {per_box} needs {widest * per_box} GB per box"
           + (f" (spec declares {int(budget)} GB)" if budget is not None else
              " (the spec declares no box budget, so this is unchecked)"))
-    return widest
+    admissible: list[str] = []
+    declined: list[dict] = []
+    for row_id, mem_gb in row_memory_gb.items():
+        if budget is None or int(mem_gb) * per_box <= int(budget):
+            admissible.append(row_id)
+            continue
+        declined.append({
+            "row_id": row_id, "mem_gb": int(mem_gb), "rows_per_box": per_box,
+            "box_memory_gb": int(budget),
+            "reason": (f"demands {int(mem_gb)} GB, and --rows-per-box "
+                       f"{per_box} needs {int(mem_gb) * per_box} GB, over the "
+                       f"{int(budget)} GB box the spec declares"),
+        })
+    if not admissible:
+        raise RuntimeError(
+            f"--rows-per-box {per_box} fits no planned row: the widest row "
+            f"demands {widest} GB and the spec declares a {int(budget)} GB "
+            f"box, so at most {int(budget) // widest} of these rows are "
+            "co-resident. Reduce --groups-per-row, or make the quantum hold "
+            "less than the whole checkpoint.")
+    print(f"[dispatch] {len(admissible)} of {len(row_memory_gb)} rows are "
+          f"admissible, {len(declined)} declined")
+    for record in declined:
+        print(f"[dispatch]   {record['row_id']} {record['reason']}")
+    return admissible, declined
 
 
 def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int,
@@ -507,13 +532,13 @@ def cmd_plan(args) -> int:
               f"{sum(len(e['audit']) for e in stack_sample.values())} audited")
 
     units_dir = workspace / "units"
-    units_dir.mkdir(parents=True, exist_ok=True)
     ordered = sorted(groups)
     bundles = [ordered[index:index + args.groups_per_row]
                for index in range(0, len(ordered), args.groups_per_row)]
 
     rows: list[dict] = []
     planned: list[dict] = []
+    selection_writes: list[tuple[Path, str]] = []
     for index, bundle in enumerate(bundles):
         row_id = f"row-{index:04d}"
         entries = []
@@ -531,7 +556,7 @@ def cmd_plan(args) -> int:
             "groups": entries,
         }
         units_path = units_dir / f"{row_id}.json"
-        units_path.write_text(json.dumps(selection, indent=2, sort_keys=True) + "\n")
+        selection_writes.append((units_path, json.dumps(selection, indent=2, sort_keys=True) + "\n"))
         row_dir = workspace / "rows" / row_id
         members = [name for entry in entries
                    for name in (entry.get("sampled") or entry["members"])]
@@ -561,12 +586,30 @@ def cmd_plan(args) -> int:
 
     # PB alone admits and places these independently retryable rows according
     # to their actual source/capture preparation and resident encoding demand.
+    # All this decides is which rows it is handed: a row too wide for the box
+    # is declined here rather than submitted for an admission that cannot
+    # come, and the rest of the plan goes on being work.
     per_box = int(args.rows_per_box)
-    require_rows_fit([int(row["demand"]["mem_gb"]) for row in rows],
-                     per_box, spec.get("box_memory_gb"))
+    row_memory_gb = {entry["row_id"]: int(row["demand"]["mem_gb"])
+                     for entry, row in zip(planned, rows)}
+    admissible, inadmissible = partition_rows_by_fit(
+        row_memory_gb, per_box, spec.get("box_memory_gb"))
+    members_by_row = {entry["row_id"]: entry["members"] for entry in planned}
+    for record in inadmissible:
+        record["members"] = members_by_row[record["row_id"]]
+    admitted = set(admissible)
+    for entry in planned:
+        entry["admissible"] = entry["row_id"] in admitted
 
+    # A refused fit check must not rewrite selections still named by an
+    # existing published manifest. Derive every row before publishing bytes.
+    units_dir.mkdir(parents=True, exist_ok=True)
+    for units_path, selection_text in selection_writes:
+        units_path.write_text(selection_text)
     manifest = workspace / "manifest.json"
-    manifest.write_text(json.dumps(rows, indent=2) + "\n")
+    manifest.write_text(json.dumps(
+        [row for entry, row in zip(planned, rows) if entry["admissible"]],
+        indent=2) + "\n")
     plan = {
         "schema": PLAN_SCHEMA,
         "model": spec["model"],
@@ -575,9 +618,11 @@ def cmd_plan(args) -> int:
         "manifest": str(manifest),
         "groups_per_row": int(args.groups_per_row),
         "rows_per_box": per_box,
-        "row_memory_gb": {row_id: int(row["demand"]["mem_gb"])
-                          for row_id, row in zip(
-                              (entry["row_id"] for entry in planned), rows)},
+        "row_memory_gb": row_memory_gb,
+        # The rows the manifest does not hold, at the demand they were derived
+        # at. A reader of the plan sees the whole layout; a reader of the
+        # manifest sees only what was submitted.
+        "inadmissible_rows": inadmissible,
         "seed_checkpoint": (None if not args.seed_checkpoint
                             else str(args.seed_checkpoint)),
         # The draw itself, whole: which experts stand for their stack, under
@@ -595,8 +640,8 @@ def cmd_plan(args) -> int:
         "rows": planned,
     }
     (workspace / "plan.json").write_text(json.dumps(plan, indent=2) + "\n")
-    print(f"[dispatch] planned {len(rows)} rows over {len(ordered)} anchor groups "
-          f"-> {manifest}")
+    print(f"[dispatch] planned {len(rows)} rows over {len(ordered)} anchor "
+          f"groups, {len(admissible)} submitted -> {manifest}")
     return 0
 
 
@@ -1209,8 +1254,10 @@ def main(argv=None) -> int:
                            "places on the demand, and shrinking it to force "
                            "co-residency would be reserving less than the row "
                            "holds. It is checked against the spec's "
-                           "'box_memory_gb', when the spec declares one, and "
-                           "recorded in the plan.")
+                           "'box_memory_gb', when the spec declares one: a row "
+                           "that does not fit is left out of the manifest and "
+                           "recorded in the plan, and only a plan with no "
+                           "admissible row at all refuses.")
     plan.add_argument("--timeout-s", type=int, default=14400)
     plan.add_argument("--stack-sample", type=int, default=None,
                       help="price each routed stack from this many experts "
