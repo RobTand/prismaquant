@@ -1,0 +1,61 @@
+[
+  {
+    "cwd": "/home/rob/tmp/pq-glm-capture-compatibility-issuance",
+    "demand": {
+      "cpu": 2,
+      "mem_gb": 8
+    },
+    "tags": [
+      "gb10"
+    ],
+    "timeout_s": 600,
+    "priority": -10,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "python3",
+      "-m",
+      "tools.tessera_campaign_container",
+      "--cpu-only",
+      "--spec",
+      "{\"container\": {\"content_sha256\": \"d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026\", \"image\": \"prismaquant-glm-derivative:causal-exp-v1-20260908\", \"mounts\": [{\"source\": \"/mnt/shared\", \"target\": \"/mnt/shared\"}, {\"readonly\": true, \"source\": \"/home/rob/.cache/huggingface\", \"target\": \"/hf-cache\"}, {\"readonly\": true, \"source\": \"/mnt/shared/models/GLM-5.3-Flash-BF16\", \"target\": \"/mnt/shared/models/GLM-5.3-Flash-BF16\"}], \"archive\": {\"path\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-image-build-03/corrected-image.tar\", \"sha256\": \"f68f0cced8285711895a43c9e7ab7d9f3bfa00d737b2d1e4f21d608ff0c2b0af\"}}, \"env\": {\"HF_DATASETS_CACHE\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/hf-datasets\", \"HF_HOME\": \"/hf-cache\", \"HF_HUB_OFFLINE\": \"1\", \"MAX_JOBS\": \"1\", \"MIMALLOC_PURGE_DELAY\": \"0\", \"MKL_NUM_THREADS\": \"1\", \"NUMEXPR_NUM_THREADS\": \"1\", \"OMP_NUM_THREADS\": \"1\", \"OPENBLAS_NUM_THREADS\": \"1\", \"PRISMAQUANT_DETERMINISTIC\": \"1\", \"PRISMAQUANT_LAYER_READ_THREADS\": \"4\", \"PRISMAQUANT_RELEASE_SOURCE_PAGES\": \"1\", \"PRISMAQUANT_TMPDIR\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-meta-cpu-01/staging\", \"PYTHONDONTWRITEBYTECODE\": \"1\", \"PYTHONPATH\": \"/workspace:/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97/src:/mnt/shared/tessera-measurements/first-model-20260907/inputs/container-compatible-deps:/mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/capture-pytest-tools\", \"PYTORCH_ALLOC_CONF\": \"expandable_segments:True\", \"TESSERA_REPO\": \"/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97\", \"TORCHINDUCTOR_CACHE_DIR\": \"/tmp/glm-canonical-inductor\", \"TORCHINDUCTOR_COMPILE_THREADS\": \"1\", \"TRITON_CACHE_DIR\": \"/tmp/glm-canonical-triton\", \"XDG_CACHE_HOME\": \"/tmp/glm-canonical-cache\", \"CUDA_VISIBLE_DEVICES\": \"\"}}",
+      "--",
+      "python3",
+      "-m",
+      "prismaquant.glm_capture_compatibility",
+      "preflight",
+      "--plan",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/compatibility-issuance-pending-plan.json",
+      "--plan-sha256",
+      "6f59204d81a178baa8e6ea1852b836aced9c59bbded1d9399336235d1b333c0a"
+    ]
+  },
+  {
+    "cwd": "/home/rob/tmp/pq-glm-capture-compatibility-issuance",
+    "tags": [
+      "x86"
+    ],
+    "demand": {
+      "cpu": 1,
+      "mem_gb": 2
+    },
+    "priority": -10,
+    "timeout_s": 120,
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "argv": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "py_compile",
+      "prismaquant/glm_capture_compatibility.py",
+      "prismaquant/streaming_model.py",
+      "tests/test_glm_capture_compatibility_cli.py"
+    ]
+  }
+]
