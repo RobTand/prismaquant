@@ -20,6 +20,8 @@ residency, GPU saturation, KL, bpp or serving quality. Production integration
 requires separate phase admission and numerical/performance qualification.
 Gate: `tests/test_joint_operator_statistics.py` and existing joint lease/oracle
 and packed-source tests.
+The [primitive measurement](measurements/joint-operator-statistics-2026-09-08.md)
+records the synthetic native before/after profiles and explicit integration limits.
 
 Re-stamped (2026-09-08, `fix/campaign-portable-image-content`) for optional
 campaign container `content_sha256` (issue #371). The existing runtime identity
