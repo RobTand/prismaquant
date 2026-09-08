@@ -295,6 +295,43 @@ def profile_declared_unpacked_expert_linears(
     return sorted(out, key=lambda member: member.qname)
 
 
+def packed_activation_input_kind(param_name: str) -> str:
+    """Input names owned by the existing packed activation derivation."""
+    kinds = {"gate_up_proj": "gate_up", "down_proj": "down"}
+    if param_name not in kinds:
+        raise RuntimeError(f"packed activation derivation does not support {param_name!r}")
+    return kinds[param_name]
+
+
+def declared_shared_capture_groups(unit_shapes, profile):
+    """Plan input ownership from profile declarations, for checked admission.
+
+    This is an expectation, not evidence of the live representation. A
+    collector using the resulting memory bound must compare its actual groups
+    with these groups before forwarding. In particular, declared experts that
+    are ordinary unpacked Linears cannot claim packed gate/up sharing.
+    """
+    classifier = ProfileRoutedExpertClassifier(profile)
+    groups = {}
+    for name, shape in sorted(unit_shapes.items()):
+        if (not isinstance(name, str) or not name or len(shape) != 2 or
+                any(type(value) is not int or value <= 0 for value in shape)):
+            raise ValueError('capture input grouping requires named positive 2-D unit shapes')
+        match = classifier.classify(name)
+        key = ('dense', name)
+        if match is not None:
+            parts = name.rsplit('.', 2)
+            if len(parts) != 3 or not parts[1].isdigit() or not match.regex_declared:
+                raise RuntimeError(f'capture unit has no declared per-expert representation: {name}')
+            parent = profile.packed_expert_parent_for_projection(match.projection_name)
+            key = ('packed', parts[0], int(parts[1]), packed_activation_input_kind(parent))
+        groups.setdefault(key, []).append(name)
+    for members in groups.values():
+        if len({unit_shapes[name][1] for name in members}) != 1:
+            raise RuntimeError(f'shared capture inputs have different widths: {members}')
+    return {members[0]: members for members in sorted(groups.values())}
+
+
 @dataclass(frozen=True)
 class PackedExpertProjection:
     """One profile-declared 2-D view of a live packed expert parameter.

@@ -290,3 +290,88 @@ def test_layer_writer_releases_previous_resume_storage_before_next_load(capture,
     assert loaded == ['a.pt', 'b.pt']
     assert all(ref.expired() for ref in storages)
     assert set(writer.records) == {'a', 'b'}
+
+
+def test_bounded_writer_advises_only_verified_durable_entries_and_guards_sealing(capture, monkeypatch):
+    from prismaquant import perturbed_x_cache as cache
+    root, path, census, identity, acts, hessians, _record = capture
+    events = []
+    def advise(filename, *, expected_stat):
+        assert Path(filename).stat() == expected_stat
+        events.append(('advice', Path(filename).name))
+    monkeypatch.setattr(cache, 'release_activation_cache_file_pages', advise)
+    writer = cc.CaptureWriter(root, census_path=path, identity=identity,
+        release_file_pages=True, resource_check=lambda label: events.append(('check', label)))
+    writer.write(acts=acts, hessians=hessians, counts=census['counts'], maxima=census['max_abs'])
+    writer.finish(model_load_contract=identity['model_load_contract'])
+    assert events == [
+        ('check', 'before_capture_write:a'), ('advice', 'a.pt'), ('check', 'after_capture_write:a'),
+        ('check', 'before_capture_write:b'), ('advice', 'b.pt'), ('check', 'after_capture_write:b'),
+        ('check', 'before_capture_seal:a'), ('advice', 'a.pt'), ('check', 'after_capture_seal:a'),
+        ('check', 'before_capture_seal:b'), ('advice', 'b.pt'), ('check', 'after_capture_seal:b')]
+    events.clear()
+    (root/'inputs/a.pt').write_bytes(b'corrupt')
+    writer = cc.CaptureWriter(root, census_path=path, identity=identity, release_file_pages=True)
+    with pytest.raises(RuntimeError, match='entry changed'):
+        writer.write(acts=acts, hessians=hessians, counts=census['counts'], maxima=census['max_abs'])
+    assert not events
+
+
+def test_guarded_source_hash_matches_legacy_and_refuses_between_bounded_reads(tmp_path):
+    path = tmp_path/'source.bin'
+    path.write_bytes(b'a'*(17*1024**2))
+    events = []
+    assert cc.sha256(path, resource_check=events.append) == cc.sha256(path)
+    assert sum(label.startswith('after_') for label in events) == 2
+    def refuse(label):
+        if label.startswith('after_'):
+            raise RuntimeError('physical hash refusal')
+    with pytest.raises(RuntimeError, match='physical hash refusal'):
+        cc.sha256(path, resource_check=refuse)
+
+
+def test_page_advice_fences_durability_and_refuses_changed_files(tmp_path, monkeypatch):
+    import os
+    from prismaquant.perturbed_x_cache import release_activation_cache_file_pages
+    path = tmp_path/'entry.pt'
+    path.write_bytes(b'complete entry')
+    expected = path.stat()
+    events = []
+    original_fsync = os.fsync
+    def fsync(fd):
+        events.append('fsync')
+        original_fsync(fd)
+    monkeypatch.setattr(os, 'fsync', fsync)
+    monkeypatch.setattr(os, 'posix_fadvise', lambda fd, start, size, mode:
+                        events.append(('advice', start, size, mode)))
+    release_activation_cache_file_pages(path, expected_stat=expected)
+    assert events == ['fsync', ('advice', 0, 0, os.POSIX_FADV_DONTNEED)]
+    assert path.read_bytes() == b'complete entry'
+    events.clear()
+    path.write_bytes(b'changed entry')
+    with pytest.raises(RuntimeError, match='changed before page advice'):
+        release_activation_cache_file_pages(path, expected_stat=expected)
+    assert not events
+
+
+def test_guarded_hash_advises_only_consumed_pages_and_keeps_the_content_digest(tmp_path, monkeypatch):
+    import os
+    path = tmp_path/'source.bin'
+    path.write_bytes(b'z'*(17*1024**2+3))
+    expected = cc.sha256(path)
+    advice = []
+    def advise(fd, start, size, mode):
+        assert start+size <= os.lseek(fd, 0, os.SEEK_CUR)
+        advice.append((start, size, mode))
+    monkeypatch.setattr(os, 'posix_fadvise', advise)
+    assert cc.sha256(path, release_read_pages=True) == expected
+    assert advice == [(0, 16*1024**2, os.POSIX_FADV_DONTNEED),
+                      (16*1024**2, 1024**2, os.POSIX_FADV_DONTNEED)]
+    changed = []
+    def change(label):
+        if label.startswith('after_') and not changed:
+            with path.open('r+b') as handle:
+                handle.write(b'x')
+            changed.append(True)
+    with pytest.raises(RuntimeError, match='changed during guarded capture hashing'):
+        cc.sha256(path, resource_check=change)

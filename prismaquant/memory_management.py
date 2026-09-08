@@ -5,6 +5,7 @@ import gc
 import os
 import sys
 import weakref
+from pathlib import Path
 from typing import Iterable
 
 import torch
@@ -15,6 +16,90 @@ _BUDGET_EVICTORS: "weakref.WeakSet[object]" = weakref.WeakSet()
 
 class GPUMemoryBudgetExceeded(RuntimeError):
     """Raised when cache eviction cannot bring CUDA memory under budget."""
+
+
+class CaptureMemoryGuard:
+    """Fail closed on the conservative cgroup-plus-CUDA capture footprint.
+
+    CUDA can be absent from GB10's cgroup charge. Adding the entire allocator
+    reservation is deliberately conservative even where charges overlap. The
+    guard never changes a cache policy or drops system-wide page caches.
+    """
+
+    def __init__(self, device, *, cgroup_root=Path('/sys/fs/cgroup'),
+                 membership=Path('/proc/self/cgroup')):
+        self.device = torch.device(device)
+        root = Path(cgroup_root)
+        entries = [line.split(':', 2)[2] for line in Path(membership).read_text().splitlines()
+                   if line.startswith('0::')]
+        if len(entries) != 1 or not entries[0].startswith('/') or '..' in Path(entries[0]).parts:
+            raise RuntimeError('capture memory guard requires a cgroup v2 membership')
+        current = root/entries[0].lstrip('/')
+        limits = []
+        for scope in [current, *current.parents]:
+            if scope != root and root not in scope.parents:
+                break
+            limit_path = scope/'memory.max'
+            if not limit_path.is_file():
+                if scope == root:
+                    break  # The host's root cgroup has no configurable limit.
+                raise RuntimeError('capture memory guard cannot inspect its cgroup ancestors')
+            raw = limit_path.read_text().strip()
+            if raw != 'max':
+                limits.append((int(raw), scope))
+            if scope == root:
+                break
+        if not limits:
+            raise RuntimeError('bounded capture requires a finite cgroup memory budget')
+        self.cap_bytes, self.scope = min(limits, key=lambda pair: pair[0])
+        self.margin_bytes = 2*1024**3
+        self.host_floor_bytes = 8*1024**3
+        if self.cap_bytes <= self.margin_bytes:
+            raise RuntimeError('capture budget cannot hold its physical safety margin')
+        self.failure = None
+        self.peak_bytes = 0
+        self.min_available_bytes = None
+        self.last = None
+
+    def check(self, label, *, reserve_bytes=0):
+        if self.failure is not None:
+            raise RuntimeError(self.failure)
+        try:
+            if type(reserve_bytes) is not int or reserve_bytes < 0:
+                raise ValueError('capture future allocation reservation must be nonnegative bytes')
+            raw = (self.scope/'memory.max').read_text().strip()
+            cap = self.cap_bytes if raw == 'max' else min(self.cap_bytes, int(raw))
+            current = int((self.scope/'memory.current').read_text())
+            reserved = int(torch.cuda.memory_reserved(self.device))
+            host = _host_memory_info()
+            if host is None or current < 0 or reserved < 0:
+                raise RuntimeError('capture memory observations are unavailable')
+            available, total = host
+            if not 0 <= available <= total:
+                raise RuntimeError('capture host memory observations are invalid')
+            self.last = dict(label=str(label), cgroup_current_bytes=current,
+                cuda_reserved_bytes=reserved,
+                conservative_cgroup_plus_cuda_reserved_bytes=current+reserved,
+                host_mem_available_bytes=available, cap_bytes=cap,
+                future_allocation_bytes=reserve_bytes,
+                refusal_threshold_bytes=cap-self.margin_bytes)
+            self.peak_bytes = max(self.peak_bytes, current+reserved)
+            self.min_available_bytes = (available if self.min_available_bytes is None
+                                       else min(self.min_available_bytes, available))
+            if (current+reserved+reserve_bytes > cap-self.margin_bytes or
+                    available < self.host_floor_bytes+reserve_bytes):
+                raise RuntimeError(f'capture physical memory refusal: {self.last}')
+        except Exception as error:
+            self.failure = str(error)
+            raise
+        return dict(self.last)
+
+    def snapshot(self):
+        return dict(scope=str(self.scope), budget_bytes=self.cap_bytes,
+            margin_bytes=self.margin_bytes, host_floor_bytes=self.host_floor_bytes,
+            peak_conservative_bytes=self.peak_bytes,
+            min_host_available_bytes=self.min_available_bytes,
+            last_checkpoint=None if self.last is None else dict(self.last))
 
 
 def env_flag_enabled(name: str, *, default: bool = True) -> bool:

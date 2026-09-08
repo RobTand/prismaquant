@@ -57,7 +57,8 @@ DEFAULT_FIXED_OVERHEAD_GB = 15.0   # HF transformers + tokenizer + Python heap f
 
 def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
-                                   prefetch_workers, headroom_gb):
+                                   prefetch_workers, headroom_gb,
+                                   capture_policy='legacy'):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -71,6 +72,8 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     import math
     from .artifact_completeness import read_artifact_header
     from .model_profiles import detect_profile
+    if capture_policy not in ('legacy', 'shared-inputs-release-v1', 'shared-inputs-bounded-v1'):
+        raise ValueError('unknown streamed capture resource policy')
     if (any(type(v) is not int or v < 1 for v in
             (nsamples, seqlen, max_act_rows, cache_slots, prefetch_workers)) or
             cache_slots < 2 or not math.isfinite(headroom_gb) or headroom_gb < 0):
@@ -103,6 +106,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         raise ValueError('profile cannot map the decoder prefix for resource admission')
     live_prefix = live_probe.rsplit('.0.', 1)[0]+'.'
     body, fixed, pack, concat = {}, 0, {}, {}
+    raw_body, max_element_bytes = {}, 4
     packed_regex = profile.per_expert_moe_regex()
     packed_pattern = (re.compile(packed_regex.removeprefix('re:')) if packed_regex else None)
     for key, meta in header.items():
@@ -133,6 +137,8 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             raise ValueError(f'out-of-body source tensor is still live: {name}')
         layer = int(index)
         body[layer] = body.get(layer, 0)+size
+        raw_body[layer] = raw_body.get(layer, 0)+stored
+        max_element_bytes = max(max_element_bytes, math.ceil(size/max(numel, 1)), floating or 0)
         leaf = name.removesuffix('.weight')
         if packed_pattern is not None and (packed_pattern.match(leaf) or
                 packed_pattern.match(profile.to_vllm_internal_name(leaf))):
@@ -187,13 +193,65 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # One new entry may coexist with the old one during atomic replacement;
     # metadata/journals have an explicit per-unit serialization allowance.
     disk = total_h+total_x+widest_unit+len(unit_shapes)*16384
-    return dict(schema='prismaquant.streamed_calibration_resources.v1',
+    result = dict(schema='prismaquant.streamed_calibration_resources.v1',
         source_header_sha256=hashlib.sha256(json.dumps(header, sort_keys=True,
             separators=(',', ':')).encode()).hexdigest(),
         terms=terms, memory_bytes=sum(terms.values()), disk_bytes=disk,
         full_hessian_bytes=total_h, full_prefix_bytes=total_x,
         body_layer_bytes={str(k): v for k, v in sorted(body.items())},
         transient_status='conservative physical allocator bound for direct final-slab packer')
+    if capture_policy != 'shared-inputs-bounded-v1':
+        return result
+
+    from .routed_experts import declared_shared_capture_groups
+    groups = declared_shared_capture_groups(unit_shapes, profile)
+    forward_h, forward_x, drain = {}, {}, {}
+    for members in groups.values():
+        if any(type(counts[name]) is not int or counts[name] <= 0 for name in members):
+            raise ValueError('shared capture admission requires positive census counts')
+        if len({counts[name] for name in members}) != 1:
+            raise ValueError('shared capture siblings disagree on census input count')
+        name = members[0]
+        layer = int(name[len(live_prefix):].split('.', 1)[0])
+        columns = unit_shapes[name][1]
+        h = columns*columns*4
+        # The device buffer reserves max_act_rows even for a shorter draw.
+        device_x = max_act_rows*columns*4
+        output_x = min(counts[name], max_act_rows)*columns*4
+        forward_h[layer] = forward_h.get(layer, 0)+h
+        forward_x[layer] = forward_x.get(layer, 0)+device_x
+        # Each group drains before its independent CPU siblings are cloned.
+        # At every group boundary charge its larger device/output footprint;
+        # one transfer may additionally coexist within the active group.
+        drain[layer] = drain.get(layer, 0)+max(h+device_x, len(members)*(h+output_x))
+    common = {key: value for key, value in terms.items() if key not in
+              ('source_window_bytes', 'loader_transient_bytes',
+               'layer_hessian_bytes', 'layer_prefix_bytes')}
+    forward = dict(common, source_window_bytes=terms['source_window_bytes'],
+        loader_transient_bytes=loader_transient,
+        layer_hessian_bytes=max(forward_h.values(), default=0),
+        layer_prefix_bytes=max(forward_x.values(), default=0))
+    materialization = dict(common,
+        source_window_bytes=sum(sorted(body.values(), reverse=True)[:cache_slots-1]),
+        loader_transient_bytes=0,
+        layer_materialization_bytes=max(drain.values(), default=0),
+        finite_validation_mask_bytes=max((max(shape[1]**2,
+            min(counts[name], max_act_rows)*shape[1])
+            for name, shape in unit_shapes.items()), default=0))
+    source_validation = dict(common, source_window_bytes=terms['source_window_bytes'],
+        loader_transient_bytes=loader_transient,
+        source_validation_file_bytes=max(raw_body.values(), default=0),
+        source_validation_cpu_copy_bytes=max(
+            (math.prod(shape)*max_element_bytes for shape in unit_shapes.values()), default=0))
+    phases = dict(source_validation=source_validation, forward=forward, materialization=materialization)
+    result.update(schema='prismaquant.streamed_calibration_resources.v2',
+        capture_policy=capture_policy, input_groups=groups, phases=phases,
+        memory_bytes=max(sum(phase.values()) for phase in phases.values()),
+        transient_status='checked shared input groups; settled prefetch window and completed source release before materialization')
+    # v1's additive terms are retained only in its own schema. v2 carries two
+    # mutually exclusive phase maps, with the maximum defining admission.
+    del result['terms']
+    return result
 
 
 def _num_layers(cfg: dict) -> int:
