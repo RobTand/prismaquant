@@ -1,7 +1,59 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `claude/dispatch-process-baseline`. Stamps
+As of: 2026-09-09 · `perf/glm-selected-source-snapshot`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-09, `perf/glm-selected-source-snapshot`) for
+`dispatch_tessera_campaign.py plan --seed-workspace`. A new plan can offer each
+matching prior row's completed or partial checkpoint to the existing seed gates.
+The planner requires the same model, census, capture, group bundles, membership
+and sampling; it records the source plan digest and each available seed manifest
+identity. These at-plan digests are provenance, not execution gates: the source
+may advance before adoption, and the runtime checks the then-current scoring
+inputs and wires. Group additions or changed bundles/sampling refuse the plan;
+a matching row without a checkpoint prices fresh. Seed files retain their original
+owner. PB continues to own all admission, placement and retries. The runtime validates
+the seed identity and wire bytes when adopting them. Gate:
+`tests/test_tessera_campaign_seed_workspace.py`.
+
+Re-stamped (2026-09-09, `perf/glm-selected-source-snapshot`) for seed-score
+identity validation. `--seed-checkpoint` now requires a digest-bound source
+manifest and matching unit envelopes, then compares calibration, score currency,
+static-scale policy, actual per-unit scoring-row identity and input scale before
+linking that unit's wires or inheriting its measured error. Producer input and
+wire checks still apply. Menu and source-package changes can reuse compatible
+measurements; changed scoring activations cannot inherit old scores. Missing
+unit shards remain eligible for fresh pricing, preserving partial-checkpoint
+recovery. Gates: `tests/test_tessera_campaign_resume.py` and
+`tests/test_tessera_campaign_fanout.py`.
+
+Re-stamped (2026-09-09, `perf/glm-selected-source-scope`) for opt-in
+`--source-snapshot-policy selected-tensors-v1` in selected anchor rows that
+reuse a complete, SHA-bound capture. The default remains `whole-layer-v1`.
+The source-only mode builds the declared meta skeleton but materializes no
+head, embedding or vision tensors. Its one-shot selection narrows the existing
+`StreamingContext` maps before prefetch, using the same profile-derived
+source dependency closure as resource admission. The existing reader, layer
+cache, concat merger and expert packer remain the owners of source bytes.
+A selected projected expert requires its entire packed parent, including all
+expert indices and sibling projections; a concat target requires every source.
+Forward installation and full source-initialization attestation are refused.
+The selected source keys are compared with the admitted plan before reading
+and recorded in the source receipt. Source shard SHA256 authentication and
+held-descriptor mutation fences remain unchanged: consuming one tensor still
+authenticates its entire shard once per row. The initial policy supports
+unscaled floating checkpoints; scaled FP8/FP4 sources fail closed.
+
+Admission excludes unconsumed source tensors and nonbody materialization,
+retains selected H/X, encoder, packing and publication charges and the existing
+full-layer source-validation allowance, and preserves
+the full-header identity and decoder coverage check. Snapshot policy is an
+execution choice outside cost identity, like compatible batch width: source
+weight bytes, calibration, encoder policy, wire format and shipping gates do
+not change. Qualification requires selected weight parity and a complete
+matched-group GPU profile before claiming a production speedup. Gates:
+`tests/test_selected_snapshot_scope.py` and existing streaming, source
+authentication, selected-anchor and dispatcher admission tests.
 
 Re-stamped (2026-09-09, `claude/dispatch-process-baseline`) for the campaign
 dispatcher's explicit process-baseline reservation. A recipe may declare

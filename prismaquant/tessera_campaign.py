@@ -1599,7 +1599,7 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "units", "calibration_census", "census_out",
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
-                 "publication_overlap_bytes"):
+                 "publication_overlap_bytes", "source_snapshot_policy"):
         settings.pop(name, None)
     return {
         **({"family_restriction": {"policy": restriction,
@@ -2026,7 +2026,8 @@ class _AnchorPublicationLedger:
 
 
 def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
-                           adopt, admits, identity_sha256, validate_state=None) -> dict:
+                           adopt, admits, identity_sha256, expected_identity,
+                           validate_state=None) -> dict:
     """Offer another campaign's stored anchors to this run's row gates.
 
     A whole-scope campaign already priced rows this run would price again.  Its
@@ -2040,13 +2041,16 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     ``verify_cached_unit`` re-reads the blob and re-validates the wire against
     it.  A row that does not describe this run's bytes is refused by name.
 
-    What is inherited and not re-derived is the stored ``dloss`` -- the same
-    thing a resume of this run's own checkpoint inherits, for the same reason.
+    Stored ``dloss`` is inherited only after the seed's calibration, currency,
+    static-scale policy and actual per-unit scoring tensors match this run.
+    Producer input identity binds encoded bytes; it does not bind the X rows
+    used to measure decoded-weight error. The manifest and unit envelope are
+    authenticated through the existing checkpoint digest and loader.
 
     Returns the record stamped into provenance: which manifest, which identity
     it was written under, and which units were adopted.
     """
-    from .cost_stage_checkpoint import unit_path
+    from .cost_stage_checkpoint import unit_path, _load_unit, canonical_json_sha256
 
     manifest = Path(manifest_path)
     parts = manifest.with_name(manifest.name + ".parts")
@@ -2056,35 +2060,32 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     seed_wire = (Path(wire_dir_arg) if wire_dir_arg
                  else manifest.parent / "cache" / "wire")
     try:
-        seed_identity = json.loads(manifest.read_text()).get("identity_sha256")
+        seed_manifest = json.loads(manifest.read_text())
+        seed_identity = seed_manifest.get("identity_sha256")
+        seed_inputs = seed_manifest.get("identity")
+        if (not isinstance(seed_inputs, dict) or
+                canonical_json_sha256(seed_inputs, where='seed checkpoint identity') != seed_identity):
+            raise ValueError('seed checkpoint identity digest differs')
     except Exception as exc:
         raise RuntimeError(
             f"--seed-checkpoint {manifest}: unreadable manifest: {exc}") from exc
+    for field in ('currency', 'calibration', 'input_global_scale_policy'):
+        if (field not in seed_inputs or field not in expected_identity or
+                seed_inputs[field] != expected_identity[field]):
+            raise RuntimeError(f'seed checkpoint scoring identity mismatch at {field}')
     adopted: list[str] = []
     for name in targets:
         path = unit_path(parts, name)
         if not path.is_file():
             continue
-        try:
-            with path.open("rb") as handle:
-                envelope = pickle.load(handle)
-        except Exception as exc:
-            raise RuntimeError(
-                f"--seed-checkpoint {manifest}: unit shard for {name} is "
-                f"unreadable: {exc}") from exc
-        if not isinstance(envelope, Mapping) or envelope.get("qname") != name:
-            raise RuntimeError(
-                f"--seed-checkpoint {manifest}: unit shard for {name} is not "
-                "an envelope for that unit")
-        payload = envelope.get("payload")
-        import hashlib
-
-        if not isinstance(payload, bytes) or envelope.get("payload_sha256") != \
-                hashlib.sha256(payload).hexdigest():
-            raise RuntimeError(
-                f"--seed-checkpoint {manifest}: unit shard for {name} fails its "
-                "own payload digest")
-        state = pickle.loads(payload)
+        seed_unit = seed_inputs.get('units', {}).get(name, {})
+        current_unit = expected_identity.get('units', {}).get(name, {})
+        for field in ('scoring_rows', 'input_global_scale'):
+            if (field not in seed_unit or field not in current_unit or
+                    seed_unit[field] != current_unit[field]):
+                raise RuntimeError(f'seed checkpoint scoring identity mismatch at units.{name}.{field}')
+        state = _load_unit(path, stage='Tessera campaign', qname=name,
+                           identity_sha256=seed_identity)
         if validate_state is not None:
             validate_state(name, state)
         # Only the rows this run's menu admits get their bytes linked in.  An
@@ -4196,6 +4197,9 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--streaming", action="store_true",
                     help="Use the source layer cache for census/capture or selected anchors from a complete capture.")
     ap.add_argument("--streaming-cache-slots", type=int, default=2)
+    ap.add_argument("--source-snapshot-policy", default="whole-layer-v1",
+                    choices=("whole-layer-v1", "selected-tensors-v1"),
+                    help="selected-tensors-v1 loads authenticated weight dependencies only; requires selected streaming capture reuse")
     ap.add_argument("--streaming-prefetch-workers", type=int, default=1)
     ap.add_argument("--streaming-cache-headroom-gb", type=float, default=24)
     ap.add_argument("--streaming-capture-policy", default="legacy",
@@ -4222,6 +4226,8 @@ def _main(argv, *, source_scope) -> int:
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if args.source_snapshot_policy != 'whole-layer-v1' and not selected_source:
+        ap.error('--source-snapshot-policy requires selected streaming capture reuse')
     if args.capture_load_policy is not None and not (selected_source or (
             args.streaming and args.capture_calibration_out and
             args.streaming_capture_policy == 'shared-inputs-bounded-v1')):
@@ -4317,6 +4323,8 @@ def _main(argv, *, source_scope) -> int:
             prefetch_min_available_gb=args.streaming_cache_headroom_gb,
             prefetch_lookahead=args.streaming_cache_slots-1, require_prefetched_residency=True,
             attn_implementation=args.attention_implementation,
+            **({'source_snapshot_only': True}
+               if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
             **({'source_authentication': source_authentication} if source_authentication is not None else {}))
         model = runner.model
     else:
@@ -4496,6 +4504,7 @@ def _main(argv, *, source_scope) -> int:
             headroom_gb=args.streaming_cache_headroom_gb,
             anchor_batch_size=args.anchor_batch_size,
             publication_overlap_bytes=args.publication_overlap_bytes,
+            source_snapshot_policy=args.source_snapshot_policy,
             **(dict(capture_load_policy=args.capture_load_policy)
                if args.capture_load_policy is not None else {}))
         if device == 'cuda':
@@ -4538,6 +4547,8 @@ def _main(argv, *, source_scope) -> int:
         try:
             selected_weights, selected_source_preparation = runner.snapshot_selected_weights(
                 targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
+                **({'expected_source_keys': selected_resources['source_tensor_keys']}
+                   if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
                 resource_check=None if selected_guard is None else selected_guard.check)
         finally:
             runner.shutdown()
@@ -4874,7 +4885,7 @@ def _main(argv, *, source_scope) -> int:
             wire_dir=wire_dir, adopt=adopt_state,
             admits=lambda name, fmt: any(
                 entry.format_name == fmt for entry in menus.get(name, ())),
-            identity_sha256=identity_sha256,
+            identity_sha256=identity_sha256, expected_identity=checkpoint_identity,
             validate_state=validate_seed_scope if args.family_restriction is not None else None)
         for name in seed_provenance["units"]:
             dirty_checkpoint_units.add(name)

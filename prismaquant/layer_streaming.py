@@ -1061,6 +1061,56 @@ def _merge_concat_sources(
     return produced
 
 
+def selected_weight_source_keys(unit_names, profile, source_keys):
+    """Resolve selected Linears to the existing reader's source dependencies.
+
+    A projected expert still needs its complete packed parent, including all
+    siblings required by the profile's packer. A concat target needs every
+    declared source. The same metadata closure sizes and executes snapshots;
+    it does not change packing, dequantization, or source authentication.
+    """
+    keys = set(source_keys)
+    names = tuple(unit_names)
+    if not names or len(names) != len(set(names)):
+        raise ValueError('selected source requires unique nonempty units')
+    regex = profile.per_expert_moe_regex()
+    pattern = re.compile(regex.removeprefix('re:')) if regex else None
+
+    def packed_parent(name):
+        if pattern is None or not (pattern.match(name) or
+                pattern.match(profile.to_vllm_internal_name(name))):
+            return None
+        owner, projection = name.rsplit('.', 1)
+        path, expert = owner.rsplit('.', 1)
+        parent = profile.packed_expert_parent_for_projection(projection)
+        return path+'.'+parent if expert.isdigit() and parent is not None else None
+
+    groups = tuple(profile.concat_merge_groups())
+    dependencies = {}
+    for key in sorted(keys):
+        target = packed_parent(key.removesuffix('.weight')) or key
+        for output, inputs, _dim in groups:
+            for suffix in inputs:
+                if key.endswith(suffix):
+                    target = key[:-len(suffix)]+output
+        dependencies.setdefault(target, set()).add(key)
+    selected = set()
+    for name in names:
+        target = packed_parent(name) or name+'.weight'
+        required = dependencies.get(target)
+        if not required:
+            raise RuntimeError(f'selected source has no checkpoint dependency for {name}')
+        if target in keys and required != {target}:
+            raise RuntimeError(f'selected source has ambiguous packed/merged inputs for {name}')
+        for output, inputs, _dim in groups:
+            if target.endswith(output) and target not in keys:
+                expected = {target[:-len(output)]+suffix for suffix in inputs}
+                if required != expected:
+                    raise RuntimeError(f'selected source has incomplete concat inputs for {name}')
+        selected.update(required)
+    return tuple(sorted(selected))
+
+
 def _build_concat_merger(model: nn.Module, weight_ckpt: dict[str, str]):
     """Return a callable that merges N->1 concat source tensors, or None.
 

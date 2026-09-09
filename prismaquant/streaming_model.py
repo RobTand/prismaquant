@@ -549,7 +549,8 @@ class StreamingContext:
                  prefetch_workers: int = 3,
                  prefetch_min_available_bytes: int = 0,
                  expert_packer=None,
-                 concat_merger=None, source_authentication=None):
+                 concat_merger=None, source_authentication=None,
+                 source_snapshot_only=False, source_fp4_experts=False):
         self.model = model
         self.base_model = base_model
         self.layers = layers
@@ -597,6 +598,8 @@ class StreamingContext:
         # behavior change). Built once in `_build_streaming_context`.
         self.concat_merger = concat_merger
         self.source_authentication = source_authentication
+        self.source_snapshot_only = source_snapshot_only
+        self.source_fp4_experts = source_fp4_experts
         self._inflight: dict[int, Any] = {}
         self._inflight_lock = threading.Lock()
         # Sequential-walk tracking for the automatic prefetch top-up.
@@ -623,12 +626,39 @@ class StreamingContext:
             int(self.layer_cache.dynamic_reserve_bytes or 0),
         )
 
+    def configure_selected_snapshot(self, names, profile):
+        """Narrow this source-only context before the existing cache loads it."""
+        from .layer_streaming import selected_weight_source_keys
+        if not getattr(self, 'source_snapshot_only', False):
+            raise RuntimeError('selected snapshot requires a source-only context')
+        with self._inflight_lock:
+            if getattr(self, '_snapshot_source_keys', None) is not None or self._inflight:
+                raise RuntimeError('selected snapshot source is already configured or active')
+            keys = selected_weight_source_keys(names, profile, self.weight_ckpt)
+            # Build the complete transition before committing any source state.
+            # Header/authentication failure leaves the original maps reusable.
+            shards = {key: self.weight_shard[key] for key in keys}
+            checkpoint_keys = {key: self.weight_ckpt[key] for key in keys}
+            estimated, layer_bytes = _estimate_layer_cache_bytes(
+                weight_shard=shards, weight_ckpt=checkpoint_keys,
+                layers_prefix=self.layers_prefix, num_layers=self.num_layers,
+                target_dtype=self.dtype, tensor_dtypes=self.buffer_dtypes,
+                fp4_experts=self.source_fp4_experts,
+                **({'source_authentication': self.source_authentication}
+                   if self.source_authentication is not None else {}))
+            self.weight_shard, self.weight_ckpt = shards, checkpoint_keys
+            self.estimated_layer_bytes = estimated
+            self._snapshot_layer_bytes = layer_bytes
+            self._snapshot_source_keys = keys
+
     def configure_runtime_pressure_floor(self) -> int:
         floor = self.memory_pressure_floor_bytes()
         self.layer_cache.configure_pressure_threshold(floor)
         return floor
 
     def _prefetch_worker(self, L: int):
+        if getattr(self, 'source_snapshot_only', False) and not getattr(self, '_snapshot_source_keys', None):
+            raise RuntimeError('snapshot source must be configured before prefetch')
         # v20 fix #1: re-check memory + pre-evict before the read.
         # schedule_prefetch's check may be stale if the queue was deep,
         # and the cache's dynamic budget only kicks in at put() time —
@@ -725,6 +755,10 @@ class StreamingContext:
         return released
 
     def schedule_prefetch(self, L: int):
+        if getattr(self, 'source_snapshot_only', False):
+            with self._inflight_lock:
+                if not getattr(self, '_snapshot_source_keys', None):
+                    raise RuntimeError('snapshot source must be configured before prefetch')
         # A one-slot policy is used by the DSv4 anchored-AURA campaign on a
         # unified-memory Spark.  Speculative loading while the current layer
         # is installed would create a second live source-weight plane even if
@@ -828,6 +862,8 @@ class StreamingContext:
         loader so a broken schedule cannot silently turn a GPU-bound campaign
         into serialized NVMe I/O.
         """
+        if getattr(self, 'source_snapshot_only', False) and not getattr(self, '_snapshot_source_keys', None):
+            raise RuntimeError('snapshot source must be configured before reading')
         cached = self.layer_cache.get(L)
         if cached is not None:
             self._claim_inflight(L)
@@ -873,7 +909,9 @@ class StreamingContext:
         return tensors, "cold"
 
     def install(self, L: int, *, require_prefetched: bool = False,
-                prefetch_following: bool = True):
+                prefetch_following: bool = True, snapshot: bool = False):
+        if getattr(self, 'source_snapshot_only', False) and (not snapshot or prefetch_following):
+            raise RuntimeError('snapshot-only source cannot install a forward layer')
         tensors, src = self.ensure_loaded(
             L, require_prefetched=require_prefetched,
         )
@@ -898,6 +936,8 @@ class StreamingContext:
 
     def begin_source_initialization_audit(self):
         """Require actual source-state coverage for this complete traversal."""
+        if getattr(self, 'source_snapshot_only', False):
+            raise RuntimeError('snapshot-only source cannot attest full initialization')
         self._source_initialization_audit = _StreamingInitializationAudit(self)
 
     def source_initialization_contract(self):
@@ -1414,6 +1454,7 @@ def _build_streaming_context(model_path: str, *,
                              visual_requires_grad: bool = False,
                              attn_implementation: str | None = None,
                              source_authentication=None,
+                             source_snapshot_only: bool = False,
                              ) -> StreamingContext:
     """One-time setup: AutoConfig + empty skeleton, then manually
     materialize only the always-resident head pieces. Decoder layers
@@ -1438,7 +1479,15 @@ def _build_streaming_context(model_path: str, *,
     top-level config the auto class cannot resolve at all — a
     vision-language *wrapper* config — falls back to
     `_resolve_text_only_skeleton` instead of raising. No visual tower is
-    materialized on this path either way."""
+    materialized on this path either way.
+
+    ``source_snapshot_only`` requires authenticated source ownership. It keeps
+    all nonbody state on meta and allows only a one-shot selected snapshot;
+    forward installation and initialization attestation fail closed."""
+    if type(source_snapshot_only) is not bool:
+        raise TypeError('source_snapshot_only must be a bool')
+    if source_snapshot_only and source_authentication is None:
+        raise RuntimeError('snapshot-only source requires authenticated source ownership')
     if max_cache_slots is not None:
         if (
             isinstance(max_cache_slots, bool)
@@ -1521,78 +1570,81 @@ def _build_streaming_context(model_path: str, *,
     # instead of true weights (range ±0.2).
     fp8_scale_inv_map = _build_fp8_scale_inv_map(
         model_path, multimodal=multimodal, **authenticated)
+    if source_snapshot_only and (fp8_scale_inv_map or declared_fp4_expert_dtype(model_path)):
+        raise RuntimeError('selected tensor snapshots require unscaled floating source weights')
     if fp8_scale_inv_map:
         print(f"{log_prefix} fp8 scale_inv map: {len(fp8_scale_inv_map)} "
               f"weights will be dequanted inline at layer-load",
               flush=True)
 
-    head_pfxs = _head_prefixes(model, base_prefix)
-    loaded_head = _materialize(
-        model,
-        head_pfxs,
-        weight_shard,
-        weight_ckpt,
-        device,
-        dtype,
-        fp8_scale_inv_map=fp8_scale_inv_map,
-        **authenticated,
-    )
-    # Weight tying: a `tie_word_embeddings` checkpoint ships no
-    # `lm_head.weight`, so `_materialize` above has nothing to install and
-    # the head stays on meta — the first `model.lm_head(...)` (probe
-    # Phase-2 CE) or `m.weight.to(device)` (cost stage) then dies with
-    # "Cannot copy out of meta tensor". Resolve the alias through
-    # transformers' own embedding accessors (no name hardcoded: the VL
-    # wrapper's `model.language_model.embed_tokens` resolves like the
-    # plain `model.embed_tokens`).
-    resolve_tied_output_embedding(model, log_prefix=log_prefix)
-    _init_rotary_inplace(base_model, device, dtype)
-    print(f"{log_prefix} head materialized ({loaded_head} tensors, "
-          f"rotary re-init) in {time.time()-t0:.1f}s", flush=True)
+    if not source_snapshot_only:
+        head_pfxs = _head_prefixes(model, base_prefix)
+        loaded_head = _materialize(
+            model,
+            head_pfxs,
+            weight_shard,
+            weight_ckpt,
+            device,
+            dtype,
+            fp8_scale_inv_map=fp8_scale_inv_map,
+            **authenticated,
+        )
+        # Weight tying: a `tie_word_embeddings` checkpoint ships no
+        # `lm_head.weight`, so `_materialize` above has nothing to install and
+        # the head stays on meta — the first `model.lm_head(...)` (probe
+        # Phase-2 CE) or `m.weight.to(device)` (cost stage) then dies with
+        # "Cannot copy out of meta tensor". Resolve the alias through
+        # transformers' own embedding accessors (no name hardcoded: the VL
+        # wrapper's `model.language_model.embed_tokens` resolves like the
+        # plain `model.embed_tokens`).
+        resolve_tied_output_embedding(model, log_prefix=log_prefix)
+        _init_rotary_inplace(base_model, device, dtype)
+        print(f"{log_prefix} head materialized ({loaded_head} tensors, "
+              f"rotary re-init) in {time.time()-t0:.1f}s", flush=True)
 
-    # Constructor-derived NON-PERSISTENT head buffers (e.g. gemma4_unified's
-    # `embed_scale = sqrt(hidden)`) are absent from the checkpoint, so
-    # `_materialize` never assigns them and they stay on `meta` — and
-    # PrismaQuant suppresses skeleton `_initialize_weights` (prismaquant/__init__),
-    # so the modeling's `_init_weights` that would set them never runs. The
-    # first forward op (`embed_tokens(ids)` multiplies by `embed_scale`) then
-    # faults "Tensor on device meta". Re-create such buffers on `device` from
-    # the owning module's retained python scalar (`scalar_<attr>`). Generic
-    # (any arch following this pattern); scoped to non-`layers` modules since
-    # streaming decoder buffers load per shard. Persistent buffers (e.g.
-    # `layer_scalar`) come from the checkpoint and are untouched.
-    _meta_fixed = 0
-    for _bname, _buf in list(base_model.named_buffers(recurse=True)):
-        if _buf is None or not _buf.is_meta or _bname.split(".", 1)[0] == "layers":
-            continue
-        _mod_name, _, _attr = _bname.rpartition(".")
-        _owner = base_model.get_submodule(_mod_name) if _mod_name else base_model
-        if _attr not in getattr(_owner, "_non_persistent_buffers_set", set()):
-            continue  # persistent buffers are loaded from the checkpoint
-        _scalar = getattr(_owner, "scalar_" + _attr, None)
-        if _scalar is None:
-            continue
-        _owner.register_buffer(
-            _attr, torch.tensor(_scalar, device=device, dtype=_buf.dtype),
-            persistent=False)
-        _meta_fixed += 1
-    _stuck = [n for n, b in base_model.named_buffers(recurse=True)
-              if b is not None and b.is_meta and n.split(".", 1)[0] != "layers"]
-    if _stuck:
-        raise RuntimeError(
-            f"{log_prefix} head buffers left on meta after materialization "
-            f"(no scalar_ init source): {_stuck[:8]} — extend the "
-            f"non-persistent-buffer sweep in _build_streaming_context")
-    if _meta_fixed:
-        print(f"{log_prefix} materialized {_meta_fixed} non-persistent head "
-              f"buffer(s) off meta (e.g. embed_scale)", flush=True)
+        # Constructor-derived NON-PERSISTENT head buffers (e.g. gemma4_unified's
+        # `embed_scale = sqrt(hidden)`) are absent from the checkpoint, so
+        # `_materialize` never assigns them and they stay on `meta` — and
+        # PrismaQuant suppresses skeleton `_initialize_weights` (prismaquant/__init__),
+        # so the modeling's `_init_weights` that would set them never runs. The
+        # first forward op (`embed_tokens(ids)` multiplies by `embed_scale`) then
+        # faults "Tensor on device meta". Re-create such buffers on `device` from
+        # the owning module's retained python scalar (`scalar_<attr>`). Generic
+        # (any arch following this pattern); scoped to non-`layers` modules since
+        # streaming decoder buffers load per shard. Persistent buffers (e.g.
+        # `layer_scalar`) come from the checkpoint and are untouched.
+        _meta_fixed = 0
+        for _bname, _buf in list(base_model.named_buffers(recurse=True)):
+            if _buf is None or not _buf.is_meta or _bname.split(".", 1)[0] == "layers":
+                continue
+            _mod_name, _, _attr = _bname.rpartition(".")
+            _owner = base_model.get_submodule(_mod_name) if _mod_name else base_model
+            if _attr not in getattr(_owner, "_non_persistent_buffers_set", set()):
+                continue  # persistent buffers are loaded from the checkpoint
+            _scalar = getattr(_owner, "scalar_" + _attr, None)
+            if _scalar is None:
+                continue
+            _owner.register_buffer(
+                _attr, torch.tensor(_scalar, device=device, dtype=_buf.dtype),
+                persistent=False)
+            _meta_fixed += 1
+        _stuck = [n for n, b in base_model.named_buffers(recurse=True)
+                  if b is not None and b.is_meta and n.split(".", 1)[0] != "layers"]
+        if _stuck:
+            raise RuntimeError(
+                f"{log_prefix} head buffers left on meta after materialization "
+                f"(no scalar_ init source): {_stuck[:8]} — extend the "
+                f"non-persistent-buffer sweep in _build_streaming_context")
+        if _meta_fixed:
+            print(f"{log_prefix} materialized {_meta_fixed} non-persistent head "
+                  f"buffer(s) off meta (e.g. embed_scale)", flush=True)
 
     # Locate the visual module on the meta skeleton. When multimodal is
     # set, fully materialize the visual tower onto `device`; body
     # layers remain meta and stream per shard.
     visual_module = None
     visual_prefix: str | None = None
-    if multimodal:
+    if multimodal and not source_snapshot_only:
         visual_module, visual_prefix = _find_visual_module(model)
         if visual_module is not None and visual_prefix:
             remove_hook_from_module(visual_module, recurse=True)
@@ -1741,5 +1793,7 @@ def _build_streaming_context(model_path: str, *,
         prefetch_min_available_bytes=min_available_bytes,
         expert_packer=_build_expert_packer(model, weight_ckpt),
         concat_merger=concat_merger,
+        source_snapshot_only=source_snapshot_only,
+        source_fp4_experts=declared_fp4_expert_dtype(model_path),
         **authenticated,
     )
