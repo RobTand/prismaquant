@@ -214,10 +214,11 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: derive.  The admission itself is unchanged: ``cell_evidence_admits`` is
 #: still status-only and still ``{repetitive}``.
 #:
-#: Verified by fetching ``RobTand/tessera`` master into a scratch repository
-#: and hashing the blob at the tip -- never a working tree (the command is in
-#: ``tessera_runtime/README.md``).  No tag names the commit.
-TESSERA_DEV_PIN_COMMIT = "b1eb1dccc9df6773ab94e1c98f316f45bb18ab4c"
+#: The resident-H integration uses the reviewed runtime tree from Tessera
+#: PR #441. Its contract blob is identical to the previous master pin; the
+#: producer source identity changes and existing priced bytes keep their seal.
+#: No release tag names this development commit.
+TESSERA_DEV_PIN_COMMIT = "7f8aef0dd1ba4ef6a6ff5cf00ee9c2bc06c73e5d"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
