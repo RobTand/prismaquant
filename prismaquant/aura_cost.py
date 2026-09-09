@@ -2673,6 +2673,10 @@ def compute_aura_cost_streamed(
         batches = runner.capture_layer_major_boundaries(
             [calib_ids[offset:offset + batch_rows] for offset in row_offsets],
             storage=boundary_storage)
+        retries = runner.layer_major_prefetch_retries
+        if retries:
+            _log(f"layer-major capture re-read {len(retries)} layer(s) whose speculative "
+                 f"prefetch the runner no longer held at install: {list(retries)}")
     else:
         for batch_index, offset in enumerate(row_offsets):
             available_gib = _free_gib()

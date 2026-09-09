@@ -735,6 +735,14 @@ class StreamingContext:
             return None
         if self.layer_cache.peek(L):
             return None
+        with self._inflight_lock:
+            held = self._inflight.get(L)
+        if held is not None:
+            # A live or delivered read is handed back before any admission
+            # gate: it allocates nothing, and a consumer re-asserting its
+            # schedule under pressure must receive the read it already owns
+            # rather than a refusal counted as a memory skip (#403).
+            return held
         pressure_floor = self.memory_pressure_floor_bytes()
         if pressure_floor > 0:
             try:
