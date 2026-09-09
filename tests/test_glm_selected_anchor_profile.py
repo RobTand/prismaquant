@@ -192,8 +192,8 @@ def selected():
 
 
 @pytest.mark.parametrize('extra', [
-    ['--anchor-batch-size', '2'], ['--capture-calibration-out', 'new'], ['--census-out', 'new']])
-def test_selected_mode_refuses_changed_capture_or_non_scalar_work(extra):
+    ['--anchor-batch-size', '0'], ['--capture-calibration-out', 'new'], ['--census-out', 'new']])
+def test_selected_mode_refuses_changed_capture_or_invalid_batch_work(extra):
     with pytest.raises(ValueError, match='selected canonical reuse'):
         observe.selected_anchor_command(selected()+extra)
 
@@ -218,3 +218,184 @@ def test_entrypoint_keeps_original_argv_and_restores_method(tmp_path, controlled
 def test_window_configuration_is_finite_and_has_first_call(tmp_path, calls):
     with pytest.raises(ValueError, match='at most four'):
         observer(tmp_path, calls=calls)
+
+
+def test_selected_mode_accepts_existing_compatible_batch_command():
+    observe.selected_anchor_command(selected()+['--anchor-batch-size', '8'])
+
+
+def test_batch_and_scalar_share_call_windows_and_preserve_outputs(tmp_path, controlled):
+    obs = observer(tmp_path, calls=(0, 2))
+    names = ['expert.0', 'expert.1']
+    weights, acts, outputs = [object(), object()], [object(), object()], [object(), object()]
+    seen = []
+    def batch(**kwargs):
+        seen.append(kwargs)
+        return outputs
+    batched = obs.wrap_anchor(batch)
+    scalar = obs.wrap_anchor(lambda **kwargs: outputs[0])
+    assert batched(qnames=names, weights=weights, activations=acts,
+                   format_name='E4M3') is outputs
+    assert scalar(qname='dense', format_name='BF16') is outputs[0]
+    assert batched(qnames=names, weights=weights, activations=acts,
+                   format_name='E4M3') is outputs
+    assert len(seen) == 2 and all(row['weights'] is weights for row in seen)
+    assert all(row['activations'] is acts for row in seen)
+    assert obs.result['anchor_calls'] == 3 and len(controlled) == 2
+    assert [row['qnames'] for row in obs.result['anchors']] == [names, names]
+    assert [row['batch_size'] for row in obs.result['anchors']] == [2, 2]
+
+
+def test_cuda_only_activity_keeps_native_event_requirement(tmp_path, controlled, monkeypatch):
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+                                 command=selected(), cuda_only=True)
+    monkeypatch.setattr(FakeProfiler, 'cuda', False)
+    output = object()
+    assert obs.wrap_anchor(lambda **_: output)(qname='u', format_name='f') is output
+    obs.validate_result()
+    assert controlled[0]['activities'] == [torch.profiler.ProfilerActivity.CUDA]
+    assert not obs.result['native_anchor_profiled']
+    assert obs.result['anchors'][0]['status'] == 'observation_failed'
+    assert obs.result['profile_activities'] == ['cuda']
+
+
+def test_entrypoint_wraps_batch_and_restores_both_after_campaign_error(
+        tmp_path, controlled, monkeypatch):
+    from prismaquant import tessera_campaign as campaign
+    scalar, batch = campaign._measure_anchor, campaign._measure_anchor_batch
+    command = selected()+['--anchor-batch-size', '8']
+    error = RuntimeError('original campaign error')
+    def main(args):
+        assert args == command
+        assert campaign._measure_anchor is not scalar
+        assert campaign._measure_anchor_batch is not batch
+        raise error
+    monkeypatch.setattr(campaign, 'main', main)
+    monkeypatch.setattr(observe.torch.cuda, 'is_available', lambda: True)
+    with pytest.raises(RuntimeError) as caught:
+        observe.main(['--evidence-out', str(tmp_path), '--selected-anchors',
+            '--anchor-profile-calls', '0', '--anchor-trace-max-bytes', '4096',
+            '--anchor-cuda-only', '--', *command])
+    assert caught.value is error
+    assert campaign._measure_anchor is scalar and campaign._measure_anchor_batch is batch
+
+
+def test_native_cuda_only_batch_trace_has_actual_events(tmp_path, monkeypatch):
+    if not torch.cuda.is_available():
+        pytest.skip('native CUDA-only observer qualification')
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4*1024**2,
+                                 command=selected()+['--anchor-batch-size', '8'], cuda_only=True)
+    ready = monitor_readiness(obs, monkeypatch)
+    weights = torch.ones((8, 64, 64), device='cuda', dtype=torch.bfloat16)
+    outputs = []
+    def original(**kwargs):
+        result = torch.bmm(kwargs['weights'], kwargs['weights'])
+        outputs.append(result)
+        return result
+    with obs:
+        for kind, event in ready.items():
+            assert event.wait(timeout=15), f'{kind} did not produce native-run evidence'
+        actual = obs.wrap_anchor(original)(qnames=[f'expert.{i}' for i in range(8)],
+            weights=weights, format_name='observer-bmm-smoke')
+    assert len(outputs) == 1 and actual is outputs[0]
+    assert torch.equal(actual, torch.full_like(actual, 64))
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'complete' and result['native_anchor_profiled']
+    assert result['anchors'][0]['cuda_events'] > 0
+    assert 0 < result['anchors'][0]['trace']['bytes'] <= 4*1024**2
+
+
+def test_timed_cuda_window_stops_collection_while_original_call_continues(
+        tmp_path, controlled, monkeypatch):
+    stopped = threading.Event()
+    toggles = []
+    def toggle(self, enabled, activities):
+        toggles.append((enabled, activities))
+        stopped.set()
+    monkeypatch.setattr(FakeProfiler, 'toggle_collection_dynamic', toggle, raising=False)
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+        command=selected(), cuda_only=True, window_seconds=.01)
+    token, calls = object(), []
+    def original(**kwargs):
+        calls.append(kwargs)
+        assert stopped.wait(10), 'CUDA collection was not stopped during the call'
+        return token
+    assert obs.wrap_anchor(original)(qname='dense', format_name='BF16') is token
+    assert len(calls) == 1
+    assert toggles == [(False, [torch.profiler.ProfilerActivity.CUDA])]
+    record, = obs.result['anchors']
+    assert record['status'] == 'complete'
+    assert record['collection_window']['stopped_by'] == 'deadline'
+    assert record['collection_window']['elapsed_seconds'] >= .01
+
+
+def test_timed_collection_failure_preserves_original_success(tmp_path, controlled, monkeypatch):
+    attempted = threading.Event()
+    def toggle(self, *_):
+        attempted.set()
+        raise RuntimeError('controlled CUDA toggle failure')
+    monkeypatch.setattr(FakeProfiler, 'toggle_collection_dynamic', toggle, raising=False)
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+        command=selected(), cuda_only=True, window_seconds=.01)
+    token, calls = object(), []
+    def original(**kwargs):
+        calls.append(kwargs)
+        assert attempted.wait(10)
+        return token
+    assert obs.wrap_anchor(original)(qname='u', format_name='f') is token
+    assert len(calls) == 1
+    assert obs.result['anchors'][0]['status'] == 'observation_failed'
+    assert 'controlled CUDA toggle failure' in obs.result['errors'][0]['error']
+
+
+@pytest.mark.parametrize('seconds', [0, -1, float('nan'), float('inf'), True])
+def test_timed_window_refuses_invalid_duration(tmp_path, seconds):
+    with pytest.raises(ValueError, match='window'):
+        observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+            command=selected(), cuda_only=True, window_seconds=seconds)
+
+
+def test_timed_window_requires_cuda_only(tmp_path):
+    with pytest.raises(ValueError, match='CUDA-only'):
+        observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+            command=selected(), window_seconds=.01)
+
+
+def test_native_timed_cuda_window_excludes_later_work(tmp_path, monkeypatch):
+    if not torch.cuda.is_available():
+        pytest.skip('native timed CUDA observer qualification')
+    stopped = threading.Event()
+    toggle = torch.profiler.profile.toggle_collection_dynamic
+    def observed_toggle(self, *args, **kwargs):
+        result = toggle(self, *args, **kwargs)
+        stopped.set()
+        return result
+    monkeypatch.setattr(torch.profiler.profile, 'toggle_collection_dynamic', observed_toggle)
+    weights = torch.ones((8, 64, 64), device='cuda', dtype=torch.bfloat16)
+    torch.bmm(weights, weights)  # Resolve the library before testing the timed window.
+    torch.cuda.synchronize()
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4*1024**2,
+        command=selected(), cuda_only=True, window_seconds=.25)
+    ready = monitor_readiness(obs, monkeypatch)
+    calls = []
+    def original(**kwargs):
+        first = torch.bmm(weights, weights)
+        torch.cuda.synchronize()
+        assert stopped.wait(15), 'native CUDA collection did not stop'
+        later = torch.bmm(weights, weights)
+        torch.cuda.synchronize()
+        result = [first, later]
+        calls.append(result)
+        return result
+    with obs:
+        for event in ready.values():
+            assert event.wait(15)
+        result = obs.wrap_anchor(original)(qnames=['a', 'b'], format_name='window-test')
+    assert len(calls) == 1 and result is calls[0]
+    assert all(torch.equal(value, torch.full_like(value, 64)) for value in result)
+    record, = obs.result['anchors']
+    assert record['status'] == 'complete'
+    assert record['collection_window']['stopped_by'] == 'deadline'
+    trace = json.loads((obs.out/record['trace']['path']).read_text())
+    kernels = [event for event in trace['traceEvents'] if event.get('cat') == 'kernel']
+    assert len(kernels) == 1, 'CUDA work after the deadline was also collected'

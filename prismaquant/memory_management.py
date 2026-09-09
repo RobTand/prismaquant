@@ -24,6 +24,18 @@ class CaptureMemoryGuard:
     CUDA can be absent from GB10's cgroup charge. Adding the entire allocator
     reservation is deliberately conservative even where charges overlap. The
     guard never changes a cache policy or drops system-wide page caches.
+
+    Every reading is ABSOLUTE: ``memory.current`` plus the whole CUDA
+    reservation for the process, not the growth a phase caused. ``check``
+    compares that absolute reading, plus the caller's future allocation, with
+    the cgroup cap less the margin, so its own arithmetic is already in one
+    unit. What is not in that unit is a phase PLAN, which states deltas; a
+    caller that admits a plan against the raw cap is out by whatever this
+    process already held. ``baseline`` is that floor, measured at the first
+    ``check``, and ``baseline_bytes`` is what such a caller subtracts.
+    ``peak_checkpoint`` and ``peak_by_checkpoint_prefix`` say where the peak
+    was observed, so a plan that undercharges is attributable from one
+    receipt instead of a rerun.
     """
 
     def __init__(self, device, *, cgroup_root=Path('/sys/fs/cgroup'),
@@ -58,6 +70,9 @@ class CaptureMemoryGuard:
             raise RuntimeError('capture budget cannot hold its physical safety margin')
         self.failure = None
         self.peak_bytes = 0
+        self.peak_checkpoint = None
+        self.peak_by_checkpoint_prefix = {}
+        self.baseline = None
         self.min_available_bytes = None
         self.last = None
 
@@ -83,7 +98,27 @@ class CaptureMemoryGuard:
                 host_mem_available_bytes=available, cap_bytes=cap,
                 future_allocation_bytes=reserve_bytes,
                 refusal_threshold_bytes=cap-self.margin_bytes)
-            self.peak_bytes = max(self.peak_bytes, current+reserved)
+            if self.baseline is None:
+                # The FIRST reading is what this process already held before
+                # any planned phase became resident: the interpreter, torch,
+                # the CUDA runtime, and every page this process had touched.
+                # A phase plan states deltas over that floor, so a caller
+                # that compares a plan with the raw cap compares two
+                # different quantities (RobTand/prismaquant#390). It is
+                # measured here, in the row's own process, because no
+                # producer-side constant can know a consumer's floor.
+                self.baseline = dict(label=str(label), bytes=current+reserved,
+                    measured_in_process=True, cgroup_current_bytes=current,
+                    cuda_reserved_bytes=reserved)
+            if current+reserved > self.peak_bytes:
+                self.peak_bytes = current+reserved
+                self.peak_checkpoint = str(label)
+            # Labels carry a per-unit suffix after ':'; the prefixes are the
+            # bounded set of phase names, so this attributes a peak to the
+            # phase that held it without growing with the roster.
+            prefix = str(label).split(':', 1)[0]
+            self.peak_by_checkpoint_prefix[prefix] = max(
+                self.peak_by_checkpoint_prefix.get(prefix, 0), current+reserved)
             self.min_available_bytes = (available if self.min_available_bytes is None
                                        else min(self.min_available_bytes, available))
             if (current+reserved+reserve_bytes > cap-self.margin_bytes or
@@ -98,8 +133,22 @@ class CaptureMemoryGuard:
         return dict(scope=str(self.scope), budget_bytes=self.cap_bytes,
             margin_bytes=self.margin_bytes, host_floor_bytes=self.host_floor_bytes,
             peak_conservative_bytes=self.peak_bytes,
+            peak_checkpoint=self.peak_checkpoint,
+            peak_by_checkpoint_prefix=dict(self.peak_by_checkpoint_prefix),
+            baseline=None if self.baseline is None else dict(self.baseline),
             min_host_available_bytes=self.min_available_bytes,
             last_checkpoint=None if self.last is None else dict(self.last))
+
+    def baseline_bytes(self):
+        """The measured process floor every delta plan is compared against.
+
+        Refuses before the first ``check`` rather than defaulting to zero: a
+        zero floor is the arithmetic this guard exists to stop, and it would
+        read as "the process holds nothing" on a box where it holds gigabytes.
+        """
+        if self.baseline is None:
+            raise RuntimeError('capture memory baseline is unmeasured; check() first')
+        return int(self.baseline['bytes'])
 
 
 def env_flag_enabled(name: str, *, default: bool = True) -> bool:

@@ -1,0 +1,83 @@
+[
+  {
+    "files": [
+      "tests/test_selected_verified_capture.py"
+    ],
+    "ran": true,
+    "returncode": 0,
+    "shard": 0,
+    "summary": "13 passed, 14 warnings in 6.10s"
+  },
+  {
+    "files": [
+      "tests/test_verified_capture_load.py"
+    ],
+    "ran": true,
+    "returncode": 0,
+    "shard": 1,
+    "summary": "70 passed, 16 warnings in 6.22s"
+  },
+  {
+    "files": [
+      "tests/test_tessera_calibration_cache.py"
+    ],
+    "ran": true,
+    "returncode": 0,
+    "shard": 2,
+    "summary": "34 passed, 14 warnings in 7.59s"
+  },
+  {
+    "files": [
+      "tests/test_tessera_selected_source.py"
+    ],
+    "ran": true,
+    "returncode": 0,
+    "shard": 3,
+    "summary": "10 passed, 1 skipped, 14 warnings in 6.00s"
+  },
+  {
+    "files": [
+      "tests/test_selected_source_authentication.py"
+    ],
+    "ran": true,
+    "returncode": 0,
+    "shard": 4,
+    "summary": "26 passed, 15 warnings in 6.77s"
+  },
+  {
+    "files": [
+      "tests/test_streamed_capture_admission.py"
+    ],
+    "ran": true,
+    "returncode": 0,
+    "shard": 5,
+    "summary": "20 passed, 14 warnings in 6.21s"
+  },
+  {
+    "files": [
+      "tests/test_tessera_campaign_resume.py"
+    ],
+    "ran": false,
+    "returncode": 137,
+    "shard": 6,
+    "summary": "NO PYTEST SUMMARY -- 1 file(s) did not run (the shard ended rc=137, before or outside pytest)"
+  },
+  {
+    "files": [
+      "tests/test_architecture_doc.py"
+    ],
+    "ran": true,
+    "returncode": 0,
+    "shard": 7,
+    "summary": "13 passed, 14 warnings in 5.42s"
+  },
+  {
+    "files": [
+      "tests/test_docs_staleness.py"
+    ],
+    "ran": true,
+    "returncode": 0,
+    "shard": 8,
+    "summary": "6 passed, 14 warnings in 5.06s"
+  }
+]

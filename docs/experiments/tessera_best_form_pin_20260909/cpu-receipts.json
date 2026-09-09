@@ -1,0 +1,124 @@
+{
+  "mode": "CPU",
+  "device_allocations": 0,
+  "passed": 249,
+  "skipped": 0,
+  "uncollected": 0,
+  "source_commit": "2a30407878",
+  "shards": [
+    {
+      "action": "7e95453a38201c2b9ce8fabc9dad0c3c280c2763c6e8145ad8c9880a873d8b44",
+      "receipt": "e0941c10ecff87c0f91c360d5ad7a4b14889d9fa4b014215f7a3d6b14f5fe309",
+      "payload_sha256": "f7e9d582d4e57d312ef4b9ea566ac5687d12bbc6538e33f4539f092d185a4438",
+      "snapshot": "62c708d05437d0104da2f7270b6536eadf190242",
+      "source_diff_from_commit": [
+        ".pbrun-closure.34ebc39060f8133b.json",
+        "docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py"
+      ],
+      "files": [
+        "tests/test_tessera_serving_pin.py",
+        "tests/test_architecture_doc.py"
+      ],
+      "summary": "28 passed, 28 warnings in 7.99s"
+    },
+    {
+      "action": "f9243f1be355aa2735f73552d5765d5b0fe12965cf0c8a46388b7c7e4a0b71f5",
+      "receipt": "c2ed37f7ac89ab91479207b90c9ad276b6ad0260d0befbb3ae0d3c87f9c44583",
+      "payload_sha256": "e4b91e5a1e2658debcbfef3378ca4b25736e6eaddc2c3900611a824880c74f3b",
+      "snapshot": "d7e875ab052d599aaeefcebd594fc3e2c6660e42",
+      "source_diff_from_commit": [
+        ".pbrun-closure.7c97cbc9b0dca3ee.json",
+        "docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py"
+      ],
+      "files": [
+        "tests/test_tessera_contract_v4.py",
+        "tests/test_docs_staleness.py"
+      ],
+      "summary": "15 passed, 28 warnings in 7.76s"
+    },
+    {
+      "action": "b0e99d0debe8185aec5112016fd21729935d172c219793dddf7cee590b49242d",
+      "receipt": "a0bc96500dcece09a8537a1a0812164bf44abb1f15ac81444b76eb861dc4ba22",
+      "payload_sha256": "47d1584523543ed4eb0c0146a7775d6ac5319c836a92cc4a4b6edfa44fb3f548",
+      "snapshot": "ec9a894bc2afc4cb6081839a36c6c87dbe0ef0c4",
+      "source_diff_from_commit": [
+        ".pbrun-closure.dec412ddfa248f73.json",
+        "docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py"
+      ],
+      "files": [
+        "tests/test_tessera_lane_v6.py"
+      ],
+      "summary": "19 passed, 28 warnings in 8.16s"
+    },
+    {
+      "action": "32d78988b9956239120bc7d97651b0aa2973689f691c04aac54a81dc9f75e232",
+      "receipt": "683102deb0aff049f1e16bac815a34a314a0fc7a1b87142dbfe26c26b72de0bb",
+      "payload_sha256": "ec953cfbf3e44fa74174215a5ebd84da7cc68f674fe309c5d1da0deacd403502",
+      "snapshot": "99116304d3f43d0cb01f4a0cae1aa02e6b392bd0",
+      "source_diff_from_commit": [
+        ".pbrun-closure.0853aa5e2ea4dbf5.json",
+        "docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py"
+      ],
+      "files": [
+        "tests/test_tessera_lane_v9.py"
+      ],
+      "summary": "59 passed, 28 warnings in 8.51s"
+    },
+    {
+      "action": "5fe87860ae0485383c7751eec917de836011a84e7fc1b31b7939872deae09d7d",
+      "receipt": "635a25246f13e219e5fb8ad6c2535026dfab788cef1407d00a053bc85ab32c30",
+      "payload_sha256": "91cdc22d77d4045a75266ba226db9b0e324e3e003ef4f6aa56383882fdfda194",
+      "snapshot": "5a50a8b50f6987f44bbe4af9365be88e11203504",
+      "source_diff_from_commit": [
+        ".pbrun-closure.5d4eac2828ffbd51.json",
+        "docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py"
+      ],
+      "files": [
+        "tests/test_tessera_lane_admission.py"
+      ],
+      "summary": "22 passed, 28 warnings in 8.24s"
+    },
+    {
+      "action": "f94c6ba430f0278cbe9b06b1805829be77fc0f8bb7e46a879a1bf3fac4b71b4f",
+      "receipt": "d4b046473105681321035d1925de918f99abe79ffcd5be327bf577faf4a1838d",
+      "payload_sha256": "e3b8ee9ab4e46a34c1187edb6a3db83a6ac02e6d7ced888d8a810b0c0525d4f7",
+      "snapshot": "98eec0aa887ec9436659e1bf1caba4f18feba755",
+      "source_diff_from_commit": [
+        ".pbrun-closure.6746fa30db290e36.json",
+        "docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py"
+      ],
+      "files": [
+        "tests/test_tessera_export_lane.py"
+      ],
+      "summary": "21 passed, 28 warnings in 8.03s"
+    },
+    {
+      "action": "d97e081d3552f05caf61a7977a553904d783fc276211e03425d8b527ee83d313",
+      "receipt": "83b47bcf9936b9794a36c409d7424a40cf5c6d8945c1bd6549e0bfcf8b3d590b",
+      "payload_sha256": "46e2f94dd584981a50667492eaabc6045d4d27f22c47e9993e658113d77c106e",
+      "snapshot": "f672aacea4fcf109a4a69689d958a32dca6e96ba",
+      "source_diff_from_commit": [
+        ".pbrun-closure.a99a1de0058a1234.json",
+        "docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py"
+      ],
+      "files": [
+        "tests/test_tessera_formats.py"
+      ],
+      "summary": "66 passed, 28 warnings in 75.20s (0:01:15)"
+    },
+    {
+      "action": "a36014597d2cd64099ec27693ada8c2c585582bfd68e7ee1aebc5eeb8e035e82",
+      "receipt": "090926d1079f10242fb323dc4d6f6d7f317290b637c166648a3f0468c5bd82d0",
+      "payload_sha256": "6203017bcac7aca1a32b6d65958f3b9035ef05c59901992e651f296824fd343e",
+      "snapshot": "e02df4717aa904ca4dfb8d311c69938f393dbf8b",
+      "source_diff_from_commit": [
+        ".pbrun-closure.a6206598c90a07e5.json",
+        "docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py"
+      ],
+      "files": [
+        "tests/test_tessera_pin_provisioner.py"
+      ],
+      "summary": "19 passed, 28 warnings in 8.44s"
+    }
+  ]
+}

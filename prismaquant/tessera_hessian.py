@@ -174,7 +174,7 @@ def encoder_recipe() -> dict:
 
 
 def activation_source(hessians: Mapping[str, Any], identity: Mapping[str, Any],
-                      **overrides: Any):
+                      *, reference_path=None, source_scope=None, **overrides: Any):
     """Build Tessera's ``ActivationSource``.  **The one construction.**
 
     ``hessians`` is keyed by qname (``model.layers.0.mlp.up_proj``), which is
@@ -186,9 +186,23 @@ def activation_source(hessians: Mapping[str, Any], identity: Mapping[str, Any],
     ``overrides`` reach the dataclass unchanged, so an ablation can move the
     sigma or the refit objective and the exported config records what it moved
     (``ActivationSource.config_block``).
+
+    An accepted campaign may supply its just-published ``reference_path`` to
+    reuse the producer's authenticated H commitments. The producer binds the
+    same resident tensors and still checks each consumed H against its seal;
+    it neither reloads payloads nor hashes the whole population a second time.
+    ``source_scope`` must own the metadata reader until every consumer ends.
     """
     from tessera.export import ActivationSource
 
+    if reference_path is not None:
+        if source_scope is None:
+            raise ValueError("a resident Hessian reference requires an owning source scope")
+        source = ActivationSource.from_capture(reference_path, resident_hessians=hessians,
+                                               **overrides)
+        source_scope.callback(source.hessians.close)
+        source.hessians.require_provenance({**dict(identity), "hessian_role": "fit"})
+        return source
     return ActivationSource(
         hessians=dict(hessians), provenance=dict(identity), **overrides)
 

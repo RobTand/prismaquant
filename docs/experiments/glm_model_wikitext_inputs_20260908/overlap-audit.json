@@ -1,0 +1,198 @@
+{
+  "cpu_affinity": [
+    0
+  ],
+  "fit_overlap_status": "unverified",
+  "full_kl": [
+    {
+      "covered_eval_positions_by_minimum_contiguous_match": {
+        "128": 0,
+        "16": 0,
+        "256": 0,
+        "32": 0,
+        "512": 0,
+        "64": 0
+      },
+      "longest_match": {
+        "calibration_flat_start": 107703,
+        "eval_start": 354,
+        "length": 7
+      },
+      "tokens": 512,
+      "window": 0
+    },
+    {
+      "covered_eval_positions_by_minimum_contiguous_match": {
+        "128": 0,
+        "16": 0,
+        "256": 0,
+        "32": 0,
+        "512": 0,
+        "64": 0
+      },
+      "longest_match": {
+        "calibration_flat_start": 5660,
+        "eval_start": 153,
+        "length": 7
+      },
+      "tokens": 512,
+      "window": 1
+    },
+    {
+      "covered_eval_positions_by_minimum_contiguous_match": {
+        "128": 0,
+        "16": 0,
+        "256": 0,
+        "32": 0,
+        "512": 0,
+        "64": 0
+      },
+      "longest_match": {
+        "calibration_flat_start": 73254,
+        "eval_start": 460,
+        "length": 9
+      },
+      "tokens": 512,
+      "window": 2
+    },
+    {
+      "covered_eval_positions_by_minimum_contiguous_match": {
+        "128": 0,
+        "16": 0,
+        "256": 0,
+        "32": 0,
+        "512": 0,
+        "64": 0
+      },
+      "longest_match": {
+        "calibration_flat_start": 184503,
+        "eval_start": 66,
+        "length": 7
+      },
+      "tokens": 512,
+      "window": 3
+    },
+    {
+      "covered_eval_positions_by_minimum_contiguous_match": {
+        "128": 0,
+        "16": 0,
+        "256": 0,
+        "32": 0,
+        "512": 0,
+        "64": 0
+      },
+      "longest_match": {
+        "calibration_flat_start": 41514,
+        "eval_start": 325,
+        "length": 8
+      },
+      "tokens": 512,
+      "window": 4
+    },
+    {
+      "covered_eval_positions_by_minimum_contiguous_match": {
+        "128": 232,
+        "16": 232,
+        "256": 0,
+        "32": 232,
+        "512": 0,
+        "64": 232
+      },
+      "longest_match": {
+        "calibration_flat_start": 90288,
+        "eval_start": 280,
+        "length": 232
+      },
+      "tokens": 512,
+      "window": 5
+    },
+    {
+      "covered_eval_positions_by_minimum_contiguous_match": {
+        "128": 0,
+        "16": 0,
+        "256": 0,
+        "32": 0,
+        "512": 0,
+        "64": 0
+      },
+      "longest_match": {
+        "calibration_flat_start": 192279,
+        "eval_start": 164,
+        "length": 7
+      },
+      "tokens": 512,
+      "window": 6
+    },
+    {
+      "covered_eval_positions_by_minimum_contiguous_match": {
+        "128": 0,
+        "16": 0,
+        "256": 0,
+        "32": 0,
+        "512": 0,
+        "64": 0
+      },
+      "longest_match": {
+        "calibration_flat_start": 20645,
+        "eval_start": 327,
+        "length": 4
+      },
+      "tokens": 512,
+      "window": 7
+    }
+  ],
+  "full_kl_exact_window_matches": [],
+  "heldout_claim": false,
+  "helper_sha256": "80239bfedb9d72ad7a693059814d6e602fd4e3e22ba4c50987a980a525f4cbb0",
+  "input_file": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/model-bound-wikitext-inputs-01/glm-wikitext-inputs.v2.json",
+    "sha256": "eb7c36a6211796bdaf523c20ca3583cbe4794e9583a11f3ec5f124641b374652"
+  },
+  "input_semantic_sha256": "460e2adb87cd6fa70794145d8c5b496f8bb338a154ba526ff6c85f85bab3296e",
+  "limitation": "Original calibration includes empty text rows and tokenizer defaults; gold filters nonempty rows and disables special tokens. Corpus start indices are incomparable. This audit does not map corpus character positions or prove held-out origin; repeated text can share token sequences.",
+  "original": {
+    "artifact_sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329",
+    "calibration_sha256": "dd5be8c887a48465fcd7df567b8aba876026339785da03f6642c7179413668e1",
+    "dtype": "torch.int64",
+    "provenance": {
+      "fit_ids_sha256": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+      "fit_tokens": 262144,
+      "fit_tokens_min": 13,
+      "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+      "nsamples": 512,
+      "seed": 0,
+      "seqlen": 512,
+      "source": "wikitext-2-raw-v1/train",
+      "split_role": "calibration",
+      "text_sha256": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5"
+    },
+    "schema": "prismaquant.calibration_input.v1",
+    "shape": [
+      512,
+      512
+    ]
+  },
+  "ppl": {
+    "covered_eval_positions_by_minimum_contiguous_match": {
+      "128": 0,
+      "16": 0,
+      "256": 0,
+      "32": 0,
+      "512": 0,
+      "64": 0
+    },
+    "longest_match": {
+      "calibration_flat_start": 97551,
+      "eval_start": 6959,
+      "length": 12
+    },
+    "tokens": 8192
+  },
+  "prior_reconstruction": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/exact-calibration-input-01/reconstruction.json",
+    "sha256": "bd67c7d78dfcaa8eff568a2a843cfdf211611b145bcc2459da84407c3eb94c51"
+  },
+  "schema": "prismaquant.glm_wikitext_token_overlap.v1",
+  "semantics": "Longest exact contiguous token matches against each original 512-token calibration window; negative separators prohibit crossing calibration-window boundaries. Coverage unions matching evaluation positions at each stated minimum length.",
+  "status": "COMPLETE_TOKEN_VALUE_AUDIT"
+}

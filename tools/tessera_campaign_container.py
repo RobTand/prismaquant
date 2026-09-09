@@ -66,6 +66,39 @@ def validate_container(spec: dict) -> None:
         raise RuntimeError('actual container content is supplied by the inspected launcher')
 
 
+def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
+    """Whether to attach the GPU, and the declaration that decided it.
+
+    ``--gpus all`` maps the whole device into the container, and until this
+    function existed the only thing that withheld it was a caller remembering
+    ``--cpu-only``.  A PrismaBuild row that reserved no GPU therefore ran with
+    the device attached and PrismaBuild's GPU tokens unspent, so its admission
+    arithmetic could seat a GPU-reserving row beside it and a power reading
+    taken next door had a second owner it could not see (#430).
+
+    So the grant decides, not the flag's absence.  ``pbrun`` sets
+    ``CUDA_VISIBLE_DEVICES`` to the empty string in the action's environment
+    exactly when it granted no GPU slots, and a spec may say the same thing
+    about its payload; either declaration withholds the device.  Neither is
+    a substitute for this check on its own: an empty ``CUDA_VISIBLE_DEVICES``
+    hides the device from CUDA inside the container, it does not stop the
+    runtime attaching and initialising it, which is the distinction
+    ``require_pool`` already refuses to treat as an exemption.
+
+    Unset is not a declaration.  An interactive run outside ``pbrun`` has no
+    grant to read, and it keeps the behaviour it had; ``--cpu-only`` is still
+    the way to say no there.
+    """
+
+    if cpu_only:
+        return False, "--cpu-only"
+    for source, value in (("container spec env", (spec.get("env") or {}).get("CUDA_VISIBLE_DEVICES")),
+                          ("CUDA_VISIBLE_DEVICES", environ.get("CUDA_VISIBLE_DEVICES"))):
+        if value == "":
+            return False, f"{source} declares no visible device"
+    return True, "no declaration withheld the device"
+
+
 def docker_command(spec: dict, command: list[str], *, cwd: str,
                    uid: int, gid: int, image_id: str, content_sha256=None, with_gpu=True) -> list[str]:
     validate_container(spec)
@@ -127,14 +160,16 @@ def main(argv=None) -> int:
     if declared is not None and declared != content_digest:
         raise RuntimeError(f"Docker image content differs for {requested!r}: "
                            f"expected {declared}, observed {content_digest}")
+    with_gpu, gpu_reason = gpu_attachment(spec, cpu_only=args.cpu_only, environ=os.environ)
     print(json.dumps({"schema": "prismaquant.tessera_campaign_container.v1",
                       "requested_image": requested, "image_id": image_id,
                       "image_content_sha256": content_digest,
                       "declared_content_sha256": declared,
-                      "uid": os.getuid(), "gid": os.getgid()}), flush=True)
+                      "uid": os.getuid(), "gid": os.getgid(),
+                      "gpu_attached": with_gpu, "gpu_decision": gpu_reason}), flush=True)
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id,
-                            content_sha256=content_digest, with_gpu=not args.cpu_only)
+                            content_sha256=content_digest, with_gpu=with_gpu)
     os.execvp(docker[0], docker)
     return 1  # exec never returns
 

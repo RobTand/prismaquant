@@ -1,0 +1,561 @@
+[
+  {
+    "action_key": "15a1aace22678abcbc6d31c400bce4f8b1b5003ff0a61f26f8f42912a6b6f4df",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_verified_capture_load.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "70 passed, 16 warnings in 6.22s"
+    ],
+    "source_snapshot": {
+      "commit": "ebdf673a67123612b37040ae5a24e0057298e43a",
+      "input": {
+        "bytes": 27402389,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "6fb62f0df615a22ea48f8a62ac64ec65aac4107eb6e1582ea3cd8d37026893aa"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "2b409e7b4e1733e1fd0a292dc55fc137de72edacce83bb3a65621ab5356cd367",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_architecture_doc.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "13 passed, 14 warnings in 5.42s"
+    ],
+    "source_snapshot": {
+      "commit": "9607dae9b3881710a2ac1e842c2a526200a504bc",
+      "input": {
+        "bytes": 27402390,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "45f2de707b8cc3d454e1f56cbb93d70e771b1c43d98f0ae28bad4e30e819ec5a"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "385f62dcdd109c5a17f163203f52d303fe9a6ba843e1e8a57718afe4864950d8",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_tessera_calibration_cache.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "34 passed, 14 warnings in 7.59s"
+    ],
+    "source_snapshot": {
+      "commit": "925b89db84033a9aae86162700a7c4cea2d18f8b",
+      "input": {
+        "bytes": 27402391,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "8af5bae25162026444e5a1ecd4d5caff0975d3127065ff36029aad15b5462fff"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "3ccc91c9f149b897cb857a6adee68f5eeab1af86d82bf9b6f31ba51960f8f34b",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_docs_staleness.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "6 passed, 14 warnings in 5.06s"
+    ],
+    "source_snapshot": {
+      "commit": "825947c8fa6cb34fefb78eb64b39b5fa004ad9bf",
+      "input": {
+        "bytes": 27402389,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "e9c5cb35b9cfbc9b87182131e626605b9c4011c6c4e1d8dd86c9068898811ff4"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "54f278d5a7badbea1bc41152bef1e4bfabe6250246ec901d1ca30bf8721435f5",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_streamed_capture_admission.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "20 passed, 14 warnings in 6.21s"
+    ],
+    "source_snapshot": {
+      "commit": "1e82609a5310a74b4e8064ce4719edd99e922b7c",
+      "input": {
+        "bytes": 27402389,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "f8b78e465b8358a113c208b3f8e9e99a4e7bba831ee475a359bbfb6f7dce2f00"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "7814eecd02a9fb7aef948103fe8aeb1537b9ec066b5a5073cb02657bc091e9e0",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_tessera_campaign_resume.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [],
+    "source_snapshot": {
+      "commit": "ef162c16e6f53e0cdb2a3aa3c2edc4472c01fdd4",
+      "input": {
+        "bytes": 27402391,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "aba12763976beb2a276bca5362bc7824f814c60908268dab457ddca4a56dd89f"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "failed",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "84295ea5ec267b5014c1a9c7d25f1faf0b10f015239f94f7d36fa74454e2d038",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_tessera_selected_source.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "10 passed, 1 skipped, 14 warnings in 6.00s"
+    ],
+    "source_snapshot": {
+      "commit": "4e139abcecc76cab521eaa31e19e573678d43b85",
+      "input": {
+        "bytes": 27402390,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "4d8d8eb18112f020e7d4d4758609aa11cfd46aa8683f0073c513bf208332ff1c"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "b6752697968a0818ad9a8dd8fa9270020f212a4880e0709fb97727d624e135d0",
+    "command": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_tessera_campaign_fanout.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "39 passed, 14 warnings in 10.57s"
+    ],
+    "source_snapshot": {
+      "commit": "d622f2845ecae1f1950c894046d7bc2c9a7eacf4",
+      "input": {
+        "bytes": 27402389,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "a1cb1fb4268f4e2d5f3956526996d24448307ab483b64bdbf538ad2744d5944c"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "c7ef81e34ff69b1986d839cb05a47a262efd6bc2b82b243003a33b8c0760d9f7",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_selected_verified_capture.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "13 passed, 14 warnings in 6.10s"
+    ],
+    "source_snapshot": {
+      "commit": "932ec9ed24ec33c08044777d9ad666480352fdc2",
+      "input": {
+        "bytes": 27402390,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "765be08bd316021c6099e8ad37dd37c51646491504ec54d5d6344e8c0ec2416d"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "f2967423efd578862f3e5d634dca329318b69605249eef806534a9afd7ab3d6a",
+    "command": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "py_compile",
+      "prismaquant/tessera_campaign.py",
+      "prismaquant/autoscale.py",
+      "tools/dispatch_tessera_campaign.py",
+      "tests/test_selected_verified_capture.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [],
+    "source_snapshot": {
+      "commit": "eeb07ad90ff519a2b9d575b5d73c1192357072ff",
+      "input": {
+        "bytes": 27402389,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "7fb5c6d3601510d3a650c3593def843a904a6c64f201fa95078fd2cf6da1abca"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "f2e22ec4352190831f0f27a618a4669601bb771092e68fbb43da84d5fad7de75",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_tessera_campaign_resume.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 12
+    },
+    "result_summary": [],
+    "source_snapshot": {
+      "commit": "8a30d4c6a9c3bbf8bdd7a1eafd8f69c50dc8078e",
+      "input": {
+        "bytes": 27402391,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "fe9cdbd1eccf7c42a80419434f87429c3e024e3ccdba0876c18ab5be22e28e41"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "failed",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "f3a5d1eb99f3ac845e747c4097953df70e775aed70e2d645681dd8a49edf8914",
+    "command": [
+      "env",
+      "TMPDIR=/home/rob/tmp",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "OPENBLAS_NUM_THREADS=1",
+      "TORCH_NUM_THREADS=1",
+      "PYTHONPATH=src:experiments",
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--no-header",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_selected_source_authentication.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "26 passed, 15 warnings in 6.77s"
+    ],
+    "source_snapshot": {
+      "commit": "5257c795496050e8278cd0b26b4983103996262f",
+      "input": {
+        "bytes": 27402392,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "809761050b438f08cd63b1d62446eae23008dda52224ec7164b9e35cbecba531"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "fac8659196710650facd4df2bf9cfd559c2dcd5fb79a4827bd96ebe8caff2c1b",
+    "command": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_selected_verified_capture.py",
+      "tests/test_tessera_campaign_resume.py::test_main_refuses_unbound_checkpoint_before_accepting_anchors"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "17 passed, 14 warnings in 5.40s"
+    ],
+    "source_snapshot": {
+      "commit": "eaed9631ed95ab50d147f46304af07eed1754d58",
+      "input": {
+        "bytes": 27403548,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "06739e7f50bea0779d0c4567b7c7be47e64de2abe14e2054872dae47e8ea4a24"
+      },
+      "parent": "ae781f4ea51822f8a67fe81cef6e767585742948",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "done",
+    "tags": [
+      "x86"
+    ]
+  },
+  {
+    "action_key": "fd3ae6aab1bc06c59b19b1699dac43e56618c5585e7658d9598998371a9ff08d",
+    "command": [
+      "/home/rob/venvs/pq-cpu312/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_selected_verified_capture.py"
+    ],
+    "resources": {
+      "cpu": 1,
+      "mem_gb": 4
+    },
+    "result_summary": [
+      "3 failed, 4 passed, 14 warnings in 5.47s"
+    ],
+    "source_snapshot": {
+      "commit": "3ee6c90ba82f411f46626fa781f0d28f3a2a9e15",
+      "input": {
+        "bytes": 27392074,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "50876382b3a1ae5da4105d57827c62c1f9c7b831dbc134b4e57e1a876c899cec"
+      },
+      "parent": "8d8a293ffbcadf6a40ec91fde03d8f690eafd2e5",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "status": "failed",
+    "tags": [
+      "x86"
+    ]
+  }
+]

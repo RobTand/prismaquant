@@ -136,7 +136,23 @@ def load_spec(path: Path) -> dict:
             "takes its deadline from the fleet, not from inside the round loop")
     if "container" in spec:
         validate_container(spec)
+    _process_baseline_bytes(spec, where=str(path))
     return spec
+
+
+def _process_baseline_bytes(spec: dict, *, where="spec") -> int:
+    """The per-row process floor this recipe reserves, in bytes.
+
+    Zero, the legacy default, reserves nothing and is what every spec written
+    before this key meant.  The value is the recipe's, not this tool's: no
+    universal torch-plus-CUDA constant is invented here, because a floor is a
+    property of the box and the runtime a row lands on and this planner never
+    enters either.
+    """
+    from prismaquant.autoscale import validate_process_baseline_bytes
+    return validate_process_baseline_bytes(
+        spec.get("process_baseline_bytes", 0),
+        where=f"{where}: process_baseline_bytes")
 
 
 def _model_bytes(model: str) -> int:
@@ -158,17 +174,49 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     * the selection's retained scoring rows, ``max_act_rows x in`` in fp32.
 
     plus the spec's declared headroom for the forward pass and the encoder.
+
+    **The spec's process baseline is charged here, once, outside the deltas.**
+    A phase plan states deltas, and the floor those deltas sit on --
+    interpreter, torch, the CUDA runtime, the pages the row's process has
+    touched -- is a property of the box the row lands on, which this planner
+    never enters. So it is still never derived here; it is *declared*, as the
+    spec's ``process_baseline_bytes``, defaulting to zero. Its own scope
+    travels with it: it is the recipe's number, not a universal maximum.
+
+    It is added to the demand and never to ``memory_bytes``, because the
+    demand becomes a cgroup cap of exactly that many GiB
+    (``prismabuild/pool.py:2850``) while the row refuses unless its plan fits
+    under that cap *less* the floor it measures for itself
+    (``prismaquant/tessera_campaign.py:4515``). Fold the reservation into the
+    plan instead and the predicate compares an inflated delta against an
+    inflated cap and nets to zero -- which is exactly why the spec's declared
+    headroom, a term inside ``memory_bytes``, could never close this gap.
+
+    Both branches charge it. A process floor exists whether or not a row
+    streams, so leaving the resident-source branch out would make the key mean
+    one thing on one path and nothing on the other.
+
+    Rounding is not a reservation. ``ceil`` leaves at most one GiB of slack,
+    and the floor measured on this fleet is 1,062,359,040 bytes -- 0.9894 GiB,
+    less than the most ``ceil`` can leave -- so before this key a row admitted
+    according to where its ``memory_bytes`` landed modulo one GiB, which both
+    inspected example rows lost. The row
+    still measures its own floor at its first ``CaptureMemoryGuard.check`` and
+    stamps it on its receipt (RobTand/prismaquant#390); that reading, not this
+    declaration, remains the measured number.
     """
     gib = 1024 ** 3
+    baseline = _process_baseline_bytes(spec)
     if "--streaming" in spec['campaign_argv']:
         resource = _streamed_resource_plan(spec, census, members, selected_source=selected_source)
-        return int(math.ceil(resource['memory_bytes']/gib))
+        return int(math.ceil((resource['memory_bytes'] + baseline)/gib))
     shapes = census.get("unit_shapes") or {}
     hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
     rows = sum(int(shapes.get(name, [0, 0])[1]) * int(spec.get("max_act_rows", 512)) * 4
                for name in members)
     total = _model_bytes(spec["model"]) + hessian + rows
-    return int(math.ceil(total / gib)) + int(spec.get("headroom_gb", 24))
+    return (int(math.ceil((total + baseline) / gib))
+            + int(spec.get("headroom_gb", 24)))
 
 
 def _streamed_resource_plan(spec, census, members, *, selected_source=False):
@@ -184,10 +232,22 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
         cache_slots=argument('--streaming-cache-slots', 2),
         prefetch_workers=argument('--streaming-prefetch-workers', 1),
         headroom_gb=max(float(spec.get('headroom_gb', 24)),
-                        argument('--streaming-cache-headroom-gb', 24., float)))
+                        argument('--streaming-cache-headroom-gb', 24., float)),
+        # Recorded beside ``memory_bytes``, never summed into it: the plan
+        # stays pure phase deltas and the reservation is charged once, in
+        # ``_row_memory_gb``, on the demand.
+        process_baseline_bytes=_process_baseline_bytes(spec))
     if selected_source:
         return selected_anchor_resources(spec['model'], **options,
-            anchor_batch_size=argument('--anchor-batch-size', 1))
+            anchor_batch_size=argument('--anchor-batch-size', 1),
+            source_snapshot_policy=argument('--source-snapshot-policy', 'whole-layer-v1', str),
+            # The row's own campaign will hold this many host bytes of staged
+            # artifacts, so the box that admits the row has to be told. A
+            # dispatcher that planned without it would size a worker for a
+            # campaign it is not about to run.
+            publication_overlap_bytes=argument('--publication-overlap-bytes', 0),
+            **(dict(capture_load_policy=argument('--capture-load-policy', None, json.loads))
+               if '--capture-load-policy' in argv else {}))
     return streamed_calibration_resources(spec['model'], **options,
         nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
         capture_policy=argument('--streaming-capture-policy', 'legacy', str))
@@ -497,6 +557,42 @@ UNITS_SCHEMA = "prismaquant.tessera_campaign_units.v1"
 UNITS_SCHEMA_V2 = "prismaquant.tessera_campaign_units.v2"
 
 
+def _seed_workspace_rows(path, *, census, calibration_cache):
+    """Bind a previous plan; each matching row keeps its own checkpoint owner."""
+    import hashlib
+    root = Path(path).resolve()
+    plan_path = root/'plan.json'
+    raw = plan_path.read_bytes()
+    plan = json.loads(raw)
+    if (plan.get('schema') != PLAN_SCHEMA or plan.get('model') != census['model'] or
+            json.loads(Path(plan['census']).read_text()) != census or
+            plan.get('calibration_cache') != calibration_cache):
+        raise RuntimeError('seed workspace model, census or capture differs')
+    rows = {}
+    for row in plan['rows']:
+        key = tuple(sorted(row['groups']))
+        if not key or key in rows:
+            raise RuntimeError('seed workspace has empty or duplicate group bundles')
+        rows[key] = row
+    return rows, {'path': str(root), 'plan_sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def _seed_for_selection(rows, bundle, selection):
+    """Only unchanged group membership and sampling may inherit this journal."""
+    import hashlib
+    row = rows.get(tuple(sorted(bundle)))
+    if row is None or json.loads(Path(row['units']).read_text()) != selection:
+        raise RuntimeError('seed workspace selection differs; preserve group bundles and sampling')
+    checkpoint = Path(row['dir'])/'cost.anchors.json'
+    if not checkpoint.is_file():
+        return None
+    raw = checkpoint.read_bytes()
+    manifest = json.loads(raw)
+    return {'checkpoint': str(checkpoint), 'wire_dir': str(Path(row['dir'])/'cache/wire'),
+            'manifest_sha256_at_plan': hashlib.sha256(raw).hexdigest(),
+            'identity_sha256': manifest['identity_sha256'], 'row_id': row['row_id']}
+
+
 def cmd_plan(args) -> int:
     spec = load_spec(Path(args.spec))
     workspace = Path(args.workspace)
@@ -510,6 +606,12 @@ def cmd_plan(args) -> int:
     selected_source = '--streaming' in spec['campaign_argv']
     if selected_source and calibration_cache is None:
         raise RuntimeError('streaming anchor rows require a hash-bound complete calibration cache')
+    seed_rows, seed_workspace = None, None
+    if getattr(args, 'seed_workspace', None):
+        if args.seed_checkpoint or args.seed_wire_dir:
+            raise RuntimeError('seed workspace is exclusive with a global seed checkpoint/wire directory')
+        seed_rows, seed_workspace = _seed_workspace_rows(args.seed_workspace,
+            census=census, calibration_cache=calibration_cache)
     groups = census["anchor_groups"]
     if not groups:
         raise RuntimeError("census reports no anchor group to price")
@@ -572,6 +674,11 @@ def cmd_plan(args) -> int:
         if calibration_cache:
             argv += ["--calibration-cache", calibration_cache["path"],
                      "--calibration-cache-sha256", calibration_cache["sha256"]]
+        row_seed = (_seed_for_selection(seed_rows, bundle, selection)
+                    if seed_rows is not None else None)
+        if row_seed is not None:
+            argv += ['--seed-checkpoint', row_seed['checkpoint'],
+                     '--seed-wire-dir', row_seed['wire_dir']]
         if args.seed_checkpoint:
             argv += ["--seed-checkpoint", str(args.seed_checkpoint)]
             if args.seed_wire_dir:
@@ -581,6 +688,7 @@ def cmd_plan(args) -> int:
                          timeout_s=int(args.timeout_s)))
         planned.append({"row_id": row_id, "groups": bundle, "members": sorted(members),
                         "dir": str(row_dir), "units": str(units_path),
+                        **({'seed': row_seed} if row_seed is not None else {}),
                         **({'resources': _streamed_resource_plan(spec, census, members,
                             selected_source=True)} if selected_source else {})})
 
@@ -619,10 +727,17 @@ def cmd_plan(args) -> int:
         "groups_per_row": int(args.groups_per_row),
         "rows_per_box": per_box,
         "row_memory_gb": row_memory_gb,
+        # The reservation those demands carry, stated once for the whole plan
+        # because it is a per-row constant. Zero means none was declared, and
+        # every row's phase plan records the same thing in its own
+        # ``baseline_policy``, so a reader cannot mistake an absent
+        # reservation for a covered one.
+        "process_baseline_bytes": _process_baseline_bytes(spec),
         # The rows the manifest does not hold, at the demand they were derived
         # at. A reader of the plan sees the whole layout; a reader of the
         # manifest sees only what was submitted.
         "inadmissible_rows": inadmissible,
+        **({'seed_workspace': seed_workspace} if seed_workspace is not None else {}),
         "seed_checkpoint": (None if not args.seed_checkpoint
                             else str(args.seed_checkpoint)),
         # The draw itself, whole: which experts stand for their stack, under
@@ -681,7 +796,8 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
     selection.
     """
     from prismaquant.tessera_campaign import (
-        SCHEMA, campaign_population_block, canonical_refusals, selection_stack_samples)
+        SCHEMA, campaign_population_block, canonical_refusals, selection_stack_samples,
+        parse_family_restriction)
     from prismaquant.tessera_campaign import ExpertPopulation
     # The keys a merged payload must land under are the ones the campaign and
     # the allocation share.  Spelling them here as literals is how a merge
@@ -695,6 +811,32 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
             raise MergeRefused(f"{row_id}: not a {SCHEMA} payload")
 
     provenances = {row: payload["provenance"] for row, payload in row_payloads.items()}
+    family_policies, restricted_structures = {}, {}
+    for row_id, prov in provenances.items():
+        restriction = prov.get("family_restriction")
+        if restriction is None:
+            family_policies[row_id] = None
+            continue
+        if not isinstance(restriction, dict) or set(restriction) != {"policy", "structure_by_unit"}:
+            raise MergeRefused(f"{row_id}: invalid family restriction provenance")
+        try:
+            policy = parse_family_restriction(restriction["policy"])
+        except (ValueError, TypeError) as exc:
+            raise MergeRefused(f"{row_id}: invalid family restriction policy: {exc}") from exc
+        structures = restriction["structure_by_unit"]
+        members = {name for group in prov["unit_selection"]["groups"]
+                   for name in group.get("sampled", group["members"])}
+        if (policy is None or not isinstance(structures, dict) or set(structures) != members
+                or any(s not in ("dense", "routed_moe") for s in structures.values())):
+            raise MergeRefused(f"{row_id}: family restriction must cover exact selected unit structures")
+        for name, structure in structures.items():
+            if name in restricted_structures:
+                raise MergeRefused(f"{row_id}: family restriction repeats selected unit {name}")
+            if name in prov["campaign_scope"]["expert_targets"] and structure != "routed_moe":
+                raise MergeRefused(f"{row_id}: family restriction contradicts projected expert {name}")
+            restricted_structures[name] = structure
+        family_policies[row_id] = policy
+    family_policy = _require_equal("provenance.family_restriction.policy", family_policies)
     for field in SHARED_PROVENANCE:
         _require_equal(f"provenance.{field}",
                        {row: prov.get(field) for row, prov in provenances.items()})
@@ -833,6 +975,9 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
 
     reference = provenances[sorted(provenances)[0]]
     provenance = {key: value for key, value in reference.items()}
+    if family_policy is not None:
+        provenance["family_restriction"] = {"policy": family_policy,
+            "structure_by_unit": dict(sorted(restricted_structures.items()))}
     provenance.update({
         "surfaces": dict(sorted(surfaces.items())),
         "anchor_groups": dict(sorted(anchor_groups.items())),
@@ -1324,7 +1469,11 @@ def main(argv=None) -> int:
                            "anchor and a leave-one-out check.")
     plan.add_argument("--probe", default=None,
                       help="a probe pickle carrying per-expert h_trace.")
-    plan.add_argument("--seed-checkpoint", default=None,
+    seeds = plan.add_mutually_exclusive_group()
+    seeds.add_argument('--seed-workspace', default=None,
+                       help='reuse matching rows from a prior plan through the ordinary seed gates; '
+                            'completed and partial checkpoints are supported')
+    seeds.add_argument("--seed-checkpoint", default=None,
                       help="a campaign checkpoint whose measured anchors every "
                            "row may adopt, subject to its own row gates")
     plan.add_argument("--seed-wire-dir", default=None)

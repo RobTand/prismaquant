@@ -148,6 +148,12 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: The Tessera commit this pin's answer was reviewed against.  Declared and
 #: recorded; NOT compared to anything.  A moving ``master`` is not a review
 #: event -- :data:`TESSERA_DEV_PIN_ANSWER` is what refuses. Re-pinned
+#: 2026-09-09 to b1eb1dccc (Tessera #437/#438) for the opt-in best-form
+#: window encoder and explicit tile controls. Actual GLM endpoint runs retain
+#: exact wire bytes and scores; no encoder default or serving cell changes.
+#: The pin also includes the reviewed cached-export and rank-local TP2 intake
+#: fixes (#434/#436), whose bounded controls do not qualify a full GLM serve.
+#: Previously re-pinned
 #: 2026-09-08 to 07ad344c3 (Tessera #431) for explicit packed checkpoint
 #: execution and strict typed export carriers, retaining the exact contract
 #: bytes and admission answer. Previously re-pinned
@@ -157,8 +163,8 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: construction output sizes. The admission answer was last changed at
 #: contract v22 / lane schema v9 (Tessera master 8ed1d9a, the merge of its
 #: #332, which answers its #327; v21 landed at b8b1cb38 in its #313 and the
-#: release e78959ed carried v20). The development and serving pins now both
-#: bind 07ad344c3: they name ONE object, and
+#: release e78959ed carried v20). At that review both pins were aligned on
+#: b1eb1dccc: they name ONE object, and
 #: letting them drift is how two of this repository's own spec files came to
 #: disagree about one runtime.  Between the v17 review and this one the
 #: answer moved in exactly four places and nowhere else -- no family, rung,
@@ -208,10 +214,11 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: derive.  The admission itself is unchanged: ``cell_evidence_admits`` is
 #: still status-only and still ``{repetitive}``.
 #:
-#: Verified by fetching ``RobTand/tessera`` master into a scratch repository
-#: and hashing the blob at the tip -- never a working tree (the command is in
-#: ``tessera_runtime/README.md``).  No tag names the commit.
-TESSERA_DEV_PIN_COMMIT = "07ad344c3275bb2fa7ce2432f93d89945d66f4c2"
+#: The resident-H integration uses the reviewed runtime tree from Tessera
+#: PR #441. Its contract blob is identical to the previous master pin; the
+#: producer source identity changes and existing priced bytes keep their seal.
+#: No release tag names this development commit.
+TESSERA_DEV_PIN_COMMIT = "387eda36fd410d6b2a4fb86b22285eab2a5e072c"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and

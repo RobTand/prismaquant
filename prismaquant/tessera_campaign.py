@@ -81,6 +81,7 @@ from .nvfp4_activation_contract import (
     ActivationScaleContractError as _OwnedActivationScaleContractError,
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
+from .tessera_publication import PublicationJob
 
 __all__ = [
     "CENSUS_SCHEMA",
@@ -190,6 +191,73 @@ def parse_rate_band(text) -> "tuple[int, int] | None":
     if lo <= 0 or hi <= 0 or lo > hi:
         raise RuntimeError(f"--rate-band {text!r}: want 0 < lo <= hi")
     return lo, hi
+
+
+FAMILY_RESTRICTION_SCHEMA = "prismaquant.tessera_campaign_family_restriction.v1"
+
+
+def parse_family_restriction(value):
+    """Canonical opt-in pricing scope; it grants no reader or serving support."""
+    if value is None:
+        return None
+    from .tessera_formats import get_tessera_family
+
+    def unique_object(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError(f"family restriction repeats field {key!r}")
+            result[key] = item
+        return result
+
+    if isinstance(value, str):
+        value = json.loads(value, object_pairs_hook=unique_object)
+    if not isinstance(value, Mapping) or set(value) != {"schema", "dense", "routed_moe"}:
+        raise ValueError("family restriction requires exactly schema, dense and routed_moe")
+    if value["schema"] != FAMILY_RESTRICTION_SCHEMA:
+        raise ValueError("family restriction has an unsupported schema")
+    result = {"schema": FAMILY_RESTRICTION_SCHEMA}
+    for structure in ("dense", "routed_moe"):
+        names = value[structure]
+        if not isinstance(names, list) or not names or any(not isinstance(n, str) for n in names):
+            raise ValueError(f"family restriction {structure} requires a nonempty family list")
+        if len(set(names)) != len(names):
+            raise ValueError(f"family restriction {structure} repeats a family")
+        for name in names:
+            try:
+                family = get_tessera_family(name)
+            except (ValueError, KeyError) as exc:
+                raise ValueError(f"family restriction has unknown family {name!r}") from exc
+            if family.name != name:
+                raise ValueError(f"family restriction requires canonical family name {name!r}")
+        result[structure] = sorted(names)
+    return result
+
+
+def require_seed_family_scope(name, state, *, family_restriction, structure_by_unit,
+                              rate_band=None):
+    """Refuse incompatible active seed anchors before their wires are linked."""
+    if family_restriction is None:
+        return
+    from .tessera_formats import parse_tessera_format_name
+    policy = parse_family_restriction(family_restriction)
+    structure = (structure_by_unit or {}).get(name)
+    if structure not in ("dense", "routed_moe"):
+        raise RuntimeError(f"{name}: family restriction requires authoritative structure")
+    if not isinstance(state, Mapping) or not isinstance(state.get("anchors"), list):
+        raise RuntimeError(f"{name}: family restriction received an invalid seed state")
+    for row in state["anchors"]:
+        try:
+            family, rate = parse_tessera_format_name(row["format_name"])
+        except (TypeError, ValueError, KeyError) as exc:
+            raise RuntimeError(f"{name}: family restriction received an invalid seed format") from exc
+        if (row.get("qname") != name or row.get("family") != family.name
+                or type(row.get("body_rate_q256")) is not int or row["body_rate_q256"] != rate):
+            raise RuntimeError(f"{name}: family restriction seed format/identity disagree")
+        if family.name not in policy[structure]:
+            raise RuntimeError(f"{name}: seed {row['format_name']} violates {structure} family restriction")
+        if rate_band is not None and not rate_band[0] <= rate <= rate_band[1]:
+            raise RuntimeError(f"{name}: seed {row['format_name']} is outside restricted rate band {rate_band}")
 
 
 def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
@@ -358,7 +426,7 @@ def _activation_kwargs_memo(source, weights, device, *, max_entries=None,
 def _measure_anchor(
     *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
     activation_kwargs_for=None, hessian_required: bool = True,
-    static_input_scale: "float | None" = None,
+    static_input_scale: "float | None" = None, publisher=None,
 ):
     """Render one rung, price it as served, and store the wire beside it.
 
@@ -398,7 +466,8 @@ def _measure_anchor(
         hessian_required=prepared["hessian_required"])
     return _finish_anchor(qname=qname, weight=weight, activations=activations,
         format_name=format_name, cache=cache, wire_dir=wire_dir,
-        prepared=prepared, render=render, blob=blob, elapsed=time.time() - started)
+        prepared=prepared, render=render, blob=blob, elapsed=time.time() - started,
+        publisher=publisher)
 
 
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
@@ -476,11 +545,22 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
 
 
 def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
-                   prepared, render, blob, elapsed, encoding_batch_size=1):
-    """Score decoded bytes and publish the existing cache/wire entries."""
+                   prepared, render, blob, elapsed, encoding_batch_size=1,
+                   publisher=None):
+    """Score decoded bytes and publish the existing cache/wire entries.
+
+    ``publisher``, when given, is a
+    :class:`~prismaquant.tessera_publication.BoundedPublisher` that performs
+    the two writes on its own thread instead of here.  The bytes handed to it
+    are the same bytes and the writes are the same calls; what moves is only
+    which thread runs them, and the caller then owes the completion an
+    ordering rule -- the anchor is not journalled until its files exist.  With
+    no publisher this function is what it has always been, line for line.
+    """
     import torch
     from .production_weight_cache import (
-        _local_forward_render_score, _store_rendered_weight_entry)
+        _canonical_rendered_weight_tensor, _local_forward_render_score,
+        _store_rendered_weight_entry)
 
     spec, family, rung = (prepared[key] for key in ("spec", "family", "rung"))
     activation_qdq, input_scale = (prepared[key] for key in (
@@ -499,31 +579,66 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         raise RuntimeError(f"unexpected render-score metric {metric!r}")
     hessian_applied = bool(prepared["activation_kwargs"])
 
-    _store_rendered_weight_entry(
-        weights=cache.weights,
-        qname=qname,
-        fmt=format_name,
-        tensor=render,
-        cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
-        weight_dtype=torch.bfloat16,
-    )
+    # Room first, then the bytes.  The copy below is a new host allocation the
+    # writer will own, so the budget has to admit it BEFORE it exists: charging
+    # it after the fact would leave this thread holding one artifact more than
+    # the bound allows, every time the writer is behind.  The size is known
+    # without making it -- one BF16 element per render element, plus the blob
+    # the encoder already returned.
+    if publisher is not None:
+        publisher.reserve(render.numel() * 2 + len(blob))
+    try:
+        # The device-to-host copy stays on the thread that owns the device
+        # work, whichever way the bytes are written.
+        # ``_store_rendered_weight_entry`` canonicalises again below and that
+        # second call is an identity on a CPU tensor already in the target
+        # dtype and contiguous, so the synchronous path stores the same object
+        # it always stored.  Staging it here is what gives the writer thread
+        # bytes nobody else owns.
+        staged = _canonical_rendered_weight_tensor(
+            render, weight_dtype=torch.bfloat16)
+    except BaseException:
+        if publisher is not None:
+            publisher.release(render.numel() * 2 + len(blob))
+        raise
     # The wire, beside the render.  A ``.tessera`` shard per (qname, rung),
     # named the way the cache names its weight shards, so the export leg can
     # find the exact bytes this row was priced on instead of re-encoding.
     wire_path = _wire_path(wire_dir, qname, format_name)
-    tmp = wire_path.with_suffix(".tessera.tmp")
-    tmp.write_bytes(blob)
-    os.replace(tmp, wire_path)
-    if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
-        # The existing PWC entry is already disk-backed. Completed anchor
-        # files must not accumulate an unbounded page-cache owner across rungs.
-        # The release helper checks the entry's identity, fsyncs and advises
-        # it from its own descriptor. No verification consumes a second hash
-        # of these completed files here.
-        from .perturbed_x_cache import release_activation_cache_file_pages
-        rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
-        for path in (rendered_path, wire_path):
-            release_activation_cache_file_pages(path, expected_stat=path.stat())
+
+    def _publish():
+        _store_rendered_weight_entry(
+            weights=cache.weights,
+            qname=qname,
+            fmt=format_name,
+            tensor=staged,
+            cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
+            weight_dtype=torch.bfloat16,
+        )
+        tmp = wire_path.with_suffix(".tessera.tmp")
+        tmp.write_bytes(blob)
+        os.replace(tmp, wire_path)
+        if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
+            # The existing PWC entry is already disk-backed. Completed anchor
+            # files must not accumulate an unbounded page-cache owner across
+            # rungs. The release helper checks the entry's identity, fsyncs
+            # and advises it from its own descriptor. No verification consumes
+            # a second hash of these completed files here.
+            from .perturbed_x_cache import release_activation_cache_file_pages
+            rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
+            for path in (rendered_path, wire_path):
+                release_activation_cache_file_pages(path, expected_stat=path.stat())
+
+    if publisher is None:
+        _publish()
+    else:
+        # The reservation above was taken for exactly these bytes; the
+        # element count is the render's and the dtype is BF16 either way.
+        publisher.submit(PublicationJob(
+            key=(FILES_JOB, qname, format_name),
+            charged_bytes=(staged.numel() * staged.element_size()) + len(blob),
+            publish=_publish,
+        ))
 
     bits = spec.bits_for_shape(tuple(weight.shape))
     return CampaignAnchor(
@@ -550,7 +665,8 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
 
 def _measure_anchor_batch(*, qnames, weights, activations, format_name,
                           cache, wire_dir, activation_kwargs_for=None,
-                          hessian_required=True, static_input_scales=None):
+                          hessian_required=True, static_input_scales=None,
+                          publisher=None):
     """One producer batch, with the scalar path's per-unit gates and storage."""
     from .tessera_render import encode_tessera_units
 
@@ -573,7 +689,8 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
     elapsed = (time.time() - started) / len(qnames)
     return [_finish_anchor(qname=name, weight=weight, activations=acts,
         format_name=format_name, cache=cache, wire_dir=wire_dir, prepared=entry,
-        render=render, blob=blob, elapsed=elapsed, encoding_batch_size=len(qnames))
+        render=render, blob=blob, elapsed=elapsed,
+        encoding_batch_size=len(qnames), publisher=publisher)
         for name, weight, acts, entry, (render, blob) in zip(
             qnames, weights, activations, prepared, encoded)]
 
@@ -1431,7 +1548,8 @@ def _checkpoint_identity_api():
 def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
-                                  expert_projection=None, stack_sampling_identity=None):
+                                  expert_projection=None, stack_sampling_identity=None,
+                                  structure_by_unit=None):
     """Bind the priced population, including score inputs when H is off.
 
     The static A-side contract is a scoring input like the score rows: the
@@ -1447,8 +1565,22 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
 
     api = _checkpoint_identity_api()
     settings = vars(args).copy()
-    # Locations, batch width and a wall-clock interruption limit are not
-    # encoding/scoring inputs. All other explicit campaign settings remain bound by default.
+    restriction = parse_family_restriction(settings.get("family_restriction"))
+    if restriction is None:
+        settings.pop("family_restriction", None)
+    else:
+        settings["family_restriction"] = restriction
+        if (not isinstance(structure_by_unit, Mapping) or set(structure_by_unit) != set(menus)
+                or any(s not in ("dense", "routed_moe") for s in structure_by_unit.values())):
+            raise ValueError("family restriction identity requires every priced unit's structure")
+    # Locations, batch width, publication staging and a wall-clock
+    # interruption limit are not encoding/scoring inputs.  All other explicit
+    # campaign settings remain bound by default.
+    #
+    # ``publication_overlap_bytes`` chooses which thread performs two writes
+    # whose arguments it does not touch.  Binding it would make a run that
+    # staged its artifacts unable to resume a journal written without staging,
+    # which is a refusal about scheduling wearing an identity's clothes.
     #
     # ``units``, ``calibration_census`` and ``census_out`` are locations too,
     # and each one's load-bearing content is already bound by value somewhere
@@ -1466,9 +1598,13 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     for name in ("out", "cache_dir", "checkpoint", "deadline_seconds",
                  "units", "calibration_census", "census_out",
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
-                 "seed_checkpoint", "seed_wire_dir", "anchor_batch_size"):
+                 "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
+                 "publication_overlap_bytes", "source_snapshot_policy"):
         settings.pop(name, None)
     return {
+        **({"family_restriction": {"policy": restriction,
+             "structure_by_unit": dict(sorted(structure_by_unit.items()))}}
+           if restriction is not None else {}),
         **({"stack_sampling_identity": stack_sampling_identity}
            if stack_sampling_identity else {}),
         "campaign_schema": SCHEMA,
@@ -1724,8 +1860,174 @@ def _checkpoint_wire_record(anchor, wire_dir, identity, *, existing=None):
             f"{anchor.format_name}: {exc}") from exc
 
 
+# Job namespaces on the one publication queue. They exist so a completion
+# says which link of the chain finished: the files, the receipt read back off
+# them, or the journal write that cites the receipt.
+FILES_JOB = "files"
+RECEIPT_JOB = "receipt"
+CHECKPOINT_JOB = "checkpoint"
+
+
+class _AnchorPublicationLedger:
+    """Decides when a measured anchor is allowed to become a journal row.
+
+    The campaign's rule is a chain: the render and wire files are written,
+    then the wire receipt is made by reading the published file back, then the
+    anchor row and that receipt go into the checkpoint together.  Each link
+    must not precede the one before it.  Doing all three on the encode thread
+    made that ordering free; doing any of them elsewhere makes it something
+    this object has to hold.
+
+    It holds it with one queue.  The publisher runs one writer thread in
+    submission order, so a receipt job submitted after a file job runs after
+    it, and a checkpoint job submitted after both runs after both.  Nothing
+    here reorders; it only decides what to put on the queue and when to
+    believe a completion.
+
+    ``make_record(anchor, identity)`` is the caller's receipt call, and
+    ``journal_anchor(anchor, record)`` is the caller's three lines that put a
+    row and its receipt into the pending checkpoint.  With no publisher both
+    run inline exactly where they always ran, which is what makes the default
+    path the historical path rather than a re-implementation of it.
+    """
+
+    def __init__(self, *, publisher, make_record, journal_anchor):
+        self._publisher = publisher
+        self._make_record = make_record
+        self._journal = journal_anchor
+        self._staged: dict = {}
+        self._records: dict = {}
+        self._checkpoint_seq = 0
+
+    @property
+    def staged(self) -> dict:
+        return self._staged
+
+    @property
+    def active(self) -> bool:
+        return self._publisher is not None
+
+    def open(self, publisher) -> None:
+        """Start deferring, from a pass-through that has nothing outstanding.
+
+        The ledger is constructed without a publisher so the rows a seed
+        adopted are journalled inline, on the historical path, before any
+        thread exists.  Attaching one afterwards is only legal while nothing
+        is staged, because a staged anchor belongs to a queue and there was
+        no queue to put it on.
+        """
+        if self._staged or self._records:
+            raise RuntimeError(
+                "the publication ledger cannot start deferring with "
+                f"{len(self._staged)} anchor(s) already staged")
+        self._publisher = publisher
+
+    def record(self, anchor, identity) -> None:
+        """Journal now, or when this anchor's own bytes have been written."""
+        if self._publisher is None:
+            self._journal(anchor, self._make_record(anchor, identity))
+            return
+        key = (anchor.qname, anchor.format_name)
+        if key in self._staged:
+            # Two anchors for one (unit, rung) share a publication key, and
+            # one of them would be journalled under the other's receipt. The
+            # anchor schedule does not produce this; if it ever does it is a
+            # scheduling defect, not something to average over.
+            raise RuntimeError(
+                f"{anchor.qname} {anchor.format_name} is already staged")
+        self._staged[key] = anchor
+
+        def make():
+            # Runs on the writer, behind this unit's own file job, so the
+            # read-back inside the receipt call reads a file that exists and
+            # the encode thread never waits for it.
+            self._records[key] = self._make_record(anchor, identity)
+
+        self._publisher.submit(PublicationJob(
+            key=(RECEIPT_JOB, *key), charged_bytes=0, publish=make))
+
+    def submit_checkpoint(self, write) -> None:
+        """Order one journal write behind every receipt it depends on."""
+        if self._publisher is None:
+            write()
+            return
+        key = (CHECKPOINT_JOB, self._checkpoint_seq)
+        self._checkpoint_seq += 1
+        self._publisher.submit(PublicationJob(
+            key=key, charged_bytes=0, publish=write))
+
+    def apply_completed(self) -> int:
+        """Journal whatever the writer has finished since the last call."""
+        if self._publisher is None:
+            return 0
+        return self._apply(self._publisher.completed())
+
+    def close(self) -> int:
+        """Journal every receipt that really completed, then stop staging.
+
+        Called on the way out of the pricing loop, including on the way out of
+        an exception, and always after the publisher's own thread has stopped.
+        What is left then is a list of completions the writer finished before
+        it stopped: those are files that exist and receipts that were read
+        back off them, and a batch that succeeded before a later one failed
+        must not lose its journal row because the loop is unwinding.  That
+        loss would be a regression against the synchronous path, which
+        checkpointed each batch before starting the next.
+
+        Everything still staged is dropped.  No receipt, no row: those units
+        are re-priced by the next run over the same paths.  Nothing is
+        refused here, because this runs while an exception is already on its
+        way out and the original failure is the one worth reporting.  After
+        this the ledger writes inline again, so a caller may flush.
+        """
+        if self._publisher is None:
+            return 0
+        completed = self._publisher.completed()
+        self._publisher = None
+        applied = 0
+        for tag, *rest in completed:
+            key = tuple(rest)
+            if tag != RECEIPT_JOB or key not in self._records \
+                    or key not in self._staged:
+                continue
+            self._journal(self._staged.pop(key), self._records.pop(key))
+            applied += 1
+        self._staged.clear()
+        self._records.clear()
+        return applied
+
+    def drain(self) -> int:
+        """Wait for every staged anchor, journal it, and refuse a remainder."""
+        if self._publisher is None:
+            return 0
+        applied = self._apply(self._publisher.drain())
+        if self._staged:
+            raise RuntimeError(
+                "publication drained with anchors still staged: "
+                + ", ".join(f"{q} {f}" for q, f in sorted(self._staged)))
+        return applied
+
+    def _apply(self, keys) -> int:
+        applied = 0
+        for tag, *rest in keys:
+            if tag in (FILES_JOB, CHECKPOINT_JOB):
+                # Both exist to be ordered, not to be reported: the files a
+                # receipt reads and the journal write a receipt precedes.
+                continue
+            if tag != RECEIPT_JOB:
+                raise RuntimeError(f"publication reported an unknown job {tag!r}")
+            key = tuple(rest)
+            if key not in self._records or key not in self._staged:
+                raise RuntimeError(
+                    f"publication reported a receipt nothing staged: {key!r}")
+            self._journal(self._staged.pop(key), self._records.pop(key))
+            applied += 1
+        return applied
+
+
 def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
-                           adopt, admits, identity_sha256) -> dict:
+                           adopt, admits, identity_sha256, expected_identity,
+                           validate_state=None) -> dict:
     """Offer another campaign's stored anchors to this run's row gates.
 
     A whole-scope campaign already priced rows this run would price again.  Its
@@ -1739,13 +2041,16 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     ``verify_cached_unit`` re-reads the blob and re-validates the wire against
     it.  A row that does not describe this run's bytes is refused by name.
 
-    What is inherited and not re-derived is the stored ``dloss`` -- the same
-    thing a resume of this run's own checkpoint inherits, for the same reason.
+    Stored ``dloss`` is inherited only after the seed's calibration, currency,
+    static-scale policy and actual per-unit scoring tensors match this run.
+    Producer input identity binds encoded bytes; it does not bind the X rows
+    used to measure decoded-weight error. The manifest and unit envelope are
+    authenticated through the existing checkpoint digest and loader.
 
     Returns the record stamped into provenance: which manifest, which identity
     it was written under, and which units were adopted.
     """
-    from .cost_stage_checkpoint import unit_path
+    from .cost_stage_checkpoint import unit_path, _load_unit, canonical_json_sha256
 
     manifest = Path(manifest_path)
     parts = manifest.with_name(manifest.name + ".parts")
@@ -1755,35 +2060,34 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     seed_wire = (Path(wire_dir_arg) if wire_dir_arg
                  else manifest.parent / "cache" / "wire")
     try:
-        seed_identity = json.loads(manifest.read_text()).get("identity_sha256")
+        seed_manifest = json.loads(manifest.read_text())
+        seed_identity = seed_manifest.get("identity_sha256")
+        seed_inputs = seed_manifest.get("identity")
+        if (not isinstance(seed_inputs, dict) or
+                canonical_json_sha256(seed_inputs, where='seed checkpoint identity') != seed_identity):
+            raise ValueError('seed checkpoint identity digest differs')
     except Exception as exc:
         raise RuntimeError(
             f"--seed-checkpoint {manifest}: unreadable manifest: {exc}") from exc
+    for field in ('currency', 'calibration', 'input_global_scale_policy'):
+        if (field not in seed_inputs or field not in expected_identity or
+                seed_inputs[field] != expected_identity[field]):
+            raise RuntimeError(f'seed checkpoint scoring identity mismatch at {field}')
     adopted: list[str] = []
     for name in targets:
         path = unit_path(parts, name)
         if not path.is_file():
             continue
-        try:
-            with path.open("rb") as handle:
-                envelope = pickle.load(handle)
-        except Exception as exc:
-            raise RuntimeError(
-                f"--seed-checkpoint {manifest}: unit shard for {name} is "
-                f"unreadable: {exc}") from exc
-        if not isinstance(envelope, Mapping) or envelope.get("qname") != name:
-            raise RuntimeError(
-                f"--seed-checkpoint {manifest}: unit shard for {name} is not "
-                "an envelope for that unit")
-        payload = envelope.get("payload")
-        import hashlib
-
-        if not isinstance(payload, bytes) or envelope.get("payload_sha256") != \
-                hashlib.sha256(payload).hexdigest():
-            raise RuntimeError(
-                f"--seed-checkpoint {manifest}: unit shard for {name} fails its "
-                "own payload digest")
-        state = pickle.loads(payload)
+        seed_unit = seed_inputs.get('units', {}).get(name, {})
+        current_unit = expected_identity.get('units', {}).get(name, {})
+        for field in ('scoring_rows', 'input_global_scale'):
+            if (field not in seed_unit or field not in current_unit or
+                    seed_unit[field] != current_unit[field]):
+                raise RuntimeError(f'seed checkpoint scoring identity mismatch at units.{name}.{field}')
+        state = _load_unit(path, stage='Tessera campaign', qname=name,
+                           identity_sha256=seed_identity)
+        if validate_state is not None:
+            validate_state(name, state)
         # Only the rows this run's menu admits get their bytes linked in.  An
         # unservable row's blob must not appear in this run's wire directory:
         # that directory is what the export intake reads, and a wire nothing
@@ -2291,14 +2595,17 @@ def report_empty_menus(menus: "Mapping[str, Sequence]", *, mode: str) -> list[st
 def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
                              parallel_kind,
                              context_by_unit: "Mapping[str, ServingContext] | None" = None,
+                             family_restriction=None, structure_by_unit=None,
                              ) -> dict[str, list]:
     """One Tessera menu per distinct shape and explicit serving context.
 
     ``expand_tessera_menu`` takes nothing but the shape and the run
     configuration and serving context, so units with equal values of those
     inputs get identical lists. Dense and routed expert units may share one
-    shape; their structural class comes from context_by_unit, never shape or
-    name. A missing map entry remains unbound. Units
+    shape; their structural class comes from owned topology, never shape or
+    name. Without a restriction, a missing context remains unbound. An explicit
+    family restriction requires exact structure coverage and adds the allowed
+    family tuple to the cache key. Units
     repeat shapes ~1500:1 on a production MoE, so expanding per Linear repeats
     the same answer thousands of times; keying by shape and context expands once per
     distinct answer instead.  Exact rather than approximate: same arguments,
@@ -2307,18 +2614,33 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
     thing that bounds the work.
     """
     from .tessera_menu import expand_tessera_menu
+    from .tessera_formats import get_tessera_family
+
+    restriction = parse_family_restriction(family_restriction)
+    if restriction is not None:
+        if (not isinstance(structure_by_unit, Mapping) or set(structure_by_unit) != set(targets)
+                or any(s not in ("dense", "routed_moe") for s in structure_by_unit.values())):
+            raise ValueError("family restriction requires exact authoritative structure coverage")
 
     by_shape_and_context: dict[tuple, list] = {}
     menus: dict[str, list] = {}
     for name in targets:
         shape = tuple(weights[name].shape)
         context = None if context_by_unit is None else context_by_unit.get(name)
-        key = (shape, None if context is None else context.key())
+        families = None
+        if restriction is not None:
+            structure = structure_by_unit[name]
+            if context is not None and context.structure != structure:
+                raise ValueError(f"{name}: family restriction structure conflicts with serving context")
+            families = tuple(restriction[structure])
+        key = (shape, None if context is None else context.key(), families)
         if key not in by_shape_and_context:
             by_shape_and_context[key] = expand_tessera_menu(
                 shape, mode=mode, tp_degree=tp_degree,
                 parallel_kind=parallel_kind,
                 **({"serving_context": context} if context is not None else {}),
+                **({"families": tuple(get_tessera_family(n) for n in families)}
+                   if families is not None else {}),
             )
         menus[name] = by_shape_and_context[key]
     return menus
@@ -3517,7 +3839,8 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
 def _run_streamed_calibration(args, runner, profile, *, mode, population,
                               dense_targets, expert_targets, scope_groups,
                               tokens, corpus_text, census, context_by_unit,
-                              attention_implementation, capture_runtime):
+                              attention_implementation, capture_runtime,
+                              structure_by_unit=None):
     """Wire canonical collection to the existing resident layer traversal."""
     import torch
     from . import tessera_calibration_cache as store
@@ -3535,7 +3858,9 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     for name in targets:
         names_by_layer.setdefault(runner.layer_index_for_qname(name), []).append(name)
     menus = expand_menus_for_targets(weights, targets, mode=mode, tp_degree=args.tp_degree,
-        parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit)
+        parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
+        family_restriction=getattr(args, "family_restriction", None),
+        structure_by_unit=structure_by_unit)
     report_empty_menus(menus, mode=mode)
     projection = None
     if population.declared:
@@ -3709,6 +4034,34 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     return 0
 
 
+def _prefetch_selected_capture(args, *, expected_identity, census, names, device,
+                               resources, guard=None):
+    """Use the existing resident prefetch and publish its separate load receipt."""
+    import hashlib
+    from . import tessera_calibration_cache as store
+    from .cost_stage_checkpoint import atomic_write_bytes
+    from .perturbed_x_cache import normalize_verified_activation_load
+    policy = normalize_verified_activation_load(args.capture_load_policy)
+    execution = {} if policy is not None else None
+    values, capture = store.prefetch_capture(args.calibration_cache,
+        expected_identity=expected_identity, census=census, names=names, device=device,
+        expected_sha256=args.calibration_cache_sha256,
+        resource_check=None if guard is None else guard.check, release_file_pages=True,
+        **(dict(verified_load_policy=policy, load_execution=execution) if policy is not None else {}))
+    if execution is None:
+        return values, capture, None
+    record = dict(schema='prismaquant.capture_load_run.v1', capture=capture,
+        prefetch=execution, resources=resources,
+        memory_guard=None if guard is None else guard.snapshot())
+    raw = (json.dumps(record, indent=2, sort_keys=True, allow_nan=False)+'\n').encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    # A later refused/interrupted resume must not replace execution evidence
+    # already referenced by a surviving priced output.
+    output = Path(args.cache_dir)/f'capture-load-execution-{digest}.json'
+    atomic_write_bytes(output, raw)
+    return values, capture, dict(path=str(output.resolve()), sha256=digest)
+
+
 def main(argv: "Sequence[str] | None" = None) -> int:
     from contextlib import ExitStack
     with ExitStack() as source_scope:
@@ -3722,12 +4075,13 @@ def _main(argv, *, source_scope) -> int:
     from .production_weight_cache import ProductionWeightCache
     from .tessera_menu import MENU_MODES, PARALLEL_NONE, menu_mode
     from .tessera_rate_surface import leave_one_anchor_out
+    from .tessera_publication import PublicationError
     from .tessera_render import (
         HessianContractError, tessera_encoder_hessian_status,
     )
     from .tessera_serving_scope import (
         add_serving_scope_arguments, serving_target_from_args,
-        context_by_unit_from_stats, scope_provenance,
+        context_by_unit_from_stats, scope_provenance, unit_structure_from_stats,
     )
 
     ap = argparse.ArgumentParser(description=__doc__)
@@ -3739,6 +4093,11 @@ def _main(argv, *, source_scope) -> int:
                     help="identity-bound JSON manifest with sibling .parts "
                          "unit shards; defaults beside --out")
     ap.add_argument("--menu-mode", default=None, choices=sorted(MENU_MODES))
+    ap.add_argument("--family-restriction", default=None, type=parse_family_restriction,
+                    help="Opt-in JSON prismaquant.tessera_campaign_family_restriction.v1 "
+                         "with explicit dense and routed_moe canonical family lists. "
+                         "Narrows pricing only; grants no serving support. Restricted "
+                         "seed imports refuse incompatible families or rate-band anchors.")
     ap.add_argument("--nsamples", type=int, default=8)
     ap.add_argument("--seqlen", type=int, default=512)
     ap.add_argument("--seed", type=int, default=0)
@@ -3750,6 +4109,13 @@ def _main(argv, *, source_scope) -> int:
                     help="maximum compatible expert anchors in one producer "
                          "batch within this action (1 = scalar). Does not "
                          "change the anchor schedule or PB placement.")
+    ap.add_argument("--publication-overlap-bytes", type=int, default=0,
+                    help="stage up to N bytes of already-encoded render/wire "
+                         "artifacts on one writer thread so the next batch "
+                         "encodes while they are written (0 = publish "
+                         "synchronously on the encode thread, the default and "
+                         "byte-for-byte the historical path). An anchor is "
+                         "still journalled only after its own files exist.")
     ap.add_argument("--max-rounds", type=int, default=0,
                     help="hard stop on adaptive rounds (0 = governed by "
                          "--anchor-budget instead). Rounds are not the "
@@ -3831,13 +4197,16 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--streaming", action="store_true",
                     help="Use the source layer cache for census/capture or selected anchors from a complete capture.")
     ap.add_argument("--streaming-cache-slots", type=int, default=2)
+    ap.add_argument("--source-snapshot-policy", default="whole-layer-v1",
+                    choices=("whole-layer-v1", "selected-tensors-v1"),
+                    help="selected-tensors-v1 loads authenticated weight dependencies only; requires selected streaming capture reuse")
     ap.add_argument("--streaming-prefetch-workers", type=int, default=1)
     ap.add_argument("--streaming-cache-headroom-gb", type=float, default=24)
     ap.add_argument("--streaming-capture-policy", default="legacy",
                     choices=("legacy", "shared-inputs-release-v1", "shared-inputs-bounded-v1"),
                     help="Opt-in shared capture; bounded also checks phase ownership and physical memory.")
     ap.add_argument("--capture-load-policy", type=json.loads, default=None,
-                    help="Explicit verified activation load v1 JSON policy; requires bounded capture.")
+                    help="Explicit verified activation load v1 JSON policy; requires bounded capture or hash-bound selected streaming reuse.")
     ap.add_argument('--export-hessian-reference-policy', type=json.loads, default=None,
                     help='Opt-in canonical H reference load-policy JSON; requires selected reuse of a complete capture.')
     ap.add_argument("--capture-calibration-out", default=None,
@@ -3852,15 +4221,17 @@ def _main(argv, *, source_scope) -> int:
         args.capture_load_policy = normalize_verified_activation_load(args.capture_load_policy)
     except ValueError as exc:
         ap.error(str(exc))
-    if args.capture_load_policy is not None and not (
-            args.streaming and args.capture_calibration_out and
-            args.streaming_capture_policy == 'shared-inputs-bounded-v1'):
-        ap.error('--capture-load-policy requires streamed shared-inputs-bounded-v1 capture')
     if args.streaming_capture_policy != "legacy" and not (args.streaming and args.capture_calibration_out):
         ap.error("--streaming-capture-policy requires --streaming and --capture-calibration-out")
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if args.source_snapshot_policy != 'whole-layer-v1' and not selected_source:
+        ap.error('--source-snapshot-policy requires selected streaming capture reuse')
+    if args.capture_load_policy is not None and not (selected_source or (
+            args.streaming and args.capture_calibration_out and
+            args.streaming_capture_policy == 'shared-inputs-bounded-v1')):
+        ap.error('--capture-load-policy requires streamed shared-inputs-bounded-v1 capture or hash-bound selected streaming reuse')
     if args.export_hessian_reference_policy is not None:
         if not selected_source:
             ap.error('--export-hessian-reference-policy requires selected reuse of a hash-bound complete capture')
@@ -3887,6 +4258,8 @@ def _main(argv, *, source_scope) -> int:
             ap.error("capture/reuse requires positive --max-act-rows")
     if args.anchor_batch_size < 1:
         ap.error("--anchor-batch-size must be positive")
+    if args.publication_overlap_bytes < 0:
+        ap.error("--publication-overlap-bytes cannot be negative")
     if args.anchor_batch_size > 1:
         from .tessera_render import require_tessera_batch_encoder
         require_tessera_batch_encoder()
@@ -3950,6 +4323,8 @@ def _main(argv, *, source_scope) -> int:
             prefetch_min_available_gb=args.streaming_cache_headroom_gb,
             prefetch_lookahead=args.streaming_cache_slots-1, require_prefetched_residency=True,
             attn_implementation=args.attention_implementation,
+            **({'source_snapshot_only': True}
+               if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
             **({'source_authentication': source_authentication} if source_authentication is not None else {}))
         model = runner.model
     else:
@@ -4063,7 +4438,8 @@ def _main(argv, *, source_scope) -> int:
                 f"--units {args.units}: the selection prices no unit")
 
     context_by_unit = None
-    if serving_target is not None:
+    structure_by_unit = None
+    if serving_target is not None or args.family_restriction is not None:
         from .sensitivity_probe import discover_moe_structure
         routed = discover_moe_structure(model, profile=profile)
         topology = {
@@ -4078,6 +4454,11 @@ def _main(argv, *, source_scope) -> int:
                 "num_experts": int(getattr(member.module, member.param_name).shape[0]),
             }
         context_by_unit = context_by_unit_from_stats(serving_target, topology, profile)
+        if args.family_restriction is not None:
+            if len(set(targets)) != len(targets) or set(topology) != set(targets):
+                raise ValueError("family restriction requires unambiguous topology for every target")
+            structure_by_unit = {name: unit_structure_from_stats(name, topology[name], profile)
+                                 for name in targets}
 
     tokens, corpus_text = _calibration_tokens(
         args.model, args.nsamples, args.seqlen, args.seed)
@@ -4105,7 +4486,7 @@ def _main(argv, *, source_scope) -> int:
                 dense_targets=census_dense_targets, expert_targets=census_expert_targets,
                 scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
                 context_by_unit=context_by_unit, attention_implementation=attention_implementation,
-                capture_runtime=capture_runtime)
+                capture_runtime=capture_runtime, structure_by_unit=structure_by_unit)
         finally:
             runner.shutdown()
     if selected_source:
@@ -4121,11 +4502,27 @@ def _main(argv, *, source_scope) -> int:
             cache_slots=args.streaming_cache_slots,
             prefetch_workers=args.streaming_prefetch_workers,
             headroom_gb=args.streaming_cache_headroom_gb,
-            anchor_batch_size=args.anchor_batch_size)
+            anchor_batch_size=args.anchor_batch_size,
+            publication_overlap_bytes=args.publication_overlap_bytes,
+            source_snapshot_policy=args.source_snapshot_policy,
+            **(dict(capture_load_policy=args.capture_load_policy)
+               if args.capture_load_policy is not None else {}))
         if device == 'cuda':
-            if selected_resources['memory_bytes'] > selected_guard.cap_bytes:
-                raise RuntimeError('selected anchor cgroup budget is smaller than its checked phase plan')
+            # Read first, then admit. The plan states DELTAS over whatever this
+            # process already holds -- interpreter, torch, the CUDA runtime,
+            # every page touched so far -- while the cap is an absolute cgroup
+            # limit, so admitting a plan against the raw cap compared two
+            # different quantities and left the difference to declared headroom
+            # (RobTand/prismaquant#390). The guard's first reading is that
+            # floor, measured in this row's own process. The guard's own
+            # refusal arithmetic needs no change: its readings are already
+            # absolute, so current + reserved + reserve_bytes against
+            # cap - margin is one unit throughout, and subtracting the baseline
+            # there would count the floor twice.
             selected_guard.check('before_selected_capture_identity')
+            if (selected_resources['memory_bytes'] >
+                    selected_guard.cap_bytes - selected_guard.baseline_bytes()):
+                raise RuntimeError('selected anchor cgroup budget is smaller than its checked phase plan')
     if args.capture_calibration_out or args.calibration_cache:
         from . import tessera_calibration_cache as calibration_store
         hi, lo = census_token_counts(census, {})
@@ -4150,10 +4547,19 @@ def _main(argv, *, source_scope) -> int:
         try:
             selected_weights, selected_source_preparation = runner.snapshot_selected_weights(
                 targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
+                **({'expected_source_keys': selected_resources['source_tensor_keys']}
+                   if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
                 resource_check=None if selected_guard is None else selected_guard.check)
         finally:
             runner.shutdown()
         selected_source_preparation.update(resources=selected_resources,
+            # The plan beside it states deltas, so the receipt has to carry
+            # the floor those deltas are over, measured in this row's own
+            # process rather than assumed from another host's run
+            # (RobTand/prismaquant#390). None on a CPU row, where there is no
+            # guard and therefore no measurement to report.
+            baseline=(None if selected_guard is None
+                      else dict(selected_guard.baseline)),
             initialization_witness_origin='complete-canonical-capture',
             full_source_initialization_repeated=False)
         # Release fixed non-body state and the source context before selected
@@ -4176,12 +4582,17 @@ def _main(argv, *, source_scope) -> int:
             print(f"[campaign] complete calibration capture reused: {record}", flush=True)
             return 0
     if args.calibration_cache:
-        values, calibration_cache = calibration_store.prefetch_capture(
-            args.calibration_cache, expected_identity=capture_identity,
-            census=census, names=targets, device=device,
-            expected_sha256=args.calibration_cache_sha256,
-            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
-                    release_file_pages=True) if selected_source else {}))
+        if selected_source:
+            values, calibration_cache, load_receipt = _prefetch_selected_capture(args,
+                expected_identity=capture_identity, census=census, names=targets,
+                device=device, resources=selected_resources, guard=selected_guard)
+            if load_receipt is not None:
+                selected_source_preparation['capture_load_execution'] = load_receipt
+        else:
+            values, calibration_cache = calibration_store.prefetch_capture(
+                args.calibration_cache, expected_identity=capture_identity,
+                census=census, names=targets, device=device,
+                expected_sha256=args.calibration_cache_sha256)
         acts, hessians, hessian_rows, act_max_abs = values
         if selected_guard is not None:
             selected_guard.check('after_selected_capture_prefetch')
@@ -4256,11 +4667,18 @@ def _main(argv, *, source_scope) -> int:
     if want_h:
         calibration_source = th.activation_source(hessians, hessian_identity)
 
-    _activation_kwargs_for = _activation_kwargs_memo(calibration_source, weights, device,
-        max_entries=args.anchor_batch_size if selected_source else None,
-        resource_check=None if selected_guard is None else selected_guard.check,
-        factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
-                              if selected_source else 0))
+    def activation_kwargs_for(source):
+        return _activation_kwargs_memo(source, weights, device,
+            # The capacity the plan CHARGED, not the batch width it was derived
+            # from, so the memo policy has one owner (RobTand/prismaquant#389 can
+            # move it without the charge and the construction drifting apart).
+            max_entries=(selected_resources['encoder_memo_capacity']
+                         if selected_source else None),
+            resource_check=None if selected_guard is None else selected_guard.check,
+            factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
+                                  if selected_source else 0))
+
+    _activation_kwargs_for = activation_kwargs_for(calibration_source)
 
     cache = ProductionWeightCache(
         weights={}, levers={"tessera_campaign": True},
@@ -4272,6 +4690,8 @@ def _main(argv, *, source_scope) -> int:
         weights, targets, mode=mode, tp_degree=args.tp_degree,
         parallel_kind=PARALLEL_NONE,
         context_by_unit=context_by_unit,
+        family_restriction=args.family_restriction,
+        structure_by_unit=structure_by_unit,
     )
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
     # ``attested`` without a dev pin, ``readable`` against a contract that
@@ -4352,6 +4772,7 @@ def _main(argv, *, source_scope) -> int:
         stack_sampling_identity={name: record
             for entry in (selection or {}).get("groups", [])
             for name, record in entry.get("stack_samples", {}).items()},
+        structure_by_unit=structure_by_unit,
     )
     journal, identity_sha256, resumed = prepare_journal(
         checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
@@ -4369,6 +4790,13 @@ def _main(argv, *, source_scope) -> int:
     unservable: dict[str, dict[str, dict]] = {}
     wire_records = {name: {} for name in targets}
     dirty_checkpoint_units = set()
+    restricted_rate_band = (parse_rate_band(args.rate_band)
+                            if args.family_restriction is not None else None)
+
+    def validate_seed_scope(name, state):
+        require_seed_family_scope(name, state, family_restriction=args.family_restriction,
+                                  structure_by_unit=structure_by_unit,
+                                  rate_band=restricted_rate_band)
 
     def adopt_state(name: str, state, *, where: str) -> None:
         """Verify one unit's stored anchors against this run and take them.
@@ -4379,7 +4807,9 @@ def _main(argv, *, source_scope) -> int:
         rather than inferred from which file the row came out of.
 
         A stored row whose rung is outside this run's menu is neither priced
-        nor refused: it is recorded as ``unservable`` evidence.  The two are
+        nor refused under the legacy unrestricted behavior: it is recorded as
+        ``unservable`` evidence. An explicit family restriction instead refuses
+        active seed rows outside its family list or requested rate band. The two are
         different failures.  A row that disagrees with this run's weights,
         Hessian applicability or static scale is a row about some other
         campaign and is refused by name; a row this menu does not admit is a
@@ -4401,6 +4831,7 @@ def _main(argv, *, source_scope) -> int:
             raise RuntimeError(f"{where} state has an invalid anchor/record envelope for {name}")
         if name not in menus:
             raise RuntimeError(f"{where} state names a unit this run does not price: {name}")
+        validate_seed_scope(name, state)
         on_menu = {entry.format_name for entry in menus[name]}
         formats = set()
         for row in state["anchors"]:
@@ -4454,7 +4885,8 @@ def _main(argv, *, source_scope) -> int:
             wire_dir=wire_dir, adopt=adopt_state,
             admits=lambda name, fmt: any(
                 entry.format_name == fmt for entry in menus.get(name, ())),
-            identity_sha256=identity_sha256)
+            identity_sha256=identity_sha256, expected_identity=checkpoint_identity,
+            validate_state=validate_seed_scope if args.family_restriction is not None else None)
         for name in seed_provenance["units"]:
             dirty_checkpoint_units.add(name)
 
@@ -4494,6 +4926,16 @@ def _main(argv, *, source_scope) -> int:
            if selected_source else {}),
     )
 
+    if args.export_hessian_reference_policy is not None:
+        # Resume was checked before any export input changed. Now reuse the
+        # commitments just computed from these same resident tensors, so the
+        # first anchor does not hash the full population again. Both encoder
+        # kwargs and checkpoint receipts must see the producer's resident
+        # mapping; its per-unit content checks remain at consumption.
+        calibration_source = th.activation_source(hessians, hessian_identity,
+            reference_path=hessian_capture_path, source_scope=source_scope)
+        _activation_kwargs_for = activation_kwargs_for(calibration_source)
+
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
     # ``attested`` without a dev pin, ``readable`` against a contract that
     # publishes no reader for these shapes -- used to resolve to nothing and
@@ -4520,16 +4962,58 @@ def _main(argv, *, source_scope) -> int:
               flush=True)
         return EXIT_EMPTY_MENU
 
+    # An anchor waits in the ledger, rather than in ``measured``, for exactly
+    # as long as its files do not exist.  That is what keeps the checkpoint
+    # invariant true without changing it: every anchor row journalled here has
+    # a wire receipt beside it, and every one of those receipts was read back
+    # off a file that had already landed.
+    # The writer itself is started INSIDE the try below, not here.  A thread
+    # that exists before the region whose ``finally`` closes it is a thread
+    # nothing joins if the setup between the two raises, and the seeded run's
+    # adopted rows are flushed in that gap.  So the ledger is built as a
+    # pass-through, the adopted flush runs inline exactly as it always did,
+    # and the publisher is attached as the first act of the guarded region.
+    publisher = None
+
+    def journal_anchor(anchor, record) -> None:
+        """Put one anchor row and its wire receipt into the pending state."""
+        name = anchor.qname
+        wire_records[name][anchor.format_name] = record
+        measured.setdefault(name, {}).setdefault(
+            anchor.family, []).append(anchor)
+        dirty_checkpoint_units.add(name)
+
+    ledger = _AnchorPublicationLedger(
+        publisher=None,
+        make_record=lambda anchor, identity: _checkpoint_wire_record(
+            anchor, wire_dir, identity),
+        journal_anchor=journal_anchor)
+
     def flush_checkpoint() -> None:
+        # The rows are snapshotted here, on the thread that owns them, and
+        # only the write itself is ordered behind the receipts it cites.
+        # ``vars`` returns the anchor's live ``__dict__``, so it is copied
+        # rather than handed over.
+        states = []
         for name in sorted(dirty_checkpoint_units):
-            rows = [vars(anchor) for anchors in measured.get(name, {}).values()
+            rows = [dict(vars(anchor))
+                    for anchors in measured.get(name, {}).values()
                     for anchor in anchors]
-            state = {"anchors": rows, "wire_records": wire_records[name]}
+            state = {"anchors": rows,
+                     "wire_records": dict(wire_records[name])}
             if unservable.get(name):
-                state["unservable"] = unservable[name]
-            write_unit(journal, stage="Tessera campaign", qname=name,
-                       identity_sha256=identity_sha256, state=state)
+                state["unservable"] = dict(unservable[name])
+            states.append((name, state))
         dirty_checkpoint_units.clear()
+        if not states:
+            return
+
+        def write():
+            for name, state in states:
+                write_unit(journal, stage="Tessera campaign", qname=name,
+                           identity_sha256=identity_sha256, state=state)
+
+        ledger.submit_checkpoint(write)
 
     # Adopted rows are journalled BEFORE the anchor loop, because the loop can
     # end without reaching its own flush: a group whose gate is already closed
@@ -4623,158 +5107,255 @@ def _main(argv, *, source_scope) -> int:
               "anchors per window family at the band ends"
               + (f", a third for {len(audit_units)} audit unit(s)"
                  if audit_units else ""), flush=True)
-    round_index = 0
-    while True:
-        round_index += 1
-        if int(args.max_rounds) > 0 and round_index > int(args.max_rounds):
-            print(f"[campaign] --max-rounds {args.max_rounds} reached",
-                  flush=True)
-            break
-        pending: list[tuple[str, str, int]] = []
-        for key, members in sorted(anchor_groups.items()):
-            for family, allowed in group_rates[key].items():
-                # The grid is what EVERY member actually measured: one
-                # member's failed encode must not let the group think it has
-                # an anchor there.
-                member_rates = {
-                    m: {a.body_rate_q256 for a in measured.get(m, {}).get(family, [])}
-                    for m in members}
-                grid = sorted(set.intersection(*member_rates.values())) if members else []
-                if round_index == 1:
-                    want = round_one_rates(allowed, band=rate_band,
-                                           anchors=args.anchors, snap=_snap)
-                    extra = (None if not audit_units else
-                             audit_extra_rate(allowed, want, snap=_snap))
-                    for m in members:
-                        rates = set(want)
-                        if extra is not None and m in audit_units:
-                            rates.add(extra)
-                        have = member_rates[m]
-                        pending.extend((m, family, rate)
-                                       for rate in sorted(rates - have))
-                    continue
-                if len(grid) >= budget:
-                    surface_stop.setdefault((key, family), "anchor_budget")
-                    continue
-                worst = 0.0
-                worst_loo: dict = {}
-                ready = True
-                interpolable = 0
-                for m in members:
-                    anchors = measured.get(m, {}).get(family, [])
-                    if len(anchors) < 3:
-                        ready = False
-                        break
-                    member_loo = _loo_for(anchors, leave_one_anchor_out)
-                    if _loo_refused(member_loo):
-                        # A refused surface has no leave-one-out error, and a
-                        # missing error is not a zero one.  Reading it as 0.0
-                        # would say "this surface interpolates perfectly" about
-                        # the one surface that does not interpolate at all --
-                        # and would close the gate on it.  It contributes
-                        # nothing to ``worst`` instead, so the group keeps
-                        # spending anchors for whichever members can still use
-                        # them, and the refusal is reported as itself.
-                        continue
-                    interpolable += 1
-                    value = float(
-                        member_loo.get("max_abs_log2_error", 0.0) or 0.0)
-                    if value > worst:
-                        worst, worst_loo = value, member_loo
-                if not ready:
-                    # LOO cannot judge two endpoints. Bootstrap an interior
-                    # anchor through next_anchor_rate's widest-gap fallback;
-                    # missing LOO is neither a closed gate nor a refusal.
-                    worst_loo = {}
-                elif not interpolable:
-                    surface_stop.setdefault((key, family), "non_interpolable")
-                    continue
-                elif worst <= args.loo_gate:
-                    surface_stop.setdefault((key, family), "gate_closed")
-                    continue
-                nxt = next_anchor_rate(grid, worst_loo)
-                nxt = _snap(nxt, allowed) if nxt is not None else None
-                if nxt is None or nxt in grid:
-                    surface_stop.setdefault((key, family), "no_room")
-                    continue
-                # A failed sibling does not invalidate an already measured
-                # member/rung or authorize overwriting its original cost.
-                pending.extend((m, family, nxt) for m in members
-                               if nxt not in member_rates[m])
-        if not pending:
-            if round_index == 1 and measured:
-                # A resumed/seeded endpoint set still needs its adaptive gate
-                # checked; an empty bootstrap is not a completed surface.
-                continue
-            print(f"[campaign] round {round_index}: nothing pending", flush=True)
-            break
-        print(f"[campaign] round {round_index}: {len(pending)} anchors",
-              flush=True)
-        batches = _anchor_batches(
-            [item for item in pending if acts.get(item[0]) is not None],
-            weights=weights, expert_members=expert_members,
-            batch_size=args.anchor_batch_size)
-        completed = 0
-        for batch in batches:
-            if out_of_time():
-                stopped_early = True
-                print("[campaign] deadline reached; stopping", flush=True)
+    # The publisher owns a thread; every exit from the pricing loop,
+    # including one that raises, has to go past its close. Close drains
+    # what is queued, so files already computed still land, and it cannot
+    # raise, so it cannot mask the exception that brought us here.
+    try:
+        if int(args.publication_overlap_bytes) > 0:
+            from .tessera_publication import BoundedPublisher
+            publisher = BoundedPublisher(
+                budget_bytes=int(args.publication_overlap_bytes))
+            ledger.open(publisher)
+            print(f"[campaign] publication overlap: staging up to "
+                  f"{int(args.publication_overlap_bytes)} bytes on one writer "
+                  "thread", flush=True)
+
+        round_index = 0
+        while True:
+            round_index += 1
+            if int(args.max_rounds) > 0 and round_index > int(args.max_rounds):
+                print(f"[campaign] --max-rounds {args.max_rounds} reached",
+                      flush=True)
                 break
-            names = [item[0] for item in batch]
-            family, rung = batch[0][1:]
-            fmt = f"{family}_R{rung}"
+            pending: list[tuple[str, str, int]] = []
+            for key, members in sorted(anchor_groups.items()):
+                for family, allowed in group_rates[key].items():
+                    # The grid is what EVERY member actually measured: one
+                    # member's failed encode must not let the group think it has
+                    # an anchor there.
+                    member_rates = {
+                        m: {a.body_rate_q256 for a in measured.get(m, {}).get(family, [])}
+                        for m in members}
+                    grid = sorted(set.intersection(*member_rates.values())) if members else []
+                    if round_index == 1:
+                        want = round_one_rates(allowed, band=rate_band,
+                                               anchors=args.anchors, snap=_snap)
+                        extra = (None if not audit_units else
+                                 audit_extra_rate(allowed, want, snap=_snap))
+                        for m in members:
+                            rates = set(want)
+                            if extra is not None and m in audit_units:
+                                rates.add(extra)
+                            have = member_rates[m]
+                            pending.extend((m, family, rate)
+                                           for rate in sorted(rates - have))
+                        continue
+                    if len(grid) >= budget:
+                        surface_stop.setdefault((key, family), "anchor_budget")
+                        continue
+                    worst = 0.0
+                    worst_loo: dict = {}
+                    ready = True
+                    interpolable = 0
+                    for m in members:
+                        anchors = measured.get(m, {}).get(family, [])
+                        if len(anchors) < 3:
+                            ready = False
+                            break
+                        member_loo = _loo_for(anchors, leave_one_anchor_out)
+                        if _loo_refused(member_loo):
+                            # A refused surface has no leave-one-out error, and a
+                            # missing error is not a zero one.  Reading it as 0.0
+                            # would say "this surface interpolates perfectly" about
+                            # the one surface that does not interpolate at all --
+                            # and would close the gate on it.  It contributes
+                            # nothing to ``worst`` instead, so the group keeps
+                            # spending anchors for whichever members can still use
+                            # them, and the refusal is reported as itself.
+                            continue
+                        interpolable += 1
+                        value = float(
+                            member_loo.get("max_abs_log2_error", 0.0) or 0.0)
+                        if value > worst:
+                            worst, worst_loo = value, member_loo
+                    if not ready:
+                        # LOO cannot judge two endpoints. Bootstrap an interior
+                        # anchor through next_anchor_rate's widest-gap fallback;
+                        # missing LOO is neither a closed gate nor a refusal.
+                        worst_loo = {}
+                    elif not interpolable:
+                        surface_stop.setdefault((key, family), "non_interpolable")
+                        continue
+                    elif worst <= args.loo_gate:
+                        surface_stop.setdefault((key, family), "gate_closed")
+                        continue
+                    nxt = next_anchor_rate(grid, worst_loo)
+                    nxt = _snap(nxt, allowed) if nxt is not None else None
+                    if nxt is None or nxt in grid:
+                        surface_stop.setdefault((key, family), "no_room")
+                        continue
+                    # A failed sibling does not invalidate an already measured
+                    # member/rung or authorize overwriting its original cost.
+                    pending.extend((m, family, nxt) for m in members
+                                   if nxt not in member_rates[m])
+            if not pending:
+                if round_index == 1 and measured:
+                    # A resumed/seeded endpoint set still needs its adaptive gate
+                    # checked; an empty bootstrap is not a completed surface.
+                    continue
+                print(f"[campaign] round {round_index}: nothing pending", flush=True)
+                break
+            print(f"[campaign] round {round_index}: {len(pending)} anchors",
+                  flush=True)
+            batches = _anchor_batches(
+                [item for item in pending if acts.get(item[0]) is not None],
+                weights=weights, expert_members=expert_members,
+                batch_size=args.anchor_batch_size)
+            completed = 0
+            # One entry per encode step, in order, each the growth across that
+            # step's own bracket. The list is stamped on the selected receipt now
+            # and filled as the loop runs, so a reader gets the steady-state cost
+            # separately from the first batch's one-time runtime charge.
+            anchor_batch_growth = []
+            if selected_source and selected_source_preparation is not None:
+                selected_source_preparation['anchor_batch_growth_bytes'] = anchor_batch_growth
+            for batch in batches:
+                # Rows whose files landed while the last batch encoded. Applied at
+                # the top of the batch rather than the bottom, so the receipt read
+                # back off each published file runs one batch behind the write
+                # instead of immediately after it.
+                ledger.apply_completed()
+                if out_of_time():
+                    stopped_early = True
+                    print("[campaign] deadline reached; stopping", flush=True)
+                    # A deadline is a termination, so the staged bytes are written
+                    # and journalled before the loop is left; they were paid for.
+                    ledger.drain()
+                    break
+                names = [item[0] for item in batch]
+                family, rung = batch[0][1:]
+                fmt = f"{family}_R{rung}"
+                batch_floor = None
+                if selected_guard is not None:
+                    # The lower bracket of the encode step. Without it the step's
+                    # growth can only be read against whichever checkpoint
+                    # happened to precede it, which is a different phase's charge,
+                    # and the pair is taken PER OCCURRENCE because the first batch
+                    # carries the runtime's one-time first-use cost while later
+                    # batches are the steady state the plan actually charges for
+                    # (RobTand/prismaquant#390).
+                    selected_guard.check('before_selected_anchor_batch')
+                    batch_floor = selected_guard.last[
+                        'conservative_cgroup_plus_cuda_reserved_bytes']
+                try:
+                    common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
+                        activation_kwargs_for=(
+                            _activation_kwargs_for if want_h else None),
+                        hessian_required=want_h, publisher=publisher)
+                    if len(batch) == 1:
+                        name = names[0]
+                        anchors = [_measure_anchor(
+                            qname=name, weight=weights[name].to(device),
+                            activations=acts[name].to(device),
+                            static_input_scale=static_scales.get(name), **common)]
+                    else:
+                        anchors = _measure_anchor_batch(
+                            qnames=names,
+                            weights=[weights[name].to(device) for name in names],
+                            activations=[acts[name].to(device) for name in names],
+                            static_input_scales=static_scales, **common)
+                except (HessianContractError, ActivationScaleContractError,
+                        PublicationError):
+                    # A staged artifact that did not reach its disk is not one
+                    # batch's bad luck: the writer has stopped and everything
+                    # behind it was dropped unwritten. Printing and continuing
+                    # here would advance the loop past files that do not exist.
+                    raise
+                except Exception as exc:
+                    if selected_guard is not None and selected_guard.failure is not None:
+                        raise  # A physical memory refusal must stop the action.
+                    # A batch that raises part way through has already handed
+                    # the writer files for its early units. Nothing records
+                    # those units, so no receipt job follows and nothing is
+                    # staged; their file completions are ignored, the bytes
+                    # land, and the next round re-prices them over the same
+                    # paths. That is what the synchronous path already does
+                    # when a partial batch writes files and journals none of
+                    # them, so the failure semantics do not change here.
+                    print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
+                          f"{exc}", flush=True)
+                    continue
+                if selected_guard is not None:
+                    # With publication staging on, this upper bracket includes the
+                    # staged CPU bytes of any batch the writer has not finished.
+                    # That is real resident memory the plan is charging for, so it
+                    # belongs in the growth figure rather than being filtered out
+                    # of it; the publisher's own budget and peak are stamped
+                    # separately on the receipt so a reader can attribute it.
+                    selected_guard.check('after_selected_anchor_batch')
+                    anchor_batch_growth.append(selected_guard.last[
+                        'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
+                for anchor in anchors:
+                    ledger.record(anchor, _checkpoint_anchor_identity(
+                        anchor, weights=weights, menus=menus,
+                        calibration_source=calibration_source, static_scales=static_scales,
+                        projected_units=projected_units))
+                completed += len(anchors)
+                # Commit every joined quantum before advancing. The scalar mode
+                # keeps its existing ten-anchor flush cadence.
+                if args.anchor_batch_size > 1 or (completed - 1) % 10 == 0:
+                    flush_checkpoint()
+                    print(f"[campaign] r{round_index} {completed}/{len(pending)} "
+                          f"batch={len(anchors)} {fmt} "
+                          f"encode_seconds={sum(a.seconds for a in anchors):.3f}", flush=True)
+            # The round is a consumer barrier: the next round reads ``measured``
+            # to decide what is still pending, so nothing may still be in flight.
+            ledger.drain()
+            flush_checkpoint()
+            if stopped_early:
+                break
+            if round_index > 1 and completed == 0:
+                raise RuntimeError(
+                    f"campaign adaptive round {round_index} made no progress: "
+                    "all pending anchors failed; successful anchors are journaled. "
+                    "Refusing to repeat unchanged work; retry after resolving the failure.")
+
+        publication_stats = None
+        if publisher is not None:
+            # The last barrier, and where a writer failure nothing else looked at
+            # is raised. Drain the receipts, journal whatever they made dirty,
+            # then wait for that journal write too: the checkpoint is the last
+            # thing published and it cites everything before it.
+            ledger.drain()
+            flush_checkpoint()
+            ledger.drain()
+            publication_stats = publisher.stats()
+
+    finally:
+        if publisher is not None:
+            # The thread first, so nothing is still writing, and then the rows
+            # for whatever it finished. On the way out of an exception this is
+            # the batch that succeeded before the one that failed; on the
+            # normal path everything is already journalled and both calls are
+            # no-ops. Any second failure here is reported and dropped: it must
+            # not replace the exception that brought us here.
+            publisher.close()
             try:
-                common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
-                    activation_kwargs_for=(
-                        _activation_kwargs_for if want_h else None),
-                    hessian_required=want_h)
-                if len(batch) == 1:
-                    name = names[0]
-                    anchors = [_measure_anchor(
-                        qname=name, weight=weights[name].to(device),
-                        activations=acts[name].to(device),
-                        static_input_scale=static_scales.get(name), **common)]
-                else:
-                    anchors = _measure_anchor_batch(
-                        qnames=names,
-                        weights=[weights[name].to(device) for name in names],
-                        activations=[acts[name].to(device) for name in names],
-                        static_input_scales=static_scales, **common)
-            except (HessianContractError, ActivationScaleContractError):
-                raise
-            except Exception as exc:
-                if selected_guard is not None and selected_guard.failure is not None:
-                    raise  # A physical memory refusal must stop the action.
-                print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
-                      f"{exc}", flush=True)
-                continue
-            if selected_guard is not None:
-                selected_guard.check('after_selected_anchor_batch')
-            for anchor in anchors:
-                name = anchor.qname
-                identity = _checkpoint_anchor_identity(
-                    anchor, weights=weights, menus=menus,
-                    calibration_source=calibration_source, static_scales=static_scales,
-                    projected_units=projected_units)
-                wire_records[name][fmt] = _checkpoint_wire_record(anchor, wire_dir, identity)
-                measured.setdefault(name, {}).setdefault(family, []).append(anchor)
-                dirty_checkpoint_units.add(name)
-            completed += len(anchors)
-            # Commit every joined quantum before advancing. The scalar mode
-            # keeps its existing ten-anchor flush cadence.
-            if args.anchor_batch_size > 1 or (completed - 1) % 10 == 0:
+                # Unconditional, and that is the point: ``close`` journals
+                # only what the writer finished after the last
+                # ``apply_completed``, but rows journalled BY that call are
+                # in ``dirty_checkpoint_units`` and unwritten until a flush,
+                # and the batch cadence may not have reached one. Flushing
+                # only when ``close`` itself journalled something loses them.
+                # ``flush_checkpoint`` returns on an empty set, so the normal
+                # path still costs nothing.
+                ledger.close()
                 flush_checkpoint()
-                print(f"[campaign] r{round_index} {completed}/{len(pending)} "
-                      f"batch={len(anchors)} {fmt} "
-                      f"encode_seconds={sum(a.seconds for a in anchors):.3f}", flush=True)
-        flush_checkpoint()
-        if stopped_early:
-            break
-        if round_index > 1 and completed == 0:
-            raise RuntimeError(
-                f"campaign adaptive round {round_index} made no progress: "
-                "all pending anchors failed; successful anchors are journaled. "
-                "Refusing to repeat unchanged work; retry after resolving the failure.")
+            except Exception as cleanup_error:  # noqa: BLE001
+                print("[campaign] could not journal the completed anchors "
+                      f"while unwinding: {type(cleanup_error).__name__}: "
+                      f"{cleanup_error}", file=sys.stderr, flush=True)
 
     loo: dict[str, dict[str, dict]] = {}
     for name, by_family in measured.items():
@@ -4787,6 +5368,14 @@ def _main(argv, *, source_scope) -> int:
     provenance = {
         "provenance": {
             "menu_mode": mode,
+            # How the artifacts were written, and what that cost. Absent means
+            # the default: every render and wire published on the encode
+            # thread before the next batch started. Present means one bounded
+            # writer thread ran them alongside the following encode, and the
+            # row says the budget, the peak charge and how long the encode
+            # thread spent blocked on it -- which is the number that says
+            # whether the bound was the limit or the disk was.
+            "publication_overlap": publication_stats,
             # Units the mode admitted no rung for. Empty on a healthy run;
             # never absent, so a reader never has to guess whether the run
             # was asked the question.
@@ -4905,6 +5494,9 @@ def _main(argv, *, source_scope) -> int:
             },
             "loo_gate": float(args.loo_gate),
             "max_artifact_bpp": float(args.max_artifact_bpp),
+            **({"family_restriction": {"policy": args.family_restriction,
+                 "structure_by_unit": dict(sorted(structure_by_unit.items()))}}
+               if args.family_restriction is not None else {}),
             "stopped_early": bool(stopped_early),
             "wall_seconds": time.time() - started,
             "cache_dir": str(cache_dir),

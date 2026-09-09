@@ -402,6 +402,10 @@ class StreamedCausalLM:
         self.prefetch_lookahead = max(0, int(prefetch_lookahead))
         self.require_prefetched_residency = require_prefetched_residency
         self._pinned_layer: int | None = None
+        # Layers whose pre-install re-assert had to issue a fresh source read
+        # during the last exact layer-major traversal (#403). Empty when every
+        # speculative prefetch was still held by the runner at install time.
+        self.layer_major_prefetch_retries: tuple[int, ...] = ()
 
     def layer_index_for_qname(self, qname: str) -> int:
         match = re.match(
@@ -421,7 +425,7 @@ class StreamedCausalLM:
         return layer
 
     def snapshot_selected_weights(self, names, *, max_resident_bytes: int,
-                                  resource_check=None):
+                                  resource_check=None, expected_source_keys=None):
         """Copy selected source Linears from the existing resident layer cache.
 
         This is preparation for a consumer that already owns its ``weights``
@@ -466,6 +470,17 @@ class StreamedCausalLM:
         if required > max_resident_bytes:
             raise RuntimeError("selected source weights exceed their resident byte budget")
 
+        snapshot_only = getattr(self.context, 'source_snapshot_only', False)
+        if snapshot_only:
+            if expected_source_keys is None:
+                raise RuntimeError('snapshot requires admitted source keys before source I/O')
+            from .layer_streaming import selected_weight_source_keys
+            planned_keys = tuple(expected_source_keys)
+            actual_keys = selected_weight_source_keys(names, self.profile, self.context.weight_ckpt)
+            if planned_keys != actual_keys:
+                raise RuntimeError('snapshot source dependencies differ from the admitted plan')
+            self.context.configure_selected_snapshot(names, self.profile)
+
         ordered = sorted(layers)
         window = max(1, min(self.prefetch_lookahead, self.context.max_cache_slots - 1))
         weights, records = {}, []
@@ -473,7 +488,8 @@ class StreamedCausalLM:
             self.context.schedule_prefetch(layer)
         for index, layer in enumerate(ordered):
             source = self.context.install(layer, require_prefetched=True,
-                                          prefetch_following=False)
+                                          prefetch_following=False,
+                                          **({'snapshot': True} if snapshot_only else {}))
             if index + window < len(ordered):
                 self.context.schedule_prefetch(ordered[index + window])
             live = {}
@@ -500,7 +516,10 @@ class StreamedCausalLM:
                 resource_check(f"after_selected_source_release:{layer}")
         return weights, dict(schema="prismaquant.selected_source_weights.v1",
             units=sorted(weights), layers=records, resident_bytes=required,
-            source_forward_count=0, packed_parent_storage_retained=False)
+            source_forward_count=0, packed_parent_storage_retained=False,
+            **({'source_snapshot_policy': 'selected-tensors-v1',
+                'source_tensor_keys': list(self.context._snapshot_source_keys),
+                'nonbody_materialized': False} if snapshot_only else {}))
 
     @contextmanager
     def pin_layer(self, layer: int) -> Iterator[None]:
@@ -536,6 +555,8 @@ class StreamedCausalLM:
             return head
 
     def _prepare(self, input_ids: torch.Tensor):
+        if getattr(self.context, 'source_snapshot_only', False):
+            raise RuntimeError('snapshot-only source cannot execute a forward')
         ids = input_ids.to(self.device)
         position_ids = torch.arange(
             ids.size(-1), device=self.device
@@ -739,12 +760,35 @@ class StreamedCausalLM:
                     shared_extra=[state[2] for batch, state in zip(batches, states)
                                   if batch.shared_pass_state is None])
 
-        scheduled = set()
-        def prefetch(layer):
-            if 0 <= layer < self.num_layers and layer not in scheduled:
-                self.context.schedule_prefetch(layer)
-                scheduled.add(layer)
+        # The runner owns residency; this visitor keeps no residency state of
+        # its own. `schedule_prefetch` is idempotent: it returns None for a hot
+        # layer, the same future for a read it already holds (in flight or
+        # delivered and unclaimed), and submits a fresh read only when nothing
+        # is held. Each layer is speculated once ahead of its turn and
+        # re-asserted once immediately before its install, so a speculation
+        # the runner no longer holds (the layer was hot and then evicted, or
+        # the pressure floor refused the read) gets one bounded retry and the
+        # `require_prefetched` refusal stays fail-closed for anything else (#403).
+        # The speculation record is the runner's future, whose result is the
+        # layer's tensors; it is released at re-assert, the same moment the
+        # runner drops its own reference at install, so this visitor is never
+        # a second owner of a claimed layer's source bytes.
+        speculated: dict[int, object] = {}
+        retried: list[int] = []
+        unspeculated = object()
 
+        def speculate(layer):
+            if 0 <= layer < self.num_layers and layer not in speculated:
+                speculated[layer] = self.context.schedule_prefetch(layer)
+
+        def reassert(layer):
+            previous = speculated.pop(layer, unspeculated)
+            held = self.context.schedule_prefetch(layer)
+            if previous is not unspeculated and held is not None and held is not previous:
+                retried.append(layer)
+
+        if exact:
+            self.layer_major_prefetch_retries = ()
         try:
             with torch.no_grad():
                 for batch_index, input_ids in enumerate(input_batches):
@@ -766,20 +810,20 @@ class StreamedCausalLM:
                     raise ValueError("layer-batch traversal requires calibration batches")
                 if exact:
                     for depth in range(min(self.num_layers, max(1, self.prefetch_lookahead))):
-                        prefetch(depth)
+                        speculate(depth)
                 else:
                     for depth in range(min(self.num_layers, self.prefetch_lookahead + 1)):
                         self.context.schedule_prefetch(depth)
                 for layer in range(self.num_layers):
                     if exact:
                         check_state()
-                        prefetch(layer)
+                        reassert(layer)
                         self.context.install(layer, require_prefetched=True, prefetch_following=False)
                     else:
                         self.context.install(layer, require_prefetched=self.require_prefetched_residency)
                     try:
                         if exact:
-                            prefetch(layer + self.prefetch_lookahead)
+                            speculate(layer + self.prefetch_lookahead)
                         else:
                             self.context.schedule_prefetch(layer + self.prefetch_lookahead)
                         next_batch = 0
@@ -839,6 +883,8 @@ class StreamedCausalLM:
                         output_consumer(index, self.tail_logits(batch, hidden))
         finally:
             states.clear()
+            if exact:
+                self.layer_major_prefetch_retries = tuple(retried)
 
 
 def build_streamed_causal_lm(
@@ -857,6 +903,7 @@ def build_streamed_causal_lm(
     attn_implementation: str | None = None,
     source_authentication=None,
     source_derivative=None,
+    source_snapshot_only=False,
 ) -> StreamedCausalLM:
     """Build the repository's existing streaming context and wrap it."""
     from prismaquant.streaming_model import _build_streaming_context
@@ -873,6 +920,7 @@ def build_streamed_causal_lm(
         log_prefix="[cost-streaming]",
         attn_implementation=attn_implementation,
         **({'source_authentication': source_authentication} if source_authentication is not None else {}),
+        **({'source_snapshot_only': True} if source_snapshot_only else {}),
     )
     runner = None
     try:

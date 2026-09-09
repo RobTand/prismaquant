@@ -72,10 +72,46 @@ def require_bounded_capture_environment(environ):
             raise RuntimeError(f'bounded CUDA capture requires {name}={expected} before process startup')
 
 
+# A reservation is charged OUTSIDE the phase deltas, so it is never summed into
+# ``memory_bytes`` and never becomes a phase term.  Folded in, it would grow the
+# plan and the cap by the same amount and net to zero at the admission
+# predicate, which is exactly what declared headroom already does.
+BASELINE_POLICY_DECLARED_HEADROOM = 'declared-headroom-pre-run-measured-in-row'
+BASELINE_POLICY_EXPLICIT_RESERVATION = 'explicit-spec-reservation-measured-in-row'
+
+
+def validate_process_baseline_bytes(value, *, where='process_baseline_bytes'):
+    """A count of bytes, or not a reservation at all.
+
+    ``bool`` is rejected explicitly: it satisfies ``isinstance(v, int)`` and
+    would silently reserve one byte, which is worse than reserving nothing
+    because the plan would then say a reservation exists.
+    """
+    if type(value) is not int or value < 0:
+        raise RuntimeError(
+            f'{where} must be a non-negative int of bytes, not {value!r}')
+    return value
+
+
+def _baseline_fields(process_baseline_bytes):
+    """What a plan records about its pre-run term, and only what is true.
+
+    Zero is the legacy default and emits nothing at all, so a reader can tell a
+    declared reservation from the absence of one.  A plan that reserved nothing
+    must not be able to report coverage it does not have.
+    """
+    validate_process_baseline_bytes(process_baseline_bytes)
+    if not process_baseline_bytes:
+        return {}
+    return dict(process_baseline_bytes=process_baseline_bytes,
+                baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION)
+
+
 def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
                                    prefetch_workers, headroom_gb,
-                                   capture_policy='legacy', capture_load_policy=None):
+                                   capture_policy='legacy', capture_load_policy=None,
+                                   process_baseline_bytes=0, selected_source_units=None):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -86,6 +122,10 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     from the final prefetch window. The
     declared headroom is additional forward/allocator/runtime workspace.
     """
+    # Ahead of every return in this function, including the legacy one
+    # below: a caller that declares a malformed reservation must be
+    # refused before it is handed a plan that silently ignored it.
+    validate_process_baseline_bytes(process_baseline_bytes)
     import math
     from .artifact_completeness import read_artifact_header
     from .model_profiles import detect_profile
@@ -126,7 +166,18 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     if live_probe is None or '.0.' not in live_probe:
         raise ValueError('profile cannot map the decoder prefix for resource admission')
     live_prefix = live_probe.rsplit('.0.', 1)[0]+'.'
+    selected_keys = None
+    if selected_source_units is not None:
+        from .layer_streaming import selected_weight_source_keys
+        mapped_keys = [profile.checkpoint_to_live_name(key, multimodal=multimodal)
+                       for key in header]
+        selected_keys = set(selected_weight_source_keys(
+            selected_source_units, profile, (key for key in mapped_keys if key is not None)))
+        if fp4_experts:
+            raise ValueError('selected tensor snapshots require unscaled floating source weights')
     body, fixed, pack, concat = {}, 0, {}, {}
+    covered_layers = set()
+    validation_raw_body = {}
     raw_body, max_element_bytes = {}, 4
     packed_regex = profile.per_expert_moe_regex()
     packed_pattern = (re.compile(packed_regex.removeprefix('re:')) if packed_regex else None)
@@ -138,6 +189,17 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         name = profile.checkpoint_to_live_name(key, multimodal=multimodal)
         if name is None:
             continue
+        if name.startswith(live_prefix):
+            index = name[len(live_prefix):].split('.', 1)[0]
+            if not index.isdigit() or not 0 <= int(index) < layers:
+                raise ValueError(f'out-of-body source tensor is still live: {name}')
+            covered_layers.add(int(index))
+            begin, end = meta['data_offsets']
+            validation_raw_body[int(index)] = validation_raw_body.get(int(index), 0)+int(end)-int(begin)
+        if selected_keys is not None and name not in selected_keys:
+            continue
+        if selected_keys is not None and str(meta['dtype']).upper() not in ('BF16', 'F16', 'F32', 'F64'):
+            raise ValueError('selected tensor snapshots require unscaled floating source weights')
         shape = meta['shape']
         numel = math.prod(shape)
         begin, end = meta['data_offsets']
@@ -176,7 +238,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             if any(name.endswith(suffix) for suffix in sources):
                 group = (layer, target)
                 concat[group] = concat.get(group, 0)+size
-    if set(body) != set(range(layers)):
+    if covered_layers != set(range(layers)):
         raise ValueError('source headers do not cover every decoder layer')
     # A final group is preallocated and filled directly; no per-expert fused
     # slabs survive. Charge all original packed-source bytes as a conservative
@@ -227,6 +289,13 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # metadata/journals have an explicit per-unit serialization allowance.
     disk = total_h+total_x+widest_unit+len(unit_shapes)*16384
     result = dict(schema='prismaquant.streamed_calibration_resources.v1',
+        # On the v1 result, so the legacy early return below carries it too:
+        # a caller that declares a reservation and gets a plan back with no
+        # record of it has been told the opposite of the truth.
+        **_baseline_fields(process_baseline_bytes),
+        **({'source_tensor_keys': sorted(selected_keys),
+            'body_source_validation_bytes': {str(k): v for k, v in validation_raw_body.items()}}
+           if selected_keys is not None else {}),
         source_header_sha256=hashlib.sha256(json.dumps(header, sort_keys=True,
             separators=(',', ':')).encode()).hexdigest(),
         terms=terms, memory_bytes=sum(terms.values()), disk_bytes=disk,
@@ -310,27 +379,89 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
 
 def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               cache_slots, prefetch_workers, headroom_gb,
-                              anchor_batch_size=1):
+                              anchor_batch_size=1, capture_load_policy=None,
+                              publication_overlap_bytes=0, process_baseline_bytes=0,
+                              source_snapshot_policy='whole-layer-v1'):
     """Bound selected-source preparation separately from resident encoding.
 
     This extends the source loader's header/dtype accounting. No source
     forward or calibration accumulation occurs. The existing plane-keyed
     encoder memo retains at most one compatible batch's factors.
+
+    **Every charge is a delta, and every delta is a traced allocation.** Each
+    term below names the line that allocates what it bounds and the shape and
+    dtype that line allocates, so a reviewer can read the charge against the
+    code rather than against a multiplier's plausibility
+    (RobTand/prismaquant#390). Two terms are not traceable from this
+    repository and stay as the conservative bounds they were, each with a
+    comment naming its gap: the export archive's pickle-and-directory
+    metadata, whose size is a function of pickle framing rather than of any
+    shape or dtype, and the producer's own encoder working set inside
+    ``tessera.export.encode_linear``.
+
+    **What this plan cannot measure, and says which term it has instead.** A
+    delta plan is over a process floor -- interpreter, torch, the CUDA runtime,
+    the pages the process has touched -- and that floor is a property of the
+    box and the run, not of the roster. Nothing here can measure it: the
+    planner runs in the dispatcher's process, not the row's, and inventing a
+    torch-plus-CUDA constant would be a third quantity, unmeasured on the box
+    it was spent on. So this plan never derives one. A caller may
+    **declare** one, as ``process_baseline_bytes``, and then it is that
+    caller's number and ``baseline_policy`` names it as declared rather than
+    measured. Declared or not, the reservation is recorded beside
+    ``memory_bytes`` and is never summed into it: it is charged outside the
+    phase deltas by whoever converts this plan into a reservation, because
+    folding it in would grow the plan and the cap together and net to zero at
+    the row's admission predicate. The row still measures its own floor at its
+    first ``CaptureMemoryGuard.check`` and stamps it beside this plan, which
+    remains the only measured number of the three.
+
+    **A second charge this plan does not own.** A row's first CUDA
+    factorisation and its first ``encode_linear`` load libraries and build
+    working buffers once, and that cost is a property of the runtime rather
+    than of the roster. On the streaming fixture, with the anchor-batch
+    bracket taken per occurrence, the first encode step grew 165.6 MB while
+    the second grew 2.7 MB against a ``resident_anchors`` plan of 10.3 MB,
+    and the whole row's peak sat 157.8 MB above its own measured baseline,
+    73.9 MB of it resident host pages and 83.9 MB CUDA allocator segments.
+    (The first step's growth exceeds the row's because its own floor sits
+    about 10 MB below the baseline, which is read earlier, during the capture
+    hash.) It does not scale with any shape in ``unit_shapes``: the same
+    fixture, same roster, grew 93.7 MB over its baseline when its menu offered
+    one rung and 157.8 MB when it offered two, so the figure follows what the
+    encoder is asked to build, not the roster. It is one-time, so on a production roster it is
+    inside the guard's margin while on a small roster it dominates. The
+    native row records the number rather than covering it, and asserts the
+    steady-state step against the plan (RobTand/prismaquant#390).
     """
+    validate_process_baseline_bytes(process_baseline_bytes)
     import math
+    from .perturbed_x_cache import normalize_verified_activation_load
+    capture_load_policy = normalize_verified_activation_load(capture_load_policy)
     if not unit_shapes or type(anchor_batch_size) is not int or anchor_batch_size < 1:
         raise ValueError('selected anchors require nonempty units and a positive batch size')
+    if source_snapshot_policy not in ('whole-layer-v1', 'selected-tensors-v1'):
+        raise ValueError('unknown selected source snapshot policy')
     source = streamed_calibration_resources(model_path, unit_shapes=unit_shapes,
         counts=counts, nsamples=1, seqlen=1, max_act_rows=max_act_rows,
         cache_slots=cache_slots, prefetch_workers=prefetch_workers,
-        headroom_gb=headroom_gb)
+        headroom_gb=headroom_gb,
+        **({'selected_source_units': tuple(unit_shapes)}
+           if source_snapshot_policy == 'selected-tensors-v1' else {}))
     prefix = source['live_layer_prefix']
     layers = sorted({str(int(name[len(prefix):].split('.', 1)[0])) for name in unit_shapes}, key=int)
     weights = sum(source['unit_source_weight_bytes'].values())
     widest_weight = max(math.prod(shape)*4 for shape in unit_shapes.values())
     widest_h = max(shape[1]**2*4 for shape in unit_shapes.values())
-    widest_x = max(min(counts[name], max_act_rows)*shape[1]*4
-                   for name, shape in unit_shapes.items())
+    # One capture entry as the loader holds it, in the loader's own arithmetic:
+    # tessera_calibration_cache._capture_storage_bytes, which is the FP32 H
+    # ([in, in]) plus the FP32 X ([min(count, max_act_rows), in]) of ONE unit.
+    # Summing a widest H and a widest X measured on different units would
+    # charge an entry no unit has.
+    widest_capture_entry = max(
+        4*(shape[1]**2 + min(counts[name], max_act_rows)*shape[1])
+        for name, shape in unit_shapes.items())
+    memo_capacity = anchor_batch_size
     terms = source['terms']
     common = dict(selected_source_weight_bytes=weights,
                   declared_headroom_bytes=terms['declared_headroom_bytes'])
@@ -341,29 +472,128 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                                           reverse=True)[:min(prefetch_workers, cache_slots)]))
     encoding = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
-        encoder_memo_bytes=anchor_batch_size*max(
+        # What one memo entry RETAINS, from the keywords
+        # tessera.export.ActivationSource.for_unit returns: 'ldl', the
+        # [in, in] FP32 factor tessera.compensate.block_ldl builds, and up to
+        # two FP32 [in] refit metrics, the base and trailing diagonal powers
+        # (h/h.mean()).pow(alpha). Four bytes an element gives in**2*4 + in*8.
+        # A 'hessian' objective binds the resident H itself by reference and
+        # adds nothing. Sized by the capacity the plan publishes, not by the
+        # anchor batch width directly, so the memo policy has one owner and a
+        # change to it (RobTand/prismaquant#389) moves one field.
+        encoder_memo_bytes=memo_capacity*max(
             shape[1]**2*4+shape[1]*8 for shape in unit_shapes.values()),
-        factorization_scratch_bytes=4*widest_h,
+        # What one for_unit call holds TRANSIENTLY, beyond the retained factor
+        # above. Two stages, and they are sequential rather than concurrent:
+        # tessera.cached_unit.tensor_identity, which the capture seal and the
+        # per-unit seal check both call, materialises one CPU FP32 copy of H
+        # and then its bytes object; and the factorisation holds
+        # tessera.compensate.regularize_hessian's H.float().clone() while
+        # tessera.compensate.block_ldl's triangular solve writes an
+        # [in, block] FP32 output, block <= in. Each stage peaks at two FP32
+        # copies of the widest H.
+        factorization_scratch_bytes=2*widest_h,
+        # GAP, left at its previous bound. The PrismaQuant-side copies are
+        # traceable and come to eight bytes an element: the BF16 device copy
+        # at the anchor call site, the FP32 reconstruction
+        # tessera.decode.reconstruct_unit returns, and the BF16 cast in
+        # tessera_render.encode_tessera_unit. What is NOT traceable from here
+        # is the producer's own working set inside encode_linear, so the
+        # sixteen bytes an element this has always charged stays as the
+        # conservative bound rather than being replaced by a smaller number
+        # that omits the encoder (RobTand/prismaquant#390).
         compatible_batch_weight_bytes=anchor_batch_size*widest_weight*4,
-        entry_validation_bytes=2*(widest_h+widest_x),
-        source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight)
+        # tessera_calibration_cache.prefetch_capture's legacy branch: one
+        # entry's CPU payload from torch.load and the device copy made by
+        # 'acts[name], hessians[name] = x.to(device), h.to(device)' are both
+        # live until the following 'del payload'. The finite check in
+        # _validate_tensors allocates BOOL masks, one byte an element and one
+        # at a time under the short-circuiting 'or', so it never raises this
+        # peak above the two FP32 copies. The loader asks for the same bound
+        # itself, once per entry, at both of its 'before_capture_prefetch'
+        # reserve_bytes call sites, so the plan and the loader's own reserve
+        # are the same number on the widest entry. Buffered read pages are
+        # not charged here: the loader releases them on the same path, and
+        # whether that release is complete is the loader's contract, not a
+        # term derivable from a shape.
+        entry_validation_bytes=2*widest_capture_entry,
+        # Narrowing tensor reads does not narrow whole-shard authentication.
+        # Retain the existing full-layer raw-page allowance, even when most
+        # tensor materialization is excluded. Do not infer a smaller hash/page
+        # footprint merely from a selected tensor's shape.
+        source_validation_bytes=sum(source.get('body_source_validation_bytes',
+            source['body_source_file_bytes'])[k] for k in layers)+widest_weight,
+        # tessera_publication.BoundedPublisher's own bound, charged as itself.
+        # Staged artifacts are host bytes waiting to be written: the CPU BF16
+        # render (_canonical_rendered_weight_tensor) and the wire blob, live
+        # from the reserve that admits them to the os.replace that publishes
+        # them. This is the whole term rather than a term plus a producer-side
+        # copy because the reservation is taken BEFORE the copy is made and an
+        # artifact larger than the budget is refused, so no thread ever holds
+        # staged bytes outside it. Charging at submit time, or admitting one
+        # oversized job, would both have made this number smaller than what
+        # the run can actually hold. A run that does not ask for staging
+        # charges nothing.
+        publication_staging_bytes=int(publication_overlap_bytes))
     export_inputs = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
-        # The unchanged Torch serializer pauses after each tensor record;
-        # verified prefix advice bounds visible file pages to one record.
-        # Counts retain the whole census, not this subset. The metadata bound
-        # also covers the writer's small buffered tail and central directory.
+        # tessera_campaign._save_hessian_capture_with_page_release pauses the
+        # unchanged Torch serializer after each 'data/' record and advises the
+        # stable prefix, so the visible file pages are one tensor record: the
+        # widest FP32 [in, in] H, the dtype tessera_calibration_cache.
+        # _validate_tensors requires.
+        #
+        # GAP in the second half. len(counts)*16384 bounds data.pkl and the
+        # records the release helper does not advise, plus the zip central
+        # directory. That size is a function of pickle framing and of the
+        # roster's name lengths, not of any shape or dtype, so there is no
+        # allocation to derive it from and it is left as it was
+        # (RobTand/prismaquant#390). Counts retain the whole census, not this
+        # subset.
         export_input_page_window_bytes=widest_h+len(counts)*16384,
+        # Two transient copies of the widest FP32 [in, in] H, because the
+        # phase's peak is the digest, not the writer. tessera_export_lane.
+        # hessian_capture_sha256 holds value = H.detach().cpu().contiguous()
+        # and then materializes value.view(uint8).numpy().tobytes(), a second
+        # full-size bytes object, before either is released; and across the
+        # loop's rebind the previous unit's copy is still referenced while the
+        # next one is built. torch.serialization._save then stages ONE CPU
+        # copy per non-CPU storage before write_record, live only across that
+        # record, so the writer's own transient is the smaller of the two.
         serialization_scratch_bytes=2*widest_h)
     phases = dict(source_preparation=preparation, export_inputs=export_inputs,
                   resident_anchors=encoding)
+    if capture_load_policy is not None:
+        # The existing loader retains one private serialized buffer and may
+        # leave its entire source file in the kernel despite page advice.
+        # Decode can coexist with already resident selected X/H, but source
+        # staging and encoder factors belong to different completed phases.
+        phases['capture_prefetch'] = dict(common,
+            selected_hessian_bytes=source['full_hessian_bytes'],
+            selected_prefix_bytes=source['full_prefix_bytes'],
+            capture_decode_storage_bytes=widest_capture_entry,
+            capture_serialized_buffer_bytes=capture_load_policy['max_buffer_bytes'],
+            capture_source_page_cache_bytes=capture_load_policy['max_buffer_bytes'],
+            capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'])
     return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases,
+        **({'source_snapshot_policy': source_snapshot_policy,
+            'source_tensor_keys': source['source_tensor_keys']}
+           if source_snapshot_policy == 'selected-tensors-v1' else {}),
+        **({'capture_load_policy': capture_load_policy} if capture_load_policy is not None else {}),
         memory_bytes=max(sum(phase.values()) for phase in phases.values()),
         selected_source_weight_bytes=weights, selected_layers=layers,
         source_header_sha256=source['source_header_sha256'],
         export_input_writer_policy='verified-tensor-record-prefix',
         encoder_memo_policy='compatible-anchor-batch-width',
-        encoder_memo_capacity=anchor_batch_size,
+        encoder_memo_capacity=memo_capacity,
+        # The pre-run term, named rather than derived. Without a declared
+        # reservation the only one is the caller's headroom, and the row
+        # measures its own process floor and stamps it beside this plan; see
+        # the docstring for why nothing here invents one. A declared
+        # reservation replaces this value and is emitted beside it, so an
+        # absent reservation cannot read as coverage.
+        **{'baseline_policy': BASELINE_POLICY_DECLARED_HEADROOM,
+           **_baseline_fields(process_baseline_bytes)},
         source_forward_count=0)
 
 

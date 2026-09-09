@@ -1,6 +1,9 @@
 """Layer-major baseline capture preserves each original source batch exactly."""
+from concurrent.futures import Future
+import gc
 import hashlib
 from pathlib import Path
+import weakref
 import pytest
 import torch
 
@@ -9,9 +12,11 @@ from prismaquant.cost_streaming import (
     LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts,
     normalize_boundary_storage,
 )
+from prismaquant.cost_streaming import StreamedCausalLM
+from prismaquant.model_profiles.default import DefaultProfile
 from test_joint_aura_streamed import _fixture
 from test_streamed_boundary_artifacts import _policy
-from test_streamed_cost_checkpoints import _model_identity
+from test_streamed_cost_checkpoints import _DenseTinyLM, _FakeStreamingContext, _model_identity
 
 
 def policy(path, *, window=2, cap=None):
@@ -45,14 +50,90 @@ def digest(tensor):
 
 def test_source_install_count_is_one_per_layer_for_the_full_draw(tmp_path):
     _, context, runner, _ = fixture()
-    scheduled = []
-    context.schedule_prefetch = scheduled.append
+    with owner(tmp_path) as storage:
+        batches = runner.capture_layer_major_boundaries([row[None] for row in draw()], storage=storage)
+        assert len(batches) == 5
+        assert all(len(batch.activations_cpu) == runner.num_layers+1 for batch in batches)
+    layers = range(runner.num_layers)
+    assert context.install_calls == runner.num_layers
+    # Each layer is speculated once ahead of its turn and re-asserted once,
+    # immediately before its install, through the runner's idempotent
+    # schedule_prefetch; nothing at or beyond num_layers is ever scheduled.
+    prefetches = [layer for kind, layer in context.events if kind == 'prefetch']
+    assert sorted(prefetches) == sorted([*layers, *layers])
+    for layer in layers:
+        install = context.events.index(('install', layer))
+        assert context.events[install - 1] == ('prefetch', layer)
+        assert ('prefetch', layer) in context.events[:install - 1]
+    assert runner.layer_major_prefetch_retries == ()
+    assert context.active == set()
+
+
+class _RunnerResidency(_FakeStreamingContext):
+    """Refuse install the way ensure_loaded does: resident or in flight, else refuse.
+
+    schedule_prefetch mirrors the runner: None for a hot layer, the live read
+    for an in-flight one, a fresh read otherwise. `defect` injects the two ways
+    a speculative call leaves nothing behind for install to find: the layer
+    was hot when speculated and the LRU evicted it before its turn, or the
+    pressure floor refused the speculative read outright.
+    """
+
+    def __init__(self, model, *, defect):
+        super().__init__(model)
+        self.defect = defect
+        self.resident = {1} if defect == 'evicted' else set()
+        self.in_flight = {}
+        self.refusals = 0
+        self.reads = []
+
+    def schedule_prefetch(self, layer):
+        super().schedule_prefetch(layer)
+        layer = int(layer)
+        if layer in self.resident:
+            return None
+        if layer in self.in_flight:
+            return self.in_flight[layer]
+        if self.defect == 'refused' and layer == 1 and self.refusals == 0:
+            self.refusals += 1
+            return None
+        read = object()
+        self.in_flight[layer] = read
+        self.reads.append(layer)
+        return read
+
+    def install(self, layer, *, require_prefetched=False, prefetch_following=True):
+        layer = int(layer)
+        if require_prefetched and layer not in self.resident and layer not in self.in_flight:
+            raise RuntimeError(f'streamed layer {layer} is not resident after its required prefetch')
+        self.in_flight.pop(layer, None)
+        self.resident.add(layer)
+        return super().install(layer, require_prefetched=require_prefetched)
+
+    def unload(self, layer):
+        released = super().unload(layer)
+        if self.defect == 'evicted' and int(layer) == 0:
+            self.resident.discard(1)
+        return released
+
+
+@pytest.mark.parametrize('defect', ['evicted', 'refused'])
+def test_visitor_reasserts_speculation_the_runner_no_longer_holds(tmp_path, defect):
+    torch.manual_seed(85)
+    model = _DenseTinyLM().eval()
+    for layer in model.model.layers:
+        layer._fixture_requires_stream_residency = True
+    context = _RunnerResidency(model, defect=defect)
+    runner = StreamedCausalLM(context, DefaultProfile(), prefetch_lookahead=1,
+                              require_prefetched_residency=True)
     with owner(tmp_path) as storage:
         batches = runner.capture_layer_major_boundaries([row[None] for row in draw()], storage=storage)
         assert len(batches) == 5
         assert all(len(batch.activations_cpu) == runner.num_layers+1 for batch in batches)
     assert context.install_calls == runner.num_layers
-    assert scheduled == list(range(runner.num_layers))
+    assert context.install_require_prefetched == [True] * runner.num_layers
+    assert runner.layer_major_prefetch_retries == (1,)
+    assert context.reads.count(1) == 1
     assert context.active == set()
 
 
@@ -200,3 +281,55 @@ def test_actual_shared_state_profile_keeps_every_batch_and_shared_adjoint(tmp_pa
     with pytest.raises(RuntimeError, match='auxiliary/shared-state'):
         _shared_run(tmp_path/'refused', layer_major=True, aux=1024)
     assert not list(tmp_path.rglob('*.pt'))
+
+
+class _DeliveredFutures(_FakeStreamingContext):
+    """schedule_prefetch hands out real delivered futures, dropped at install.
+
+    This is the runner's ownership shape: `_prefetch_worker` returns the layer
+    tensors as the future's result and `_claim_inflight` drops that future at
+    install. Every reference the visitor keeps past that point is a second
+    owner of the layer's source bytes.
+    """
+
+    def __init__(self, model):
+        super().__init__(model)
+        self.in_flight = {}
+        self.refs = {}
+        self.dead_at_install = []
+
+    def schedule_prefetch(self, layer):
+        super().schedule_prefetch(layer)
+        layer = int(layer)
+        if layer in self.in_flight:
+            return self.in_flight[layer]
+        future = Future()
+        future.set_result({'weight': torch.zeros(4)})
+        self.in_flight[layer] = future
+        self.refs[layer] = weakref.ref(future)
+        return future
+
+    def install(self, layer, *, require_prefetched=False, prefetch_following=True):
+        layer = int(layer)
+        self.in_flight.pop(layer, None)
+        gc.collect()
+        self.dead_at_install.append(
+            [index for index, ref in sorted(self.refs.items()) if index < layer and ref() is None])
+        return super().install(layer, require_prefetched=require_prefetched)
+
+
+def test_visitor_holds_no_reference_to_a_claimed_speculative_read(tmp_path):
+    torch.manual_seed(85)
+    model = _DenseTinyLM().eval()
+    for layer in model.model.layers:
+        layer._fixture_requires_stream_residency = True
+    context = _DeliveredFutures(model)
+    runner = StreamedCausalLM(context, DefaultProfile(), prefetch_lookahead=1,
+                              require_prefetched_residency=True)
+    with owner(tmp_path) as storage:
+        batches = runner.capture_layer_major_boundaries([row[None] for row in draw()], storage=storage)
+        assert len(batches) == 5
+    # By the install of layer 1 the fake has claimed layer 0's future; the
+    # visitor must not be the owner keeping its delivered tensors alive.
+    assert context.dead_at_install == [[], [0]]
+    assert runner.layer_major_prefetch_retries == ()

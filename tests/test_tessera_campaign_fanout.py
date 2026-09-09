@@ -474,6 +474,11 @@ def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path):
     (seed / "cache" / "wire").mkdir(parents=True)
     for name in ("priced.wire", "evidence.wire"):
         (seed / "cache" / "wire" / name).write_bytes(b"x")
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    seed_inputs = {'currency': 'output_mse', 'calibration': {},
+        'input_global_scale_policy': 'fixture',
+        'units': {'a': {'scoring_rows': {'sha256': 'rows'}, 'input_global_scale': 1.0}}}
+    seed_sha = canonical_json_sha256(seed_inputs, where='seed fixture')
     parts = seed / "cost.anchors.json.parts"
     parts.mkdir()
     state = {
@@ -485,8 +490,8 @@ def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path):
                          "OFF": {"file": "evidence.wire"}},
     }
     write_unit(parts, stage="Tessera campaign", qname="a",
-               identity_sha256="seed-identity", state=state)
-    (seed / "cost.anchors.json").write_text(json.dumps({"identity_sha256": "seed"}))
+               identity_sha256=seed_sha, state=state)
+    (seed / "cost.anchors.json").write_text(json.dumps({"identity_sha256": seed_sha, "identity": seed_inputs}))
 
     wire_dir = tmp_path / "run-wire"
     wire_dir.mkdir()
@@ -495,7 +500,7 @@ def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path):
         seed / "cost.anchors.json", None, targets=["a"], wire_dir=wire_dir,
         adopt=lambda name, state, where: seen.update({name: state}),
         admits=lambda name, fmt: fmt == "ON",
-        identity_sha256="run-identity")
+        identity_sha256="run-identity", expected_identity=seed_inputs)
 
     assert sorted(p.name for p in wire_dir.iterdir()) == ["priced.wire"]
     # The adopter still gets the whole state: deciding what to do with the
