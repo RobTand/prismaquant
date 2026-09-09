@@ -157,3 +157,42 @@ def test_selected_public_cli_publishes_references_without_changing_capture(monke
     with cc.open_hessian_reference(path) as owner:
         assert owner.receipt()['loaded_entries']==0
         assert owner.binding()['canonical_capture_sha256']==cc.sha256(tmp_path/'capture/capture_manifest.json')
+
+
+def test_selected_cli_reuses_published_hessian_commitments(monkeypatch, tmp_path):
+    """The source about to price must seal without another population scan."""
+    from tessera import cached_unit
+    sources = []
+    original_memo = campaign._activation_kwargs_memo
+    original_write = campaign.write_export_inputs
+    original_label = campaign.contract_source_label
+    published = False
+    checked = []
+
+    def memo(source, *args, **kwargs):
+        sources.append(source)
+        return original_memo(source, *args, **kwargs)
+
+    def write(*args, **kwargs):
+        nonlocal published
+        result = original_write(*args, **kwargs)
+        published = True
+        return result
+
+    def label():
+        # The public fixture reaches the empty-menu gate after export inputs
+        # are committed. Exercise the same source the anchor loop would use.
+        if published:
+            with monkeypatch.context() as patch:
+                patch.setattr(cached_unit, 'tensor_identity', lambda *_a, **_k:
+                    pytest.fail('resident capture was rehashed after its commitments were published'))
+                checked.append(sources[-1].capture_sha256())
+        return original_label()
+
+    monkeypatch.setattr(campaign, '_activation_kwargs_memo', memo)
+    monkeypatch.setattr(campaign, 'write_export_inputs', write)
+    monkeypatch.setattr(campaign, 'contract_source_label', label)
+    test_selected_public_cli_publishes_references_without_changing_capture(monkeypatch, tmp_path)
+    assert checked
+    descriptor = json.loads((tmp_path/'cache/hessian_capture.references.json').read_text())
+    assert checked == [descriptor['capture_sha256']]
