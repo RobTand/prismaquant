@@ -1,0 +1,34 @@
+{
+  "sparky": {
+    "samples": 194,
+    "first_sample_unix": 1788908832.2055762,
+    "last_sample_unix": 1788909810.8004391,
+    "max_sample_gap_seconds": 6.881665468215942,
+    "power_distinct_updates": 99,
+    "power_peak_watts": 57.0,
+    "power_chart_max_age_seconds": 14.963454961776733,
+    "power_observed_span_seconds": 980,
+    "gross_device_energy_joules_trapezoid": 15115.0,
+    "time_weighted_power_watts": 15.423469387755102,
+    "host_cpu_busy_percent_mean": 8.87585597628866,
+    "available_memory_MiB_min": 60758.7695312,
+    "scope": "whole host; other qualification load is present on Sparky",
+    "gpu_framebuffer_dimensions": "empty in this GB10 Netdata chart; no memory claim derived from it"
+  },
+  "sparklina": {
+    "samples": 194,
+    "first_sample_unix": 1788908832.2132835,
+    "last_sample_unix": 1788909810.8076248,
+    "max_sample_gap_seconds": 6.882222890853882,
+    "power_distinct_updates": 99,
+    "power_peak_watts": 44.0,
+    "power_chart_max_age_seconds": 17.384491682052612,
+    "power_observed_span_seconds": 980,
+    "gross_device_energy_joules_trapezoid": 23550.0,
+    "time_weighted_power_watts": 24.03061224489796,
+    "host_cpu_busy_percent_mean": 18.51289430876289,
+    "available_memory_MiB_min": 51267.6132812,
+    "scope": "whole host; other qualification load is present on Sparky",
+    "gpu_framebuffer_dimensions": "empty in this GB10 Netdata chart; no memory claim derived from it"
+  }
+}

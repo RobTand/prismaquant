@@ -1,0 +1,45 @@
+{
+  "action": "29761463f3fd2e606da38b90d814d8c0d221cddada8e6936156b8da67e191121",
+  "returncode": 0,
+  "receipt_sha256": "a86a05a73a157897aee10b0e354fa502d5fac31279de5a296f73c82ffbbb3cb5",
+  "result": {
+    "bytes": 711,
+    "sha256": "57d034884d303fb2267aefc7172448f6a40d37489510845e5474873fdb1d2c56"
+  },
+  "source_snapshot": {
+    "commit": "35df4f001bd5c5c574c9e3ffb37129f476280531",
+    "input": {
+      "bytes": 27407911,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "5480ee0d67e42d371b7abcc78fab9328a18e81264f7672f00a10da929b85a53a"
+    },
+    "parent": "da7e065687329419a8a6f38562b39619a922a6eb",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "worker": "dl380g10",
+  "resources": {
+    "cpu": 4,
+    "mem_gb": 12
+  },
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 52%]\n..................................................................       [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n138 passed, 56 warnings in 65.74s (0:01:05)\n",
+  "scope_resources": {
+    "cpu_seconds": 129.008092,
+    "cpu_system_seconds": 33.693501,
+    "cpu_user_seconds": 95.31459,
+    "memory_current_bytes": 4354048,
+    "memory_peak_bytes": 3164426240,
+    "source": "cgroup"
+  },
+  "tested_file_sha256": {
+    "experiments/authenticate_glm_tr3_source.py": "78783f838e4d7385c37cd23cacac47c5c118f56ac583284898911f5a6e742614",
+    "experiments/build_glm_tr3_teacher.py": "b588857b2a1b8100cfb4d7f365a0348275a5567f6af4435bc10b7acaa372be7a",
+    "experiments/glm_tr3_full_vocab.py": "1b2ad03e8ab70615b6d4ed04c40b73ac527cab8a03759b41e6f1459d1ab83db3",
+    "experiments/measure_glm_tr3_vllm.py": "b68ad3fcd39bf95ec2b58528b9096e690815b5a447e563733a059e75679875aa",
+    "tests/test_glm_tr3_full_vocab.py": "67e805712123161344ec6069a3e67e83569623cecaa896c0d84bb49b08ee3129"
+  },
+  "current_worktree_changed_files_since_test": [
+    "experiments/build_glm_tr3_teacher.py"
+  ]
+}

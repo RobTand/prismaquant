@@ -1,0 +1,152 @@
+{
+  "action": "55ed24ce9dfad7ccf68411da549a04ce2889f2148f878767d76ca2dbcd6d842e",
+  "returncode": 0,
+  "cleanup": {
+    "checked_unix": 1788914099.323338,
+    "complete": true,
+    "nonce": "5c51d7cce8d3433bad9b86ab1e23d6fe",
+    "released": {
+      "ok": true,
+      "scope_id": "prismabuild-jobfbc7eb1e1de812580f8fbddd9c7ab551.slice",
+      "stop_reason": "executed",
+      "stopped_unix": 1788914099.2659714
+    },
+    "telemetry": {
+      "action_key": "55ed24ce9dfad7ccf68411da549a04ce2889f2148f878767d76ca2dbcd6d842e",
+      "complete": true,
+      "cpu_seconds": 55.152053,
+      "cpu_system_seconds": 3.977148,
+      "cpu_user_seconds": 51.174905,
+      "errors": [],
+      "gpu_memory_max_bytes": 8589934592,
+      "host": "dl380g10",
+      "memory_current_bytes": 28286976,
+      "memory_max_bytes": 8589934592,
+      "memory_peak_bytes": 2765090816,
+      "nonce": "5c51d7cce8d3433bad9b86ab1e23d6fe",
+      "oom_kill": 0,
+      "oom_local": 0,
+      "process_io": {
+        "live": {},
+        "members": [
+          3877003,
+          3877023,
+          3877024,
+          3877025,
+          3877026,
+          3877029,
+          3877032,
+          3877035,
+          3877046,
+          3877057,
+          3877061,
+          3877065
+        ],
+        "processes_live": 0,
+        "processes_observed": 12,
+        "processes_unreadable": 0,
+        "rchar": 49937337,
+        "read_bytes": 0,
+        "retired": {
+          "rchar": 49937337,
+          "read_bytes": 0,
+          "syscr": 2413,
+          "syscw": 11,
+          "wchar": 868,
+          "write_bytes": 472
+        },
+        "source": "proc_io",
+        "syscr": 2413,
+        "syscw": 11,
+        "wchar": 868,
+        "write_bytes": 472
+      },
+      "sampled_unix": 1788914099.3053467,
+      "scope_unit": "prismabuild-jobfbc7eb1e1de812580f8fbddd9c7ab551.slice",
+      "shape_key": "26622a03b320cbfe8f3e7f489ca04ca12470ef549536d12e172f872495d68690",
+      "termination_reason": "executed",
+      "wall_seconds": 8.306997256004252
+    }
+  },
+  "receipt_sha256": "845cd61d52eb8f8cbf7d9b0bfc6cec0c6db51fed054d5d1b9bdc062ee09a8461",
+  "result": {
+    "bytes": 621,
+    "sha256": "7cfddc7b94820e45e5c3e46091caeebfefa91f19aaf4d10fc72be14e602803d6"
+  },
+  "source_snapshot": {
+    "commit": "7f1d1accbf5d108e7427830267c02597d45d63f8",
+    "input": {
+      "bytes": 27438106,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "3f99899aa475510a41bd53683f82248edc3df24fdede88caec19531a2dcd85b5"
+    },
+    "parent": "b50e45e1d5847785946ac70c5596a7425c2d81f3",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n..........................................................               [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 112 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n58 passed, 112 warnings in 7.19s\n",
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 6.785884574999998,
+        "busy_percent_peak": 11.0136573,
+        "psi_some_avg10_max": 0.0,
+        "psi_some_avg10_samples": 10,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 12,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788914099.2511225,
+      "errors": [
+        "no pqteld CSV for dl380g10 covering the window"
+      ],
+      "host": "dl380g10",
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata",
+      "start_unix": 1788914089.377508
+    },
+    "finished_unix": 1788914099.2511225,
+    "host": "dl380g10",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 12,
+      "processes_unreadable": 0,
+      "rchar": 49937337,
+      "read_bytes": 0,
+      "source": "proc_io",
+      "syscr": 2413,
+      "syscw": 11,
+      "wchar": 868,
+      "write_bytes": 472
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 0,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 135634944,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.01791799999999999,
+      "user_seconds": 0.10850600000000021,
+      "voluntary_context_switches": 3
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 55.152053,
+      "cpu_system_seconds": 3.977148,
+      "cpu_user_seconds": 51.174905,
+      "memory_current_bytes": 28286976,
+      "memory_peak_bytes": 2765090816,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788914089.377508,
+    "wall_seconds": 9.87361454963684
+  },
+  "native_driver_probe": {
+    "before.log": "{\"mode\": \"old\", \"expected_failure\": \"chunked prompt or partial vocabulary refused\", \"native_logits_calls_before_failure\": [[1, 11], [1024, 11]], \"native_source_sha256\": \"4cf22d390e7bf59e44c458cff7180268db63e95d06af2f1e14d720a2d77c9663\"}\n",
+    "after.log": "{\"mode\": \"new\", \"native_logits_calls\": [[1, 11], [1024, 11], [1024, 11]], \"scored_positions\": 2047, \"passed\": true, \"native_source_sha256\": \"4cf22d390e7bf59e44c458cff7180268db63e95d06af2f1e14d720a2d77c9663\", \"scope\": \"native Python chunk driver with CPU top-k stand-in; no GPU/runtime logits claim\"}\n"
+  }
+}

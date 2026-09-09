@@ -1,0 +1,185 @@
+{
+  "action": "90a36b449ef47cf5fbeb967400a59a7468281d661b05ac5bc60f3dac77ce4d2e",
+  "returncode": 0,
+  "cleanup_complete": true,
+  "receipt_sha256": "99ac8dd2e4896a1e6f9bd22aea5efc36ed48a2ec36431046c0c0784fb3c5bfad",
+  "cas_result": {
+    "bytes": 2884,
+    "sha256": "42ad95685feb7d47ac6c5da3ae06e09de52033db6fe57c289a4978afeeb5c0ec"
+  },
+  "teacher_sha256": "1cc798a32a3457f996e859f778fe61fd987561b91490fe2953b698457ea747ae",
+  "teacher_manifest_bytes": 103521,
+  "windows": 25,
+  "source_initialization_contract": {
+    "derived_buffers": 0,
+    "dtype": "torch.bfloat16",
+    "layers_prefix": "model.language_model.layers.",
+    "model_class": "transformers.models.glm5_next.modeling_glm5_next.Glm5NextForConditionalGeneration",
+    "num_layers": 45,
+    "persistent_tensors": 1262,
+    "schema": "prismaquant.streaming_initialization.v1",
+    "scope": "streamed_text_source_forward",
+    "source_map_sha256": "ad7900d15f9a45dc52407ee1e983562e5c067198c13d81595ef642090cc94669",
+    "state_sha256": "e0f48d644e8d72e9935bb130b135a12740f3d0a59dd2a52ff78769b5d97f0cf5",
+    "status": "completed",
+    "transformers_version": "5.16.1"
+  },
+  "source_snapshot": {
+    "commit": "7882eda3a87fd6a45a1142de140aa17c49a8021e",
+    "input": {
+      "bytes": 27409655,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "12a63dee16e7dba16a975ae2c28055f8bb369052c27f6a9af8b98103af6be3b7"
+    },
+    "parent": "da7e065687329419a8a6f38562b39619a922a6eb",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 18.144084538119326,
+        "busy_percent_peak": 33.7033292,
+        "psi_some_avg10_max": 1.38,
+        "psi_some_avg10_samples": 989,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 989,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788909815.547537,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.315,
+        "power_reference_scope": "soc_tdp",
+        "power_reference_source": "https://docs.nvidia.com/dgx/dgx-spark/hardware.html",
+        "power_reference_w": 140.0,
+        "power_w_mean": 23.60029903699949,
+        "power_w_peak": 44.1,
+        "samples": 1973,
+        "source": "pqteld",
+        "temperature_c_peak": 68.0,
+        "utilization_percent_mean": 40.771414090217945,
+        "utilization_percent_peak": 96.0,
+        "utilization_samples": 1973,
+        "uvm_residual_bytes_peak": 68808433664,
+        "uvm_residual_samples": 1973
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 83.91,
+        "psi_mem_full_avg10_max": 0.0,
+        "samples": 1973,
+        "source": "pqteld",
+        "unified_available_bytes_min": 53471784960,
+        "unified_total_bytes": 130595991552,
+        "unified_used_bytes_peak": 77124206592
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1788908828.9530787
+    },
+    "finished_unix": 1788909815.547537,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 6,
+      "processes_unreadable": 0,
+      "rchar": 32254652063,
+      "read_bytes": 656769146880,
+      "source": "proc_io",
+      "syscr": 28955,
+      "syscw": 17740,
+      "wchar": 32051210034,
+      "write_bytes": 32050774016
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 2,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 96403456,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.013936000000000004,
+      "user_seconds": 0.06669400000000003,
+      "voluntary_context_switches": 21
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 1365.506986,
+      "cpu_system_seconds": 182.436905,
+      "cpu_user_seconds": 1183.07008,
+      "memory_current_bytes": 34762452992,
+      "memory_peak_bytes": 41323192320,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788908828.9530787,
+    "wall_seconds": 986.5944583415985
+  },
+  "observer_summary": {
+    "schema": "prismaquant.glm_full_capture_profile.v1",
+    "status": "complete",
+    "started_unix": 1788908832.1578517,
+    "collections": [],
+    "errors": [],
+    "torch": "2.13.0+cu130",
+    "cuda": "13.0",
+    "cpu_affinity": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      15
+    ],
+    "kernel": "6.17.0-1032-nvidia",
+    "netdata": {
+      "hosts": [
+        "sparky",
+        "sparklina"
+      ],
+      "interval_seconds": 5,
+      "byte_cap": 3221225472,
+      "bytes_written": 4474169,
+      "samples": 194
+    },
+    "python_sampler": {
+      "scope": "main_thread_only",
+      "interval_seconds": 1,
+      "byte_cap": 536870912,
+      "bytes_written": 1542011,
+      "samples": 945
+    },
+    "profile_layers": [],
+    "forward_windows_zero_based": [
+      [
+        0,
+        1
+      ],
+      [
+        31,
+        32
+      ]
+    ],
+    "nfsv4_srcversion": "939D67D3912BE82E3030657",
+    "nfsv4_parameters_delegation_watermark": "0",
+    "finished_unix": 1788909813.0458696,
+    "campaign_error": null
+  },
+  "telemetry_file_hashes_verified": true,
+  "all_teacher_array_hashes": "verified independent complete body read via ec8d349dc358d06f6dd56f716352c4b1539f5764653f117fa7272c6076a3d0ad",
+  "source_bundle_verified": true,
+  "experiment_source_files_verified": {
+    "build_glm_tr3_teacher.py": "85138571a3dbbffc6cee9ba52c18906751a0e52018902d69f8fac07d34dfec94",
+    "glm_full_capture_profile.py": "cf4a3599327010ae90072b9f2a2f1f6e99c6c035c221e5a42cb1474e68d6004f",
+    "glm_tr3_full_vocab.py": "1b2ad03e8ab70615b6d4ed04c40b73ac527cab8a03759b41e6f1459d1ab83db3",
+    "measure_glm_tr3_vllm.py": "e4f3477b7d136c1d213c8527c69e848cc476ab8397309f7a59a31ca8d431c62a",
+    "workspace_netdata.py": "938db1c5d613990324b0397a364439159eb3e4da7daa824f790d96722d4e3361"
+  },
+  "gold_source_files_verified": 9,
+  "complete_prismaquant_package_files_verified": 231,
+  "complete_prismaquant_package_sha256": "5a507741716b7a7a7f50dd8f650852e2f5b910d245e9325244b9ccf736c64a53",
+  "teacher_source_identity_matches_authenticated_original": true,
+  "teacher_array_audit_sha256": "fd750e7a3dc21e5feb23f74f2509a6dc105041dd85aafef82c55d69e3d8b8366"
+}

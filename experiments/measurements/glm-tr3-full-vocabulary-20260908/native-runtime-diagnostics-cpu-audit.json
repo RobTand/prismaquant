@@ -1,0 +1,45 @@
+{
+  "before": {
+    "action": "96f3a0187da4433f89ee0616525f9fa2097a593567da657e8a34d652c1c4c360",
+    "returncode": 1,
+    "cleanup_complete": true,
+    "source_snapshot": {
+      "commit": "f5cc802ea1d18544ffc1eb905d9deb97bf3d932f",
+      "input": {
+        "bytes": 27463587,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "6291188cb722ae7bd1eb2e4bfccf5dc8d5787e376e165b016f0a52548aa99876"
+      },
+      "parent": "ddc9aac80cda44c519d947b8468a0577a3ec17cb",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    }
+  },
+  "after": {
+    "action": "cffb2862274320f5f085614e24514bb14e28206d8831b7e1bb3109821554757f",
+    "returncode": 0,
+    "cleanup_complete": true,
+    "source_snapshot": {
+      "commit": "358465c0457c8323a9edb2a74be0190f55489336",
+      "input": {
+        "bytes": 27464397,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "5eda43190f0bf06a51ede30fa64716a0d1940cdb65e6c01e39b6f775b3d03fb5"
+      },
+      "parent": "ddc9aac80cda44c519d947b8468a0577a3ec17cb",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "receipt_sha256": "c202bb889c6cbb62d30b4152e5eaaedb8befec58ed32e4e222d6c0e29b54d0a7",
+    "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 86%]\n...........                                                              [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n83 passed, 56 warnings in 7.02s\n",
+    "result": {
+      "bytes": 699,
+      "sha256": "023cb7e9d9cc0cb3a05c47684c1d9289df3af18e892885b2b3222d54b6059ba8"
+    },
+    "tested_code_matches_worktree": true
+  },
+  "scope": "CPU contract regressions and scorer py_compile; x86 scoped pq-cpu312; before 2 CPUs/4 GiB, after 4 CPUs/6 GiB, native threads1, priority -10; no native GPU qualification of edited source.",
+  "setup_failure": "Portable pb-cpu attempt 723c9ae883d2 failed collection: compressed_tensors absent; no tests collected. Used existing pq-cpu312 x86 environment."
+}

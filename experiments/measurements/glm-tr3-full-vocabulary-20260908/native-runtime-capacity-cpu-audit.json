@@ -1,0 +1,106 @@
+{
+  "schema": "tr3_runtime_capacity_comparison_cpu_audit/1",
+  "before": {
+    "action": "1f751f7fdfdab62bad90f57952b06cbb53545b1b77b5fd50dbc1f2ec9a67b51c",
+    "source_snapshot": {
+      "commit": "87c83b031688655f19cbb31a0d51a723983e93f6",
+      "input": {
+        "bytes": 27456727,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "07b391b799dfda2d9370b515fcbf71b022079f461e81b39f010534142b80f109"
+      },
+      "parent": "626cde56be8f0680c3646a983e5751ba185cc5c8",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "returncode": 1,
+    "cleanup_complete": true,
+    "stdout": "F                                                                        [100%]\n=================================== FAILURES ===================================\n______ test_native_restart_kv_capacity_does_not_invalidate_qualification _______\n\n    def test_native_restart_kv_capacity_does_not_invalidate_qualification():\n        fixtures = Path(__file__).parent / \"fixtures\" / \"glm_tr3_runtime\"\n        qualified = json.loads((fixtures / \"qualified-runtime.json\").read_text())[\"runtime_binding\"]\n        restarted = json.loads((fixtures / \"restarted-runtime.json\").read_text())[\"runtime_binding\"]\n        assert qualified != restarted  # Actual attempt 07 versus attempt 08 allocations.\n        original = copy.deepcopy((qualified, restarted))\n>       assert served.qualification_runtime_matches(qualified, restarted)\nE       AssertionError: assert False\nE        +  where False = <function qualification_runtime_matches at 0x7b942640bec0>({'candidate_identity': {'content_sha256': 'e0479b481a3f99836e5464472d3c0d1921c71f016adc0d80a9c9b98cf04874d0', 'metadat...ogprobs', 'max_model_len': 2049}, 'parallel_config': {'data_parallel_size': 1, 'pipeline_parallel_size': 1}, ...}, ...}, {'candidate_identity': {'content_sha256': 'e0479b481a3f99836e5464472d3c0d1921c71f016adc0d80a9c9b98cf04874d0', 'metadat...ogprobs', 'max_model_len': 2049}, 'parallel_config': {'data_parallel_size': 1, 'pipeline_parallel_size': 1}, ...}, ...})\nE        +    where <function qualification_runtime_matches at 0x7b942640bec0> = served.qualification_runtime_matches\n\ntests/test_glm_tr3_full_vocab.py:24: AssertionError\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_glm_tr3_full_vocab.py::test_native_restart_kv_capacity_does_not_invalidate_qualification\n1 failed, 14 warnings in 5.13s\n"
+  },
+  "after": {
+    "action": "4f7c6b4b95fdf68fec16ec840aee286e672eaa91825bcf425923abd5a7f4d25d",
+    "source_snapshot": {
+      "commit": "644056283fd1327841d23c87840ce3264067ea4b",
+      "input": {
+        "bytes": 27457793,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "18610c2e99e7a13b4fb0f320008264e0e3bd9c4d9d6cfdfaf59ba2ded6ad66c0"
+      },
+      "parent": "626cde56be8f0680c3646a983e5751ba185cc5c8",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "returncode": 0,
+    "cleanup_complete": true,
+    "receipt_sha256": "de716cde46f870947c2a61bf62d9f7a4a50ff58651f5fc1998f6678bec42427d",
+    "result": {
+      "bytes": 701,
+      "sha256": "cffb9c6bc877efc9d24e5380b2a153e0e8cbd8111453fbf7802f6b7d73311905"
+    },
+    "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 91%]\n.......                                                                  [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 112 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n79 passed, 112 warnings in 8.64s\n",
+    "resource_profile": {
+      "box_window": {
+        "cpu": {
+          "busy_percent_mean": 6.149808869230769,
+          "busy_percent_peak": 11.1194868,
+          "psi_some_avg10_max": 4.41,
+          "psi_some_avg10_samples": 13,
+          "psi_some_avg10_update_every_s": 1,
+          "samples": 13,
+          "source": "netdata",
+          "time_group": "average",
+          "update_every_s": 1
+        },
+        "end_unix": 1788916472.6739707,
+        "errors": [
+          "no pqteld CSV for dl380g10 covering the window"
+        ],
+        "host": "dl380g10",
+        "schema": "prismabuild.box_window.v1",
+        "source": "netdata",
+        "start_unix": 1788916461.4478688
+      },
+      "finished_unix": 1788916472.6739707,
+      "host": "dl380g10",
+      "process_io": {
+        "processes_live": 0,
+        "processes_observed": 13,
+        "processes_unreadable": 0,
+        "rchar": 38768203,
+        "read_bytes": 0,
+        "source": "proc_io",
+        "syscr": 1130,
+        "syscw": 11,
+        "wchar": 868,
+        "write_bytes": 472
+      },
+      "reaped_children": {
+        "involuntary_context_switches": 0,
+        "max_rss_bytes": null,
+        "max_rss_watermark_bytes": 132317184,
+        "scope": "this parent's launched child and the descendants it reaped",
+        "source": "getrusage_children",
+        "system_seconds": 0.01398900000000003,
+        "user_seconds": 0.10591699999999982,
+        "voluntary_context_switches": 3
+      },
+      "schema": "prismabuild.resource_profile.v1",
+      "scope": {
+        "cpu_seconds": 54.155095,
+        "cpu_system_seconds": 4.511758,
+        "cpu_user_seconds": 49.643337,
+        "memory_current_bytes": 35549184,
+        "memory_peak_bytes": 2761773056,
+        "source": "cgroup"
+      },
+      "start_source": "claimed_unix",
+      "start_unix": 1788916461.4478688,
+      "wall_seconds": 11.226101875305176
+    }
+  },
+  "placement": "x86; scoped pq-cpu312 Python on DL380; native threads1; beforeCPU1mem2GiB; afterCPU8mem8GiB",
+  "compile_check": "py_compile experiments/glm_tr3_full_vocab.py experiments/measure_glm_tr3_vllm.py after pytest in same successful PB action",
+  "scope": "Actual immutable native07/08 observations, exact prior equality refuses, capacity-aware equality passes; nineteen noncapacity changes refuse; no new GPU qualification claimed."
+}
