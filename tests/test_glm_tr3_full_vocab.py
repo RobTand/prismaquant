@@ -158,6 +158,27 @@ def test_first_row_observation_is_bounded_and_preserves_values():
     assert result["other"] == [None, 4]
 
 
+def test_full_boundary_observation_detects_nonfirst_token_changes():
+    value = torch.arange(3 * 5, dtype=torch.bfloat16).reshape(3, 5)
+    original = value.clone()
+    before = served.first_row_observation(value, full=True)
+    assert before['full_sha256'] == hashlib.sha256(value.view(torch.uint8).numpy().tobytes()).hexdigest()
+    assert before['full_bytes'] == value.numel() * value.element_size()
+    torch.testing.assert_close(value, original, rtol=0, atol=0)
+    value[2, 3] += 1
+    after = served.first_row_observation(value, full=True)
+    assert before['full_sha256'] != after['full_sha256']
+    assert before['first_row_sha256'] == after['first_row_sha256']
+    assert before['sample_values'] == after['sample_values']
+
+
+def test_full_boundary_mode_requires_layer_observations_before_loading():
+    from types import SimpleNamespace
+    with pytest.raises(ValueError, match="requires layer observation"):
+        served.measure(SimpleNamespace(diagnostic_repeat_first_window=4, qualify_hook=True,
+                                       diagnostic_layers=False, diagnostic_full_boundaries=True))
+
+
 def test_layer_hooks_preserve_forward_and_clear_each_request():
     layer = torch.nn.Linear(5, 5, bias=False)
     h = served.DiagnosticPromptLogitsCapture(rank=0, world_size=1, rows=3,

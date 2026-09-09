@@ -125,19 +125,25 @@ class DiagnosticPromptLogitsCapture(PromptLogitsCapture):
         return result
 
 
-def first_row_observation(value):
+def first_row_observation(value, *, full=False):
     """Copy one token's raw bytes and bounded samples; retain no GPU tensors."""
     if isinstance(value, torch.Tensor):
-        row = value.detach()[:1] if value.ndim else value.detach()
+        cpu = value.detach().contiguous().cpu() if full else None
+        tensor = cpu if full else value.detach()
+        row = tensor[:1] if tensor.ndim else tensor
         flat = row.contiguous().reshape(-1).cpu()
         columns = torch.linspace(0, max(0, flat.numel() - 1), min(128, flat.numel())).long()
-        return {"shape": list(value.shape), "dtype": str(value.dtype),
+        result = {"shape": list(value.shape), "dtype": str(value.dtype),
                 "first_row_sha256": hashlib.sha256(memoryview(flat.view(torch.uint8).numpy())).hexdigest(),
                 "sample_indices": columns.tolist(), "sample_values": flat[columns].float().tolist()}
+        if full:
+            result["full_sha256"] = hashlib.sha256(memoryview(cpu.reshape(-1).view(torch.uint8).numpy())).hexdigest()
+            result["full_bytes"] = cpu.numel() * cpu.element_size()
+        return result
     if isinstance(value, (list, tuple)):
-        return [first_row_observation(item) for item in value]
+        return [first_row_observation(item, full=full) for item in value]
     if isinstance(value, dict):
-        return {key: first_row_observation(item) for key, item in value.items()}
+        return {key: first_row_observation(item, full=full) for key, item in value.items()}
     if value is None or type(value) in (int, float, bool, str):
         return value
     return {"unobserved_type": type(value).__module__ + "." + type(value).__qualname__}
@@ -171,7 +177,8 @@ def diagnostic_layer_pre(state, name, module, args, kwargs):
     if state.window_id is None:
         raise ValueError("unarmed layer observation")
     event = {"module": name, "stage": "input", "class": type(module).__qualname__,
-             "args": first_row_observation(args), "kwargs": first_row_observation(kwargs)}
+             "args": first_row_observation(args, full=getattr(state, "full_boundaries", False)),
+             "kwargs": first_row_observation(kwargs, full=getattr(state, "full_boundaries", False))}
     if type(module).__name__ in ("Glm5NextLinearAttention", "Glm5NextMLAAttention"):
         event["attention_metadata"] = diagnostic_attention_metadata(module)
     state.layer_observations.append(event)
@@ -182,11 +189,11 @@ def diagnostic_layer_post(state, name, module, args, kwargs, output):
         raise ValueError("unarmed layer observation")
     state.layer_observations.append({"module": name, "stage": "output",
                                      "class": type(module).__qualname__,
-                                     "output": first_row_observation(output)})
+                                     "output": first_row_observation(output, full=getattr(state, "full_boundaries", False))})
 
 
 def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnostic=False,
-                    diagnostic_layers=False):
+                    diagnostic_layers=False, full_boundaries=False):
     """Public apply_model control RPC; hooks return no replacement tensor."""
     from vllm.distributed import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
     import vllm
@@ -205,11 +212,14 @@ def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnost
                                rows=CONTEXT_LENGTH - 1, vocab_size=VOCAB_SIZE,
                                tile_rows=tile_rows, logits_layout=logits_layout)
     model._tr3_capture = state
+    state.full_boundaries = full_boundaries
     model._tr3_capture_handle = processor.register_forward_hook(state)
     model._tr3_layer_handles = []
     if diagnostic_layers:
         names = {"Glm5NextDecoderLayer", "Glm5NextLinearAttention", "Glm5NextMLAAttention",
                  "Glm5NextMoE", "Glm5NextMLP"}
+        if full_boundaries:
+            names.add("GateLinear")
         for name, module in text_model.named_modules():
             if type(module).__name__ in names:
                 model._tr3_layer_handles.extend([
@@ -451,10 +461,13 @@ def qualification_runtime_matches(qualified, observed):
 def measure(args):
     repeats = getattr(args, "diagnostic_repeat_first_window", 0)
     diagnostic_layers = getattr(args, "diagnostic_layers", False)
+    full_boundaries = getattr(args, "diagnostic_full_boundaries", False)
     if repeats and (not args.qualify_hook or not 2 <= repeats <= 8):
         raise ValueError("diagnostic repetition requires qualify-hook and 2..8 repeats")
     if diagnostic_layers and not repeats:
         raise ValueError("layer observation requires explicit diagnostic repetition")
+    if full_boundaries and not diagnostic_layers:
+        raise ValueError("full boundary observation requires layer observation")
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
     model = Path(args.model).resolve(strict=True)
@@ -490,7 +503,8 @@ def measure(args):
             requested_kv_cache_dtype=args.kv_cache_dtype)
         worker_runtime = llm.apply_model(partial(install_capture, tile_rows=args.tile_rows,
                                                 logits_layout=args.logits_layout, diagnostic=bool(repeats),
-                                                diagnostic_layers=diagnostic_layers))
+                                                diagnostic_layers=diagnostic_layers,
+                                                full_boundaries=full_boundaries))
         installed = True
         worker_runtime.sort(key=lambda row: row["rank"])
         if ([row["rank"] for row in worker_runtime] != list(range(topology["tensor_parallel_size"]))
@@ -617,6 +631,8 @@ def main():
                    help="diagnostic only: repeat final-0000 2..8 times; requires --qualify-hook")
     p.add_argument("--diagnostic-layers", action="store_true",
                    help="observe first-token layer/attention/MLP boundaries during diagnostic repeats")
+    p.add_argument("--diagnostic-full-boundaries", action="store_true",
+                   help="also hash all token rows and observe router gates; requires --diagnostic-layers")
     p.add_argument("--qualification")
     p.add_argument("--qualification-sha256")
     add_gold_engine_arguments(p)

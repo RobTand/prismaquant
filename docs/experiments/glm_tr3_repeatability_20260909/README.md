@@ -81,3 +81,26 @@ per tensor and retain no GPU references. The copies introduce synchronization;
 if the variation disappears under observation, that is evidence of sensitivity
 to instrumentation, not proof of correctness or a fix. No model output is
 replaced. The result remains diagnostic and cannot qualify a full-panel replay.
+
+The four-request localization run at `78cb4521` finished with head exit 0 and
+artifact SHA256 `f74d992461c658368ac3edbccaa64255ff96e184e093ef94c5c3642cb223a5ff`
+(31,174,031 bytes). It retained 354 ordered events per rank per request.
+Means were 0.05596205608317094, 0.04757906332418833,
+0.045731642356578374 and 0.05575659131743314. The second request's complete
+2047-position KL vector exactly equals the earlier qualification09 vector.
+
+For the first token, the earliest difference is the MoE output at layer 8
+between requests 0 and 1/2, at layer 23 between 0 and 3, and at layer 22
+between 1 and 2. Both ranks agree on these boundaries. The observed layer-8
+sample maximum difference is 0.000244140625 in BF16; preceding first-token
+inputs and the shared-expert output are byte-identical. This localizes the
+first-token difference to a MoE boundary, but does not prove the whole input
+batch is identical: other tokens can affect expert batch shapes and routing.
+
+`--diagnostic-full-boundaries` therefore extends the same diagnostic to hash
+all raw tensor rows at every observed boundary and adds router `GateLinear`
+boundaries. First-token samples remain bounded; full tensors are staged on CPU
+one at a time, hashed and released rather than retained as model state. This
+adds host traffic and synchronization deliberately for correctness localization,
+with no performance claim. The earliest whole-batch difference will distinguish
+identical-input numerical variation from differences inherited from other tokens.
