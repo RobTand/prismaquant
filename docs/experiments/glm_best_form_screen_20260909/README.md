@@ -286,3 +286,61 @@ Existing resource planner PB
 derives B8/B16/B32 reservations of 104/105/108 GiB including 4 GiB observer
 headroom, with zero source forwards. This is a reservation derivation, not a
 measured peak. Wider best-form batches remain to be measured.
+
+## 05:30 UTC: actual best-tile B8/B32 endpoint comparison
+
+Frozen producer `b1eb1dccc9df6773ab94e1c98f316f45bb18ab4c` (merged
+Tessera PR438), package source
+`bcad2ef2a7fdec2aab51b30d59f1f5e10b4933637ca4ffc74ee05e20816c1822`,
+BEST_FORM=1, BEST_TILE=64,4,2, torch 2.13+cu130. Each action runs 32 real
+row-0076 experts from the unchanged original capture, all 864 selected entries
+resident, no source forward. PB placed the R832 pair on Sparky and R1088 pair
+on Sparklina concurrently. Both-host telemetry covers the resulting external
+load. Comparisons are within each host, not across hosts.
+
+| endpoint | B8 seconds / J / mean W | B32 seconds / J / mean W | throughput | work/J |
+|---|---|---|---|---|
+| R832 | 70.6443 / 5603.06 / 79.3137 | 56.7408 / 4515.34 / 79.5784 | 1.24504x | 1.24089x |
+| R1088 | 78.0419 / 4547.24 / 58.2667 | 69.3892 / 5166.96 / 74.4635 | 1.12470x | 0.880061x |
+
+All six arms per endpoint match all 32 actual wire files and scores exactly,
+including the 32 retained old-07ad units per endpoint. Every timed arm builds
+zero plans. Complete warmed actual-call profiles contain no dynamic toggles,
+no capture in the profile, correct graph/step counts and zero kernel overlaps.
+The B32 call's actual input prefixes exactly equal the B8 inputs. The requested
+90–100 W full-encode mean is not reached; the R1088 throughput gain costs
+energy per expert, so B32 is not a blanket winner.
+
+Initial reservation 108 GiB exceeded both GB10 workers' declared 104 GiB and
+PB refused before queueing. The same existing resource planner with explicit
+20 GiB headroom (both spec and campaign argument, default remains 24) derives
+104 GiB including 4 GiB observer allowance. Native runs passed that reservation
+with the full resident row. R832's warm CUDA allocated peak was 86,461,430,272
+bytes; its timed arms have a lower peak. No capacity or residency guard was
+bypassed. The first headroom derivation changed only the argument, correctly
+retaining the spec's larger 24 GiB floor; the accepted derivation changes both.
+
+Native keys: R832
+`5b0742bece0f5c66aa1e418c7227b1953f51d7c3bf634f417fb1535ce5c85172`,
+R1088 `a9adbe93e67e3befcebeaa6d3a999da48e0d99f137113a9e5fddc840295938c1`.
+CPU audits: R832
+`0074f1a9512c2c4cb10d59d7dbf35e73843f0756b5f9a8c54c6df9c8ede0938b`,
+R1088 `c36113f532bee3cec6a1ed60e95525eede38c86602aea150a0c0a33b1161bb8e`.
+Reservation derivation:
+`aff3fefcf4ef6cd0f984aeadb3ef052c792fab7eeb6ed011a0c6e186eed3e83d`.
+Artifacts: `first-proof-anchor-preparation-02/performance-best-tile-batch-r{832,1088}-ab-01/`,
+including `root-best-batch-audit.json`, raw 2 Hz pqteld CSVs for both hosts,
+full observer samples, complete traces, actual input tensors, and source/CAS
+verification. The campaign manifest is `best-tile-batch-endpoints-campaign.json`.
+
+The corrected earlier tile microbenchmarks were independently audited by PB
+`d92f8384125e2a8a0a23fff449a7c81a4c07a5e06b72221dee1e4570755c4635`:
+raw bracketed power integration, all five blocks, zero plan constructions,
+exact reference states/SSE, native profile step counts and zero overlaps pass.
+Its ratio of mean times is 1.11935x at R3 and 1.02961x at R4 versus the
+incumbent tile; the upstream page uses median times, explaining the small
+ratio difference. Energy ratios agree at 1.06229x / 1.10543x. Additional
+both-box historical Netdata lives at
+`/mnt/shared/tessera-tile-netdata-20260909`; 10 s GPU sampling gives no GPU
+sample during the short R4 profile, so this is principally the missing
+both-host CPU, memory, disk and network context, not a new profile power claim.

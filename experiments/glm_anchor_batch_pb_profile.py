@@ -21,7 +21,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--container-spec')
     parser.add_argument('--comparison', choices=('batch-width', 'trellis-best-form',
-                        'trellis-call-profile', 'trellis-best-form-complete'),
+                        'trellis-call-profile', 'trellis-best-form-complete', 'best-batch-complete'),
                         default='batch-width')
     parser.add_argument('--out', required=True)
     parser.add_argument('campaign', nargs=argparse.REMAINDER)
@@ -44,12 +44,15 @@ def main(argv=None):
     from prismaquant import tessera_campaign as campaign
     from experiments.glm_full_capture_profile import CaptureObserver
     from prismaquant.tessera_campaign import _wire_path
-    if command[command.index('--anchor-batch-size') + 1] != '16':
-        raise ValueError('comparison requires the selected planner to reserve batch 16')
+    batch_compare = args.comparison == 'best-batch-complete'
+    complete = args.comparison in ('trellis-best-form-complete', 'best-batch-complete')
+    unit_count = 32 if batch_compare else 16
+    if command[command.index('--anchor-batch-size') + 1] != str(unit_count):
+        raise ValueError(f'comparison requires the selected planner to reserve batch {unit_count}')
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=False)
     result = dict(schema='prismaquant.glm_anchor_batch_pb_profile.v1',
-        status='running', scope='first compatible 16 experts at the first campaign rung',
+        status='running', scope=f'first compatible {unit_count} experts at the first campaign rung',
         comparison=args.comparison,
         full_campaign_complete=False, arms=[], command=command,
         torch=torch.__version__, cuda=torch.version.cuda, started_unix=time.time())
@@ -57,9 +60,17 @@ def main(argv=None):
     from tessera import window_viterbi
     result['producer_source_sha256'] = encoder_source_sha256()
     result['trellis_module_path'] = window_viterbi.__file__
+    result['best_tile'] = os.environ.get('TESSERA_WINDOW_BEST_TILE')
     if args.comparison != 'batch-width' and not hasattr(window_viterbi, '_BEST_FORM_ENV'):
         raise RuntimeError('the selected producer does not implement the candidate')
     original_best_form = os.environ.get('TESSERA_WINDOW_BEST_FORM')
+    plan_builds = [0]
+    original_plan = window_viterbi._WindowPlan
+    def counted_plan(**kwargs):
+        plan_builds[0] += 1
+        return original_plan(**kwargs)
+    if batch_compare:
+        window_viterbi._WindowPlan = counted_plan
     original = campaign._measure_anchor_batch
     original_scalar = campaign._measure_anchor
 
@@ -73,8 +84,8 @@ def main(argv=None):
 
     def compare(**kw):
         names = list(kw['qnames'])
-        if len(names) != 16 or not all('.experts.' in name for name in names):
-            raise RuntimeError('expected 16 compatible routed experts')
+        if len(names) != unit_count or not all('.experts.' in name for name in names):
+            raise RuntimeError(f'expected {unit_count} compatible routed experts')
         result.update(qnames=names, format_name=kw['format_name'],
             shapes=[list(w.shape) for w in kw['weights']])
         if args.comparison == 'trellis-call-profile':
@@ -135,7 +146,7 @@ def main(argv=None):
             if best_form is not None:
                 os.environ['TESSERA_WINDOW_BEST_FORM'] = '1' if best_form else '0'
             record = dict(label=label, batch_size=width, best_form=best_form,
-                          units=16, started_unix=time.time())
+                          units=unit_count, started_unix=time.time())
             result['arms'].append(record)
             torch.cuda.synchronize()
             torch.cuda.reset_peak_memory_stats()
@@ -153,7 +164,7 @@ def main(argv=None):
                     finally:
                         io_calls.append(dict(kind=kind, seconds=time.perf_counter()-begun))
                 return call
-            if args.comparison == 'trellis-best-form-complete':
+            if complete:
                 os.fsync = timed('fsync', original_fsync)
                 torch.save = timed('torch_save', original_save)
                 Path.write_bytes = timed('path_write_bytes', original_write)
@@ -173,9 +184,10 @@ def main(argv=None):
                         record['trace_finished_unix'] = time.time()
                 timer = threading.Thread(target=window, daemon=True)
                 timer.start()
+            built_before = plan_builds[0]
             start = time.perf_counter()
             try:
-                for offset in range(0, 16, width):
+                for offset in range(0, unit_count, width):
                     subset = dict(kw)
                     for field in ('qnames', 'weights', 'activations'):
                         subset[field] = kw[field][offset:offset + width]
@@ -189,8 +201,11 @@ def main(argv=None):
                 stop.set()
                 if timer is not None:
                     timer.join()
-                if args.comparison == 'trellis-best-form-complete':
+                if complete:
                     record['io_calls'] = io_calls
+            record['plans_built'] = plan_builds[0] - built_before
+            if batch_compare and label.startswith('measured-') and record['plans_built']:
+                raise RuntimeError('timed arm rebuilt an execution plan')
             signatures = []
             for anchor in outputs:
                 wire = _wire_path(kw['wire_dir'], anchor.qname, anchor.format_name)
@@ -205,7 +220,7 @@ def main(argv=None):
                 record['signatures'] = signatures
                 raise RuntimeError('batch width changed actual wire bytes or pricing scores')
             record.update(signatures=signatures, exact_parity=True,
-                units_per_second=16 / record['seconds'])
+                units_per_second=unit_count / record['seconds'])
             print(json.dumps(record), flush=True)
             save()
 
@@ -214,7 +229,9 @@ def main(argv=None):
         variants = ([(8, 'front', False), (8, 'best', True)]
                     if args.comparison in ('trellis-best-form', 'trellis-best-form-complete')
                     else [(8, 'b8', None), (16, 'b16', None)])
-        if args.comparison == 'trellis-best-form-complete':
+        if batch_compare:
+            variants = [(8, 'b8', True), (32, 'b32', True)]
+        if complete:
             import shutil
             original_viterbi = window_viterbi.viterbi_window_fused
             reference = None
@@ -237,13 +254,17 @@ def main(argv=None):
                         sha256=hashlib.sha256(v.view(torch.uint8).numpy().tobytes()).hexdigest())
                         for k,v in inputs.items()}
                     call = dict(inputs=identities,window_bits=window_bits,rate=rate,chunk=chunk)
-                    if call_reference is None:
+                    if call_reference is None or batch_compare:
                         call_reference = call
-                        evidence = out/'actual-first-viterbi-inputs.pt'
+                        evidence = out/(label+'-actual-first-viterbi-inputs.pt' if batch_compare else 'actual-first-viterbi-inputs.pt')
                         torch.save(dict(**inputs,window_bits=window_bits,rate=rate,chunk=chunk),evidence)
-                        result['call_inputs'] = dict(path=str(evidence),bytes=evidence.stat().st_size,
+                        input_record = dict(path=str(evidence),bytes=evidence.stat().st_size,
                             sha256=hashlib.sha256(evidence.read_bytes()).hexdigest())
-                    if call_reference != call:
+                        if batch_compare:
+                            result.setdefault('batch_call_inputs', {})[label] = input_record
+                        else:
+                            result['call_inputs'] = input_record
+                    if not batch_compare and call_reference != call:
                         raise RuntimeError('complete-call profiles received different actual inputs')
                     for _ in range(3):
                         original_viterbi(*positional, **named)
@@ -274,7 +295,7 @@ def main(argv=None):
                 finally:
                     window_viterbi.viterbi_window_fused = original_viterbi
             first,second = result['call_profiles']
-            if first['sse'] != second['sse'] or first['states_sha256'] != second['states_sha256']:
+            if not batch_compare and (first['sse'] != second['sse'] or first['states_sha256'] != second['states_sha256']):
                 raise RuntimeError('complete-call profiles changed actual states or SSE')
             for index,(width,label,best) in enumerate((variants[0],variants[1],variants[1],variants[0])):
                 arm(width,f'measured-{index}-{label}',best_form=best)
@@ -331,6 +352,7 @@ def main(argv=None):
         result.update(status='failed', error=repr(error))
         raise
     finally:
+        window_viterbi._WindowPlan = original_plan
         campaign._measure_anchor_batch = original
         campaign._measure_anchor = original_scalar
         if original_best_form is None:

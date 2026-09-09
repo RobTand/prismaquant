@@ -11,11 +11,13 @@ census=json.loads((base/'workspace/census.json').read_text())
 units=json.loads((base/'workspace/units/row-0076.json').read_text())
 members=sorted(n for g in units['groups'] for n in g['members'])
 reports=[]
-for width in (8,16,32):
+for width,headroom in ((8,24),(16,24),(32,24),(32,20)):
     current=copy.deepcopy(spec)
+    current["headroom_gb"] = headroom
     current['campaign_argv'][current['campaign_argv'].index('--anchor-batch-size')+1]=str(width)
+    current['campaign_argv'][current['campaign_argv'].index('--streaming-cache-headroom-gb')+1]=str(headroom)
     resource=_streamed_resource_plan(current,census,members,selected_source=True)
     assert resource['encoder_memo_capacity']==width and resource['source_forward_count']==0
-    reports.append(dict(batch=width,base_gib=math.ceil(resource['memory_bytes']/2**30),
+    reports.append(dict(batch=width,headroom_gib=headroom,base_gib=math.ceil(resource['memory_bytes']/2**30),
         observer_gib=4,final_gib=math.ceil(resource['memory_bytes']/2**30)+4,resource=resource))
 print(json.dumps(dict(status='DERIVED_NOT_MEASURED',row='row-0076',units=len(members),reports=reports),sort_keys=True))
