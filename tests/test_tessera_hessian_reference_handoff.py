@@ -159,7 +159,8 @@ def test_selected_public_cli_publishes_references_without_changing_capture(monke
         assert owner.binding()['canonical_capture_sha256']==cc.sha256(tmp_path/'capture/capture_manifest.json')
 
 
-def test_selected_cli_reuses_published_hessian_commitments(monkeypatch, tmp_path):
+@pytest.mark.parametrize('abort', [False, True])
+def test_selected_cli_reuses_published_hessian_commitments(monkeypatch, tmp_path, abort):
     """The source about to price must seal without another population scan."""
     from tessera import cached_unit
     sources = []
@@ -187,12 +188,64 @@ def test_selected_cli_reuses_published_hessian_commitments(monkeypatch, tmp_path
                 patch.setattr(cached_unit, 'tensor_identity', lambda *_a, **_k:
                     pytest.fail('resident capture was rehashed after its commitments were published'))
                 checked.append(sources[-1].capture_sha256())
+            if abort:
+                raise RuntimeError('injected post-binding failure')
         return original_label()
 
     monkeypatch.setattr(campaign, '_activation_kwargs_memo', memo)
     monkeypatch.setattr(campaign, 'write_export_inputs', write)
     monkeypatch.setattr(campaign, 'contract_source_label', label)
-    test_selected_public_cli_publishes_references_without_changing_capture(monkeypatch, tmp_path)
+    if abort:
+        with pytest.raises(RuntimeError, match='injected post-binding failure'):
+            test_selected_public_cli_publishes_references_without_changing_capture(monkeypatch, tmp_path)
+    else:
+        test_selected_public_cli_publishes_references_without_changing_capture(monkeypatch, tmp_path)
     assert checked
     descriptor = json.loads((tmp_path/'cache/hessian_capture.references.json').read_text())
     assert checked == [descriptor['capture_sha256']]
+    assert sources[-1].hessians.receipt()['closed']
+
+
+def test_resident_reference_preserves_seal_and_encoding_input_identity(handoff, monkeypatch):
+    from contextlib import ExitStack
+    from tessera.cached_unit import encoding_input_identity
+    from tessera.alphabet import E4M3_GRID
+    from prismaquant import tessera_hessian as th
+
+    f = handoff
+    path, _, digest = write_row(f, 'a')
+    hessians = {'a': f['H']['a']}
+    plain = th.activation_source(hessians, f['calibration'])
+    weight = torch.arange(6, dtype=torch.bfloat16).reshape(3, 2)
+    expected = encoding_input_identity(weight, 'a', E4M3_GRID, 1024, activation=plain)
+    with ExitStack() as scope:
+        source = th.activation_source(hessians, f['calibration'], reference_path=path,
+                                      source_scope=scope)
+        monkeypatch.setattr(torch, 'load', lambda *_a, **_k: pytest.fail('resident H payload reload'))
+        assert source.hessians['a'] is hessians['a']
+        assert source.capture_sha256() == plain.capture_sha256() == digest
+        actual = encoding_input_identity(weight, 'a', E4M3_GRID, 1024, activation=source)
+        assert actual == expected
+        assert source.hessians.receipt()['loaded_entries'] == 0
+    assert source.hessians.receipt()['closed']
+
+
+def test_resident_reference_refuses_a_different_caller_identity(handoff):
+    from contextlib import ExitStack
+    from tessera.errors import GrammarError
+    from prismaquant import tessera_hessian as th
+
+    f = handoff
+    path, _, _ = write_row(f, 'a')
+    with ExitStack() as scope:
+        with pytest.raises(GrammarError, match='provenance'):
+            th.activation_source({'a': f['H']['a']}, {**f['calibration'], 'seqlen': 99},
+                                 reference_path=path, source_scope=scope)
+
+
+def test_resident_reference_requires_explicit_lifetime_owner(handoff):
+    from prismaquant import tessera_hessian as th
+
+    f = handoff
+    with pytest.raises(ValueError, match='owning source scope'):
+        th.activation_source(f['H'], f['calibration'], reference_path=f['tmp']/'absent')
