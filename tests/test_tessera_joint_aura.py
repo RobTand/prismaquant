@@ -256,6 +256,54 @@ def test_plan_refuses_unqualified_probe_or_activation_policies(tmp_path, field, 
         _load_plan(path, sha(path))
 
 
+@pytest.mark.parametrize("prior", [None, "1"])
+def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypatch, prior):
+    """The plan's activation-scale value is live inside execute and gone after.
+
+    execute sets PRISMAQUANT_PROD_ACT_SCALES so the render path it drives
+    reads the campaign's value, and every admitted plan carries "0".  Left
+    behind, that "0" is the input that turns the render scorer's activation
+    clip off for the rest of the process: with it set,
+    ``_local_forward_render_score`` skips the clamp and reports
+    ``activation_clipped`` False, which is what
+    ``tests/test_served_activation_contract.py::
+    test_stock_nvfp4_cache_score_is_unchanged`` then fails on.  Both halves
+    are asserted here; restoring without setting would be just as wrong.
+    """
+    import os
+    import torch
+    from types import SimpleNamespace
+    from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
+    key = bridge.ACTIVATION_SCALE_ENV
+    monkeypatch.delenv(key, raising=False)
+    if prior is not None:
+        monkeypatch.setenv(key, prior)
+
+    draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
+    monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
+    monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
+        census={"model": "fixture", "attention_implementation": "eager"},
+        payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
+    # Called after the write, so it is where the live value can be read.
+    during = {}
+    def _observe(*_args, **_kwargs):
+        during["value"] = os.environ.get(key)
+        return torch.zeros((1, 512), dtype=torch.int64), {"provenance": {**draw, "nsamples": 1}}
+    monkeypatch.setattr(calibration_data, "load_calibration_input", _observe)
+    monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", lambda *_a, **_k:
+        pytest.fail("subset draw reached model construction"))
+    config = {"model": "fixture", "inputs": {}, "output_root": str(tmp_path),
+        "calibration_input": {"path": "fixture", "sha256": "a" * 64},
+        "profile_tool": "cprofile",
+        "execution": {"production_act_scales": "0", "n_calib_samples": 1, "calib_seqlen": 512}}
+
+    with pytest.raises(ValueError, match="original full draw nsamples"):
+        bridge.execute("prepare", config, plan_sha256="b" * 64)
+
+    assert during["value"] == "0", "the plan's value must be live inside execute"
+    assert os.environ.get(key) == prior, "and must not outlive the call"
+
+
 @pytest.mark.parametrize("profile_tool", ["cprofile", "py-spy"])
 def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypatch, profile_tool):
     import torch
