@@ -179,6 +179,138 @@ def test_full_boundary_mode_requires_layer_observations_before_loading():
                                        diagnostic_layers=False, diagnostic_full_boundaries=True))
 
 
+@pytest.mark.parametrize("repeats,full,exl3", [(0, True, True), (4, False, True), (4, True, False)])
+def test_grouped_down_replay_requires_explicit_diagnostic_scope_before_loading(repeats, full, exl3):
+    from types import SimpleNamespace
+    with pytest.raises(ValueError, match="grouped-down replay requires"):
+        served.measure(SimpleNamespace(diagnostic_repeat_first_window=repeats, qualify_hook=True,
+                                       diagnostic_layers=bool(repeats),
+                                       diagnostic_full_boundaries=bool(repeats) and full,
+                                       require_exl3_diag=exl3, diagnostic_grouped_down_replay=True))
+
+
+def grouped_replay_owner(tmp_path, monkeypatch, *, rank):
+    """Real capture lifecycle, mocked native call with its actual tensor ABI."""
+    import sys
+    from types import ModuleType
+
+    extension = ModuleType("exl3_replay_cpu_fixture")
+    native_file = tmp_path / "native-fixture.so"
+    native_file.write_bytes(b"mocked native ABI; no GPU qualification")
+    extension.__file__ = str(native_file)
+    calls = []
+
+    def native(*args):
+        calls.append(args[3].data_ptr())
+        args[3].add_(1.)
+
+    extension.exl3_fat_moe_down = native
+    module = ModuleType("vllm.model_executor.layers.quantization.exl3")
+    module.__file__ = str(native_file)
+    module._FAT_MOE_EXT_CACHE = [extension]
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setitem(sys.modules, extension.__name__, extension)
+    tensors = (
+        torch.zeros(4096, 32, dtype=torch.float16),
+        torch.zeros(8, dtype=torch.int64), torch.zeros(8, dtype=torch.int64),
+        torch.zeros(exp.CONTEXT_LENGTH, 256, dtype=torch.float32),
+        torch.zeros(4096, dtype=torch.int64), torch.ones(4096, dtype=torch.float16),
+        torch.zeros(8, dtype=torch.int32), torch.zeros(8, dtype=torch.int32),
+        torch.zeros(8, dtype=torch.int32), torch.ones(1, dtype=torch.int32))
+
+    class Boundary(torch.nn.Module):
+        def forward(self, x):
+            extension.exl3_fat_moe_down(*tensors)
+            return x
+
+    model = torch.nn.Module()
+    model.model = torch.nn.Module()
+    model.model.layers = torch.nn.ModuleList([torch.nn.Module() for _ in range(4)])
+    model.model.layers[3].mlp = Boundary()
+    model._tr3_capture = served.DiagnosticPromptLogitsCapture(
+        rank=rank, world_size=2, rows=3, vocab_size=5, require_cuda=False)
+    return model, extension, tensors, calls
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+def test_grouped_replay_uses_real_capture_state_and_restores_native_call(tmp_path, monkeypatch, rank):
+    model, extension, tensors, calls = grouped_replay_owner(tmp_path, monkeypatch, rank=rank)
+    original = extension.exl3_fat_moe_down
+    identity = served.install_grouped_down_capture(model)
+    assert identity["required_rows"] == exp.CONTEXT_LENGTH
+    assert identity["extension_sha256"] == hashlib.sha256(
+        b"mocked native ABI; no GPU qualification").hexdigest()
+    boundary, state = model.model.layers[3].mlp, model._tr3_capture
+    # An actual unarmed capture has window_id=None and no fabricated .armed flag.
+    boundary(torch.zeros(1))
+    assert len(calls) == 1 and not model._tr3_grouped_down_replay.fired
+    for index in range(2):
+        tensors[3].zero_()
+        state.arm(index, "final-0000", torch.zeros(3, 5) if rank == 0 else None)
+        boundary(torch.zeros(1))
+        for shape in ((1, 5), (3, 5)):
+            state(None, (), torch.zeros(shape) if rank == 0 else None)
+        report = served.finish_capture(model, window_id="final-0000")
+        assert state.window_id is None
+        assert torch.equal(tensors[3], torch.ones_like(tensors[3]))
+        if index == 0:
+            record = report["grouped_down_replay"]
+            assert record["rank"] == rank and record["world_size"] == 2
+            assert record["window_id"] == "final-0000" and len(record["replays"]) == 8
+            assert record["inputs_before"]["h2"]["sha256"] == hashlib.sha256(
+                tensors[0].view(torch.uint8).numpy().tobytes()).hexdigest()
+            assert len(calls) == 10  # warmup + scored call + eight replays
+        else:
+            assert "grouped_down_replay" not in report and len(calls) == 11
+    assert served.remove_capture(model)
+    assert extension.exl3_fat_moe_down is original
+    assert not hasattr(model, "_tr3_capture") and not hasattr(model, "_tr3_grouped_down_replay")
+    assert served.remove_capture(model)  # Partial/previous cleanup is harmless.
+
+
+@pytest.mark.parametrize("cache", [None, [], [None], [object(), object()]])
+def test_grouped_replay_never_loads_an_absent_native_extension(tmp_path, monkeypatch, cache):
+    import sys
+    model, _, _, _ = grouped_replay_owner(tmp_path, monkeypatch, rank=0)
+    module = sys.modules["vllm.model_executor.layers.quantization.exl3"]
+    module._FAT_MOE_EXT_CACHE = cache
+    def forbidden_load():
+        pytest.fail("diagnostic attempted to load a native extension")
+    module.load_fat_moe_ext = forbidden_load
+    with pytest.raises(ValueError, match="already-loaded"):
+        served.install_grouped_down_capture(model)
+
+
+def replay_tp_reports():
+    from tools.exl3_grouped_down_replay import REPLAY_SCHEMA, DEFAULT_MODULE
+    return [{"rank": rank, "grouped_down_replay": {
+        "schema": REPLAY_SCHEMA, "module": DEFAULT_MODULE, "rank": rank,
+        "world_size": 2, "window_id": "final-0000", "required_rows": exp.CONTEXT_LENGTH,
+        "repeats": 8, "replays": [{"index": index} for index in range(8)]}}
+        for rank in (1, 0)]
+
+
+def test_grouped_replay_requires_both_actual_tp_records():
+    records = served.collect_grouped_down_reports(replay_tp_reports(), window_id="final-0000", world_size=2)
+    assert [record["rank"] for record in records] == [0, 1]
+
+
+@pytest.mark.parametrize("bad", ["missing-rank", "duplicate-rank", "missing-record", "wrong-window",
+                                  "wrong-rank", "wrong-world", "wrong-rows", "missing-replay"])
+def test_grouped_replay_cannot_complete_with_partial_or_mismatched_evidence(bad):
+    reports = replay_tp_reports()
+    if bad == "missing-rank": reports.pop()
+    elif bad == "duplicate-rank": reports[1]["rank"] = 1
+    elif bad == "missing-record": reports[0].pop("grouped_down_replay")
+    elif bad == "wrong-window": reports[0]["grouped_down_replay"]["window_id"] = "final-0001"
+    elif bad == "wrong-rank": reports[0]["grouped_down_replay"]["rank"] = 0
+    elif bad == "wrong-world": reports[0]["grouped_down_replay"]["world_size"] = 1
+    elif bad == "wrong-rows": reports[0]["grouped_down_replay"]["required_rows"] = exp.CONTEXT_LENGTH - 1
+    else: reports[0]["grouped_down_replay"]["replays"].pop()
+    with pytest.raises(ValueError, match="grouped-down replay|every TP rank"):
+        served.collect_grouped_down_reports(reports, window_id="final-0000", world_size=2)
+
+
 def test_layer_hooks_preserve_forward_and_clear_each_request():
     layer = torch.nn.Linear(5, 5, bias=False)
     h = served.DiagnosticPromptLogitsCapture(rank=0, world_size=1, rows=3,

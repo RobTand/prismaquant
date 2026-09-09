@@ -193,7 +193,7 @@ def diagnostic_layer_post(state, name, module, args, kwargs, output):
 
 
 def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnostic=False,
-                    diagnostic_layers=False, full_boundaries=False):
+                    diagnostic_layers=False, full_boundaries=False, grouped_down_replay=False):
     """Public apply_model control RPC; hooks return no replacement tensor."""
     from vllm.distributed import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
     import vllm
@@ -229,7 +229,8 @@ def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnost
                                                  with_kwargs=True)])
         if not model._tr3_layer_handles:
             raise ValueError("diagnostic found no GLM layer boundaries")
-    return {"rank": state.rank, "world_size": state.world_size, "torch": torch.__version__,
+    replay_identity = install_grouped_down_capture(model) if grouped_down_replay else None
+    result = {"rank": state.rank, "world_size": state.world_size, "torch": torch.__version__,
             "vllm": vllm.__version__, "model_class": type(model).__qualname__,
             "text_model_class": type(text_model).__qualname__, "logits_owner": owner_path,
             "logits_module_class": type(processor).__qualname__,
@@ -238,6 +239,51 @@ def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnost
                              "text_model": sha256(inspect.getfile(type(text_model))),
                              "logits_module": sha256(inspect.getfile(type(processor))),
                              "gpu_model_runner": sha256(inspect.getfile(gpu_runner))}}
+    if replay_identity is not None:
+        result["grouped_down_replay"] = replay_identity
+    return result
+
+
+def install_grouped_down_capture(model):
+    """Wrap only the extension already selected by the native EXL3 worker."""
+    from tools import exl3_grouped_down_replay as replay
+
+    module = sys.modules.get("vllm.model_executor.layers.quantization.exl3")
+    cache = getattr(module, "_FAT_MOE_EXT_CACHE", None)
+    if (not isinstance(cache, list) or len(cache) != 1
+            or cache[0] is None or not callable(getattr(cache[0], "exl3_fat_moe_down", None))):
+        raise ValueError("grouped-down replay requires the already-loaded EXL3 extension")
+    extension = cache[0]
+    if sys.modules.get(getattr(extension, "__name__", None)) is not extension:
+        raise ValueError("grouped-down extension is not the loaded module instance")
+    identity = {"extension_module": extension.__name__,
+                "extension_sha256": sha256(inspect.getfile(extension)),
+                "hook_sha256": sha256(inspect.getfile(replay)),
+                "exl3_source_sha256": sha256(inspect.getfile(module))}
+    identity.update(replay.install(model, extension, model._tr3_capture,
+                                   required_rows=CONTEXT_LENGTH, repeats=8))
+    model._tr3_grouped_down_extension = extension
+    return identity
+
+
+def collect_grouped_down_reports(reports, *, window_id, world_size):
+    """Require a first-request replay record from every TP worker."""
+    from tools.exl3_grouped_down_replay import REPLAY_SCHEMA, DEFAULT_MODULE
+
+    if (len(reports) != world_size
+            or sorted(row["rank"] for row in reports) != list(range(world_size))):
+        raise ValueError("grouped-down replay requires every TP rank")
+    result = []
+    for report in sorted(reports, key=lambda row: row["rank"]):
+        record = report.get("grouped_down_replay")
+        if (not isinstance(record, dict) or record.get("schema") != REPLAY_SCHEMA
+                or record.get("rank") != report["rank"] or record.get("world_size") != world_size
+                or record.get("window_id") != window_id or record.get("module") != DEFAULT_MODULE
+                or record.get("required_rows") != CONTEXT_LENGTH or record.get("repeats") != 8
+                or len(record.get("replays", [])) != 8):
+            raise ValueError("missing or mismatched first-request grouped-down replay")
+        result.append(record)
+    return result
 
 
 def arm_capture(model, *, index, window_id, descriptor, teacher_root, target_ids):
@@ -259,15 +305,30 @@ def arm_capture(model, *, index, window_id, descriptor, teacher_root, target_ids
 
 
 def finish_capture(model, *, window_id):
-    return model._tr3_capture.finish(window_id)
+    state = model._tr3_capture
+    first_request = state.next_index == 0
+    replay = getattr(model, "_tr3_grouped_down_replay", None)
+    record = copy.deepcopy(replay.record) if replay is not None and first_request else None
+    result = state.finish(window_id)
+    if replay is not None and first_request:
+        result["grouped_down_replay"] = record
+    return result
 
 
 def remove_capture(model):
-    model._tr3_capture_handle.remove()
-    for handle in model._tr3_layer_handles:
+    extension = getattr(model, "_tr3_grouped_down_extension", None)
+    if extension is not None:
+        from tools.exl3_grouped_down_replay import uninstall
+        uninstall(model, extension)
+        del model._tr3_grouped_down_extension
+    capture_handle = getattr(model, "_tr3_capture_handle", None)
+    if capture_handle is not None:
+        capture_handle.remove()
+    for handle in getattr(model, "_tr3_layer_handles", []):
         handle.remove()
-    del model._tr3_layer_handles
-    del model._tr3_capture_handle, model._tr3_capture
+    for name in ("_tr3_layer_handles", "_tr3_capture_handle", "_tr3_capture"):
+        if hasattr(model, name):
+            delattr(model, name)
     return True
 
 
@@ -462,12 +523,16 @@ def measure(args):
     repeats = getattr(args, "diagnostic_repeat_first_window", 0)
     diagnostic_layers = getattr(args, "diagnostic_layers", False)
     full_boundaries = getattr(args, "diagnostic_full_boundaries", False)
+    grouped_down_replay = getattr(args, "diagnostic_grouped_down_replay", False)
     if repeats and (not args.qualify_hook or not 2 <= repeats <= 8):
         raise ValueError("diagnostic repetition requires qualify-hook and 2..8 repeats")
     if diagnostic_layers and not repeats:
         raise ValueError("layer observation requires explicit diagnostic repetition")
     if full_boundaries and not diagnostic_layers:
         raise ValueError("full boundary observation requires layer observation")
+    if grouped_down_replay and (not repeats or not full_boundaries
+                                or not getattr(args, "require_exl3_diag", False)):
+        raise ValueError("grouped-down replay requires explicit repetition, full boundaries and EXL3 diagnostics")
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
     model = Path(args.model).resolve(strict=True)
@@ -501,11 +566,12 @@ def measure(args):
         observed_configuration = observed_engine_configuration(
             llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
             requested_kv_cache_dtype=args.kv_cache_dtype)
+        installed = True  # Remove any partial worker hooks if installation fails.
         worker_runtime = llm.apply_model(partial(install_capture, tile_rows=args.tile_rows,
                                                 logits_layout=args.logits_layout, diagnostic=bool(repeats),
                                                 diagnostic_layers=diagnostic_layers,
-                                                full_boundaries=full_boundaries))
-        installed = True
+                                                full_boundaries=full_boundaries,
+                                                grouped_down_replay=grouped_down_replay))
         worker_runtime.sort(key=lambda row: row["rank"])
         if ([row["rank"] for row in worker_runtime] != list(range(topology["tensor_parallel_size"]))
                 or any(row["world_size"] != topology["tensor_parallel_size"] for row in worker_runtime)):
@@ -534,6 +600,7 @@ def measure(args):
                 or qualification.get("passed") is not True):
             raise ValueError("native qualification differs from this candidate/runtime/teacher/topology")
         vectors, alignment, rank_calls, raw_logits, layer_observations = [], [], [], [], []
+        replay_reports = None
         diagnostic_configuration = (llm.collective_rpc(diagnostic_worker_configuration) if repeats else None)
         count = repeats or (1 if args.qualify_hook else len(inputs))
         for index in range(count):
@@ -550,6 +617,9 @@ def measure(args):
                                                   prompt_logprobs=1, detokenize=False, ignore_eos=True),
                                    use_tqdm=False)
             reports = llm.apply_model(partial(finish_capture, window_id=window["window_id"]))
+            if grouped_down_replay and index == 0:
+                replay_reports = collect_grouped_down_reports(
+                    reports, window_id=window["window_id"], world_size=topology["tensor_parallel_size"])
             if len(outputs) != 1:
                 raise ValueError("native hook requires one outstanding request")
             vectors.append(collect_tp_result(reports, window_id=window["window_id"],
@@ -567,6 +637,7 @@ def measure(args):
                                    "diagnostic_configuration": diagnostic_configuration,
                                    "per_position_kl": vectors, "raw_logits": raw_logits,
                                    "layer_observations": layer_observations,
+                                   **({"grouped_down_replay": replay_reports} if grouped_down_replay else {}),
                                    "prompt_alignment": alignment, "rank_calls": rank_calls},
                                   Path(args.output).with_suffix(".progress.json"))
             print(f"[tr3-full-kl] measured {window['window_id']}", flush=True)
@@ -602,6 +673,8 @@ def measure(args):
             result["diagnostic_configuration"] = diagnostic_configuration
             result["raw_logits"] = raw_logits
             result["layer_observations"] = layer_observations
+            if grouped_down_replay:
+                result["grouped_down_replay"] = replay_reports
             result["summary"]["interpretation"] = (
                 "Repeated identical final-0000 in one engine; diagnostic only, "
                 "not a hook qualification, full-panel score or allocation input.")
@@ -633,6 +706,9 @@ def main():
                    help="observe first-token layer/attention/MLP boundaries during diagnostic repeats")
     p.add_argument("--diagnostic-full-boundaries", action="store_true",
                    help="also hash all token rows and observe router gates; requires --diagnostic-layers")
+    p.add_argument("--diagnostic-grouped-down-replay", action="store_true",
+                   help="repeat the first layer-3 grouped-down call eight times on both ranks; "
+                        "requires repetition, full boundaries and --require-exl3-diag")
     p.add_argument("--qualification")
     p.add_argument("--qualification-sha256")
     add_gold_engine_arguments(p)
