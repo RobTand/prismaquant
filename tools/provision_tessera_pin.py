@@ -65,7 +65,9 @@ PIN_SOURCE = ROOT / "prismaquant" / "tessera_runtime_contract.py"
 PIN_NAME = "TESSERA_DEV_PIN_COMMIT"
 SHA_NAME = "TESSERA_DEV_PIN_CONTRACT_SHA256"
 DEFAULT_PINS_ROOT = Path("/mnt/shared/tessera-pins")
-DEFAULT_CLONE = Path("/home/rob/tessera")
+#: A bare mirror on the shared mount, because a fleet worker has no
+#: Tessera worktree and every worker must be able to archive the pin.
+DEFAULT_CLONE = Path("/mnt/shared/tessera-source.git")
 CONTRACT_IN_TREE = Path("src/tessera/serving/runtime_contract.json")
 PACKAGE_IN_TREE = Path("src/tessera")
 PYPROJECT_IN_TREE = Path("pyproject.toml")
@@ -189,8 +191,22 @@ def package_digest(root: Path, unshipped: list[str] | None = None):
     return tree_digest(root, _package_skip(unshipped or []))
 
 
+def _is_git_repository(path: Path) -> bool:
+    """A worktree or a bare repository; the shared mirror is the latter.
+
+    ``(path / ".git").exists()`` was the earlier test and it refuses a bare
+    repository, which is the only form that can live on the shared mount for
+    every worker to archive from -- and no fleet worker but the one that made
+    it has a Tessera worktree.
+    """
+    done = subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(path), "rev-parse",
+         "--git-dir"], capture_output=True, text=True)
+    return done.returncode == 0
+
+
 def _archive_into(commit: str, clone: Path, dest: Path) -> None:
-    if not (clone / ".git").exists():
+    if not _is_git_repository(clone):
         raise SystemExit(f"{clone} is not a Tessera clone; pass --clone")
     dest.mkdir(parents=True, exist_ok=True)
     archive = subprocess.run(
