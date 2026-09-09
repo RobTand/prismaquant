@@ -329,3 +329,29 @@ def test_pressure_trim_clears_the_pin_when_it_does_evict(monkeypatch):
     assert not cache.peek(0)
     assert 0 not in cache._pinned_until_read, "stale pin leaked"
     assert cache.evicted_pinned == 1
+
+
+# ---------------------------------------------------------------------------
+# 5. A read the context already holds is handed back before any admission
+#    gate. A consumer re-asserting its schedule under pressure must receive
+#    the future it owns, not a refusal counted as a memory skip (#403).
+def test_in_flight_read_is_returned_before_the_pressure_gate(monkeypatch):
+    ctx = _make_ctx(monkeypatch, num_layers=8)
+    started, block = threading.Event(), threading.Event()
+
+    def blocking_read(prefix, *args, **kwargs):
+        started.set()
+        block.wait(5)
+        L = int(prefix.rstrip(".").rsplit(".", 1)[-1])
+        return _layer_tensors(L)
+
+    monkeypatch.setattr(streaming_model, "_read_layer_to_device", blocking_read)
+    fut = ctx.schedule_prefetch(3)
+    assert fut is not None and started.wait(5) and not fut.done()
+    ctx.prefetch_min_available_bytes = 1 << 62  # all of MemAvailable is below the floor
+    assert ctx.schedule_prefetch(3) is fut
+    assert ctx.prefetch_memory_skips == 0
+    assert ctx.schedule_prefetch(4) is None
+    assert ctx.prefetch_memory_skips == 1
+    block.set()
+    _drain(ctx)
