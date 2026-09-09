@@ -366,3 +366,135 @@ def test_the_temporary_file_is_not_left_behind_by_a_completed_publication(
         "model__layers__0__q__NVFP4.tessera"]
     assert not [p.name for p in cache_dir.glob("*.tmp")]
     assert os.listdir(cache_dir)
+
+
+# ---------------------------------------------------------------------------
+# The rule that a receipt never precedes the file it describes
+# ---------------------------------------------------------------------------
+
+class _Anchor:
+    def __init__(self, qname, format_name="NVFP4"):
+        self.qname = qname
+        self.format_name = format_name
+
+
+def _ledger(publisher, journalled):
+    from prismaquant.tessera_campaign import _AnchorPublicationLedger
+
+    return _AnchorPublicationLedger(
+        publisher=publisher,
+        journal_anchor=lambda anchor, identity: journalled.append(
+            (anchor.qname, identity)))
+
+
+def test_without_a_publisher_the_ledger_journals_where_it_always_did():
+    journalled = []
+    ledger = _ledger(None, journalled)
+    ledger.record(_Anchor("a.b"), "id-a")
+    assert journalled == [("a.b", "id-a")], (
+        "the default path must journal at the same point it always has")
+    assert ledger.apply_completed() == 0
+    assert ledger.drain() == 0
+    assert ledger.staged == {}
+
+
+def test_a_staged_anchor_is_not_journalled_while_its_writer_is_blocked():
+    journalled = []
+    barrier = threading.Event()
+    pub = _publisher()
+    ledger = _ledger(pub, journalled)
+    try:
+        pub.submit(PublicationJob(
+            key=("a.b", "NVFP4"), charged_bytes=1,
+            publish=lambda: barrier.wait(WAIT)))
+        ledger.record(_Anchor("a.b"), "id-a")
+        assert ledger.apply_completed() == 0
+        assert journalled == [], (
+            "an anchor row reached the journal before its own bytes reached "
+            "the disk; a resume would then read a receipt for a file that "
+            "does not exist")
+        barrier.set()
+        assert ledger.drain() == 1
+        assert journalled == [("a.b", "id-a")]
+        assert ledger.staged == {}
+    finally:
+        barrier.set()
+        pub.close()
+
+
+def test_the_ledger_journals_in_publication_order():
+    journalled = []
+    release = threading.Event()
+    pub = _publisher()
+    ledger = _ledger(pub, journalled)
+    try:
+        for name in ("a.b", "c.d", "e.f"):
+            pub.submit(PublicationJob(
+                key=(name, "NVFP4"), charged_bytes=1,
+                publish=lambda: release.wait(WAIT)))
+            ledger.record(_Anchor(name), f"id-{name}")
+        release.set()
+        assert ledger.drain() == 3
+    finally:
+        release.set()
+        pub.close()
+    assert journalled == [("a.b", "id-a.b"), ("c.d", "id-c.d"), ("e.f", "id-e.f")]
+
+
+def test_a_failed_publication_leaves_its_anchor_unjournalled():
+    journalled = []
+    release = threading.Event()
+    pub = _publisher()
+    ledger = _ledger(pub, journalled)
+    try:
+        pub.submit(PublicationJob(key=("good", "NVFP4"), charged_bytes=1,
+                                  publish=lambda: None))
+        ledger.record(_Anchor("good"), "id-good")
+
+        def boom():
+            assert release.wait(WAIT)
+            raise OSError("no space left on device")
+
+        pub.submit(PublicationJob(key=("bad", "NVFP4"), charged_bytes=1,
+                                  publish=boom))
+        ledger.record(_Anchor("bad"), "id-bad")
+        release.set()
+        with pytest.raises(PublicationError):
+            ledger.drain()
+        assert ("bad", "id-bad") not in journalled, (
+            "an anchor whose files never landed was journalled anyway")
+        # The unit that did land is still recoverable: applying the completed
+        # keys journals it, so a resume skips work that was really done.
+        assert ledger.apply_completed() == 1
+        assert journalled == [("good", "id-good")]
+        assert ("bad", "NVFP4") in ledger.staged
+    finally:
+        release.set()
+        pub.close()
+
+
+def test_a_drain_that_leaves_an_anchor_staged_refuses():
+    journalled = []
+    pub = _publisher()
+    ledger = _ledger(pub, journalled)
+    try:
+        # An anchor recorded with no job behind it is an ambiguous partial
+        # state: the drain has nothing to wait for and no completion to apply.
+        ledger.record(_Anchor("orphan"), "id-orphan")
+        with pytest.raises(RuntimeError, match="still staged"):
+            ledger.drain()
+        assert journalled == []
+    finally:
+        pub.close()
+
+
+def test_one_publication_key_cannot_hold_two_anchors():
+    journalled = []
+    pub = _publisher()
+    ledger = _ledger(pub, journalled)
+    try:
+        ledger.record(_Anchor("a.b"), "first")
+        with pytest.raises(RuntimeError, match="already staged"):
+            ledger.record(_Anchor("a.b"), "second")
+    finally:
+        pub.close()

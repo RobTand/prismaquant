@@ -1843,6 +1843,70 @@ def _checkpoint_wire_record(anchor, wire_dir, identity, *, existing=None):
             f"{anchor.format_name}: {exc}") from exc
 
 
+class _AnchorPublicationLedger:
+    """Decides when a measured anchor is allowed to become a journal row.
+
+    The campaign's rule is that an anchor row and its wire receipt are written
+    together, and that the receipt is read back off a file that exists.  With
+    the publication of that file moved to another thread, "exists" stops being
+    something the encode thread knows by having just done it, so this object
+    holds the anchor until the writer says so.
+
+    ``journal_anchor(anchor, identity)`` is the caller's own three lines: make
+    the receipt, add the row, mark the unit dirty.  It is called exactly once
+    per anchor either way; what changes is when.
+
+    Without a publisher this is a pass-through, which is what makes the
+    default path the historical path rather than a re-implementation of it.
+    """
+
+    def __init__(self, *, publisher, journal_anchor):
+        self._publisher = publisher
+        self._journal = journal_anchor
+        self._staged: dict = {}
+
+    @property
+    def staged(self) -> dict:
+        return self._staged
+
+    def record(self, anchor, identity) -> None:
+        """Journal now, or when this anchor's own bytes have been written."""
+        if self._publisher is None:
+            self._journal(anchor, identity)
+            return
+        key = (anchor.qname, anchor.format_name)
+        if key in self._staged:
+            # Two anchors for one (unit, rung) share a publication key, and
+            # one of them would be journalled under the other's receipt. The
+            # anchor schedule does not produce this; if it ever does it is a
+            # scheduling defect, not something to average over.
+            raise RuntimeError(
+                f"{anchor.qname} {anchor.format_name} is already staged")
+        self._staged[key] = (anchor, identity)
+
+    def apply_completed(self) -> int:
+        """Journal whatever the writer has finished since the last call."""
+        if self._publisher is None:
+            return 0
+        return self._apply(self._publisher.completed())
+
+    def drain(self) -> int:
+        """Wait for every staged anchor, journal it, and refuse a remainder."""
+        if self._publisher is None:
+            return 0
+        applied = self._apply(self._publisher.drain())
+        if self._staged:
+            raise RuntimeError(
+                "publication drained with anchors still staged: "
+                + ", ".join(f"{q} {f}" for q, f in sorted(self._staged)))
+        return applied
+
+    def _apply(self, keys) -> int:
+        for key in keys:
+            self._journal(*self._staged.pop(key))
+        return len(keys)
+
+
 def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
                            adopt, admits, identity_sha256, validate_state=None) -> dict:
     """Offer another campaign's stored anchors to this run's row gates.
@@ -4766,13 +4830,11 @@ def _main(argv, *, source_scope) -> int:
                        identity_sha256=identity_sha256, state=state)
         dirty_checkpoint_units.clear()
 
-    # Anchors whose bytes are staged but not yet written, keyed the way the
-    # publisher keys its jobs.  An anchor lives here instead of in ``measured``
-    # for exactly as long as its files do not exist, which is what keeps
+    # An anchor waits in the ledger, rather than in ``measured``, for exactly
+    # as long as its files do not exist.  That is what keeps
     # ``flush_checkpoint``'s existing invariant true without changing it: every
     # anchor row it journals has a wire receipt beside it, and every one of
     # those receipts was read back off a file that had already landed.
-    awaiting_publication: dict = {}
     publisher = None
     if int(args.publication_overlap_bytes) > 0:
         from .tessera_publication import BoundedPublisher
@@ -4797,24 +4859,8 @@ def _main(argv, *, source_scope) -> int:
             anchor.family, []).append(anchor)
         dirty_checkpoint_units.add(name)
 
-    def apply_publications(keys) -> None:
-        """Turn published files into journallable rows, in publication order."""
-        for key in keys:
-            journal_anchor(*awaiting_publication.pop(key))
-
-    def record_anchor(anchor, identity) -> None:
-        """Journal this anchor now, or when the writer says its bytes exist."""
-        if publisher is None:
-            journal_anchor(anchor, identity)
-            return
-        key = (anchor.qname, anchor.format_name)
-        if key in awaiting_publication:
-            # Two anchors for one (unit, rung) would have one publication key
-            # and one of them would be journalled under the other's receipt.
-            # The anchor schedule does not produce this; if it ever does, it
-            # is a scheduling defect and not something to average over.
-            raise RuntimeError(f"{anchor.qname} {anchor.format_name} is already staged")
-        awaiting_publication[key] = (anchor, identity)
+    ledger = _AnchorPublicationLedger(
+        publisher=publisher, journal_anchor=journal_anchor)
 
     # Adopted rows are journalled BEFORE the anchor loop, because the loop can
     # end without reaching its own flush: a group whose gate is already closed
@@ -5012,15 +5058,13 @@ def _main(argv, *, source_scope) -> int:
             # the top of the batch rather than the bottom, so the receipt read
             # back off each published file runs one batch behind the write
             # instead of immediately after it.
-            if publisher is not None:
-                apply_publications(publisher.completed())
+            ledger.apply_completed()
             if out_of_time():
                 stopped_early = True
                 print("[campaign] deadline reached; stopping", flush=True)
                 # A deadline is a termination, so the staged bytes are written
                 # and journalled before the loop is left; they were paid for.
-                if publisher is not None:
-                    apply_publications(publisher.drain())
+                ledger.drain()
                 break
             names = [item[0] for item in batch]
             family, rung = batch[0][1:]
@@ -5078,7 +5122,7 @@ def _main(argv, *, source_scope) -> int:
                 anchor_batch_growth.append(selected_guard.last[
                     'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
             for anchor in anchors:
-                record_anchor(anchor, _checkpoint_anchor_identity(
+                ledger.record(anchor, _checkpoint_anchor_identity(
                     anchor, weights=weights, menus=menus,
                     calibration_source=calibration_source, static_scales=static_scales,
                     projected_units=projected_units))
@@ -5092,8 +5136,7 @@ def _main(argv, *, source_scope) -> int:
                       f"encode_seconds={sum(a.seconds for a in anchors):.3f}", flush=True)
         # The round is a consumer barrier: the next round reads ``measured``
         # to decide what is still pending, so nothing may still be in flight.
-        if publisher is not None:
-            apply_publications(publisher.drain())
+        ledger.drain()
         flush_checkpoint()
         if stopped_early:
             break
@@ -5108,11 +5151,7 @@ def _main(argv, *, source_scope) -> int:
         # Every round already drained, and a round that broke out staged
         # nothing; this is the last barrier, and it is where a writer failure
         # that nothing else looked at is raised.
-        apply_publications(publisher.drain())
-        if awaiting_publication:
-            raise RuntimeError(
-                "publication drained with anchors still staged: "
-                + ", ".join(f"{q} {f}" for q, f in sorted(awaiting_publication)))
+        ledger.drain()
         publication_stats = publisher.stats()
         publisher.close()
         flush_checkpoint()
