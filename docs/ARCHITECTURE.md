@@ -1,7 +1,25 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `claude/bounded-publication-overlap`. Stamps
+As of: 2026-09-09 · `fix/glm-resident-hessian-commitments`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-09, `fix/glm-resident-hessian-commitments`) for resident
+Hessian commitment reuse in the selected campaign's existing opt-in
+`--export-hessian-reference-policy` path. Resume and seed validation still
+precede publication of export inputs. After those gates accept, the campaign
+binds its resident H tensors to the producer's authenticated reference owner
+over the just-published commitments. The encoder and checkpoint identity paths
+share that owner's resident mapping; capture sealing uses its committed
+digests instead of hashing the full population again. Each encoder consumption
+still checks actual H content against its commitment. No H payload is loaded
+through the reference reader on this path, and the campaign's existing source
+scope closes the held metadata on successful returns and exceptions. The
+original capture seal and per-unit encoding input identities are preserved;
+the conservative producer source seal continues to track dependency changes.
+The plain mapping path remains for campaigns without reference export inputs.
+Tests in `tests/test_tessera_hessian_reference_handoff.py` cover the public CLI
+regression, identity parity, provenance refusal and metadata-owner cleanup.
+Native performance measurements are recorded separately from this contract.
 
 Re-stamped (2026-09-09, `claude/bounded-publication-overlap`) for the campaign's
 opt-in **bounded publication overlap** (§4.10). `--publication-overlap-bytes N`

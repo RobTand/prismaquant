@@ -4656,15 +4656,18 @@ def _main(argv, *, source_scope) -> int:
     if want_h:
         calibration_source = th.activation_source(hessians, hessian_identity)
 
-    _activation_kwargs_for = _activation_kwargs_memo(calibration_source, weights, device,
-        # The capacity the plan CHARGED, not the batch width it was derived
-        # from, so the memo policy has one owner (RobTand/prismaquant#389 can
-        # move it without the charge and the construction drifting apart).
-        max_entries=(selected_resources['encoder_memo_capacity']
-                     if selected_source else None),
-        resource_check=None if selected_guard is None else selected_guard.check,
-        factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
-                              if selected_source else 0))
+    def activation_kwargs_for(source):
+        return _activation_kwargs_memo(source, weights, device,
+            # The capacity the plan CHARGED, not the batch width it was derived
+            # from, so the memo policy has one owner (RobTand/prismaquant#389 can
+            # move it without the charge and the construction drifting apart).
+            max_entries=(selected_resources['encoder_memo_capacity']
+                         if selected_source else None),
+            resource_check=None if selected_guard is None else selected_guard.check,
+            factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
+                                  if selected_source else 0))
+
+    _activation_kwargs_for = activation_kwargs_for(calibration_source)
 
     cache = ProductionWeightCache(
         weights={}, levers={"tessera_campaign": True},
@@ -4679,6 +4682,16 @@ def _main(argv, *, source_scope) -> int:
         family_restriction=args.family_restriction,
         structure_by_unit=structure_by_unit,
     )
+    if args.export_hessian_reference_policy is not None:
+        # Resume was checked before any export input changed. Now reuse the
+        # commitments just computed from these same resident tensors, so the
+        # first anchor does not hash the full population again. Both encoder
+        # kwargs and checkpoint receipts must see the producer's resident
+        # mapping; its per-unit content checks remain at consumption.
+        calibration_source = th.activation_source(hessians, hessian_identity,
+            reference_path=hessian_capture_path, source_scope=source_scope)
+        _activation_kwargs_for = activation_kwargs_for(calibration_source)
+
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
     # ``attested`` without a dev pin, ``readable`` against a contract that
     # publishes no reader for these shapes -- used to resolve to nothing and
