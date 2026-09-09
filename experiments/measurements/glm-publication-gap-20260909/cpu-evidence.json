@@ -1,0 +1,27 @@
+{
+  "action": "d7c265da6b1c0049eddd5237c61e0ce148e72e195b38a0402519b9732dc0f20c",
+  "overall_returncode": 1,
+  "scope_cleanup_complete": true,
+  "tests": "43 passed, 0 skipped",
+  "failure": "Initial preparation budget guard refused profiler-inclusive memory; tests passed.",
+  "logs": [
+    {
+      "path": "/mnt/shared/prismabuild-fleet/pb-queue/attempts/d7c265da6b1c0049eddd5237c61e0ce148e72e195b38a0402519b9732dc0f20c/2a1af8e3436bbf67a5900ba696f5bae7db5eccca0fd8690bbec7881968796dff/00000001.stdout.034444d9d8f85b33a35846543ab9c007cd28f2107a1c66cea71215ad5f257693.log",
+      "sha256": "034444d9d8f85b33a35846543ab9c007cd28f2107a1c66cea71215ad5f257693",
+      "bytes": 977
+    }
+  ],
+  "snapshot": "4fd2e1b726f1b38159a28c386a0c0d00060b41ba",
+  "final_prepare": [
+    {
+      "action": "10cc09590bce20d2c69a97ff70d37a034e1d12ff876baced68e5edd06e56c796",
+      "receipt": "7b15b3516391f803b1596d5074bf323063cce6beb3f5cb13f80269bb3ca5b0db",
+      "payload_sha256": "bd2c3c7913bbd00151a662583942581e347e9ce0376bbfcc6ab8cc835e839694",
+      "snapshot": "4631cb871a328146c3721770e1a5c4fb8cb2da7e",
+      "source_diff_from_commit": [
+        ".pbrun-closure.e4954107e0ffccc8.json"
+      ],
+      "stdout_tail": "{\"plan\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/plan.json\", \"sha256\": \"d0539b9d372bdbd849b2f22d1eadd0e9989444b8d3ce4a06fde2fd53053bba3d\", \"memory_gib\": 104, \"publication_staging_bytes\": {\"0\": 0, \"268435456\": 268435456}}\n"
+    }
+  ]
+}

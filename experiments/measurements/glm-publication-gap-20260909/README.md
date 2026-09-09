@@ -39,6 +39,55 @@ source and original capture, account for staging memory and resume only through
 the existing checkpoint gates. Production defaults remain synchronous unless
 broader qualification or an explicit decision changes that contract.
 
-Status: comparison prepared; native results pending. Earlier batch-width
+Initial status: comparison prepared; native results were pending. Earlier batch-width
 profiling that failed its trace-size cap remains negative evidence and is not
 used as an A/B result here.
+
+
+## Completed comparison and disposition, 2026-09-09
+
+All four arms completed with identical 64-anchor wires, receipts, checkpoint
+identity and scores. After excluding the first profiled batch and including
+final checkpoint completion, the 56-anchor steady intervals were:
+
+| Saving mode | Seconds | GPU joules | Time below 45 W |
+|---|---:|---:|---:|
+| Synchronous A0 | 143.497 | 8611.08 | 20.40% |
+| Background B1 | 137.150 | 8487.03 | 16.66% |
+| Background B2 | 137.019 | 8468.12 | 16.22% |
+| Synchronous A3 | 142.836 | 8561.60 | 19.20% |
+
+Mean throughput improved 4.44%; GPU energy per anchor fell 1.27%. The measured
+work remains dominated by the producer; background saving removes only part
+of the recurring pause. The 45 W threshold describes the trace, not GPU
+idleness or saturation. The existing 0.5-second power recorder covered every
+steady interval with a maximum sample gap of 0.501 seconds. Both hosts' Netdata
+series and main-thread stack samples accompany each arm. Main-thread samples
+still show tensor hashing, wire bit packing and producer column construction;
+those samples do not attribute every remaining pause to those functions.
+
+Evidence root:
+`/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/`.
+`steady-summary.json` SHA256:
+`c67b650c839e6d89a9fbb0ee572982388950733df60a7e12547d77c253206545`.
+Native action:
+`cb9ee1ab995a968f8b07af0e11f5b6f4af2c08144a639b821cbcc4dda418fc67`.
+CAS receipt:
+`922748ed9a64687409b64727f8d533bfc22e73be9debac1c4a12352708fe8652`.
+Exit 0, completed resource cleanup, receipt and payload hashes, actual source,
+all four observer results and produced output were checked. The native
+snapshot differs from benchmark commit `ec980688ec50` only by PB's closure
+record. CPU validation passed 43 tests with no skips; its combined action
+failed the original preparation memory guard. The corrected preparation and
+compile action succeeded separately. See `cpu-evidence.json` for both outcomes.
+
+Rob explicitly deferred further optimization and requested main-campaign
+resumption. The remaining work is recorded in
+[PrismaQuant #283](https://github.com/RobTand/prismaquant/issues/283).
+The 34-row overlap candidate manifest was prepared with existing resource
+accounting, but never submitted or activated. Main-campaign actions retain
+their original configuration, frozen production/producer sources and original
+512×512 capture. At resumption, both GPU workers had original campaign actions;
+81 actions were audited complete and 49 were ready. Prepared manifests and
+profiles are retained as bounded evidence for the later fix. No full-model KL,
+serving measurement or six-variant export is claimed by this comparison.

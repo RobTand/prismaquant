@@ -1,0 +1,12 @@
+[
+  {
+    "action": "cb9ee1ab995a968f8b07af0e11f5b6f4af2c08144a639b821cbcc4dda418fc67",
+    "receipt": "922748ed9a64687409b64727f8d533bfc22e73be9debac1c4a12352708fe8652",
+    "payload_sha256": "a5df89d9c8fcdc28c58447ccba81b76efc0abafaaad0e380a3ad3059ec3bd5b0",
+    "snapshot": "63b150665e5c086f44f488d64f28eb3a30e0a2c6",
+    "source_diff_from_commit": [
+      ".pbrun-closure.7415abca0ab2fde8.json"
+    ],
+    "stdout_tail": "erver_result\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-01/profile/attempt-87a57ff727314ef4949b3d968f6b028a/result.json\"}\n{\"index\": 2, \"publication_overlap_bytes\": 268435456, \"started_unix\": 1788989386.8356025, \"finished_unix\": 1788989792.3097844, \"returncode\": 0, \"command\": [\"/usr/bin/python3\", \"-u\", \"-m\", \"experiments.campaign_publication_ab\", \"--plan\", \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/plan.json\", \"--plan-sha256\", \"d0539b9d372bdbd849b2f22d1eadd0e9989444b8d3ce4a06fde2fd53053bba3d\", \"--arm-out\", \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-02\", \"--budget\", \"268435456\"], \"exact_parity\": true, \"anchor_units\": 64, \"observer_result\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-02/profile/attempt-7a2e3c5c91f34dccb318b1ba5abc7d98/result.json\"}\n{\"index\": 3, \"publication_overlap_bytes\": 0, \"started_unix\": 1788989792.8480992, \"finished_unix\": 1788990203.2973819, \"returncode\": 0, \"command\": [\"/usr/bin/python3\", \"-u\", \"-m\", \"experiments.campaign_publication_ab\", \"--plan\", \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/plan.json\", \"--plan-sha256\", \"d0539b9d372bdbd849b2f22d1eadd0e9989444b8d3ce4a06fde2fd53053bba3d\", \"--arm-out\", \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-03\", \"--budget\", \"0\"], \"exact_parity\": true, \"anchor_units\": 64, \"observer_result\": \"/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-03/profile/attempt-ff66b91af6d749bfa6ec6330c8cadf5e/result.json\"}\n"
+  }
+]
