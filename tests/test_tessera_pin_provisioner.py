@@ -203,15 +203,52 @@ def _pin_module(tmp_path: Path, commit: str, contract_sha: str) -> Path:
 CONTRACT = b'{"schema": "tessera.runtime_contract.v1", "executes": []}\n'
 
 
+#: The real tree's build config excludes its own tooling subpackage from what
+#: a consumer installs, so a source tree has files an install will never have.
+#: The fixture carries that shape because the first version did not, and a
+#: fixture that copies everything into site-packages cannot see a digest which
+#: compares a source tree against an install.
+PYPROJECT = """\
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tessera-quant"
+version = "0.1.0"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tessera._dev*"]
+
+[tool.setuptools.package-data]
+"tessera.serving" = ["runtime_contract.json"]
+"""
+
+#: What a wheel leaves out of ``src/tessera``, as relative paths.
+NOT_INSTALLED = ("_dev",)
+
+
 def _tessera_tree(root: Path, encoder_body: str) -> None:
-    """A minimal tree shaped like Tessera's: contract under the package."""
+    """A minimal tree shaped like Tessera's: contract under the package.
+
+    Including the halves that make source and install differ: a build config
+    that excludes ``tessera._dev``, and a ``_dev`` subpackage for it to
+    exclude.
+    """
     pkg = root / "src" / "tessera" / "serving"
     pkg.mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
     (root / "src" / "tessera" / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "runtime_contract.json").write_bytes(CONTRACT)
     (root / "src" / "tessera" / "encode.py").write_text(encoder_body,
                                                         encoding="utf-8")
+    dev = root / "src" / "tessera" / "_dev"
+    dev.mkdir(parents=True, exist_ok=True)
+    (dev / "__init__.py").write_text("", encoding="utf-8")
+    (dev / "tooling.py").write_text("# repository tooling, not shipped\n",
+                                    encoding="utf-8")
 
 
 def _git_clone_with_two_commits(tmp_path: Path) -> tuple[Path, str, str]:
@@ -259,6 +296,10 @@ def _venv_with_tessera(tmp_path: Path, name: str, encoder_body: str) -> Path:
     _tessera_tree(env / "staging", encoder_body)
     import shutil
     shutil.copytree(env / "staging" / "src" / "tessera", site / "tessera")
+    # A wheel does not carry what the build config excludes.  Copying the
+    # whole source directory is the shape that hid the defect below.
+    for rel in NOT_INSTALLED:
+        shutil.rmtree(site / "tessera" / rel)
     return env / "bin" / "python"
 
 
@@ -328,3 +369,154 @@ def test_a_tampered_cached_tree_is_not_reused(tmp_path):
     second = mod.materialise(new, clone, pins)
     assert (second / "src" / "tessera" / "encode.py").read_text() == "VERSION = 2\n", \
         "a cached tree whose bytes moved must be repaired, not reused"
+
+
+def test_a_subpackage_the_build_excludes_is_not_expected_in_the_install(tmp_path):
+    """A digest over the whole source tree can never match a real install.
+
+    The pinned tree's own build config excludes ``tessera._dev`` from what a
+    consumer installs, so the source has files a correct install will never
+    have.  Comparing the two directly reports drift on a correctly provisioned
+    interpreter, forever: install, re-probe, still different, exit 1.  The
+    earlier fixture copied the whole source directory into site-packages and
+    so could not see this at all.
+
+    What the digest has to compare is the source MINUS what the build config
+    says it does not ship, which is read from the pinned tree rather than
+    known here.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    import hashlib
+    pin = _pin_module(tmp_path, new, hashlib.sha256(CONTRACT).hexdigest())
+    python = _venv_with_tessera(tmp_path, "venv-wheel-shaped", "VERSION = 2\n")
+
+    rc = mod.main(["--python", str(python), "--pin-source", str(pin),
+                   "--clone", str(clone), "--pins-root", str(tmp_path / "pins"),
+                   "--check-only"])
+    assert rc == 0, (
+        "an interpreter carrying exactly what a wheel of the pin installs is "
+        "on the pin; a digest that counts unshipped source files says it never is"
+    )
+
+
+def test_check_only_does_not_write_into_the_pins_root(tmp_path):
+    """``--check-only`` reports; it does not repair.
+
+    The pins root is shared across the fleet and the flag's whole contract is
+    that it changes nothing.  Materialising to learn the expected digest is a
+    write, and an operator who ran a read-only check to see where a box stood
+    would find a tree laid down by it.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    import hashlib
+    pin = _pin_module(tmp_path, new, hashlib.sha256(CONTRACT).hexdigest())
+    python = _venv_with_tessera(tmp_path, "venv-ro", "VERSION = 2\n")
+    pins = tmp_path / "pins"
+    pins.mkdir()
+
+    rc = mod.main(["--python", str(python), "--pin-source", str(pin),
+                   "--clone", str(clone), "--pins-root", str(pins),
+                   "--check-only"])
+
+    assert list(pins.iterdir()) == [], (
+        "--check-only materialised the pinned tree into the shared pins root")
+    assert rc != 0, (
+        "with no verifiable source to compare against, a read-only check "
+        "cannot report clean")
+
+
+def test_a_cached_tree_that_fails_its_manifest_is_kept_not_deleted(tmp_path):
+    """A tree that does not verify is evidence, and evidence is not deleted.
+
+    Whatever edited or truncated it is unexplained, and the bytes are the only
+    record of what happened.  Replacing the tree is right; removing the thing
+    that would say why is not, and on a shared pins root it removes it for
+    everyone.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    pins = tmp_path / "pins"
+
+    first = mod.materialise(new, clone, pins)
+    (first / "src" / "tessera" / "encode.py").write_text("VERSION = 99\n")
+
+    second = mod.materialise(new, clone, pins)
+    assert (second / "src" / "tessera" / "encode.py").read_text() == "VERSION = 2\n"
+
+    kept = [p for p in pins.rglob("encode.py")
+            if p.read_text() == "VERSION = 99\n"]
+    assert kept, (
+        "the tree that failed its manifest was deleted; it is the only record "
+        "of what wrote to a shared pins root")
+
+
+def test_an_unmanifested_tree_matching_the_commit_is_attested_not_replaced(tmp_path):
+    """Bytes that already are the commit do not need to be written again.
+
+    ``/mnt/shared/tessera-pins/07ad344c...`` predates the manifest and is
+    correct.  Rewriting it churns a shared directory other boxes may be
+    reading, for a tree that is already right; verifying it against a fresh
+    ``git archive`` establishes the same thing without touching it.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    pins = tmp_path / "pins"
+
+    laid = mod.materialise(new, clone, pins)
+    encode = laid / "src" / "tessera" / "encode.py"
+    before = encode.stat().st_ino
+    (laid / mod.MANIFEST).unlink()               # a pre-manifest tree
+
+    again = mod.materialise(new, clone, pins)
+    assert again == laid
+    assert encode.read_text() == "VERSION = 2\n"
+    assert encode.stat().st_ino == before, (
+        "a tree that already holds the commit's bytes was rewritten rather "
+        "than verified and attested")
+    assert (laid / mod.MANIFEST).exists(), "and the manifest was not written"
+
+
+def test_the_install_does_not_run_inside_the_frozen_tree(tmp_path, monkeypatch):
+    """``pip install <dir>`` writes ``*.egg-info`` into the directory it builds.
+
+    Pointed at the pinned tree that lands inside the tree, so the manifest
+    that tree was published with stops matching it, and the next run reports
+    the pin's own source corrupt.  The build gets a copy; the frozen tree is
+    an input.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    import hashlib
+    pin = _pin_module(tmp_path, new, hashlib.sha256(CONTRACT).hexdigest())
+    python = _venv_with_tessera(tmp_path, "venv-stale", "VERSION = 1\n")
+    pins = tmp_path / "pins"
+
+    seen: list[list[str]] = []
+    real_run = subprocess.run
+
+    def spy(argv, *a, **kw):
+        if "pip" in argv:
+            seen.append([str(x) for x in argv])
+            # A build backend really does write here; act like one.
+            built = Path(argv[-1])
+            (built / "tessera_quant.egg-info").mkdir(exist_ok=True)
+            (built / "tessera_quant.egg-info" / "PKG-INFO").write_text("x")
+            return subprocess.CompletedProcess(argv, 0)
+        return real_run(argv, *a, **kw)
+
+    monkeypatch.setattr(mod.subprocess, "run", spy)
+    mod.main(["--python", str(python), "--pin-source", str(pin),
+              "--clone", str(clone), "--pins-root", str(pins)])
+
+    assert seen, "no install was attempted"
+    built = Path(seen[0][-1]).resolve()
+    assert pins.resolve() not in built.parents and built != (pins / new), (
+        f"the build ran in the frozen tree at {built}")
+
+    tree = pins / new
+    held = json.loads((tree / mod.MANIFEST).read_text())
+    digest, count = mod.tree_digest(tree)
+    assert (digest, count) == (held["tree_sha256"], held["files"]), (
+        "the install left the pinned tree failing its own manifest")
