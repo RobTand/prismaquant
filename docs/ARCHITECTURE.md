@@ -9,9 +9,10 @@ dispatcher's explicit process-baseline reservation. A recipe may declare
 demand, in both the streaming and resident-source branches, and never inside
 `memory_bytes`. `baseline_policy` gains
 `explicit-spec-reservation-measured-in-row` for a plan that carries one, and
-the plan records the integer beside `row_memory_gb`. The default is `0` and is
-byte-identical to the previous behaviour. The runtime's measured fail-closed
-guard is unchanged.
+the plan records the integer beside `row_memory_gb`. The default is `0`, which preserves
+every row's resource demand exactly; the plan file itself is not byte-identical,
+since it now carries `process_baseline_bytes: 0`. The runtime's measured
+fail-closed guard is unchanged.
 
 Re-stamped (2026-09-09, `fix/glm-resident-hessian-source`) for resident
 Hessian commitment reuse in the selected campaign's existing opt-in
@@ -181,9 +182,9 @@ an absent reservation cannot read as coverage. The row's own first
 `CaptureMemoryGuard.check` remains the only measured floor of the three.
 Rounding was not a reservation: `ceil` leaves at most one GiB of slack and the
 floor measured on this fleet is 1,062,359,040 bytes, 0.9894 GiB, so before this
-key a row admitted according to where its `memory_bytes` landed modulo one GiB
-and both rows of the 132-row plan lost that, at 827,603,112 and 266,244,264
-bytes of slack. The declared value is the recipe's bound, not a claim about any
+key a row admitted according to where its `memory_bytes` landed modulo one GiB,
+and both inspected example rows lost that, at 827,603,112 and 266,244,264 bytes
+of slack. The declared value is the recipe's bound, not a claim about any
 universal maximum.
 A third quantity is measured and reported rather than charged. On the
 streaming fixture the first encode step grew 165.6 MB and the second grew

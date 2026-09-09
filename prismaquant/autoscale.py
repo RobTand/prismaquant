@@ -100,6 +100,7 @@ def _baseline_fields(process_baseline_bytes):
     declared reservation from the absence of one.  A plan that reserved nothing
     must not be able to report coverage it does not have.
     """
+    validate_process_baseline_bytes(process_baseline_bytes)
     if not process_baseline_bytes:
         return {}
     return dict(process_baseline_bytes=process_baseline_bytes,
@@ -121,6 +122,10 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     from the final prefetch window. The
     declared headroom is additional forward/allocator/runtime workspace.
     """
+    # Ahead of every return in this function, including the legacy one
+    # below: a caller that declares a malformed reservation must be
+    # refused before it is handed a plan that silently ignored it.
+    validate_process_baseline_bytes(process_baseline_bytes)
     import math
     from .artifact_completeness import read_artifact_header
     from .model_profiles import detect_profile
@@ -262,6 +267,10 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # metadata/journals have an explicit per-unit serialization allowance.
     disk = total_h+total_x+widest_unit+len(unit_shapes)*16384
     result = dict(schema='prismaquant.streamed_calibration_resources.v1',
+        # On the v1 result, so the legacy early return below carries it too:
+        # a caller that declares a reservation and gets a plan back with no
+        # record of it has been told the opposite of the truth.
+        **_baseline_fields(process_baseline_bytes),
         source_header_sha256=hashlib.sha256(json.dumps(header, sort_keys=True,
             separators=(',', ':')).encode()).hexdigest(),
         terms=terms, memory_bytes=sum(terms.values()), disk_bytes=disk,
@@ -336,7 +345,6 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     result.update(schema='prismaquant.streamed_calibration_resources.v2',
         capture_policy=capture_policy, input_groups=groups, phases=phases,
         memory_bytes=max(sum(phase.values()) for phase in phases.values()),
-        **_baseline_fields(validate_process_baseline_bytes(process_baseline_bytes)),
         transient_status='checked shared input groups; settled prefetch window and completed source release before materialization')
     # v1's additive terms are retained only in its own schema. v2 carries
     # mutually exclusive phase maps, with the maximum defining admission.
@@ -400,6 +408,7 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     native row records the number rather than covering it, and asserts the
     steady-state step against the plan (RobTand/prismaquant#390).
     """
+    validate_process_baseline_bytes(process_baseline_bytes)
     import math
     from .perturbed_x_cache import normalize_verified_activation_load
     capture_load_policy = normalize_verified_activation_load(capture_load_policy)
@@ -546,7 +555,7 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # reservation replaces this value and is emitted beside it, so an
         # absent reservation cannot read as coverage.
         **{'baseline_policy': BASELINE_POLICY_DECLARED_HEADROOM,
-           **_baseline_fields(validate_process_baseline_bytes(process_baseline_bytes))},
+           **_baseline_fields(process_baseline_bytes)},
         source_forward_count=0)
 
 

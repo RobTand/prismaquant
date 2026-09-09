@@ -245,3 +245,44 @@ def test_verified_load_buffer_is_priced_only_in_load_phases(glm_checkpoint):
     assert after['memory_bytes'] == max(sum(p.values()) for p in after['phases'].values())
     with pytest.raises(ValueError, match='bounded capture'):
         streamed_calibration_resources(source, **kwargs, capture_load_policy=policy)
+
+
+@pytest.mark.parametrize('capture_policy', ['legacy', 'shared-inputs-bounded-v1'])
+def test_every_capture_policy_records_the_reservation_it_was_given(
+        glm_checkpoint, capture_policy):
+    """The legacy plan returns early, and returned without the reservation.
+
+    ``streamed_calibration_resources`` builds a v1 result and returns it
+    immediately unless the policy is ``shared-inputs-bounded-v1``.  A
+    reservation attached only to the v2 update therefore reached one policy
+    and silently vanished on the other, and a malformed one was accepted
+    there.  Both policies are exercised because the early return is the whole
+    defect: a plan that drops a declared reservation has told its caller the
+    opposite of the truth, and the caller is what sizes the row.
+
+    ``memory_bytes`` is asserted equal across the pair on each policy: the
+    reservation is recorded, never summed into the deltas.
+    """
+    from prismaquant.autoscale import streamed_calibration_resources
+    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+    from prismaquant.routed_experts import profile_declared_packed_expert_projections
+    model, source = glm_checkpoint
+    members = profile_declared_packed_expert_projections(model, Glm5NextProfile())
+    shapes = {member.qname: list(member.weight.shape) for member in members}
+    common = dict(unit_shapes=shapes, counts={name: 2 for name in shapes},
+                  nsamples=1, seqlen=2, max_act_rows=7, cache_slots=2,
+                  prefetch_workers=1, headroom_gb=1, capture_policy=capture_policy)
+
+    plain = streamed_calibration_resources(source, **common)
+    reserved = streamed_calibration_resources(source, process_baseline_bytes=2147483648,
+                                              **common)
+    assert 'process_baseline_bytes' not in plain
+    assert 'baseline_policy' not in plain
+    assert reserved['process_baseline_bytes'] == 2147483648
+    assert reserved['baseline_policy'] == 'explicit-spec-reservation-measured-in-row'
+    assert reserved['memory_bytes'] == plain['memory_bytes']
+
+    for malformed in (-1, 1.5, '2147483648', True, None):
+        with pytest.raises(RuntimeError, match='process_baseline_bytes'):
+            streamed_calibration_resources(source, process_baseline_bytes=malformed,
+                                           **common)

@@ -199,7 +199,8 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     Rounding is not a reservation. ``ceil`` leaves at most one GiB of slack,
     and the floor measured on this fleet is 1,062,359,040 bytes -- 0.9894 GiB,
     less than the most ``ceil`` can leave -- so before this key a row admitted
-    according to where its ``memory_bytes`` landed modulo one GiB. The row
+    according to where its ``memory_bytes`` landed modulo one GiB, which both
+    inspected example rows lost. The row
     still measures its own floor at its first ``CaptureMemoryGuard.check`` and
     stamps it on its receipt (RobTand/prismaquant#390); that reading, not this
     declaration, remains the measured number.

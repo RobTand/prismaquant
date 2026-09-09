@@ -342,31 +342,58 @@ def test_selected_capture_cli_refuses_missing_capture_before_streamed_source(mon
 # 0.9894 GiB.
 GLM_MEASURED_PROCESS_FLOOR_BYTES = 1_062_359_040
 
-# A plan whose rounding slack is 900,000,000 bytes, below that floor.  The two
-# real rows of the 132-row plan sit at 827,603,112 and 266,244,264 bytes of
-# slack, so both are on this side of the line; this fixture stands for them at
-# a size a test can hold.
-_ROUNDING_LOSER_PLAN_BYTES = 2321225472
+# A plan whose rounding slack is 900,000,000 bytes, below that floor.  Both
+# inspected example rows sit at 827,603,112 and 266,244,264 bytes of slack, so
+# both are on this side of the line.  The magnitude is chosen so the guard's
+# own 2 GiB physical margin is not what refuses: the point of the fixture is
+# the slack, and it has to be the only thing that is tight.
+_ROUNDING_LOSER_PLAN_BYTES = 20 * 1024 ** 3 + 173_741_824
 
 
-def _row_is_admitted(mem_gb: int, memory_bytes: int, floor_bytes: int) -> bool:
+def _row_is_admitted(tmp_path, mem_gb, memory_bytes, floor_bytes, monkeypatch):
     """The two ends a row's demand actually has to meet, joined.
 
-    PrismaBuild turns a row's ``mem_gb`` into a cgroup cap of exactly that many
-    GiB -- ``prismabuild/pool.py:2850`` constructs the scope with
-    ``memory * 1024 ** 3`` -- and the row then refuses unless its phase plan
-    fits under that cap *less* the floor it measures in its own process
-    (``prismaquant/tessera_campaign.py:4515``).  Neither end is under test
-    here; this reproduces the one-line predicate so a dispatcher-side demand
-    can be checked against the thing that will actually judge it.
+    The cap is built the way PrismaBuild builds it -- ``pool.py:2850``
+    constructs the resource scope with ``memory * 1024 ** 3``, so ``mem_gb``
+    is exactly that many GiB -- and the floor is read by a **real**
+    ``CaptureMemoryGuard`` from a real cgroup tree, not asserted.  Only the
+    two readings the guard cannot take on a CPU test box are supplied: the
+    cgroup's own ``memory.current`` and the CUDA reservation, whose sum is the
+    floor.  The predicate below is then the row's, at
+    ``prismaquant/tessera_campaign.py:4515``.
+
+    Reading the floor through the guard rather than substituting a constant is
+    what makes this a regression on the mechanism: a change to how the guard
+    measures its baseline, or to which of the two readings it sums, moves this
+    test.  A hardcoded number would not have noticed.
     """
-    return memory_bytes <= mem_gb * 1024 ** 3 - floor_bytes
+    from prismaquant import memory_management as memory
+    root = tmp_path/'cgroup'
+    child = root/'job'
+    child.mkdir(parents=True, exist_ok=True)
+    (root/'memory.max').write_text(str(mem_gb * 1024 ** 3))
+    (root/'memory.current').write_text(str(floor_bytes))
+    (child/'memory.max').write_text('max')
+    membership = tmp_path/'membership'
+    membership.write_text('0::/job\n')
+    monkeypatch.setattr(memory.torch.cuda, 'memory_reserved', lambda _device: 0)
+    # The guard's own two refusals -- its 2 GiB physical margin and its host
+    # floor -- are deliberately kept slack here.  They are real and they bind
+    # the row at runtime, but they are not the arithmetic under test, and a
+    # fixture that tripped them would fail for a reason that has nothing to do
+    # with whether the demand reserved the baseline.
+    monkeypatch.setattr(memory, '_host_memory_info', lambda: (64 * 1024 ** 3, 128 * 1024 ** 3))
+    guard = memory.CaptureMemoryGuard('cuda', cgroup_root=root, membership=membership)
+    guard.check('before_selected_capture_identity')
+    assert guard.baseline_bytes() == floor_bytes, 'the guard did not read the floor under test'
+    assert guard.cap_bytes == mem_gb * 1024 ** 3, 'the cap is not the demand PrismaBuild would set'
+    return not (memory_bytes > guard.cap_bytes - guard.baseline_bytes())
 
 
 @pytest.mark.parametrize('reservation,demand_gb,admitted', [
-    (None, 3, False),
-    (800_000_000, 3, False),
-    (2147483648, 5, True),
+    (None, 21, False),
+    (800_000_000, 21, False),
+    (2147483648, 23, True),
 ])
 def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
         monkeypatch, tmp_path, reservation, demand_gb, admitted):
@@ -382,7 +409,8 @@ def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
     GiB of slack, and the measured floor is 0.9894 GiB -- *less* than the most
     ``ceil`` can ever leave.  A row therefore admitted or refused according to
     where its ``memory_bytes`` happened to land modulo one GiB, which is an
-    accident no one owns and no receipt records.  Both real rows lose it.
+    accident no one owns and no receipt records.  Both inspected example rows
+    lose it.
 
     The middle arm is the one worth reading twice.  A declared 800,000,000
     bytes is *smaller than the slack it replaces*, so it does not even move the
@@ -423,8 +451,9 @@ def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
                           '--calibration-cache', '/capture']) == 0
     row = json.loads((tmp_path/'manifest.json').read_text())[0]
     assert row['demand']['mem_gb'] == demand_gb
-    assert _row_is_admitted(row['demand']['mem_gb'], _ROUNDING_LOSER_PLAN_BYTES,
-                            GLM_MEASURED_PROCESS_FLOOR_BYTES) is admitted
+    assert _row_is_admitted(tmp_path, row['demand']['mem_gb'],
+                            _ROUNDING_LOSER_PLAN_BYTES,
+                            GLM_MEASURED_PROCESS_FLOOR_BYTES, monkeypatch) is admitted
 
 
 @pytest.mark.parametrize('value', [-1, 1.5, '2147483648', True, None])
@@ -472,3 +501,41 @@ def test_an_absent_reservation_still_reports_the_pre_run_term_it_actually_has(mo
     assert reserved['baseline_policy'] == 'explicit-spec-reservation-measured-in-row'
     assert reserved['memory_bytes'] == plain['memory_bytes']
     assert reserved['phases'] == plain['phases']
+
+
+def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tmp_path):
+    """A process floor exists whether or not the row streams.
+
+    The resident-source branch of ``_row_memory_gb`` is a different expression
+    with its own ``ceil`` and its own ``headroom_gb`` addend, so a key wired
+    into the streaming branch alone would mean one thing on one path and
+    nothing on the other, under one name.
+    """
+    import math
+    from tools import dispatch_tessera_campaign as dispatch
+    gib = 1024 ** 3
+    monkeypatch.setattr(dispatch, '_model_bytes', lambda model: 10 * gib)
+    census = dict(unit_shapes={'layers.0.proj': [4, 8]})
+    spec = dict(model='/source', campaign_argv=[], headroom_gb=3, max_act_rows=2)
+    hessian, rows = 8 ** 2 * 4, 8 * 2 * 4
+    body = 10 * gib + hessian + rows
+
+    plain = dispatch._row_memory_gb(spec, ['layers.0.proj'], census)
+    assert plain == math.ceil(body / gib) + 3
+
+    reserved = dispatch._row_memory_gb(
+        {**spec, 'process_baseline_bytes': 2147483648}, ['layers.0.proj'], census)
+    # Charged inside the same ceil as the body, so the demand covers
+    # body + reservation rather than rounding each of them up separately.
+    assert reserved == math.ceil((body + 2147483648) / gib) + 3
+    assert reserved - plain == 2
+
+    # Headroom is untouched by the reservation: they are separate terms and
+    # only one of them is inside ``memory_bytes``.
+    assert dispatch._row_memory_gb(
+        {**spec, 'headroom_gb': 9, 'process_baseline_bytes': 2147483648},
+        ['layers.0.proj'], census) == reserved + 6
+
+    with pytest.raises(RuntimeError, match='process_baseline_bytes'):
+        dispatch._row_memory_gb({**spec, 'process_baseline_bytes': '2147483648'},
+                                ['layers.0.proj'], census)
