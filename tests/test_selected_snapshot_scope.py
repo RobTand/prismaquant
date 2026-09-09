@@ -53,7 +53,8 @@ def test_selected_snapshot_reads_only_requested_dense_weights(tmp_path, monkeypa
                              require_prefetched_residency=True)
     names = ["model.layers.0.gate", "model.layers.0.up"]
     try:
-        weights, receipt = runner.snapshot_selected_weights(names, max_resident_bytes=96)
+        weights, receipt = runner.snapshot_selected_weights(names, max_resident_bytes=96,
+            expected_source_keys=tuple(name+".weight" for name in names))
         assert read == [name + ".weight" for name in names]
         assert receipt["source_forward_count"] == 0
         assert all(torch.equal(weights[name], source[name + ".weight"]) for name in names)
@@ -140,6 +141,11 @@ def test_glm_snapshot_preserves_source_bytes_without_head_or_unrelated_reads(
         with pytest.raises(RuntimeError, match='resident byte budget'):
             runner.snapshot_selected_weights([name], max_resident_bytes=1)
         assert reads == []
+        with pytest.raises(RuntimeError, match='admitted source keys'):
+            runner.snapshot_selected_weights([name],
+                max_resident_bytes=selected['selected_source_weight_bytes'])
+        assert reads == []
+        assert getattr(runner.context, '_snapshot_source_keys', None) is None
         weights, receipt = runner.snapshot_selected_weights([name],
             max_resident_bytes=selected['selected_source_weight_bytes'], expected_source_keys=keys)
         assert sorted(reads) == keys
@@ -191,3 +197,35 @@ def test_resource_policy_rejects_unknown_snapshot_policy():
         selected_anchor_resources('/does-not-exist', unit_shapes={'layers.0.a': [2, 2]},
             counts={'layers.0.a': 1}, max_act_rows=1, cache_slots=2,
             prefetch_workers=1, headroom_gb=0, source_snapshot_policy='typo')
+
+
+def test_failed_snapshot_configuration_preserves_source_maps(monkeypatch):
+    import threading
+    from prismaquant import streaming_model as sm
+    context = object.__new__(sm.StreamingContext)
+    context.source_snapshot_only = True
+    context._inflight = {}
+    context._inflight_lock = threading.Lock()
+    context.weight_shard = {'layers.0.a.weight': 'first', 'layers.0.b.weight': 'second'}
+    context.weight_ckpt = {key: key for key in context.weight_shard}
+    before = context.weight_shard.copy(), context.weight_ckpt.copy()
+    context.layers_prefix, context.num_layers = 'layers.', 1
+    context.dtype, context.buffer_dtypes = torch.float32, {}
+    context.source_fp4_experts, context.source_authentication = False, None
+    context.estimated_layer_bytes = 99
+    def fail_estimate(**kwargs):
+        raise OSError('unreadable source header')
+    monkeypatch.setattr(sm, '_estimate_layer_cache_bytes', fail_estimate)
+    profile = SimpleNamespace(per_expert_moe_regex=lambda: None, concat_merge_groups=lambda: ())
+    with pytest.raises(OSError, match='unreadable source header'):
+        context.configure_selected_snapshot(['layers.0.a'], profile)
+    assert (context.weight_shard, context.weight_ckpt) == before
+    assert context.estimated_layer_bytes == 99
+    assert getattr(context, '_snapshot_source_keys', None) is None
+    def estimate(**kwargs):
+        assert context._inflight_lock.locked()
+        return 4, {0: 4}
+    monkeypatch.setattr(sm, '_estimate_layer_cache_bytes', estimate)
+    context.configure_selected_snapshot(['layers.0.a'], profile)
+    assert context._snapshot_source_keys == ('layers.0.a.weight',)
+    assert context.estimated_layer_bytes == 4
