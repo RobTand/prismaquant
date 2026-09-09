@@ -153,3 +153,64 @@ def test_actual_candidate_filter_keeps_per_unit_context_gate(monkeypatch):
     assert {c.fmt for c in result[STACK]} == {'BF16'}
     assert calls == [accepted, refused]
     assert [(m['qname'], m['reason']) for m in masks] == [(STACK, 'tessera_serving_context')]
+
+
+def test_routed_allow_list_equals_the_pinned_contracts_routed_moe_families(monkeypatch):
+    """The allow-list must be the contract's answer, not a copy of it.
+
+    ``allow_tessera_families`` is typed into the spec file and read by
+    ``ServingFormatRule.check`` as a gate input, so it is a producer-side
+    field stating which families the serving runtime executes for routed
+    experts. Principle 14 says such a field is derived from the runtime's own
+    machine-readable table or refused. Deriving the whole list is the larger
+    change; this test is the smaller one that makes the copy honest, by
+    asserting it still equals the projection it was copied from.
+
+    What it catches is drift in the direction nothing else does. If Tessera
+    publishes a ``routed_moe`` cell for a second family, the runtime executes
+    that rung and this profile keeps refusing it, silently and forever: no
+    export gate fires, because over-refusal is not a refusal anyone sees. The
+    mirror case is already contained, but by accident rather than design -- a
+    withdrawn cell leaves the profile admitting a family whose
+    ``route_admission`` then resolves ``unattested``, so export still fails
+    closed.
+
+    The development reader is opt-in: ``load_tessera_contract`` returns
+    ``None`` when ``PRISMAQUANT_TESSERA_DEV_PIN`` is unset, before it looks at
+    anything installed. So this test requests the pin itself, the way
+    ``tests/test_tessera_menu_real_table.py`` does for the operator walk, and
+    only then treats ``None`` as a failure: with the pin requested it means
+    Tessera is absent or its answer moved, which are both things to see rather
+    than skip. ``tests/test_ci_tessera_install.py`` keeps CI installing the
+    pinned commit, and ``tests/test_tessera_serving_pin.py`` gates the bytes.
+    """
+    from prismaquant import lane_eligibility as le
+    from prismaquant import tessera_runtime_contract as trc
+
+    monkeypatch.setenv(trc.TESSERA_DEV_PIN_ENV, "1")
+    assert trc.dev_pin_requested(), "the development reader must be opted in"
+    contract = trc.load_tessera_contract()
+    assert contract is not None, (
+        "the pin is requested and still no contract: Tessera is not installed, "
+        f"or not the pinned commit ({trc.TESSERA_DEV_PIN_COMMIT[:12]}), and the "
+        "loader fails closed on both. This test derives from that contract "
+        "rather than restating it; tests/test_ci_tessera_install.py and "
+        "tests/test_tessera_serving_pin.py gate the install itself")
+    profile = sp.load_serving_profile(PROFILE)
+    published = {
+        cell.family for cell in contract.cells
+        if cell.structure == le.STRUCTURE_ROUTED_MOE
+        and cell.platform == profile.target_platform
+    }
+    rule, = [r for r in profile.format_rules
+             if r.id == 'glm_routed_packed_research_families']
+    assert set(rule.allow_tessera_families) == published, (
+        f"{PROFILE} allows {sorted(rule.allow_tessera_families)} for routed "
+        f"experts, but the pinned contract "
+        f"({contract.commit[:12]}, {contract.lane_schema}) publishes "
+        f"{sorted(published)} as its routed_moe families on "
+        f"{profile.target_platform}")
+    # Not vacuous in either direction: the projection must actually select,
+    # and it must exclude a family the contract publishes only as dense.
+    assert published
+    assert {cell.family for cell in contract.cells} - published
