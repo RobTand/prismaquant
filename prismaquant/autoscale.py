@@ -310,7 +310,8 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
 
 def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               cache_slots, prefetch_workers, headroom_gb,
-                              anchor_batch_size=1, capture_load_policy=None):
+                              anchor_batch_size=1, capture_load_policy=None,
+                              publication_overlap_bytes=0):
     """Bound selected-source preparation separately from resident encoding.
 
     This extends the source loader's header/dtype accounting. No source
@@ -435,7 +436,19 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # whether that release is complete is the loader's contract, not a
         # term derivable from a shape.
         entry_validation_bytes=2*widest_capture_entry,
-        source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight)
+        source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight,
+        # tessera_publication.BoundedPublisher's own bound, charged as itself.
+        # Staged artifacts are host bytes waiting to be written: the CPU BF16
+        # render (_canonical_rendered_weight_tensor) and the wire blob, live
+        # from the reserve that admits them to the os.replace that publishes
+        # them. This is the whole term rather than a term plus a producer-side
+        # copy because the reservation is taken BEFORE the copy is made and an
+        # artifact larger than the budget is refused, so no thread ever holds
+        # staged bytes outside it. Charging at submit time, or admitting one
+        # oversized job, would both have made this number smaller than what
+        # the run can actually hold. A run that does not ask for staging
+        # charges nothing.
+        publication_staging_bytes=int(publication_overlap_bytes))
     export_inputs = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
         # tessera_campaign._save_hessian_capture_with_page_release pauses the

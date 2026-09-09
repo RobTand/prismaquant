@@ -1,7 +1,45 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `integration/glm-reviewed-best-form-producer`. Stamps
+As of: 2026-09-09 · `experiment/glm-publication-cycle-profile`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-09, `claude/bounded-publication-overlap`) for the campaign's
+opt-in **bounded publication overlap** (§4.10). `--publication-overlap-bytes N`
+(default `0`, which is the historical synchronous path byte for byte) runs one
+bounded writer thread so the next anchor batch encodes while the previous
+batch's artifacts are persisted. Three links move onto that thread, in queue
+order: the render and wire files, the wire receipt that is read back off them,
+and the `write_unit` journal write that cites the receipt. The
+device-to-host copy of each render stays on the thread that owns the device
+work, and the writer then calls the same
+`production_weight_cache._store_rendered_weight_entry` and the same
+tmp-plus-`os.replace` wire write the synchronous path calls, so there is no
+second cache and no change to what a published file is. An anchor is added to
+`measured` and marked for the journal only after its own receipt exists, so
+the checkpoint invariant that every journalled anchor row carries a wire
+receipt read back off a published file is unchanged. A round, a deadline stop
+and the end of the loop are drain barriers; the publisher's lifetime is a
+`try`/`finally`, and unwinding commits the rows whose receipts really
+completed before dropping what is still staged, so a batch that succeeded
+before a later one failed keeps its journal row.
+
+The byte budget is a bound rather than a statistic: the producer reserves
+before it allocates, an artifact larger than the whole budget is refused
+instead of admitted as a special case, and `autoscale.
+selected_anchor_resources` charges the budget as `publication_staging_bytes`
+in the `resident_anchors` phase, propagated from both the campaign CLI and
+`tools/dispatch_tessera_campaign.py`. The memory guard's
+`after_selected_anchor_batch` bracket therefore includes staged bytes, and the
+publisher's budget, peak charge and blocked seconds are stamped on cost
+provenance under `publication_overlap` so a reader can attribute them. A
+writer failure is closed: everything queued behind it is dropped unwritten and
+the campaign's batch handler re-raises rather than continuing. The option is
+excluded from checkpoint input identity, because it chooses which thread
+performs writes whose arguments it does not touch. Gates:
+`tests/test_tessera_publication.py`,
+`tests/test_tessera_campaign_publication_cli.py`. The barrier tests establish
+ordering and bounds only; the device-to-host copy remains synchronous, and no
+speed, work-per-joule or I/O claim is made here.
 
 Re-stamped (2026-09-09, `integration/glm-reviewed-best-form-producer`) for the
 synchronized development/serving dependency pin to Tessera `b1eb1dccc9df`
@@ -1437,7 +1475,9 @@ and calls Tessera's `encode_linears` with each unit's own ActivationSource
 mapping. Each result uses the scalar path's served activation scale, wire
 decoder, production scorer and cache writer. Per-unit wire identity and
 journal envelopes remain unchanged; each completed batch is journalled before
-the next starts. Batch width is excluded from input identity, so a resume can
+the next starts (under `--publication-overlap-bytes` a batch is journalled when
+its own files land, which may be during the next batch's encode; see the
+2026-09-09 stamp). Batch width is excluded from input identity, so a resume can
 change execution width without repricing completed rows. Measured rows record
 batch width and identify equally apportioned batch encoding time; that is
 accounting, not independently measured per-unit latency. Default width remains
