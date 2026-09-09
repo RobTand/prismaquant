@@ -344,3 +344,29 @@ both-box historical Netdata lives at
 `/mnt/shared/tessera-tile-netdata-20260909`; 10 s GPU sampling gives no GPU
 sample during the short R4 profile, so this is principally the missing
 both-host CPU, memory, disk and network context, not a new profile power claim.
+
+## 05:48 UTC: B16 upper-endpoint result
+
+On Sparklina, the same frozen b1eb1dccc producer and opt-in 64,4,2 tile,
+R1088 row-0076 first 16 experts, original capture and all 864 selected entries
+resident: B8 mean 38.7325 s / 2204.33 J / 56.91 W; B16 mean 33.6391 s /
+2157.17 J / 64.13 W. B16 provides **1.15141x throughput and 1.02186x work/J**
+in this bounded ABBA comparison. The energy gain is small; no claim of a
+universal batch optimum or sustained 90–100 W is supported.
+
+All six arms match all 16 actual wire files and scores, including their old
+07ad counterparts. Timed plan constructions are zero. Complete warmed call
+profiles retain one graph and 4095 steps for both widths, with zero overlaps;
+the B16 actual input prefix exactly equals B8. Both-host telemetry and raw
+bracketed 2 Hz power are retained. Timed serialization and wire writes still
+run synchronously and cost roughly 1.5 seconds per arm in aggregate.
+
+Native action `8f2e7a0026ddc7a697aae1e8dcd2ca8430657640cd883c70846cd93d610316dc`;
+CPU audit `e839ce1827e0f85cad96ebda833e9a33cd173581a12bd5f6994121214420bac4`.
+The root independently checked actual successful exits, cleanup, CAS payloads,
+receipt hashes and checkout snapshots. Native/audit source differences are
+only audit additions and PB closure files; the executed harness matches the
+retained implementation. Evidence directory:
+`first-proof-anchor-preparation-02/performance-best-tile-batch16-r1088-ab-01/`,
+including `root-best-batch-audit.json` and
+`root-native-and-audit-cas-source.json`.
