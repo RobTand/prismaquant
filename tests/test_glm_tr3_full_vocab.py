@@ -435,6 +435,21 @@ def test_attention_receipt_reports_allocated_storage_separately_from_cache_polic
     assert row["allocated_kv_cache"] == {"dtype": "torch.uint8", "shape": [2, 4], "device": "cpu"}
 
 
+def test_initialized_runtime_observation_preserves_raw_state_without_claiming_score(tmp_path):
+    binding = {"worker_runtime": [{"rank": 0, "allocated_kv_cache": {
+        "dtype": "torch.uint8", "shape": [100, 64, 512], "device": "cuda:0"}}]}
+    output = tmp_path / "hook-qualification.json"
+    first = served.write_runtime_observation(output, binding)
+    observed = json.loads(first.read_text())
+    assert observed["runtime_binding"] == binding
+    assert observed["stage"] == "initialized_before_scoring" and observed["scored_windows"] == 0
+    assert "passed" not in observed and not output.exists()
+    binding["worker_runtime"][0]["allocated_kv_cache"]["shape"][0] = 101
+    second = served.write_runtime_observation(output, binding)
+    assert second != first and first.exists() and second.exists()
+    assert json.loads(first.read_text()) == observed
+
+
 @pytest.mark.parametrize("observer_fails", [False, True])
 def test_teacher_manifest_waits_for_both_box_observer_completion(tmp_path, monkeypatch, observer_fails):
     import sys

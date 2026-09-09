@@ -269,3 +269,15 @@ or certify hook qualification. Evidence remains at
 `/home/rob/tmp/tr3-native-layout-01/{probe.py,prompt_logprob.py,before.log,after.log}`.
 The actual native repaired-layout qualification and full-panel score are
 still pending at this checkpoint.
+
+### Initialized runtime observations
+
+A separate content-addressed `*.runtime-<sha256>.json` now records the actual
+worker/runtime binding before the first scored window or qualification replay
+comparison. It retains raw allocated KV tensor shapes without normalizing them.
+Its schema marks `initialized_before_scoring` with zero scored windows and has
+no success flag; it is diagnostic evidence, never a hook qualification or KL
+result. This preserves the exact initialized state when a native forward or
+strict replay binding subsequently refuses. Distinct runtime bindings produce
+distinct filenames, so a later attempt does not erase earlier observations.
+The qualification comparison remains exact; no KV capacity exception is added.

@@ -271,6 +271,17 @@ def verify_prompt_alignment(output, tokens, reports):
             "tolerance": 1e-4, "passed": True}
 
 
+def write_runtime_observation(output, runtime_binding):
+    """Retain initialized state even when later native scoring fails closed."""
+    output = Path(output)
+    digest = canonical_sha256(runtime_binding)
+    path = output.with_name(f"{output.stem}.runtime-{digest}.json")
+    atomic_json_write({"schema": "prismaquant.glm_tr3_runtime_observation/1",
+                       "stage": "initialized_before_scoring", "scored_windows": 0,
+                       "runtime_binding_sha256": digest, "runtime_binding": runtime_binding}, path)
+    return path
+
+
 def measure(args):
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
@@ -328,6 +339,8 @@ def measure(args):
                            "logits_layout": args.logits_layout}
         diagnostics_before = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
         runtime_binding["require_exl3_diag"] = args.require_exl3_diag
+        observation = write_runtime_observation(args.output, runtime_binding)
+        print(f"[tr3-full-kl] initialized runtime observation {observation}", flush=True)
         if qualification is not None and (
                 qualification.get("schema") != "prismaquant.glm_tr3_hook_qualification/1"
                 or qualification.get("runtime_binding") != runtime_binding
