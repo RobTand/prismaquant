@@ -269,4 +269,4 @@ def summarize_panel(panel, vectors):
                 for key, values in groups.items()}
     return {"windows": windows, "domains": grouped(domains), "documents": grouped(documents),
             "mean": float(np.mean([v for vec in vectors for v in vec])),
-            "interpretation": "Sealed final-panel benchmark; correlated positions in four documents; no independent-token significance or broad generalization claim."}
+            "interpretation": "Sealed final-panel benchmark; correlated positions within the reported documents; no independent-token significance or broad generalization claim."}
