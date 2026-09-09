@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pickle
 import sys
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -181,6 +182,7 @@ def test_the_checkpoint_carries_every_unit_with_its_wire_receipt(
 
 def test_a_publication_failure_stops_the_action_instead_of_being_absorbed(
         monkeypatch, tmp_path):
+    from prismaquant.cost_stage_checkpoint import unit_path
     from prismaquant.tessera_publication import PublicationError
 
     campaign, _render = _fixture(monkeypatch, tmp_path)
@@ -196,27 +198,62 @@ def test_a_publication_failure_stops_the_action_instead_of_being_absorbed(
     monkeypatch.setattr(torch, "save", failing)
     with pytest.raises(PublicationError):
         campaign.main([*_argv(tmp_path), "--publication-overlap-bytes", str(1 << 20)])
-    # No cost table, and no journal row for a unit whose render never landed.
+    # No cost table, and no journal row for the unit whose render never
+    # landed. The failing save is the second one, and the second save is
+    # unit one's, because the writer publishes in submission order and
+    # submission order is the anchor order: so unit one has a row and unit
+    # two must not.
     assert not (tmp_path / "cost.pkl").exists()
-    checkpoint = tmp_path / "campaign.anchors.json"
-    if checkpoint.exists():
-        text = checkpoint.read_text()
-        assert saved[1].split("__")[0] not in text or "anchors" not in text
+    root = tmp_path / "campaign.anchors.json.parts"
+    assert not unit_path(root, UNITS[1]).exists(), (
+        "a unit whose bytes failed to land was journalled anyway")
+    assert unit_path(root, UNITS[0]).exists(), (
+        "the unit that did land lost its row when the action unwound")
 
 
+@pytest.mark.parametrize("apply_timing", ["eager", "deferred"])
 def test_a_fatal_encode_error_still_journals_the_batch_that_succeeded(
-        monkeypatch, tmp_path):
+        monkeypatch, tmp_path, apply_timing):
     """The regression the synchronous per-batch checkpoint did not have.
 
     With a writer behind, unit one's row is not journalled at the moment its
     encode returns; it is journalled when its bytes land.  If unit two then
     fails fatally, unwinding must still commit unit one.  Losing it would mean
     the resume re-encodes work the run really finished.
+
+    Which of the two unwind paths runs depends on a RACE the test must not
+    inherit: whether the writer had finished unit one by the time the next
+    batch called ``apply_completed``.
+
+    * ``deferred`` -- it had not, so the anchor is still staged and
+      ``ledger.close`` is what journals it.
+    * ``eager`` -- it had, so the row is already in the pending checkpoint
+      and ``close`` finds nothing; only an unconditional flush writes it.
+
+    On an unloaded box the second is the likely one, which is why the flush
+    in the ``finally`` may not be made conditional on ``close`` having
+    journalled something.  Both are forced here rather than sampled.
     """
     from prismaquant.cost_stage_checkpoint import unit_path
     from prismaquant.tessera_render import HessianContractError
 
     campaign, _render = _fixture(monkeypatch, tmp_path)
+    ledger_cls = campaign._AnchorPublicationLedger
+    original_apply = ledger_cls.apply_completed
+    if apply_timing == "eager":
+        def apply_completed(self):
+            # Wait the writer out, so every finished receipt is applied and
+            # sitting unflushed in the pending checkpoint when the encode
+            # below raises.
+            if self._publisher is not None:
+                while self._publisher.outstanding:
+                    time.sleep(0.005)
+            return original_apply(self)
+    else:
+        def apply_completed(self):
+            # Never applied, so everything is still staged at close.
+            return 0
+    monkeypatch.setattr(ledger_cls, "apply_completed", apply_completed)
     real_encode = campaign._encode_and_render
     calls = []
 

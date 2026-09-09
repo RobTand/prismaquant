@@ -629,3 +629,72 @@ def test_one_publication_key_cannot_hold_two_anchors():
             ledger.record(_Anchor("a.b"), "second")
     finally:
         pub.close()
+
+
+def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
+    """A row's declared demand has to include what its campaign will stage.
+
+    The flag reaches ``selected_anchor_resources`` twice over: the campaign
+    passes its own, and the dispatcher reads it back off the row's argv when
+    it sizes the worker that will admit the row.  Only the second is testable
+    without running a campaign, and it is the one a planning change breaks
+    silently, because a worker sized without the term still runs -- it just
+    runs a campaign holding bytes nobody reserved.
+    """
+    from prismaquant import autoscale
+    from tools import dispatch_tessera_campaign as dispatch
+
+    seen: dict = {}
+
+    def selected(model, **kwargs):
+        seen.update(kwargs)
+        return {"memory_bytes": 100}
+
+    monkeypatch.setattr(autoscale, "selected_anchor_resources", selected)
+    dispatch._streamed_resource_plan(
+        dict(model="/source", campaign_argv=[
+            "--streaming", "--publication-overlap-bytes", "8388608"]),
+        dict(unit_shapes={"a": [3, 4]}, counts={"a": 9}), ["a"],
+        selected_source=True)
+    assert seen["publication_overlap_bytes"] == 8388608
+
+    seen.clear()
+    dispatch._streamed_resource_plan(
+        dict(model="/source", campaign_argv=["--streaming"]),
+        dict(unit_shapes={"a": [3, 4]}, counts={"a": 9}), ["a"],
+        selected_source=True)
+    assert seen["publication_overlap_bytes"] == 0
+
+
+def test_the_plan_charges_the_staging_bound_where_the_anchors_live(monkeypatch):
+    """And the number lands in the phase the staged bytes are resident in."""
+    from prismaquant import autoscale
+
+    # The source census is the part that needs a real checkpoint on disk;
+    # the term under test is added after it, so it is stood in for here.
+    monkeypatch.setattr(autoscale, "streamed_calibration_resources",
+                        lambda *_args, **_kwargs: dict(
+                            live_layer_prefix="layers.",
+                            terms=dict(nonbody_source_bytes=100,
+                                       declared_headroom_bytes=200),
+                            body_layer_bytes={"0": 1000},
+                            body_loader_transient_bytes={"0": 100},
+                            body_source_file_bytes={"0": 900},
+                            unit_source_weight_bytes={"layers.0.proj": 24},
+                            full_hessian_bytes=64, full_prefix_bytes=32,
+                            source_header_sha256="a" * 64))
+    kwargs = dict(unit_shapes={"layers.0.proj": [3, 4]},
+                  counts={"layers.0.proj": 9},
+                  max_act_rows=2, cache_slots=2, prefetch_workers=1,
+                  headroom_gb=0)
+    off = autoscale.selected_anchor_resources("/source", **kwargs)
+    on = autoscale.selected_anchor_resources(
+        "/source", **kwargs, publication_overlap_bytes=8388608)
+    assert off["phases"]["resident_anchors"].get(
+        "publication_staging_bytes", 0) == 0
+    assert on["phases"]["resident_anchors"]["publication_staging_bytes"] == 8388608
+    # Nothing else moved: the term is additive, not a re-sizing.
+    assert {k: v for k, v in on["phases"]["resident_anchors"].items()
+            if k != "publication_staging_bytes"} == {
+        k: v for k, v in off["phases"]["resident_anchors"].items()
+        if k != "publication_staging_bytes"}

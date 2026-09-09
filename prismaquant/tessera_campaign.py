@@ -1907,6 +1907,21 @@ class _AnchorPublicationLedger:
     def active(self) -> bool:
         return self._publisher is not None
 
+    def open(self, publisher) -> None:
+        """Start deferring, from a pass-through that has nothing outstanding.
+
+        The ledger is constructed without a publisher so the rows a seed
+        adopted are journalled inline, on the historical path, before any
+        thread exists.  Attaching one afterwards is only legal while nothing
+        is staged, because a staged anchor belongs to a queue and there was
+        no queue to put it on.
+        """
+        if self._staged or self._records:
+            raise RuntimeError(
+                "the publication ledger cannot start deferring with "
+                f"{len(self._staged)} anchor(s) already staged")
+        self._publisher = publisher
+
     def record(self, anchor, identity) -> None:
         """Journal now, or when this anchor's own bytes have been written."""
         if self._publisher is None:
@@ -4928,14 +4943,13 @@ def _main(argv, *, source_scope) -> int:
     # invariant true without changing it: every anchor row journalled here has
     # a wire receipt beside it, and every one of those receipts was read back
     # off a file that had already landed.
+    # The writer itself is started INSIDE the try below, not here.  A thread
+    # that exists before the region whose ``finally`` closes it is a thread
+    # nothing joins if the setup between the two raises, and the seeded run's
+    # adopted rows are flushed in that gap.  So the ledger is built as a
+    # pass-through, the adopted flush runs inline exactly as it always did,
+    # and the publisher is attached as the first act of the guarded region.
     publisher = None
-    if int(args.publication_overlap_bytes) > 0:
-        from .tessera_publication import BoundedPublisher
-        publisher = BoundedPublisher(
-            budget_bytes=int(args.publication_overlap_bytes))
-        print(f"[campaign] publication overlap: staging up to "
-              f"{int(args.publication_overlap_bytes)} bytes on one writer "
-              "thread", flush=True)
 
     def journal_anchor(anchor, record) -> None:
         """Put one anchor row and its wire receipt into the pending state."""
@@ -4946,7 +4960,7 @@ def _main(argv, *, source_scope) -> int:
         dirty_checkpoint_units.add(name)
 
     ledger = _AnchorPublicationLedger(
-        publisher=publisher,
+        publisher=None,
         make_record=lambda anchor, identity: _checkpoint_wire_record(
             anchor, wire_dir, identity),
         journal_anchor=journal_anchor)
@@ -5074,6 +5088,15 @@ def _main(argv, *, source_scope) -> int:
     # what is queued, so files already computed still land, and it cannot
     # raise, so it cannot mask the exception that brought us here.
     try:
+        if int(args.publication_overlap_bytes) > 0:
+            from .tessera_publication import BoundedPublisher
+            publisher = BoundedPublisher(
+                budget_bytes=int(args.publication_overlap_bytes))
+            ledger.open(publisher)
+            print(f"[campaign] publication overlap: staging up to "
+                  f"{int(args.publication_overlap_bytes)} bytes on one writer "
+                  "thread", flush=True)
+
         round_index = 0
         while True:
             round_index += 1
@@ -5295,8 +5318,16 @@ def _main(argv, *, source_scope) -> int:
             # not replace the exception that brought us here.
             publisher.close()
             try:
-                if ledger.close():
-                    flush_checkpoint()
+                # Unconditional, and that is the point: ``close`` journals
+                # only what the writer finished after the last
+                # ``apply_completed``, but rows journalled BY that call are
+                # in ``dirty_checkpoint_units`` and unwritten until a flush,
+                # and the batch cadence may not have reached one. Flushing
+                # only when ``close`` itself journalled something loses them.
+                # ``flush_checkpoint`` returns on an empty set, so the normal
+                # path still costs nothing.
+                ledger.close()
+                flush_checkpoint()
             except Exception as cleanup_error:  # noqa: BLE001
                 print("[campaign] could not journal the completed anchors "
                       f"while unwinding: {type(cleanup_error).__name__}: "

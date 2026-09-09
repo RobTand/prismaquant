@@ -19,9 +19,13 @@ second cache and no change to what a published file is. An anchor is added to
 the checkpoint invariant that every journalled anchor row carries a wire
 receipt read back off a published file is unchanged. A round, a deadline stop
 and the end of the loop are drain barriers; the publisher's lifetime is a
-`try`/`finally`, and unwinding commits the rows whose receipts really
-completed before dropping what is still staged, so a batch that succeeded
-before a later one failed keeps its journal row.
+`try`/`finally` it is started inside, and unwinding commits the rows whose
+receipts really completed before dropping what is still staged, so a batch
+that succeeded before a later one failed keeps its journal row. That commit
+is unconditional: rows a batch's `apply_completed` had already put into the
+pending checkpoint are unwritten until a flush, and the batch cadence need
+not have reached one, so flushing only when the unwind itself journalled
+something would lose exactly the batch it exists to keep.
 
 The byte budget is a bound rather than a statistic: the producer reserves
 before it allocates, an artifact larger than the whole budget is refused

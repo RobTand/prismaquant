@@ -186,8 +186,8 @@ class BoundedPublisher:
 
         This does not raise on a writer failure.  The keys it returns are files
         that exist, and a caller that journals them is recording work that was
-        really done; the failure is raised by the next :meth:`submit` or
-        :meth:`drain`, and callers that must notice it without either can read
+        really done; the failure is raised by the next :meth:`reserve`,
+        :meth:`submit` or :meth:`drain`, and callers that must notice it without either can read
         :attr:`failure`.
         """
         with self._cond:
