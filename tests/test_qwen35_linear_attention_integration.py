@@ -34,8 +34,10 @@ from transformers.models.qwen3_5.modeling_qwen3_5 import (
 from prismaquant.layer_streaming import (
     _call_layer,
     _compute_attention_mask,
+    _compute_position_embeddings,
     _layer_attention_type,
 )
+from prismaquant.model_profiles.qwen3_5 import Qwen3_5Profile
 
 
 @pytest.fixture(autouse=True)
@@ -101,6 +103,7 @@ def _tiny_hybrid():
         def __init__(self):
             super().__init__()
             self.config = cfg
+            self.rotary_emb = rotary
 
     return cfg, _Base(), layers, rotary
 
@@ -110,7 +113,10 @@ def _stream(base, layers, rotary, hidden, attention_mask):
         hidden.size(0), -1)
     masks = _compute_attention_mask(base, hidden, position_ids,
                                     attention_mask=attention_mask)
-    pe = rotary(hidden, position_ids)
+    pe = _compute_position_embeddings(base, hidden, position_ids, Qwen3_5Profile())
+    expected = rotary(hidden, position_ids.unsqueeze(0).expand(3, -1, -1))
+    for actual, reference in zip(pe, expected):
+        torch.testing.assert_close(actual, reference, rtol=0, atol=0)
     out = hidden
     for layer in layers:
         out = _call_layer(layer, out, position_embeddings=pe,
@@ -161,6 +167,22 @@ def test_streaming_forward_unpadded_batch():
     assert bool(torch.isfinite(out).all())
 
 
+def test_explicit_rotary_axes_are_preserved():
+    _, base, _, rotary = _tiny_hybrid()
+    hidden = torch.randn(2, 6, 64)
+    positions = torch.arange(36).reshape(3, 2, 6)
+    expected = rotary(hidden, positions)
+    actual = _compute_position_embeddings(base, hidden, positions, Qwen3_5Profile())
+    for first, second in zip(actual, expected):
+        torch.testing.assert_close(first, second, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("shape", [(6,), (2, 2, 6), (4, 2, 6)])
+def test_invalid_rotary_axes_refuse(shape):
+    with pytest.raises(ValueError, match="Qwen rotary positions"):
+        Qwen3_5Profile().rotary_position_ids(torch.zeros(shape, dtype=torch.long))
+
+
 @pytest.mark.skipif(
     not _GUARDLESS_MASK,
     reason="pre-5.15 apply_mask_to_padding_states still shape-guards "
@@ -169,10 +191,10 @@ def test_dense_mask_crashes_real_linear_layer():
     # Documents the pre-fix failure mode this branch removes: a dense
     # [1, 1, T, T] additive mask fed to a real GatedDeltaNet layer
     # broadcasts against hidden_states and raises a trailing-dim mismatch.
-    _, _, layers, rotary = _tiny_hybrid()
+    _, base, layers, rotary = _tiny_hybrid()
     hidden = torch.randn(1, 6, 64)
     position_ids = torch.arange(6).unsqueeze(0)
-    pe = rotary(hidden, position_ids)
+    pe = _compute_position_embeddings(base, hidden, position_ids, Qwen3_5Profile())
     dense = torch.zeros(1, 1, 6, 6)
     with pytest.raises(RuntimeError, match="must match the size"):
         layers[0](hidden_states=hidden, attention_mask=dense,

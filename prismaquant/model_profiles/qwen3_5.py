@@ -92,6 +92,19 @@ class Qwen3_5Profile(ModelProfile):
     def name(self) -> str:
         return "qwen3_5"
 
+    def rotary_position_ids(self, position_ids):
+        """Supply Qwen's three rotary axes for a text-only streamed pass.
+
+        Transformers 5.17 moved this expansion from rotary into the model
+        forward, which the streamed driver bypasses. An explicit multiaxis
+        input already carries its own positions and must be preserved.
+        """
+        if position_ids.ndim == 2:
+            return position_ids.unsqueeze(0).expand(3, -1, -1)
+        if position_ids.ndim == 3 and position_ids.shape[0] == 3:
+            return position_ids
+        raise ValueError("Qwen rotary positions require [batch, tokens] or [3, batch, tokens]")
+
     def _declared_moe_layout(self) -> str:
         """Classify the checkpoint's declared MoE entrypoint exactly.
 

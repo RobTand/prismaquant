@@ -1,0 +1,78 @@
+{
+  "schema": "prismaquant.qwen35_rotary_517_cpu_audit/1",
+  "before": [
+    {
+      "action": "a4894ddc35827e3b22cc3636bfae53c66477373f89ff9c1e5a6b8c3549991fc0",
+      "returncode": 1,
+      "cleanup_complete": true,
+      "source_snapshot": {
+        "commit": "71bf953cf65e24e7f771665cb375a68ba860df42",
+        "input": {
+          "bytes": 27790132,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "57ab309f7c014a68d7bf3eca1c7817644fdc6335b2627c58f6eed6f1ec9aa412"
+        },
+        "parent": "7f4069b294e3bd81d3e8e1dba8ad11a64ba1c297",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "result": "3 failed, 2 passed; IndexError at native rotary with 2D positions"
+    },
+    {
+      "action": "b831e5bc28bc4004464beb72a991ae6490b690639cf3ab53474af895dc2cb057",
+      "returncode": 1,
+      "cleanup_complete": true,
+      "source_snapshot": {
+        "commit": "06f3a239604d6f312302db54ca1e6a012f8975d1",
+        "input": {
+          "bytes": 27779528,
+          "id": "pbrun.checkout-snapshot",
+          "sha256": "a0b18fb2b444a9f09dddc29cd126584ef5536334ff85ac257e25b2ac4eb30aa7"
+        },
+        "parent": "7f4069b294e3bd81d3e8e1dba8ad11a64ba1c297",
+        "refs": {},
+        "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+        "subdirectory": "."
+      },
+      "result": "3 failed, 2 passed; IndexError at native rotary with 2D positions"
+    }
+  ],
+  "after": [
+    {
+      "action": "e0de25c8d30efec49623307ed09d2a4157e17b36a088429f6649256f4614b058",
+      "receipt": "734d4cd3f3c8fe6f900da48a17455266aa3ca0186a797b179543baaf4647de10",
+      "payload_sha256": "f53404a220d3729e362802fb616f0de264916454a85792fc77877479193e6c2c",
+      "snapshot": "b8d4b4a1927cdec036d82378cd5bc4366d4bbdb6",
+      "source_diff_from_commit": [
+        ".pbrun-closure.f0322bb303fa060a.json",
+        "docs/ARCHITECTURE.md"
+      ],
+      "stdout_tail": "Transformers 5.16.1\nbringing up nodes...\nbringing up nodes...\n\n......................................................................   [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/_pytest/config/__init__.py:1345\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio\n    self._mark_plugins_for_rewrite(hook, disable_autoload)\n\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n70 passed, 57 warnings in 7.22s\n",
+      "source_review": "Only PB closure metadata and the architecture stamp branch-name correction differ; code/test bytes identical."
+    },
+    {
+      "action": "ec105f10bded49550ab2fc2fe516edd4f4385cd964ad0ff679bb4733ac89189b",
+      "receipt": "af0db8d0417be3c83b6251ddbade342c3b9d1bb2dbc3019b7c3d41979412c219",
+      "payload_sha256": "9582e0caf4f8b0c027e1cd9c1d5615e04ea9fdb22ef1d8b19a3506708a75beee",
+      "snapshot": "b09ee1fd6fdb99884ad7dd748bef6e92f4540061",
+      "source_diff_from_commit": [
+        ".pbrun-closure.40eedef2794fd25c.json",
+        "docs/ARCHITECTURE.md"
+      ],
+      "stdout_tail": "Transformers 5.17.0\nbringing up nodes...\nbringing up nodes...\n\n......................................................................   [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/_pytest/config/__init__.py:1345\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio\n    self._mark_plugins_for_rewrite(hook, disable_autoload)\n\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n70 passed, 57 warnings in 7.18s\n",
+      "source_review": "Only PB closure metadata and the architecture stamp branch-name correction differ; code/test bytes identical."
+    }
+  ],
+  "scope": "CPU-only, Python3.12.11; Transformers5.16.1 and scoped5.17.0 overlay; each after action 4CPU/6GiB/native1/priority-10; 70passed0skip per version and py_compile for three touched modules.",
+  "hosted_regression": {
+    "run": 34397560209,
+    "transformers": "5.17.0",
+    "failed": 3,
+    "passed": 7538,
+    "skipped": 207,
+    "xfailed": 3,
+    "subtests_passed": 192
+  },
+  "interpretation": "Exact native three-axis rotary parity on real tiny random-weight Qwen hybrid forwards. No GPU, quality/bitrate or serving-speed claim."
+}
