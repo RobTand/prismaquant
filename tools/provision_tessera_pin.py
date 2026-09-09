@@ -545,11 +545,22 @@ def main(argv: list[str] | None = None) -> int:
         copy = build / "tree"
         shutil.copytree(source, copy)
         report["built_from"] = str(copy)
-        subprocess.run(
+        # pip writes to stdout, and stdout here is the JSON report a caller
+        # parses.  Its output is worth keeping and belongs on stderr with the
+        # rest of the narration.
+        done = subprocess.run(
             [args.python, "-m", "pip", "install", "--no-deps",
              "--no-build-isolation", "--force-reinstall", str(copy)],
-            check=True,
+            capture_output=True, text=True,
         )
+        sys.stderr.write(done.stdout)
+        sys.stderr.write(done.stderr)
+        if done.returncode != 0:
+            report["action"] = "the install failed"
+            report["pip_returncode"] = done.returncode
+            report["pip_error"] = (done.stdout + done.stderr).strip().splitlines()[-1:]
+            print(json.dumps(report, indent=1))
+            return 1
     finally:
         shutil.rmtree(build, ignore_errors=True)
 

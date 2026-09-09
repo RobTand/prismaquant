@@ -52,6 +52,12 @@ def main() -> int:
         shutil.rmtree(env)
     venv.create(env, with_pip=True)
     python = env / "bin" / "python"
+    # The provisioner installs with --no-build-isolation, which is right for a
+    # fleet venv that already carries setuptools and wrong for a venv made two
+    # lines ago: 3.12 stopped seeding it.  Giving the throwaway one the build
+    # backend keeps the acceptance about the provisioner.
+    subprocess.run([str(python), "-m", "pip", "install", "-q", "setuptools"],
+                   check=True)
 
     out: dict = {"commit": commit, "venv": str(env)}
 
