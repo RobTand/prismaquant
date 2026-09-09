@@ -3,6 +3,27 @@
 As of: 2026-09-08 · `integration/glm-first-artifact-pricing-delivery`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-08, `fix/glm-selected-verified-capture`) for opt-in
+`--capture-load-policy` on selected streaming reuse of a SHA-bound complete
+calibration capture. The existing verified activation loader authenticates
+one private serialized buffer against each original manifest entry, validates
+its archive/storage/FP32 tensors, and releases the buffer before CUDA transfer.
+The dispatcher and runtime share the selected-resource plan's additional
+capture-prefetch phase: resident selected weights/X/H, one decoded storage S,
+private file buffer F, full-file source-page exposure F, explicit scratch M,
+and existing headroom. All original phases and physical refusal gates remain.
+Digest-named `capture-load-execution-<sha256>.json` sidecars record the actual
+load chain, byte counts, original manifest binding, resources and memory guard;
+selected-source provenance binds the sidecar's path/SHA. A later refused or
+interrupted resume cannot replace an earlier sidecar. The explicit CLI policy
+remains in checkpoint settings and changed implementation source remains a
+resume boundary; this does not authorize silent reuse of old priced anchors.
+The canonical capture identity and payload bytes remain unchanged; the option
+does not run calibration forward or reprobe source projections. The option is
+still unset by default. Gates: `tests/test_selected_verified_capture.py`,
+existing verified-load, selected-source, admission and campaign resume tests.
+CPU contracts alone do not establish native I/O, speed or served quality.
+
 Re-stamped (2026-09-08, `feat/tessera-campaign-family-restriction`) for the optional
 campaign `--family-restriction` pricing contract. Its closed
 `prismaquant.tessera_campaign_family_restriction.v1` JSON supplies nonempty
@@ -159,6 +180,7 @@ and per-node runtime evidence. Configured topology and the helper's source
 bytes join existing gold provenance. Full-vocab final-position KL remains
 distinct from HTTP top-K KL. This instrument change touches no frozen pricing
 package input, Tessera producer, serving qualification or performance claim.
+
 
 Re-stamped (2026-09-08, `integrate/glm-packed-source-20260908`) for the
 synchronized development/serving dependency pin to Tessera `07ad344c3275`
@@ -392,8 +414,9 @@ remain covered by the physical guard's runtime margin.
 The raw buffer expires before CPU results can transfer to CUDA. File changes,
 unknown owners, overbudget storage and unsupported copying reads refuse.
 
-`--capture-load-policy` accepts that JSON only with streamed
-`shared-inputs-bounded-v1` capture. Materialization and final sealing price
+`--capture-load-policy` accepts that JSON with streamed
+`shared-inputs-bounded-v1` capture or selected streaming reuse of a hash-bound
+complete capture. Materialization and final sealing price
 private serialized buffer, full-file source-page exposure and scratch separately; forward/source-validation phases
 retain their existing terms. The unchanged physical cap must admit the maximum
 phase. Joint preparation accepts the same top-level `capture_load_policy` only

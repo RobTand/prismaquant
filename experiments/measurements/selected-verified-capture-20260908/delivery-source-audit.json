@@ -1,0 +1,35 @@
+{
+  "schema": "prismaquant.selected_reader_delivery_source_audit.v1",
+  "tested_tree": "dc59bcf099",
+  "delivery_tree": "27dc5bd8fc32f0f25bb9c08ba402a5eece25044e",
+  "base": "2cf67c1a6641e9bc44c7972739a6ce02d95dd645",
+  "byte_identical": [
+    {
+      "path": "prismaquant/autoscale.py",
+      "sha256": "ffd2dd1380b77514e9e2ed236486858c52c9c3ccf3e1988d74ce38df2c1efaea",
+      "byte_identical": true
+    },
+    {
+      "path": "prismaquant/tessera_calibration_cache.py",
+      "sha256": "39b30efb634e3605886b52dfaac6a74f8953f2237583e029b197983bded80156",
+      "byte_identical": true
+    },
+    {
+      "path": "prismaquant/perturbed_x_cache.py",
+      "sha256": "ecd243410a8cb578ed7a8d80f7544fdef8a05b92278d7663c239746b397ed65c",
+      "byte_identical": true
+    },
+    {
+      "path": "tests/test_selected_verified_capture.py",
+      "sha256": "cf7630e0cf58c86cdf423be29e3622082376b300d871d1eb8d35b5596f5a901f",
+      "byte_identical": true
+    },
+    {
+      "path": "experiments/glm_full_capture_profile.py",
+      "sha256": "56c1d2dde5c5ed1135983c20d60ea4343adee926f374d91ca74f380668f56ca6",
+      "byte_identical": true
+    }
+  ],
+  "other_production_differences": "tessera_campaign.py and dispatch_tessera_campaign.py omit the separate unmerged family-restriction implementation present in the tested branch; remaining inherited changes are current-main gold tooling and related documentation/tests.",
+  "validation_limit": "Read-only source comparison; not a test result on the delivery tree. Native after-change measurement remains pending."
+}

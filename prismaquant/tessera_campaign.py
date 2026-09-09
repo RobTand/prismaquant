@@ -3811,6 +3811,34 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     return 0
 
 
+def _prefetch_selected_capture(args, *, expected_identity, census, names, device,
+                               resources, guard=None):
+    """Use the existing resident prefetch and publish its separate load receipt."""
+    import hashlib
+    from . import tessera_calibration_cache as store
+    from .cost_stage_checkpoint import atomic_write_bytes
+    from .perturbed_x_cache import normalize_verified_activation_load
+    policy = normalize_verified_activation_load(args.capture_load_policy)
+    execution = {} if policy is not None else None
+    values, capture = store.prefetch_capture(args.calibration_cache,
+        expected_identity=expected_identity, census=census, names=names, device=device,
+        expected_sha256=args.calibration_cache_sha256,
+        resource_check=None if guard is None else guard.check, release_file_pages=True,
+        **(dict(verified_load_policy=policy, load_execution=execution) if policy is not None else {}))
+    if execution is None:
+        return values, capture, None
+    record = dict(schema='prismaquant.capture_load_run.v1', capture=capture,
+        prefetch=execution, resources=resources,
+        memory_guard=None if guard is None else guard.snapshot())
+    raw = (json.dumps(record, indent=2, sort_keys=True, allow_nan=False)+'\n').encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    # A later refused/interrupted resume must not replace execution evidence
+    # already referenced by a surviving priced output.
+    output = Path(args.cache_dir)/f'capture-load-execution-{digest}.json'
+    atomic_write_bytes(output, raw)
+    return values, capture, dict(path=str(output.resolve()), sha256=digest)
+
+
 def main(argv: "Sequence[str] | None" = None) -> int:
     from contextlib import ExitStack
     with ExitStack() as source_scope:
@@ -3944,7 +3972,7 @@ def _main(argv, *, source_scope) -> int:
                     choices=("legacy", "shared-inputs-release-v1", "shared-inputs-bounded-v1"),
                     help="Opt-in shared capture; bounded also checks phase ownership and physical memory.")
     ap.add_argument("--capture-load-policy", type=json.loads, default=None,
-                    help="Explicit verified activation load v1 JSON policy; requires bounded capture.")
+                    help="Explicit verified activation load v1 JSON policy; requires bounded capture or hash-bound selected streaming reuse.")
     ap.add_argument('--export-hessian-reference-policy', type=json.loads, default=None,
                     help='Opt-in canonical H reference load-policy JSON; requires selected reuse of a complete capture.')
     ap.add_argument("--capture-calibration-out", default=None,
@@ -3959,15 +3987,15 @@ def _main(argv, *, source_scope) -> int:
         args.capture_load_policy = normalize_verified_activation_load(args.capture_load_policy)
     except ValueError as exc:
         ap.error(str(exc))
-    if args.capture_load_policy is not None and not (
-            args.streaming and args.capture_calibration_out and
-            args.streaming_capture_policy == 'shared-inputs-bounded-v1'):
-        ap.error('--capture-load-policy requires streamed shared-inputs-bounded-v1 capture')
     if args.streaming_capture_policy != "legacy" and not (args.streaming and args.capture_calibration_out):
         ap.error("--streaming-capture-policy requires --streaming and --capture-calibration-out")
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if args.capture_load_policy is not None and not (selected_source or (
+            args.streaming and args.capture_calibration_out and
+            args.streaming_capture_policy == 'shared-inputs-bounded-v1')):
+        ap.error('--capture-load-policy requires streamed shared-inputs-bounded-v1 capture or hash-bound selected streaming reuse')
     if args.export_hessian_reference_policy is not None:
         if not selected_source:
             ap.error('--export-hessian-reference-policy requires selected reuse of a hash-bound complete capture')
@@ -4234,7 +4262,9 @@ def _main(argv, *, source_scope) -> int:
             cache_slots=args.streaming_cache_slots,
             prefetch_workers=args.streaming_prefetch_workers,
             headroom_gb=args.streaming_cache_headroom_gb,
-            anchor_batch_size=args.anchor_batch_size)
+            anchor_batch_size=args.anchor_batch_size,
+            **(dict(capture_load_policy=args.capture_load_policy)
+               if args.capture_load_policy is not None else {}))
         if device == 'cuda':
             # Read first, then admit. The plan states DELTAS over whatever this
             # process already holds -- interpreter, torch, the CUDA runtime,
@@ -4308,12 +4338,17 @@ def _main(argv, *, source_scope) -> int:
             print(f"[campaign] complete calibration capture reused: {record}", flush=True)
             return 0
     if args.calibration_cache:
-        values, calibration_cache = calibration_store.prefetch_capture(
-            args.calibration_cache, expected_identity=capture_identity,
-            census=census, names=targets, device=device,
-            expected_sha256=args.calibration_cache_sha256,
-            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
-                    release_file_pages=True) if selected_source else {}))
+        if selected_source:
+            values, calibration_cache, load_receipt = _prefetch_selected_capture(args,
+                expected_identity=capture_identity, census=census, names=targets,
+                device=device, resources=selected_resources, guard=selected_guard)
+            if load_receipt is not None:
+                selected_source_preparation['capture_load_execution'] = load_receipt
+        else:
+            values, calibration_cache = calibration_store.prefetch_capture(
+                args.calibration_cache, expected_identity=capture_identity,
+                census=census, names=targets, device=device,
+                expected_sha256=args.calibration_cache_sha256)
         acts, hessians, hessian_rows, act_max_abs = values
         if selected_guard is not None:
             selected_guard.check('after_selected_capture_prefetch')

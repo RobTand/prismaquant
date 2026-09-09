@@ -310,7 +310,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
 
 def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               cache_slots, prefetch_workers, headroom_gb,
-                              anchor_batch_size=1):
+                              anchor_batch_size=1, capture_load_policy=None):
     """Bound selected-source preparation separately from resident encoding.
 
     This extends the source loader's header/dtype accounting. No source
@@ -358,6 +358,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     steady-state step against the plan (RobTand/prismaquant#390).
     """
     import math
+    from .perturbed_x_cache import normalize_verified_activation_load
+    capture_load_policy = normalize_verified_activation_load(capture_load_policy)
     if not unit_shapes or type(anchor_batch_size) is not int or anchor_batch_size < 1:
         raise ValueError('selected anchors require nonempty units and a positive batch size')
     source = streamed_calibration_resources(model_path, unit_shapes=unit_shapes,
@@ -462,7 +464,20 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         serialization_scratch_bytes=2*widest_h)
     phases = dict(source_preparation=preparation, export_inputs=export_inputs,
                   resident_anchors=encoding)
+    if capture_load_policy is not None:
+        # The existing loader retains one private serialized buffer and may
+        # leave its entire source file in the kernel despite page advice.
+        # Decode can coexist with already resident selected X/H, but source
+        # staging and encoder factors belong to different completed phases.
+        phases['capture_prefetch'] = dict(common,
+            selected_hessian_bytes=source['full_hessian_bytes'],
+            selected_prefix_bytes=source['full_prefix_bytes'],
+            capture_decode_storage_bytes=widest_h+widest_x,
+            capture_serialized_buffer_bytes=capture_load_policy['max_buffer_bytes'],
+            capture_source_page_cache_bytes=capture_load_policy['max_buffer_bytes'],
+            capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'])
     return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases,
+        **({'capture_load_policy': capture_load_policy} if capture_load_policy is not None else {}),
         memory_bytes=max(sum(phase.values()) for phase in phases.values()),
         selected_source_weight_bytes=weights, selected_layers=layers,
         source_header_sha256=source['source_header_sha256'],

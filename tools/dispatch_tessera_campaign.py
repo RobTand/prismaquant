@@ -200,7 +200,9 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
                         argument('--streaming-cache-headroom-gb', 24., float)))
     if selected_source:
         return selected_anchor_resources(spec['model'], **options,
-            anchor_batch_size=argument('--anchor-batch-size', 1))
+            anchor_batch_size=argument('--anchor-batch-size', 1),
+            **(dict(capture_load_policy=argument('--capture-load-policy', None, json.loads))
+               if '--capture-load-policy' in argv else {}))
     return streamed_calibration_resources(spec['model'], **options,
         nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
         capture_policy=argument('--streaming-capture-policy', 'legacy', str))
