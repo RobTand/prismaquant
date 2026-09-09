@@ -61,19 +61,31 @@ def main():
     parser.add_argument('--root',required=True)
     parser.add_argument('--action',required=True)
     parser.add_argument('--reference',required=True)
+    parser.add_argument('--completed-prefix',action='store_true',
+        help='Verify four completed arms of a failed six-arm action; never report a complete comparison.')
     args=parser.parse_args()
     root=Path(args.root); fleet=Path('/mnt/shared/prismabuild-fleet'); key=args.action
-    terminal=json.loads((fleet/'pb-queue/done'/f'{key}.json').read_text())
-    assert terminal['detail']['returncode']==0 and terminal['resource_scope_cleanup']['complete']
-    receipt=json.loads((fleet/'cas/actions/v3'/key[:2]/f'{key}.json').read_text())
-    body={k:v for k,v in receipt.items() if k!='receipt_sha256'}
-    assert hashlib.sha256(json.dumps(body,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()==receipt['receipt_sha256']
-    meta=receipt['result']; payload=fleet/'cas/blobs'/meta['sha256'][:2]/meta['sha256']
-    assert digest(payload)==meta['sha256'] and payload.stat().st_size==meta['bytes']
+    terminal=json.loads((fleet/('pb-queue/failed' if args.completed_prefix else 'pb-queue/done')/f'{key}.json').read_text())
+    assert terminal['detail']['returncode']==(1 if args.completed_prefix else 0) and terminal['resource_scope_cleanup']['complete']
+    if args.completed_prefix:
+        # Failed actions have terminal output, not a successful CAS receipt.
+        stdout=terminal['detail']['stdout']
+    else:
+        receipt=json.loads((fleet/'cas/actions/v3'/key[:2]/f'{key}.json').read_text())
+        body={k:v for k,v in receipt.items() if k!='receipt_sha256'}
+        assert hashlib.sha256(json.dumps(body,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()==receipt['receipt_sha256']
+        meta=receipt['result']; payload=fleet/'cas/blobs'/meta['sha256'][:2]/meta['sha256']
+        assert digest(payload)==meta['sha256'] and payload.stat().st_size==meta['bytes']
+        stdout=payload.read_text()
     result=json.loads((root/'result.json').read_text())
-    assert result['status']=='complete' and result['full_campaign_complete'] is False
-    printed=[json.loads(line) for line in payload.read_text().splitlines() if line.startswith('{"label":')]
-    assert printed==result['arms'] and len(printed)==6
+    assert result['status']==('failed' if args.completed_prefix else 'complete') and result['full_campaign_complete'] is False
+    arms=result['arms']
+    if args.completed_prefix:
+        assert len(arms)==5 and 'cycle_seconds' not in arms[-1]
+        assert result['error']=="RuntimeError('selected anchor cgroup budget is smaller than its checked phase plan')"
+        arms=arms[:4]
+    printed=[json.loads(line) for line in stdout.splitlines() if line.startswith('{"label":')]
+    assert printed==arms and len(printed)==(4 if args.completed_prefix else 6)
     assert result['producer_source_sha256']=='bcad2ef2a7fdec2aab51b30d59f1f5e10b4933637ca4ffc74ee05e20816c1822'
     reference=json.loads(Path(args.reference).read_text())
     old=reference['arms'][0]['signatures']
@@ -86,7 +98,8 @@ def main():
             compared+=1
     assert compared==len(old)>0
     observer=json.loads((root/'observer/result.json').read_text())
-    assert observer['status']=='complete' and not observer['errors']
+    assert observer['status']==('failed' if args.completed_prefix else 'complete')
+    if not args.completed_prefix: assert not observer['errors']
     nd=[json.loads(line) for line in (root/'observer/netdata.jsonl').read_text().splitlines()]
     power={}
     for source in json.loads((root/'root-pqteld-sources.json').read_text()):
@@ -96,7 +109,7 @@ def main():
     assert set(power)=={'sparky','sparklina'}
     from prismaquant.cost_stage_checkpoint import _load_unit, unit_path
     reports=[]; profiles=[]
-    for index,arm in enumerate(result['arms']):
+    for index,arm in enumerate(arms):
         enabled=bool(arm['overlap_bytes']); assert enabled==(index in (1,3,4))
         assert arm['signatures']==signatures and arm['exact_parity'] and arm['returncode']==0
         runroot=root/arm['label']; manifest=json.loads((runroot/'cost.anchors.json').read_text())
@@ -137,15 +150,18 @@ def main():
         reports.append(dict(label=arm['label'],enabled=enabled,seconds=arm['cycle_seconds'],**j,
             main_io_union_seconds=main_io,io=io,publication=stats,guard=guard,
             before_collection=arm['before_collection'],after_collection=arm['after_collection']))
-    assert terminal['detail']['profile']['blob_sha256']==result['arms'][1]['profiles'][0]['sha256']
+    if not args.completed_prefix:
+        assert terminal['detail']['profile']['blob_sha256']==arms[1]['profiles'][0]['sha256']
     totals={}
     for enabled in (False,True):
-        arms=[a for a in reports[2:] if a['enabled']==enabled];assert len(arms)==2
+        arms=[a for a in reports[2:] if a['enabled']==enabled];assert len(arms)==(1 if args.completed_prefix else 2)
         seconds=sum(a['seconds'] for a in arms);joules=sum(a['joules'] for a in arms)
         totals['async' if enabled else 'sync']=dict(seconds=seconds,joules=joules,mean_w=joules/seconds,
-            units_per_second=2*result['units']/seconds,units_per_joule=2*result['units']/joules)
+            units_per_second=len(arms)*result['units']/seconds,units_per_joule=len(arms)*result['units']/joules)
     hosts={h:len([v for v in nd if v['host']==h]) for h in power};assert all(hosts.values())
-    print(json.dumps(dict(status='PASS',action=key,host=terminal['claimed_host'],units=result['units'],
+    print(json.dumps(dict(status='COMPLETED_PREFIX_VERIFIED' if args.completed_prefix else 'PASS',
+        complete_comparison=not args.completed_prefix,failed_action_error=result.get('error'),
+        action=key,host=terminal['claimed_host'],units=result['units'],
         full_campaign_complete=False,arms=reports,profiles=profiles,totals=totals,
         throughput_ratio=totals['sync']['seconds']/totals['async']['seconds'],
         work_per_joule_ratio=totals['sync']['joules']/totals['async']['joules'],netdata_samples=hosts,
