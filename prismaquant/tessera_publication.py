@@ -34,11 +34,15 @@ Ownership and bounds:
   thread that owns the device work -- and then transfers them.  A submitted job
   owns its tensor and its blob until it is published, and nothing else may
   write to them.
-* Every job is charged ``tensor.nbytes + len(blob)`` and :meth:`submit` blocks
-  once the outstanding charge would exceed the budget, so staging cannot grow
-  without limit while the writer falls behind.  A single artifact larger than
-  the whole budget still publishes: it waits for an empty queue rather than
-  waiting for room that can never appear.
+* **The budget is reserved before the bytes are made, not after.**  The caller
+  calls :meth:`reserve` with the size it is about to stage, and that call is
+  what blocks; only then does it allocate.  Charging at submit time would have
+  left the producer holding one more artifact than the budget allows, because
+  the copy it is about to hand over already exists by then.  An artifact
+  larger than the whole budget is refused rather than admitted as a special
+  case: admitting it would mean the declared bound is not the bound, and the
+  answer to a render that does not fit is a bigger budget, chosen by whoever
+  is accounting for the memory.
 * One writer thread and a FIFO queue, so jobs run in submission order and
   completions are reported in that order.  Recovery stays deterministic.
 
@@ -108,6 +112,7 @@ class BoundedPublisher:
         self._queued: deque[PublicationJob] = deque()
         self._done: deque[Hashable] = deque()
         self._charged = 0
+        self._reserved = 0
         self._outstanding = 0
         self._failure: BaseException | None = None
         self._closing = False
@@ -123,26 +128,57 @@ class BoundedPublisher:
 
     # -- caller side --------------------------------------------------------
 
-    def submit(self, job: PublicationJob) -> None:
-        """Hand over one unit's staged bytes, blocking while over budget."""
-        charge = int(job.charged_bytes)
+    def reserve(self, nbytes: int) -> None:
+        """Take room for bytes that do not exist yet, blocking until it fits.
+
+        The caller must follow a successful reserve with exactly one
+        :meth:`submit` of that size, or with :meth:`release`.
+        """
+        charge = int(nbytes)
+        if charge < 0:
+            raise ValueError("cannot reserve negative bytes")
+        if charge > self._budget:
+            raise PublicationError(
+                f"one artifact of {charge} bytes does not fit a publication "
+                f"budget of {self._budget}; raise --publication-overlap-bytes "
+                "or publish synchronously. Admitting it would mean the "
+                "declared bound is not the bound.")
         with self._cond:
             self._raise_failure()
             if self._closing:
                 raise PublicationError("publisher is closed; nothing more can be staged")
             waited = time.monotonic()
-            # ``self._charged`` in the guard is what admits an artifact bigger
-            # than the entire budget: it waits for an empty queue, and then
-            # goes, instead of waiting for room that cannot appear.
-            while self._charged and self._charged + charge > self._budget:
+            while self._charged + charge > self._budget:
                 self._cond.wait()
                 self._raise_failure()
             self._submit_blocked_seconds += time.monotonic() - waited
-            self._queued.append(job)
             self._charged += charge
-            self._outstanding += 1
+            self._reserved += charge
             if self._charged > self._peak_charged_bytes:
                 self._peak_charged_bytes = self._charged
+
+    def release(self, nbytes: int) -> None:
+        """Give back a reservation whose bytes were never staged."""
+        charge = int(nbytes)
+        with self._cond:
+            self._charged -= charge
+            self._reserved -= charge
+            self._cond.notify_all()
+
+    def submit(self, job: PublicationJob) -> None:
+        """Hand over one unit's staged bytes against an existing reservation."""
+        charge = int(job.charged_bytes)
+        with self._cond:
+            self._raise_failure()
+            if self._closing:
+                raise PublicationError("publisher is closed; nothing more can be staged")
+            if charge > self._reserved:
+                raise PublicationError(
+                    f"{charge} bytes were submitted against {self._reserved} "
+                    "reserved; every charged job reserves before it stages")
+            self._reserved -= charge
+            self._queued.append(job)
+            self._outstanding += 1
             self._cond.notify_all()
 
     def completed(self) -> list:
@@ -172,7 +208,15 @@ class BoundedPublisher:
             return out
 
     def close(self) -> None:
-        """Stop the writer.  Does not wait for the queue; drain first."""
+        """Publish what is queued, then stop the writer.
+
+        The writer keeps taking jobs until the queue is empty, so a close on
+        the way out of a failed run still lands the bytes that were already
+        computed.  It reports nothing and raises nothing: use :meth:`drain`
+        when the completions matter, and :meth:`close` when what matters is
+        that the thread is gone and nothing was abandoned half written.  After
+        a writer failure nothing is queued, so this returns at once.
+        """
         with self._cond:
             self._closing = True
             self._cond.notify_all()
@@ -236,6 +280,7 @@ class BoundedPublisher:
                     # waiting on a writer that has stopped.
                     self._queued.clear()
                     self._charged = 0
+                    self._reserved = 0
                     self._outstanding = 0
                     self._cond.notify_all()
                 return

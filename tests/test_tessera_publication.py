@@ -32,6 +32,12 @@ def _publisher(**kwargs):
     return BoundedPublisher(**kwargs)
 
 
+def _stage(publisher, job):
+    """Reserve then submit, the way a producer must."""
+    publisher.reserve(job.charged_bytes)
+    publisher.submit(job)
+
+
 # ---------------------------------------------------------------------------
 # The publisher on its own
 # ---------------------------------------------------------------------------
@@ -41,7 +47,7 @@ def test_jobs_publish_in_submission_order():
     pub = _publisher()
     try:
         for index in range(8):
-            pub.submit(PublicationJob(
+            _stage(pub, PublicationJob(
                 key=index, charged_bytes=1,
                 publish=lambda index=index: order.append(index)))
         assert pub.drain() == list(range(8))
@@ -62,13 +68,13 @@ def test_the_budget_blocks_a_submit_until_the_writer_catches_up():
 
     pub = BoundedPublisher(budget_bytes=100)
     try:
-        pub.submit(PublicationJob(key="a", charged_bytes=60, publish=slow))
+        _stage(pub, PublicationJob(key="a", charged_bytes=60, publish=slow))
         assert started.wait(WAIT)
         blocked = threading.Event()
 
         def second():
-            pub.submit(PublicationJob(key="b", charged_bytes=60,
-                                      publish=lambda: None))
+            _stage(pub, PublicationJob(key="b", charged_bytes=60,
+                                       publish=lambda: None))
             blocked.set()
 
         worker = threading.Thread(target=second)
@@ -76,7 +82,7 @@ def test_the_budget_blocks_a_submit_until_the_writer_catches_up():
         # 60 + 60 > 100, and the first job is still resident, so the second
         # submit has to wait rather than stage past the bound.
         assert not blocked.wait(0.5), (
-            "an over-budget submit returned; staging is not bounded")
+            "an over-budget reservation returned; staging is not bounded")
         release.set()
         assert blocked.wait(WAIT), "submit never unblocked after the writer drained"
         worker.join(WAIT)
@@ -88,14 +94,47 @@ def test_the_budget_blocks_a_submit_until_the_writer_catches_up():
         pub.close()
 
 
-def test_an_artifact_larger_than_the_whole_budget_still_publishes():
+def test_an_artifact_larger_than_the_whole_budget_is_refused(monkeypatch):
+    """The declared bound is the bound, or it is not a bound."""
+    published = []
     pub = BoundedPublisher(budget_bytes=8)
     try:
-        pub.submit(PublicationJob(key="huge", charged_bytes=4096,
+        with pytest.raises(PublicationError, match="does not fit"):
+            pub.reserve(4096)
+        # And nothing was staged behind the refusal.
+        _stage(pub, PublicationJob(key="small", charged_bytes=8,
+                                   publish=lambda: published.append("small")))
+        assert pub.drain() == ["small"]
+        assert published == ["small"]
+        assert pub.stats()["peak_charged_bytes"] == 8
+    finally:
+        pub.close()
+
+
+def test_a_reservation_is_needed_before_charged_bytes_are_submitted():
+    pub = BoundedPublisher(budget_bytes=64)
+    try:
+        with pytest.raises(PublicationError, match="reserve"):
+            pub.submit(PublicationJob(key="unreserved", charged_bytes=16,
+                                      publish=lambda: None))
+        # A zero-charge job carries no bytes and needs no room: the receipt
+        # and journal jobs are ordering, not staging.
+        pub.submit(PublicationJob(key="free", charged_bytes=0,
                                   publish=lambda: None))
-        assert pub.drain() == ["huge"], (
-            "an artifact bigger than the budget must wait for an empty queue, "
-            "not for room that cannot appear")
+        assert pub.drain() == ["free"]
+    finally:
+        pub.close()
+
+
+def test_a_released_reservation_gives_its_room_back():
+    pub = BoundedPublisher(budget_bytes=64)
+    try:
+        pub.reserve(64)
+        pub.release(64)
+        # If the release had not landed this would block until the timeout.
+        _stage(pub, PublicationJob(key="after", charged_bytes=64,
+                                   publish=lambda: None))
+        assert pub.drain() == ["after"]
     finally:
         pub.close()
 
@@ -110,10 +149,10 @@ def test_a_writer_failure_drops_what_was_queued_behind_it_unwritten():
 
     pub = _publisher()
     try:
-        pub.submit(PublicationJob(key="a", charged_bytes=1, publish=first))
-        pub.submit(PublicationJob(
+        _stage(pub, PublicationJob(key="a", charged_bytes=1, publish=first))
+        _stage(pub, PublicationJob(
             key="b", charged_bytes=1, publish=lambda: written.append("b")))
-        pub.submit(PublicationJob(
+        _stage(pub, PublicationJob(
             key="c", charged_bytes=1, publish=lambda: written.append("c")))
         release.set()
         with pytest.raises(PublicationError) as caught:
@@ -131,14 +170,14 @@ def test_what_landed_before_a_failure_is_still_reported_for_recovery():
     release = threading.Event()
     pub = _publisher()
     try:
-        pub.submit(PublicationJob(key="done", charged_bytes=1,
-                                  publish=lambda: None))
+        _stage(pub, PublicationJob(key="done", charged_bytes=1,
+                                   publish=lambda: None))
 
         def boom():
             assert release.wait(WAIT)
             raise OSError("no space left on device")
 
-        pub.submit(PublicationJob(key="bad", charged_bytes=1, publish=boom))
+        _stage(pub, PublicationJob(key="bad", charged_bytes=1, publish=boom))
         release.set()
         with pytest.raises(PublicationError):
             pub.drain()
@@ -160,13 +199,13 @@ def test_a_failure_reaches_a_submit_that_is_blocked_on_the_budget():
 
     pub = BoundedPublisher(budget_bytes=100)
     try:
-        pub.submit(PublicationJob(key="bad", charged_bytes=60, publish=boom))
+        _stage(pub, PublicationJob(key="bad", charged_bytes=60, publish=boom))
         raised = []
 
         def second():
             try:
-                pub.submit(PublicationJob(key="next", charged_bytes=60,
-                                          publish=lambda: None))
+                _stage(pub, PublicationJob(key="next", charged_bytes=60,
+                                           publish=lambda: None))
             except BaseException as exc:  # noqa: BLE001
                 raised.append(exc)
 
@@ -292,7 +331,7 @@ def test_a_publisher_lets_the_next_unit_start_while_the_writer_is_blocked(
         assert pub.completed() == [], (
             "a job reported complete while its writer was still blocked")
         barrier.set()
-        assert pub.drain() == [("model.layers.0.q", "NVFP4")]
+        assert pub.drain() == [("files", "model.layers.0.q", "NVFP4")]
     finally:
         barrier.set()
         pub.close()
@@ -354,6 +393,50 @@ def test_a_failed_publication_surfaces_at_the_next_submit(tmp_path, monkeypatch)
         pub.close()
 
 
+def test_the_budget_bounds_the_encode_thread_with_the_writer_blocked(
+        tmp_path, monkeypatch):
+    """One artifact in flight, and the next one not yet made."""
+    barrier = threading.Event()
+    # 8x8 BF16 render plus a ten byte blob: room for exactly one.
+    pub = BoundedPublisher(budget_bytes=8 * 8 * 2 + 10)
+    returned = threading.Event()
+    try:
+        _finish(tmp_path / "one", monkeypatch, publisher=pub, barrier=barrier,
+                qname="a.b")
+
+        def second():
+            _finish(tmp_path / "two", monkeypatch, publisher=pub,
+                    barrier=barrier, qname="c.d")
+            returned.set()
+
+        worker = threading.Thread(target=second)
+        worker.start()
+        assert not returned.wait(0.5), (
+            "a second artifact was staged while the first still occupied the "
+            "whole budget; the bound is not a bound")
+        assert pub.stats()["peak_charged_bytes"] == 8 * 8 * 2 + 10
+        barrier.set()
+        assert returned.wait(WAIT)
+        worker.join(WAIT)
+        pub.drain()
+    finally:
+        barrier.set()
+        pub.close()
+
+
+def test_a_render_larger_than_the_budget_is_refused_before_it_is_copied(
+        tmp_path, monkeypatch):
+    pub = BoundedPublisher(budget_bytes=16)
+    try:
+        with pytest.raises(PublicationError, match="does not fit"):
+            _finish(tmp_path, monkeypatch, publisher=pub, qname="a.b")
+        assert not list((tmp_path / "cache").glob("*.pt")), (
+            "a refused artifact still reached the cache")
+        assert pub.stats()["peak_charged_bytes"] == 0
+    finally:
+        pub.close()
+
+
 def test_the_temporary_file_is_not_left_behind_by_a_completed_publication(
         tmp_path, monkeypatch):
     pub = _publisher()
@@ -383,19 +466,36 @@ def _ledger(publisher, journalled):
 
     return _AnchorPublicationLedger(
         publisher=publisher,
-        journal_anchor=lambda anchor, identity: journalled.append(
-            (anchor.qname, identity)))
+        make_record=lambda anchor, identity: f"record:{identity}",
+        journal_anchor=lambda anchor, record: journalled.append(
+            (anchor.qname, record)))
+
+
+def _files_job(publisher, name, publish):
+    """Stand in for the render/wire job ``_finish_anchor`` submits."""
+    from prismaquant.tessera_campaign import FILES_JOB
+
+    _stage(publisher, PublicationJob(
+        key=(FILES_JOB, name, "NVFP4"), charged_bytes=1, publish=publish))
 
 
 def test_without_a_publisher_the_ledger_journals_where_it_always_did():
     journalled = []
     ledger = _ledger(None, journalled)
+    assert ledger.active is False
     ledger.record(_Anchor("a.b"), "id-a")
-    assert journalled == [("a.b", "id-a")], (
+    assert journalled == [("a.b", "record:id-a")], (
         "the default path must journal at the same point it always has")
     assert ledger.apply_completed() == 0
     assert ledger.drain() == 0
     assert ledger.staged == {}
+
+
+def test_without_a_publisher_a_checkpoint_is_written_where_it_always_was():
+    written = []
+    ledger = _ledger(None, [])
+    ledger.submit_checkpoint(lambda: written.append("now"))
+    assert written == ["now"]
 
 
 def test_a_staged_anchor_is_not_journalled_while_its_writer_is_blocked():
@@ -404,9 +504,7 @@ def test_a_staged_anchor_is_not_journalled_while_its_writer_is_blocked():
     pub = _publisher()
     ledger = _ledger(pub, journalled)
     try:
-        pub.submit(PublicationJob(
-            key=("a.b", "NVFP4"), charged_bytes=1,
-            publish=lambda: barrier.wait(WAIT)))
+        _files_job(pub, "a.b", lambda: barrier.wait(WAIT))
         ledger.record(_Anchor("a.b"), "id-a")
         assert ledger.apply_completed() == 0
         assert journalled == [], (
@@ -415,11 +513,32 @@ def test_a_staged_anchor_is_not_journalled_while_its_writer_is_blocked():
             "does not exist")
         barrier.set()
         assert ledger.drain() == 1
-        assert journalled == [("a.b", "id-a")]
+        assert journalled == [("a.b", "record:id-a")]
         assert ledger.staged == {}
     finally:
         barrier.set()
         pub.close()
+
+
+def test_a_checkpoint_write_is_ordered_behind_the_receipts_it_cites():
+    order = []
+    barrier = threading.Event()
+    pub = _publisher()
+    ledger = _ledger(pub, order)
+    try:
+        _files_job(pub, "a.b", lambda: (barrier.wait(WAIT),
+                                        order.append("files")))
+        ledger.record(_Anchor("a.b"), "id-a")
+        ledger.submit_checkpoint(lambda: order.append("checkpoint"))
+        barrier.set()
+        ledger.drain()
+    finally:
+        barrier.set()
+        pub.close()
+    # The receipt is made on the writer, between the two, and the row it
+    # produced is applied by the caller; what matters here is that the journal
+    # write did not run before the bytes it cites were written.
+    assert order.index("files") < order.index("checkpoint")
 
 
 def test_the_ledger_journals_in_publication_order():
@@ -429,16 +548,15 @@ def test_the_ledger_journals_in_publication_order():
     ledger = _ledger(pub, journalled)
     try:
         for name in ("a.b", "c.d", "e.f"):
-            pub.submit(PublicationJob(
-                key=(name, "NVFP4"), charged_bytes=1,
-                publish=lambda: release.wait(WAIT)))
+            _files_job(pub, name, lambda: release.wait(WAIT))
             ledger.record(_Anchor(name), f"id-{name}")
         release.set()
         assert ledger.drain() == 3
     finally:
         release.set()
         pub.close()
-    assert journalled == [("a.b", "id-a.b"), ("c.d", "id-c.d"), ("e.f", "id-e.f")]
+    assert journalled == [("a.b", "record:id-a.b"), ("c.d", "record:id-c.d"),
+                          ("e.f", "record:id-e.f")]
 
 
 def test_a_failed_publication_leaves_its_anchor_unjournalled():
@@ -447,43 +565,37 @@ def test_a_failed_publication_leaves_its_anchor_unjournalled():
     pub = _publisher()
     ledger = _ledger(pub, journalled)
     try:
-        pub.submit(PublicationJob(key=("good", "NVFP4"), charged_bytes=1,
-                                  publish=lambda: None))
+        _files_job(pub, "good", lambda: release.wait(WAIT))
         ledger.record(_Anchor("good"), "id-good")
 
         def boom():
-            assert release.wait(WAIT)
             raise OSError("no space left on device")
 
-        pub.submit(PublicationJob(key=("bad", "NVFP4"), charged_bytes=1,
-                                  publish=boom))
+        _files_job(pub, "bad", boom)
         ledger.record(_Anchor("bad"), "id-bad")
         release.set()
         with pytest.raises(PublicationError):
             ledger.drain()
-        assert ("bad", "id-bad") not in journalled, (
+        assert ("bad", "record:id-bad") not in journalled, (
             "an anchor whose files never landed was journalled anyway")
         # The unit that did land is still recoverable: applying the completed
         # keys journals it, so a resume skips work that was really done.
         assert ledger.apply_completed() == 1
-        assert journalled == [("good", "id-good")]
+        assert journalled == [("good", "record:id-good")]
         assert ("bad", "NVFP4") in ledger.staged
     finally:
         release.set()
         pub.close()
 
 
-def test_a_drain_that_leaves_an_anchor_staged_refuses():
-    journalled = []
+def test_a_completion_nothing_staged_is_refused_rather_than_ignored():
     pub = _publisher()
-    ledger = _ledger(pub, journalled)
+    ledger = _ledger(pub, [])
     try:
-        # An anchor recorded with no job behind it is an ambiguous partial
-        # state: the drain has nothing to wait for and no completion to apply.
-        ledger.record(_Anchor("orphan"), "id-orphan")
-        with pytest.raises(RuntimeError, match="still staged"):
+        pub.submit(PublicationJob(key=("something-else", 1), charged_bytes=0,
+                                  publish=lambda: None))  # ordering job, no bytes
+        with pytest.raises(RuntimeError, match="unknown job"):
             ledger.drain()
-        assert journalled == []
     finally:
         pub.close()
 
@@ -493,6 +605,7 @@ def test_one_publication_key_cannot_hold_two_anchors():
     pub = _publisher()
     ledger = _ledger(pub, journalled)
     try:
+        _files_job(pub, "a.b", lambda: None)
         ledger.record(_Anchor("a.b"), "first")
         with pytest.raises(RuntimeError, match="already staged"):
             ledger.record(_Anchor("a.b"), "second")

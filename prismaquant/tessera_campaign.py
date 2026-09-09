@@ -81,6 +81,7 @@ from .nvfp4_activation_contract import (
     ActivationScaleContractError as _OwnedActivationScaleContractError,
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
+from .tessera_publication import PublicationJob
 
 __all__ = [
     "CENSUS_SCHEMA",
@@ -578,13 +579,28 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         raise RuntimeError(f"unexpected render-score metric {metric!r}")
     hessian_applied = bool(prepared["activation_kwargs"])
 
-    # The device-to-host copy stays on the thread that owns the device work,
-    # whichever way the bytes are written.  ``_store_rendered_weight_entry``
-    # canonicalises again below and that second call is an identity on a CPU
-    # tensor already in the target dtype and contiguous, so the synchronous
-    # path stores the same object it always stored.  Staging it here is what
-    # gives the writer thread bytes nobody else owns.
-    staged = _canonical_rendered_weight_tensor(render, weight_dtype=torch.bfloat16)
+    # Room first, then the bytes.  The copy below is a new host allocation the
+    # writer will own, so the budget has to admit it BEFORE it exists: charging
+    # it after the fact would leave this thread holding one artifact more than
+    # the bound allows, every time the writer is behind.  The size is known
+    # without making it -- one BF16 element per render element, plus the blob
+    # the encoder already returned.
+    if publisher is not None:
+        publisher.reserve(render.numel() * 2 + len(blob))
+    try:
+        # The device-to-host copy stays on the thread that owns the device
+        # work, whichever way the bytes are written.
+        # ``_store_rendered_weight_entry`` canonicalises again below and that
+        # second call is an identity on a CPU tensor already in the target
+        # dtype and contiguous, so the synchronous path stores the same object
+        # it always stored.  Staging it here is what gives the writer thread
+        # bytes nobody else owns.
+        staged = _canonical_rendered_weight_tensor(
+            render, weight_dtype=torch.bfloat16)
+    except BaseException:
+        if publisher is not None:
+            publisher.release(render.numel() * 2 + len(blob))
+        raise
     # The wire, beside the render.  A ``.tessera`` shard per (qname, rung),
     # named the way the cache names its weight shards, so the export leg can
     # find the exact bytes this row was priced on instead of re-encoding.
@@ -616,9 +632,10 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     if publisher is None:
         _publish()
     else:
-        from .tessera_publication import PublicationJob
+        # The reservation above was taken for exactly these bytes; the
+        # element count is the render's and the dtype is BF16 either way.
         publisher.submit(PublicationJob(
-            key=(qname, format_name),
+            key=(FILES_JOB, qname, format_name),
             charged_bytes=(staged.numel() * staged.element_size()) + len(blob),
             publish=_publish,
         ))
@@ -1843,36 +1860,57 @@ def _checkpoint_wire_record(anchor, wire_dir, identity, *, existing=None):
             f"{anchor.format_name}: {exc}") from exc
 
 
+# Job namespaces on the one publication queue. They exist so a completion
+# says which link of the chain finished: the files, the receipt read back off
+# them, or the journal write that cites the receipt.
+FILES_JOB = "files"
+RECEIPT_JOB = "receipt"
+CHECKPOINT_JOB = "checkpoint"
+
+
 class _AnchorPublicationLedger:
     """Decides when a measured anchor is allowed to become a journal row.
 
-    The campaign's rule is that an anchor row and its wire receipt are written
-    together, and that the receipt is read back off a file that exists.  With
-    the publication of that file moved to another thread, "exists" stops being
-    something the encode thread knows by having just done it, so this object
-    holds the anchor until the writer says so.
+    The campaign's rule is a chain: the render and wire files are written,
+    then the wire receipt is made by reading the published file back, then the
+    anchor row and that receipt go into the checkpoint together.  Each link
+    must not precede the one before it.  Doing all three on the encode thread
+    made that ordering free; doing any of them elsewhere makes it something
+    this object has to hold.
 
-    ``journal_anchor(anchor, identity)`` is the caller's own three lines: make
-    the receipt, add the row, mark the unit dirty.  It is called exactly once
-    per anchor either way; what changes is when.
+    It holds it with one queue.  The publisher runs one writer thread in
+    submission order, so a receipt job submitted after a file job runs after
+    it, and a checkpoint job submitted after both runs after both.  Nothing
+    here reorders; it only decides what to put on the queue and when to
+    believe a completion.
 
-    Without a publisher this is a pass-through, which is what makes the
-    default path the historical path rather than a re-implementation of it.
+    ``make_record(anchor, identity)`` is the caller's receipt call, and
+    ``journal_anchor(anchor, record)`` is the caller's three lines that put a
+    row and its receipt into the pending checkpoint.  With no publisher both
+    run inline exactly where they always ran, which is what makes the default
+    path the historical path rather than a re-implementation of it.
     """
 
-    def __init__(self, *, publisher, journal_anchor):
+    def __init__(self, *, publisher, make_record, journal_anchor):
         self._publisher = publisher
+        self._make_record = make_record
         self._journal = journal_anchor
         self._staged: dict = {}
+        self._records: dict = {}
+        self._checkpoint_seq = 0
 
     @property
     def staged(self) -> dict:
         return self._staged
 
+    @property
+    def active(self) -> bool:
+        return self._publisher is not None
+
     def record(self, anchor, identity) -> None:
         """Journal now, or when this anchor's own bytes have been written."""
         if self._publisher is None:
-            self._journal(anchor, identity)
+            self._journal(anchor, self._make_record(anchor, identity))
             return
         key = (anchor.qname, anchor.format_name)
         if key in self._staged:
@@ -1882,13 +1920,66 @@ class _AnchorPublicationLedger:
             # scheduling defect, not something to average over.
             raise RuntimeError(
                 f"{anchor.qname} {anchor.format_name} is already staged")
-        self._staged[key] = (anchor, identity)
+        self._staged[key] = anchor
+
+        def make():
+            # Runs on the writer, behind this unit's own file job, so the
+            # read-back inside the receipt call reads a file that exists and
+            # the encode thread never waits for it.
+            self._records[key] = self._make_record(anchor, identity)
+
+        self._publisher.submit(PublicationJob(
+            key=(RECEIPT_JOB, *key), charged_bytes=0, publish=make))
+
+    def submit_checkpoint(self, write) -> None:
+        """Order one journal write behind every receipt it depends on."""
+        if self._publisher is None:
+            write()
+            return
+        key = (CHECKPOINT_JOB, self._checkpoint_seq)
+        self._checkpoint_seq += 1
+        self._publisher.submit(PublicationJob(
+            key=key, charged_bytes=0, publish=write))
 
     def apply_completed(self) -> int:
         """Journal whatever the writer has finished since the last call."""
         if self._publisher is None:
             return 0
         return self._apply(self._publisher.completed())
+
+    def close(self) -> int:
+        """Journal every receipt that really completed, then stop staging.
+
+        Called on the way out of the pricing loop, including on the way out of
+        an exception, and always after the publisher's own thread has stopped.
+        What is left then is a list of completions the writer finished before
+        it stopped: those are files that exist and receipts that were read
+        back off them, and a batch that succeeded before a later one failed
+        must not lose its journal row because the loop is unwinding.  That
+        loss would be a regression against the synchronous path, which
+        checkpointed each batch before starting the next.
+
+        Everything still staged is dropped.  No receipt, no row: those units
+        are re-priced by the next run over the same paths.  Nothing is
+        refused here, because this runs while an exception is already on its
+        way out and the original failure is the one worth reporting.  After
+        this the ledger writes inline again, so a caller may flush.
+        """
+        if self._publisher is None:
+            return 0
+        completed = self._publisher.completed()
+        self._publisher = None
+        applied = 0
+        for tag, *rest in completed:
+            key = tuple(rest)
+            if tag != RECEIPT_JOB or key not in self._records \
+                    or key not in self._staged:
+                continue
+            self._journal(self._staged.pop(key), self._records.pop(key))
+            applied += 1
+        self._staged.clear()
+        self._records.clear()
+        return applied
 
     def drain(self) -> int:
         """Wait for every staged anchor, journal it, and refuse a remainder."""
@@ -1902,9 +1993,21 @@ class _AnchorPublicationLedger:
         return applied
 
     def _apply(self, keys) -> int:
-        for key in keys:
-            self._journal(*self._staged.pop(key))
-        return len(keys)
+        applied = 0
+        for tag, *rest in keys:
+            if tag in (FILES_JOB, CHECKPOINT_JOB):
+                # Both exist to be ordered, not to be reported: the files a
+                # receipt reads and the journal write a receipt precedes.
+                continue
+            if tag != RECEIPT_JOB:
+                raise RuntimeError(f"publication reported an unknown job {tag!r}")
+            key = tuple(rest)
+            if key not in self._records or key not in self._staged:
+                raise RuntimeError(
+                    f"publication reported a receipt nothing staged: {key!r}")
+            self._journal(self._staged.pop(key), self._records.pop(key))
+            applied += 1
+        return applied
 
 
 def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
@@ -4377,6 +4480,7 @@ def _main(argv, *, source_scope) -> int:
             prefetch_workers=args.streaming_prefetch_workers,
             headroom_gb=args.streaming_cache_headroom_gb,
             anchor_batch_size=args.anchor_batch_size,
+            publication_overlap_bytes=args.publication_overlap_bytes,
             **(dict(capture_load_policy=args.capture_load_policy)
                if args.capture_load_policy is not None else {}))
         if device == 'cuda':
@@ -4819,22 +4923,11 @@ def _main(argv, *, source_scope) -> int:
               flush=True)
         return EXIT_EMPTY_MENU
 
-    def flush_checkpoint() -> None:
-        for name in sorted(dirty_checkpoint_units):
-            rows = [vars(anchor) for anchors in measured.get(name, {}).values()
-                    for anchor in anchors]
-            state = {"anchors": rows, "wire_records": wire_records[name]}
-            if unservable.get(name):
-                state["unservable"] = unservable[name]
-            write_unit(journal, stage="Tessera campaign", qname=name,
-                       identity_sha256=identity_sha256, state=state)
-        dirty_checkpoint_units.clear()
-
     # An anchor waits in the ledger, rather than in ``measured``, for exactly
-    # as long as its files do not exist.  That is what keeps
-    # ``flush_checkpoint``'s existing invariant true without changing it: every
-    # anchor row it journals has a wire receipt beside it, and every one of
-    # those receipts was read back off a file that had already landed.
+    # as long as its files do not exist.  That is what keeps the checkpoint
+    # invariant true without changing it: every anchor row journalled here has
+    # a wire receipt beside it, and every one of those receipts was read back
+    # off a file that had already landed.
     publisher = None
     if int(args.publication_overlap_bytes) > 0:
         from .tessera_publication import BoundedPublisher
@@ -4844,23 +4937,45 @@ def _main(argv, *, source_scope) -> int:
               f"{int(args.publication_overlap_bytes)} bytes on one writer "
               "thread", flush=True)
 
-    def journal_anchor(anchor, identity) -> None:
-        """Make this anchor's wire receipt and mark its unit for the journal.
-
-        The receipt is read back off the published file, which is what makes
-        it a statement about bytes that exist rather than about bytes that
-        were intended.  Both paths run this same code; they differ only in
-        when it is safe to run it.
-        """
+    def journal_anchor(anchor, record) -> None:
+        """Put one anchor row and its wire receipt into the pending state."""
         name = anchor.qname
-        wire_records[name][anchor.format_name] = _checkpoint_wire_record(
-            anchor, wire_dir, identity)
+        wire_records[name][anchor.format_name] = record
         measured.setdefault(name, {}).setdefault(
             anchor.family, []).append(anchor)
         dirty_checkpoint_units.add(name)
 
     ledger = _AnchorPublicationLedger(
-        publisher=publisher, journal_anchor=journal_anchor)
+        publisher=publisher,
+        make_record=lambda anchor, identity: _checkpoint_wire_record(
+            anchor, wire_dir, identity),
+        journal_anchor=journal_anchor)
+
+    def flush_checkpoint() -> None:
+        # The rows are snapshotted here, on the thread that owns them, and
+        # only the write itself is ordered behind the receipts it cites.
+        # ``vars`` returns the anchor's live ``__dict__``, so it is copied
+        # rather than handed over.
+        states = []
+        for name in sorted(dirty_checkpoint_units):
+            rows = [dict(vars(anchor))
+                    for anchors in measured.get(name, {}).values()
+                    for anchor in anchors]
+            state = {"anchors": rows,
+                     "wire_records": dict(wire_records[name])}
+            if unservable.get(name):
+                state["unservable"] = dict(unservable[name])
+            states.append((name, state))
+        dirty_checkpoint_units.clear()
+        if not states:
+            return
+
+        def write():
+            for name, state in states:
+                write_unit(journal, stage="Tessera campaign", qname=name,
+                           identity_sha256=identity_sha256, state=state)
+
+        ledger.submit_checkpoint(write)
 
     # Adopted rows are journalled BEFORE the anchor loop, because the loop can
     # end without reaching its own flush: a group whose gate is already closed
@@ -4954,207 +5069,238 @@ def _main(argv, *, source_scope) -> int:
               "anchors per window family at the band ends"
               + (f", a third for {len(audit_units)} audit unit(s)"
                  if audit_units else ""), flush=True)
-    round_index = 0
-    while True:
-        round_index += 1
-        if int(args.max_rounds) > 0 and round_index > int(args.max_rounds):
-            print(f"[campaign] --max-rounds {args.max_rounds} reached",
-                  flush=True)
-            break
-        pending: list[tuple[str, str, int]] = []
-        for key, members in sorted(anchor_groups.items()):
-            for family, allowed in group_rates[key].items():
-                # The grid is what EVERY member actually measured: one
-                # member's failed encode must not let the group think it has
-                # an anchor there.
-                member_rates = {
-                    m: {a.body_rate_q256 for a in measured.get(m, {}).get(family, [])}
-                    for m in members}
-                grid = sorted(set.intersection(*member_rates.values())) if members else []
-                if round_index == 1:
-                    want = round_one_rates(allowed, band=rate_band,
-                                           anchors=args.anchors, snap=_snap)
-                    extra = (None if not audit_units else
-                             audit_extra_rate(allowed, want, snap=_snap))
-                    for m in members:
-                        rates = set(want)
-                        if extra is not None and m in audit_units:
-                            rates.add(extra)
-                        have = member_rates[m]
-                        pending.extend((m, family, rate)
-                                       for rate in sorted(rates - have))
-                    continue
-                if len(grid) >= budget:
-                    surface_stop.setdefault((key, family), "anchor_budget")
-                    continue
-                worst = 0.0
-                worst_loo: dict = {}
-                ready = True
-                interpolable = 0
-                for m in members:
-                    anchors = measured.get(m, {}).get(family, [])
-                    if len(anchors) < 3:
-                        ready = False
-                        break
-                    member_loo = _loo_for(anchors, leave_one_anchor_out)
-                    if _loo_refused(member_loo):
-                        # A refused surface has no leave-one-out error, and a
-                        # missing error is not a zero one.  Reading it as 0.0
-                        # would say "this surface interpolates perfectly" about
-                        # the one surface that does not interpolate at all --
-                        # and would close the gate on it.  It contributes
-                        # nothing to ``worst`` instead, so the group keeps
-                        # spending anchors for whichever members can still use
-                        # them, and the refusal is reported as itself.
-                        continue
-                    interpolable += 1
-                    value = float(
-                        member_loo.get("max_abs_log2_error", 0.0) or 0.0)
-                    if value > worst:
-                        worst, worst_loo = value, member_loo
-                if not ready:
-                    # LOO cannot judge two endpoints. Bootstrap an interior
-                    # anchor through next_anchor_rate's widest-gap fallback;
-                    # missing LOO is neither a closed gate nor a refusal.
-                    worst_loo = {}
-                elif not interpolable:
-                    surface_stop.setdefault((key, family), "non_interpolable")
-                    continue
-                elif worst <= args.loo_gate:
-                    surface_stop.setdefault((key, family), "gate_closed")
-                    continue
-                nxt = next_anchor_rate(grid, worst_loo)
-                nxt = _snap(nxt, allowed) if nxt is not None else None
-                if nxt is None or nxt in grid:
-                    surface_stop.setdefault((key, family), "no_room")
-                    continue
-                # A failed sibling does not invalidate an already measured
-                # member/rung or authorize overwriting its original cost.
-                pending.extend((m, family, nxt) for m in members
-                               if nxt not in member_rates[m])
-        if not pending:
-            if round_index == 1 and measured:
-                # A resumed/seeded endpoint set still needs its adaptive gate
-                # checked; an empty bootstrap is not a completed surface.
-                continue
-            print(f"[campaign] round {round_index}: nothing pending", flush=True)
-            break
-        print(f"[campaign] round {round_index}: {len(pending)} anchors",
-              flush=True)
-        batches = _anchor_batches(
-            [item for item in pending if acts.get(item[0]) is not None],
-            weights=weights, expert_members=expert_members,
-            batch_size=args.anchor_batch_size)
-        completed = 0
-        # One entry per encode step, in order, each the growth across that
-        # step's own bracket. The list is stamped on the selected receipt now
-        # and filled as the loop runs, so a reader gets the steady-state cost
-        # separately from the first batch's one-time runtime charge.
-        anchor_batch_growth = []
-        if selected_source and selected_source_preparation is not None:
-            selected_source_preparation['anchor_batch_growth_bytes'] = anchor_batch_growth
-        for batch in batches:
-            # Rows whose files landed while the last batch encoded. Applied at
-            # the top of the batch rather than the bottom, so the receipt read
-            # back off each published file runs one batch behind the write
-            # instead of immediately after it.
-            ledger.apply_completed()
-            if out_of_time():
-                stopped_early = True
-                print("[campaign] deadline reached; stopping", flush=True)
-                # A deadline is a termination, so the staged bytes are written
-                # and journalled before the loop is left; they were paid for.
-                ledger.drain()
+    # The publisher owns a thread; every exit from the pricing loop,
+    # including one that raises, has to go past its close. Close drains
+    # what is queued, so files already computed still land, and it cannot
+    # raise, so it cannot mask the exception that brought us here.
+    try:
+        round_index = 0
+        while True:
+            round_index += 1
+            if int(args.max_rounds) > 0 and round_index > int(args.max_rounds):
+                print(f"[campaign] --max-rounds {args.max_rounds} reached",
+                      flush=True)
                 break
-            names = [item[0] for item in batch]
-            family, rung = batch[0][1:]
-            fmt = f"{family}_R{rung}"
-            batch_floor = None
-            if selected_guard is not None:
-                # The lower bracket of the encode step. Without it the step's
-                # growth can only be read against whichever checkpoint
-                # happened to precede it, which is a different phase's charge,
-                # and the pair is taken PER OCCURRENCE because the first batch
-                # carries the runtime's one-time first-use cost while later
-                # batches are the steady state the plan actually charges for
-                # (RobTand/prismaquant#390).
-                selected_guard.check('before_selected_anchor_batch')
-                batch_floor = selected_guard.last[
-                    'conservative_cgroup_plus_cuda_reserved_bytes']
-            try:
-                common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
-                    activation_kwargs_for=(
-                        _activation_kwargs_for if want_h else None),
-                    hessian_required=want_h)
-                if len(batch) == 1:
-                    name = names[0]
-                    anchors = [_measure_anchor(
-                        qname=name, weight=weights[name].to(device),
-                        activations=acts[name].to(device),
-                        static_input_scale=static_scales.get(name), **common)]
-                else:
-                    anchors = _measure_anchor_batch(
-                        qnames=names,
-                        weights=[weights[name].to(device) for name in names],
-                        activations=[acts[name].to(device) for name in names],
-                        static_input_scales=static_scales, **common)
-            except (HessianContractError, ActivationScaleContractError,
-                    PublicationError):
-                # A staged artifact that did not reach its disk is not one
-                # batch's bad luck: the writer has stopped and everything
-                # behind it was dropped unwritten. Printing and continuing
-                # here would advance the loop past files that do not exist.
-                raise
-            except Exception as exc:
-                if selected_guard is not None and selected_guard.failure is not None:
-                    raise  # A physical memory refusal must stop the action.
-                print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
-                      f"{exc}", flush=True)
-                continue
-            if selected_guard is not None:
-                # With publication staging on, this upper bracket includes the
-                # staged CPU bytes of any batch the writer has not finished.
-                # That is real resident memory the plan is charging for, so it
-                # belongs in the growth figure rather than being filtered out
-                # of it; the publisher's own budget and peak are stamped
-                # separately on the receipt so a reader can attribute it.
-                selected_guard.check('after_selected_anchor_batch')
-                anchor_batch_growth.append(selected_guard.last[
-                    'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
-            for anchor in anchors:
-                ledger.record(anchor, _checkpoint_anchor_identity(
-                    anchor, weights=weights, menus=menus,
-                    calibration_source=calibration_source, static_scales=static_scales,
-                    projected_units=projected_units))
-            completed += len(anchors)
-            # Commit every joined quantum before advancing. The scalar mode
-            # keeps its existing ten-anchor flush cadence.
-            if args.anchor_batch_size > 1 or (completed - 1) % 10 == 0:
-                flush_checkpoint()
-                print(f"[campaign] r{round_index} {completed}/{len(pending)} "
-                      f"batch={len(anchors)} {fmt} "
-                      f"encode_seconds={sum(a.seconds for a in anchors):.3f}", flush=True)
-        # The round is a consumer barrier: the next round reads ``measured``
-        # to decide what is still pending, so nothing may still be in flight.
-        ledger.drain()
-        flush_checkpoint()
-        if stopped_early:
-            break
-        if round_index > 1 and completed == 0:
-            raise RuntimeError(
-                f"campaign adaptive round {round_index} made no progress: "
-                "all pending anchors failed; successful anchors are journaled. "
-                "Refusing to repeat unchanged work; retry after resolving the failure.")
+            pending: list[tuple[str, str, int]] = []
+            for key, members in sorted(anchor_groups.items()):
+                for family, allowed in group_rates[key].items():
+                    # The grid is what EVERY member actually measured: one
+                    # member's failed encode must not let the group think it has
+                    # an anchor there.
+                    member_rates = {
+                        m: {a.body_rate_q256 for a in measured.get(m, {}).get(family, [])}
+                        for m in members}
+                    grid = sorted(set.intersection(*member_rates.values())) if members else []
+                    if round_index == 1:
+                        want = round_one_rates(allowed, band=rate_band,
+                                               anchors=args.anchors, snap=_snap)
+                        extra = (None if not audit_units else
+                                 audit_extra_rate(allowed, want, snap=_snap))
+                        for m in members:
+                            rates = set(want)
+                            if extra is not None and m in audit_units:
+                                rates.add(extra)
+                            have = member_rates[m]
+                            pending.extend((m, family, rate)
+                                           for rate in sorted(rates - have))
+                        continue
+                    if len(grid) >= budget:
+                        surface_stop.setdefault((key, family), "anchor_budget")
+                        continue
+                    worst = 0.0
+                    worst_loo: dict = {}
+                    ready = True
+                    interpolable = 0
+                    for m in members:
+                        anchors = measured.get(m, {}).get(family, [])
+                        if len(anchors) < 3:
+                            ready = False
+                            break
+                        member_loo = _loo_for(anchors, leave_one_anchor_out)
+                        if _loo_refused(member_loo):
+                            # A refused surface has no leave-one-out error, and a
+                            # missing error is not a zero one.  Reading it as 0.0
+                            # would say "this surface interpolates perfectly" about
+                            # the one surface that does not interpolate at all --
+                            # and would close the gate on it.  It contributes
+                            # nothing to ``worst`` instead, so the group keeps
+                            # spending anchors for whichever members can still use
+                            # them, and the refusal is reported as itself.
+                            continue
+                        interpolable += 1
+                        value = float(
+                            member_loo.get("max_abs_log2_error", 0.0) or 0.0)
+                        if value > worst:
+                            worst, worst_loo = value, member_loo
+                    if not ready:
+                        # LOO cannot judge two endpoints. Bootstrap an interior
+                        # anchor through next_anchor_rate's widest-gap fallback;
+                        # missing LOO is neither a closed gate nor a refusal.
+                        worst_loo = {}
+                    elif not interpolable:
+                        surface_stop.setdefault((key, family), "non_interpolable")
+                        continue
+                    elif worst <= args.loo_gate:
+                        surface_stop.setdefault((key, family), "gate_closed")
+                        continue
+                    nxt = next_anchor_rate(grid, worst_loo)
+                    nxt = _snap(nxt, allowed) if nxt is not None else None
+                    if nxt is None or nxt in grid:
+                        surface_stop.setdefault((key, family), "no_room")
+                        continue
+                    # A failed sibling does not invalidate an already measured
+                    # member/rung or authorize overwriting its original cost.
+                    pending.extend((m, family, nxt) for m in members
+                                   if nxt not in member_rates[m])
+            if not pending:
+                if round_index == 1 and measured:
+                    # A resumed/seeded endpoint set still needs its adaptive gate
+                    # checked; an empty bootstrap is not a completed surface.
+                    continue
+                print(f"[campaign] round {round_index}: nothing pending", flush=True)
+                break
+            print(f"[campaign] round {round_index}: {len(pending)} anchors",
+                  flush=True)
+            batches = _anchor_batches(
+                [item for item in pending if acts.get(item[0]) is not None],
+                weights=weights, expert_members=expert_members,
+                batch_size=args.anchor_batch_size)
+            completed = 0
+            # One entry per encode step, in order, each the growth across that
+            # step's own bracket. The list is stamped on the selected receipt now
+            # and filled as the loop runs, so a reader gets the steady-state cost
+            # separately from the first batch's one-time runtime charge.
+            anchor_batch_growth = []
+            if selected_source and selected_source_preparation is not None:
+                selected_source_preparation['anchor_batch_growth_bytes'] = anchor_batch_growth
+            for batch in batches:
+                # Rows whose files landed while the last batch encoded. Applied at
+                # the top of the batch rather than the bottom, so the receipt read
+                # back off each published file runs one batch behind the write
+                # instead of immediately after it.
+                ledger.apply_completed()
+                if out_of_time():
+                    stopped_early = True
+                    print("[campaign] deadline reached; stopping", flush=True)
+                    # A deadline is a termination, so the staged bytes are written
+                    # and journalled before the loop is left; they were paid for.
+                    ledger.drain()
+                    break
+                names = [item[0] for item in batch]
+                family, rung = batch[0][1:]
+                fmt = f"{family}_R{rung}"
+                batch_floor = None
+                if selected_guard is not None:
+                    # The lower bracket of the encode step. Without it the step's
+                    # growth can only be read against whichever checkpoint
+                    # happened to precede it, which is a different phase's charge,
+                    # and the pair is taken PER OCCURRENCE because the first batch
+                    # carries the runtime's one-time first-use cost while later
+                    # batches are the steady state the plan actually charges for
+                    # (RobTand/prismaquant#390).
+                    selected_guard.check('before_selected_anchor_batch')
+                    batch_floor = selected_guard.last[
+                        'conservative_cgroup_plus_cuda_reserved_bytes']
+                try:
+                    common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
+                        activation_kwargs_for=(
+                            _activation_kwargs_for if want_h else None),
+                        hessian_required=want_h, publisher=publisher)
+                    if len(batch) == 1:
+                        name = names[0]
+                        anchors = [_measure_anchor(
+                            qname=name, weight=weights[name].to(device),
+                            activations=acts[name].to(device),
+                            static_input_scale=static_scales.get(name), **common)]
+                    else:
+                        anchors = _measure_anchor_batch(
+                            qnames=names,
+                            weights=[weights[name].to(device) for name in names],
+                            activations=[acts[name].to(device) for name in names],
+                            static_input_scales=static_scales, **common)
+                except (HessianContractError, ActivationScaleContractError,
+                        PublicationError):
+                    # A staged artifact that did not reach its disk is not one
+                    # batch's bad luck: the writer has stopped and everything
+                    # behind it was dropped unwritten. Printing and continuing
+                    # here would advance the loop past files that do not exist.
+                    raise
+                except Exception as exc:
+                    if selected_guard is not None and selected_guard.failure is not None:
+                        raise  # A physical memory refusal must stop the action.
+                    # A batch that raises part way through has already handed
+                    # the writer files for its early units. Nothing records
+                    # those units, so no receipt job follows and nothing is
+                    # staged; their file completions are ignored, the bytes
+                    # land, and the next round re-prices them over the same
+                    # paths. That is what the synchronous path already does
+                    # when a partial batch writes files and journals none of
+                    # them, so the failure semantics do not change here.
+                    print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
+                          f"{exc}", flush=True)
+                    continue
+                if selected_guard is not None:
+                    # With publication staging on, this upper bracket includes the
+                    # staged CPU bytes of any batch the writer has not finished.
+                    # That is real resident memory the plan is charging for, so it
+                    # belongs in the growth figure rather than being filtered out
+                    # of it; the publisher's own budget and peak are stamped
+                    # separately on the receipt so a reader can attribute it.
+                    selected_guard.check('after_selected_anchor_batch')
+                    anchor_batch_growth.append(selected_guard.last[
+                        'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
+                for anchor in anchors:
+                    ledger.record(anchor, _checkpoint_anchor_identity(
+                        anchor, weights=weights, menus=menus,
+                        calibration_source=calibration_source, static_scales=static_scales,
+                        projected_units=projected_units))
+                completed += len(anchors)
+                # Commit every joined quantum before advancing. The scalar mode
+                # keeps its existing ten-anchor flush cadence.
+                if args.anchor_batch_size > 1 or (completed - 1) % 10 == 0:
+                    flush_checkpoint()
+                    print(f"[campaign] r{round_index} {completed}/{len(pending)} "
+                          f"batch={len(anchors)} {fmt} "
+                          f"encode_seconds={sum(a.seconds for a in anchors):.3f}", flush=True)
+            # The round is a consumer barrier: the next round reads ``measured``
+            # to decide what is still pending, so nothing may still be in flight.
+            ledger.drain()
+            flush_checkpoint()
+            if stopped_early:
+                break
+            if round_index > 1 and completed == 0:
+                raise RuntimeError(
+                    f"campaign adaptive round {round_index} made no progress: "
+                    "all pending anchors failed; successful anchors are journaled. "
+                    "Refusing to repeat unchanged work; retry after resolving the failure.")
 
-    publication_stats = None
-    if publisher is not None:
-        # Every round already drained, and a round that broke out staged
-        # nothing; this is the last barrier, and it is where a writer failure
-        # that nothing else looked at is raised.
-        ledger.drain()
-        publication_stats = publisher.stats()
-        publisher.close()
-        flush_checkpoint()
+        publication_stats = None
+        if publisher is not None:
+            # The last barrier, and where a writer failure nothing else looked at
+            # is raised. Drain the receipts, journal whatever they made dirty,
+            # then wait for that journal write too: the checkpoint is the last
+            # thing published and it cites everything before it.
+            ledger.drain()
+            flush_checkpoint()
+            ledger.drain()
+            publication_stats = publisher.stats()
+
+    finally:
+        if publisher is not None:
+            # The thread first, so nothing is still writing, and then the rows
+            # for whatever it finished. On the way out of an exception this is
+            # the batch that succeeded before the one that failed; on the
+            # normal path everything is already journalled and both calls are
+            # no-ops. Any second failure here is reported and dropped: it must
+            # not replace the exception that brought us here.
+            publisher.close()
+            try:
+                if ledger.close():
+                    flush_checkpoint()
+            except Exception as cleanup_error:  # noqa: BLE001
+                print("[campaign] could not journal the completed anchors "
+                      f"while unwinding: {type(cleanup_error).__name__}: "
+                      f"{cleanup_error}", file=sys.stderr, flush=True)
 
     loo: dict[str, dict[str, dict]] = {}
     for name, by_family in measured.items():
