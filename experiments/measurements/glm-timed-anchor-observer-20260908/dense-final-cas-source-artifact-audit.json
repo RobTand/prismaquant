@@ -1,0 +1,356 @@
+{
+  "action": {
+    "key": "9f46d50b9abd700c67f2b52539fe153ab574e2aee70cfc30d08dab3347e65e28",
+    "terminal_sha256": "2c4e79f7b4990fc177b31bc835ab6937e9dd14b3a46a73a3983b17ec4c7641a3",
+    "returncode": 0,
+    "cleanup_complete": true,
+    "snapshot": {
+      "commit": "0f1ae97eb96519b40f23128e39fa10bbbfb72b5a",
+      "input": {
+        "bytes": 27393375,
+        "id": "pbrun.checkout-snapshot",
+        "sha256": "a3b5cc8b713ca8158991a43f02d0f74e5df2c54060279b89bfdbe1c6864a421f"
+      },
+      "parent": "8e8506e584f82d686a618c24be5cba200f2ad4f9",
+      "refs": {},
+      "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+      "subdirectory": "."
+    },
+    "published": [
+      {
+        "receipt_sha256": "d6d4db2e7800619213600d3949a9a76b7bfd2b8f69a7e70b855d31ff6f4e235b",
+        "result": {
+          "bytes": 4973,
+          "sha256": "c663de48c86c0478da002a342f8384b7bb9618ca1d6bf1abd644a64f13597953"
+        },
+        "actual_output": "{\"schema\": \"prismaquant.tessera_campaign_container.v1\", \"requested_image\": \"prismaquant-glm-producer:content-qualified-20260908\", \"image_id\": \"sha256:9f9b9f05b17531399ba66dc6415b054cf5d68c82270626d0e9150e75c808435f\", \"image_content_sha256\": \"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\", \"declared_content_sha256\": \"eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd\", \"uid\": 1000, \"gid\": 1000}\n[cost-streaming] profile glm5_next has no text-only skeleton route; using the multimodal construction\n[cost-streaming] masking torch.cuda queries during meta init\n[cost-streaming] base_prefix='model.language_model'  layers=45  head_resident_on=0  offload=/mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/cache/source-offload  multimodal=True  visual_prefix=model.visual\n[cost-streaming] head materialized (3 tensors, rotary re-init) in 16.1s\n[cost-streaming] materializing visual tower: 347/347 tensors -> cuda\n[cost-streaming] model ready in 16.5s\n[cost-streaming] building install resolvers for 45 layers ...\n[cost-streaming] resolvers built: 1259 tensors across 45 layers in 0.0s\n[cost-streaming] layer cache budget=84.9 GB (free=108.9 GB, headroom=24.0 GB, dynamic_reserve=24.0 GB, explicit)\n[cost-streaming] prefetch auto: workers=1 (explicit, capped by max_cache_slots), cache_slots=6, max_cache_slots=2, memory_slots=6, est_layer=13.8 GB, min_avail=24.0 GB (explicit)\n[campaign] 135 target Linears + 36288 projected expert units in 42 stacks, 132 anchor groups, mode=readable, device=cuda\n[campaign] --units selects 1 of 132 anchor groups: 2 dense + 0 projected expert units\nUsing the latest cached version of the dataset since Salesforce/wikitext couldn't be found on the Hugging Face Hub (offline mode is enabled).\nFound the latest cached dataset configuration 'wikitext-2-raw-v1' at /mnt/shared/tessera-measurements/glm-canonical-census-20260908/inputs/hf-datasets/Salesforce___wikitext/wikitext-2-raw-v1/0.0.0/b08601e04326c79dfdd32d625aee71d232d685c3 (last modified on Sun Aug 23 21:27:09 2026).\n[transformers] Token indices sequence length is longer than the specified maximum sequence length for this model (2441861 > 1048576). Running this sequence through the model will result in indexing errors\n[campaign] calibration prefetched: 2 units, 150994944 resident bytes, 0 misses\n[campaign] activations ready (hessian=require, rows/Linear 13..262144)\n[campaign] producer projected 42 stacks; 0 expert units priced here\n[campaign] wrote /mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/cache/hessian_capture.references.json (2 H commitments; no copied H payloads)\n[campaign] wrote /mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/cache/input_scales.safetensors (36423 static input scales)\n[campaign] anchor groups: g:model.language_model.layers.10.mlp.shared_experts.gate_up_proj(2)\n[campaign] rate band q256 832..1088: two anchors per window family at the band ends\n[campaign] round 1: 10 anchors\nUSDT:2026-09-08 23:34:56 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\n[W908 23:34:57.436893087 profiler_kineto.cpp:820] Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events\nUSDT:2026-09-08 23:35:13 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\n[campaign] r1 1/10 batch=1 TESSERA_BF16_K1_R832 encode_seconds=16.342\n[campaign] r1 2/10 batch=1 TESSERA_BF16_K1_R1088 encode_seconds=6.893\n[campaign] r1 3/10 batch=1 TESSERA_BF16_K1_R832 encode_seconds=6.480\nUSDT:2026-09-08 23:35:27 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start\n[W908 23:35:27.204263491 profiler_kineto.cpp:820] Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events\nUSDT:2026-09-08 23:35:34 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop\n[campaign] r1 4/10 batch=1 TESSERA_BF16_K1_R1088 encode_seconds=6.690\n[campaign] r1 5/10 batch=1 TESSERA_E2M1_K2_R896 encode_seconds=30.291\n[campaign] r1 6/10 batch=1 TESSERA_E2M1_K2_R896 encode_seconds=28.572\n[campaign] r1 7/10 batch=1 TESSERA_E4M3_K1_R832 encode_seconds=6.477\n[campaign] r1 8/10 batch=1 TESSERA_E4M3_K1_R1088 encode_seconds=6.653\n[campaign] r1 9/10 batch=1 TESSERA_E4M3_K1_R832 encode_seconds=6.474\n[campaign] r1 10/10 batch=1 TESSERA_E4M3_K1_R1088 encode_seconds=6.655\n[campaign] round 2: 4 anchors\n[campaign] r2 1/4 batch=1 TESSERA_BF16_K1_R960 encode_seconds=6.744\n[campaign] r2 2/4 batch=1 TESSERA_BF16_K1_R960 encode_seconds=6.679\n[campaign] r2 3/4 batch=1 TESSERA_E4M3_K1_R960 encode_seconds=6.657\n[campaign] r2 4/4 batch=1 TESSERA_E4M3_K1_R960 encode_seconds=6.656\n[campaign] round 3: nothing pending\n[campaign] wrote /mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/cost.pkl: 2 units, 1030 priced rungs, 515 distinct formats\n"
+      }
+    ],
+    "actual_failure_output": null,
+    "source_diff": "A\t.pbrun-closure.5d37324d866c48bc.json\n"
+  },
+  "observer": {
+    "schema": "prismaquant.glm_selected_anchor_profile.v1",
+    "status": "complete",
+    "started_unix": 1788910420.543527,
+    "collections": [],
+    "errors": [],
+    "torch": "2.13.0+cu130",
+    "cuda": "13.0",
+    "cpu_affinity": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      15,
+      16,
+      17
+    ],
+    "kernel": "6.17.0-1032-nvidia",
+    "netdata": {
+      "hosts": [
+        "sparky",
+        "sparklina"
+      ],
+      "interval_seconds": 5,
+      "byte_cap": 3221225472,
+      "bytes_written": 1058350,
+      "samples": 46
+    },
+    "python_sampler": {
+      "scope": "main_thread_only",
+      "interval_seconds": 1,
+      "byte_cap": 536870912,
+      "bytes_written": 518034,
+      "samples": 228
+    },
+    "nfsv4_srcversion": "939D67D3912BE82E3030657",
+    "nfsv4_parameters_delegation_watermark": "0",
+    "mode": "selected_anchors",
+    "campaign_argv": [
+      "--model",
+      "/mnt/shared/models/GLM-5.3-Flash-BF16",
+      "--out",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/cost.pkl",
+      "--cache-dir",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/cache",
+      "--checkpoint",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/cost.anchors.json",
+      "--units",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/units/row-0002.json",
+      "--calibration-census",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/census.json",
+      "--menu-mode",
+      "readable",
+      "--nsamples",
+      "512",
+      "--seqlen",
+      "512",
+      "--seed",
+      "0",
+      "--max-act-rows",
+      "512",
+      "--layer-stride",
+      "1",
+      "--anchors",
+      "3",
+      "--anchor-budget",
+      "12",
+      "--loo-gate",
+      "0.25",
+      "--max-artifact-bpp",
+      "0",
+      "--hessian",
+      "require",
+      "--tp-degree",
+      "1",
+      "--attention-implementation",
+      "eager",
+      "--streaming",
+      "--streaming-cache-slots",
+      "2",
+      "--streaming-prefetch-workers",
+      "1",
+      "--streaming-cache-headroom-gb",
+      "24",
+      "--anchor-batch-size",
+      "8",
+      "--max-rounds",
+      "0",
+      "--export-hessian-reference-policy",
+      "{\"max_file_bytes\":629147557,\"max_hessian_bytes\":603979776,\"max_metadata_bytes\":134217728,\"schema\":\"tessera.hessian_reference_load.v1\"}",
+      "--rate-band",
+      "832,1088",
+      "--family-restriction",
+      "{\"dense\": [\"TESSERA_BF16_K1\", \"TESSERA_E2M1_K2\", \"TESSERA_E4M3_K1\"], \"routed_moe\": [\"TESSERA_E4M3_K1\"], \"schema\": \"prismaquant.tessera_campaign_family_restriction.v1\"}",
+      "--calibration-cache",
+      "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+      "--calibration-cache-sha256",
+      "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c"
+    ],
+    "anchor_calls": 14,
+    "anchors": [
+      {
+        "call_index": 0,
+        "qname": "model.language_model.layers.10.mlp.shared_experts.gate_proj",
+        "format_name": "TESSERA_BF16_K1_R832",
+        "started_unix": 1788910496.8942769,
+        "status": "complete",
+        "cuda_events": 791,
+        "qnames": [
+          "model.language_model.layers.10.mlp.shared_experts.gate_proj"
+        ],
+        "batch_size": 1,
+        "collection_window": {
+          "requested_seconds": 0.25,
+          "stopped_by": "deadline",
+          "elapsed_seconds": 0.2513299339916557
+        },
+        "trace": {
+          "path": "anchor-000000.trace.json",
+          "bytes": 1683273,
+          "sha256": "3f185313f9550d7f248291c27e7e175b8037ed28839a925721387362d01f8fab"
+        },
+        "finished_unix": 1788910513.6636565
+      },
+      {
+        "call_index": 3,
+        "qname": "model.language_model.layers.10.mlp.shared_experts.up_proj",
+        "format_name": "TESSERA_BF16_K1_R1088",
+        "started_unix": 1788910527.666874,
+        "status": "complete",
+        "cuda_events": 66500,
+        "qnames": [
+          "model.language_model.layers.10.mlp.shared_experts.up_proj"
+        ],
+        "batch_size": 1,
+        "collection_window": {
+          "requested_seconds": 0.25,
+          "stopped_by": "deadline",
+          "elapsed_seconds": 0.255068171012681
+        },
+        "trace": {
+          "path": "anchor-000003.trace.json",
+          "bytes": 72418678,
+          "sha256": "3c4c679e3957c12ad3bca0826d3b7b7d3e69e1c7d638a42fb9ee0409c4b0e1bd"
+        },
+        "finished_unix": 1788910536.543776
+      }
+    ],
+    "profile_calls_zero_based": [
+      0,
+      3
+    ],
+    "trace_max_bytes": 536870912,
+    "native_anchor_profiled": true,
+    "profile_activities": [
+      "cuda"
+    ],
+    "call_index_scope": "Shared scalar and compatible-batch invocation sequence.",
+    "trace_cap_scope": "Exported bytes per window; not a live profiler-memory bound.",
+    "requested_window_seconds": 0.25,
+    "window_scope": "Initial CUDA collection interval; observed duration records scheduler/toggle delay.",
+    "profile_status": "observed",
+    "unobserved_calls": [],
+    "finished_unix": 1788910651.1771548,
+    "campaign_error": null
+  },
+  "observer_result_sha256": "4ffba1dce0961905a232c696a187c8abb4b23c88484e82489de614dfb704ab78",
+  "native_trace_summary": [
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/profile/attempt-c1d78b49d96a45668ec33950623a008f/anchor-000000.trace.json",
+      "bytes": 1683273,
+      "sha256": "3f185313f9550d7f248291c27e7e175b8037ed28839a925721387362d01f8fab",
+      "kernels": 781,
+      "kernel_span_s": 0.053970751953125,
+      "total_kernel_s": 0.009795258999999992,
+      "top_kernel_time": [
+        [
+          "void kernel<getrf_wo_pivot_params_<float, 0, 256, 1, 64, 64, 68, 8, 1, 1> >(int, int, void*, int, void*, int, int, int, int, int, int*)",
+          3703.87
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1})",
+          3220.9259999999927
+        ],
+        [
+          "void batch_trsm_left_kernel<float, 64, 4, 3, false, false, true>(cublasTrsmBatchParams2<float>, float, float const*, int)",
+          2141.6319999999996
+        ],
+        [
+          "void at::native::triu_tril_kernel<float, int, false, 2, true>(at::cuda::detail::TensorInfo<float, int>, at::cuda::detail::TensorInfo<float const, int>, long, long, int)",
+          488.703
+        ],
+        [
+          "void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}>(int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, function_traits<at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}>::result_type*)",
+          220.19200000000023
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::compare_scalar_kernel<float>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, float)::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::compare_scalar_kernel<float>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, float)::{lambda(float)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::compare_scalar_kernel<float>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, float)::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::compare_scalar_kernel<float>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, float)::{lambda(float)#1} const&)::{lambda(int)#1})",
+          5.888
+        ],
+        [
+          "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4>)",
+          5.056
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctorOnSelf_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctorOnSelf_add<float> const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctorOnSelf_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctorOnSelf_add<float> const&)::{lambda(int)#1})",
+          2.656
+        ]
+      ],
+      "top_kernel_count": [
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1})",
+          386
+        ],
+        [
+          "void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}>(int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, function_traits<at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}>::result_type*)",
+          257
+        ],
+        [
+          "void batch_trsm_left_kernel<float, 64, 4, 3, false, false, true>(cublasTrsmBatchParams2<float>, float, float const*, int)",
+          128
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::compare_scalar_kernel<float>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, float)::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::compare_scalar_kernel<float>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, float)::{lambda(float)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::compare_scalar_kernel<float>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, float)::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::compare_scalar_kernel<float>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, float)::{lambda(float)#1} const&)::{lambda(int)#1})",
+          1
+        ],
+        [
+          "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::or_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4> >(at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::or_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4>)",
+          1
+        ],
+        [
+          "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4>)",
+          1
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctorOnSelf_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctorOnSelf_add<float> const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctorOnSelf_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctorOnSelf_add<float> const&)::{lambda(int)#1})",
+          1
+        ],
+        [
+          "xxtrf4_set_info_ker(int, int*)",
+          1
+        ]
+      ]
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/profile/attempt-c1d78b49d96a45668ec33950623a008f/anchor-000003.trace.json",
+      "bytes": 72418678,
+      "sha256": "3c4c679e3957c12ad3bca0826d3b7b7d3e69e1c7d638a42fb9ee0409c4b0e1bd",
+      "kernels": 66262,
+      "kernel_span_s": 0.24961505859375,
+      "total_kernel_s": 0.19400687699997646,
+      "top_kernel_time": [
+        [
+          "_step",
+          169734.85699997647
+        ],
+        [
+          "_traceback",
+          18466.552
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>, std::array<char*, 1ul> >(int, at::native::FillFunctor<long>, std::array<char*, 1ul>)",
+          974.7829999999999
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::(anonymous namespace)::pow_tensor_scalar_kernel_impl<float, float>(at::TensorIteratorBase&, float)::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::(anonymous namespace)::pow_tensor_scalar_kernel_impl<float, float>(at::TensorIteratorBase&, float)::{lambda(float)#1}, std::array<char*, 2ul>)",
+          574.528
+        ],
+        [
+          "void at::native::reduce_kernel<128, 4, at::native::ReduceOp<float, at::native::MinOps<float>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::MinOps<float>, unsigned int, float, 4, 4>)",
+          495.1039999999999
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctor_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctor_add<float> const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctor_add<float> >(at::TensorIteratorBase&, at::native::CUDAFunctor_add<float> const&)::{lambda(int)#1})",
+          478.752
+        ],
+        [
+          "void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1}>(long, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1})",
+          453.6320000000001
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1})",
+          334.5279999999999
+        ]
+      ],
+      "top_kernel_count": [
+        [
+          "_step",
+          65536
+        ],
+        [
+          "void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1}>(long, at::native::gpu_index_kernel<at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_kernel_impl<at::native::OpaqueType<4> >(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1})",
+          82
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1} const&)::{lambda(int)#1})",
+          78
+        ],
+        [
+          "void at::native::index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<at::native::index_put_kernel_impl<at::native::OpaqueType<8> >(at::TensorIterator&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_put_kernel_impl<at::native::OpaqueType<8> >(at::TensorIterator&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1}>(long, at::native::gpu_index_kernel<at::native::index_put_kernel_impl<at::native::OpaqueType<8> >(at::TensorIterator&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1}>(at::TensorIteratorBase&, c10::ArrayRef<long>, c10::ArrayRef<long>, at::native::index_put_kernel_impl<at::native::OpaqueType<8> >(at::TensorIterator&, c10::ArrayRef<long>, c10::ArrayRef<long>)::{lambda(char*, char const*, long)#1} const&, bool)::{lambda(int)#1})",
+          62
+        ],
+        [
+          "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+          33
+        ],
+        [
+          "_init",
+          32
+        ],
+        [
+          "_copy_front",
+          32
+        ],
+        [
+          "void at::native::reduce_kernel<128, 4, at::native::ReduceOp<float, at::native::MinOps<float>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::MinOps<float>, unsigned int, float, 4, 4>)",
+          32
+        ]
+      ]
+    }
+  ],
+  "cost_sha256": "c0c31ff2c7b4e1001093eed49bd2b26c2baf5c6643e71aab026f63aedd34cad6",
+  "checkpoint_sha256": "4adea77e0390236921bfc5388337c12e340e59a6cb6dc3a9d57321443bdf1711"
+}

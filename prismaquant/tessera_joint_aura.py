@@ -623,9 +623,11 @@ def _restores_activation_scale_env(function):
     admitted plan carries ``"0"`` (``_load_plan``), and that is the input
     which turns the render scorer's activation clip OFF for everything that
     runs afterwards (``production_weight_cache.py``, in
-    ``_local_forward_render_score``).  Nothing outside ``execute`` reads the
-    key, so restoring it on the way out leaves the campaign byte-identical
-    and leaves the process as it was found.
+    ``_local_forward_render_score``).  Plenty of code outside ``execute``
+    reads the key -- the render scorer is exactly that code, which is why the
+    leak bites -- but nothing needs THIS command's value to still be set after
+    ``execute`` has returned.  So restoring it on the way out leaves the
+    campaign byte-identical and leaves the process as it was found.
     """
     absent = object()
 

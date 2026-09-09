@@ -1,0 +1,11 @@
+[
+  {
+    "files": [
+      "tests/test_tessera_campaign_resume.py"
+    ],
+    "ran": false,
+    "returncode": 1,
+    "shard": 0,
+    "summary": "NO PYTEST SUMMARY -- 1 file(s) did not run (the shard ended rc=1, before or outside pytest)"
+  }
+]

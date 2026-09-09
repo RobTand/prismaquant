@@ -1,7 +1,97 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `triage/layer-major-prefetch-reassert`. Stamps
+As of: 2026-09-08 · `integration/glm-first-artifact-pricing-delivery`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `fix/glm-selected-verified-capture`) for opt-in
+`--capture-load-policy` on selected streaming reuse of a SHA-bound complete
+calibration capture. The existing verified activation loader authenticates
+one private serialized buffer against each original manifest entry, validates
+its archive/storage/FP32 tensors, and releases the buffer before CUDA transfer.
+The dispatcher and runtime share the selected-resource plan's additional
+capture-prefetch phase: resident selected weights/X/H, one decoded storage S,
+private file buffer F, full-file source-page exposure F, explicit scratch M,
+and existing headroom. All original phases and physical refusal gates remain.
+Digest-named `capture-load-execution-<sha256>.json` sidecars record the actual
+load chain, byte counts, original manifest binding, resources and memory guard;
+selected-source provenance binds the sidecar's path/SHA. A later refused or
+interrupted resume cannot replace an earlier sidecar. The explicit CLI policy
+remains in checkpoint settings and changed implementation source remains a
+resume boundary; this does not authorize silent reuse of old priced anchors.
+The canonical capture identity and payload bytes remain unchanged; the option
+does not run calibration forward or reprobe source projections. The option is
+still unset by default. Gates: `tests/test_selected_verified_capture.py`,
+existing verified-load, selected-source, admission and campaign resume tests.
+CPU contracts alone do not establish native I/O, speed or served quality.
+
+Re-stamped (2026-09-08, `feat/tessera-campaign-family-restriction`) for the optional
+campaign `--family-restriction` pricing contract. Its closed
+`prismaquant.tessera_campaign_family_restriction.v1` JSON supplies nonempty
+canonical Tessera family lists for both `dense` and `routed_moe`. Campaign
+discovery supplies each unit's topology and the existing profile-aware
+`unit_structure_from_stats` validator resolves its structure; missing,
+conflicting or malformed facts refuse. The existing menu expander receives
+the family's allowlist before rung enumeration, and its cache key binds that
+allowlist alongside shape and serving context. Checkpoint and cost provenance
+bind the canonical policy and exact unit structures. Restricted seed intake
+refuses incompatible active families and out-of-band anchors before linking
+their wires; the existing producer receipt checks still govern accepted bytes.
+Fanout merge refuses mixed policies or incomplete structure maps and preserves
+their complete union. The option narrows research pricing only: existing
+reader, shape, serving-cell, release and export gates still decide support.
+Unset preserves the prior menu and seed behavior. No format default, producer
+pin, wire arithmetic, residency mechanism or PB placement changes.
+Gates: `tests/test_tessera_campaign_family_restriction.py`, existing campaign
+resume/fanout/context tests. CPU contract tests do not qualify native fit,
+batch throughput or a serving release.
+
+Re-stamped (2026-09-08, `triage/selected-anchor-plan-baseline`) for the
+selected-anchor plan's derived terms and its measured process baseline (#390).
+Every charge in `autoscale.selected_anchor_resources` now names the line that
+allocates what it bounds and the shape and dtype that line allocates: the
+export file-page window is one FP32 `[in, in]` Hessian record, serialization
+scratch is the two live copies the capture digest holds (a CPU copy of one
+Hessian and the bytes object taken from it) rather than the smaller staging
+copy `torch.serialization._save` makes per device storage, entry validation is
+one capture entry's CPU payload beside its
+device copy at the loader's own `_capture_storage_bytes` arithmetic, the
+factorization transient is two FP32 copies of the widest Hessian across the
+producer's sequential seal and factorise stages, and the encoder memo is sized
+by the capacity the plan publishes rather than by the anchor batch width, so
+the charge and the memo's construction have one owner. Two terms are stated as
+gaps and left unchanged: the export archive's pickle-and-directory metadata,
+whose size follows pickle framing rather than any shape or dtype, and the
+producer's own working set inside `encode_linear`.
+The plan states deltas; `CaptureMemoryGuard` reads absolute process bytes.
+The guard now records its first reading as a measured baseline and reports
+`peak_checkpoint` and a per-phase-prefix peak map, the selected row stamps
+that baseline beside its plan, and selected admission compares the plan with
+the cap less the baseline instead of with the raw cap. The guard's own refusal
+arithmetic is unchanged: its readings are already absolute. No pre-run baseline
+is invented for the dispatcher; `baseline_policy` records that declared
+headroom remains its only pre-run term.
+A third quantity is measured and reported rather than charged. On the
+streaming fixture the first encode step grew 165.6 MB and the second grew
+2.7 MB against a 10.3 MB `resident_anchors` plan, and the row's peak sat
+157.8 MB above its own measured baseline, 73.9 MB of it resident host pages
+and 83.9 MB CUDA allocator segments. Nearly all of it is the first step:
+loading the CUDA factorisation path and building the encoder's working
+buffers once. The charge follows no shape in the roster and is not even
+fixed for one roster, since the same fixture grew 93.7 MB over its baseline
+with a one-rung menu and 157.8 MB with two, so it is recorded in the guard
+telemetry and left uncharged; a constant would be a multiplier by another
+name.
+Gates: `tests/test_tessera_selected_source.py` for the derived terms and the
+measured baseline, and the native GLM selected row in
+`tests/test_glm_campaign_streaming.py`, which pins declared headroom to zero,
+asserts the admission arithmetic against the cap less the measured baseline,
+and runs two encode steps so the first-use charge and the steady state are
+separable. The campaign takes the anchor-batch bracket per occurrence and
+stamps one growth figure per step on the receipt; the row asserts that every
+step after the first fits the `resident_anchors` phase plan, so a forgotten
+term fails there rather than disappearing into headroom. This bounds
+attribution and admission arithmetic on a fixture roster; it is not a
+full-GLM fit claim, and it does not bound the first step.
 
 Re-stamped (2026-09-08, `triage/layer-major-prefetch-reassert`) for the exact
 layer-major visitor's residency contract (#403). `StreamedCausalLM.
@@ -90,6 +180,7 @@ and per-node runtime evidence. Configured topology and the helper's source
 bytes join existing gold provenance. Full-vocab final-position KL remains
 distinct from HTTP top-K KL. This instrument change touches no frozen pricing
 package input, Tessera producer, serving qualification or performance claim.
+
 
 Re-stamped (2026-09-08, `integrate/glm-packed-source-20260908`) for the
 synchronized development/serving dependency pin to Tessera `07ad344c3275`
@@ -323,8 +414,9 @@ remain covered by the physical guard's runtime margin.
 The raw buffer expires before CPU results can transfer to CUDA. File changes,
 unknown owners, overbudget storage and unsupported copying reads refuse.
 
-`--capture-load-policy` accepts that JSON only with streamed
-`shared-inputs-bounded-v1` capture. Materialization and final sealing price
+`--capture-load-policy` accepts that JSON with streamed
+`shared-inputs-bounded-v1` capture or selected streaming reuse of a hash-bound
+complete capture. Materialization and final sealing price
 private serialized buffer, full-file source-page exposure and scratch separately; forward/source-validation phases
 retain their existing terms. The unchanged physical cap must admit the maximum
 phase. Joint preparation accepts the same top-level `capture_load_policy` only

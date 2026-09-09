@@ -1,0 +1,9 @@
+{
+  "baseline": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-01/workspace/rows/row-0002/cost.pkl",
+  "candidate": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/timed-observer-01/dense-qualification-01/cost.pkl",
+  "priced_rows": 1030,
+  "changed_fields": {
+    "encode_seconds": 14
+  },
+  "all_other_cost_fields_equal": true
+}

@@ -99,6 +99,9 @@ def test_selected_campaign_hashes_only_consumed_shards_and_preserves_identity(
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', build)
     monkeypatch.setattr(autoscale, 'selected_anchor_resources', lambda *a, **k: dict(
         memory_bytes=1024**3, selected_source_weight_bytes=selected.numel()*2,
+        # The campaign builds the encoder memo with the capacity the plan
+        # charged for, so a stub plan publishes one too.
+        encoder_memo_capacity=1,
         phases={'resident_anchors': {'factorization_scratch_bytes': 4*256**2*4}}))
     monkeypatch.setattr(campaign, '_collect_activations', lambda *a, **k: pytest.fail('repeated forward'))
     selection = tmp_path/'selection.json'

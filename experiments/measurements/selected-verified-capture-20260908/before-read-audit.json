@@ -1,0 +1,349 @@
+{
+  "enclosing_after_unix": 1788909861.158911,
+  "enclosing_before_unix": 1788909252.506191,
+  "enclosing_window_delta_io": {
+    "cancelled_write_bytes": 0,
+    "rchar": 101821777606,
+    "read_bytes": 99056222208,
+    "syscr": 81349,
+    "syscw": 854,
+    "wchar": 3338998,
+    "write_bytes": 3502080
+  },
+  "file_size_counts": {
+    "20973477": 288,
+    "75499429": 576
+  },
+  "first_prefetch_unix": 1788909253.5066457,
+  "guard_stack_samples": 3,
+  "host_metrics": {
+    "sparklina": {
+      "metrics": {
+        "nvidia_smi.gpu_gpu-b1eceeea-fec7-371e-2cf3-cd10f2e7b705_power_draw/power_draw": {
+          "max": 43.0,
+          "mean": 19.553719008264462,
+          "min": 4.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/claim": {
+          "max": 95323.0,
+          "mean": 10935.495867768595,
+          "min": 3311.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/listdir": {
+          "max": 454.0,
+          "mean": 146.6694214876033,
+          "min": 42.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/open": {
+          "max": 2800.0,
+          "mean": 530.1157024793389,
+          "min": 114.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/stat": {
+          "max": 20.0,
+          "mean": 3.5702479338842976,
+          "min": 2.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/worst": {
+          "max": 706786.0,
+          "mean": 37238.20661157025,
+          "min": 3812.0,
+          "n": 121
+        },
+        "prismabuild.mount_rpc_time/queue": {
+          "max": 53398.0,
+          "mean": 1723.611570247934,
+          "min": 0.0,
+          "n": 121
+        },
+        "prismabuild.mount_rpc_time/rtt": {
+          "max": 72619.0,
+          "mean": 10741.710743801654,
+          "min": 444.0,
+          "n": 121
+        },
+        "system.cpu/guest": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/guest_nice": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/idle": {
+          "max": 98.8471178,
+          "mean": 84.3748651446281,
+          "min": 66.29667,
+          "n": 121
+        },
+        "system.cpu/iowait": {
+          "max": 20.5823293,
+          "mean": 9.156401803305785,
+          "min": 0.3007519,
+          "n": 121
+        },
+        "system.cpu/irq": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/nice": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/softirq": {
+          "max": 0.1009082,
+          "mean": 0.009144778512396694,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/steal": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/system": {
+          "max": 8.1488934,
+          "mean": 1.990285941322314,
+          "min": 0.4509018,
+          "n": 121
+        },
+        "system.cpu/user": {
+          "max": 23.7160121,
+          "mean": 4.469302327272727,
+          "min": 0.3507014,
+          "n": 121
+        }
+      },
+      "samples": 121
+    },
+    "sparky": {
+      "metrics": {
+        "nvidia_smi.gpu_gpu-e76c7efc-c157-b1f4-1348-83e4eb5092f4_power_draw/power_draw": {
+          "max": 13.0,
+          "mean": 12.983471074380166,
+          "min": 12.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/claim": {
+          "max": 95160.0,
+          "mean": 10116.388429752065,
+          "min": 3034.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/listdir": {
+          "max": 283.0,
+          "mean": 107.7107438016529,
+          "min": 46.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/open": {
+          "max": 2425.0,
+          "mean": 684.8760330578513,
+          "min": 104.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/stat": {
+          "max": 9.0,
+          "mean": 2.8264462809917354,
+          "min": 2.0,
+          "n": 121
+        },
+        "prismabuild.mount_latency/worst": {
+          "max": 712757.0,
+          "mean": 35645.47107438016,
+          "min": 3173.0,
+          "n": 121
+        },
+        "prismabuild.mount_rpc_time/queue": {
+          "max": 171.0,
+          "mean": 55.247933884297524,
+          "min": 0.0,
+          "n": 121
+        },
+        "prismabuild.mount_rpc_time/rtt": {
+          "max": 28680.0,
+          "mean": 6913.214876033057,
+          "min": 377.0,
+          "n": 121
+        },
+        "system.cpu/guest": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/guest_nice": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/idle": {
+          "max": 94.1796287,
+          "mean": 92.4242279677686,
+          "min": 83.0111902,
+          "n": 121
+        },
+        "system.cpu/iowait": {
+          "max": 10.286001,
+          "mean": 5.066723959504132,
+          "min": 3.512293,
+          "n": 121
+        },
+        "system.cpu/irq": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/nice": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/softirq": {
+          "max": 0.0508906,
+          "mean": 0.007472192561983471,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/steal": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0,
+          "n": 121
+        },
+        "system.cpu/system": {
+          "max": 5.0428643,
+          "mean": 1.0635082776859504,
+          "min": 0.4014049,
+          "n": 121
+        },
+        "system.cpu/user": {
+          "max": 7.8840285,
+          "mean": 1.4380675925619835,
+          "min": 0.2506266,
+          "n": 121
+        }
+      },
+      "samples": 121
+    }
+  },
+  "last_prefetch_unix": 1788909859.8487196,
+  "manifest_sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c",
+  "physical_bytes_per_second": 162806566.69299453,
+  "physical_to_selected_bytes": 1.9931434049164556,
+  "prefetch_samples": 607,
+  "rchar_to_selected_bytes": 2.04814802071863,
+  "sample_window_delta_io": {
+    "cancelled_write_bytes": 0,
+    "rchar": 101440741694,
+    "read_bytes": 98716471296,
+    "syscr": 75816,
+    "syscw": 848,
+    "wchar": 3336850,
+    "write_bytes": 3497984
+  },
+  "sample_window_seconds": 606.3420739173889,
+  "sampler_samples": 904,
+  "schema": "prismaquant.selected_capture_prefetch_read_audit.v1",
+  "selected_entries": 864,
+  "selected_file_bytes": 49528032480,
+  "selected_payload_bytes_per_second": 81683318.06502339,
+  "snapshots": [
+    {
+      "bytes": 997729,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/selected-verified-capture-01/before-python_sampler.jsonl",
+      "sha256": "b7ec484b00d8ab92bf2ed5a5a4c2855fdf24017797a111cd12ebb6d4d3eee73d"
+    },
+    {
+      "bytes": 4169030,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/selected-verified-capture-01/before-netdata.jsonl",
+      "sha256": "3ba5db1ca3c10903572927851d25a0f16f9c55d052b80fc27cad66d42f32852f"
+    }
+  ],
+  "source_action": "ab1c32b1a4c8fabc1bc27161cd5e8690b106503cd868e3640e1339a487d11e38",
+  "top_frame_counts": [
+    {
+      "file": "/workspace/prismaquant/tessera_calibration_cache.py",
+      "function": "sha256",
+      "line": 40,
+      "samples": 499
+    },
+    {
+      "file": "/usr/local/lib/python3.12/dist-packages/torch/serialization.py",
+      "function": "load_tensor",
+      "line": 2128,
+      "samples": 38
+    },
+    {
+      "file": "/workspace/prismaquant/tessera_calibration_cache.py",
+      "function": "_validate_tensors",
+      "line": 416,
+      "samples": 28
+    },
+    {
+      "file": "/workspace/prismaquant/tessera_calibration_cache.py",
+      "function": "sha256",
+      "line": 49,
+      "samples": 25
+    },
+    {
+      "file": "/workspace/prismaquant/perturbed_x_cache.py",
+      "function": "release_activation_cache_file_pages",
+      "line": 441,
+      "samples": 6
+    },
+    {
+      "file": "/workspace/prismaquant/tessera_calibration_cache.py",
+      "function": "prefetch_capture",
+      "line": 924,
+      "samples": 3
+    },
+    {
+      "file": "/usr/lib/python3.12/pathlib.py",
+      "function": "open",
+      "line": 1015,
+      "samples": 3
+    },
+    {
+      "file": "/usr/local/lib/python3.12/dist-packages/torch/serialization.py",
+      "function": "_is_zipfile",
+      "line": 439,
+      "samples": 2
+    },
+    {
+      "file": "/usr/local/lib/python3.12/dist-packages/psutil/_common.py",
+      "function": "open_binary",
+      "line": 682,
+      "samples": 1
+    },
+    {
+      "file": "/workspace/prismaquant/tessera_calibration_cache.py",
+      "function": "sha256",
+      "line": 30,
+      "samples": 1
+    },
+    {
+      "file": "/workspace/prismaquant/perturbed_x_cache.py",
+      "function": "_advise_activation_descriptor",
+      "line": 427,
+      "samples": 1
+    }
+  ]
+}
