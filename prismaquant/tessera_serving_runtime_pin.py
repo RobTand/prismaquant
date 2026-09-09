@@ -168,7 +168,7 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: the same commit.  Re-check it against the COMMIT rather than a past HEAD,
 #: which nobody can re-run::
 #:
-#:     git -C "$TS" cat-file -p 07ad344c3275bb2fa7ce2432f93d89945d66f4c2:src/tessera/serving/runtime_contract.json | sha256sum
+#:     git -C "$TS" cat-file -p b1eb1dccc9df6773ab94e1c98f316f45bb18ab4c:src/tessera/serving/runtime_contract.json | sha256sum
 #:
 #: Re-pinned 2026-09-05 to ba582d4 (Tessera #356) for the priced-input
 #: exporter snapshot API required by PrismaQuant #231. The v22 contract bytes
@@ -186,8 +186,12 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: packed checkpoint execution declaration and strict typed export carriers.
 #: Contract bytes and admission answers remain unchanged. This is a producer
 #: API/source dependency, with no full-model or TP2 qualification claim.
+#: Re-pinned 2026-09-09 to b1eb1dccc for the opt-in best-form encoder and
+#: tile controls (#437/#438), including reviewed cached-export and rank-local
+#: intake fixes (#434/#436). Actual GLM pricing preserves measured bytes and
+#: scores; the unchanged contract and answer grant no new serving qualification.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "07ad344c3275bb2fa7ce2432f93d89945d66f4c2"
+    "b1eb1dccc9df6773ab94e1c98f316f45bb18ab4c"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (

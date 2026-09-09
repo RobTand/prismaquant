@@ -1,7 +1,25 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `integration/glm-first-artifact-pricing-delivery`. Stamps
+As of: 2026-09-09 · `integration/glm-reviewed-best-form-producer`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-09, `integration/glm-reviewed-best-form-producer`) for the
+synchronized development/serving dependency pin to Tessera `b1eb1dccc9df`
+(#437/#438). Its best-form window recurrence and tile controls remain opt-in;
+the package also includes the reviewed calibrated cached-export and rank-local
+TP2 intake fixes (#434/#436). The packaged runtime contract is byte-identical
+to `07ad344c3275`, and the admission answer, format menu, serving cells and
+encoder defaults remain unchanged. Native GLM row-0076 measurements preserve
+all 32 selected experts' wire bytes and scores at both R832 and R1088 with
+this producer; they do not establish full-model KL, a serving release or a
+blanket batch-width policy. Wider batches improved work/J at R832 and worsened
+it at R1088. The original complete calibration capture remains reusable under
+its own identity; old priced anchors retain their old source seal and are not
+relabeled or automatically adopted under the new producer. New pricing binds
+the new source identity. Provision fleet dependencies with
+`tools/provision_tessera_pin.py` through PrismaBuild; the provisioner compares
+the shipped package files as well as the contract and builds outside the frozen
+source tree. Detailed measurements and gates accompany the pin integration.
 
 Re-stamped (2026-09-08, `fix/glm-selected-verified-capture`) for opt-in
 `--capture-load-policy` on selected streaming reuse of a SHA-bound complete
