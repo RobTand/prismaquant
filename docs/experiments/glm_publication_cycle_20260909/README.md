@@ -69,3 +69,49 @@ Evidence under the preceding shared preparation root:
 `root-actual-tile32-cas-source.json`. The PB manifest is
 `actual-tile32-screen-campaign.json`. Native/audit source matches retained
 commit 4e14b58f35 apart from PB closures and the subsequently added audit file.
+
+## Publication correctness intake and retained failed run
+
+The final upstream cleanup at `4ef7ef9654`, integrated with the merged b1
+producer pin in root `d6f99fa01d`, passed 51 focused CPU tests with no skips.
+They covered publisher behavior, the actual campaign CLI, architecture and
+staleness. Four independent PB shards used the scoped b1 producer CPU
+Python environment on dl380g10; actual terminal exits, cleanup, CAS payloads,
+receipt hashes and source snapshots were verified. Source differences were
+only PB closure files. Evidence:
+`/mnt/shared/tessera-measurements/glm-publication-final-cleanup-tests-20260909{,-cas-source}.json`.
+The broader earlier integration had 120 passes and one CUDA-only skip; final
+upstream regression had 209 passes and three skips in its older CPU producer
+environment. These are CPU policy/correctness results, not native performance.
+
+Seven deliberately damaged implementations failed their intended tests.
+Root fetched their actual CAS source bundles and read failed terminal output.
+M1 forces synchronous publication despite a publisher; M2 journals before
+publication; M3 disconnects the publisher from the campaign call; M4 removes
+unwind journalling; M5 admits oversized jobs; M6 stages before reservation;
+M7 makes unwind flushing conditional on newly completed receipts, losing
+previously applied dirty rows. M7 fails specifically in the eager-completion
+case. The initial receipt index mislabeled M1 and swapped the meanings of M5
+and M6; actual patches take precedence. Failed actions have no successful CAS
+receipt: their logs are retained terminal output, while their source bundles
+are CAS hash checked. Full keys, patches and logs:
+`/mnt/shared/tessera-measurements/glm-publication-mutants-20260909-cas-source.json`.
+
+Native PB `1e1f6decc655af9327d57e54afd6f6b00a4a5ddc7470809394dea514eefa5307`
+on Sparky ended with exit 1 after the first synchronous warm arm produced 64
+actual wires and matching journal scores. The next arm refused the checked
+phase plan against its remaining memory budget. There was no cgroup OOM,
+and cleanup completed. The first arm's 188.389 seconds includes warm-up and
+is **not an A/B result**. Its source was `b8f2c3f66d`, before final cleanup.
+Retain `performance-publication-cycle-r1088-ab-01/` as bounded failure evidence.
+
+The comparison harness now records the process/cgroup/CUDA floor before and
+after Python collection and unused CUDA allocator cleanup between arms,
+outside timed intervals; cached live plans remain. It records admission and
+completed guard snapshots and releases the loaded cost payload before the
+next arm. The primary trace is preserved after either warm profile so a later
+failure does not discard the first trace. The safety guard is unchanged.
+The retry reserves 104 GiB, including 6 GiB over the rounded 98 GiB phase plan
+for the observer and retained state; 110 GiB was refused before submission
+because both fleet workers declare 104 GiB. No workload ran for that refused
+submission. Native R1088/64-unit and R832/32-unit A/B qualification is pending.
