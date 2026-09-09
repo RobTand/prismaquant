@@ -117,6 +117,33 @@ def capture(rank=0, world=1):
     return h
 
 
+def test_diagnostic_repeats_preserve_logits_and_detect_changed_raw_bytes():
+    h = served.DiagnosticPromptLogitsCapture(rank=0, world_size=1, rows=3,
+                                            vocab_size=5, require_cuda=False)
+    reports = []
+    for index in range(3):
+        h.arm(index, "final-0000", torch.zeros(3, 5))
+        for value in (torch.ones(1, 5), torch.arange(15).reshape(3, 5).float() + (index == 2)):
+            original = value.clone()
+            assert h(None, (), value) is None
+            torch.testing.assert_close(value, original, rtol=0, atol=0)
+        reports.append(h.finish("final-0000"))
+    assert reports[0]["raw_logits"] == reports[1]["raw_logits"]
+    assert reports[0]["raw_logits"][1]["sha256"] != reports[2]["raw_logits"][1]["sha256"]
+    # Adding a constant changes raw bytes but preserves normalized KL.
+    np.testing.assert_allclose(reports[0]["values"], reports[2]["values"], atol=1e-12)
+    assert reports[0]["raw_logits"][1]["sha256"] == hashlib.sha256(
+        torch.arange(15).float().numpy().tobytes()).hexdigest()
+    assert h.teacher is None and h.raw_observations == []
+
+
+@pytest.mark.parametrize("count,qualify", [(1, True), (9, True), (4, False), (-1, True)])
+def test_diagnostic_requires_bounded_explicit_mode_before_loading(count, qualify):
+    from types import SimpleNamespace
+    with pytest.raises(ValueError, match="diagnostic repetition"):
+        served.measure(SimpleNamespace(diagnostic_repeat_first_window=count, qualify_hook=qualify))
+
+
 @pytest.mark.parametrize("reverse", [False, True])
 def test_hook_does_not_modify_output_and_accepts_stock_call_order(reverse):
     h = capture()

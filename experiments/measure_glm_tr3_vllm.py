@@ -13,6 +13,7 @@ import hashlib
 import inspect
 import io
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -91,7 +92,37 @@ def attention_runtime(text_model):
     return result
 
 
-def install_capture(model, *, tile_rows, logits_layout="legacy_single"):
+class DiagnosticPromptLogitsCapture(PromptLogitsCapture):
+    """Read-only raw-logits observations for repeated-window diagnosis only."""
+
+    def arm(self, *args, **kwargs):
+        super().arm(*args, **kwargs)
+        self.raw_observations = []
+
+    def __call__(self, module, args, output):
+        super().__call__(module, args, output)
+        if self.rank == 0 and isinstance(output, torch.Tensor):
+            # Bounded host staging, released after each logits call. Hash raw
+            # storage before normalization; no replacement output or GPU copy.
+            raw = output.detach().contiguous().cpu()
+            octets = raw.view(torch.uint8).numpy()
+            columns = torch.linspace(0, raw.shape[1] - 1, 512).long()
+            self.raw_observations.append({
+                "shape": list(raw.shape), "dtype": str(raw.dtype),
+                "sha256": hashlib.sha256(memoryview(octets)).hexdigest(),
+                "sample_rows": list(range(min(16, raw.shape[0]))),
+                "sample_columns": columns.tolist(),
+                "sample_values": raw[:16, columns].float().tolist(),
+            })
+
+    def finish(self, window_id):
+        result = super().finish(window_id)
+        result["raw_logits"] = self.raw_observations
+        self.raw_observations = []
+        return result
+
+
+def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnostic=False):
     """Public apply_model control RPC; hooks return no replacement tensor."""
     from vllm.distributed import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
     import vllm
@@ -104,7 +135,8 @@ def install_capture(model, *, tile_rows, logits_layout="legacy_single"):
         raise ValueError("candidate lacks the unscaled full-vocabulary logits module")
     if hasattr(model, "_tr3_capture"):
         raise ValueError("candidate already has a TR3 capture hook")
-    state = PromptLogitsCapture(rank=get_tensor_model_parallel_rank(),
+    capture_class = DiagnosticPromptLogitsCapture if diagnostic else PromptLogitsCapture
+    state = capture_class(rank=get_tensor_model_parallel_rank(),
                                world_size=get_tensor_model_parallel_world_size(),
                                rows=CONTEXT_LENGTH - 1, vocab_size=VOCAB_SIZE,
                                tile_rows=tile_rows, logits_layout=logits_layout)
@@ -221,6 +253,21 @@ def observed_worker_configuration(worker, *, expected_kv_cache_dtype, logits_lay
             "logits_layout": logits_layout, "prompt_layout_source": layout_source}
 
 
+def diagnostic_worker_configuration(worker):
+    """Observe third-party execution controls without exporting arbitrary env."""
+    prefixes = ("GLM53_", "EXL3_", "ABLIT", "FLASHINFER_", "NCCL_", "CUDA_", "TORCH_")
+    environment = {key: value for key, value in sorted(os.environ.items())
+                   if key.startswith(prefixes)
+                   and not any(part in key.upper() for part in ("TOKEN", "SECRET", "PASSWORD", "KEY"))}
+    config = worker.vllm_config
+    return {"rank": worker.model_runner.model._tr3_capture.rank,
+            "environment": environment,
+            "kernel_config": str(config.kernel_config),
+            "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+            "cuda_matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+            "float32_matmul_precision": torch.get_float32_matmul_precision()}
+
+
 def route_diagnostics(model, *, require_exl3):
     # Observe only an already loaded module. Importing a plugin for measurement
     # would itself change the serving process's extension residency.
@@ -322,6 +369,9 @@ def qualification_runtime_matches(qualified, observed):
 
 
 def measure(args):
+    repeats = getattr(args, "diagnostic_repeat_first_window", 0)
+    if repeats and (not args.qualify_hook or not 2 <= repeats <= 8):
+        raise ValueError("diagnostic repetition requires qualify-hook and 2..8 repeats")
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
     model = Path(args.model).resolve(strict=True)
@@ -356,7 +406,7 @@ def measure(args):
             llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
             requested_kv_cache_dtype=args.kv_cache_dtype)
         worker_runtime = llm.apply_model(partial(install_capture, tile_rows=args.tile_rows,
-                                                logits_layout=args.logits_layout))
+                                                logits_layout=args.logits_layout, diagnostic=bool(repeats)))
         installed = True
         worker_runtime.sort(key=lambda row: row["rank"])
         if ([row["rank"] for row in worker_runtime] != list(range(topology["tensor_parallel_size"]))
@@ -385,11 +435,13 @@ def measure(args):
                 or not qualification_runtime_matches(qualification.get("runtime_binding"), runtime_binding)
                 or qualification.get("passed") is not True):
             raise ValueError("native qualification differs from this candidate/runtime/teacher/topology")
-        vectors, alignment, rank_calls = [], [], []
-        count = 1 if args.qualify_hook else len(inputs)
+        vectors, alignment, rank_calls, raw_logits = [], [], [], []
+        diagnostic_configuration = (llm.collective_rpc(diagnostic_worker_configuration) if repeats else None)
+        count = repeats or (1 if args.qualify_hook else len(inputs))
         for index in range(count):
-            window, row = panel["windows"][index], teacher["windows"][index]
-            tokens = inputs[index][0].tolist()
+            input_index = 0 if repeats else index
+            window, row = panel["windows"][input_index], teacher["windows"][input_index]
+            tokens = inputs[input_index][0].tolist()
             armed = llm.apply_model(partial(arm_capture, index=index, window_id=window["window_id"],
                                            descriptor=row, teacher_root=str(Path(args.teacher).resolve().parent),
                                            target_ids=tokens[1:]))
@@ -408,6 +460,14 @@ def measure(args):
                                             logits_layout=args.logits_layout))
             alignment.append(verify_prompt_alignment(outputs[0], tokens, reports))
             rank_calls.append([{k: r[k] for k in ("rank", "world_size", "window_id", "calls", "logits_layout")} for r in reports])
+            if repeats:
+                raw_logits.append(next(r["raw_logits"] for r in reports if r["rank"] == 0))
+                atomic_json_write({"schema": "prismaquant.glm_tr3_repeatability_progress/1",
+                                   "completed_repeats": index + 1, "runtime_binding": runtime_binding,
+                                   "diagnostic_configuration": diagnostic_configuration,
+                                   "per_position_kl": vectors, "raw_logits": raw_logits,
+                                   "prompt_alignment": alignment, "rank_calls": rank_calls},
+                                  Path(args.output).with_suffix(".progress.json"))
             print(f"[tr3-full-kl] measured {window['window_id']}", flush=True)
         if cached_checkpoint_identity(model, args.candidate_digest_cache) != candidate_identity:
             raise ValueError("candidate checkpoint changed while scoring")
@@ -433,7 +493,16 @@ def measure(args):
                   "per_position_kl": vectors, "prompt_alignment": alignment, "rank_calls": rank_calls,
                   "route_diagnostics": {"before": diagnostics_before, "after": diagnostics_after},
                   "teacher_source_execution": teacher["source_execution"],
-                  "summary": summarize_panel({"windows": panel["windows"][:count]}, vectors)}
+                  "summary": summarize_panel({"windows": ([panel["windows"][0]] * count if repeats
+                                                           else panel["windows"][:count])}, vectors)}
+        if repeats:
+            result["schema"] = "prismaquant.glm_tr3_repeatability_diagnostic/1"
+            result["completed"] = result.pop("passed")
+            result["diagnostic_configuration"] = diagnostic_configuration
+            result["raw_logits"] = raw_logits
+            result["summary"]["interpretation"] = (
+                "Repeated identical final-0000 in one engine; diagnostic only, "
+                "not a hook qualification, full-panel score or allocation input.")
         atomic_json_write(result, args.output)
         return result
     finally:
@@ -456,6 +525,8 @@ def main():
     p.add_argument("--logits-layout", choices=LOGITS_LAYOUTS, default="legacy_single",
                    help="explicit native logits-call layout; scheduler chunked prefill stays disabled")
     p.add_argument("--qualify-hook", action="store_true")
+    p.add_argument("--diagnostic-repeat-first-window", type=int, default=0,
+                   help="diagnostic only: repeat final-0000 2..8 times; requires --qualify-hook")
     p.add_argument("--qualification")
     p.add_argument("--qualification-sha256")
     add_gold_engine_arguments(p)
