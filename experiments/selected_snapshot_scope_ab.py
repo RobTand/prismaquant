@@ -123,7 +123,7 @@ def run(path, expected):
         command += ['--source-snapshot-policy', policy]
         argv = [sys.executable, '-u', '-m', 'experiments.glm_full_capture_profile',
             '--evidence-out', str(out/'profile'), '--selected-anchors',
-            '--anchor-profile-calls', '0,3', '--anchor-trace-max-bytes', str(256*1024**2),
+            '--anchor-profile-calls', '0,3', '--anchor-trace-max-bytes', str(512*1024**2),
             '--anchor-cuda-only', '--anchor-profile-seconds', '2', '--', *command]
         environment = dict(os.environ, TRITON_CACHE_DIR=str(out/'triton'),
             TORCHINDUCTOR_CACHE_DIR=str(out/'inductor'))
