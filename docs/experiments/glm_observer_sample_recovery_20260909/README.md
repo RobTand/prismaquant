@@ -19,3 +19,23 @@ on DL380 CPU with four workers and native threads bounded to one. The skips
 are CUDA-only coverage. An earlier wrong-environment submission lacked
 compressed_tensors and did not collect; it is not a regression result.
 This changes observation recovery, not pricing, sampling values or admission.
+
+## Concurrent progress serialization (issue #460)
+
+A first monitor round added dictionary keys while the main thread could be
+serializing progress, raising `RuntimeError: dictionary changed size during
+iteration`. Initialize monitor counters and both host failure slots before
+starting threads; each failure record also has its complete key set before
+publication. Progress remains a non-atomic observation; the final snapshot
+follows thread shutdown and retains any errors.
+
+The deterministic regression pauses the actual JSON dictionary iterator before
+running the first monitor round, for both monitor kinds. PB
+`2093a627f4189ac9360beba0cef59b369783d8b9d3ea271ac13e99e478893b8f`
+failed both cases with the dictionary-size error. Final green PB
+`550b801d8faaea6d9895201fa0959007a9b3dc3bb3bda7f540a5019c6306f1cd`
+passed 45 tests with the same 3 CUDA-only skips in 7.40 seconds (DL380 CPU,
+four workers, one native thread each). The terminal record confirms exit 0
+and resource cleanup. The CAS result hash is
+`b966e20248cd4757ea42a8d4f8593f0e3944122d14993d0b1efa9d8b3feb5261`;
+the tested snapshot is `232e6c89ddef8faa177c604d60c19f4d01240458`.
