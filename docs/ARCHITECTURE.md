@@ -1,7 +1,35 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `claude/dispatch-process-baseline`. Stamps
+As of: 2026-09-09 · `perf/glm-selected-source-scope`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-09, `perf/glm-selected-source-scope`) for opt-in
+`--source-snapshot-policy selected-tensors-v1` in selected anchor rows that
+reuse a complete, SHA-bound capture. The default remains `whole-layer-v1`.
+The source-only mode builds the declared meta skeleton but materializes no
+head, embedding or vision tensors. Its one-shot selection narrows the existing
+`StreamingContext` maps before prefetch, using the same profile-derived
+source dependency closure as resource admission. The existing reader, layer
+cache, concat merger and expert packer remain the owners of source bytes.
+A selected projected expert requires its entire packed parent, including all
+expert indices and sibling projections; a concat target requires every source.
+Forward installation and full source-initialization attestation are refused.
+The selected source keys are compared with the admitted plan before reading
+and recorded in the source receipt. Source shard SHA256 authentication and
+held-descriptor mutation fences remain unchanged: consuming one tensor still
+authenticates its entire shard once per row. The initial policy supports
+unscaled floating checkpoints; scaled FP8/FP4 sources fail closed.
+
+Admission excludes unconsumed source tensors and nonbody materialization,
+retains selected H/X, encoder, packing and publication charges and the existing
+full-layer source-validation allowance, and preserves
+the full-header identity and decoder coverage check. Snapshot policy is an
+execution choice outside cost identity, like compatible batch width: source
+weight bytes, calibration, encoder policy, wire format and shipping gates do
+not change. Qualification requires selected weight parity and a complete
+matched-group GPU profile before claiming a production speedup. Gates:
+`tests/test_selected_snapshot_scope.py` and existing streaming, source
+authentication, selected-anchor and dispatcher admission tests.
 
 Re-stamped (2026-09-09, `claude/dispatch-process-baseline`) for the campaign
 dispatcher's explicit process-baseline reservation. A recipe may declare

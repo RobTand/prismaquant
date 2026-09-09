@@ -111,7 +111,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
                                    prefetch_workers, headroom_gb,
                                    capture_policy='legacy', capture_load_policy=None,
-                                   process_baseline_bytes=0):
+                                   process_baseline_bytes=0, selected_source_units=None):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -166,7 +166,18 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     if live_probe is None or '.0.' not in live_probe:
         raise ValueError('profile cannot map the decoder prefix for resource admission')
     live_prefix = live_probe.rsplit('.0.', 1)[0]+'.'
+    selected_keys = None
+    if selected_source_units is not None:
+        from .layer_streaming import selected_weight_source_keys
+        mapped_keys = [profile.checkpoint_to_live_name(key, multimodal=multimodal)
+                       for key in header]
+        selected_keys = set(selected_weight_source_keys(
+            selected_source_units, profile, (key for key in mapped_keys if key is not None)))
+        if fp4_experts:
+            raise ValueError('selected tensor snapshots require unscaled floating source weights')
     body, fixed, pack, concat = {}, 0, {}, {}
+    covered_layers = set()
+    validation_raw_body = {}
     raw_body, max_element_bytes = {}, 4
     packed_regex = profile.per_expert_moe_regex()
     packed_pattern = (re.compile(packed_regex.removeprefix('re:')) if packed_regex else None)
@@ -178,6 +189,17 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         name = profile.checkpoint_to_live_name(key, multimodal=multimodal)
         if name is None:
             continue
+        if name.startswith(live_prefix):
+            index = name[len(live_prefix):].split('.', 1)[0]
+            if not index.isdigit() or not 0 <= int(index) < layers:
+                raise ValueError(f'out-of-body source tensor is still live: {name}')
+            covered_layers.add(int(index))
+            begin, end = meta['data_offsets']
+            validation_raw_body[int(index)] = validation_raw_body.get(int(index), 0)+int(end)-int(begin)
+        if selected_keys is not None and name not in selected_keys:
+            continue
+        if selected_keys is not None and str(meta['dtype']).upper() not in ('BF16', 'F16', 'F32', 'F64'):
+            raise ValueError('selected tensor snapshots require unscaled floating source weights')
         shape = meta['shape']
         numel = math.prod(shape)
         begin, end = meta['data_offsets']
@@ -216,7 +238,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             if any(name.endswith(suffix) for suffix in sources):
                 group = (layer, target)
                 concat[group] = concat.get(group, 0)+size
-    if set(body) != set(range(layers)):
+    if covered_layers != set(range(layers)):
         raise ValueError('source headers do not cover every decoder layer')
     # A final group is preallocated and filled directly; no per-expert fused
     # slabs survive. Charge all original packed-source bytes as a conservative
@@ -271,6 +293,9 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         # a caller that declares a reservation and gets a plan back with no
         # record of it has been told the opposite of the truth.
         **_baseline_fields(process_baseline_bytes),
+        **({'source_tensor_keys': sorted(selected_keys),
+            'body_source_validation_bytes': {str(k): v for k, v in validation_raw_body.items()}}
+           if selected_keys is not None else {}),
         source_header_sha256=hashlib.sha256(json.dumps(header, sort_keys=True,
             separators=(',', ':')).encode()).hexdigest(),
         terms=terms, memory_bytes=sum(terms.values()), disk_bytes=disk,
@@ -355,7 +380,8 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
 def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               cache_slots, prefetch_workers, headroom_gb,
                               anchor_batch_size=1, capture_load_policy=None,
-                              publication_overlap_bytes=0, process_baseline_bytes=0):
+                              publication_overlap_bytes=0, process_baseline_bytes=0,
+                              source_snapshot_policy='whole-layer-v1'):
     """Bound selected-source preparation separately from resident encoding.
 
     This extends the source loader's header/dtype accounting. No source
@@ -414,10 +440,14 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     capture_load_policy = normalize_verified_activation_load(capture_load_policy)
     if not unit_shapes or type(anchor_batch_size) is not int or anchor_batch_size < 1:
         raise ValueError('selected anchors require nonempty units and a positive batch size')
+    if source_snapshot_policy not in ('whole-layer-v1', 'selected-tensors-v1'):
+        raise ValueError('unknown selected source snapshot policy')
     source = streamed_calibration_resources(model_path, unit_shapes=unit_shapes,
         counts=counts, nsamples=1, seqlen=1, max_act_rows=max_act_rows,
         cache_slots=cache_slots, prefetch_workers=prefetch_workers,
-        headroom_gb=headroom_gb)
+        headroom_gb=headroom_gb,
+        **({'selected_source_units': tuple(unit_shapes)}
+           if source_snapshot_policy == 'selected-tensors-v1' else {}))
     prefix = source['live_layer_prefix']
     layers = sorted({str(int(name[len(prefix):].split('.', 1)[0])) for name in unit_shapes}, key=int)
     weights = sum(source['unit_source_weight_bytes'].values())
@@ -487,7 +517,12 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # whether that release is complete is the loader's contract, not a
         # term derivable from a shape.
         entry_validation_bytes=2*widest_capture_entry,
-        source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)+widest_weight,
+        # Narrowing tensor reads does not narrow whole-shard authentication.
+        # Retain the existing full-layer raw-page allowance, even when most
+        # tensor materialization is excluded. Do not infer a smaller hash/page
+        # footprint merely from a selected tensor's shape.
+        source_validation_bytes=sum(source.get('body_source_validation_bytes',
+            source['body_source_file_bytes'])[k] for k in layers)+widest_weight,
         # tessera_publication.BoundedPublisher's own bound, charged as itself.
         # Staged artifacts are host bytes waiting to be written: the CPU BF16
         # render (_canonical_rendered_weight_tensor) and the wire blob, live
@@ -541,6 +576,9 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
             capture_source_page_cache_bytes=capture_load_policy['max_buffer_bytes'],
             capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'])
     return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases,
+        **({'source_snapshot_policy': source_snapshot_policy,
+            'source_tensor_keys': source['source_tensor_keys']}
+           if source_snapshot_policy == 'selected-tensors-v1' else {}),
         **({'capture_load_policy': capture_load_policy} if capture_load_policy is not None else {}),
         memory_bytes=max(sum(phase.values()) for phase in phases.values()),
         selected_source_weight_bytes=weights, selected_layers=layers,

@@ -1599,7 +1599,7 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "units", "calibration_census", "census_out",
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
-                 "publication_overlap_bytes"):
+                 "publication_overlap_bytes", "source_snapshot_policy"):
         settings.pop(name, None)
     return {
         **({"family_restriction": {"policy": restriction,
@@ -4196,6 +4196,9 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--streaming", action="store_true",
                     help="Use the source layer cache for census/capture or selected anchors from a complete capture.")
     ap.add_argument("--streaming-cache-slots", type=int, default=2)
+    ap.add_argument("--source-snapshot-policy", default="whole-layer-v1",
+                    choices=("whole-layer-v1", "selected-tensors-v1"),
+                    help="selected-tensors-v1 loads authenticated weight dependencies only; requires selected streaming capture reuse")
     ap.add_argument("--streaming-prefetch-workers", type=int, default=1)
     ap.add_argument("--streaming-cache-headroom-gb", type=float, default=24)
     ap.add_argument("--streaming-capture-policy", default="legacy",
@@ -4222,6 +4225,8 @@ def _main(argv, *, source_scope) -> int:
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if args.source_snapshot_policy != 'whole-layer-v1' and not selected_source:
+        ap.error('--source-snapshot-policy requires selected streaming capture reuse')
     if args.capture_load_policy is not None and not (selected_source or (
             args.streaming and args.capture_calibration_out and
             args.streaming_capture_policy == 'shared-inputs-bounded-v1')):
@@ -4317,6 +4322,8 @@ def _main(argv, *, source_scope) -> int:
             prefetch_min_available_gb=args.streaming_cache_headroom_gb,
             prefetch_lookahead=args.streaming_cache_slots-1, require_prefetched_residency=True,
             attn_implementation=args.attention_implementation,
+            **({'source_snapshot_only': True}
+               if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
             **({'source_authentication': source_authentication} if source_authentication is not None else {}))
         model = runner.model
     else:
@@ -4496,6 +4503,7 @@ def _main(argv, *, source_scope) -> int:
             headroom_gb=args.streaming_cache_headroom_gb,
             anchor_batch_size=args.anchor_batch_size,
             publication_overlap_bytes=args.publication_overlap_bytes,
+            source_snapshot_policy=args.source_snapshot_policy,
             **(dict(capture_load_policy=args.capture_load_policy)
                if args.capture_load_policy is not None else {}))
         if device == 'cuda':
@@ -4538,6 +4546,8 @@ def _main(argv, *, source_scope) -> int:
         try:
             selected_weights, selected_source_preparation = runner.snapshot_selected_weights(
                 targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
+                **({'expected_source_keys': selected_resources['source_tensor_keys']}
+                   if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
                 resource_check=None if selected_guard is None else selected_guard.check)
         finally:
             runner.shutdown()

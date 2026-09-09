@@ -425,7 +425,7 @@ class StreamedCausalLM:
         return layer
 
     def snapshot_selected_weights(self, names, *, max_resident_bytes: int,
-                                  resource_check=None):
+                                  resource_check=None, expected_source_keys=None):
         """Copy selected source Linears from the existing resident layer cache.
 
         This is preparation for a consumer that already owns its ``weights``
@@ -470,6 +470,13 @@ class StreamedCausalLM:
         if required > max_resident_bytes:
             raise RuntimeError("selected source weights exceed their resident byte budget")
 
+        snapshot_only = getattr(self.context, 'source_snapshot_only', False)
+        if snapshot_only:
+            self.context.configure_selected_snapshot(names, self.profile)
+            if (expected_source_keys is not None and
+                    tuple(expected_source_keys) != self.context._snapshot_source_keys):
+                raise RuntimeError('snapshot source dependencies differ from the admitted plan')
+
         ordered = sorted(layers)
         window = max(1, min(self.prefetch_lookahead, self.context.max_cache_slots - 1))
         weights, records = {}, []
@@ -477,7 +484,8 @@ class StreamedCausalLM:
             self.context.schedule_prefetch(layer)
         for index, layer in enumerate(ordered):
             source = self.context.install(layer, require_prefetched=True,
-                                          prefetch_following=False)
+                                          prefetch_following=False,
+                                          **({'snapshot': True} if snapshot_only else {}))
             if index + window < len(ordered):
                 self.context.schedule_prefetch(ordered[index + window])
             live = {}
@@ -504,7 +512,10 @@ class StreamedCausalLM:
                 resource_check(f"after_selected_source_release:{layer}")
         return weights, dict(schema="prismaquant.selected_source_weights.v1",
             units=sorted(weights), layers=records, resident_bytes=required,
-            source_forward_count=0, packed_parent_storage_retained=False)
+            source_forward_count=0, packed_parent_storage_retained=False,
+            **({'source_snapshot_policy': 'selected-tensors-v1',
+                'source_tensor_keys': list(self.context._snapshot_source_keys),
+                'nonbody_materialized': False} if snapshot_only else {}))
 
     @contextmanager
     def pin_layer(self, layer: int) -> Iterator[None]:
@@ -540,6 +551,8 @@ class StreamedCausalLM:
             return head
 
     def _prepare(self, input_ids: torch.Tensor):
+        if getattr(self.context, 'source_snapshot_only', False):
+            raise RuntimeError('snapshot-only source cannot execute a forward')
         ids = input_ids.to(self.device)
         position_ids = torch.arange(
             ids.size(-1), device=self.device
@@ -886,6 +899,7 @@ def build_streamed_causal_lm(
     attn_implementation: str | None = None,
     source_authentication=None,
     source_derivative=None,
+    source_snapshot_only=False,
 ) -> StreamedCausalLM:
     """Build the repository's existing streaming context and wrap it."""
     from prismaquant.streaming_model import _build_streaming_context
@@ -902,6 +916,7 @@ def build_streamed_causal_lm(
         log_prefix="[cost-streaming]",
         attn_implementation=attn_implementation,
         **({'source_authentication': source_authentication} if source_authentication is not None else {}),
+        **({'source_snapshot_only': True} if source_snapshot_only else {}),
     )
     runner = None
     try:

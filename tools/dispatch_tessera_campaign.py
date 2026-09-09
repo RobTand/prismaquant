@@ -240,6 +240,7 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
     if selected_source:
         return selected_anchor_resources(spec['model'], **options,
             anchor_batch_size=argument('--anchor-batch-size', 1),
+            source_snapshot_policy=argument('--source-snapshot-policy', 'whole-layer-v1', str),
             # The row's own campaign will hold this many host bytes of staged
             # artifacts, so the box that admits the row has to be told. A
             # dispatcher that planned without it would size a worker for a
