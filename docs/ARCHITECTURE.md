@@ -1,7 +1,16 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `perf/glm-selected-source-snapshot`. Stamps
+As of: 2026-09-09 · `fix/qwen35-tf517-rotary-positions`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-09, `fix/qwen35-tf517-rotary-positions`) for the
+profile-owned `rotary_position_ids` hook at the shared streamed rotary call.
+Qwen3.5/3.6 supplies three identical rotary axes for two-dimensional text
+positions and preserves explicit three-axis inputs. This carries the model
+forward's expansion into streaming after Transformers 5.17 removed it from
+the rotary module. Mask and decoder-layer positions remain unchanged; other
+profiles pass rotary positions through. Gates: real Qwen hybrid integration
+and the existing rotary/mask tests. See #477.
 
 Re-stamped (2026-09-09, `perf/glm-selected-source-snapshot`) for
 `dispatch_tessera_campaign.py plan --seed-workspace`. A new plan can offer each
