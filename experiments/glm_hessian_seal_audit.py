@@ -54,7 +54,7 @@ def main():
             assert digest(path) == meta['sha256'] and path.stat().st_size == meta['bytes']
             events = json.loads(gzip.decompress(path.read_bytes()))['traceEvents']
             for name in ('construct_and_seal_resident_capture', 'consume_one_actual_hessian'):
-                assert len([e for e in events if e.get('name') == name and e.get('ph') == 'X']) == 1
+                assert len([e for e in events if e.get('name') == name and e.get('ph') == 'X' and e.get('cat') == 'user_annotation']) == 1
             kernels = [e for e in events if e.get('cat') == 'kernel' and e.get('ph') == 'X']
             assert kernels
             profiles.append(dict(sha256=meta['sha256'], kernels=len(kernels),
