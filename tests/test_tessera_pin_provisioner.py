@@ -461,10 +461,9 @@ def test_a_cached_tree_that_fails_its_manifest_is_kept_not_deleted(tmp_path):
 def test_an_unmanifested_tree_matching_the_commit_is_attested_not_replaced(tmp_path):
     """Bytes that already are the commit do not need to be written again.
 
-    ``/mnt/shared/tessera-pins/07ad344c...`` predates the manifest and is
-    correct.  Rewriting it churns a shared directory other boxes may be
-    reading, for a tree that is already right; verifying it against a fresh
-    ``git archive`` establishes the same thing without touching it.
+    A tree written before manifests existed may already match its commit.
+    Rewriting those verified bytes churns a shared directory other boxes may
+    be reading; compare against a fresh ``git archive`` and attest in place.
     """
     mod = _load()
     clone, old, new = _git_clone_with_two_commits(tmp_path)

@@ -19,9 +19,12 @@ second cache and no change to what a published file is. An anchor is added to
 the checkpoint invariant that every journalled anchor row carries a wire
 receipt read back off a published file is unchanged. A round, a deadline stop
 and the end of the loop are drain barriers; the publisher's lifetime is a
-`try`/`finally` it is started inside, and unwinding commits the rows whose
-receipts really completed before dropping what is still staged, so a batch
-that succeeded before a later one failed keeps its journal row. That commit
+`try`/`finally` it is started inside. That `finally` runs on every exit, a
+successful return included; on the success path the loop's own drain and
+flush have already emptied the pending state, so its close and flush are
+no-ops. What it exists for is the exception path, where it commits the rows
+whose receipts really completed before dropping what is still staged, so a
+batch that succeeded before a later one failed keeps its journal row. That commit
 is unconditional: rows a batch's `apply_completed` had already put into the
 pending checkpoint are unwritten until a flush, and the batch cadence need
 not have reached one, so flushing only when the unwind itself journalled
@@ -44,6 +47,24 @@ performs writes whose arguments it does not touch. Gates:
 `tests/test_tessera_campaign_publication_cli.py`. The barrier tests establish
 ordering and bounds only; the device-to-host copy remains synchronous, and no
 speed, work-per-joule or I/O claim is made here.
+
+Re-stamped (2026-09-09, `integration/glm-reviewed-best-form-producer`) for the
+synchronized development/serving dependency pin to Tessera `b1eb1dccc9df`
+(#437/#438). Its best-form window recurrence and tile controls remain opt-in;
+the package also includes the reviewed calibrated cached-export and rank-local
+TP2 intake fixes (#434/#436). The packaged runtime contract is byte-identical
+to `07ad344c3275`, and the admission answer, format menu, serving cells and
+encoder defaults remain unchanged. Native GLM row-0076 measurements preserve
+all 32 selected experts' wire bytes and scores at both R832 and R1088 with
+this producer; they do not establish full-model KL, a serving release or a
+blanket batch-width policy. Wider batches improved work/J at R832 and worsened
+it at R1088. The original complete calibration capture remains reusable under
+its own identity; old priced anchors retain their old source seal and are not
+relabeled or automatically adopted under the new producer. New pricing binds
+the new source identity. Provision fleet dependencies with
+`tools/provision_tessera_pin.py` through PrismaBuild; the provisioner compares
+the shipped package files as well as the contract and builds outside the frozen
+source tree. Detailed measurements and gates accompany the pin integration.
 
 Re-stamped (2026-09-08, `fix/glm-selected-verified-capture`) for opt-in
 `--capture-load-policy` on selected streaming reuse of a SHA-bound complete
