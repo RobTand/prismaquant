@@ -12,11 +12,16 @@ import torch
 from prismaquant.cost_stage_checkpoint import _load_unit, canonical_json_sha256, unit_path
 
 rate=int(sys.argv[1])
-assert rate in (832,1088)
-base = Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-02')/f'performance-best-tile-batch-r{rate}-ab-01'
+max_width=int(sys.argv[2]) if len(sys.argv)>2 else 32
+assert rate in (832,1088) and max_width in (16,32)
+assert max_width==32 or rate==1088
+batch_suffix='16' if max_width==16 else ''
+base = Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-02')/f'performance-best-tile-batch{batch_suffix}-r{rate}-ab-01'
 fleet = Path('/mnt/shared/prismabuild-fleet')
 key = {832:'5b0742bece0f5c66aa1e418c7227b1953f51d7c3bf634f417fb1535ce5c85172',
        1088:'a9adbe93e67e3befcebeaa6d3a999da48e0d99f137113a9e5fddc840295938c1'}[rate]
+if max_width==16:
+    key='8f2e7a0026ddc7a697aae1e8dcd2ca8430657640cd883c70846cd93d610316dc'
 
 def digest(path):
     with path.open('rb') as handle:
@@ -38,8 +43,8 @@ assert result['format_name'] == f'TESSERA_E4M3_K1_R{rate}'
 assert result['best_tile']=='64,4,2'
 assert len(result['arms']) == 6
 signatures = result['arms'][0]['signatures']
-assert len(signatures) == 32
-assert all(a['signatures'] == signatures and a['exact_parity'] and a['batch_size'] in (8,32) and a['best_form'] for a in result['arms'])
+assert len(signatures) == max_width
+assert all(a['signatures'] == signatures and a['exact_parity'] and a['batch_size'] in (8,max_width) and a['best_form'] for a in result['arms'])
 assert result['arms'] == [p for p in printed if p.get('label','').startswith(('warm-','measured-'))]
 for s in signatures:
     p = base/'cache/wire'/(s['qname'].replace('.','__')+'__'+result['format_name']+'.tessera')
@@ -73,15 +78,15 @@ profiles = []
 first,second = result['call_profiles']
 assert first['call']['rate']==second['call']['rate']==(3 if rate==832 else 4)
 assert first['call']['inputs']['targets']['shape']==[4096,192]
-assert second['call']['inputs']['targets']['shape']==[4096,768]
+assert second['call']['inputs']['targets']['shape']==[4096,max_width*24]
 assert first['call']['inputs']['vectors']==second['call']['inputs']['vectors']
 input_payloads={}
 for label,meta in result['batch_call_inputs'].items():
     p=Path(meta['path']);assert p.stat().st_size==meta['bytes'] and digest(p)==meta['sha256']
     input_payloads[label]=torch.load(p,map_location='cpu',weights_only=True)
-assert torch.equal(input_payloads['b8']['vectors'],input_payloads['b32']['vectors'])
+assert torch.equal(input_payloads['b8']['vectors'],input_payloads[f'b{max_width}']['vectors'])
 for name in ('targets','weights'):
-    assert torch.equal(input_payloads['b8'][name],input_payloads['b32'][name][:,:192])
+    assert torch.equal(input_payloads['b8'][name],input_payloads[f'b{max_width}'][name][:,:192])
 for arm in result['call_profiles']:
     meta = arm['trace']; p = Path(meta['path'])
     assert p.stat().st_size==meta['bytes'] and digest(p)==meta['sha256']
@@ -92,12 +97,12 @@ for arm in result['call_profiles']:
     span = max(e['ts']+e['dur'] for e in kernels)-min(e['ts'] for e in kernels)
     assert sum(e['dur'] for e in kernels)<=span*1.01
     assert arm['best_form']
-    graphs=1 if arm['label']=='b8' else (3 if rate==832 else 2)
+    graphs=1 if arm['label']=='b8' or max_width==16 else (3 if rate==832 else 2)
     steps = [e for e in kernels if e['name']=='_step_best']
     assert len(steps)==4095*graphs
     overlaps = [a['ts']+a['dur']-b['ts'] for a,b in zip(steps,steps[1:]) if a['ts']+a['dur']>b['ts']]
     assert max(overlaps,default=0)<1 and sum(overlaps)/sum(e['dur'] for e in steps)<0.0001
-    tb = [e for e in kernels if e['name']=='_traceback']; assert len(tb)==(1 if arm['label']=='b8' else 2)
+    tb = [e for e in kernels if e['name']=='_traceback']; assert len(tb)==(1 if arm['label']=='b8' or max_width==16 else 2)
     launches = [e for e in events if e.get('name')=='cudaGraphLaunch' and e.get('ph')=='X']
     assert len(launches)==graphs
     assert not any('StreamBeginCapture' in e.get('name','') for e in events)
@@ -138,22 +143,22 @@ for arm in result['arms'][2:]:
     counters=[{k:int(v) for k,v in (l.split(':',1) for l in s['process_io'].splitlines())} for s in (selected[0],selected[-1])]
     io_groups=collections.defaultdict(list)
     for c in arm['io_calls']: io_groups[c['kind']].append(c['seconds'])
-    assert {k:len(v) for k,v in io_groups.items()}==dict(fsync=64,torch_save=32,path_write_bytes=32)
+    assert {k:len(v) for k,v in io_groups.items()}==dict(fsync=2*max_width,torch_save=max_width,path_write_bytes=max_width)
     arms.append(dict(label=arm['label'],batch_size=arm['batch_size'],seconds=arm['seconds'],plans_built=arm['plans_built'],hosts=hosts,
         io_calls={k:dict(count=len(v),seconds=sum(v),max_seconds=max(v)) for k,v in io_groups.items()},
         sampled_process_io={k:counters[1][k]-counters[0][k] for k in counters[0]},
         io_sample_interval=[selected[0]['time'],selected[-1]['time']],python_samples=len(selected),
         viterbi_inclusive_samples=sum(any(f['function']=='viterbi_window_fused' for f in s['frames']) for s in selected)))
 means={}
-for width,label in ((8,'b8'),(32,'b32')):
+for width,label in ((8,'b8'),(max_width,f'b{max_width}')):
     selected=[a for a in arms if a['batch_size']==width];assert len(selected)==2
     sec=statistics.mean(a['seconds'] for a in selected);j=statistics.mean(a['hosts'][terminal['claimed_host']]['joules'] for a in selected)
-    means[label]=dict(seconds=sec,joules=j,mean_w=j/sec,units_per_joule=32/j)
+    means[label]=dict(seconds=sec,joules=j,mean_w=j/sec,units_per_joule=max_width/j)
 print(json.dumps(dict(status='PASS',action=key,receipt=receipt['receipt_sha256'],source=result['producer_source_sha256'],
-    torch=result['torch'],host=terminal['claimed_host'],format=result['format_name'],shape=[4096,2048],units=32,batches=[8,32],
-    all_six_arms_exact_wire_and_score=True,actual_wire_hashes_checked=32,old_07ad_exact_units=old_parity,
+    torch=result['torch'],host=terminal['claimed_host'],format=result['format_name'],shape=[4096,2048],units=max_width,batches=[8,max_width],
+    all_six_arms_exact_wire_and_score=True,actual_wire_hashes_checked=max_width,old_07ad_exact_units=old_parity,
     capture_load_execution=load,actual_first_call_inputs=inputs,profiles=profiles,arms=arms,means=means,
-    throughput_ratio=means['b8']['seconds']/means['b32']['seconds'],work_per_joule_ratio=means['b8']['joules']/means['b32']['joules'],
+    throughput_ratio=means['b8']['seconds']/means[f'b{max_width}']['seconds'],work_per_joule_ratio=means['b8']['joules']/means[f'b{max_width}']['joules'],
     limitations=['A bounded endpoint comparison, not a completed pricing row or model.',
         'Complete-call traces are warm-up attribution only, not timed-arm traces.',
         'torch_save durations include serialization and I/O; do not equate them with network latency.',

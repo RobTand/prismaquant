@@ -23,6 +23,7 @@ def main(argv=None):
     parser.add_argument('--comparison', choices=('batch-width', 'trellis-best-form',
                         'trellis-call-profile', 'trellis-best-form-complete', 'best-batch-complete'),
                         default='batch-width')
+    parser.add_argument('--batch-pair', choices=('8,32','8,16'), default='8,32')
     parser.add_argument('--out', required=True)
     parser.add_argument('campaign', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -38,7 +39,7 @@ def main(argv=None):
         spec['env']['PRISMABUILD_PROFILE_TORCH_OUT'] = '/pb-profile/' + profile.name
         return container_main(['--spec', json.dumps(spec), '--', 'python3', '-u', '-m',
             'experiments.glm_anchor_batch_pb_profile', '--comparison', args.comparison,
-            '--out', args.out, '--', *command])
+            '--batch-pair', args.batch_pair, '--out', args.out, '--', *command])
 
     import torch
     from prismaquant import tessera_campaign as campaign
@@ -46,14 +47,15 @@ def main(argv=None):
     from prismaquant.tessera_campaign import _wire_path
     batch_compare = args.comparison == 'best-batch-complete'
     complete = args.comparison in ('trellis-best-form-complete', 'best-batch-complete')
-    unit_count = 32 if batch_compare else 16
+    widths = tuple(int(v) for v in args.batch_pair.split(','))
+    unit_count = max(widths) if batch_compare else 16
     if command[command.index('--anchor-batch-size') + 1] != str(unit_count):
         raise ValueError(f'comparison requires the selected planner to reserve batch {unit_count}')
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=False)
     result = dict(schema='prismaquant.glm_anchor_batch_pb_profile.v1',
         status='running', scope=f'first compatible {unit_count} experts at the first campaign rung',
-        comparison=args.comparison,
+        comparison=args.comparison,batch_pair=widths if batch_compare else None,
         full_campaign_complete=False, arms=[], command=command,
         torch=torch.__version__, cuda=torch.version.cuda, started_unix=time.time())
     from tessera.cached_unit import encoder_source_sha256
@@ -230,7 +232,7 @@ def main(argv=None):
                     if args.comparison in ('trellis-best-form', 'trellis-best-form-complete')
                     else [(8, 'b8', None), (16, 'b16', None)])
         if batch_compare:
-            variants = [(8, 'b8', True), (32, 'b32', True)]
+            variants = [(width, f'b{width}', True) for width in widths]
         if complete:
             import shutil
             original_viterbi = window_viterbi.viterbi_window_fused
