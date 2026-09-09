@@ -298,19 +298,27 @@ def test_main_refuses_missing_or_changed_priced_wire(monkeypatch, tmp_path, dama
     assert checkpoint.read_bytes() == original_manifest
 
 
-def test_seed_refuses_changed_scoring_rows_before_linking_wire(monkeypatch, tmp_path):
+@pytest.mark.parametrize('changed', [False, True])
+def test_seed_refuses_changed_scoring_rows_before_linking_wire(monkeypatch, tmp_path, changed):
     (campaign, checkpoint, argv, _model, inputs), _payload = _fresh_priced_campaign(
         monkeypatch, tmp_path, hessian=True)
     original_manifest = checkpoint.read_bytes()
     _forbid_reencode(monkeypatch, campaign)
     # The encoder still sees identical W, H, draw and static scale. Only the
     # bounded rows used to score its decoded weight have changed.
-    inputs['rows'][0, 0] += 1
+    if changed:
+        inputs['rows'][0, 0] += 1
     new_cache = tmp_path/'new-cache'
     argv[argv.index('--checkpoint')+1] = str(tmp_path/'new.anchors.json')
     argv[argv.index('--cache-dir')+1] = str(new_cache)
     argv[argv.index('--out')+1] = str(tmp_path/'new-cost.pkl')
-    with pytest.raises(RuntimeError, match='seed.*scoring_rows'):
-        campaign.main([*argv, '--seed-checkpoint', str(checkpoint)])
+    if changed:
+        with pytest.raises(RuntimeError, match='seed.*scoring_rows'):
+            campaign.main([*argv, '--seed-checkpoint', str(checkpoint)])
+        assert list((new_cache/'wire').glob('*.tessera')) == []
+    else:
+        assert campaign.main([*argv, '--seed-checkpoint', str(checkpoint)]) == 0
+        with (tmp_path/'new-cost.pkl').open('rb') as handle:
+            assert pickle.load(handle)['costs'] == _payload['costs']
+        assert list((new_cache/'wire').glob('*.tessera'))
     assert checkpoint.read_bytes() == original_manifest
-    assert list((new_cache/'wire').glob('*.tessera')) == []

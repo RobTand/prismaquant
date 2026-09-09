@@ -1,7 +1,18 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `perf/glm-selected-source-scope`. Stamps
+As of: 2026-09-09 · `perf/glm-selected-source-snapshot`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-09, `perf/glm-selected-source-snapshot`) for seed-score
+identity validation. `--seed-checkpoint` now requires a digest-bound source
+manifest and matching unit envelopes, then compares calibration, score currency,
+static-scale policy, actual per-unit scoring-row identity and input scale before
+linking that unit's wires or inheriting its measured error. Producer input and
+wire checks still apply. Menu and source-package changes can reuse compatible
+measurements; changed scoring activations cannot inherit old scores. Missing
+unit shards remain eligible for fresh pricing, preserving partial-checkpoint
+recovery. Gates: `tests/test_tessera_campaign_resume.py` and
+`tests/test_tessera_campaign_fanout.py`.
 
 Re-stamped (2026-09-09, `perf/glm-selected-source-scope`) for opt-in
 `--source-snapshot-policy selected-tensors-v1` in selected anchor rows that
