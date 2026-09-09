@@ -25,7 +25,7 @@ import numpy as np
 import torch
 
 from experiments.glm_tr3_full_vocab import (
-    CONTEXT_LENGTH, PANEL_SHA256, TOKENIZER_SHA256, VOCAB_SIZE,
+    CONTEXT_LENGTH, LOGITS_LAYOUTS, PANEL_SHA256, TOKENIZER_SHA256, VOCAB_SIZE,
     PromptLogitsCapture, bound_json, cached_checkpoint_identity, collect_tp_result, load_panel, sha256, summarize_panel,
 )
 from experiments.build_glm_tr3_teacher import producer_identity
@@ -90,7 +90,7 @@ def attention_runtime(text_model):
     return result
 
 
-def install_capture(model, *, tile_rows):
+def install_capture(model, *, tile_rows, logits_layout="legacy_single"):
     """Public apply_model control RPC; hooks return no replacement tensor."""
     from vllm.distributed import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
     import vllm
@@ -106,7 +106,7 @@ def install_capture(model, *, tile_rows):
     state = PromptLogitsCapture(rank=get_tensor_model_parallel_rank(),
                                world_size=get_tensor_model_parallel_world_size(),
                                rows=CONTEXT_LENGTH - 1, vocab_size=VOCAB_SIZE,
-                               tile_rows=tile_rows)
+                               tile_rows=tile_rows, logits_layout=logits_layout)
     model._tr3_capture = state
     model._tr3_capture_handle = processor.register_forward_hook(state)
     return {"rank": state.rank, "world_size": state.world_size, "torch": torch.__version__,
@@ -185,7 +185,7 @@ def observed_configuration(config, *, expected_kv_cache_dtype):
     return observed
 
 
-def observed_worker_configuration(worker, *, expected_kv_cache_dtype):
+def observed_worker_configuration(worker, *, expected_kv_cache_dtype, logits_layout="legacy_single"):
     """Public control RPC observes worker-local promotion after model loading."""
     config = observed_configuration(getattr(worker, "vllm_config", None),
                                     expected_kv_cache_dtype=expected_kv_cache_dtype)
@@ -199,12 +199,25 @@ def observed_worker_configuration(worker, *, expected_kv_cache_dtype):
     state = getattr(getattr(runner, "model", None), "_tr3_capture", None)
     if state is None:
         raise ValueError("native worker configuration has no installed capture owner")
+    layout_source = None
+    if logits_layout == "vllm_v2_chunk1024":
+        prompt_worker = getattr(runner, "prompt_logprobs_worker", None)
+        if (type(runner).__module__ != "vllm.v1.worker.gpu.model_runner"
+                or type(runner).__name__ != "GPUModelRunner"
+                or type(prompt_worker).__module__ != "vllm.v1.worker.gpu.sample.prompt_logprob"
+                or type(prompt_worker).__name__ != "PromptLogprobsWorker"):
+            raise ValueError("declared V2 prompt layout requires the native V2 prompt worker")
+        layout_source = {"runner_class": type(runner).__module__ + "." + type(runner).__name__,
+                         "runner_source_sha256": sha256(inspect.getfile(type(runner))),
+                         "prompt_worker_class": type(prompt_worker).__module__ + "." + type(prompt_worker).__name__,
+                         "prompt_worker_source_sha256": sha256(inspect.getfile(type(prompt_worker)))}
     return {"rank": state.rank, "configuration": config,
             "worker_cache_dtype": worker_dtype, "runner_cache_dtype": runner_dtype,
             # Assigned before model construction in the pinned GPU runner;
             # unlike each attention module's allocated cache, this may predate
             # sparse MLA's worker-local dtype promotion.
-            "runner_initial_kv_dtype": str(storage_dtype)}
+            "runner_initial_kv_dtype": str(storage_dtype),
+            "logits_layout": logits_layout, "prompt_layout_source": layout_source}
 
 
 def route_diagnostics(model, *, require_exl3):
@@ -292,7 +305,8 @@ def measure(args):
         observed_configuration = observed_engine_configuration(
             llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
             requested_kv_cache_dtype=args.kv_cache_dtype)
-        worker_runtime = llm.apply_model(partial(install_capture, tile_rows=args.tile_rows))
+        worker_runtime = llm.apply_model(partial(install_capture, tile_rows=args.tile_rows,
+                                                logits_layout=args.logits_layout))
         installed = True
         worker_runtime.sort(key=lambda row: row["rank"])
         if ([row["rank"] for row in worker_runtime] != list(range(topology["tensor_parallel_size"]))
@@ -300,7 +314,8 @@ def measure(args):
             raise ValueError("native hook installation lacks complete TP rank evidence")
         worker_configuration = llm.collective_rpc(
             observed_worker_configuration,
-            kwargs={"expected_kv_cache_dtype": args.expected_kv_cache_dtype})
+            kwargs={"expected_kv_cache_dtype": args.expected_kv_cache_dtype,
+                    "logits_layout": args.logits_layout})
         worker_configuration.sort(key=lambda row: row["rank"])
         if [row["rank"] for row in worker_configuration] != list(range(topology["tensor_parallel_size"])):
             raise ValueError("native configuration observation lacks every TP worker")
@@ -309,7 +324,8 @@ def measure(args):
                            "observed_worker_configuration": worker_configuration,
                            "serve_image": args.serve_image, "producer_identity": producer,
                            "candidate_identity": candidate_identity,
-                           "teacher_sha256": args.teacher_sha256, "panel_sha256": PANEL_SHA256}
+                           "teacher_sha256": args.teacher_sha256, "panel_sha256": PANEL_SHA256,
+                           "logits_layout": args.logits_layout}
         diagnostics_before = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
         runtime_binding["require_exl3_diag"] = args.require_exl3_diag
         if qualification is not None and (
@@ -336,9 +352,10 @@ def measure(args):
                 raise ValueError("native hook requires one outstanding request")
             vectors.append(collect_tp_result(reports, window_id=window["window_id"],
                                             world_size=topology["tensor_parallel_size"],
-                                            rows=CONTEXT_LENGTH - 1, vocab_size=VOCAB_SIZE))
+                                            rows=CONTEXT_LENGTH - 1, vocab_size=VOCAB_SIZE,
+                                            logits_layout=args.logits_layout))
             alignment.append(verify_prompt_alignment(outputs[0], tokens, reports))
-            rank_calls.append([{k: r[k] for k in ("rank", "world_size", "window_id", "calls")} for r in reports])
+            rank_calls.append([{k: r[k] for k in ("rank", "world_size", "window_id", "calls", "logits_layout")} for r in reports])
             print(f"[tr3-full-kl] measured {window['window_id']}", flush=True)
         if cached_checkpoint_identity(model, args.candidate_digest_cache) != candidate_identity:
             raise ValueError("candidate checkpoint changed while scoring")
@@ -384,6 +401,8 @@ def main():
     p.add_argument("--require-exl3-diag", action="store_true")
     p.add_argument("--gpu-memory-utilization", type=float, default=.9)
     p.add_argument("--tile-rows", type=int, default=32)
+    p.add_argument("--logits-layout", choices=LOGITS_LAYOUTS, default="legacy_single",
+                   help="explicit native logits-call layout; scheduler chunked prefill stays disabled")
     p.add_argument("--qualify-hook", action="store_true")
     p.add_argument("--qualification")
     p.add_argument("--qualification-sha256")

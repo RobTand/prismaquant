@@ -236,3 +236,36 @@ self-contained scorer checkout is retained at adjacent `tr3-score-source-01`,
 commit `38ef485559a70d0d3e15f5fce620ae6976321f6b`. The sealed adapter and
 argument hashes are in `tr3-exl3-offline-adapter-01/handoff.json`. No native
 EXL3 hook or complete paired quality score has run as of this entry.
+
+## Native V2 logits layout repair — 2026-09-09
+
+Native attempt 05 reached model execution after the runtime Git and callback
+serialization repairs, then the strict legacy hook refused its first 1024-row
+prompt-logit chunk. The actual pinned V2 runner samples one token first, calls
+`gpu/sample/prompt_logprob.py::compute_prompt_logprobs_with_chunking` over all
+2048 prompt hidden states in two fixed 1024-row chunks, and omits the final
+prompt score from the returned prompt logprobs. Scheduler chunked prefill was
+observed disabled. Logits tiling and scheduler prefill chunking are separate.
+
+The experimental scorer now exposes explicit
+`--logits-layout vllm_v2_chunk1024`; the legacy single-prompt-call default is
+retained. The new path requires exactly the ordered sample `[1,V]`, prompt
+`[1024,V]`, prompt `[1024,V]` calls. It scores rows 0 through 2046, excludes the
+extra final prompt row, retains the complete resident teacher on rank zero,
+and checks native target log probabilities at all 2047 causal positions.
+Unknown layouts, partial vocabulary/chunks, missing/extra calls and TP layout
+mismatches refuse. The native V2 runner and prompt-worker classes and source
+hashes join the qualification binding. This changes only the experimental
+instrument; teacher bytes, fitting capture and the pricing package are fixed.
+
+The before/after CPU driver replay uses the exact native chunk function body
+(SHA256 of its original file:
+`4cf22d390e7bf59e44c458cff7180268db63e95d06af2f1e14d720a2d77c9663`),
+with a CPU top-k stand-in, in the pinned serving image. The old hook refuses
+at `[1024,11]`; the repaired hook observes `[1,11], [1024,11], [1024,11]`,
+returns exactly 2047 positions, and matches independent FP64 full-vocabulary
+KL and target-logprob oracles. This replay does not measure native GPU logits
+or certify hook qualification. Evidence remains at
+`/home/rob/tmp/tr3-native-layout-01/{probe.py,prompt_logprob.py,before.log,after.log}`.
+The actual native repaired-layout qualification and full-panel score are
+still pending at this checkpoint.

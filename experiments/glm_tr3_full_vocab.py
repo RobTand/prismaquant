@@ -114,22 +114,38 @@ def token_kl(teacher, candidate, *, tile_rows=32, require_cuda=True):
     return result
 
 
+LOGITS_LAYOUTS = ("legacy_single", "vllm_v2_chunk1024")
+
+
+def prompt_logit_shapes(rows, vocab_size, logits_layout):
+    if logits_layout == "legacy_single":
+        return [(1, vocab_size), (rows, vocab_size)]
+    if logits_layout == "vllm_v2_chunk1024" and rows == CONTEXT_LENGTH - 1:
+        # The native V2 runner samples first, computes all 2048 prompt rows
+        # in fixed 1024-row chunks, then drops the last prompt score.
+        return [(1, vocab_size), (1024, vocab_size), (1024, vocab_size)]
+    raise ValueError("unsupported prompt logits layout/geometry")
+
+
 class PromptLogitsCapture:
-    """One armed request, one full prompt call and one sampled-token call.
+    """One armed request with an explicit native prompt-logits layout.
 
     Stock vLLM may expose gathered logits on every TP rank. Only rank zero
     scores; every rank reports its call geometry so ownership is checkable.
     A non-owner may see None from a gather-to-owner implementation. Any partial
-    vocabulary, chunked/multiple prefill, missing or duplicate call refuses.
+    vocabulary, undeclared chunking, missing or extra call refuses. The V2
+    logits chunks are independent of scheduler chunked prefill, which stays off.
     """
     def __init__(self, *, rank, world_size, rows, vocab_size, tile_rows=32,
-                 require_cuda=True):
+                 require_cuda=True, logits_layout="legacy_single"):
         if (type(rank) is not int or type(world_size) is not int or world_size < 1
                 or not 0 <= rank < world_size or rows <= 1 or vocab_size <= 1):
             raise ValueError("invalid prompt hook topology/geometry")
         self.rank, self.world_size = rank, world_size
         self.rows, self.vocab_size = rows, vocab_size
         self.tile_rows, self.require_cuda = tile_rows, require_cuda
+        self.logits_layout = logits_layout
+        self.expected_calls = prompt_logit_shapes(rows, vocab_size, logits_layout)
         self.window_id = None
         self.teacher = None
         self.calls = []
@@ -163,51 +179,69 @@ class PromptLogitsCapture:
             if not isinstance(output, torch.Tensor) or output.ndim != 2:
                 raise ValueError("prompt logits must be a tensor on the owner")
             shape = tuple(output.shape)
-            if shape not in ((1, self.vocab_size), (self.rows, self.vocab_size)):
-                raise ValueError("chunked prompt or partial vocabulary refused")
-            if shape in self.calls:
-                raise ValueError("duplicate prompt/sample logit call")
+            call_index = len(self.calls)
+            if self.logits_layout == "legacy_single":
+                if shape not in self.expected_calls:
+                    raise ValueError("chunked prompt or partial vocabulary refused")
+                if shape in self.calls:
+                    raise ValueError("duplicate prompt/sample logit call")
+                start, stop = 0, self.rows
+            else:
+                if call_index >= len(self.expected_calls) or shape != self.expected_calls[call_index]:
+                    raise ValueError(f"native logits call {call_index} has unexpected shape {shape}")
+                start = max(0, call_index - 1) * 1024
+                stop = min(start + shape[0], self.rows)
             self.calls.append(shape)
-            if shape[0] == self.rows and self.rank == 0:
-                self.values = token_kl(self.teacher, output, tile_rows=self.tile_rows,
-                                       require_cuda=self.require_cuda).cpu().tolist()
+            if shape[0] != 1 and self.rank == 0:
+                # The final V2 chunk includes the last prompt position, whose
+                # next token is outside the sealed teacher. Never score it.
+                logits = output[:stop - start]
+                values = token_kl(self.teacher[start:stop], logits, tile_rows=self.tile_rows,
+                                  require_cuda=self.require_cuda).cpu().tolist()
+                self.values = (self.values or []) + values
                 if self.target_ids is not None:
-                    target_lps = torch.empty(self.rows, device=output.device, dtype=torch.float32)
-                    for first in range(0, self.rows, self.tile_rows):
-                        last = min(first + self.tile_rows, self.rows)
-                        lp = torch.log_softmax(output[first:last].float(), dim=-1)
-                        target_lps[first:last] = lp.gather(1, self.target_ids[first:last, None]).squeeze(1)
-                    self.target_logprobs = target_lps.cpu().tolist()
-        if len(self.calls) > 2:
+                    count = stop - start
+                    target_lps = torch.empty(count, device=output.device, dtype=torch.float32)
+                    for first in range(0, count, self.tile_rows):
+                        last = min(first + self.tile_rows, count)
+                        lp = torch.log_softmax(logits[first:last].float(), dim=-1)
+                        target_lps[first:last] = lp.gather(
+                            1, self.target_ids[start + first:start + last, None]).squeeze(1)
+                    self.target_logprobs = (self.target_logprobs or []) + target_lps.cpu().tolist()
+        if len(self.calls) > len(self.expected_calls):
             raise ValueError("unexpected extra logit call")
         # Returning None leaves stock model output unchanged.
 
     def finish(self, window_id):
-        if window_id != self.window_id or len(self.calls) != 2:
+        if window_id != self.window_id or len(self.calls) != len(self.expected_calls):
             raise ValueError("missing prompt/sample call or wrong window completion")
         if self.rank == 0 and (self.values is None or None in self.calls):
             raise ValueError("TP owner did not observe full prompt logits")
         if self.rank != 0 and self.values is not None:
             raise ValueError("duplicate TP score owner")
-        if None in self.calls and self.calls != [None, None]:
+        if None in self.calls and self.calls != [None] * len(self.expected_calls):
             raise ValueError("inconsistent TP gather ownership")
         result = {"rank": self.rank, "world_size": self.world_size,
                   "window_id": window_id, "calls": self.calls, "values": self.values,
-                  "target_logprobs": self.target_logprobs}
+                  "target_logprobs": self.target_logprobs, "logits_layout": self.logits_layout}
         self.window_id = self.teacher = self.values = None
         self.target_ids = self.target_logprobs = None
         self.next_index += 1
         return result
 
 
-def collect_tp_result(results, *, window_id, world_size, rows, vocab_size):
+def collect_tp_result(results, *, window_id, world_size, rows, vocab_size,
+                      logits_layout="legacy_single"):
     if len(results) != world_size or sorted(r["rank"] for r in results) != list(range(world_size)):
         raise ValueError("missing or duplicate TP rank evidence")
+    expected_calls = prompt_logit_shapes(rows, vocab_size, logits_layout)
     for r in results:
         calls = [None if x is None else tuple(x) for x in r["calls"]]
-        complete = sorted(calls) == [(1, vocab_size), (rows, vocab_size)] if None not in calls else False
+        complete = ((sorted(calls) == expected_calls if logits_layout == "legacy_single"
+                     else calls == expected_calls) if None not in calls else False)
         if (r["window_id"] != window_id or r["world_size"] != world_size
-                or not (complete or (r["rank"] != 0 and calls == [None, None]))
+                or r.get("logits_layout", "legacy_single") != logits_layout
+                or not (complete or (r["rank"] != 0 and calls == [None] * len(expected_calls)))
                 or (r["rank"] != 0 and r["values"] is not None)):
             raise ValueError("TP ownership or prompt geometry evidence mismatch")
     values = next(r["values"] for r in results if r["rank"] == 0)

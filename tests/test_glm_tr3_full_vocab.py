@@ -170,6 +170,85 @@ def test_native_target_alignment_checks_causal_order():
         served.verify_prompt_alignment(output, tokens, [report])
 
 
+def v2_capture(rank=0, world=1):
+    h = exp.PromptLogitsCapture(rank=rank, world_size=world, rows=2047,
+        vocab_size=11, require_cuda=False, logits_layout="vllm_v2_chunk1024")
+    generator = torch.Generator().manual_seed(42)
+    teacher_logits = torch.randn(2047, 11, generator=generator)
+    candidate = torch.randn(2048, 11, generator=generator)
+    tokens = (torch.arange(2048) % 11).tolist()
+    h.arm(0, "final-0000", teacher_logits if rank == 0 else None,
+          torch.tensor(tokens[1:]) if rank == 0 else None)
+    return h, teacher_logits, candidate, tokens
+
+
+@pytest.mark.parametrize("other_gathers", [True, False])
+def test_native_v2_logits_chunks_cover_exact_causal_rows(other_gathers):
+    from types import SimpleNamespace
+    owner, teacher_logits, candidate, tokens = v2_capture(0, 2)
+    other, _, _, _ = v2_capture(1, 2)
+    candidate[-1] = 10000.  # This final prompt row is outside the teacher.
+    original = candidate.clone()
+    for h in (owner, other):
+        for output in (candidate[-1:], candidate[:1024], candidate[1024:]):
+            assert h(None, (), output if h.rank == 0 or other_gathers else None) is None
+    torch.testing.assert_close(candidate, original)
+    reports = [h.finish("final-0000") for h in (owner, other)]
+    values = exp.collect_tp_result(reports, window_id="final-0000", world_size=2,
+        rows=2047, vocab_size=11, logits_layout="vllm_v2_chunk1024")
+    np.testing.assert_allclose(values, upstream_oracle(teacher_logits.numpy(), candidate[:2047].numpy()),
+                               rtol=1e-12, atol=1e-12)
+    lp = torch.log_softmax(candidate[:2047], -1)
+    output = SimpleNamespace(prompt_token_ids=tokens, prompt_logprobs=[None] + [
+        {token: SimpleNamespace(logprob=float(lp[index, token]))}
+        for index, token in enumerate(tokens[1:])])
+    assert served.verify_prompt_alignment(output, tokens, reports)["positions"] == 2047
+    assert reports[0]["calls"] == [(1, 11), (1024, 11), (1024, 11)]
+    reports[1]["logits_layout"] = "legacy_single"
+    with pytest.raises(ValueError, match="geometry"):
+        exp.collect_tp_result(reports, window_id="final-0000", world_size=2,
+            rows=2047, vocab_size=11, logits_layout="vllm_v2_chunk1024")
+
+
+@pytest.mark.parametrize("mutation", ["missing", "extra", "sample-last", "partial-vocab", "partial-chunk"])
+def test_native_v2_refuses_incomplete_or_undeclared_geometry(mutation):
+    h, _, candidate, _ = v2_capture()
+    calls = [candidate[-1:], candidate[:1024], candidate[1024:]]
+    if mutation == "missing": calls.pop()
+    elif mutation == "extra": calls.append(candidate[:1024])
+    elif mutation == "sample-last": calls = calls[1:] + calls[:1]
+    elif mutation == "partial-vocab": calls[1] = calls[1][:, :-1]
+    else: calls[1] = calls[1][:-1]
+    with pytest.raises(ValueError):
+        for output in calls:
+            h(None, (), output)
+        h.finish("final-0000")
+
+
+@pytest.mark.parametrize("mutation", ["duplicate-first", "reorder"])
+def test_native_v2_alignment_refuses_wrong_chunk_content(mutation):
+    from types import SimpleNamespace
+    h, _, candidate, tokens = v2_capture()
+    chunks = [candidate[:1024], candidate[1024:]]
+    if mutation == "duplicate-first": chunks[1] = chunks[0]
+    else: chunks.reverse()
+    for output in [candidate[-1:], *chunks]:
+        h(None, (), output)
+    report = h.finish("final-0000")
+    lp = torch.log_softmax(candidate[:2047], -1)
+    output = SimpleNamespace(prompt_token_ids=tokens, prompt_logprobs=[None] + [
+        {token: SimpleNamespace(logprob=float(lp[index, token]))}
+        for index, token in enumerate(tokens[1:])])
+    with pytest.raises(ValueError, match="alignment"):
+        served.verify_prompt_alignment(output, tokens, [report])
+
+
+def test_native_v2_layout_requires_the_observed_context():
+    with pytest.raises(ValueError, match="layout"):
+        exp.PromptLogitsCapture(rank=0, world_size=1, rows=3, vocab_size=11,
+                               require_cuda=False, logits_layout="vllm_v2_chunk1024")
+
+
 @pytest.fixture
 def sealed_panel(tmp_path, monkeypatch):
     def save(name, array):
@@ -333,6 +412,9 @@ def test_worker_observation_refuses_promotion_hidden_from_coordinator():
     worker.model_runner.cache_config.cache_dtype = "auto"
     worker.model_runner.kv_cache_dtype = torch.bfloat16
     assert served.observed_worker_configuration(worker, expected_kv_cache_dtype="auto")["runner_initial_kv_dtype"] == "torch.bfloat16"
+    with pytest.raises(ValueError, match="native V2 prompt worker"):
+        served.observed_worker_configuration(worker, expected_kv_cache_dtype="auto",
+                                             logits_layout="vllm_v2_chunk1024")
     worker.vllm_config.cache_config.cache_dtype = "fp8_ds_mla"
     with pytest.raises(ValueError, match="cache_config"):
         served.observed_worker_configuration(worker, expected_kv_cache_dtype="auto")
