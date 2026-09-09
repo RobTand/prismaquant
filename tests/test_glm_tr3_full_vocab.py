@@ -144,6 +144,47 @@ def test_diagnostic_requires_bounded_explicit_mode_before_loading(count, qualify
         served.measure(SimpleNamespace(diagnostic_repeat_first_window=count, qualify_hook=qualify))
 
 
+def test_first_row_observation_is_bounded_and_preserves_values():
+    tensor = torch.arange(3 * 4 * 512, dtype=torch.float32).reshape(3, 4, 512)
+    original = tensor.clone()
+    result = served.first_row_observation({"hidden": tensor, "other": (None, 4)})
+    row = result["hidden"]
+    assert row["shape"] == [3, 4, 512]
+    assert len(row["sample_values"]) == 128
+    assert row["first_row_sha256"] == hashlib.sha256(tensor[:1].numpy().tobytes()).hexdigest()
+    torch.testing.assert_close(tensor, original, rtol=0, atol=0)
+    tensor[1:].add_(10)
+    assert served.first_row_observation(tensor) == row
+    assert result["other"] == [None, 4]
+
+
+def test_layer_hooks_preserve_forward_and_clear_each_request():
+    layer = torch.nn.Linear(5, 5, bias=False)
+    h = served.DiagnosticPromptLogitsCapture(rank=0, world_size=1, rows=3,
+                                            vocab_size=5, require_cuda=False)
+    from functools import partial
+    handles = [layer.register_forward_pre_hook(partial(served.diagnostic_layer_pre, h, "layer"),
+                                               with_kwargs=True),
+               layer.register_forward_hook(partial(served.diagnostic_layer_post, h, "layer"),
+                                           with_kwargs=True)]
+    x = torch.arange(15).reshape(3, 5).float()
+    expected = torch.nn.functional.linear(x, layer.weight)
+    for index in range(2):
+        h.arm(index, "final-0000", torch.zeros(3, 5))
+        assert h.layer_observations == []
+        actual = layer(x)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        h(None, (), torch.zeros(1, 5))
+        h(None, (), actual)
+        report = h.finish("final-0000")
+        assert [r["stage"] for r in report["layer_observations"]] == ["input", "output"]
+        assert report["layer_observations"][0]["args"][0] == served.first_row_observation(x)
+        assert report["layer_observations"][1]["output"] == served.first_row_observation(expected)
+        assert h.layer_observations == []
+    for handle in handles:
+        handle.remove()
+
+
 @pytest.mark.parametrize("reverse", [False, True])
 def test_hook_does_not_modify_output_and_accepts_stock_call_order(reverse):
     h = capture()

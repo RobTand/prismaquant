@@ -98,6 +98,7 @@ class DiagnosticPromptLogitsCapture(PromptLogitsCapture):
     def arm(self, *args, **kwargs):
         super().arm(*args, **kwargs)
         self.raw_observations = []
+        self.layer_observations = []
 
     def __call__(self, module, args, output):
         super().__call__(module, args, output)
@@ -118,11 +119,74 @@ class DiagnosticPromptLogitsCapture(PromptLogitsCapture):
     def finish(self, window_id):
         result = super().finish(window_id)
         result["raw_logits"] = self.raw_observations
+        result["layer_observations"] = self.layer_observations
         self.raw_observations = []
+        self.layer_observations = []
         return result
 
 
-def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnostic=False):
+def first_row_observation(value):
+    """Copy one token's raw bytes and bounded samples; retain no GPU tensors."""
+    if isinstance(value, torch.Tensor):
+        row = value.detach()[:1] if value.ndim else value.detach()
+        flat = row.contiguous().reshape(-1).cpu()
+        columns = torch.linspace(0, max(0, flat.numel() - 1), min(128, flat.numel())).long()
+        return {"shape": list(value.shape), "dtype": str(value.dtype),
+                "first_row_sha256": hashlib.sha256(memoryview(flat.view(torch.uint8).numpy())).hexdigest(),
+                "sample_indices": columns.tolist(), "sample_values": flat[columns].float().tolist()}
+    if isinstance(value, (list, tuple)):
+        return [first_row_observation(item) for item in value]
+    if isinstance(value, dict):
+        return {key: first_row_observation(item) for key, item in value.items()}
+    if value is None or type(value) in (int, float, bool, str):
+        return value
+    return {"unobserved_type": type(value).__module__ + "." + type(value).__qualname__}
+
+
+def diagnostic_attention_metadata(module):
+    from vllm.forward_context import get_forward_context
+    metadata = get_forward_context().attn_metadata
+    prefix = getattr(module, "prefix", None)
+    if not isinstance(metadata, dict) or not isinstance(prefix, str):
+        return {"prefix": prefix, "entries": None}
+    fields = ("has_initial_state", "non_spec_state_indices_tensor", "non_spec_query_start_loc",
+              "num_actual_tokens", "num_prefills", "num_decodes", "seq_lens", "query_start_loc",
+              "slot_mapping", "block_table")
+    result = {}
+    for key, entry in metadata.items():
+        if isinstance(key, str) and (key == prefix or key.startswith(prefix + ".")):
+            values = {}
+            for field in fields:
+                value = getattr(entry, field, None)
+                if isinstance(value, torch.Tensor):
+                    values[field] = {"shape": list(value.shape),
+                                     "first_values": value.detach().reshape(-1)[:32].cpu().tolist()}
+                elif value is None or type(value) in (int, float, bool, str):
+                    values[field] = value
+            result[key] = values
+    return {"prefix": prefix, "entries": result}
+
+
+def diagnostic_layer_pre(state, name, module, args, kwargs):
+    if state.window_id is None:
+        raise ValueError("unarmed layer observation")
+    event = {"module": name, "stage": "input", "class": type(module).__qualname__,
+             "args": first_row_observation(args), "kwargs": first_row_observation(kwargs)}
+    if type(module).__name__ in ("Glm5NextLinearAttention", "Glm5NextMLAAttention"):
+        event["attention_metadata"] = diagnostic_attention_metadata(module)
+    state.layer_observations.append(event)
+
+
+def diagnostic_layer_post(state, name, module, args, kwargs, output):
+    if state.window_id is None:
+        raise ValueError("unarmed layer observation")
+    state.layer_observations.append({"module": name, "stage": "output",
+                                     "class": type(module).__qualname__,
+                                     "output": first_row_observation(output)})
+
+
+def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnostic=False,
+                    diagnostic_layers=False):
     """Public apply_model control RPC; hooks return no replacement tensor."""
     from vllm.distributed import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
     import vllm
@@ -142,6 +206,19 @@ def install_capture(model, *, tile_rows, logits_layout="legacy_single", diagnost
                                tile_rows=tile_rows, logits_layout=logits_layout)
     model._tr3_capture = state
     model._tr3_capture_handle = processor.register_forward_hook(state)
+    model._tr3_layer_handles = []
+    if diagnostic_layers:
+        names = {"Glm5NextDecoderLayer", "Glm5NextLinearAttention", "Glm5NextMLAAttention",
+                 "Glm5NextMoE", "Glm5NextMLP"}
+        for name, module in text_model.named_modules():
+            if type(module).__name__ in names:
+                model._tr3_layer_handles.extend([
+                    module.register_forward_pre_hook(partial(diagnostic_layer_pre, state, name),
+                                                     with_kwargs=True),
+                    module.register_forward_hook(partial(diagnostic_layer_post, state, name),
+                                                 with_kwargs=True)])
+        if not model._tr3_layer_handles:
+            raise ValueError("diagnostic found no GLM layer boundaries")
     return {"rank": state.rank, "world_size": state.world_size, "torch": torch.__version__,
             "vllm": vllm.__version__, "model_class": type(model).__qualname__,
             "text_model_class": type(text_model).__qualname__, "logits_owner": owner_path,
@@ -177,6 +254,9 @@ def finish_capture(model, *, window_id):
 
 def remove_capture(model):
     model._tr3_capture_handle.remove()
+    for handle in model._tr3_layer_handles:
+        handle.remove()
+    del model._tr3_layer_handles
     del model._tr3_capture_handle, model._tr3_capture
     return True
 
@@ -370,8 +450,11 @@ def qualification_runtime_matches(qualified, observed):
 
 def measure(args):
     repeats = getattr(args, "diagnostic_repeat_first_window", 0)
+    diagnostic_layers = getattr(args, "diagnostic_layers", False)
     if repeats and (not args.qualify_hook or not 2 <= repeats <= 8):
         raise ValueError("diagnostic repetition requires qualify-hook and 2..8 repeats")
+    if diagnostic_layers and not repeats:
+        raise ValueError("layer observation requires explicit diagnostic repetition")
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
     model = Path(args.model).resolve(strict=True)
@@ -406,7 +489,8 @@ def measure(args):
             llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
             requested_kv_cache_dtype=args.kv_cache_dtype)
         worker_runtime = llm.apply_model(partial(install_capture, tile_rows=args.tile_rows,
-                                                logits_layout=args.logits_layout, diagnostic=bool(repeats)))
+                                                logits_layout=args.logits_layout, diagnostic=bool(repeats),
+                                                diagnostic_layers=diagnostic_layers))
         installed = True
         worker_runtime.sort(key=lambda row: row["rank"])
         if ([row["rank"] for row in worker_runtime] != list(range(topology["tensor_parallel_size"]))
@@ -435,7 +519,7 @@ def measure(args):
                 or not qualification_runtime_matches(qualification.get("runtime_binding"), runtime_binding)
                 or qualification.get("passed") is not True):
             raise ValueError("native qualification differs from this candidate/runtime/teacher/topology")
-        vectors, alignment, rank_calls, raw_logits = [], [], [], []
+        vectors, alignment, rank_calls, raw_logits, layer_observations = [], [], [], [], []
         diagnostic_configuration = (llm.collective_rpc(diagnostic_worker_configuration) if repeats else None)
         count = repeats or (1 if args.qualify_hook else len(inputs))
         for index in range(count):
@@ -462,10 +546,13 @@ def measure(args):
             rank_calls.append([{k: r[k] for k in ("rank", "world_size", "window_id", "calls", "logits_layout")} for r in reports])
             if repeats:
                 raw_logits.append(next(r["raw_logits"] for r in reports if r["rank"] == 0))
+                layer_observations.append([{"rank": r["rank"], "events": r["layer_observations"]}
+                                           for r in sorted(reports, key=lambda item: item["rank"])])
                 atomic_json_write({"schema": "prismaquant.glm_tr3_repeatability_progress/1",
                                    "completed_repeats": index + 1, "runtime_binding": runtime_binding,
                                    "diagnostic_configuration": diagnostic_configuration,
                                    "per_position_kl": vectors, "raw_logits": raw_logits,
+                                   "layer_observations": layer_observations,
                                    "prompt_alignment": alignment, "rank_calls": rank_calls},
                                   Path(args.output).with_suffix(".progress.json"))
             print(f"[tr3-full-kl] measured {window['window_id']}", flush=True)
@@ -500,6 +587,7 @@ def measure(args):
             result["completed"] = result.pop("passed")
             result["diagnostic_configuration"] = diagnostic_configuration
             result["raw_logits"] = raw_logits
+            result["layer_observations"] = layer_observations
             result["summary"]["interpretation"] = (
                 "Repeated identical final-0000 in one engine; diagnostic only, "
                 "not a hook qualification, full-panel score or allocation input.")
@@ -527,6 +615,8 @@ def main():
     p.add_argument("--qualify-hook", action="store_true")
     p.add_argument("--diagnostic-repeat-first-window", type=int, default=0,
                    help="diagnostic only: repeat final-0000 2..8 times; requires --qualify-hook")
+    p.add_argument("--diagnostic-layers", action="store_true",
+                   help="observe first-token layer/attention/MLP boundaries during diagnostic repeats")
     p.add_argument("--qualification")
     p.add_argument("--qualification-sha256")
     add_gold_engine_arguments(p)
