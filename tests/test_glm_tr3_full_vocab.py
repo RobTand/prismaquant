@@ -3,6 +3,7 @@ import copy
 import hashlib
 import io
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -12,6 +13,59 @@ from experiments import glm_tr3_full_vocab as exp
 from experiments import build_glm_tr3_teacher as teacher
 from experiments import measure_glm_tr3_vllm as served
 from experiments import authenticate_glm_tr3_source as authentication
+
+
+def test_native_restart_kv_capacity_does_not_invalidate_qualification():
+    fixtures = Path(__file__).parent / "fixtures" / "glm_tr3_runtime"
+    qualified = json.loads((fixtures / "qualified-runtime.json").read_text())["runtime_binding"]
+    restarted = json.loads((fixtures / "restarted-runtime.json").read_text())["runtime_binding"]
+    assert qualified != restarted  # Actual attempt 07 versus attempt 08 allocations.
+    original = copy.deepcopy((qualified, restarted))
+    assert served.qualification_runtime_matches(qualified, restarted)
+    assert (qualified, restarted) == original
+
+
+@pytest.mark.parametrize("field", [
+    "dtype", "device", "layout", "zero_blocks", "negative_blocks", "boolean_blocks",
+    "rank", "backend", "backend_source", "unknown_backend", "module", "missing_cache",
+    "teacher", "candidate", "producer", "context", "logits_layout", "tp", "missing_binding",
+])
+def test_native_restart_still_refuses_noncapacity_changes(field):
+    fixtures = Path(__file__).parent / "fixtures" / "glm_tr3_runtime"
+    qualified = json.loads((fixtures / "qualified-runtime.json").read_text())["runtime_binding"]
+    restarted = json.loads((fixtures / "restarted-runtime.json").read_text())["runtime_binding"]
+    attention = restarted["worker_runtime"][0]["attention_runtime"][3]
+    cache = attention["allocated_kv_cache"]
+    if field in ("dtype", "device"):
+        cache[field] = "different"
+    elif field == "layout":
+        cache["shape"][1] += 1
+    elif field in ("zero_blocks", "negative_blocks", "boolean_blocks"):
+        cache["shape"][0] = {"zero_blocks": 0, "negative_blocks": -1, "boolean_blocks": True}[field]
+    elif field == "rank":
+        cache["shape"].append(1)
+    elif field in ("backend", "backend_source", "module"):
+        attention[{"backend": "backend", "backend_source": "backend_source_sha256", "module": "module"}[field]] = "different"
+    elif field == "unknown_backend":
+        # Matching but unknown backend names cannot waive an axis comparison.
+        attention["backend"] = qualified["worker_runtime"][0]["attention_runtime"][3]["backend"] = "unknown"
+    elif field == "missing_cache":
+        attention["allocated_kv_cache"] = None
+    elif field == "teacher":
+        restarted["teacher_sha256"] = "different"
+    elif field == "candidate":
+        restarted["candidate_identity"]["content_sha256"] = "different"
+    elif field == "producer":
+        restarted["producer_identity"]["gold_source"]["tools"]["git_commit"] = "different"
+    elif field == "context":
+        restarted["engine_kwargs"]["max_model_len"] += 1
+    elif field == "logits_layout":
+        restarted["logits_layout"] = "legacy_single"
+    elif field == "tp":
+        restarted["worker_runtime"][1]["rank"] = 0
+    elif field == "missing_binding":
+        restarted = None
+    assert not served.qualification_runtime_matches(qualified, restarted)
 
 
 def upstream_oracle(teacher, student):

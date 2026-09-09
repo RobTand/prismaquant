@@ -281,3 +281,51 @@ result. This preserves the exact initialized state when a native forward or
 strict replay binding subsequently refuses. Distinct runtime bindings produce
 distinct filenames, so a later attempt does not erase earlier observations.
 The qualification comparison remains exact; no KV capacity exception is added.
+
+
+### Native qualification and restart-capacity repair — 2026-09-09
+
+Attempt 07 completed the native hook qualification on frozen source
+`7d9992b85783d5ae0a490f3f1be2a520b4f56606`. The actual head exited 0 without
+OOM at 01:00:29Z. Its 300,416-byte result has SHA256
+`04a602b9e98d83b9f9bb89c4912e5cfdd70d1b2ae73474b1654913627f03c35f`.
+Both TP ranks observed `[1,154880], [1024,154880], [1024,154880]`; all 2047
+causal positions aligned with native prompt scores to 2.3839675122871995e-6,
+below 1e-4. EXL3 grouped prefill calls increased 42 to 84 on each rank.
+The one-window mean full-vocabulary KL was 0.047159120783769146. This is
+hook qualification evidence, not a complete-panel baseline or a paired win.
+The sealed result's interpretation still says four documents; qualification
+actually covers one window from one document. The development branch's
+separate prose correction says “within the reported documents” instead,
+without rewriting any measured artifact.
+
+Attempt 08 reloaded the same source, teacher, candidate and configuration for
+the complete panel. It exited 1 without OOM at 01:10:05Z before scoring because
+the exact qualification comparison included cache capacity. Comparing the
+raw initialized observations finds exactly 66 changes, all in
+`allocated_kv_cache.shape[0]`: 12441→12532, 957→964 or 49764→50128, 22 each
+across both ranks. No other runtime-binding field changed. Byte-identical
+observations are now regression fixtures in `tests/fixtures/glm_tr3_runtime`.
+
+The comparison now ignores only that positive integer block-count dimension
+for the three observed backends whose pinned `get_kv_cache_shape` source
+explicitly places `num_blocks` first: `DeepseekV32IndexerBackend`,
+`KpoolTailBackend` and `FlashInferMLASparseSM120Backend`. Every remaining
+field compares exactly, including all source/teacher/candidate identities,
+backend/module, cache dtype/device and invariant tensor dimensions. Invalid
+geometry refuses and unknown backend layouts receive no exception. Raw
+observations and result bindings retain every original allocated dimension;
+only copied comparison data replaces the capacity axis. New scorer source
+requires a fresh native qualification; attempt 07 cannot qualify changed code.
+
+The real-observation regression failed with the previous equality under PB
+`1f751f7fdfdab62bad90f57952b06cbb53545b1b77b5fd50dbc1f2ec9a67b51c`.
+After repair, PB
+`4f7c6b4b95fdf68fec16ec840aee286e672eaa91825bcf425923abd5a7f4d25d`
+passed 79 CPU tests in 8.64s, including 19 negative geometry/provenance cases,
+then compiled both scorer modules. Actual terminal records, cleanup and CAS
+payload hashes were checked; `native-runtime-capacity-cpu-audit.json` records
+the evidence. Both runs used the scoped x86 CPU environment on DL380 with
+native threads bounded to 1. Fresh native qualification and full 25-window scoring
+remain pending at this checkpoint. No teacher or production package bytes
+changed, and no speed claim follows from this comparison repair.

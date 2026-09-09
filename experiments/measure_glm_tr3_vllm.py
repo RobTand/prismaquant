@@ -7,6 +7,7 @@ candidate/runtime/topology binding for the whole panel. No core patches.
 from __future__ import annotations
 
 import argparse
+import copy
 from functools import partial
 import hashlib
 import inspect
@@ -282,6 +283,44 @@ def write_runtime_observation(output, runtime_binding):
     return path
 
 
+def qualification_runtime_matches(qualified, observed):
+    """Compare replay semantics without treating free-memory capacity as layout.
+
+    These native backends declare ``get_kv_cache_shape(num_blocks, ...)``
+    with num_blocks as dimension zero. Keep their raw allocations in both
+    receipts; only this comparison ignores that positive block count. Every
+    other field, including backend source, dtype and remaining dimensions,
+    still compares exactly. Unknown backend layouts receive no exception.
+    """
+    capacity_axis_backends = {
+        "vllm.v1.attention.backends.mla.indexer.DeepseekV32IndexerBackend": 3,
+        "vllm.v1.attention.backends.mla.indexer.KpoolTailBackend": 4,
+        "vllm.v1.attention.backends.mla.flashinfer_mla_sparse.FlashInferMLASparseSM120Backend": 3,
+    }
+
+    def semantics(binding):
+        if not isinstance(binding, dict):
+            raise ValueError("runtime binding must be an object")
+        value = copy.deepcopy(binding)
+        for worker in value["worker_runtime"]:
+            for attention in worker["attention_runtime"]:
+                rank = capacity_axis_backends.get(attention["backend"])
+                cache = attention["allocated_kv_cache"]
+                if rank is None or cache is None:
+                    continue
+                shape = cache["shape"]
+                if (not isinstance(shape, list) or len(shape) != rank
+                        or any(type(size) is not int or size <= 0 for size in shape)):
+                    raise ValueError("native allocated KV shape must have positive dimensions")
+                shape[0] = None
+        return value
+
+    try:
+        return semantics(qualified) == semantics(observed)
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def measure(args):
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
@@ -343,7 +382,7 @@ def measure(args):
         print(f"[tr3-full-kl] initialized runtime observation {observation}", flush=True)
         if qualification is not None and (
                 qualification.get("schema") != "prismaquant.glm_tr3_hook_qualification/1"
-                or qualification.get("runtime_binding") != runtime_binding
+                or not qualification_runtime_matches(qualification.get("runtime_binding"), runtime_binding)
                 or qualification.get("passed") is not True):
             raise ValueError("native qualification differs from this candidate/runtime/teacher/topology")
         vectors, alignment, rank_calls = [], [], []
