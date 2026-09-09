@@ -51,6 +51,39 @@ term fails there rather than disappearing into headroom. This bounds
 attribution and admission arithmetic on a fixture roster; it is not a
 full-GLM fit claim, and it does not bound the first step.
 
+Re-stamped (2026-09-08, `triage/container-gpu-declaration`) for **the campaign
+container's GPU attachment contract** (§4.10, #430). The launcher no longer
+maps the device because nobody said not to. `--gpus all` is withheld when any
+declaration withholds it: an explicit `--cpu-only`, an empty
+`CUDA_VISIBLE_DEVICES` in the action environment, which is exactly what
+`pbrun` sets when it granted no GPU slots, or an empty `CUDA_VISIBLE_DEVICES`
+in the spec's own `env` block. Otherwise the device is attached, as before.
+The two checks are not redundant with the variable itself: an empty
+`CUDA_VISIBLE_DEVICES` hides the device from CUDA inside the container but
+does not stop the runtime attaching and initialising it, so a row that
+reserved no GPU could still own one while PrismaBuild's GPU tokens stayed
+unspent, and a power reading taken beside it had a second owner it could not
+see. An unset variable is not a declaration: a run outside `pbrun` has no
+grant to read and keeps the behaviour it had, where `--cpu-only` remains the
+way to withhold the device. The launcher's existing JSON line now carries
+`gpu_attached` and `gpu_decision`, so the choice and the declaration that made
+it are readable rather than inferred. No serving pin, wire recipe, cost
+currency, format menu or ship-gate change. Gate:
+`tests/test_tessera_campaign_container.py`.
+
+Re-stamped (2026-09-08, `fix/glm-streamed-gold-companion`) for the opt-in
+streamed gold companion (#437). The existing v1 8×512 seed-42 WikiText
+all-position top-K=8192 payload and coverage/fidelity gates retain their
+defaults. V2 can retain normalized full-vocabulary final rows from the same
+streamed forward, with explicit observed GLM source-derivative binding,
+pre/post checkpoint/tokenizer/input/source identity checks, and tool/package
+provenance. Model-bound WikiText inputs require an independent file digest.
+V2 students verify teacher evidence and candidate tokenizer/family/vocabulary
+before engine loading and retain the teacher evidence in final-position KL.
+Fitting overlap remains unverified in this payload; full-vocabulary scope is
+not a held-out claim. This tools-only extension changes no pricing package,
+streaming residency mechanism, fitting capture, quantization or serving gate.
+
 Re-stamped (2026-09-08, `fix/glm-model-bound-wikitext-inputs`) for the
 explicit offline `prismaquant.model_wikitext_inputs/2` input contract.
 The existing materializer opts in with `--input-schema model-v2`; its default

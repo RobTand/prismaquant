@@ -1,0 +1,39 @@
+{
+  "action": "08b37f82d47e69e3006b4beb62bfbd12a027c2742bbab39ba85c3b7acc5bcec8",
+  "returncode": 0,
+  "receipt_sha256": "22eaad3e2287daf4c6692eecb206943afd5b1a48c0057526407204e459bd1001",
+  "result": {
+    "bytes": 781,
+    "sha256": "5af95e42cfa737e15616a94fc0e22eab648e7c7c8c269e357c2c736e9f3dc3b1"
+  },
+  "source_snapshot": {
+    "commit": "30793738de58fcf52ee0a84e1f771c2fba9a0802",
+    "input": {
+      "bytes": 27374104,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "fe33eb28b2ed350fd42ce663c006cb5c486e148ada7733be64e3a5c2bac66a55"
+    },
+    "parent": "8c82e9d53c534eb74fc684db40e617d941b2ebc7",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "worker": "dl380g10",
+  "resources": {
+    "cpu": 4,
+    "mem_gb": 12
+  },
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 38%]\n........................................................................ [ 77%]\n..........................................                               [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n186 passed, 56 warnings in 42.18s\n",
+  "scope_resources": {
+    "cpu_seconds": 110.222976,
+    "cpu_system_seconds": 26.836664,
+    "cpu_user_seconds": 83.386312,
+    "memory_current_bytes": 4984832,
+    "memory_peak_bytes": 3256373248,
+    "source": "cgroup"
+  },
+  "source_diff_snapshot_to_head": [
+    ".pbrun-closure.ffc60a954ed586f0.json"
+  ],
+  "frozen_package_diff": []
+}
