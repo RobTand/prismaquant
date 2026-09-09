@@ -99,7 +99,7 @@ def main():
     assert compared==len(old)>0
     observer=json.loads((root/'observer/result.json').read_text())
     assert observer['status']==('failed' if args.completed_prefix else 'complete')
-    if not args.completed_prefix: assert not observer['errors']
+    assert not observer['errors']
     nd=[json.loads(line) for line in (root/'observer/netdata.jsonl').read_text().splitlines()]
     power={}
     for source in json.loads((root/'root-pqteld-sources.json').read_text()):
