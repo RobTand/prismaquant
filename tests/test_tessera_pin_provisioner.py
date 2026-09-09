@@ -509,7 +509,10 @@ def test_the_install_does_not_run_inside_the_frozen_tree(tmp_path, monkeypatch):
             built = Path(argv[-1])
             (built / "tessera_quant.egg-info").mkdir(exist_ok=True)
             (built / "tessera_quant.egg-info" / "PKG-INFO").write_text("x")
-            return subprocess.CompletedProcess(argv, 0)
+            # capture_output=True with text=True always yields strings, and a
+            # fake that returns None for them makes the caller's own logging
+            # raise.  Answer in the shape the real call answers in.
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         return real_run(argv, *a, **kw)
 
     monkeypatch.setattr(mod.subprocess, "run", spy)
@@ -527,3 +530,44 @@ def test_the_install_does_not_run_inside_the_frozen_tree(tmp_path, monkeypatch):
     digest, count = mod.tree_digest(tree)
     assert (digest, count) == (held["tree_sha256"], held["files"]), (
         "the install left the pinned tree failing its own manifest")
+
+
+def test_a_failure_attesting_the_replacement_leaves_the_old_tree_in_place(
+        tmp_path, monkeypatch):
+    """The repair opens a window where the path is absent; it opens it late.
+
+    Replacing a wrong tree is two renames, and between them the pinned path
+    does not exist.  Nothing can make that atomic, so the ordering is what
+    there is to get right: the staged tree is hashed and attested BEFORE the
+    old name is vacated.  A failure in that step then costs nothing a reader
+    can see.  Written the other way round the same failure leaves the pinned
+    path gone with a repair that never finished.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    pins = tmp_path / "pins"
+
+    target = mod.materialise(new, clone, pins)
+    (target / "src" / "tessera" / "encode.py").write_text("VERSION = 99\n")
+
+    real = mod._write_manifest
+    calls: list[Path] = []
+
+    def failing(root, commit):
+        calls.append(Path(root))
+        raise OSError("disk full while attesting the replacement")
+
+    monkeypatch.setattr(mod, "_write_manifest", failing)
+    with pytest.raises(OSError):
+        mod.materialise(new, clone, pins)
+
+    assert calls and calls[0] != target, (
+        "the first attestation was of the published path, so the old tree had "
+        "already been vacated when it failed")
+    assert (target / "src" / "tessera" / "encode.py").read_text() == "VERSION = 99\n", (
+        "the pinned path is missing or half-repaired after a failure that "
+        "happened before anything needed to move")
+
+    monkeypatch.setattr(mod, "_write_manifest", real)
+    repaired = mod.materialise(new, clone, pins)
+    assert (repaired / "src" / "tessera" / "encode.py").read_text() == "VERSION = 2\n"

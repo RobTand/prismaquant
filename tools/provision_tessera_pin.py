@@ -40,8 +40,10 @@ content-addressed store, whatever its name suggests: an interrupted ``tar``
 leaves one with the right name and some of the right files.  So each tree is
 written beside a manifest of its own digest, published with an atomic
 ``os.replace``, and reused only while it still digests to what the manifest
-says.  A tree that does not, or that has no manifest, is re-materialised, which
-needs the clone.
+says.  A tree with no manifest is not assumed wrong: it is compared against a
+fresh ``git archive`` and, when the bytes are the commit's, attested where it
+stands.  Only a tree that neither holds its manifest nor matches the archive is
+replaced, and the old one is kept.  Both of those paths need the clone.
 """
 from __future__ import annotations
 
@@ -294,23 +296,34 @@ def materialise(commit: str, clone: Path, pins_root: Path,
     collapsed them into one:
 
     * **Manifested and matching.** Reused, no clone needed.
-    * **No manifest, right bytes.** ``/mnt/shared/tessera-pins/07ad344c...``
-      predates the manifest and is correct.  Its content is compared against a
-      fresh ``git archive`` of the commit and, when equal, the manifest is
-      written beside it.  The bytes are not replaced: rewriting a shared
-      directory other boxes may be reading, to end with what is already there,
-      is churn with a window in it.
+    * **No manifest, right bytes.**  A tree written before this tool existed,
+      or by a run that died after extracting and before attesting, is not
+      assumed wrong.  Its content is compared against a fresh ``git archive``
+      of the commit and, when equal, the manifest is written beside it.  The
+      bytes are not replaced: rewriting a shared directory other boxes may be
+      reading, to end with what is already there, is churn with a window in it.
     * **Anything else.** The tree is moved aside under a
       ``.quarantine-<commit>-...`` name and the fresh archive published in its
       place.  It is not deleted.  Something wrote to a shared pins root and
       those bytes are the only record of what; the quarantine path is returned
       in ``report`` so a run says where it went.
 
-    Publication is ``os.replace`` of a directory that is complete and already
-    manifested, so a reader sees the old tree or the new one.  Staging is
-    ``mkdtemp`` under the pins root -- unique and owned, where the earlier
-    PID-named scratch could collide between hosts on NFS and was removed by
-    name, which is a directory another box may be extracting into.
+    **The repair path is not an atomic exchange, and needs a quiescent
+    reader.**  A first publication is one ``os.replace`` onto a name that does
+    not exist yet, so a reader sees nothing or the whole tree.  Replacing a
+    wrong tree is two: the old name is vacated, then the new tree takes it.
+    Between them the path is *absent*, and a reader opening it then gets
+    ``FileNotFoundError`` rather than either version.  The manifest is written
+    on the staged tree first, so a failure while hashing or attesting the
+    replacement leaves the old tree still in place and the window unopened;
+    once the quarantine rename has run the window is open until the second
+    rename lands.  It is short and it is not zero.  Run a repair when nothing
+    is serving out of that path, and read ``report["quarantined"]`` for where
+    the predecessor went.
+
+    Staging is ``mkdtemp`` under the pins root -- unique and owned, where the
+    earlier PID-named scratch could collide between hosts on NFS and was
+    removed by name, which is a directory another box may be extracting into.
     """
     target = pins_root / commit
     if _manifest_holds(target, commit):
@@ -330,6 +343,10 @@ def materialise(commit: str, clone: Path, pins_root: Path,
             _archive_into(commit, clone, fresh)
             if not (fresh / CONTRACT_IN_TREE).exists():
                 raise SystemExit(f"{commit} carries no {CONTRACT_IN_TREE}")
+            # Attested while it is still staging, and before any existing tree
+            # is vacated: a failure hashing or writing this metadata then
+            # leaves the old tree in place instead of leaving the path absent.
+            _write_manifest(fresh, commit)
 
             if target.exists():
                 if tree_digest(target)[0] == tree_digest(fresh)[0]:
@@ -347,7 +364,6 @@ def materialise(commit: str, clone: Path, pins_root: Path,
                 if report is not None:
                     report["quarantined"] = str(quarantine)
 
-            _write_manifest(fresh, commit)
             os.replace(fresh, target)
             if report is not None:
                 report.setdefault("source_state", "published from the clone")
