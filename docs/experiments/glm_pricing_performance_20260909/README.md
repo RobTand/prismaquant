@@ -112,6 +112,18 @@ All five retained performance harness/audit modules passed `py_compile` in PB
 `6b1eb0c2aaec6107acad9c5b34c8331e2fa5e900a183315b82698c9d6a29da6c`
 on DL380 CPU; the actual terminal, empty CAS output and source were checked.
 
+Read-only configuration observation at 03:19 UTC is retained separately as
+`PREP/root-network-memory-readonly-audit.json`. Both clients use NFS 4.2,
+RDMA, 1 MiB reads/writes; each client link and both server links report
+100000 Mb/s, full duplex, up. DL380 reports 308,829,708 KiB total RAM;
+ZFS ARC maximum is 257,698,037,760 bytes (240 GiB), current ARC size
+156,034,159,728 bytes. The shared dataset has 1 MiB records, primary/secondary
+cache set to all, and compression enabled. This is neither a transfer
+benchmark nor proof that a particular selected group is warm in ARC. The
+initial server memory query lacked `rg`; a successful `cat /proc/meminfo`
+fallback is recorded alongside that error. No network or storage settings
+were changed.
+
 Reproduction commands and container/environment identities for the GPU runs
 are preserved in each directory's manifest/invocation, submission log and PB
 request. Retain these screens as bounded evidence; do not use them as a
