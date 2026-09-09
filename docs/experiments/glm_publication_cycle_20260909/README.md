@@ -115,3 +115,55 @@ The retry reserves 104 GiB, including 6 GiB over the rounded 98 GiB phase plan
 for the observer and retained state; 110 GiB was refused before submission
 because both fleet workers declare 104 GiB. No workload ran for that refused
 submission. Native R1088/64-unit and R832/32-unit A/B qualification is pending.
+
+## Completed qualification and disposition, 08:06 UTC
+
+The final PR465 head `83d265aa560f54e8430e7d8da4c0ea783fccb1b7`
+passed full CPU CI: 7,352 passed, 204 skipped, three xfailed and 192 subtests
+in 1,265.05 seconds. Root retrieved the actual job log, SHA256
+`d33a48df4a7cbd33e40cf8590dce21f0b2a55dd84112d11be4755a179f2620f9`;
+`/mnt/shared/tessera-measurements/glm-publication-pr465-ci-20260909-audit.json`
+binds the job and head. CUDA is covered separately by the bounded native runs.
+
+The R832 retry completed all six arms over the same fully resident 864-unit
+row, with 32 actual encoded units per arm, B8 and the qualified 64,4,2 tile.
+All 192 wires and scores matched exactly. Two unprofiled synchronous arms took
+237.048103 seconds total; the interleaved asynchronous arms took 231.405995
+seconds: **1.02438x throughput** for this bounded full publication cycle.
+GPU energy was 12,346.45 J versus 12,282.54 J (1.00520x work/J), too small a
+difference to claim decisive energy improvement. Mean GPU power was 52.08 W
+versus 53.08 W. Main-thread publication time fell from 3.72–3.75 seconds to
+0.105–0.123 seconds. Capture hashing still dominates the first prepare at
+43.77–47.11 seconds; this is measured separately in the next fix.
+
+Before/after CPU/CUDA traces, 443 Netdata samples on each host and 4,473 power
+samples accompany the result. CPU audit verifies actual files, receipts,
+checkpoint scores, queue budget/order and complete recurrence traces with
+one graph and 4,095 steps. PB native:
+`55a9fbd847d34329793c1eb04e3b8a95b392a55ea298d28c1554d4d426b64056`;
+audit: `3c2158f07380a41b59bf23136abd2c9ca129904aa970b048a828b9dc19c8fedd`.
+Evidence: `performance-publication-cycle-r832-ab-02/` and
+`root-publication-lower-audit.json` under the preparation root above; root
+receipt/source checks are `glm-publication-lower-{native,audit}-cas-source-20260909.json`
+under `/mnt/shared/tessera-measurements/`.
+
+The R1088 retry completed four arms (64 wires/scores exact) before the next
+arm refused the memory phase guard. Its one completed unprofiled A/B pair
+was 177.695322 versus 173.413246 seconds, 1.02469x throughput. Energy was
+8,924.49 versus 8,905.47 J, again inconclusive. This is **partial evidence**,
+not a completed ABBA comparison. No OOM occurred and cleanup completed.
+PB native failed action:
+`92f904bb18f41dc68f0c1a46146e2fa8c9d10431819ad346ae30b60f16df9a3e`;
+completed-prefix audit:
+`d2544955fe4817846690543fe2f4f720352f1e6008bbf8230d3127e6502a36f1`.
+The audit deliberately verifies the failed terminal output instead of claiming
+a successful native receipt. Evidence: `performance-publication-cycle-r1088-ab-03/`,
+`root-publication-upper-prefix-audit.json`, and
+`/mnt/shared/tessera-measurements/glm-publication-upper-{failed-native-source,audit-cas-source}-20260909.json`.
+
+Between-arm diagnostics identified retained unused pinned-host allocator pages.
+The final R832 harness releases these outside measurement, while preserving
+live plans and the production guard. Earlier failed runs remain failure
+evidence. No further publication tuning or R1088 retry is planned: the gain is
+modest, and the default remains synchronous (`--publication-overlap-bytes=0`).
+The experiment does not establish full-model throughput or served quality.
