@@ -106,28 +106,46 @@ def materialise(commit: str, clone: Path, pins_root: Path) -> Path:
     return target
 
 
-def installed_contract(python: str) -> str | None:
-    """The sha256 of the contract that interpreter's Tessera actually packages."""
+def installed_contract(python: str) -> tuple[str | None, str | None]:
+    """That interpreter's packaged contract: ``(sha256, reason it is absent)``.
+
+    Exactly one of the two is set.  The reason is carried rather than dropped
+    because an absent contract has at least three causes an operator has to
+    act on differently -- the venv does not exist, Tessera is not installed in
+    it, or Tessera is installed without its packaged contract -- and a bare
+    ``null`` reads as all three at once.  The GB10 venv reported ``null`` on
+    its first audit; it was the second cause, and the report did not say so.
+    """
 
     probe = (
-        "import hashlib,sys\n"
+        "import hashlib,json,sys\n"
         "from importlib import resources\n"
         "try:\n"
         "    p = resources.files('tessera.serving')"
         ".joinpath('runtime_contract.json')\n"
-        "    sys.stdout.write(hashlib.sha256(p.read_bytes()).hexdigest())\n"
-        "except Exception:\n"
-        "    sys.stdout.write('')\n"
+        "    out = {'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}\n"
+        "except Exception as exc:\n"
+        "    out = {'reason': type(exc).__name__ + ': ' + str(exc)}\n"
+        "sys.stdout.write(json.dumps(out))\n"
     )
     try:
-        got = subprocess.run([python, "-c", probe],
-                             capture_output=True, text=True).stdout.strip()
-    except OSError:
+        done = subprocess.run([python, "-c", probe],
+                              capture_output=True, text=True)
+    except OSError as exc:
         # No such interpreter, or one that will not start.  The caller wants
         # "not the reviewed bytes", and an exception here would make a routine
         # audit of a machine that has no such venv look like a tool failure.
-        return None
-    return got or None
+        return None, f"{type(exc).__name__}: {exc}"
+    try:
+        out = json.loads(done.stdout.strip() or "{}")
+    except ValueError:
+        out = {}
+    sha = out.get("sha256")
+    if sha:
+        return sha, None
+    reason = out.get("reason") or (done.stderr.strip().splitlines() or
+                                   ["the probe printed nothing"])[-1]
+    return None, reason
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -143,13 +161,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     commit, reviewed_sha = reviewed_pin()
-    before = installed_contract(args.python)
+    before, before_absent = installed_contract(args.python)
     report = {
         "python": args.python,
         "reviewed_commit": commit,
         "reviewed_contract_sha256": reviewed_sha,
         "installed_contract_sha256_before": before,
     }
+    if before_absent is not None:
+        report["installed_contract_absent_before"] = before_absent
 
     if before == reviewed_sha:
         report["action"] = "none, already the reviewed bytes"
@@ -176,8 +196,10 @@ def main(argv: list[str] | None = None) -> int:
         check=True,
     )
 
-    after = installed_contract(args.python)
+    after, after_absent = installed_contract(args.python)
     report["installed_contract_sha256_after"] = after
+    if after_absent is not None:
+        report["installed_contract_absent_after"] = after_absent
     if after != reviewed_sha:
         report["action"] = "installed, and it did NOT take"
         print(json.dumps(report, indent=1))

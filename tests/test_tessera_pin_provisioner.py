@@ -52,7 +52,38 @@ def test_the_provisioner_needs_neither_prismaquant_nor_tessera():
 
 def test_a_missing_interpreter_reports_no_installed_contract():
     mod = _load()
-    assert mod.installed_contract(str(ROOT / "no-such-python")) is None
+    sha, absent = mod.installed_contract(str(ROOT / "no-such-python"))
+    assert sha is None
+    # And it says which of the three absences this is.  A bare ``None`` reads
+    # as "no venv", "no Tessera" and "no packaged contract" at once, and those
+    # want different repairs.
+    assert "FileNotFoundError" in absent
+
+
+def test_an_interpreter_without_tessera_names_the_import_that_failed(tmp_path):
+    """The GB10 venv's first audit returned an empty contract and no reason.
+
+    It was not a missing venv and not a Tessera built from the wrong commit:
+    Tessera is not installed in it at all, and the report said only ``null``.
+    The reason travels now, so the next audit reads a repair instead of a gap.
+
+    The interpreter here is a real one that really lacks Tessera, built by
+    ``venv`` in the test's own directory, rather than the running interpreter
+    under a skip.  A test that skips wherever the suite actually runs proves
+    nothing about the branch it names.
+    """
+    import venv
+
+    env = tmp_path / "bare"
+    venv.create(env, with_pip=False)
+    python = env / "bin" / "python"
+    assert python.exists()
+
+    mod = _load()
+    sha, absent = mod.installed_contract(str(python))
+    assert sha is None
+    assert "ModuleNotFoundError" in absent
+    assert "tessera" in absent
 
 
 def test_check_only_refuses_an_interpreter_that_is_not_on_the_pin(tmp_path):
