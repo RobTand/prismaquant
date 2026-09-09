@@ -132,3 +132,158 @@ def test_materialise_refuses_when_it_has_no_clone_to_archive_from(tmp_path):
     with pytest.raises(SystemExit) as excinfo:
         mod.materialise("0" * 40, tmp_path / "absent-clone", tmp_path)
     assert "not a Tessera clone" in str(excinfo.value)
+
+
+# --- the same-contract, different-source regression (root, PR461 review) -----
+#
+# The pin names a COMMIT.  ``runtime_contract.json`` is one file in that
+# commit's tree, and two commits can publish identical contract bytes while
+# differing everywhere else -- tessera#437 is exactly that: it rewrites the
+# window encoder and leaves the contract alone.  A gate that compares only the
+# contract therefore reports "already the reviewed bytes" for a re-pin whose
+# whole point is new encoder code, and leaves the old encoder installed.  These
+# tests were written red against that gate.
+
+
+def _pin_module(tmp_path: Path, commit: str, contract_sha: str) -> Path:
+    """A stand-in for ``prismaquant/tessera_runtime_contract.py``.
+
+    The real one is the repository's live pin and moves with re-pins; a test
+    that asserted against it would be asserting today's pin, not the rule.
+    """
+    p = tmp_path / "pin_module.py"
+    p.write_text(
+        f'TESSERA_DEV_PIN_COMMIT = "{commit}"\n'
+        f'TESSERA_DEV_PIN_CONTRACT_SHA256 = "{contract_sha}"\n',
+        encoding="utf-8")
+    return p
+
+
+CONTRACT = b'{"schema": "tessera.runtime_contract.v1", "executes": []}\n'
+
+
+def _tessera_tree(root: Path, encoder_body: str) -> None:
+    """A minimal tree shaped like Tessera's: contract under the package."""
+    pkg = root / "src" / "tessera" / "serving"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (root / "src" / "tessera" / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "runtime_contract.json").write_bytes(CONTRACT)
+    (root / "src" / "tessera" / "encode.py").write_text(encoder_body,
+                                                        encoding="utf-8")
+
+
+def _git_clone_with_two_commits(tmp_path: Path) -> tuple[Path, str, str]:
+    """A clone whose second commit changes the encoder and not the contract."""
+    clone = tmp_path / "tessera-clone"
+    clone.mkdir()
+    run = lambda *a: subprocess.run(["git", "-C", str(clone), *a], check=True,
+                                    capture_output=True)
+    subprocess.run(["git", "init", "-q", str(clone)], check=True,
+                   capture_output=True)
+    run("config", "user.email", "t@example.invalid")
+    run("config", "user.name", "t")
+    _tessera_tree(clone, "VERSION = 1\n")
+    run("add", "-A")
+    run("commit", "-q", "-m", "old encoder")
+    old = subprocess.run(["git", "-C", str(clone), "rev-parse", "HEAD"],
+                         check=True, capture_output=True,
+                         text=True).stdout.strip()
+    _tessera_tree(clone, "VERSION = 2\n")          # contract byte-identical
+    run("add", "-A")
+    run("commit", "-q", "-m", "new encoder, same contract")
+    new = subprocess.run(["git", "-C", str(clone), "rev-parse", "HEAD"],
+                         check=True, capture_output=True,
+                         text=True).stdout.strip()
+    return clone, old, new
+
+
+def _venv_with_tessera(tmp_path: Path, name: str, encoder_body: str) -> Path:
+    """A real interpreter carrying a Tessera-shaped package in site-packages.
+
+    Placed rather than pip-installed: the regression is about what the tool
+    DECIDES, and a build backend in the loop would add a network dependency
+    and a second failure mode without adding evidence.
+    """
+    import sysconfig
+    import venv
+
+    env = tmp_path / name
+    venv.create(env, with_pip=False)
+    site = env / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    if not site.exists():                       # non-posix_prefix layouts
+        site = Path(sysconfig.get_paths()["purelib"].replace(
+            sys.prefix, str(env)))
+        site.mkdir(parents=True, exist_ok=True)
+    _tessera_tree(env / "staging", encoder_body)
+    import shutil
+    shutil.copytree(env / "staging" / "src" / "tessera", site / "tessera")
+    return env / "bin" / "python"
+
+
+def test_same_contract_with_older_source_is_not_already_the_reviewed_bytes(tmp_path):
+    """The regression root found: a re-pin that only moves code is a no-op.
+
+    The interpreter carries the OLD encoder under the SAME contract bytes the
+    new pin reviews.  A contract-only gate says there is nothing to do; there
+    is, and it is the entire content of the re-pin.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    import hashlib
+    contract_sha = hashlib.sha256(CONTRACT).hexdigest()
+    pin = _pin_module(tmp_path, new, contract_sha)
+    python = _venv_with_tessera(tmp_path, "venv-old", "VERSION = 1\n")
+
+    rc = mod.main(["--python", str(python), "--pin-source", str(pin),
+                   "--clone", str(clone), "--pins-root", str(tmp_path / "pins"),
+                   "--check-only"])
+    assert rc != 0, "an interpreter on the wrong source must not report clean"
+
+
+def test_the_matching_source_is_reported_clean(tmp_path):
+    """And the other direction, so the check above is not vacuously red."""
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    import hashlib
+    pin = _pin_module(tmp_path, new, hashlib.sha256(CONTRACT).hexdigest())
+    python = _venv_with_tessera(tmp_path, "venv-new", "VERSION = 2\n")
+
+    rc = mod.main(["--python", str(python), "--pin-source", str(pin),
+                   "--clone", str(clone), "--pins-root", str(tmp_path / "pins"),
+                   "--check-only"])
+    assert rc == 0
+
+
+def test_a_truncated_cached_tree_is_not_reused(tmp_path):
+    """``materialise`` trusted a directory name and one marker file.
+
+    A tree left half-extracted by an interrupted tar, or edited afterwards,
+    still has ``runtime_contract.json`` and still has the commit's name on it.
+    Reusing it installs something that is not the commit, under the commit's
+    label, which is the failure the pin exists to prevent.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    pins = tmp_path / "pins"
+
+    first = mod.materialise(new, clone, pins)
+    assert (first / "src" / "tessera" / "encode.py").read_text() == "VERSION = 2\n"
+
+    (first / "src" / "tessera" / "encode.py").unlink()          # truncated
+    second = mod.materialise(new, clone, pins)
+    assert (second / "src" / "tessera" / "encode.py").read_text() == "VERSION = 2\n", \
+        "a cached tree missing a file must be repaired, not reused"
+
+
+def test_a_tampered_cached_tree_is_not_reused(tmp_path):
+    """Same rule for a tree whose bytes were changed rather than removed."""
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    pins = tmp_path / "pins"
+
+    first = mod.materialise(new, clone, pins)
+    (first / "src" / "tessera" / "encode.py").write_text("VERSION = 99\n")
+    second = mod.materialise(new, clone, pins)
+    assert (second / "src" / "tessera" / "encode.py").read_text() == "VERSION = 2\n", \
+        "a cached tree whose bytes moved must be repaired, not reused"
