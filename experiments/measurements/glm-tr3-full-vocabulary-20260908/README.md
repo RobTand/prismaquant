@@ -329,3 +329,49 @@ the evidence. Both runs used the scoped x86 CPU environment on DL380 with
 native threads bounded to 1. Fresh native qualification and full 25-window scoring
 remain pending at this checkpoint. No teacher or production package bytes
 changed, and no speed claim follows from this comparison repair.
+
+### Completion evidence and PR review — 2026-09-09
+
+The preceding pending checkpoint is superseded by retained native results on
+frozen source `ddc9aac80cda44c519d947b8468a0577a3ec17cb`. Qualification09 and
+the subsequent full25 launch both report head exit 0. The full result contains
+25 windows and all 51,175 finite causal KL values, with mean
+**0.02446462473923544**. Both TP ranks report the expected 1+1024+1024 call
+geometry on every window. Maximum alignment error against native prompt
+logprobs is 5.9569720178842545e-6, below 1e-4. Qualification/full runtime
+bindings differ in exactly 66 positive KV block capacities and nothing else.
+`native-completion-review.json` records the artifact/log hashes, recomputed
+summary, listed source-file hash verification against ddc9aac8 and provenance.
+The logs retain forced engine shutdown and leaked IPC warnings; successful
+result production does not establish graceful runtime teardown.
+
+This is a measured full-panel result, **not yet a stable quality comparator**.
+[Issue #468](https://github.com/RobTand/prismaquant/issues/468) tracks the
+unresolved first-window divergence. A later diagnostic on source
+`632e2324349bb122cbf25514ee6ecdee8126c91e` repeats identical final-0000 four
+times in one engine and obtains means 0.0462136121, 0.0472286403,
+0.0573906394 and 0.0569008298. Native prompt alignment still passes. This
+rules out treating alignment alone as evidence of repeatability; no root cause
+or measured noise floor follows. The prepared repeatability04 run has only a
+successful preflight ending “nothing was launched,” with no result. The
+research instrument can be retained while #468 remains open; these results
+do not establish a paired Tessera win or production admission.
+
+The reviewer-requested failure diagnostics now report up to eight deterministic
+JSON paths after the existing capacity normalization, plus explicit envelope
+and invalid-shape errors. Known-capacity acceptance and all other comparisons
+are preserved. The four new diagnostic regressions failed on the prior source;
+the repaired scorer passed all **83 CPU tests**, without skips, and compiled
+under PB `cffb2862274320f5f085614e24514bb14e28206d8831b7e1bb3109821554757f`.
+The action used the existing x86 Python 3.12 environment, four CPUs, 6 GiB,
+native threads 1 and priority -10. Terminal cleanup, CAS receipt and payload,
+and exact tested scorer/test bytes were verified; see
+`native-runtime-diagnostics-cpu-audit.json`. The first generic CPU environment
+attempt could not collect tests because `compressed_tensors` was absent.
+
+Review of the teacher builder and panel loader found no additional defect:
+they preserve sealed panel/array identity, authenticated reference inputs,
+resident streaming, complete-manifest publication and explicit source policy.
+No new native execution was performed for this diagnostic edit. The changed
+source revision and integration with main require fresh qualification before
+subsequent scoring; the historical native receipts qualify only ddc9aac8.
