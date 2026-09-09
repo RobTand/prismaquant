@@ -50,10 +50,10 @@ def test_the_provisioner_needs_neither_prismaquant_nor_tessera():
             assert not stripped.startswith(("import tessera", "from tessera"))
 
 
-def test_a_missing_interpreter_reports_no_installed_contract():
+def test_a_missing_interpreter_reports_no_installed_tessera():
     mod = _load()
-    sha, absent = mod.installed_contract(str(ROOT / "no-such-python"))
-    assert sha is None
+    found, absent = mod.installed_identity(str(ROOT / "no-such-python"))
+    assert found is None
     # And it says which of the three absences this is.  A bare ``None`` reads
     # as "no venv", "no Tessera" and "no packaged contract" at once, and those
     # want different repairs.
@@ -80,8 +80,8 @@ def test_an_interpreter_without_tessera_names_the_import_that_failed(tmp_path):
     assert python.exists()
 
     mod = _load()
-    sha, absent = mod.installed_contract(str(python))
-    assert sha is None
+    found, absent = mod.installed_identity(str(python))
+    assert found is None
     assert "ModuleNotFoundError" in absent
     assert "tessera" in absent
 
@@ -89,34 +89,55 @@ def test_an_interpreter_without_tessera_names_the_import_that_failed(tmp_path):
 def test_check_only_refuses_an_interpreter_that_is_not_on_the_pin(tmp_path):
     """Refusing is the useful answer: a green suite on stale bytes is the bug.
 
-    The stale install carried the pin's own static version ``0.1.0``, so a
-    version comparison would have called it correct.  Only the contract bytes
-    tell the two apart, and this exit status is what a provisioning check in
-    CI or a fleet audit would read.
+    Run as a subprocess against a synthetic pin rather than the repository's
+    live one, because this asserts the RULE and the exit status a fleet audit
+    reads, and asserting against today's pin would make the test move whenever
+    the pin does.  The stale install this was written for carried the pin's own
+    static version ``0.1.0``, so a version comparison would have called it
+    correct.
     """
+    import hashlib
+
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    pin = _pin_module(tmp_path, new, hashlib.sha256(CONTRACT).hexdigest())
+    python = _venv_with_tessera(tmp_path, "venv-stale", "VERSION = 1\n")
+
     completed = subprocess.run(
-        [sys.executable, str(TOOL), "--python", sys.executable, "--check-only"],
+        [sys.executable, str(TOOL), "--python", str(python),
+         "--pin-source", str(pin), "--clone", str(clone),
+         "--pins-root", str(tmp_path / "pins"), "--check-only"],
         capture_output=True, text=True, check=False,
     )
     report = json.loads(completed.stdout)
+    assert completed.returncode == 1
+    assert report["reviewed_commit"] == new
+    assert report["action"] == "none, --check-only"
+    # And it names the field that drifted, so the report is a repair order.
+    assert report["drift"] == ["package_sha256"]
+    assert report["installed_before"]["contract_sha256"] == \
+        report["expected"]["contract_sha256"]
+
+
+def test_the_provisioner_reads_the_live_pin_it_ships_with():
+    """The synthetic pin above proves the rule; this proves the wiring.
+
+    A tool that only ever ran against a test's own pin module could have the
+    literal names wrong and nothing would say so.
+    """
     mod = _load()
     commit, sha = mod.reviewed_pin()
-    assert report["reviewed_commit"] == commit
-    assert report["reviewed_contract_sha256"] == sha
-    if report["installed_contract_sha256_before"] == sha:
-        assert completed.returncode == 0
-        assert report["action"] == "none, already the reviewed bytes"
-    else:
-        assert completed.returncode == 1
-        assert report["action"] == "none, --check-only"
+    assert len(commit) == 40 and len(sha) == 64
 
 
-def test_materialise_reuses_a_tree_that_is_already_laid_down(tmp_path):
-    """A directory named for a commit either holds it or does not exist.
+def test_a_cached_tree_without_a_manifest_is_not_trusted(tmp_path):
+    """This test used to assert the opposite, and the opposite was the bug.
 
-    So a second run must not re-archive, and must not need a clone at all --
-    which is what makes the shared path usable from a worker with no Tessera
-    checkout of its own.
+    It said a directory named for a commit either holds that commit's tree or
+    does not exist, so a marker file was enough to reuse it.  That is true of
+    a content-addressed store and false of a directory: an interrupted ``tar``
+    leaves a directory with the right name and some of the right files.  A
+    cached tree is now reused only when it still digests to what its own
+    manifest records, and one without a manifest is re-materialised.
     """
     mod = _load()
     commit = "0" * 40
@@ -124,7 +145,27 @@ def test_materialise_reuses_a_tree_that_is_already_laid_down(tmp_path):
     marker = target / mod.CONTRACT_IN_TREE
     marker.parent.mkdir(parents=True)
     marker.write_text("{}", encoding="utf-8")
-    assert mod.materialise(commit, tmp_path / "absent-clone", tmp_path) == target
+    with pytest.raises(SystemExit) as excinfo:
+        mod.materialise(commit, tmp_path / "absent-clone", tmp_path)
+    assert "not a Tessera clone" in str(excinfo.value)
+
+
+def test_a_verified_cached_tree_is_reused_without_a_clone(tmp_path):
+    """And a tree that does verify is still reused, which is the point of it.
+
+    A worker with no Tessera checkout has to be able to install from the
+    shared path; requiring a clone every time would move the cost this cache
+    exists to remove.
+    """
+    mod = _load()
+    clone, old, new = _git_clone_with_two_commits(tmp_path)
+    pins = tmp_path / "pins"
+    first = mod.materialise(new, clone, pins)
+    assert (first / mod.MANIFEST).exists()
+
+    again = mod.materialise(new, tmp_path / "absent-clone", pins)
+    assert again == first
+    assert (again / "src" / "tessera" / "encode.py").read_text() == "VERSION = 2\n"
 
 
 def test_materialise_refuses_when_it_has_no_clone_to_archive_from(tmp_path):
