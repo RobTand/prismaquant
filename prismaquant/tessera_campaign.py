@@ -192,6 +192,73 @@ def parse_rate_band(text) -> "tuple[int, int] | None":
     return lo, hi
 
 
+FAMILY_RESTRICTION_SCHEMA = "prismaquant.tessera_campaign_family_restriction.v1"
+
+
+def parse_family_restriction(value):
+    """Canonical opt-in pricing scope; it grants no reader or serving support."""
+    if value is None:
+        return None
+    from .tessera_formats import get_tessera_family
+
+    def unique_object(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError(f"family restriction repeats field {key!r}")
+            result[key] = item
+        return result
+
+    if isinstance(value, str):
+        value = json.loads(value, object_pairs_hook=unique_object)
+    if not isinstance(value, Mapping) or set(value) != {"schema", "dense", "routed_moe"}:
+        raise ValueError("family restriction requires exactly schema, dense and routed_moe")
+    if value["schema"] != FAMILY_RESTRICTION_SCHEMA:
+        raise ValueError("family restriction has an unsupported schema")
+    result = {"schema": FAMILY_RESTRICTION_SCHEMA}
+    for structure in ("dense", "routed_moe"):
+        names = value[structure]
+        if not isinstance(names, list) or not names or any(not isinstance(n, str) for n in names):
+            raise ValueError(f"family restriction {structure} requires a nonempty family list")
+        if len(set(names)) != len(names):
+            raise ValueError(f"family restriction {structure} repeats a family")
+        for name in names:
+            try:
+                family = get_tessera_family(name)
+            except (ValueError, KeyError) as exc:
+                raise ValueError(f"family restriction has unknown family {name!r}") from exc
+            if family.name != name:
+                raise ValueError(f"family restriction requires canonical family name {name!r}")
+        result[structure] = sorted(names)
+    return result
+
+
+def require_seed_family_scope(name, state, *, family_restriction, structure_by_unit,
+                              rate_band=None):
+    """Refuse incompatible active seed anchors before their wires are linked."""
+    if family_restriction is None:
+        return
+    from .tessera_formats import parse_tessera_format_name
+    policy = parse_family_restriction(family_restriction)
+    structure = (structure_by_unit or {}).get(name)
+    if structure not in ("dense", "routed_moe"):
+        raise RuntimeError(f"{name}: family restriction requires authoritative structure")
+    if not isinstance(state, Mapping) or not isinstance(state.get("anchors"), list):
+        raise RuntimeError(f"{name}: family restriction received an invalid seed state")
+    for row in state["anchors"]:
+        try:
+            family, rate = parse_tessera_format_name(row["format_name"])
+        except (TypeError, ValueError, KeyError) as exc:
+            raise RuntimeError(f"{name}: family restriction received an invalid seed format") from exc
+        if (row.get("qname") != name or row.get("family") != family.name
+                or type(row.get("body_rate_q256")) is not int or row["body_rate_q256"] != rate):
+            raise RuntimeError(f"{name}: family restriction seed format/identity disagree")
+        if family.name not in policy[structure]:
+            raise RuntimeError(f"{name}: seed {row['format_name']} violates {structure} family restriction")
+        if rate_band is not None and not rate_band[0] <= rate <= rate_band[1]:
+            raise RuntimeError(f"{name}: seed {row['format_name']} is outside restricted rate band {rate_band}")
+
+
 def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
                     snap) -> list[int]:
     """Where round one puts this family's anchors on this group's grid.
@@ -1431,7 +1498,8 @@ def _checkpoint_identity_api():
 def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
-                                  expert_projection=None, stack_sampling_identity=None):
+                                  expert_projection=None, stack_sampling_identity=None,
+                                  structure_by_unit=None):
     """Bind the priced population, including score inputs when H is off.
 
     The static A-side contract is a scoring input like the score rows: the
@@ -1447,6 +1515,14 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
 
     api = _checkpoint_identity_api()
     settings = vars(args).copy()
+    restriction = parse_family_restriction(settings.get("family_restriction"))
+    if restriction is None:
+        settings.pop("family_restriction", None)
+    else:
+        settings["family_restriction"] = restriction
+        if (not isinstance(structure_by_unit, Mapping) or set(structure_by_unit) != set(menus)
+                or any(s not in ("dense", "routed_moe") for s in structure_by_unit.values())):
+            raise ValueError("family restriction identity requires every priced unit's structure")
     # Locations, batch width and a wall-clock interruption limit are not
     # encoding/scoring inputs. All other explicit campaign settings remain bound by default.
     #
@@ -1469,6 +1545,9 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size"):
         settings.pop(name, None)
     return {
+        **({"family_restriction": {"policy": restriction,
+             "structure_by_unit": dict(sorted(structure_by_unit.items()))}}
+           if restriction is not None else {}),
         **({"stack_sampling_identity": stack_sampling_identity}
            if stack_sampling_identity else {}),
         "campaign_schema": SCHEMA,
@@ -1725,7 +1804,7 @@ def _checkpoint_wire_record(anchor, wire_dir, identity, *, existing=None):
 
 
 def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
-                           adopt, admits, identity_sha256) -> dict:
+                           adopt, admits, identity_sha256, validate_state=None) -> dict:
     """Offer another campaign's stored anchors to this run's row gates.
 
     A whole-scope campaign already priced rows this run would price again.  Its
@@ -1784,6 +1863,8 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
                 f"--seed-checkpoint {manifest}: unit shard for {name} fails its "
                 "own payload digest")
         state = pickle.loads(payload)
+        if validate_state is not None:
+            validate_state(name, state)
         # Only the rows this run's menu admits get their bytes linked in.  An
         # unservable row's blob must not appear in this run's wire directory:
         # that directory is what the export intake reads, and a wire nothing
@@ -2291,14 +2372,17 @@ def report_empty_menus(menus: "Mapping[str, Sequence]", *, mode: str) -> list[st
 def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
                              parallel_kind,
                              context_by_unit: "Mapping[str, ServingContext] | None" = None,
+                             family_restriction=None, structure_by_unit=None,
                              ) -> dict[str, list]:
     """One Tessera menu per distinct shape and explicit serving context.
 
     ``expand_tessera_menu`` takes nothing but the shape and the run
     configuration and serving context, so units with equal values of those
     inputs get identical lists. Dense and routed expert units may share one
-    shape; their structural class comes from context_by_unit, never shape or
-    name. A missing map entry remains unbound. Units
+    shape; their structural class comes from owned topology, never shape or
+    name. Without a restriction, a missing context remains unbound. An explicit
+    family restriction requires exact structure coverage and adds the allowed
+    family tuple to the cache key. Units
     repeat shapes ~1500:1 on a production MoE, so expanding per Linear repeats
     the same answer thousands of times; keying by shape and context expands once per
     distinct answer instead.  Exact rather than approximate: same arguments,
@@ -2307,18 +2391,33 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
     thing that bounds the work.
     """
     from .tessera_menu import expand_tessera_menu
+    from .tessera_formats import get_tessera_family
+
+    restriction = parse_family_restriction(family_restriction)
+    if restriction is not None:
+        if (not isinstance(structure_by_unit, Mapping) or set(structure_by_unit) != set(targets)
+                or any(s not in ("dense", "routed_moe") for s in structure_by_unit.values())):
+            raise ValueError("family restriction requires exact authoritative structure coverage")
 
     by_shape_and_context: dict[tuple, list] = {}
     menus: dict[str, list] = {}
     for name in targets:
         shape = tuple(weights[name].shape)
         context = None if context_by_unit is None else context_by_unit.get(name)
-        key = (shape, None if context is None else context.key())
+        families = None
+        if restriction is not None:
+            structure = structure_by_unit[name]
+            if context is not None and context.structure != structure:
+                raise ValueError(f"{name}: family restriction structure conflicts with serving context")
+            families = tuple(restriction[structure])
+        key = (shape, None if context is None else context.key(), families)
         if key not in by_shape_and_context:
             by_shape_and_context[key] = expand_tessera_menu(
                 shape, mode=mode, tp_degree=tp_degree,
                 parallel_kind=parallel_kind,
                 **({"serving_context": context} if context is not None else {}),
+                **({"families": tuple(get_tessera_family(n) for n in families)}
+                   if families is not None else {}),
             )
         menus[name] = by_shape_and_context[key]
     return menus
@@ -3517,7 +3616,8 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
 def _run_streamed_calibration(args, runner, profile, *, mode, population,
                               dense_targets, expert_targets, scope_groups,
                               tokens, corpus_text, census, context_by_unit,
-                              attention_implementation, capture_runtime):
+                              attention_implementation, capture_runtime,
+                              structure_by_unit=None):
     """Wire canonical collection to the existing resident layer traversal."""
     import torch
     from . import tessera_calibration_cache as store
@@ -3535,7 +3635,9 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     for name in targets:
         names_by_layer.setdefault(runner.layer_index_for_qname(name), []).append(name)
     menus = expand_menus_for_targets(weights, targets, mode=mode, tp_degree=args.tp_degree,
-        parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit)
+        parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
+        family_restriction=getattr(args, "family_restriction", None),
+        structure_by_unit=structure_by_unit)
     report_empty_menus(menus, mode=mode)
     projection = None
     if population.declared:
@@ -3727,7 +3829,7 @@ def _main(argv, *, source_scope) -> int:
     )
     from .tessera_serving_scope import (
         add_serving_scope_arguments, serving_target_from_args,
-        context_by_unit_from_stats, scope_provenance,
+        context_by_unit_from_stats, scope_provenance, unit_structure_from_stats,
     )
 
     ap = argparse.ArgumentParser(description=__doc__)
@@ -3739,6 +3841,11 @@ def _main(argv, *, source_scope) -> int:
                     help="identity-bound JSON manifest with sibling .parts "
                          "unit shards; defaults beside --out")
     ap.add_argument("--menu-mode", default=None, choices=sorted(MENU_MODES))
+    ap.add_argument("--family-restriction", default=None, type=parse_family_restriction,
+                    help="Opt-in JSON prismaquant.tessera_campaign_family_restriction.v1 "
+                         "with explicit dense and routed_moe canonical family lists. "
+                         "Narrows pricing only; grants no serving support. Restricted "
+                         "seed imports refuse incompatible families or rate-band anchors.")
     ap.add_argument("--nsamples", type=int, default=8)
     ap.add_argument("--seqlen", type=int, default=512)
     ap.add_argument("--seed", type=int, default=0)
@@ -4063,7 +4170,8 @@ def _main(argv, *, source_scope) -> int:
                 f"--units {args.units}: the selection prices no unit")
 
     context_by_unit = None
-    if serving_target is not None:
+    structure_by_unit = None
+    if serving_target is not None or args.family_restriction is not None:
         from .sensitivity_probe import discover_moe_structure
         routed = discover_moe_structure(model, profile=profile)
         topology = {
@@ -4078,6 +4186,11 @@ def _main(argv, *, source_scope) -> int:
                 "num_experts": int(getattr(member.module, member.param_name).shape[0]),
             }
         context_by_unit = context_by_unit_from_stats(serving_target, topology, profile)
+        if args.family_restriction is not None:
+            if len(set(targets)) != len(targets) or set(topology) != set(targets):
+                raise ValueError("family restriction requires unambiguous topology for every target")
+            structure_by_unit = {name: unit_structure_from_stats(name, topology[name], profile)
+                                 for name in targets}
 
     tokens, corpus_text = _calibration_tokens(
         args.model, args.nsamples, args.seqlen, args.seed)
@@ -4105,7 +4218,7 @@ def _main(argv, *, source_scope) -> int:
                 dense_targets=census_dense_targets, expert_targets=census_expert_targets,
                 scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
                 context_by_unit=context_by_unit, attention_implementation=attention_implementation,
-                capture_runtime=capture_runtime)
+                capture_runtime=capture_runtime, structure_by_unit=structure_by_unit)
         finally:
             runner.shutdown()
     if selected_source:
@@ -4295,6 +4408,8 @@ def _main(argv, *, source_scope) -> int:
         weights, targets, mode=mode, tp_degree=args.tp_degree,
         parallel_kind=PARALLEL_NONE,
         context_by_unit=context_by_unit,
+        family_restriction=args.family_restriction,
+        structure_by_unit=structure_by_unit,
     )
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
     # ``attested`` without a dev pin, ``readable`` against a contract that
@@ -4375,6 +4490,7 @@ def _main(argv, *, source_scope) -> int:
         stack_sampling_identity={name: record
             for entry in (selection or {}).get("groups", [])
             for name, record in entry.get("stack_samples", {}).items()},
+        structure_by_unit=structure_by_unit,
     )
     journal, identity_sha256, resumed = prepare_journal(
         checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
@@ -4392,6 +4508,13 @@ def _main(argv, *, source_scope) -> int:
     unservable: dict[str, dict[str, dict]] = {}
     wire_records = {name: {} for name in targets}
     dirty_checkpoint_units = set()
+    restricted_rate_band = (parse_rate_band(args.rate_band)
+                            if args.family_restriction is not None else None)
+
+    def validate_seed_scope(name, state):
+        require_seed_family_scope(name, state, family_restriction=args.family_restriction,
+                                  structure_by_unit=structure_by_unit,
+                                  rate_band=restricted_rate_band)
 
     def adopt_state(name: str, state, *, where: str) -> None:
         """Verify one unit's stored anchors against this run and take them.
@@ -4402,7 +4525,9 @@ def _main(argv, *, source_scope) -> int:
         rather than inferred from which file the row came out of.
 
         A stored row whose rung is outside this run's menu is neither priced
-        nor refused: it is recorded as ``unservable`` evidence.  The two are
+        nor refused under the legacy unrestricted behavior: it is recorded as
+        ``unservable`` evidence. An explicit family restriction instead refuses
+        active seed rows outside its family list or requested rate band. The two are
         different failures.  A row that disagrees with this run's weights,
         Hessian applicability or static scale is a row about some other
         campaign and is refused by name; a row this menu does not admit is a
@@ -4424,6 +4549,7 @@ def _main(argv, *, source_scope) -> int:
             raise RuntimeError(f"{where} state has an invalid anchor/record envelope for {name}")
         if name not in menus:
             raise RuntimeError(f"{where} state names a unit this run does not price: {name}")
+        validate_seed_scope(name, state)
         on_menu = {entry.format_name for entry in menus[name]}
         formats = set()
         for row in state["anchors"]:
@@ -4477,7 +4603,8 @@ def _main(argv, *, source_scope) -> int:
             wire_dir=wire_dir, adopt=adopt_state,
             admits=lambda name, fmt: any(
                 entry.format_name == fmt for entry in menus.get(name, ())),
-            identity_sha256=identity_sha256)
+            identity_sha256=identity_sha256,
+            validate_state=validate_seed_scope if args.family_restriction is not None else None)
         for name in seed_provenance["units"]:
             dirty_checkpoint_units.add(name)
 
@@ -4949,6 +5076,9 @@ def _main(argv, *, source_scope) -> int:
             },
             "loo_gate": float(args.loo_gate),
             "max_artifact_bpp": float(args.max_artifact_bpp),
+            **({"family_restriction": {"policy": args.family_restriction,
+                 "structure_by_unit": dict(sorted(structure_by_unit.items()))}}
+               if args.family_restriction is not None else {}),
             "stopped_early": bool(stopped_early),
             "wall_seconds": time.time() - started,
             "cache_dir": str(cache_dir),
