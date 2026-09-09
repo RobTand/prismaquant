@@ -6,6 +6,7 @@ run through campaign.main. These partial artifacts are measurement evidence.
 """
 from __future__ import annotations
 import argparse
+import gc
 import hashlib
 import json
 import os
@@ -53,6 +54,7 @@ def main(argv=None):
     from prismaquant.cost_stage_checkpoint import _load_unit, unit_path
     from tessera import window_viterbi
     from tessera.cached_unit import encoder_source_sha256
+    from prismaquant.memory_management import CaptureMemoryGuard
     from experiments.glm_full_capture_profile import CaptureObserver
     width = int(command[command.index('--anchor-batch-size')+1])
     if args.units < 4*width or args.units % width or args.overlap_bytes <= 0:
@@ -70,6 +72,7 @@ def main(argv=None):
     original_batches = campaign._anchor_batches
     original_viterbi = window_viterbi.viterbi_window_fused
     original_plan = window_viterbi._WindowPlan
+    original_guard_check = CaptureMemoryGuard.check
     plans = [0]
     def counted_plan(**kwargs):
         plans[0] += 1
@@ -92,6 +95,22 @@ def main(argv=None):
                 record = dict(label=label, overlap_bytes=args.overlap_bytes if enabled else 0,
                     started_unix=time.time(), io_calls=[], scheduled=[], profiles=[])
                 result['arms'].append(record)
+                def memory_reading():
+                    guard = CaptureMemoryGuard('cuda')
+                    return dict(guard.check('between_measurement_arms'),
+                        cuda_allocated_bytes=torch.cuda.memory_allocated())
+                record['before_collection'] = memory_reading()
+                record['collected_objects'] = gc.collect()
+                torch.cuda.empty_cache()
+                record['after_collection'] = memory_reading()
+                def observed_guard_check(guard, label, **kw):
+                    try:
+                        return original_guard_check(guard, label, **kw)
+                    finally:
+                        if label == 'before_selected_capture_identity':
+                            record['admission_guard'] = guard.snapshot()
+                            save()
+                CaptureMemoryGuard.check = observed_guard_check
                 cycle_start = [None]
                 builds_before = [None]
                 calls = [0]
@@ -155,9 +174,8 @@ def main(argv=None):
                     record['profiles'].append(dict(path=str(path),sha256=digest(path),
                         bytes=path.stat().st_size,targets_shape=list(pos[0].shape),
                         window_bits=pos[2],rate=pos[3],sse=answer[1]))
-                    if enabled:
-                        import shutil
-                        shutil.copyfile(path,os.environ['PRISMABUILD_PROFILE_TORCH_OUT'])
+                    import shutil
+                    shutil.copyfile(path,os.environ['PRISMABUILD_PROFILE_TORCH_OUT'])
                     return answer
                 window_viterbi.viterbi_window_fused=profile_first
                 try:
@@ -170,6 +188,7 @@ def main(argv=None):
                         allocated_peak_bytes=torch.cuda.max_memory_allocated(),
                         reserved_peak_bytes=torch.cuda.max_memory_reserved())
                 finally:
+                    CaptureMemoryGuard.check=original_guard_check
                     window_viterbi.viterbi_window_fused=original_viterbi
                     for owner,name,original in reversed(wrappers):
                         setattr(owner,name,original)
@@ -178,6 +197,8 @@ def main(argv=None):
                 with (root/'cost.pkl').open('rb') as handle:
                     cost_payload=pickle.load(handle)
                 record['publication_stats']=cost_payload['provenance']['publication_overlap']
+                record['completed_guard']=cost_payload['provenance']['selected_source_preparation']['memory_guard']
+                del cost_payload
                 if enabled and (not record['publication_stats'] or record['publication_stats']['failed']):
                     raise RuntimeError('enabled publication did not report successful completion')
                 if any(t.name.startswith('tessera-publication') for t in threading.enumerate()):
@@ -210,6 +231,7 @@ def main(argv=None):
         campaign._anchor_batches=original_batches
         window_viterbi.viterbi_window_fused=original_viterbi
         window_viterbi._WindowPlan=original_plan
+        CaptureMemoryGuard.check=original_guard_check
         result['finished_unix']=time.time()
         save()
     return 0
