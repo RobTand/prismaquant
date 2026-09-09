@@ -101,6 +101,9 @@ def test_check_only_refuses_an_interpreter_that_is_not_on_the_pin(tmp_path):
     clone, old, new = _git_clone_with_two_commits(tmp_path)
     pin = _pin_module(tmp_path, new, hashlib.sha256(CONTRACT).hexdigest())
     python = _venv_with_tessera(tmp_path, "venv-stale", "VERSION = 1\n")
+    # --check-only reads a source that already verifies and writes none, so
+    # the source is published first, the way a provisioning run leaves it.
+    _load().materialise(new, clone, tmp_path / "pins")
 
     completed = subprocess.run(
         [sys.executable, str(TOOL), "--python", str(python),
@@ -316,6 +319,7 @@ def test_same_contract_with_older_source_is_not_already_the_reviewed_bytes(tmp_p
     contract_sha = hashlib.sha256(CONTRACT).hexdigest()
     pin = _pin_module(tmp_path, new, contract_sha)
     python = _venv_with_tessera(tmp_path, "venv-old", "VERSION = 1\n")
+    mod.materialise(new, clone, tmp_path / "pins")   # --check-only only reads
 
     rc = mod.main(["--python", str(python), "--pin-source", str(pin),
                    "--clone", str(clone), "--pins-root", str(tmp_path / "pins"),
@@ -330,6 +334,7 @@ def test_the_matching_source_is_reported_clean(tmp_path):
     import hashlib
     pin = _pin_module(tmp_path, new, hashlib.sha256(CONTRACT).hexdigest())
     python = _venv_with_tessera(tmp_path, "venv-new", "VERSION = 2\n")
+    mod.materialise(new, clone, tmp_path / "pins")
 
     rc = mod.main(["--python", str(python), "--pin-source", str(pin),
                    "--clone", str(clone), "--pins-root", str(tmp_path / "pins"),
@@ -390,6 +395,7 @@ def test_a_subpackage_the_build_excludes_is_not_expected_in_the_install(tmp_path
     import hashlib
     pin = _pin_module(tmp_path, new, hashlib.sha256(CONTRACT).hexdigest())
     python = _venv_with_tessera(tmp_path, "venv-wheel-shaped", "VERSION = 2\n")
+    mod.materialise(new, clone, tmp_path / "pins")
 
     rc = mod.main(["--python", str(python), "--pin-source", str(pin),
                    "--clone", str(clone), "--pins-root", str(tmp_path / "pins"),
@@ -508,7 +514,8 @@ def test_the_install_does_not_run_inside_the_frozen_tree(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mod.subprocess, "run", spy)
     mod.main(["--python", str(python), "--pin-source", str(pin),
-              "--clone", str(clone), "--pins-root", str(pins)])
+              "--clone", str(clone), "--pins-root", str(pins),
+              "--staging-root", str(tmp_path / "staging")])
 
     assert seen, "no install was attempted"
     built = Path(seen[0][-1]).resolve()

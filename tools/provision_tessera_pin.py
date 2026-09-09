@@ -54,6 +54,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
+import tomllib
+from fnmatch import fnmatch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +67,9 @@ SHA_NAME = "TESSERA_DEV_PIN_CONTRACT_SHA256"
 DEFAULT_PINS_ROOT = Path("/mnt/shared/tessera-pins")
 DEFAULT_CLONE = Path("/home/rob/tessera")
 CONTRACT_IN_TREE = Path("src/tessera/serving/runtime_contract.json")
+PACKAGE_IN_TREE = Path("src/tessera")
+PYPROJECT_IN_TREE = Path("pyproject.toml")
+DEFAULT_STAGING_ROOT = Path("/home/rob/tmp")
 
 
 def _literal(name: str, source: Path = PIN_SOURCE) -> str:
@@ -110,7 +117,7 @@ SKIP_SUFFIXES = {".pyc", ".pyo"}
 SKIP_NAMES = {MANIFEST}
 
 
-def tree_digest(root: Path) -> tuple[str, int]:
+def tree_digest(root: Path, skip=None) -> tuple[str, int]:
     """``(sha256 over the tree's paths and bytes, file count)``.
 
     Path-and-content, not content alone: a tree that lost a file entirely, and
@@ -124,6 +131,8 @@ def tree_digest(root: Path) -> tuple[str, int]:
         if (set(rel.parts) & SKIP_DIRS or path.suffix in SKIP_SUFFIXES
                 or path.name in SKIP_NAMES):
             continue
+        if skip is not None and skip(rel):
+            continue
         h.update(str(rel).encode("utf-8"))
         h.update(b"\0")
         h.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
@@ -132,15 +141,52 @@ def tree_digest(root: Path) -> tuple[str, int]:
     return h.hexdigest(), n
 
 
-def package_digest(root: Path) -> tuple[str, int]:
+def unshipped_packages(source: Path) -> list[str]:
+    """Dotted subpackages the pinned tree's build config does not install.
+
+    Read from the tree rather than known here.  Tessera excludes
+    ``tessera._dev*`` -- its own merge-suite and import-graph tooling, which
+    lives under ``src/`` because ``tools/`` imports it by module name.  A
+    digest that counted those five files would compare a 76-file source tree
+    against a 71-file install and report drift on a correctly provisioned
+    interpreter, every run, forever.  The exclusion is a fact about the build
+    backend, so it is taken from the backend's own configuration; Tessera's
+    ``tools/check_wheel.py`` proves it on the built artifact.
+    """
+
+    pyproject = source / PYPROJECT_IN_TREE
+    if not pyproject.is_file():
+        raise SystemExit(f"{source} carries no {PYPROJECT_IN_TREE}")
+    config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    find = (config.get("tool", {}).get("setuptools", {})
+            .get("packages", {}).get("find", {}))
+    return list(find.get("exclude", []))
+
+
+def _package_skip(patterns: list[str], package: str = "tessera"):
+    """A ``tree_digest`` predicate for those patterns, over package paths."""
+
+    if not patterns:
+        return None
+
+    def skip(rel: Path) -> bool:
+        dotted = ".".join((package, *rel.parts[:-1]))
+        return any(fnmatch(dotted, pattern) for pattern in patterns)
+
+    return skip
+
+
+def package_digest(root: Path, unshipped: list[str] | None = None):
     """The digest of the ``tessera`` package alone, as an install would see it.
 
     A source tree carries ``pyproject.toml``, tests and CI that an install
     does not, so the two are only comparable over the package directory.  Paths
     are taken relative to it, so the same package under ``src/`` and under
-    ``site-packages/`` digests identically.
+    ``site-packages/`` digests identically -- and subpackages the build config
+    excludes are dropped on both sides, because an install never has them and
+    a source tree always does.
     """
-    return tree_digest(root)
+    return tree_digest(root, _package_skip(unshipped or []))
 
 
 def _archive_into(commit: str, clone: Path, dest: Path) -> None:
@@ -156,68 +202,147 @@ def _archive_into(commit: str, clone: Path, dest: Path) -> None:
                    check=True, input=archive.stdout)
 
 
-def materialise(commit: str, clone: Path, pins_root: Path) -> Path:
-    """Lay down ``commit``'s tree under ``pins_root``, verified, or repair it.
+def _manifest_holds(target: Path, commit: str) -> bool:
+    """Does ``target`` still digest to what its own manifest recorded?"""
 
-    The first version returned any directory named for the commit that had a
-    ``runtime_contract.json`` somewhere in it.  A tree left half-extracted by
-    an interrupted ``tar``, or edited afterwards, satisfies both of those and
-    is not the commit -- so it would have installed something else under the
-    commit's label, which is the one thing a pin exists to prevent.
+    manifest = target / MANIFEST
+    if not manifest.is_file():
+        return False
+    try:
+        held = json.loads(manifest.read_text(encoding="utf-8"))
+    except ValueError:
+        return False
+    if held.get("commit") != commit:
+        return False
+    digest, count = tree_digest(target)
+    return digest == held.get("tree_sha256") and count == held.get("files")
 
-    So the tree is written beside its own manifest, and a cached tree is
-    reused only when it still digests to what the manifest says.  Extraction
-    goes to a scratch directory and is moved into place with ``os.replace``,
-    which is atomic within a filesystem: a reader either sees the previous
-    tree or the new one, never a partial one, and an interrupted run leaves
-    scratch behind rather than a plausible-looking half tree.
+
+def _write_manifest(target: Path, commit: str) -> None:
+    """Record what ``target`` digests to, atomically, beside itself.
+
+    The manifest lives inside the tree it describes, so ``tree_digest``
+    excludes it by name; otherwise writing it would change the thing it
+    records and no cached tree could ever verify.
+    """
+    digest, count = tree_digest(target)
+    body = json.dumps({"commit": commit, "tree_sha256": digest,
+                       "files": count}, indent=1)
+    scratch = target / f".{MANIFEST}.writing"
+    scratch.write_text(body, encoding="utf-8")
+    os.replace(scratch, target / MANIFEST)
+
+
+class _PinsLock:
+    """One writer at a time per commit, across hosts on the shared root.
+
+    Two boxes provisioning the same pin at once is the ordinary case, not the
+    exotic one: PrismaBuild runs actions concurrently and the pins root is
+    NFS.  Without this they race to publish the same directory, and the loser
+    quarantines the winner's freshly published tree as an intruder.
+    """
+
+    def __init__(self, pins_root: Path, commit: str) -> None:
+        self.path = pins_root / f".lock-{commit}"
+
+    def __enter__(self):
+        import fcntl
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = open(self.path, "a+")
+        fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        import fcntl
+        fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        self.handle.close()
+        return False
+
+
+def verified_source(commit: str, pins_root: Path) -> Path | None:
+    """``pins_root/commit`` if it verifies against its own manifest, else None.
+
+    Reads only.  ``--check-only`` runs on this, because a read-only check that
+    writes the pinned tree into a shared directory to learn what to compare
+    against is not read-only.
     """
     target = pins_root / commit
-    manifest = target / MANIFEST
-    if manifest.exists():
+    return target if _manifest_holds(target, commit) else None
+
+
+def materialise(commit: str, clone: Path, pins_root: Path,
+                report: dict | None = None) -> Path:
+    """Lay down ``commit``'s tree under ``pins_root``, verified, or repair it.
+
+    Three states, three different right answers, and the first version of this
+    collapsed them into one:
+
+    * **Manifested and matching.** Reused, no clone needed.
+    * **No manifest, right bytes.** ``/mnt/shared/tessera-pins/07ad344c...``
+      predates the manifest and is correct.  Its content is compared against a
+      fresh ``git archive`` of the commit and, when equal, the manifest is
+      written beside it.  The bytes are not replaced: rewriting a shared
+      directory other boxes may be reading, to end with what is already there,
+      is churn with a window in it.
+    * **Anything else.** The tree is moved aside under a
+      ``.quarantine-<commit>-...`` name and the fresh archive published in its
+      place.  It is not deleted.  Something wrote to a shared pins root and
+      those bytes are the only record of what; the quarantine path is returned
+      in ``report`` so a run says where it went.
+
+    Publication is ``os.replace`` of a directory that is complete and already
+    manifested, so a reader sees the old tree or the new one.  Staging is
+    ``mkdtemp`` under the pins root -- unique and owned, where the earlier
+    PID-named scratch could collide between hosts on NFS and was removed by
+    name, which is a directory another box may be extracting into.
+    """
+    target = pins_root / commit
+    if _manifest_holds(target, commit):
+        return target
+
+    pins_root.mkdir(parents=True, exist_ok=True)
+    with _PinsLock(pins_root, commit):
+        # Re-checked under the lock: another box may have published it while
+        # this one waited, and that tree is as good as one written here.
+        if _manifest_holds(target, commit):
+            return target
+
+        staging = Path(tempfile.mkdtemp(dir=pins_root,
+                                        prefix=f".materialising-{commit}-"))
+        fresh = staging / "tree"
         try:
-            held = json.loads(manifest.read_text(encoding="utf-8"))
-        except ValueError:
-            held = {}
-        if held.get("commit") == commit:
-            digest, count = tree_digest(target)
-            if (digest == held.get("tree_sha256")
-                    and count == held.get("files")):
-                return target
-        # Fall through and repair.  Saying which way it failed is worth a line
-        # to whoever reads the log: a digest mismatch and a missing manifest
-        # are different accidents.
-        print(f"{target}: cached tree does not match its manifest, replacing",
-              file=sys.stderr)
-    elif target.exists():
-        print(f"{target}: cached tree has no manifest, replacing",
-              file=sys.stderr)
+            _archive_into(commit, clone, fresh)
+            if not (fresh / CONTRACT_IN_TREE).exists():
+                raise SystemExit(f"{commit} carries no {CONTRACT_IN_TREE}")
 
-    scratch = pins_root / f".materialising-{commit}-{os.getpid()}"
-    if scratch.exists():
-        shutil.rmtree(scratch)
-    try:
-        _archive_into(commit, clone, scratch)
-        if not (scratch / CONTRACT_IN_TREE).exists():
-            raise SystemExit(f"{commit} carries no {CONTRACT_IN_TREE}")
-        # The manifest lives inside the tree it describes, so ``tree_digest``
-        # excludes it by name; otherwise writing it would change the thing it
-        # records and no cached tree could ever verify.
-        digest, count = tree_digest(scratch)
-        (scratch / MANIFEST).write_text(json.dumps(
-            {"commit": commit, "tree_sha256": digest, "files": count},
-            indent=1), encoding="utf-8")
-        if target.exists():
-            doomed = pins_root / f".replaced-{commit}-{os.getpid()}"
-            os.replace(target, doomed)
-            shutil.rmtree(doomed, ignore_errors=True)
-        os.replace(scratch, target)
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-    return target
+            if target.exists():
+                if tree_digest(target)[0] == tree_digest(fresh)[0]:
+                    # Already the commit, only unattested.  Attest in place.
+                    _write_manifest(target, commit)
+                    if report is not None:
+                        report["source_state"] = "verified against a fresh archive"
+                    return target
+                quarantine = pins_root / (
+                    f".quarantine-{commit}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+                    f"-{staging.name.rsplit('-', 1)[-1]}")
+                os.replace(target, quarantine)
+                print(f"{target}: does not hold {commit}; kept at {quarantine}",
+                      file=sys.stderr)
+                if report is not None:
+                    report["quarantined"] = str(quarantine)
+
+            _write_manifest(fresh, commit)
+            os.replace(fresh, target)
+            if report is not None:
+                report.setdefault("source_state", "published from the clone")
+            return target
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
 
-def installed_identity(python: str) -> tuple[dict | None, str | None]:
+def installed_identity(python: str,
+                       unshipped: list[str] | None = None,
+                       ) -> tuple[dict | None, str | None]:
     """That interpreter's Tessera: ``(identity, reason it is absent)``.
 
     Exactly one of the two is set.  The identity carries the packaged
@@ -240,17 +365,25 @@ def installed_identity(python: str) -> tuple[dict | None, str | None]:
     fleet does not import.
     """
 
+    # The exclusion travels INTO the probe rather than being applied to its
+    # answer: an editable install points at a checkout that does carry the
+    # unshipped subpackage, and only the digest that skipped it on both sides
+    # compares the two halves of one pin.
     probe = (
         "import hashlib,json,sys\n"
+        "from fnmatch import fnmatch\n"
         "from importlib import resources\n"
         "from pathlib import Path\n"
         "SKIP_DIRS={'__pycache__','.git'}\n"
         "SKIP_SUF={'.pyc','.pyo'}\n"
+        f"UNSHIPPED={list(unshipped or [])!r}\n"
         "def digest(root):\n"
         "    h=hashlib.sha256(); n=0\n"
         "    for p in sorted(q for q in root.rglob('*') if q.is_file()):\n"
         "        rel=p.relative_to(root)\n"
         "        if set(rel.parts)&SKIP_DIRS or p.suffix in SKIP_SUF: continue\n"
+        "        dotted='.'.join(('tessera',)+rel.parts[:-1])\n"
+        "        if any(fnmatch(dotted,x) for x in UNSHIPPED): continue\n"
         "        h.update(str(rel).encode()); h.update(b'\\0')\n"
         "        h.update(hashlib.sha256(p.read_bytes()).hexdigest().encode())\n"
         "        h.update(b'\\n'); n+=1\n"
@@ -286,13 +419,14 @@ def installed_identity(python: str) -> tuple[dict | None, str | None]:
     return None, reason
 
 
-def expected_identity(source: Path) -> dict:
+def expected_identity(source: Path,
+                      unshipped: list[str] | None = None) -> dict:
     """What a correct install of the pinned tree would report."""
 
-    pkg = source / "src" / "tessera"
+    pkg = source / PACKAGE_IN_TREE
     if not pkg.is_dir():
-        raise SystemExit(f"{source} carries no src/tessera")
-    digest, count = package_digest(pkg)
+        raise SystemExit(f"{source} carries no {PACKAGE_IN_TREE}")
+    digest, count = package_digest(pkg, unshipped)
     return {
         "contract_sha256": hashlib.sha256(
             (source / CONTRACT_IN_TREE).read_bytes()).hexdigest(),
@@ -322,34 +456,55 @@ def main(argv: list[str] | None = None) -> int:
                         help="where pinned source trees are materialised")
     parser.add_argument("--pin-source", type=Path, default=PIN_SOURCE,
                         help="module holding the reviewed pin literals")
+    parser.add_argument("--staging-root", type=Path,
+                        default=DEFAULT_STAGING_ROOT,
+                        help="where the build's copy of the pinned tree goes")
     parser.add_argument("--check-only", action="store_true",
-                        help="report what is installed, install nothing")
+                        help="report what is installed, write nothing")
     args = parser.parse_args(argv)
 
     commit, reviewed_sha = reviewed_pin(args.pin_source)
-    installed, absent = installed_identity(args.python)
     report = {
         "python": args.python,
         "reviewed_commit": commit,
         "reviewed_contract_sha256": reviewed_sha,
-        "installed_before": installed,
     }
-    if absent is not None:
-        report["installed_absent_before"] = absent
 
-    # The pinned tree is materialised BEFORE the decision, not after it,
-    # because the decision needs the commit's package digest and only the tree
-    # has it.  The contract hash in the pin is a second, independent check on
-    # the tree, and it is checked here rather than trusted.
-    source = materialise(commit, args.clone, args.pins_root)
-    expected = expected_identity(source)
+    # --check-only reads.  It does not materialise, because the pins root is
+    # shared and a read-only check that lays a tree down in it is not one; an
+    # operator running it to see where a box stands would find a directory
+    # written by the question.  So it answers from a source that already
+    # verifies, and says so when there is none rather than making one.
+    if args.check_only:
+        source = verified_source(commit, args.pins_root)
+        if source is None:
+            report["installed_before"], absent = installed_identity(args.python)
+            if absent is not None:
+                report["installed_absent_before"] = absent
+            report["action"] = "none, --check-only and no verified pinned source"
+            report["repair"] = (
+                f"run without --check-only to publish {args.pins_root / commit} "
+                "from the clone")
+            print(json.dumps(report, indent=1))
+            return 1
+    else:
+        source = materialise(commit, args.clone, args.pins_root, report)
+
+    unshipped = unshipped_packages(source)
     report["source"] = str(source)
+    report["unshipped_packages"] = unshipped
+    expected = expected_identity(source, unshipped)
     report["expected"] = expected
     if expected["contract_sha256"] != reviewed_sha:
         raise SystemExit(
             f"{source} publishes contract {expected['contract_sha256']}, "
             f"reviewed is {reviewed_sha}"
         )
+
+    installed, absent = installed_identity(args.python, unshipped)
+    report["installed_before"] = installed
+    if absent is not None:
+        report["installed_absent_before"] = absent
 
     fields = drift(installed, expected)
     report["drift"] = fields
@@ -362,19 +517,36 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=1))
         return 1
 
-    subprocess.run(
-        [args.python, "-m", "pip", "install", "--no-deps",
-         "--no-build-isolation", "--force-reinstall", str(source)],
-        check=True,
-    )
+    # The build gets a copy.  ``pip install <dir>`` runs the backend IN that
+    # directory, and setuptools writes ``*.egg-info`` (and, uncached, a
+    # ``build/``) into it -- so pointing pip at the pinned tree makes the tree
+    # stop matching the manifest it was published with, and the next run
+    # reports the pin's own source corrupt.  The frozen tree is an input.
+    args.staging_root.mkdir(parents=True, exist_ok=True)
+    build = Path(tempfile.mkdtemp(dir=args.staging_root,
+                                  prefix=f"tessera-build-{commit[:12]}-"))
+    try:
+        copy = build / "tree"
+        shutil.copytree(source, copy)
+        report["built_from"] = str(copy)
+        subprocess.run(
+            [args.python, "-m", "pip", "install", "--no-deps",
+             "--no-build-isolation", "--force-reinstall", str(copy)],
+            check=True,
+        )
+    finally:
+        shutil.rmtree(build, ignore_errors=True)
 
-    after, after_absent = installed_identity(args.python)
+    # And proved rather than argued: the tree still answers its own manifest.
+    report["source_intact_after_install"] = _manifest_holds(source, commit)
+
+    after, after_absent = installed_identity(args.python, unshipped)
     report["installed_after"] = after
     if after_absent is not None:
         report["installed_absent_after"] = after_absent
     remaining = drift(after, expected)
     report["drift_after"] = remaining
-    if remaining:
+    if remaining or not report["source_intact_after_install"]:
         report["action"] = "installed, and it did NOT take"
         print(json.dumps(report, indent=1))
         return 1
