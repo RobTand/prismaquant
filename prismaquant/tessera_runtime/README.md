@@ -197,13 +197,15 @@ p.write_text(s)
 EDIT_CONSTS
 ```
 
-Verify — ONE shell segment, and the empty `CUDA_VISIBLE_DEVICES` prefix is
-required by this repository's pool hook:
+Use a fleet interpreter provisioned at the reviewed pin, then route CPU
+verification through PrismaBuild:
 
 ```bash
-cd /home/rob/prismaquant && CUDA_VISIBLE_DEVICES="" PYTHONPATH=. \
-  TRITON_CACHE_DIR=/home/rob/tmp/triton-cache nice -n 10 \
-  /home/rob/dq-runs/venvs/prismaquant-cu130/bin/python -m pytest -q -p no:cacheprovider \
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
+  --cwd /home/rob/prismaquant --tag x86 --cpus 4 --demand mem_gb=8 \
+  --priority -10 --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
+  --env OPENBLAS_NUM_THREADS=1 -- \
+  /home/rob/venvs/pq-cpu312/bin/python -m pytest -q -n 4 \
   tests/test_tessera_serving_pin.py tests/test_tessera_lane_v6.py \
   tests/test_tessera_lane_admission.py tests/test_tessera_export_lane.py
 ```
