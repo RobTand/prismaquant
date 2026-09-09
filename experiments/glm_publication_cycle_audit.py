@@ -115,7 +115,9 @@ def main():
         stats=arm['publication_stats']
         if enabled:
             assert not stats['failed'] and stats['budget_bytes']==arm['overlap_bytes']
-            assert 0<stats['peak_charged_bytes']<=stats['budget_bytes'] and stats['published']>=3*result['units']
+            # File and receipt jobs are per unit. Checkpoint queue jobs hold
+            # snapshots of multiple units and invoke write_unit for each.
+            assert 0<stats['peak_charged_bytes']<=stats['budget_bytes'] and stats['published']>2*result['units']
         else: assert stats is None
         io={}
         for call in arm['io_calls']:

@@ -100,12 +100,15 @@ def main(argv=None):
                     guard = CaptureMemoryGuard('cuda')
                     return dict(guard.check('between_measurement_arms'),
                         cuda_allocated_bytes=torch.cuda.memory_allocated(),
+                        host_allocator=torch.cuda.host_memory_stats(),
                         cgroup_stat={key:int(value) for key,value in
                             (line.split() for line in (guard.scope/'memory.stat').read_text().splitlines())})
                 record['before_collection'] = memory_reading()
                 record['collected_objects'] = gc.collect()
                 torch.cuda.empty_cache()
                 record['after_collection'] = memory_reading()
+                torch.accelerator.memory.empty_host_cache()
+                record['after_host_cache_release']=memory_reading()
                 libc=ctypes.CDLL(None)
                 trim=getattr(libc,'malloc_trim',None)
                 record['malloc_trim_returncode']=None if trim is None else trim(0)
