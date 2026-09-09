@@ -472,10 +472,14 @@ class StreamedCausalLM:
 
         snapshot_only = getattr(self.context, 'source_snapshot_only', False)
         if snapshot_only:
-            self.context.configure_selected_snapshot(names, self.profile)
-            if (expected_source_keys is not None and
-                    tuple(expected_source_keys) != self.context._snapshot_source_keys):
+            if expected_source_keys is None:
+                raise RuntimeError('snapshot requires admitted source keys before source I/O')
+            from .layer_streaming import selected_weight_source_keys
+            planned_keys = tuple(expected_source_keys)
+            actual_keys = selected_weight_source_keys(names, self.profile, self.context.weight_ckpt)
+            if planned_keys != actual_keys:
                 raise RuntimeError('snapshot source dependencies differ from the admitted plan')
+            self.context.configure_selected_snapshot(names, self.profile)
 
         ordered = sorted(layers)
         window = max(1, min(self.prefetch_lookahead, self.context.max_cache_slots - 1))

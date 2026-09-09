@@ -631,20 +631,25 @@ class StreamingContext:
         from .layer_streaming import selected_weight_source_keys
         if not getattr(self, 'source_snapshot_only', False):
             raise RuntimeError('selected snapshot requires a source-only context')
-        if getattr(self, '_snapshot_source_keys', None) is not None or self._inflight:
-            raise RuntimeError('selected snapshot source is already configured or active')
-        keys = selected_weight_source_keys(names, profile, self.weight_ckpt)
-        # No prefetch or full-layer install is permitted before this transition.
-        self.weight_shard = {key: self.weight_shard[key] for key in keys}
-        self.weight_ckpt = {key: self.weight_ckpt[key] for key in keys}
-        self.estimated_layer_bytes, self._snapshot_layer_bytes = _estimate_layer_cache_bytes(
-            weight_shard=self.weight_shard, weight_ckpt=self.weight_ckpt,
-            layers_prefix=self.layers_prefix, num_layers=self.num_layers,
-            target_dtype=self.dtype, tensor_dtypes=self.buffer_dtypes,
-            fp4_experts=self.source_fp4_experts,
-            **({'source_authentication': self.source_authentication}
-               if self.source_authentication is not None else {}))
-        self._snapshot_source_keys = keys
+        with self._inflight_lock:
+            if getattr(self, '_snapshot_source_keys', None) is not None or self._inflight:
+                raise RuntimeError('selected snapshot source is already configured or active')
+            keys = selected_weight_source_keys(names, profile, self.weight_ckpt)
+            # Build the complete transition before committing any source state.
+            # Header/authentication failure leaves the original maps reusable.
+            shards = {key: self.weight_shard[key] for key in keys}
+            checkpoint_keys = {key: self.weight_ckpt[key] for key in keys}
+            estimated, layer_bytes = _estimate_layer_cache_bytes(
+                weight_shard=shards, weight_ckpt=checkpoint_keys,
+                layers_prefix=self.layers_prefix, num_layers=self.num_layers,
+                target_dtype=self.dtype, tensor_dtypes=self.buffer_dtypes,
+                fp4_experts=self.source_fp4_experts,
+                **({'source_authentication': self.source_authentication}
+                   if self.source_authentication is not None else {}))
+            self.weight_shard, self.weight_ckpt = shards, checkpoint_keys
+            self.estimated_layer_bytes = estimated
+            self._snapshot_layer_bytes = layer_bytes
+            self._snapshot_source_keys = keys
 
     def configure_runtime_pressure_floor(self) -> int:
         floor = self.memory_pressure_floor_bytes()
@@ -750,6 +755,10 @@ class StreamingContext:
         return released
 
     def schedule_prefetch(self, L: int):
+        if getattr(self, 'source_snapshot_only', False):
+            with self._inflight_lock:
+                if not getattr(self, '_snapshot_source_keys', None):
+                    raise RuntimeError('snapshot source must be configured before prefetch')
         # A one-slot policy is used by the DSv4 anchored-AURA campaign on a
         # unified-memory Spark.  Speculative loading while the current layer
         # is installed would create a second live source-weight plane even if
