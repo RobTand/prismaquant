@@ -155,7 +155,7 @@ def test_actual_candidate_filter_keeps_per_unit_context_gate(monkeypatch):
     assert [(m['qname'], m['reason']) for m in masks] == [(STACK, 'tessera_serving_context')]
 
 
-def test_routed_allow_list_equals_the_pinned_contracts_routed_moe_families():
+def test_routed_allow_list_equals_the_pinned_contracts_routed_moe_families(monkeypatch):
     """The allow-list must be the contract's answer, not a copy of it.
 
     ``allow_tessera_families`` is typed into the spec file and read by
@@ -175,25 +175,27 @@ def test_routed_allow_list_equals_the_pinned_contracts_routed_moe_families():
     ``route_admission`` then resolves ``unattested``, so export still fails
     closed.
 
-    No skip when the pinned contract is unavailable, which is the same stance
-    the rest of the ``test_tessera_*`` family already takes. ``load_tessera_
-    contract`` returns ``None`` both when Tessera is absent and when the
-    installed Tessera is not the pinned commit, because it fails closed rather
-    than reading whatever is installed. A test that skipped on either would
-    pass quietly in exactly the environment where the drift it watches for
-    would go unseen. ``tests/test_ci_tessera_install.py`` and
-    ``tests/test_tessera_serving_pin.py`` are the gates for the install itself.
+    The development reader is opt-in: ``load_tessera_contract`` returns
+    ``None`` when ``PRISMAQUANT_TESSERA_DEV_PIN`` is unset, before it looks at
+    anything installed. So this test requests the pin itself, the way
+    ``tests/test_tessera_menu_real_table.py`` does for the operator walk, and
+    only then treats ``None`` as a failure: with the pin requested it means
+    Tessera is absent or its answer moved, which are both things to see rather
+    than skip. ``tests/test_ci_tessera_install.py`` keeps CI installing the
+    pinned commit, and ``tests/test_tessera_serving_pin.py`` gates the bytes.
     """
     from prismaquant import lane_eligibility as le
     from prismaquant import tessera_runtime_contract as trc
 
+    monkeypatch.setenv(trc.TESSERA_DEV_PIN_ENV, "1")
+    assert trc.dev_pin_requested(), "the development reader must be opted in"
     contract = trc.load_tessera_contract()
     assert contract is not None, (
-        "no pinned Tessera contract: it is either not installed or not the "
-        f"pinned commit ({trc.TESSERA_DEV_PIN_COMMIT[:12]}), "
-        "and the loader fails closed on both. This test derives from that "
-        "contract rather than restating it; tests/test_ci_tessera_install.py "
-        "and tests/test_tessera_serving_pin.py gate the install itself")
+        "the pin is requested and still no contract: Tessera is not installed, "
+        f"or not the pinned commit ({trc.TESSERA_DEV_PIN_COMMIT[:12]}), and the "
+        "loader fails closed on both. This test derives from that contract "
+        "rather than restating it; tests/test_ci_tessera_install.py and "
+        "tests/test_tessera_serving_pin.py gate the install itself")
     profile = sp.load_serving_profile(PROFILE)
     published = {
         cell.family for cell in contract.cells
