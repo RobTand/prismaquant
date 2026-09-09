@@ -24,16 +24,20 @@ activate_prismaquant_source()
 try:  # package mode (`python -m tools.measure_vllm_full_kl`)
     from .gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
     from .full_kl_teacher_payload import (
+        TEACHER_PAYLOAD_V2_SCHEMA,
         load_teacher_evidence,
         safe_load_torch_payload,
+        tokenizer_identity,
     )
     from .serve_fingerprint import gold_producer_identity, self_manifest
     from .spec_decode_guard import refuse_if_spec_decode
 except ImportError:  # script mode (`python /repo/tools/measure_vllm_full_kl.py`)
     from gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
     from full_kl_teacher_payload import (  # type: ignore
+        TEACHER_PAYLOAD_V2_SCHEMA,
         load_teacher_evidence,
         safe_load_torch_payload,
+        tokenizer_identity,
     )
     from serve_fingerprint import (  # type: ignore
         gold_producer_identity,
@@ -627,6 +631,21 @@ def _student_all_positions(args, payload, teacher_evidence=None) -> int:
     return 0
 
 
+def _require_v2_candidate_identity(args, payload) -> None:
+    """Pair model family/vocabulary and token IDs before a costly engine load."""
+    try:
+        from .dsv4_wikitext_inputs import wikitext_model_identity
+    except ImportError:
+        from dsv4_wikitext_inputs import wikitext_model_identity
+    tokenizer = tokenizer_identity(args.model)
+    if tokenizer["content_sha256"] != payload["calibration_contract"]["tokenizer"]["identity_sha256"]:
+        raise RuntimeError("candidate tokenizer identity differs from the authenticated teacher")
+    candidate = wikitext_model_identity(args.model)
+    source = payload["model_identity"]
+    if candidate != source or candidate["vocab_size"] != payload["vocab_size"]:
+        raise RuntimeError("candidate model family/vocabulary differs from the authenticated teacher")
+
+
 def _student(args) -> int:
     started = time.monotonic()
     teacher_payload_sha256 = _file_sha256(args.teacher_payload)
@@ -640,9 +659,17 @@ def _student(args) -> int:
     if _file_sha256(args.teacher_payload) != teacher_payload_sha256:
         raise RuntimeError("teacher payload changed while the student loaded it")
     args.teacher_payload_sha256 = teacher_payload_sha256
-    if payload.get("score_positions") == "all":
+    v2 = payload.get("schema") == TEACHER_PAYLOAD_V2_SCHEMA
+    if v2 and not args.teacher_meta:
+        raise RuntimeError("v2 teacher requires authenticated --teacher-meta before engine loading")
+    if v2:
+        _require_v2_candidate_identity(args, payload)
+    final_companion = v2 and args.score_positions == "final"
+    if final_companion and payload.get("final_logprobs") is None:
+        raise RuntimeError("final scoring requires a full-vocabulary teacher companion")
+    if payload.get("score_positions") == "all" and not final_companion:
         return _student_all_positions(args, payload, teacher_evidence)
-    teacher = payload["teacher_logprobs"].float()
+    teacher = payload["final_logprobs" if final_companion else "teacher_logprobs"].float()
     prompts = payload["calib_ids"].tolist()
     vocab_size = int(payload["vocab_size"])
     print(
@@ -671,6 +698,8 @@ def _student(args) -> int:
         "kl_max": float(per_sample.max().item()),
         "kl_per_sample": [float(x) for x in per_sample.tolist()],
         "elapsed_s": time.monotonic() - started,
+        **({"score_positions": "final", "n_positions": len(prompts),
+            "teacher_evidence": teacher_evidence} if final_companion else {}),
         **_provenance(args),
     }
     result_text = _strict_json_text(result)

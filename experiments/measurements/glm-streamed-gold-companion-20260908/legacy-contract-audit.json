@@ -1,0 +1,43 @@
+{
+  "action": "69a5591d1e0565b28d077ed486484c6d8588869212716bc66b91533b44e2a1d7",
+  "returncode": 0,
+  "receipt_sha256": "03ddee6fe921fd178f845ab10945b106621c3cb8d80d0c37fe55180898d2d860",
+  "result": {
+    "bytes": 620,
+    "sha256": "0cceed16d1e9b3f0979e7ccb939faa3a2bf885bad600f7e33ddcd88f7bbb275f"
+  },
+  "source_snapshot": {
+    "commit": "a15f61c2e9515ccecc9ff42ae08b07d211035934",
+    "input": {
+      "bytes": 27352131,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "b848a437d161cc4eab58b66a7e7116281fea1974302fcc282ae6cb853f0f0654"
+    },
+    "parent": "716b35c3c18b0cf70001ed0ee32f15f48c4f9d51",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "collection": "44 passed, zero skips (including scipy validation); archived test_full_kl_teacher_payload.py imports live tools directly",
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n............................................                             [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n44 passed, 56 warnings in 41.12s\n",
+  "scope_resources": {
+    "cpu_seconds": 151.828468,
+    "cpu_system_seconds": 38.292578,
+    "cpu_user_seconds": 113.53589,
+    "memory_current_bytes": 1639137280,
+    "memory_peak_bytes": 6220759040,
+    "source": "cgroup"
+  },
+  "source_diff_to_base": [
+    ".pbrun-closure.3a20a30868617118.json",
+    "docs/ARCHITECTURE.md",
+    "experiments/measurements/glm-streamed-gold-companion-20260908/README.md",
+    "experiments/measurements/glm-streamed-gold-companion-20260908/baseline-audit.json",
+    "experiments/measurements/glm-streamed-gold-companion-20260908/initial-green-audit.json",
+    "tests/test_streamed_gold_companion.py",
+    "tools/build_streamed_full_kl_teacher.py",
+    "tools/full_kl_teacher_payload.py",
+    "tools/measure_vllm_full_kl.py",
+    "tools/serve_fingerprint.py"
+  ]
+}

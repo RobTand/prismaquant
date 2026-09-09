@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import functools
 from dataclasses import dataclass
 import hashlib
 import json
@@ -610,6 +611,41 @@ def _io_counters():
     return values
 
 
+ACTIVATION_SCALE_ENV = "PRISMAQUANT_PROD_ACT_SCALES"
+
+
+def _restores_activation_scale_env(function):
+    """Scope ``execute``'s activation-scale write to the call that makes it.
+
+    ``execute`` sets ``PRISMAQUANT_PROD_ACT_SCALES`` from the admitted plan so
+    the render path it drives reads the campaign's value.  As a process entry
+    point that is right; called in-process it leaves the value behind.  Every
+    admitted plan carries ``"0"`` (``_load_plan``), and that is the input
+    which turns the render scorer's activation clip OFF for everything that
+    runs afterwards (``production_weight_cache.py``, in
+    ``_local_forward_render_score``).  Nothing outside ``execute`` reads the
+    key, so restoring it on the way out leaves the campaign byte-identical
+    and leaves the process as it was found.
+    """
+    absent = object()
+
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        import os
+
+        prior = os.environ.get(ACTIVATION_SCALE_ENV, absent)
+        try:
+            return function(*args, **kwargs)
+        finally:
+            if prior is absent:
+                os.environ.pop(ACTIVATION_SCALE_ENV, None)
+            else:
+                os.environ[ACTIVATION_SCALE_ENV] = prior
+
+    return wrapper
+
+
+@_restores_activation_scale_env
 def execute(command, config, *, plan_sha256, prepared=None, resume=False, source_transition=None):
     """Execute one admitted preparation or one dependent cost action."""
     if source_transition is not None:
@@ -636,7 +672,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
     from .tessera_reader import load_declared_reader
 
     require_cuda_hot_path("tessera_joint_aura", "cuda")
-    os.environ["PRISMAQUANT_PROD_ACT_SCALES"] = config["execution"]["production_act_scales"]
+    os.environ[ACTIVATION_SCALE_ENV] = config["execution"]["production_act_scales"]
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision("highest")
     torch.backends.cuda.matmul.allow_tf32 = False

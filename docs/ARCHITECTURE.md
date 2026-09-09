@@ -1,7 +1,71 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-08 · `fix/glm-model-bound-wikitext-inputs`. Stamps
+As of: 2026-09-08 · `triage/layer-major-prefetch-reassert`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-08, `triage/layer-major-prefetch-reassert`) for the exact
+layer-major visitor's residency contract (#403). `StreamedCausalLM.
+visit_layer_batches` with v2 `layer_major` storage keeps no residency state of
+its own: the streaming runner owns residency, and `StreamingContext.
+schedule_prefetch` is idempotent (None for a hot layer, the held future for a
+read in flight or delivered and unclaimed, a fresh read only when nothing is
+held, and None with a counted memory skip when the pressure floor refuses a
+fresh one). A held read is now returned before the pressure floor and admission
+gates, so re-asserting a schedule under pressure is never counted as a memory
+skip. The visitor speculates each layer once ahead of its turn
+(`prefetch_lookahead`) and re-asserts it once, immediately before
+`install(require_prefetched=True)`, releasing its record of the speculation
+at that re-assert: the record is the runner's future, whose result is the
+layer's tensors, and the runner drops its own reference at install, so the
+visitor never holds a claimed layer's source bytes past its turn. A
+speculation the runner no longer holds,
+because the layer was hot when speculated and the LRU evicted it before its
+turn, or because the pressure floor refused the read, therefore gets exactly
+one bounded retry, costing one serialized source read in the critical path.
+The install refusal stays fail-closed for everything else and its message
+names the layer. The layers that needed a fresh read are recorded on the
+runner as `layer_major_prefetch_retries` and logged by
+`compute_aura_cost_streamed` after the capture. The visitor's previous private
+`scheduled` set vetoed the re-schedule, so an evicted or refused speculation
+could only be recovered by rerunning with a larger budget. Gates:
+`tests/test_layer_major_boundary_capture.py` (a fake context that refuses
+install like `ensure_loaded`, both defects injected, plus a fake handing out
+real delivered futures that must be dead at the next install) and
+`tests/test_streamed_prefetch_scheduling.py`. No default, stage, format, lane
+or ship-gate change.
+
+Re-stamped (2026-09-08, `triage/container-gpu-declaration`) for **the campaign
+container's GPU attachment contract** (§4.10, #430). The launcher no longer
+maps the device because nobody said not to. `--gpus all` is withheld when any
+declaration withholds it: an explicit `--cpu-only`, an empty
+`CUDA_VISIBLE_DEVICES` in the action environment, which is exactly what
+`pbrun` sets when it granted no GPU slots, or an empty `CUDA_VISIBLE_DEVICES`
+in the spec's own `env` block. Otherwise the device is attached, as before.
+The two checks are not redundant with the variable itself: an empty
+`CUDA_VISIBLE_DEVICES` hides the device from CUDA inside the container but
+does not stop the runtime attaching and initialising it, so a row that
+reserved no GPU could still own one while PrismaBuild's GPU tokens stayed
+unspent, and a power reading taken beside it had a second owner it could not
+see. An unset variable is not a declaration: a run outside `pbrun` has no
+grant to read and keeps the behaviour it had, where `--cpu-only` remains the
+way to withhold the device. The launcher's existing JSON line now carries
+`gpu_attached` and `gpu_decision`, so the choice and the declaration that made
+it are readable rather than inferred. No serving pin, wire recipe, cost
+currency, format menu or ship-gate change. Gate:
+`tests/test_tessera_campaign_container.py`.
+
+Re-stamped (2026-09-08, `fix/glm-streamed-gold-companion`) for the opt-in
+streamed gold companion (#437). The existing v1 8×512 seed-42 WikiText
+all-position top-K=8192 payload and coverage/fidelity gates retain their
+defaults. V2 can retain normalized full-vocabulary final rows from the same
+streamed forward, with explicit observed GLM source-derivative binding,
+pre/post checkpoint/tokenizer/input/source identity checks, and tool/package
+provenance. Model-bound WikiText inputs require an independent file digest.
+V2 students verify teacher evidence and candidate tokenizer/family/vocabulary
+before engine loading and retain the teacher evidence in final-position KL.
+Fitting overlap remains unverified in this payload; full-vocabulary scope is
+not a held-out claim. This tools-only extension changes no pricing package,
+streaming residency mechanism, fitting capture, quantization or serving gate.
 
 Re-stamped (2026-09-08, `fix/glm-model-bound-wikitext-inputs`) for the
 explicit offline `prismaquant.model_wikitext_inputs/2` input contract.
@@ -321,7 +385,8 @@ preparation/source calls. Other mutable custom-model state is outside this
 qualification; no blanket stateful-model equivalence is claimed. Gates include
 `tests/test_layer_major_boundary_capture.py`, actual shared-state regressions,
 and a paired original-layout GLM source-read/profile qualification with Netdata
-from both hosts. This remains default-off and establishes no full-GLM fit.
+from both hosts. This remains default-off and establishes no full-GLM fit. The
+visitor's prefetch re-assert contract (#403) is stated in its own stamp above.
 
 Re-stamped (2026-09-08, `feat/joint-operator-windows`) for opt-in streamed
 operator windows (#392). A closed `operator_windows` v1 policy bounds GW/GA,
