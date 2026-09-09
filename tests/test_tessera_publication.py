@@ -666,10 +666,23 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
     assert seen["publication_overlap_bytes"] == 0
 
 
-def test_the_plan_charges_the_staging_bound_where_the_anchors_live():
+def test_the_plan_charges_the_staging_bound_where_the_anchors_live(monkeypatch):
     """And the number lands in the phase the staged bytes are resident in."""
     from prismaquant import autoscale
 
+    # The source census is the part that needs a real checkpoint on disk;
+    # the term under test is added after it, so it is stood in for here.
+    monkeypatch.setattr(autoscale, "streamed_calibration_resources",
+                        lambda *_args, **_kwargs: dict(
+                            live_layer_prefix="layers.",
+                            terms=dict(nonbody_source_bytes=100,
+                                       declared_headroom_bytes=200),
+                            body_layer_bytes={"0": 1000},
+                            body_loader_transient_bytes={"0": 100},
+                            body_source_file_bytes={"0": 900},
+                            unit_source_weight_bytes={"layers.0.proj": 24},
+                            full_hessian_bytes=64, full_prefix_bytes=32,
+                            source_header_sha256="a" * 64))
     kwargs = dict(unit_shapes={"layers.0.proj": [3, 4]},
                   counts={"layers.0.proj": 9},
                   max_act_rows=2, cache_slots=2, prefetch_workers=1,
