@@ -335,3 +335,207 @@ def test_selected_capture_cli_refuses_missing_capture_before_streamed_source(mon
             '--calibration-cache', str(tmp_path/'capture_manifest.json'),
             '--calibration-cache-sha256', 'a'*64,
             '--attention-implementation', 'eager'])
+
+
+# The floor a GLM row measured for itself on this fleet, from the receipt that
+# established that native evidence exists at all: 1,062,359,040 bytes, which is
+# 0.9894 GiB.
+GLM_MEASURED_PROCESS_FLOOR_BYTES = 1_062_359_040
+
+# A plan whose rounding slack is 900,000,000 bytes, below that floor.  Both
+# inspected example rows sit at 827,603,112 and 266,244,264 bytes of slack, so
+# both are on this side of the line.  The magnitude is chosen so the guard's
+# own 2 GiB physical margin is not what refuses: the point of the fixture is
+# the slack, and it has to be the only thing that is tight.
+_ROUNDING_LOSER_PLAN_BYTES = 20 * 1024 ** 3 + 173_741_824
+
+
+def _row_is_admitted(tmp_path, mem_gb, memory_bytes, floor_bytes, monkeypatch):
+    """The two ends a row's demand actually has to meet, joined.
+
+    The cap is built the way PrismaBuild builds it -- ``pool.py:2850``
+    constructs the resource scope with ``memory * 1024 ** 3``, so ``mem_gb``
+    is exactly that many GiB -- and the floor is read by a **real**
+    ``CaptureMemoryGuard`` from a real cgroup tree, not asserted.  Only the
+    two readings the guard cannot take on a CPU test box are supplied: the
+    cgroup's own ``memory.current`` and the CUDA reservation, whose sum is the
+    floor.  The predicate below is then the row's, at
+    ``prismaquant/tessera_campaign.py:4515``.
+
+    Reading the floor through the guard rather than substituting a constant is
+    what makes this a regression on the mechanism: a change to how the guard
+    measures its baseline, or to which of the two readings it sums, moves this
+    test.  A hardcoded number would not have noticed.
+    """
+    from prismaquant import memory_management as memory
+    root = tmp_path/'cgroup'
+    child = root/'job'
+    child.mkdir(parents=True, exist_ok=True)
+    (root/'memory.max').write_text(str(mem_gb * 1024 ** 3))
+    (root/'memory.current').write_text(str(floor_bytes))
+    (child/'memory.max').write_text('max')
+    membership = tmp_path/'membership'
+    membership.write_text('0::/job\n')
+    monkeypatch.setattr(memory.torch.cuda, 'memory_reserved', lambda _device: 0)
+    # The guard's own two refusals -- its 2 GiB physical margin and its host
+    # floor -- are deliberately kept slack here.  They are real and they bind
+    # the row at runtime, but they are not the arithmetic under test, and a
+    # fixture that tripped them would fail for a reason that has nothing to do
+    # with whether the demand reserved the baseline.
+    monkeypatch.setattr(memory, '_host_memory_info', lambda: (64 * 1024 ** 3, 128 * 1024 ** 3))
+    guard = memory.CaptureMemoryGuard('cuda', cgroup_root=root, membership=membership)
+    guard.check('before_selected_capture_identity')
+    assert guard.baseline_bytes() == floor_bytes, 'the guard did not read the floor under test'
+    assert guard.cap_bytes == mem_gb * 1024 ** 3, 'the cap is not the demand PrismaBuild would set'
+    return not (memory_bytes > guard.cap_bytes - guard.baseline_bytes())
+
+
+@pytest.mark.parametrize('reservation,demand_gb,admitted', [
+    (None, 21, False),
+    (800_000_000, 21, False),
+    (2147483648, 23, True),
+])
+def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
+        monkeypatch, tmp_path, reservation, demand_gb, admitted):
+    """A row's demand has to cover the floor the row is judged against.
+
+    The plan states **deltas** over whatever the process already holds; the cap
+    is **absolute**; and the row subtracts its measured floor from the cap
+    before comparing.  So the floor is taken off one side and charged on
+    neither, and until now nothing joined the dispatcher that states the demand
+    to the predicate that spends it.
+
+    What stood in for a reservation was rounding.  ``ceil`` leaves at most one
+    GiB of slack, and the measured floor is 0.9894 GiB -- *less* than the most
+    ``ceil`` can ever leave.  A row therefore admitted or refused according to
+    where its ``memory_bytes`` happened to land modulo one GiB, which is an
+    accident no one owns and no receipt records.  Both inspected example rows
+    lose it.
+
+    The middle arm is the one worth reading twice.  A declared 800,000,000
+    bytes is *smaller than the slack it replaces*, so it does not even move the
+    demand: the row still asks for 3 GiB and still refuses.  A reservation that
+    fits inside the rounding it was supposed to make unnecessary buys nothing,
+    and must not be able to report that it did.
+    """
+    import json
+    from tools import dispatch_tessera_campaign as dispatch
+
+    gib = 1024 ** 3
+    slack = (-_ROUNDING_LOSER_PLAN_BYTES) % gib
+    assert 0 < slack < GLM_MEASURED_PROCESS_FLOOR_BYTES, (
+        'the fixture only says anything if its rounding slack is below the '
+        'floor; a plan that wins the lottery would pass without a reservation')
+
+    census = dict(model='/source', anchor_groups={'u:layers.0.proj': ['layers.0.proj']},
+        layer_stride=1, unit_shapes={'layers.0.proj': [3, 4]}, counts={'layers.0.proj': 9})
+    (tmp_path/'census.json').write_text(json.dumps(census))
+    spec = dict(model='/source', campaign_argv=['--streaming'], cwd=str(tmp_path),
+                python='python3', env={}, cpus=1)
+    if reservation is not None:
+        spec['process_baseline_bytes'] = reservation
+    (tmp_path/'spec.json').write_text(json.dumps(spec))
+    monkeypatch.setattr(dispatch, '_calibration_cache_binding',
+                        lambda *a: dict(path='/capture', sha256='a'*64))
+    # A constant plan across every arm: the reservation must move the demand
+    # without moving the deltas.  Fold it into ``memory_bytes`` instead and the
+    # predicate compares an inflated plan against an inflated cap and nets to
+    # zero, which is exactly what declared headroom already does.
+    monkeypatch.setattr(dispatch, '_streamed_resource_plan',
+        lambda spec, census, members, *, selected_source: dict(
+            memory_bytes=_ROUNDING_LOSER_PLAN_BYTES, selected_layers=['0'],
+            baseline_policy='declared-headroom-pre-run-measured-in-row'))
+
+    assert dispatch.main(['plan', '--spec', str(tmp_path/'spec.json'),
+                          '--workspace', str(tmp_path),
+                          '--calibration-cache', '/capture']) == 0
+    row = json.loads((tmp_path/'manifest.json').read_text())[0]
+    assert row['demand']['mem_gb'] == demand_gb
+    assert _row_is_admitted(tmp_path, row['demand']['mem_gb'],
+                            _ROUNDING_LOSER_PLAN_BYTES,
+                            GLM_MEASURED_PROCESS_FLOOR_BYTES, monkeypatch) is admitted
+
+
+@pytest.mark.parametrize('value', [-1, 1.5, '2147483648', True, None])
+def test_a_malformed_process_baseline_reservation_refuses_before_any_row(
+        tmp_path, value):
+    """A reservation is a count of bytes or it is not a reservation.
+
+    ``True`` is in this list on purpose: it passes ``isinstance(v, int)`` and
+    would silently reserve one byte.
+    """
+    import json
+    from tools import dispatch_tessera_campaign as dispatch
+    spec = dict(model='/source', campaign_argv=['--streaming'], cwd=str(tmp_path),
+                python='python3', env={}, cpus=1, process_baseline_bytes=value)
+    (tmp_path/'spec.json').write_text(json.dumps(spec))
+    with pytest.raises(RuntimeError, match='process_baseline_bytes'):
+        dispatch.load_spec(tmp_path/'spec.json')
+
+
+def test_an_absent_reservation_still_reports_the_pre_run_term_it_actually_has(monkeypatch):
+    """Zero cannot read as coverage.
+
+    A reader of a plan has to be able to tell a declared reservation from the
+    absence of one, or the policy field stops being evidence.  With nothing
+    declared the plan says exactly what it said before, and carries no
+    reservation key at all; with a reservation declared it names it and says
+    so.  ``memory_bytes`` is identical either way, because the reservation is
+    never a phase delta.
+    """
+    from prismaquant import autoscale
+    monkeypatch.setattr(autoscale, 'streamed_calibration_resources', lambda *a, **k: dict(
+        live_layer_prefix='layers.', terms=dict(nonbody_source_bytes=100, declared_headroom_bytes=200),
+        body_layer_bytes={'0': 1000}, body_loader_transient_bytes={'0': 100},
+        body_source_file_bytes={'0': 900}, unit_source_weight_bytes={'layers.0.proj': 24},
+        full_hessian_bytes=128, full_prefix_bytes=64, source_header_sha256='a'*64))
+    options = dict(unit_shapes={'layers.0.proj': [3, 4]}, counts={'layers.0.proj': 9},
+                   max_act_rows=2, cache_slots=2, prefetch_workers=1,
+                   headroom_gb=0, anchor_batch_size=3)
+    plain = autoscale.selected_anchor_resources('/source', **options)
+    reserved = autoscale.selected_anchor_resources('/source', process_baseline_bytes=2147483648,
+                                                   **options)
+    assert 'process_baseline_bytes' not in plain
+    assert plain['baseline_policy'] == 'declared-headroom-pre-run-measured-in-row'
+    assert reserved['process_baseline_bytes'] == 2147483648
+    assert reserved['baseline_policy'] == 'explicit-spec-reservation-measured-in-row'
+    assert reserved['memory_bytes'] == plain['memory_bytes']
+    assert reserved['phases'] == plain['phases']
+
+
+def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tmp_path):
+    """A process floor exists whether or not the row streams.
+
+    The resident-source branch of ``_row_memory_gb`` is a different expression
+    with its own ``ceil`` and its own ``headroom_gb`` addend, so a key wired
+    into the streaming branch alone would mean one thing on one path and
+    nothing on the other, under one name.
+    """
+    import math
+    from tools import dispatch_tessera_campaign as dispatch
+    gib = 1024 ** 3
+    monkeypatch.setattr(dispatch, '_model_bytes', lambda model: 10 * gib)
+    census = dict(unit_shapes={'layers.0.proj': [4, 8]})
+    spec = dict(model='/source', campaign_argv=[], headroom_gb=3, max_act_rows=2)
+    hessian, rows = 8 ** 2 * 4, 8 * 2 * 4
+    body = 10 * gib + hessian + rows
+
+    plain = dispatch._row_memory_gb(spec, ['layers.0.proj'], census)
+    assert plain == math.ceil(body / gib) + 3
+
+    reserved = dispatch._row_memory_gb(
+        {**spec, 'process_baseline_bytes': 2147483648}, ['layers.0.proj'], census)
+    # Charged inside the same ceil as the body, so the demand covers
+    # body + reservation rather than rounding each of them up separately.
+    assert reserved == math.ceil((body + 2147483648) / gib) + 3
+    assert reserved - plain == 2
+
+    # Headroom is untouched by the reservation: they are separate terms and
+    # only one of them is inside ``memory_bytes``.
+    assert dispatch._row_memory_gb(
+        {**spec, 'headroom_gb': 9, 'process_baseline_bytes': 2147483648},
+        ['layers.0.proj'], census) == reserved + 6
+
+    with pytest.raises(RuntimeError, match='process_baseline_bytes'):
+        dispatch._row_memory_gb({**spec, 'process_baseline_bytes': '2147483648'},
+                                ['layers.0.proj'], census)
