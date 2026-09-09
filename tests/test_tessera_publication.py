@@ -396,10 +396,24 @@ def test_a_failed_publication_surfaces_at_the_next_submit(tmp_path, monkeypatch)
 def test_the_budget_bounds_the_encode_thread_with_the_writer_blocked(
         tmp_path, monkeypatch):
     """One artifact in flight, and the next one not yet made."""
+    from prismaquant import production_weight_cache as pwc
+
     barrier = threading.Event()
     # 8x8 BF16 render plus a ten byte blob: room for exactly one.
     pub = BoundedPublisher(budget_bytes=8 * 8 * 2 + 10)
     returned = threading.Event()
+    # Only the producer's copies. The writer canonicalises again inside
+    # _store_rendered_weight_entry, and that call is an identity on a tensor
+    # this test is not asking about.
+    copies = []
+    real_canonical = pwc._canonical_rendered_weight_tensor
+
+    def counted(tensor, **kwargs):
+        if not threading.current_thread().name.startswith("tessera-publication"):
+            copies.append(1)
+        return real_canonical(tensor, **kwargs)
+
+    monkeypatch.setattr(pwc, "_canonical_rendered_weight_tensor", counted)
     try:
         _finish(tmp_path / "one", monkeypatch, publisher=pub, barrier=barrier,
                 qname="a.b")
@@ -414,6 +428,10 @@ def test_the_budget_bounds_the_encode_thread_with_the_writer_blocked(
         assert not returned.wait(0.5), (
             "a second artifact was staged while the first still occupied the "
             "whole budget; the bound is not a bound")
+        assert copies == [1], (
+            "the second render was copied to host while the budget was full: "
+            "reserving after the copy leaves the producer holding one "
+            "artifact more than the bound admits")
         assert pub.stats()["peak_charged_bytes"] == 8 * 8 * 2 + 10
         barrier.set()
         assert returned.wait(WAIT)
