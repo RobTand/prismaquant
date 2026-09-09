@@ -1,9 +1,9 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `fix/glm-resident-hessian-commitments`. Stamps
+As of: 2026-09-09 · `fix/glm-resident-hessian-source`. Stamps
 follow, newest first, each recording its own branch and date.
 
-Re-stamped (2026-09-09, `fix/glm-resident-hessian-commitments`) for resident
+Re-stamped (2026-09-09, `fix/glm-resident-hessian-source`) for resident
 Hessian commitment reuse in the selected campaign's existing opt-in
 `--export-hessian-reference-policy` path. Resume and seed validation still
 precede publication of export inputs. After those gates accept, the campaign
@@ -21,7 +21,7 @@ Tests in `tests/test_tessera_hessian_reference_handoff.py` cover the public CLI
 regression, identity parity, provenance refusal and metadata-owner cleanup.
 Native performance measurements are recorded separately from this contract.
 This integration pins the producer and serving dependency to the same Tessera
-development commit `7f8aef0dd1ba` from PR #441. Its packaged runtime contract
+development commit `387eda36fd41`, the merge of PR #441. Its packaged runtime contract
 is unchanged, so admission, formats and serving cells retain their previous
 answers. Producer source identity changes; existing priced rows are not
 relabeled under this source. Native qualification uses fresh output paths.

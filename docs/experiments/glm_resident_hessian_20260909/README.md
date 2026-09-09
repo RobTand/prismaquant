@@ -84,3 +84,13 @@ under the shared measurement directory. Source tests cover unchanged capture
 and unit identities, mutation/roster/provenance refusals and successful/error
 owner cleanup. The producer digest changes conservatively; old priced rows
 are not relabeled under the updated producer.
+
+## Integrated dependency
+
+Tessera PR441 merged as `387eda36fd410d6b2a4fb86b22285eab2a5e072c`.
+Its runtime source is identical to the measured frozen `7f8aef0dd1` tree.
+The final branch update adds a closed-owner lookup assertion and incorporates
+previously merged measurement prose. Its four focused PB shards pass 51 tests
+with one CUDA skip; pure CI at `f49365c7649b` passes 1,594 tests with 98 skips
+and wheel/sdist checks. Root verified actual source snapshots and final CI
+output. The PrismaQuant development and serving pins both name the merge.
