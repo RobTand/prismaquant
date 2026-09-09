@@ -6,6 +6,7 @@ run through campaign.main. These partial artifacts are measurement evidence.
 """
 from __future__ import annotations
 import argparse
+import ctypes
 import gc
 import hashlib
 import json
@@ -98,11 +99,17 @@ def main(argv=None):
                 def memory_reading():
                     guard = CaptureMemoryGuard('cuda')
                     return dict(guard.check('between_measurement_arms'),
-                        cuda_allocated_bytes=torch.cuda.memory_allocated())
+                        cuda_allocated_bytes=torch.cuda.memory_allocated(),
+                        cgroup_stat={key:int(value) for key,value in
+                            (line.split() for line in (guard.scope/'memory.stat').read_text().splitlines())})
                 record['before_collection'] = memory_reading()
                 record['collected_objects'] = gc.collect()
                 torch.cuda.empty_cache()
                 record['after_collection'] = memory_reading()
+                libc=ctypes.CDLL(None)
+                trim=getattr(libc,'malloc_trim',None)
+                record['malloc_trim_returncode']=None if trim is None else trim(0)
+                record['after_allocator_trim']=memory_reading()
                 def observed_guard_check(guard, label, **kw):
                     try:
                         return original_guard_check(guard, label, **kw)
