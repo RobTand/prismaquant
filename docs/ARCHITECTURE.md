@@ -3,6 +3,16 @@
 As of: 2026-09-09 · `perf/glm-selected-source-snapshot`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-09, `perf/glm-selected-source-snapshot`) for
+`dispatch_tessera_campaign.py plan --seed-workspace`. A new plan can offer each
+matching prior row's completed or partial checkpoint to the existing seed gates.
+The planner requires the same model, census, capture, group bundles, membership
+and sampling; it records the source plan digest and each available seed manifest
+identity. Unstarted rows price normally. Seed files retain their original owner;
+PB continues to own all admission, placement and retries. The runtime validates
+the seed identity and wire bytes when adopting them. Gate:
+`tests/test_tessera_campaign_seed_workspace.py`.
+
 Re-stamped (2026-09-09, `perf/glm-selected-source-snapshot`) for seed-score
 identity validation. `--seed-checkpoint` now requires a digest-bound source
 manifest and matching unit envelopes, then compares calibration, score currency,

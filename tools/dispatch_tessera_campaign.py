@@ -557,6 +557,42 @@ UNITS_SCHEMA = "prismaquant.tessera_campaign_units.v1"
 UNITS_SCHEMA_V2 = "prismaquant.tessera_campaign_units.v2"
 
 
+def _seed_workspace_rows(path, *, census, calibration_cache):
+    """Bind a previous plan; each matching row keeps its own checkpoint owner."""
+    import hashlib
+    root = Path(path).resolve()
+    plan_path = root/'plan.json'
+    raw = plan_path.read_bytes()
+    plan = json.loads(raw)
+    if (plan.get('schema') != PLAN_SCHEMA or plan.get('model') != census['model'] or
+            json.loads(Path(plan['census']).read_text()) != census or
+            plan.get('calibration_cache') != calibration_cache):
+        raise RuntimeError('seed workspace model, census or capture differs')
+    rows = {}
+    for row in plan['rows']:
+        key = tuple(sorted(row['groups']))
+        if not key or key in rows:
+            raise RuntimeError('seed workspace has empty or duplicate group bundles')
+        rows[key] = row
+    return rows, {'path': str(root), 'plan_sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def _seed_for_selection(rows, bundle, selection):
+    """Only unchanged group membership and sampling may inherit this journal."""
+    import hashlib
+    row = rows.get(tuple(sorted(bundle)))
+    if row is None or json.loads(Path(row['units']).read_text()) != selection:
+        raise RuntimeError('seed workspace selection differs; preserve group bundles and sampling')
+    checkpoint = Path(row['dir'])/'cost.anchors.json'
+    if not checkpoint.is_file():
+        return None
+    raw = checkpoint.read_bytes()
+    manifest = json.loads(raw)
+    return {'checkpoint': str(checkpoint), 'wire_dir': str(Path(row['dir'])/'cache/wire'),
+            'manifest_sha256_at_plan': hashlib.sha256(raw).hexdigest(),
+            'identity_sha256': manifest['identity_sha256'], 'row_id': row['row_id']}
+
+
 def cmd_plan(args) -> int:
     spec = load_spec(Path(args.spec))
     workspace = Path(args.workspace)
@@ -570,6 +606,12 @@ def cmd_plan(args) -> int:
     selected_source = '--streaming' in spec['campaign_argv']
     if selected_source and calibration_cache is None:
         raise RuntimeError('streaming anchor rows require a hash-bound complete calibration cache')
+    seed_rows, seed_workspace = None, None
+    if getattr(args, 'seed_workspace', None):
+        if args.seed_checkpoint or args.seed_wire_dir:
+            raise RuntimeError('seed workspace is exclusive with a global seed checkpoint/wire directory')
+        seed_rows, seed_workspace = _seed_workspace_rows(args.seed_workspace,
+            census=census, calibration_cache=calibration_cache)
     groups = census["anchor_groups"]
     if not groups:
         raise RuntimeError("census reports no anchor group to price")
@@ -632,6 +674,11 @@ def cmd_plan(args) -> int:
         if calibration_cache:
             argv += ["--calibration-cache", calibration_cache["path"],
                      "--calibration-cache-sha256", calibration_cache["sha256"]]
+        row_seed = (_seed_for_selection(seed_rows, bundle, selection)
+                    if seed_rows is not None else None)
+        if row_seed is not None:
+            argv += ['--seed-checkpoint', row_seed['checkpoint'],
+                     '--seed-wire-dir', row_seed['wire_dir']]
         if args.seed_checkpoint:
             argv += ["--seed-checkpoint", str(args.seed_checkpoint)]
             if args.seed_wire_dir:
@@ -641,6 +688,7 @@ def cmd_plan(args) -> int:
                          timeout_s=int(args.timeout_s)))
         planned.append({"row_id": row_id, "groups": bundle, "members": sorted(members),
                         "dir": str(row_dir), "units": str(units_path),
+                        **({'seed': row_seed} if row_seed is not None else {}),
                         **({'resources': _streamed_resource_plan(spec, census, members,
                             selected_source=True)} if selected_source else {})})
 
@@ -689,6 +737,7 @@ def cmd_plan(args) -> int:
         # at. A reader of the plan sees the whole layout; a reader of the
         # manifest sees only what was submitted.
         "inadmissible_rows": inadmissible,
+        **({'seed_workspace': seed_workspace} if seed_workspace is not None else {}),
         "seed_checkpoint": (None if not args.seed_checkpoint
                             else str(args.seed_checkpoint)),
         # The draw itself, whole: which experts stand for their stack, under
@@ -1420,7 +1469,11 @@ def main(argv=None) -> int:
                            "anchor and a leave-one-out check.")
     plan.add_argument("--probe", default=None,
                       help="a probe pickle carrying per-expert h_trace.")
-    plan.add_argument("--seed-checkpoint", default=None,
+    seeds = plan.add_mutually_exclusive_group()
+    seeds.add_argument('--seed-workspace', default=None,
+                       help='reuse matching rows from a prior plan through the ordinary seed gates; '
+                            'completed and partial checkpoints are supported')
+    seeds.add_argument("--seed-checkpoint", default=None,
                       help="a campaign checkpoint whose measured anchors every "
                            "row may adopt, subject to its own row gates")
     plan.add_argument("--seed-wire-dir", default=None)
