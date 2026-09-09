@@ -8,8 +8,11 @@ Re-stamped (2026-09-09, `perf/glm-selected-source-snapshot`) for
 matching prior row's completed or partial checkpoint to the existing seed gates.
 The planner requires the same model, census, capture, group bundles, membership
 and sampling; it records the source plan digest and each available seed manifest
-identity. Unstarted rows price normally. Seed files retain their original owner;
-PB continues to own all admission, placement and retries. The runtime validates
+identity. These at-plan digests are provenance, not execution gates: the source
+may advance before adoption, and the runtime checks the then-current scoring
+inputs and wires. Group additions or changed bundles/sampling refuse the plan;
+a matching row without a checkpoint prices fresh. Seed files retain their original
+owner. PB continues to own all admission, placement and retries. The runtime validates
 the seed identity and wire bytes when adopting them. Gate:
 `tests/test_tessera_campaign_seed_workspace.py`.
 

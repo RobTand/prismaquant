@@ -90,7 +90,7 @@ The source change's CPU suite passed 215 tests with one CUDA-only skip, followed
 by eight focused snapshot tests. Review regressions reproduced three failures;
 the guard fix passed 31 tests with one CUDA-only skip (PB `59d2c85f2425`).
 Seed-score validation reproduced adoption across changed scoring activations
-(PB `063e64c1d28c`), then passed 113 tests with two skips (`554c9024efc5`), plus
+(PB `063e64c1d28c`), then passed 113 tests with two producer-projection-tool skips (`554c9024efc5`), plus
 an explicit unchanged-input adoption test (`d7a152352d31`). Workspace reuse
 passed six tests (`039b8e22935c`); integrated planner/docs checks passed 58
 (`451865c80e10`). Counts overlap and must not be summed. Actual source/receipt
