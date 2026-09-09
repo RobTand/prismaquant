@@ -283,7 +283,7 @@ def write_runtime_observation(output, runtime_binding):
     return path
 
 
-def qualification_runtime_matches(qualified, observed):
+def qualification_runtime_differences(qualified, observed, *, limit=8):
     """Compare replay semantics without treating free-memory capacity as layout.
 
     These native backends declare ``get_kv_cache_shape(num_blocks, ...)``
@@ -292,6 +292,8 @@ def qualification_runtime_matches(qualified, observed):
     other field, including backend source, dtype and remaining dimensions,
     still compares exactly. Unknown backend layouts receive no exception.
     """
+    if type(limit) is not int or limit < 1:
+        raise ValueError("difference limit must be a positive integer")
     capacity_axis_backends = {
         "vllm.v1.attention.backends.mla.indexer.DeepseekV32IndexerBackend": 3,
         "vllm.v1.attention.backends.mla.indexer.KpoolTailBackend": 4,
@@ -302,8 +304,8 @@ def qualification_runtime_matches(qualified, observed):
         if not isinstance(binding, dict):
             raise ValueError("runtime binding must be an object")
         value = copy.deepcopy(binding)
-        for worker in value["worker_runtime"]:
-            for attention in worker["attention_runtime"]:
+        for worker_index, worker in enumerate(value["worker_runtime"]):
+            for attention_index, attention in enumerate(worker["attention_runtime"]):
                 rank = capacity_axis_backends.get(attention["backend"])
                 cache = attention["allocated_kv_cache"]
                 if rank is None or cache is None:
@@ -311,14 +313,62 @@ def qualification_runtime_matches(qualified, observed):
                 shape = cache["shape"]
                 if (not isinstance(shape, list) or len(shape) != rank
                         or any(type(size) is not int or size <= 0 for size in shape)):
-                    raise ValueError("native allocated KV shape must have positive dimensions")
+                    path = (f'$["worker_runtime"][{worker_index}]'
+                            f'["attention_runtime"][{attention_index}]'
+                            '["allocated_kv_cache"]["shape"]')
+                    raise ValueError(f"{path}: native allocated KV shape must have positive dimensions")
                 shape[0] = None
         return value
 
-    try:
-        return semantics(qualified) == semantics(observed)
-    except (KeyError, TypeError, ValueError):
-        return False
+    normalized = []
+    for side, binding in (("qualified", qualified), ("observed", observed)):
+        try:
+            normalized.append(semantics(binding))
+        except (KeyError, TypeError, ValueError) as error:
+            return [f"{side} runtime binding invalid: {error}"]
+    differences = []
+
+    def compare(left, right, path):
+        if len(differences) >= limit:
+            return
+        if isinstance(left, dict) and isinstance(right, dict):
+            for key in sorted(left.keys() | right.keys()):
+                child = f"{path}[{json.dumps(key)}]"
+                if key not in left or key not in right:
+                    differences.append(child)
+                else:
+                    compare(left[key], right[key], child)
+                if len(differences) >= limit:
+                    break
+        elif isinstance(left, list) and isinstance(right, list):
+            if len(left) != len(right):
+                differences.append(f"{path}.length")
+            for index, (first, second) in enumerate(zip(left, right)):
+                if len(differences) >= limit:
+                    break
+                compare(first, second, f"{path}[{index}]")
+        elif left != right:
+            differences.append(path)
+
+    compare(*normalized, "$")
+    return differences
+
+
+def qualification_runtime_matches(qualified, observed):
+    return not qualification_runtime_differences(qualified, observed)
+
+
+def require_native_qualification(qualification, runtime_binding):
+    """Fail closed with bounded differing paths, without dumping bound values."""
+    if qualification.get("schema") != "prismaquant.glm_tr3_hook_qualification/1":
+        raise ValueError("native qualification has invalid schema")
+    if qualification.get("passed") is not True:
+        raise ValueError("native qualification passed must be true")
+    differences = qualification_runtime_differences(
+        qualification.get("runtime_binding"), runtime_binding)
+    if differences:
+        raise ValueError("native qualification differs from this candidate/runtime/teacher/topology; "
+                         "first differing paths (up to 8): " + "; ".join(differences))
 
 
 def measure(args):
@@ -380,11 +430,8 @@ def measure(args):
         runtime_binding["require_exl3_diag"] = args.require_exl3_diag
         observation = write_runtime_observation(args.output, runtime_binding)
         print(f"[tr3-full-kl] initialized runtime observation {observation}", flush=True)
-        if qualification is not None and (
-                qualification.get("schema") != "prismaquant.glm_tr3_hook_qualification/1"
-                or not qualification_runtime_matches(qualification.get("runtime_binding"), runtime_binding)
-                or qualification.get("passed") is not True):
-            raise ValueError("native qualification differs from this candidate/runtime/teacher/topology")
+        if qualification is not None:
+            require_native_qualification(qualification, runtime_binding)
         vectors, alignment, rank_calls = [], [], []
         count = 1 if args.qualify_hook else len(inputs)
         for index in range(count):

@@ -25,6 +25,47 @@ def test_native_restart_kv_capacity_does_not_invalidate_qualification():
     assert (qualified, restarted) == original
 
 
+def test_runtime_mismatch_diagnostics_are_normalized_bounded_and_specific():
+    fixtures = Path(__file__).parent / "fixtures" / "glm_tr3_runtime"
+    qualified = json.loads((fixtures / "qualified-runtime.json").read_text())["runtime_binding"]
+    restarted = json.loads((fixtures / "restarted-runtime.json").read_text())["runtime_binding"]
+    assert served.qualification_runtime_differences(qualified, restarted) == []
+    restarted["teacher_sha256"] = "different"
+    restarted["worker_runtime"][0]["attention_runtime"][3]["backend"] = "renamed.backend"
+    differences = served.qualification_runtime_differences(qualified, restarted, limit=2)
+    assert differences == [
+        '$["teacher_sha256"]',
+        '$["worker_runtime"][0]["attention_runtime"][3]["allocated_kv_cache"]["shape"][0]',
+    ]
+    assert any(path.endswith('["backend"]') for path in
+               served.qualification_runtime_differences(qualified, restarted))
+    with pytest.raises(ValueError, match=r'teacher_sha256'):
+        served.require_native_qualification({
+            "schema": "prismaquant.glm_tr3_hook_qualification/1",
+            "passed": True, "runtime_binding": qualified,
+        }, restarted)
+
+
+@pytest.mark.parametrize("field,value", [("schema", "wrong"), ("passed", False)])
+def test_qualification_envelope_diagnostic(field, value):
+    qualification = {"schema": "prismaquant.glm_tr3_hook_qualification/1",
+                     "passed": True, "runtime_binding": {"worker_runtime": []}}
+    qualification[field] = value
+    with pytest.raises(ValueError, match=field):
+        served.require_native_qualification(qualification, {"worker_runtime": []})
+
+
+def test_invalid_runtime_shape_diagnostic_identifies_side_and_path():
+    binding = {"worker_runtime": [{"attention_runtime": [{
+        "backend": "vllm.v1.attention.backends.mla.indexer.DeepseekV32IndexerBackend",
+        "allocated_kv_cache": {"shape": [0, 4, 8]},
+    }]}]}
+    differences = served.qualification_runtime_differences(binding, binding)
+    assert len(differences) == 1
+    assert 'qualified' in differences[0]
+    assert '["worker_runtime"][0]["attention_runtime"][0]["allocated_kv_cache"]["shape"]' in differences[0]
+
+
 @pytest.mark.parametrize("field", [
     "dtype", "device", "layout", "zero_blocks", "negative_blocks", "boolean_blocks",
     "rank", "backend", "backend_source", "unknown_backend", "module", "missing_cache",
