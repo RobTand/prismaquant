@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import pickle
 from pathlib import Path
 import threading
 import time
@@ -47,6 +48,8 @@ def main(argv=None):
     import torch
     from prismaquant import tessera_campaign as campaign
     from prismaquant import cost_stage_checkpoint as checkpoint
+    from prismaquant import production_weight_cache as pwc
+    from prismaquant import tessera_render as render_adapter
     from prismaquant.cost_stage_checkpoint import _load_unit, unit_path
     from tessera import window_viterbi
     from tessera.cached_unit import encoder_source_sha256
@@ -128,7 +131,11 @@ def main(argv=None):
                     wrappers.append((owner,name,original))
                 for owner,name in ((torch,'save'),(Path,'write_bytes'),(os,'fsync'),
                         (campaign,'_checkpoint_wire_record'),(checkpoint,'write_unit'),
-                        (checkpoint,'atomic_write_bytes')):
+                        (checkpoint,'atomic_write_bytes'),(pickle,'dump'),
+                        (campaign,'_prepare_anchor'),(campaign,'_finish_anchor'),
+                        (render_adapter,'encode_tessera_units'),
+                        (pwc,'_canonical_rendered_weight_tensor'),
+                        (pwc,'_local_forward_render_score')):
                     if not hasattr(owner,name):
                         raise RuntimeError(f'publication call site changed: {name}; review instrumentation')
                     instrument(owner,name)
@@ -168,6 +175,13 @@ def main(argv=None):
                         setattr(owner,name,original)
                 if index>=2 and record['plans_built']:
                     raise RuntimeError('timed cycle constructed a plan')
+                with (root/'cost.pkl').open('rb') as handle:
+                    cost_payload=pickle.load(handle)
+                record['publication_stats']=cost_payload['provenance']['publication_overlap']
+                if enabled and (not record['publication_stats'] or record['publication_stats']['failed']):
+                    raise RuntimeError('enabled publication did not report successful completion')
+                if any(t.name.startswith('tessera-publication') for t in threading.enumerate()):
+                    raise RuntimeError('publication thread survived the campaign return')
                 manifest=json.loads((root/'cost.anchors.json').read_text())
                 signatures=[]
                 for name,_,_ in record['scheduled']:
