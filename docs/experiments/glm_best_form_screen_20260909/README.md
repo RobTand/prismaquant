@@ -251,3 +251,38 @@ The isolated zero-row reproduction caught and printed the pre-fix CUDA
 fault while exiting 0; the post-fix output is empty states and zero SSE.
 The fault text, rather than the wrapper exit status, is the regression
 evidence in `root-empty-regression-terminal-audit.json`.
+
+## 05:12 UTC: upper endpoint and wider-batch reservation
+
+R1088 actual GLM row-0076, first 16 experts, B8, original capture and frozen
+producer 61da00740c0a47c43319340a030db1f618555a31: six warm/ABBA arms have
+identical wire bytes and scores, also matching the retained earlier 07ad run
+for all 16 units. Front mean 77.9068 s / 5498.98 J / 70.5841 W; best-form
+mean 42.7564 s / 3208.38 J / 75.0386 W. Throughput 1.82211x and work/J
+1.71394x. The requested 90–100 W mean is not reached.
+
+The complete first actual weighted R4 call has valid before/after profiles:
+front 24,576 step kernels across six graphs, best 4,095 across one graph;
+step time 98.0582 ms versus 39.8682 ms. Neither trace has kernel overlaps.
+Timed arms contain 16 torch.save calls (~1.13–1.16 s), 16 wire writes
+(~0.394–0.411 s), and 32 fsync calls (~54 microseconds total). These measure
+serialization and I/O call durations, not an isolated NFS-latency claim.
+
+Native PB `3a8fa1c2cc0513629555d349b9689086fdb6c91dbb761391481a4ae27d83924e`
+and CPU audit `e27f2c3cc20f346e7367f6094e51abfe623109a93275128acf46951afe0a303b`
+passed. The first CPU audit attempt failed because plain Python lacked Torch;
+the accepted audit used the existing pq-cpu312 environment. Results, both-host
+telemetry, actual input tensors, wire hashes and source/CAS verification live
+under `first-proof-anchor-preparation-02/performance-best-form-r1088-ab-01/`
+in the shared census measurement root used above. Audit script:
+`experiments/glm_r1088_best_form_audit.py`.
+
+The original capture has 36,423 entries; 864 selected entries are prefetched
+for this row. Earlier shorthand describing an "864-entry capture" refers to
+that selected resident subset, not a separate or newly captured calibration.
+
+Existing resource planner PB
+`371796014dcea5d860567bb7d0730d9802744f505f4c2025ae3929c92e8bf80c`
+derives B8/B16/B32 reservations of 104/105/108 GiB including 4 GiB observer
+headroom, with zero source forwards. This is a reservation derivation, not a
+measured peak. Wider best-form batches remain to be measured.

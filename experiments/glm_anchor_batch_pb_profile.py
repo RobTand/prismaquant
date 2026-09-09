@@ -20,7 +20,8 @@ class BenchmarkComplete(BaseException):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--container-spec')
-    parser.add_argument('--comparison', choices=('batch-width', 'trellis-best-form', 'trellis-call-profile'),
+    parser.add_argument('--comparison', choices=('batch-width', 'trellis-best-form',
+                        'trellis-call-profile', 'trellis-best-form-complete'),
                         default='batch-width')
     parser.add_argument('--out', required=True)
     parser.add_argument('campaign', nargs=argparse.REMAINDER)
@@ -56,7 +57,7 @@ def main(argv=None):
     from tessera import window_viterbi
     result['producer_source_sha256'] = encoder_source_sha256()
     result['trellis_module_path'] = window_viterbi.__file__
-    if args.comparison == 'trellis-best-form' and not hasattr(window_viterbi, '_BEST_FORM_ENV'):
+    if args.comparison != 'batch-width' and not hasattr(window_viterbi, '_BEST_FORM_ENV'):
         raise RuntimeError('the selected producer does not implement the candidate')
     original_best_form = os.environ.get('TESSERA_WINDOW_BEST_FORM')
     original = campaign._measure_anchor_batch
@@ -139,6 +140,23 @@ def main(argv=None):
             torch.cuda.synchronize()
             torch.cuda.reset_peak_memory_stats()
             outputs = []
+            # Timed wrappers distinguish durability waits from GPU work. They
+            # are symmetric across all arms and count overlapping operations
+            # separately: torch.save includes its own serialization and I/O.
+            io_calls = []
+            original_fsync, original_save, original_write = os.fsync, torch.save, Path.write_bytes
+            def timed(kind, function):
+                def call(*positional, **named):
+                    begun = time.perf_counter()
+                    try:
+                        return function(*positional, **named)
+                    finally:
+                        io_calls.append(dict(kind=kind, seconds=time.perf_counter()-begun))
+                return call
+            if args.comparison == 'trellis-best-form-complete':
+                os.fsync = timed('fsync', original_fsync)
+                torch.save = timed('torch_save', original_save)
+                Path.write_bytes = timed('path_write_bytes', original_write)
             timer = None
             stop = threading.Event()
             # Sample the SAME warmed encode offset in each arm. The complete
@@ -164,12 +182,15 @@ def main(argv=None):
                     outputs.extend(original(**subset))
                 torch.cuda.synchronize()
             finally:
+                os.fsync, torch.save, Path.write_bytes = original_fsync, original_save, original_write
                 record.update(seconds=time.perf_counter()-start, finished_unix=time.time(),
                     allocated_peak_bytes=torch.cuda.max_memory_allocated(),
                     reserved_peak_bytes=torch.cuda.max_memory_reserved())
                 stop.set()
                 if timer is not None:
                     timer.join()
+                if args.comparison == 'trellis-best-form-complete':
+                    record['io_calls'] = io_calls
             signatures = []
             for anchor in outputs:
                 wire = _wire_path(kw['wire_dir'], anchor.qname, anchor.format_name)
@@ -191,8 +212,74 @@ def main(argv=None):
         # Warm both controls, then ABBA with identical observation. The
         # best-form comparison holds actual encode batch size fixed at eight.
         variants = ([(8, 'front', False), (8, 'best', True)]
-                    if args.comparison == 'trellis-best-form'
+                    if args.comparison in ('trellis-best-form', 'trellis-best-form-complete')
                     else [(8, 'b8', None), (16, 'b16', None)])
+        if args.comparison == 'trellis-best-form-complete':
+            import shutil
+            original_viterbi = window_viterbi.viterbi_window_fused
+            reference = None
+            call_reference = None
+            result['call_profiles'] = []
+            for width, label, best in variants:
+                captured = False
+                def capture_first(*positional, **named):
+                    nonlocal captured, call_reference
+                    if captured:
+                        return original_viterbi(*positional, **named)
+                    captured = True
+                    targets, vectors, window_bits, rate = positional[:4]
+                    weights = named.get('weights', positional[4] if len(positional)>4 else None)
+                    chunk = named.get('chunk', positional[5] if len(positional)>5 else 512)
+                    inputs = dict(targets=targets.detach().cpu().contiguous(),
+                        vectors=vectors.detach().cpu().contiguous(),
+                        weights=None if weights is None else weights.detach().cpu().contiguous())
+                    identities = {k: None if v is None else dict(shape=list(v.shape),dtype=str(v.dtype),
+                        sha256=hashlib.sha256(v.view(torch.uint8).numpy().tobytes()).hexdigest())
+                        for k,v in inputs.items()}
+                    call = dict(inputs=identities,window_bits=window_bits,rate=rate,chunk=chunk)
+                    if call_reference is None:
+                        call_reference = call
+                        evidence = out/'actual-first-viterbi-inputs.pt'
+                        torch.save(dict(**inputs,window_bits=window_bits,rate=rate,chunk=chunk),evidence)
+                        result['call_inputs'] = dict(path=str(evidence),bytes=evidence.stat().st_size,
+                            sha256=hashlib.sha256(evidence.read_bytes()).hexdigest())
+                    if call_reference != call:
+                        raise RuntimeError('complete-call profiles received different actual inputs')
+                    for _ in range(3):
+                        original_viterbi(*positional, **named)
+                    torch.cuda.synchronize()
+                    started = time.time()
+                    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
+                            torch.profiler.ProfilerActivity.CUDA], record_shapes=False,
+                            profile_memory=False, with_stack=False) as profile:
+                        answer = original_viterbi(*positional, **named)
+                        torch.cuda.synchronize()
+                    finished = time.time()
+                    trace = out/(label+'.complete-call.trace.json.gz')
+                    profile.export_chrome_trace(str(trace))
+                    result['call_profiles'].append(dict(label=label,best_form=best,call=call,
+                        started_unix=started,finished_unix=finished,sse=answer[1],
+                        states_sha256=hashlib.sha256(answer[0].cpu().contiguous().numpy().tobytes()).hexdigest(),
+                        trace=dict(path=str(trace),bytes=trace.stat().st_size,
+                            sha256=hashlib.sha256(trace.read_bytes()).hexdigest())))
+                    if best:
+                        shutil.copyfile(trace,os.environ['PRISMABUILD_PROFILE_TORCH_OUT'])
+                    save()
+                    return answer
+                window_viterbi.viterbi_window_fused = capture_first
+                try:
+                    arm(width,'warm-'+label,best_form=best)
+                    if not captured:
+                        raise RuntimeError('warm encode missed complete-call profile hook')
+                finally:
+                    window_viterbi.viterbi_window_fused = original_viterbi
+            first,second = result['call_profiles']
+            if first['sse'] != second['sse'] or first['states_sha256'] != second['states_sha256']:
+                raise RuntimeError('complete-call profiles changed actual states or SSE')
+            for index,(width,label,best) in enumerate((variants[0],variants[1],variants[1],variants[0])):
+                arm(width,f'measured-{index}-{label}',best_form=best)
+            result['profile_scope'] = 'complete warmed actual calls before timed ABBA; no dynamic toggling; symmetric timed I/O wrappers'
+            raise BenchmarkComplete()
         for width, label, best_form in variants:
             arm(width, 'warm-'+label, best_form=best_form)
         # Re-enabling one profiler across long CUDA-graph replay intervals
