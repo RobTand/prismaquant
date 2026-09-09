@@ -20,7 +20,7 @@ class BenchmarkComplete(BaseException):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--container-spec')
-    parser.add_argument('--comparison', choices=('batch-width', 'trellis-best-form'),
+    parser.add_argument('--comparison', choices=('batch-width', 'trellis-best-form', 'trellis-call-profile'),
                         default='batch-width')
     parser.add_argument('--out', required=True)
     parser.add_argument('campaign', nargs=argparse.REMAINDER)
@@ -76,6 +76,57 @@ def main(argv=None):
             raise RuntimeError('expected 16 compatible routed experts')
         result.update(qnames=names, format_name=kw['format_name'],
             shapes=[list(w.shape) for w in kw['weights']])
+        if args.comparison == 'trellis-call-profile':
+            # Profile complete, warmed calls without dynamically toggling CUPTI.
+            # Inputs come from the first real campaign encode's residual, table
+            # and weights. This is attribution only, not another anchor A/B.
+            import shutil
+            original_viterbi = window_viterbi.viterbi_window_fused
+
+            def profile_call(targets, vectors, window_bits, rate, weights=None, chunk=512):
+                result['call'] = dict(targets_shape=list(targets.shape),
+                    vectors_shape=list(vectors.shape), window_bits=window_bits,
+                    rate=rate, chunk=chunk, has_weights=weights is not None)
+                reference = None
+                for best, label in ((False, 'front'), (True, 'best')):
+                    os.environ['TESSERA_WINDOW_BEST_FORM'] = str(int(best))
+                    for _ in range(3):
+                        original_viterbi(targets, vectors, window_bits, rate, weights, chunk)
+                    torch.cuda.synchronize()
+                    started = time.time()
+                    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
+                            torch.profiler.ProfilerActivity.CUDA], record_shapes=False,
+                            profile_memory=False, with_stack=False) as prof:
+                        states, sse = original_viterbi(targets, vectors, window_bits, rate, weights, chunk)
+                        torch.cuda.synchronize()
+                    finished = time.time()
+                    if reference is None:
+                        reference = (states.clone(), sse)
+                    if not torch.equal(states, reference[0]) or sse != reference[1]:
+                        raise RuntimeError('paired actual-residual profile changed states or SSE')
+                    trace = out/(label+'.trace.json.gz')
+                    prof.export_chrome_trace(str(trace))
+                    record = dict(label=label, best_form=best, started_unix=started,
+                        finished_unix=finished, exact_parity=True, sse=sse,
+                        trace=dict(path=str(trace), bytes=trace.stat().st_size,
+                            sha256=hashlib.sha256(trace.read_bytes()).hexdigest()))
+                    result['arms'].append(record)
+                    print(json.dumps(record), flush=True)
+                    if best:
+                        shutil.copyfile(trace, os.environ['PRISMABUILD_PROFILE_TORCH_OUT'])
+                    save()
+                result['profile_scope'] = 'two complete warmed Viterbi calls on identical actual GLM residual; no dynamic toggling'
+                raise BenchmarkComplete()
+
+            subset = dict(kw)
+            for field in ('qnames', 'weights', 'activations'):
+                subset[field] = kw[field][:8]
+            window_viterbi.viterbi_window_fused = profile_call
+            try:
+                original(**subset)
+            finally:
+                window_viterbi.viterbi_window_fused = original_viterbi
+            raise RuntimeError('real encode did not reach the Viterbi profile hook')
         reference = None
 
         def arm(width, label, prof=None, best_form=None):
@@ -146,8 +197,9 @@ def main(argv=None):
             arm(width, 'warm-'+label, best_form=best_form)
         # Re-enabling one profiler across long CUDA-graph replay intervals
         # corrupts later kernel durations in the real PB trace (2026-09-09).
-        # Fresh contexts isolate CUPTI's correlation state. Retain every raw
-        # trace; PB also files the first candidate trace as its primary profile.
+        # Fresh contexts ALSO failed physical duration checks on torch 2.13.
+        # Retain this reproducible negative screen; use trellis-call-profile
+        # for a complete-call capture without dynamic collection toggling.
         primary = Path(os.environ['PRISMABUILD_PROFILE_TORCH_OUT'])
         event_count = 0
         for index, (width, label, best_form) in enumerate(

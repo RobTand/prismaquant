@@ -194,3 +194,60 @@ result `root-real-wall-energy-parity-audit.json`, status
 `LIMITED_CUDA_TRACES_REJECTED`. Raw rejected traces are retained. Pricing
 and EXL3 qualifier09 remain paused at this checkpoint; no producer default,
 serving pin or completed receipt was changed.
+
+## Complete-call profile accepted, 2026-09-09 04:25 UTC
+
+The replacement capture uses a complete Viterbi call with no dynamic
+collection toggling. It intercepts the first real campaign residual after
+normal resident prefetch and Hessian preparation: weighted 4096×192 targets,
+the actual 16384×1 E4M3 table, L14/R3, outer chunk 512. Each implementation
+is warmed three times before its own fresh CPU/CUDA profiler context.
+Both return identical states and SSE (70,974,832.0).
+
+| Actual R3 call | Front | Best |
+|---|---:|---:|
+| Graph replays | 6 | 1 |
+| Step kernels | 24576 | 4095 |
+| Total step-kernel time, ms | 98.4966 | 34.5666 |
+| Whole kernel span, ms | 103.8845 | 37.4797 |
+| Traceback count | 1 | 1 |
+| Traceback time, ms | 2.15972 | 2.15976 |
+
+The raw traces pass timestamp boundaries, expected step/replay counts and
+serial-duration checks. A single front-step overlap is below the audit's
+one-microsecond tolerance and negligible aggregate threshold; candidate
+steps have none. No graph construction occurs inside either profile. This
+establishes before/after attribution on the actual torch 2.13 workload;
+the separate full ABBA experiment above remains the source for throughput
+and energy. R4 is covered by the earlier distinct representative profile,
+not this actual-residual capture.
+
+Native PB action
+`c86c6920b91f65c45dc9f25d6a9c19e17a47159314dfb436206ffbabb74364f6`
+completed on Sparky with cleanup confirmed. The two retained compressed
+traces hash to
+`08f429306345f2a1e9d555841167816140107e64d2fb51b6d970f74b36ac69e3`
+(front) and
+`7590f7fc61c3422d2a5c50153907736c2d5f92a1974a648221aba84c5df2f11d`
+(best, also PB's primary profile). The audit
+`experiments/glm_real_call_profile_audit.py` ran as PB
+`15a5ba58ec04f64841bf6cc280f4ace747e45bdb3e28396a8f6e245f4cae0c99`.
+Its `PASS` result and source/CAS checks are
+`performance-best-form-call-profile-01/root-complete-call-profile-audit.json`
+and `root-native-and-audit-cas-source.json` alongside the preceding evidence
+directory. Both hosts' observer series are retained there too.
+
+Final producer test intake also verifies six modules after the empty-input
+fix: **209 passed, 156 allocated CUDA, zero skipped or uncollected**. A
+separate CPU-reference prototype has 68 passing tests and zero device
+allocations. The broader six-action encoder suite has 1453 passed, 5 skipped,
+1 expected failure and 404 device-allocating tests, with best-form unset;
+it checks the default front path on the earlier source before the empty
+guard. The five skips are one unpublished E2M1 reader range and four
+unsupported 4-way/8-way column cuts. These receipts do not add candidate
+coverage. Full keys, source differences and logs are retained in
+`window-best-form-ab-20260909/root-post-empty-fix-tests-cas-source-audit.json`.
+The isolated zero-row reproduction caught and printed the pre-fix CUDA
+fault while exiting 0; the post-fix output is empty states and zero SSE.
+The fault text, rather than the wrapper exit status, is the regression
+evidence in `root-empty-regression-terminal-audit.json`.
