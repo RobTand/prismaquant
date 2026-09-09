@@ -104,3 +104,93 @@ audits are retained in `v3/root-verification-cas-source-audit.json`.
 Before accepting the mechanism attribution, preserve distinct raw profiles
 for both rates and correct the width control. Before adopting the candidate,
 measure the actual GLM path in its known-good torch 2.13.0+cu130 container.
+
+## Corrected control and distinct traces, 2026-09-09 04:00 UTC
+
+The corrected control holds outer `chunk=512` for all arms and overrides
+only the candidate's internal L2 budget to admit width 32. All three arms
+now have identical states and SSE and exactly one outer traceback. The
+control isolates the combined recurrence and final-front changes; it does
+not measure a single store instruction in isolation.
+
+| Rate | Front/best throughput | Front/best work per joule | Front/best at width 32 throughput |
+|---|---:|---:|---:|
+| R3 | 2.6280 | 1.5125 | 1.4843 |
+| R4 | 1.7196 | 1.5582 | 0.9921 |
+
+These figures come from v6 timing action
+`63eae68972d28d587080fd258ce65bbb2e8c536d05b951efac5cdea6839033b6`.
+Raw 1 Hz power samples are now retained and bracket every interval. Root
+recomputed their integrals, respecting timestamp/energy serialization
+precision. This table uses this run's own power series, not the recovered
+v3 data above.
+
+Distinct v5 profiles retain both rates: R3 action
+`748070a53a9685c9fa92149619b4449a8b949659c87c2a51885606be3ecef64a`
+and R4 action
+`d2da1454fefaf994a1d992d81837d3a4ec8a33cdf511bee5ad7a37ebfc95ab02`.
+Root checked marker boundaries, expected step counts, no dependent-step
+overlap, actual CAS blobs and retained file hashes. R3 has front/best/control
+step counts 24576/4095/24570; R4 has 8192/4095/8190. The R3 fixed-width
+control includes one 193.759 microsecond step outlier; it is retained and
+does not violate the execution boundaries or dependencies.
+
+The audit is `experiments/glm_best_form_corrected_audit.py`, PB
+`b7dfd2b9e7270e2f49a6021935598747760081befd14e68d1623ed34fe0a2423`,
+with result `v6/root-corrected-control-profile-audit.json` and source/CAS
+verification `v6/root-corrected-and-real-audit-cas-source.json`.
+
+## Actual GLM pricing, 2026-09-09 04:15 UTC
+
+The fixed-B8 comparison used the first 16 actual layer-4 expert down
+projections, shape 4096×2048, at `TESSERA_E4M3_K1_R832`. This artifact rung
+mixes recurrence rates 3 and 4; B8 means eight experts per encode call.
+The original 864-entry calibration capture was prefetched, with no source
+forward execution. Resident source data was 49,526,341,632 bytes. Producer
+commit `61da00740c0a47c43319340a030db1f618555a31` has package identity
+`e6fe414581b7c51f76c0c3f75fd461365136949339b5082d8fe4de189034f8d4`.
+The measured source predates the subsequent empty-input guard; that guard
+does not change this positive-input kernel path.
+
+PB action
+`569ee819458cb3cf1c91a687ff66f1edbcd51a87a4f31813e36dc9fb2c572c2b`
+completed on Sparky in the qualified torch 2.13.0+cu130 container, with
+8 reserved CPUs and 104 GiB host memory. Two warm-ups were excluded, then
+the arms ran front/best/best/front. All six arms returned identical wire
+hashes and pricing scores. Root hashed all 16 actual wire files and also
+confirmed exact parity with the earlier original-07ad batch screen.
+
+| Arm | Seconds for 16 experts | Estimated joules | Mean GPU W |
+|---|---:|---:|---:|
+| Front, mean of two | 77.4095 | 4516.05 | 58.34 |
+| Best, mean of two | 37.3955 | 3078.12 | 82.31 |
+
+Throughput improved **2.0700×** and work per joule **1.4671×**. Each actual
+arm interval is fully bracketed by the retained 2 Hz pqteld series; maximum
+sample gap is 0.501 seconds. Both hosts' Netdata samples are retained.
+Candidate power peaks were 91.44 and 91.52 W, but its 82.31 W mean remains
+below the requested sustained 90–100 W target.
+
+The CUDA instrumentation is only partially usable. Both front traces have
+impossible summed durations and overlapping dependent steps despite fresh
+profiler contexts; both candidate windows pass those physical checks.
+There is no accepted paired kernel-time attribution from this run. Complete
+wall intervals, continuous power, Python stacks and actual output parity
+remain independently checkable. A separate complete-call profile without
+dynamic collection toggling is pending; the full A/B is not being repeated.
+
+Sampled process `read_bytes` deltas were zero in all four measured arms,
+with 7.7–54.3 KB of `rchar`. Writes were 162–260 MB in the candidate arms.
+Samples exclude interval tails, and Linux process counters alone cannot
+establish zero NFS latency. Startup, warm-up and trace-export overhead are
+excluded from the table and remain part of total job cost. This is a bounded
+16-expert result, not a completed pricing row or model.
+
+Evidence lives under
+`/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-02/performance-best-form-ab-01/`.
+The audit is `experiments/glm_real_best_form_audit.py`, PB
+`12e3377464c00cc51d75e9b9f25a40c81631771dada9e92ec33c921dbcadcc4c`,
+result `root-real-wall-energy-parity-audit.json`, status
+`LIMITED_CUDA_TRACES_REJECTED`. Raw rejected traces are retained. Pricing
+and EXL3 qualifier09 remain paused at this checkpoint; no producer default,
+serving pin or completed receipt was changed.
