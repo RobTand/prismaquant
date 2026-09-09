@@ -39,9 +39,11 @@ class CaptureObserver:
             cpu_affinity=sorted(os.sched_getaffinity(0)),
             kernel=os.uname().release,
             netdata=dict(hosts=['sparky', 'sparklina'], interval_seconds=5,
-                         byte_cap=3*1024**3),
+                         byte_cap=3*1024**3, bytes_written=0, samples=0,
+                         samples_scope='rounds attempted',
+                         sample_failures={'sparky': None, 'sparklina': None}),
             python_sampler=dict(scope='main_thread_only', interval_seconds=1,
-                                byte_cap=512*1024**2),
+                                byte_cap=512*1024**2, bytes_written=0, samples=0),
             profile_layers=sorted(self.profile_layers),
             forward_windows_zero_based=[[0, 1], [31, 32]])
         for name in ('srcversion', 'parameters/delegation_watermark'):
@@ -65,11 +67,11 @@ class CaptureObserver:
                                 # shutdown, but keep both hosts observable after
                                 # a transient HTTP/schema failure. Only successful
                                 # samples enter the measurement stream.
-                                failures = self.result[kind].setdefault('sample_failures', {})
+                                failures = self.result[kind]['sample_failures']
                                 now = time.time()
-                                if host not in failures:
+                                if failures[host] is None:
                                     failures[host] = dict(instrument=kind, host=host,
-                                        error=repr(error), first_failed_unix=now,
+                                        error=repr(error), last_error=repr(error), first_failed_unix=now,
                                         last_failed_unix=now, failed_samples=0)
                                     self.result['errors'].append(failures[host])
                                 failures[host].update(last_failed_unix=now,
@@ -86,7 +88,7 @@ class CaptureObserver:
                                     for x in frames],
                             process_io=Path('/proc/self/io').read_text()))
                     self.result[kind]['bytes_written'] = writer.bytes_written
-                    self.result[kind]['samples'] = self.result[kind].get('samples', 0)+1
+                    self.result[kind]['samples'] += 1
                     self.stopped.wait(self.result[kind]['interval_seconds'])
         except BaseException as error:
             self.result['errors'].append(dict(instrument=kind, error=repr(error)))

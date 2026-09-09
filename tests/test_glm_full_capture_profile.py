@@ -90,3 +90,33 @@ def test_netdata_failure_keeps_other_host_and_later_samples(tmp_path, monkeypatc
     assert result['status'] == 'failed'
     assert result['errors'][0]['host'] == 'sparky'
     assert 'GPU power chart missing' in result['errors'][0]['error']
+
+
+@pytest.mark.parametrize('kind,first_key', [('netdata', 'hosts'), ('python_sampler', 'scope')])
+def test_snapshot_survives_first_monitor_round_during_dict_iteration(tmp_path, monkeypatch, kind, first_key):
+    from experiments import glm_full_capture_profile as module
+    observer = CaptureObserver(tmp_path/kind, profile_layers=())
+    def sample(host):
+        if host == 'sparky':
+            raise RuntimeError('sample gap')
+        return {'host': host}
+    monkeypatch.setattr(module, 'sample_netdata', sample)
+    monkeypatch.setattr(observer.stopped, 'wait', lambda _: observer.stopped.set())
+    chunks = json.JSONEncoder(indent=2).iterencode(observer.result)
+    prefix = []
+    for chunk in chunks:
+        prefix.append(chunk)
+        if chunk == json.dumps(first_key):
+            break
+    else:
+        pytest.fail('snapshot never entered the monitor-owned dictionary')
+    # Force the real scheduling interleaving: JSON's dict iterator is alive
+    # while a first monitor round publishes counters and a first host failure.
+    observer.monitor(kind)
+    decoded = json.loads(''.join(prefix) + ''.join(chunks))
+    assert decoded[kind]['samples'] == 1
+    if kind == 'netdata':
+        assert decoded[kind]['sample_failures']['sparky']['failed_samples'] == 1
+        # Earlier fields can precede this monitor round in a progress snapshot.
+        # The final joined snapshot still carries the retained error.
+        assert observer.result['errors'][0]['host'] == 'sparky'
