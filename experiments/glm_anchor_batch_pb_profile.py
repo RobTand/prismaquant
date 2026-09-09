@@ -20,6 +20,8 @@ class BenchmarkComplete(BaseException):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--container-spec')
+    parser.add_argument('--comparison', choices=('batch-width', 'trellis-best-form'),
+                        default='batch-width')
     parser.add_argument('--out', required=True)
     parser.add_argument('campaign', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -34,7 +36,8 @@ def main(argv=None):
         spec['container']['mounts'].append(dict(source=str(profile.parent), target='/pb-profile'))
         spec['env']['PRISMABUILD_PROFILE_TORCH_OUT'] = '/pb-profile/' + profile.name
         return container_main(['--spec', json.dumps(spec), '--', 'python3', '-u', '-m',
-            'experiments.glm_anchor_batch_pb_profile', '--out', args.out, '--', *command])
+            'experiments.glm_anchor_batch_pb_profile', '--comparison', args.comparison,
+            '--out', args.out, '--', *command])
 
     import torch
     from prismaquant import tessera_campaign as campaign
@@ -46,8 +49,16 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=False)
     result = dict(schema='prismaquant.glm_anchor_batch_pb_profile.v1',
         status='running', scope='first compatible 16 experts at the first campaign rung',
+        comparison=args.comparison,
         full_campaign_complete=False, arms=[], command=command,
         torch=torch.__version__, cuda=torch.version.cuda, started_unix=time.time())
+    from tessera.cached_unit import encoder_source_sha256
+    from tessera import window_viterbi
+    result['producer_source_sha256'] = encoder_source_sha256()
+    result['trellis_module_path'] = window_viterbi.__file__
+    if args.comparison == 'trellis-best-form' and not hasattr(window_viterbi, '_BEST_FORM_ENV'):
+        raise RuntimeError('the selected producer does not implement the candidate')
+    original_best_form = os.environ.get('TESSERA_WINDOW_BEST_FORM')
     original = campaign._measure_anchor_batch
     original_scalar = campaign._measure_anchor
 
@@ -67,9 +78,12 @@ def main(argv=None):
             shapes=[list(w.shape) for w in kw['weights']])
         reference = None
 
-        def arm(width, label, prof=None):
+        def arm(width, label, prof=None, best_form=None):
             nonlocal reference
-            record = dict(label=label, batch_size=width, units=16, started_unix=time.time())
+            if best_form is not None:
+                os.environ['TESSERA_WINDOW_BEST_FORM'] = '1' if best_form else '0'
+            record = dict(label=label, batch_size=width, best_form=best_form,
+                          units=16, started_unix=time.time())
             result['arms'].append(record)
             torch.cuda.synchronize()
             torch.cuda.reset_peak_memory_stats()
@@ -123,22 +137,26 @@ def main(argv=None):
             print(json.dumps(record), flush=True)
             save()
 
-        # Warm both shapes. Compare ABBA with identical instrumentation on all
-        # four measured arms; exports occur after all arm timers stop.
-        arm(8, 'warm-b8')
-        arm(16, 'warm-b16')
+        # Warm both controls, then ABBA with identical observation. The
+        # best-form comparison holds actual encode batch size fixed at eight.
+        variants = ([(8, 'front', False), (8, 'best', True)]
+                    if args.comparison == 'trellis-best-form'
+                    else [(8, 'b8', None), (16, 'b16', None)])
+        for width, label, best_form in variants:
+            arm(width, 'warm-'+label, best_form=best_form)
         # Re-enabling one profiler across long CUDA-graph replay intervals
         # corrupts later kernel durations in the real PB trace (2026-09-09).
         # Fresh contexts isolate CUPTI's correlation state. Retain every raw
-        # trace; PB also files the first B16 trace as its primary profile.
+        # trace; PB also files the first candidate trace as its primary profile.
         primary = Path(os.environ['PRISMABUILD_PROFILE_TORCH_OUT'])
         event_count = 0
-        for index, width in enumerate((8, 16, 16, 8)):
+        for index, (width, label, best_form) in enumerate(
+                (variants[0], variants[1], variants[1], variants[0])):
             with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA],
                     record_shapes=False, profile_memory=False, with_stack=False) as prof:
                 prof.toggle_collection_dynamic(False, [torch.profiler.ProfilerActivity.CUDA])
-                arm(width, f'measured-{index}-b{width}', prof)
-            trace_path = out/f'measured-{index}-b{width}.trace.json.gz'
+                arm(width, f'measured-{index}-{label}', prof, best_form=best_form)
+            trace_path = out/f'measured-{index}-{label}.trace.json.gz'
             prof.export_chrome_trace(str(trace_path))
             with trace_path.open('rb') as handle:
                 trace_sha = hashlib.file_digest(handle, 'sha256').hexdigest()
@@ -176,6 +194,10 @@ def main(argv=None):
     finally:
         campaign._measure_anchor_batch = original
         campaign._measure_anchor = original_scalar
+        if original_best_form is None:
+            os.environ.pop('TESSERA_WINDOW_BEST_FORM', None)
+        else:
+            os.environ['TESSERA_WINDOW_BEST_FORM'] = original_best_form
         result['finished_unix'] = time.time()
         save()
     return 0
