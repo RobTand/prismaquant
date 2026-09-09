@@ -5326,8 +5326,8 @@ def _main(argv, *, source_scope) -> int:
                 # only when ``close`` itself journalled something loses them.
                 # ``flush_checkpoint`` returns on an empty set, so the normal
                 # path still costs nothing.
-                if ledger.close():
-                    flush_checkpoint()
+                ledger.close()
+                flush_checkpoint()
             except Exception as cleanup_error:  # noqa: BLE001
                 print("[campaign] could not journal the completed anchors "
                       f"while unwinding: {type(cleanup_error).__name__}: "
