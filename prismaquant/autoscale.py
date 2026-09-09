@@ -472,7 +472,7 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         phases['capture_prefetch'] = dict(common,
             selected_hessian_bytes=source['full_hessian_bytes'],
             selected_prefix_bytes=source['full_prefix_bytes'],
-            capture_decode_storage_bytes=widest_h+widest_x,
+            capture_decode_storage_bytes=widest_capture_entry,
             capture_serialized_buffer_bytes=capture_load_policy['max_buffer_bytes'],
             capture_source_page_cache_bytes=capture_load_policy['max_buffer_bytes'],
             capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'])
