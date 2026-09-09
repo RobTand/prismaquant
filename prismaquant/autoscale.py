@@ -72,10 +72,45 @@ def require_bounded_capture_environment(environ):
             raise RuntimeError(f'bounded CUDA capture requires {name}={expected} before process startup')
 
 
+# A reservation is charged OUTSIDE the phase deltas, so it is never summed into
+# ``memory_bytes`` and never becomes a phase term.  Folded in, it would grow the
+# plan and the cap by the same amount and net to zero at the admission
+# predicate, which is exactly what declared headroom already does.
+BASELINE_POLICY_DECLARED_HEADROOM = 'declared-headroom-pre-run-measured-in-row'
+BASELINE_POLICY_EXPLICIT_RESERVATION = 'explicit-spec-reservation-measured-in-row'
+
+
+def validate_process_baseline_bytes(value, *, where='process_baseline_bytes'):
+    """A count of bytes, or not a reservation at all.
+
+    ``bool`` is rejected explicitly: it satisfies ``isinstance(v, int)`` and
+    would silently reserve one byte, which is worse than reserving nothing
+    because the plan would then say a reservation exists.
+    """
+    if type(value) is not int or value < 0:
+        raise RuntimeError(
+            f'{where} must be a non-negative int of bytes, not {value!r}')
+    return value
+
+
+def _baseline_fields(process_baseline_bytes):
+    """What a plan records about its pre-run term, and only what is true.
+
+    Zero is the legacy default and emits nothing at all, so a reader can tell a
+    declared reservation from the absence of one.  A plan that reserved nothing
+    must not be able to report coverage it does not have.
+    """
+    if not process_baseline_bytes:
+        return {}
+    return dict(process_baseline_bytes=process_baseline_bytes,
+                baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION)
+
+
 def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
                                    prefetch_workers, headroom_gb,
-                                   capture_policy='legacy', capture_load_policy=None):
+                                   capture_policy='legacy', capture_load_policy=None,
+                                   process_baseline_bytes=0):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -301,6 +336,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     result.update(schema='prismaquant.streamed_calibration_resources.v2',
         capture_policy=capture_policy, input_groups=groups, phases=phases,
         memory_bytes=max(sum(phase.values()) for phase in phases.values()),
+        **_baseline_fields(validate_process_baseline_bytes(process_baseline_bytes)),
         transient_status='checked shared input groups; settled prefetch window and completed source release before materialization')
     # v1's additive terms are retained only in its own schema. v2 carries
     # mutually exclusive phase maps, with the maximum defining admission.
@@ -311,7 +347,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
 def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               cache_slots, prefetch_workers, headroom_gb,
                               anchor_batch_size=1, capture_load_policy=None,
-                              publication_overlap_bytes=0):
+                              publication_overlap_bytes=0, process_baseline_bytes=0):
     """Bound selected-source preparation separately from resident encoding.
 
     This extends the source loader's header/dtype accounting. No source
@@ -329,16 +365,22 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     shape or dtype, and the producer's own encoder working set inside
     ``tessera.export.encode_linear``.
 
-    **What this plan cannot state, and says so instead.** A delta plan is over
-    a process floor -- interpreter, torch, the CUDA runtime, the pages the
-    process has touched -- and that floor is a property of the box and the
-    run, not of the roster. Nothing here can measure it: the planner runs in
-    the dispatcher's process, not the row's. So the pre-run term stays exactly
-    what it was, the caller's ``headroom_gb``, and ``baseline_policy`` says
-    so; the row measures its own floor at its first
-    ``CaptureMemoryGuard.check`` and stamps it beside this plan. Inventing a
-    torch-plus-CUDA constant here would have been a third quantity, unmeasured
-    on the box it was spent on.
+    **What this plan cannot measure, and says which term it has instead.** A
+    delta plan is over a process floor -- interpreter, torch, the CUDA runtime,
+    the pages the process has touched -- and that floor is a property of the
+    box and the run, not of the roster. Nothing here can measure it: the
+    planner runs in the dispatcher's process, not the row's, and inventing a
+    torch-plus-CUDA constant would be a third quantity, unmeasured on the box
+    it was spent on. So this plan never derives one. A caller may
+    **declare** one, as ``process_baseline_bytes``, and then it is that
+    caller's number and ``baseline_policy`` names it as declared rather than
+    measured. Declared or not, the reservation is recorded beside
+    ``memory_bytes`` and is never summed into it: it is charged outside the
+    phase deltas by whoever converts this plan into a reservation, because
+    folding it in would grow the plan and the cap together and net to zero at
+    the row's admission predicate. The row still measures its own floor at its
+    first ``CaptureMemoryGuard.check`` and stamps it beside this plan, which
+    remains the only measured number of the three.
 
     **A second charge this plan does not own.** A row's first CUDA
     factorisation and its first ``encode_linear`` load libraries and build
@@ -497,10 +539,14 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         export_input_writer_policy='verified-tensor-record-prefix',
         encoder_memo_policy='compatible-anchor-batch-width',
         encoder_memo_capacity=memo_capacity,
-        # The only pre-run term is the caller's declared headroom. The row
+        # The pre-run term, named rather than derived. Without a declared
+        # reservation the only one is the caller's headroom, and the row
         # measures its own process floor and stamps it beside this plan; see
-        # the docstring for why nothing here invents one.
-        baseline_policy='declared-headroom-pre-run-measured-in-row',
+        # the docstring for why nothing here invents one. A declared
+        # reservation replaces this value and is emitted beside it, so an
+        # absent reservation cannot read as coverage.
+        **{'baseline_policy': BASELINE_POLICY_DECLARED_HEADROOM,
+           **_baseline_fields(validate_process_baseline_bytes(process_baseline_bytes))},
         source_forward_count=0)
 
 

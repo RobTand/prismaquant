@@ -136,7 +136,23 @@ def load_spec(path: Path) -> dict:
             "takes its deadline from the fleet, not from inside the round loop")
     if "container" in spec:
         validate_container(spec)
+    _process_baseline_bytes(spec, where=str(path))
     return spec
+
+
+def _process_baseline_bytes(spec: dict, *, where="spec") -> int:
+    """The per-row process floor this recipe reserves, in bytes.
+
+    Zero, the legacy default, reserves nothing and is what every spec written
+    before this key meant.  The value is the recipe's, not this tool's: no
+    universal torch-plus-CUDA constant is invented here, because a floor is a
+    property of the box and the runtime a row lands on and this planner never
+    enters either.
+    """
+    from prismaquant.autoscale import validate_process_baseline_bytes
+    return validate_process_baseline_bytes(
+        spec.get("process_baseline_bytes", 0),
+        where=f"{where}: process_baseline_bytes")
 
 
 def _model_bytes(model: str) -> int:
@@ -159,29 +175,47 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
 
     plus the spec's declared headroom for the forward pass and the encoder.
 
-    **No process baseline is charged here, deliberately.** A phase plan states
-    deltas, and the floor those deltas sit on -- interpreter, torch, the CUDA
-    runtime, the pages the row's process has touched -- is a property of the
-    box the row lands on, which this planner never enters. The two honest
-    options were a baseline recorded from a prior receipt with its host and
-    runtime scope, and leaving the spec's declared headroom as the only
-    pre-run term. This takes the second: no receipt at this head carries a
-    scoped baseline, and a torch-plus-CUDA constant invented here would be a
-    third quantity, unmeasured on the box it was spent on. The selected plan
-    records that choice in ``baseline_policy``, and the row measures its own
-    floor at its first ``CaptureMemoryGuard.check`` and stamps it on its
-    receipt (RobTand/prismaquant#390).
+    **The spec's process baseline is charged here, once, outside the deltas.**
+    A phase plan states deltas, and the floor those deltas sit on --
+    interpreter, torch, the CUDA runtime, the pages the row's process has
+    touched -- is a property of the box the row lands on, which this planner
+    never enters. So it is still never derived here; it is *declared*, as the
+    spec's ``process_baseline_bytes``, defaulting to zero. Its own scope
+    travels with it: it is the recipe's number, not a universal maximum.
+
+    It is added to the demand and never to ``memory_bytes``, because the
+    demand becomes a cgroup cap of exactly that many GiB
+    (``prismabuild/pool.py:2850``) while the row refuses unless its plan fits
+    under that cap *less* the floor it measures for itself
+    (``prismaquant/tessera_campaign.py:4515``). Fold the reservation into the
+    plan instead and the predicate compares an inflated delta against an
+    inflated cap and nets to zero -- which is exactly why the spec's declared
+    headroom, a term inside ``memory_bytes``, could never close this gap.
+
+    Both branches charge it. A process floor exists whether or not a row
+    streams, so leaving the resident-source branch out would make the key mean
+    one thing on one path and nothing on the other.
+
+    Rounding is not a reservation. ``ceil`` leaves at most one GiB of slack,
+    and the floor measured on this fleet is 1,062,359,040 bytes -- 0.9894 GiB,
+    less than the most ``ceil`` can leave -- so before this key a row admitted
+    according to where its ``memory_bytes`` landed modulo one GiB. The row
+    still measures its own floor at its first ``CaptureMemoryGuard.check`` and
+    stamps it on its receipt (RobTand/prismaquant#390); that reading, not this
+    declaration, remains the measured number.
     """
     gib = 1024 ** 3
+    baseline = _process_baseline_bytes(spec)
     if "--streaming" in spec['campaign_argv']:
         resource = _streamed_resource_plan(spec, census, members, selected_source=selected_source)
-        return int(math.ceil(resource['memory_bytes']/gib))
+        return int(math.ceil((resource['memory_bytes'] + baseline)/gib))
     shapes = census.get("unit_shapes") or {}
     hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
     rows = sum(int(shapes.get(name, [0, 0])[1]) * int(spec.get("max_act_rows", 512)) * 4
                for name in members)
     total = _model_bytes(spec["model"]) + hessian + rows
-    return int(math.ceil(total / gib)) + int(spec.get("headroom_gb", 24))
+    return (int(math.ceil((total + baseline) / gib))
+            + int(spec.get("headroom_gb", 24)))
 
 
 def _streamed_resource_plan(spec, census, members, *, selected_source=False):
@@ -197,7 +231,11 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
         cache_slots=argument('--streaming-cache-slots', 2),
         prefetch_workers=argument('--streaming-prefetch-workers', 1),
         headroom_gb=max(float(spec.get('headroom_gb', 24)),
-                        argument('--streaming-cache-headroom-gb', 24., float)))
+                        argument('--streaming-cache-headroom-gb', 24., float)),
+        # Recorded beside ``memory_bytes``, never summed into it: the plan
+        # stays pure phase deltas and the reservation is charged once, in
+        # ``_row_memory_gb``, on the demand.
+        process_baseline_bytes=_process_baseline_bytes(spec))
     if selected_source:
         return selected_anchor_resources(spec['model'], **options,
             anchor_batch_size=argument('--anchor-batch-size', 1),
@@ -639,6 +677,12 @@ def cmd_plan(args) -> int:
         "groups_per_row": int(args.groups_per_row),
         "rows_per_box": per_box,
         "row_memory_gb": row_memory_gb,
+        # The reservation those demands carry, stated once for the whole plan
+        # because it is a per-row constant. Zero means none was declared, and
+        # every row's phase plan records the same thing in its own
+        # ``baseline_policy``, so a reader cannot mistake an absent
+        # reservation for a covered one.
+        "process_baseline_bytes": _process_baseline_bytes(spec),
         # The rows the manifest does not hold, at the demand they were derived
         # at. A reader of the plan sees the whole layout; a reader of the
         # manifest sees only what was submitted.

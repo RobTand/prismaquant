@@ -1,7 +1,17 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `fix/glm-resident-hessian-source`. Stamps
+As of: 2026-09-09 · `claude/dispatch-process-baseline`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-09, `claude/dispatch-process-baseline`) for the campaign
+dispatcher's explicit process-baseline reservation. A recipe may declare
+`process_baseline_bytes` on its spec; `_row_memory_gb` charges it once on the
+demand, in both the streaming and resident-source branches, and never inside
+`memory_bytes`. `baseline_policy` gains
+`explicit-spec-reservation-measured-in-row` for a plan that carries one, and
+the plan records the integer beside `row_memory_gb`. The default is `0` and is
+byte-identical to the previous behaviour. The runtime's measured fail-closed
+guard is unchanged.
 
 Re-stamped (2026-09-09, `fix/glm-resident-hessian-source`) for resident
 Hessian commitment reuse in the selected campaign's existing opt-in
@@ -154,8 +164,27 @@ The guard now records its first reading as a measured baseline and reports
 that baseline beside its plan, and selected admission compares the plan with
 the cap less the baseline instead of with the raw cap. The guard's own refusal
 arithmetic is unchanged: its readings are already absolute. No pre-run baseline
-is invented for the dispatcher; `baseline_policy` records that declared
-headroom remains its only pre-run term.
+is derived for the dispatcher, which never enters the box a row lands on, but a
+recipe may **declare** one: `process_baseline_bytes` on the campaign spec, a
+non-negative integer of bytes defaulting to `0`. `load_spec` refuses anything
+else, `bool` included, before a row is derived. `_row_memory_gb` adds it to the
+demand in **both** branches, streaming and resident-source, since a process
+floor exists either way; it is never summed into `memory_bytes`, because the
+demand becomes a cap of exactly that many GiB while the row compares its plan
+with the cap less its measured floor, so a reservation folded into the plan
+would inflate both sides and net to zero. That is why `headroom_gb`, a term
+inside `memory_bytes`, could not close this gap. `baseline_policy` records
+which pre-run term a plan has:
+`declared-headroom-pre-run-measured-in-row` when nothing is declared, and
+`explicit-spec-reservation-measured-in-row` beside the integer when one is, so
+an absent reservation cannot read as coverage. The row's own first
+`CaptureMemoryGuard.check` remains the only measured floor of the three.
+Rounding was not a reservation: `ceil` leaves at most one GiB of slack and the
+floor measured on this fleet is 1,062,359,040 bytes, 0.9894 GiB, so before this
+key a row admitted according to where its `memory_bytes` landed modulo one GiB
+and both rows of the 132-row plan lost that, at 827,603,112 and 266,244,264
+bytes of slack. The declared value is the recipe's bound, not a claim about any
+universal maximum.
 A third quantity is measured and reported rather than charged. On the
 streaming fixture the first encode step grew 165.6 MB and the second grew
 2.7 MB against a 10.3 MB `resident_anchors` plan, and the row's peak sat
