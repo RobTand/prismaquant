@@ -425,7 +425,7 @@ def _activation_kwargs_memo(source, weights, device, *, max_entries=None,
 def _measure_anchor(
     *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
     activation_kwargs_for=None, hessian_required: bool = True,
-    static_input_scale: "float | None" = None,
+    static_input_scale: "float | None" = None, publisher=None,
 ):
     """Render one rung, price it as served, and store the wire beside it.
 
@@ -465,7 +465,8 @@ def _measure_anchor(
         hessian_required=prepared["hessian_required"])
     return _finish_anchor(qname=qname, weight=weight, activations=activations,
         format_name=format_name, cache=cache, wire_dir=wire_dir,
-        prepared=prepared, render=render, blob=blob, elapsed=time.time() - started)
+        prepared=prepared, render=render, blob=blob, elapsed=time.time() - started,
+        publisher=publisher)
 
 
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
@@ -543,11 +544,22 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
 
 
 def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
-                   prepared, render, blob, elapsed, encoding_batch_size=1):
-    """Score decoded bytes and publish the existing cache/wire entries."""
+                   prepared, render, blob, elapsed, encoding_batch_size=1,
+                   publisher=None):
+    """Score decoded bytes and publish the existing cache/wire entries.
+
+    ``publisher``, when given, is a
+    :class:`~prismaquant.tessera_publication.BoundedPublisher` that performs
+    the two writes on its own thread instead of here.  The bytes handed to it
+    are the same bytes and the writes are the same calls; what moves is only
+    which thread runs them, and the caller then owes the completion an
+    ordering rule -- the anchor is not journalled until its files exist.  With
+    no publisher this function is what it has always been, line for line.
+    """
     import torch
     from .production_weight_cache import (
-        _local_forward_render_score, _store_rendered_weight_entry)
+        _canonical_rendered_weight_tensor, _local_forward_render_score,
+        _store_rendered_weight_entry)
 
     spec, family, rung = (prepared[key] for key in ("spec", "family", "rung"))
     activation_qdq, input_scale = (prepared[key] for key in (
@@ -566,31 +578,50 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         raise RuntimeError(f"unexpected render-score metric {metric!r}")
     hessian_applied = bool(prepared["activation_kwargs"])
 
-    _store_rendered_weight_entry(
-        weights=cache.weights,
-        qname=qname,
-        fmt=format_name,
-        tensor=render,
-        cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
-        weight_dtype=torch.bfloat16,
-    )
+    # The device-to-host copy stays on the thread that owns the device work,
+    # whichever way the bytes are written.  ``_store_rendered_weight_entry``
+    # canonicalises again below and that second call is an identity on a CPU
+    # tensor already in the target dtype and contiguous, so the synchronous
+    # path stores the same object it always stored.  Staging it here is what
+    # gives the writer thread bytes nobody else owns.
+    staged = _canonical_rendered_weight_tensor(render, weight_dtype=torch.bfloat16)
     # The wire, beside the render.  A ``.tessera`` shard per (qname, rung),
     # named the way the cache names its weight shards, so the export leg can
     # find the exact bytes this row was priced on instead of re-encoding.
     wire_path = _wire_path(wire_dir, qname, format_name)
-    tmp = wire_path.with_suffix(".tessera.tmp")
-    tmp.write_bytes(blob)
-    os.replace(tmp, wire_path)
-    if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
-        # The existing PWC entry is already disk-backed. Completed anchor
-        # files must not accumulate an unbounded page-cache owner across rungs.
-        # The release helper checks the entry's identity, fsyncs and advises
-        # it from its own descriptor. No verification consumes a second hash
-        # of these completed files here.
-        from .perturbed_x_cache import release_activation_cache_file_pages
-        rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
-        for path in (rendered_path, wire_path):
-            release_activation_cache_file_pages(path, expected_stat=path.stat())
+
+    def _publish():
+        _store_rendered_weight_entry(
+            weights=cache.weights,
+            qname=qname,
+            fmt=format_name,
+            tensor=staged,
+            cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
+            weight_dtype=torch.bfloat16,
+        )
+        tmp = wire_path.with_suffix(".tessera.tmp")
+        tmp.write_bytes(blob)
+        os.replace(tmp, wire_path)
+        if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
+            # The existing PWC entry is already disk-backed. Completed anchor
+            # files must not accumulate an unbounded page-cache owner across
+            # rungs. The release helper checks the entry's identity, fsyncs
+            # and advises it from its own descriptor. No verification consumes
+            # a second hash of these completed files here.
+            from .perturbed_x_cache import release_activation_cache_file_pages
+            rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
+            for path in (rendered_path, wire_path):
+                release_activation_cache_file_pages(path, expected_stat=path.stat())
+
+    if publisher is None:
+        _publish()
+    else:
+        from .tessera_publication import PublicationJob
+        publisher.submit(PublicationJob(
+            key=(qname, format_name),
+            charged_bytes=(staged.numel() * staged.element_size()) + len(blob),
+            publish=_publish,
+        ))
 
     bits = spec.bits_for_shape(tuple(weight.shape))
     return CampaignAnchor(
@@ -617,7 +648,8 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
 
 def _measure_anchor_batch(*, qnames, weights, activations, format_name,
                           cache, wire_dir, activation_kwargs_for=None,
-                          hessian_required=True, static_input_scales=None):
+                          hessian_required=True, static_input_scales=None,
+                          publisher=None):
     """One producer batch, with the scalar path's per-unit gates and storage."""
     from .tessera_render import encode_tessera_units
 
@@ -640,7 +672,8 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
     elapsed = (time.time() - started) / len(qnames)
     return [_finish_anchor(qname=name, weight=weight, activations=acts,
         format_name=format_name, cache=cache, wire_dir=wire_dir, prepared=entry,
-        render=render, blob=blob, elapsed=elapsed, encoding_batch_size=len(qnames))
+        render=render, blob=blob, elapsed=elapsed,
+        encoding_batch_size=len(qnames), publisher=publisher)
         for name, weight, acts, entry, (render, blob) in zip(
             qnames, weights, activations, prepared, encoded)]
 
@@ -1523,8 +1556,14 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
         if (not isinstance(structure_by_unit, Mapping) or set(structure_by_unit) != set(menus)
                 or any(s not in ("dense", "routed_moe") for s in structure_by_unit.values())):
             raise ValueError("family restriction identity requires every priced unit's structure")
-    # Locations, batch width and a wall-clock interruption limit are not
-    # encoding/scoring inputs. All other explicit campaign settings remain bound by default.
+    # Locations, batch width, publication staging and a wall-clock
+    # interruption limit are not encoding/scoring inputs.  All other explicit
+    # campaign settings remain bound by default.
+    #
+    # ``publication_overlap_bytes`` chooses which thread performs two writes
+    # whose arguments it does not touch.  Binding it would make a run that
+    # staged its artifacts unable to resume a journal written without staging,
+    # which is a refusal about scheduling wearing an identity's clothes.
     #
     # ``units``, ``calibration_census`` and ``census_out`` are locations too,
     # and each one's load-bearing content is already bound by value somewhere
@@ -1542,7 +1581,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     for name in ("out", "cache_dir", "checkpoint", "deadline_seconds",
                  "units", "calibration_census", "census_out",
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
-                 "seed_checkpoint", "seed_wire_dir", "anchor_batch_size"):
+                 "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
+                 "publication_overlap_bytes"):
         settings.pop(name, None)
     return {
         **({"family_restriction": {"policy": restriction,
@@ -3852,6 +3892,7 @@ def _main(argv, *, source_scope) -> int:
     from .production_weight_cache import ProductionWeightCache
     from .tessera_menu import MENU_MODES, PARALLEL_NONE, menu_mode
     from .tessera_rate_surface import leave_one_anchor_out
+    from .tessera_publication import PublicationError
     from .tessera_render import (
         HessianContractError, tessera_encoder_hessian_status,
     )
@@ -3885,6 +3926,13 @@ def _main(argv, *, source_scope) -> int:
                     help="maximum compatible expert anchors in one producer "
                          "batch within this action (1 = scalar). Does not "
                          "change the anchor schedule or PB placement.")
+    ap.add_argument("--publication-overlap-bytes", type=int, default=0,
+                    help="stage up to N bytes of already-encoded render/wire "
+                         "artifacts on one writer thread so the next batch "
+                         "encodes while they are written (0 = publish "
+                         "synchronously on the encode thread, the default and "
+                         "byte-for-byte the historical path). An anchor is "
+                         "still journalled only after its own files exist.")
     ap.add_argument("--max-rounds", type=int, default=0,
                     help="hard stop on adaptive rounds (0 = governed by "
                          "--anchor-budget instead). Rounds are not the "
@@ -4022,6 +4070,8 @@ def _main(argv, *, source_scope) -> int:
             ap.error("capture/reuse requires positive --max-act-rows")
     if args.anchor_batch_size < 1:
         ap.error("--anchor-batch-size must be positive")
+    if args.publication_overlap_bytes < 0:
+        ap.error("--publication-overlap-bytes cannot be negative")
     if args.anchor_batch_size > 1:
         from .tessera_render import require_tessera_batch_encoder
         require_tessera_batch_encoder()
@@ -4716,6 +4766,56 @@ def _main(argv, *, source_scope) -> int:
                        identity_sha256=identity_sha256, state=state)
         dirty_checkpoint_units.clear()
 
+    # Anchors whose bytes are staged but not yet written, keyed the way the
+    # publisher keys its jobs.  An anchor lives here instead of in ``measured``
+    # for exactly as long as its files do not exist, which is what keeps
+    # ``flush_checkpoint``'s existing invariant true without changing it: every
+    # anchor row it journals has a wire receipt beside it, and every one of
+    # those receipts was read back off a file that had already landed.
+    awaiting_publication: dict = {}
+    publisher = None
+    if int(args.publication_overlap_bytes) > 0:
+        from .tessera_publication import BoundedPublisher
+        publisher = BoundedPublisher(
+            budget_bytes=int(args.publication_overlap_bytes))
+        print(f"[campaign] publication overlap: staging up to "
+              f"{int(args.publication_overlap_bytes)} bytes on one writer "
+              "thread", flush=True)
+
+    def journal_anchor(anchor, identity) -> None:
+        """Make this anchor's wire receipt and mark its unit for the journal.
+
+        The receipt is read back off the published file, which is what makes
+        it a statement about bytes that exist rather than about bytes that
+        were intended.  Both paths run this same code; they differ only in
+        when it is safe to run it.
+        """
+        name = anchor.qname
+        wire_records[name][anchor.format_name] = _checkpoint_wire_record(
+            anchor, wire_dir, identity)
+        measured.setdefault(name, {}).setdefault(
+            anchor.family, []).append(anchor)
+        dirty_checkpoint_units.add(name)
+
+    def apply_publications(keys) -> None:
+        """Turn published files into journallable rows, in publication order."""
+        for key in keys:
+            journal_anchor(*awaiting_publication.pop(key))
+
+    def record_anchor(anchor, identity) -> None:
+        """Journal this anchor now, or when the writer says its bytes exist."""
+        if publisher is None:
+            journal_anchor(anchor, identity)
+            return
+        key = (anchor.qname, anchor.format_name)
+        if key in awaiting_publication:
+            # Two anchors for one (unit, rung) would have one publication key
+            # and one of them would be journalled under the other's receipt.
+            # The anchor schedule does not produce this; if it ever does, it
+            # is a scheduling defect and not something to average over.
+            raise RuntimeError(f"{anchor.qname} {anchor.format_name} is already staged")
+        awaiting_publication[key] = (anchor, identity)
+
     # Adopted rows are journalled BEFORE the anchor loop, because the loop can
     # end without reaching its own flush: a group whose gate is already closed
     # has nothing pending in round one and breaks out.  A seeded run is exactly
@@ -4908,9 +5008,19 @@ def _main(argv, *, source_scope) -> int:
         if selected_source and selected_source_preparation is not None:
             selected_source_preparation['anchor_batch_growth_bytes'] = anchor_batch_growth
         for batch in batches:
+            # Rows whose files landed while the last batch encoded. Applied at
+            # the top of the batch rather than the bottom, so the receipt read
+            # back off each published file runs one batch behind the write
+            # instead of immediately after it.
+            if publisher is not None:
+                apply_publications(publisher.completed())
             if out_of_time():
                 stopped_early = True
                 print("[campaign] deadline reached; stopping", flush=True)
+                # A deadline is a termination, so the staged bytes are written
+                # and journalled before the loop is left; they were paid for.
+                if publisher is not None:
+                    apply_publications(publisher.drain())
                 break
             names = [item[0] for item in batch]
             family, rung = batch[0][1:]
@@ -4944,7 +5054,12 @@ def _main(argv, *, source_scope) -> int:
                         weights=[weights[name].to(device) for name in names],
                         activations=[acts[name].to(device) for name in names],
                         static_input_scales=static_scales, **common)
-            except (HessianContractError, ActivationScaleContractError):
+            except (HessianContractError, ActivationScaleContractError,
+                    PublicationError):
+                # A staged artifact that did not reach its disk is not one
+                # batch's bad luck: the writer has stopped and everything
+                # behind it was dropped unwritten. Printing and continuing
+                # here would advance the loop past files that do not exist.
                 raise
             except Exception as exc:
                 if selected_guard is not None and selected_guard.failure is not None:
@@ -4953,18 +5068,20 @@ def _main(argv, *, source_scope) -> int:
                       f"{exc}", flush=True)
                 continue
             if selected_guard is not None:
+                # With publication staging on, this upper bracket includes the
+                # staged CPU bytes of any batch the writer has not finished.
+                # That is real resident memory the plan is charging for, so it
+                # belongs in the growth figure rather than being filtered out
+                # of it; the publisher's own budget and peak are stamped
+                # separately on the receipt so a reader can attribute it.
                 selected_guard.check('after_selected_anchor_batch')
                 anchor_batch_growth.append(selected_guard.last[
                     'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
             for anchor in anchors:
-                name = anchor.qname
-                identity = _checkpoint_anchor_identity(
+                record_anchor(anchor, _checkpoint_anchor_identity(
                     anchor, weights=weights, menus=menus,
                     calibration_source=calibration_source, static_scales=static_scales,
-                    projected_units=projected_units)
-                wire_records[name][fmt] = _checkpoint_wire_record(anchor, wire_dir, identity)
-                measured.setdefault(name, {}).setdefault(family, []).append(anchor)
-                dirty_checkpoint_units.add(name)
+                    projected_units=projected_units))
             completed += len(anchors)
             # Commit every joined quantum before advancing. The scalar mode
             # keeps its existing ten-anchor flush cadence.
@@ -4973,6 +5090,10 @@ def _main(argv, *, source_scope) -> int:
                 print(f"[campaign] r{round_index} {completed}/{len(pending)} "
                       f"batch={len(anchors)} {fmt} "
                       f"encode_seconds={sum(a.seconds for a in anchors):.3f}", flush=True)
+        # The round is a consumer barrier: the next round reads ``measured``
+        # to decide what is still pending, so nothing may still be in flight.
+        if publisher is not None:
+            apply_publications(publisher.drain())
         flush_checkpoint()
         if stopped_early:
             break
@@ -4981,6 +5102,20 @@ def _main(argv, *, source_scope) -> int:
                 f"campaign adaptive round {round_index} made no progress: "
                 "all pending anchors failed; successful anchors are journaled. "
                 "Refusing to repeat unchanged work; retry after resolving the failure.")
+
+    publication_stats = None
+    if publisher is not None:
+        # Every round already drained, and a round that broke out staged
+        # nothing; this is the last barrier, and it is where a writer failure
+        # that nothing else looked at is raised.
+        apply_publications(publisher.drain())
+        if awaiting_publication:
+            raise RuntimeError(
+                "publication drained with anchors still staged: "
+                + ", ".join(f"{q} {f}" for q, f in sorted(awaiting_publication)))
+        publication_stats = publisher.stats()
+        publisher.close()
+        flush_checkpoint()
 
     loo: dict[str, dict[str, dict]] = {}
     for name, by_family in measured.items():
@@ -4993,6 +5128,14 @@ def _main(argv, *, source_scope) -> int:
     provenance = {
         "provenance": {
             "menu_mode": mode,
+            # How the artifacts were written, and what that cost. Absent means
+            # the default: every render and wire published on the encode
+            # thread before the next batch started. Present means one bounded
+            # writer thread ran them alongside the following encode, and the
+            # row says the budget, the peak charge and how long the encode
+            # thread spent blocked on it -- which is the number that says
+            # whether the bound was the limit or the disk was.
+            "publication_overlap": publication_stats,
             # Units the mode admitted no rung for. Empty on a healthy run;
             # never absent, so a reader never has to guess whether the run
             # was asked the question.
