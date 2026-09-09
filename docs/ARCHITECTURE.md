@@ -20,6 +20,11 @@ The plain mapping path remains for campaigns without reference export inputs.
 Tests in `tests/test_tessera_hessian_reference_handoff.py` cover the public CLI
 regression, identity parity, provenance refusal and metadata-owner cleanup.
 Native performance measurements are recorded separately from this contract.
+This integration pins the producer and serving dependency to the same Tessera
+development commit `7f8aef0dd1ba` from PR #441. Its packaged runtime contract
+is unchanged, so admission, formats and serving cells retain their previous
+answers. Producer source identity changes; existing priced rows are not
+relabeled under this source. Native qualification uses fresh output paths.
 
 Re-stamped (2026-09-09, `claude/bounded-publication-overlap`) for the campaign's
 opt-in **bounded publication overlap** (§4.10). `--publication-overlap-bytes N`
