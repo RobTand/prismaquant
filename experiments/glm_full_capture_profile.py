@@ -58,7 +58,25 @@ class CaptureObserver:
                 while not self.stopped.is_set():
                     if kind == 'netdata':
                         for host in self.result[kind]['hosts']:
-                            writer.write(sample_netdata(host))
+                            try:
+                                sample = sample_netdata(host)
+                            except Exception as error:
+                                # Preserve the incomplete-evidence failure at
+                                # shutdown, but keep both hosts observable after
+                                # a transient HTTP/schema failure. Only successful
+                                # samples enter the measurement stream.
+                                failures = self.result[kind].setdefault('sample_failures', {})
+                                now = time.time()
+                                if host not in failures:
+                                    failures[host] = dict(instrument=kind, host=host,
+                                        error=repr(error), first_failed_unix=now,
+                                        last_failed_unix=now, failed_samples=0)
+                                    self.result['errors'].append(failures[host])
+                                failures[host].update(last_failed_unix=now,
+                                    last_error=repr(error),
+                                    failed_samples=failures[host]['failed_samples'] + 1)
+                                continue
+                            writer.write(sample)
                     else:
                         frame = sys._current_frames().get(self.main_thread)
                         frames = traceback.extract_stack(frame)

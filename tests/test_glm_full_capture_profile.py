@@ -54,3 +54,39 @@ def test_observer_preserves_forward_return_and_partial_failure(tmp_path):
     assert 'original forward failure' in result['campaign_error']
 
     assert json.loads((tmp_path/'partial/progress.json').read_text()) == result
+
+
+def test_netdata_failure_keeps_other_host_and_later_samples(tmp_path, monkeypatch):
+    from experiments import glm_full_capture_profile as module
+    observer = CaptureObserver(tmp_path/'sample-gap', profile_layers=())
+    calls = []
+    rounds = 0
+
+    def sample(host):
+        calls.append(host)
+        if len(calls) == 1:
+            raise RuntimeError('Netdata required GPU power chart missing')
+        return {'host': host, 'metrics': {'observed': True}}
+
+    def wait(_seconds):
+        nonlocal rounds
+        rounds += 1
+        if rounds == 2:
+            observer.stopped.set()
+        return observer.stopped.is_set()
+
+    monkeypatch.setattr(module, 'sample_netdata', sample)
+    monkeypatch.setattr(observer.stopped, 'wait', wait)
+    observer.monitor('netdata')
+    assert calls == ['sparky', 'sparklina', 'sparky', 'sparklina']
+    records = [json.loads(line) for line in (observer.out/'netdata.jsonl').read_text().splitlines()]
+    assert [row['host'] for row in records] == ['sparklina', 'sparky', 'sparklina']
+    assert observer.result['netdata']['samples'] == 2
+    # A lost sample remains an explicit incomplete-evidence failure, even when
+    # subsequent samples were retained. Collection recovery is not gap erasure.
+    with pytest.raises(RuntimeError, match='required profiler evidence'):
+        observer.__exit__(None, None, None)
+    result = json.loads((observer.out/'result.json').read_text())
+    assert result['status'] == 'failed'
+    assert result['errors'][0]['host'] == 'sparky'
+    assert 'GPU power chart missing' in result['errors'][0]['error']
