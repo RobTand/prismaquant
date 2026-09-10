@@ -134,7 +134,10 @@ def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_h
     assert canonical_json_sha256(actual, where="bound") == canonical_json_sha256(
         expected, where="legacy")
     assert calls.count(id(weight)) == 1
-    assert calls.count(id(hessian)) == 1
+    # Tessera's one producer receipt seals H for capture provenance and then
+    # stamps its per-unit H identity. Both are producer-owned calls, once at
+    # startup rather than once for every published anchor.
+    assert calls.count(id(hessian)) == 2
     assert bound[name].observed_metadata_bytes() > 0
     replacement = tc.th.activation_source({name: hessian}, source.provenance)
     bound[name].replace_calibration_source(replacement)
