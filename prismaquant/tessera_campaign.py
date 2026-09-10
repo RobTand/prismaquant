@@ -1721,14 +1721,33 @@ class _BoundCheckpointUnitIdentity:
         self._guard()
 
     def _calibration_settings(self):
+        """Snapshot producer settings without resealing the resident Hessian."""
         if self._calibration is None:
             return None
+        import copy
         api = _checkpoint_identity_api()
-        settings = self._calibration.config_block()
-        settings.pop("note", None)
-        settings["hessian"] = {key: self._calibration.provenance[key]
-                               for key in api.HESSIAN_IDENTITY}
-        return settings
+        source = self._calibration
+        # This is ActivationSource.config_block() minus its capture_sha256()
+        # call. The producer receipt has already sealed H in `_template`; a
+        # lifetime guard must compare the same scalar/provenance inputs without
+        # synchronizing and hashing H a second time.
+        return {
+            "ldlq_sigma": source.ldlq_sigma,
+            "ldlq_block": (source.ldlq_block if isinstance(source.ldlq_block, int)
+                           else copy.deepcopy(dict(source.ldlq_block))),
+            "refit_objective": (source.refit_objective if isinstance(source.refit_objective, str)
+                                else copy.deepcopy(dict(source.refit_objective))),
+            "refit_objective_trailing": (
+                None if source.refit_objective_trailing is None
+                else source.refit_objective_trailing
+                if isinstance(source.refit_objective_trailing, str)
+                else copy.deepcopy(dict(source.refit_objective_trailing))),
+            "refit_reach_floor": bool(source.refit_reach_floor),
+            "refit_gauss_seidel": (bool(source.refit_gauss_seidel)
+                                   if isinstance(source.refit_gauss_seidel, bool)
+                                   else copy.deepcopy(dict(source.refit_gauss_seidel))),
+            "hessian": {key: source.provenance[key] for key in api.HESSIAN_IDENTITY},
+        }
 
     def _guard(self):
         if self._closed:
