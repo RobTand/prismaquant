@@ -464,6 +464,12 @@ def _pbcampaign(manifest: Path, *, wait_s: int, receipts: Path | None = None) ->
     every row reports a key, the host it executed on and its exit status, and
     ``merge`` refuses without it.  A submission acknowledgement is not a result.
     """
+    # No ``--transport``: the fleet's own default carries these rows, and the
+    # rows say what they need.  Every row declares progress phases, which
+    # ``pbcampaign`` refuses at manifest load on SLURM because the stall
+    # watchdog is the pull-queue worker's.  Pinning ``--transport pool`` here
+    # would instead submit into a queue a cut-over fleet might not drain; the
+    # refusal is the outcome we want, and it names the reason.
     command = [sys.executable, str(PBCAMPAIGN), "--wait-s", str(wait_s), str(manifest)]
     print("[dispatch] " + " ".join(command), flush=True)
     completed = subprocess.run(command, check=False, text=True,
