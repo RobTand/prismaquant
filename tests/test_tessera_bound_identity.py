@@ -159,3 +159,17 @@ def test_h_free_hold_accepts_later_shared_reference_owner(monkeypatch):
     replacement = tc.th.activation_source({name: hessian}, source.provenance)
     bound.replace_calibration_source(replacement)
     bound.close()
+
+
+def test_campaign_identity_hold_closes_during_error_unwind():
+    from contextlib import ExitStack
+    tc, name, weight, _, source, anchors, projection, kwargs = fixture(projected=True)
+    bound = tc.bind_checkpoint_unit_identity(anchors, source_weight=weight,
+        calibration_source=source, projected_unit=projection,
+        static_scales=kwargs["static_scales"], retain_source_receipt=False)
+    with pytest.raises(RuntimeError, match="publisher failed"):
+        with ExitStack() as scope:
+            scope.callback(bound.close)
+            raise RuntimeError("publisher failed")
+    with pytest.raises(ValueError, match="closed"):
+        bound.campaign_inputs()
