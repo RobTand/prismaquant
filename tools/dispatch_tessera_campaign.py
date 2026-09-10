@@ -303,7 +303,24 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
     return admissible, declined
 
 
-def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int,
+#: The quiet a pricing row is allowed in each phase, in the order it walks
+#: them.  Measured, not chosen: a least-squares fit of ``elapsed_s`` against
+#: committed batches over the 23 completed full 864-unit GLM pricing rows in
+#: the fleet's terminal records (2026-09-10) gives 18.4 s of wall clock per
+#: committed batch and 943 s of everything that is not the pricing loop --
+#: source and calibration load, activations, and the finalization tail --
+#: with every full-length row inside +-180 s of that fit.
+#:
+#: So: ``pricing`` is 49x the measured commit cadence, and ``startup`` and
+#: ``finalize`` are each larger than the whole 943 s of non-pricing quiet the
+#: fit attributes to both together.  The sum, 6300 s, is the longest a row can
+#: run having committed nothing -- less than half the 14,400 s that killed
+#: row-0050 and row-0065 while they were committing anchors every 18 s.
+CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
+
+
+def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
+         progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
          module: str = "prismaquant.tessera_campaign") -> dict:
     env = dict(spec['env'])
     policy_flag = '--streaming-capture-policy'
@@ -328,13 +345,25 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int,
         "demand": {"gpu": 1, "cpu": int(spec.get("cpus", 4)), "mem_gb": int(mem_gb)},
         "env": env,
         "tags": list(spec.get("tags", ["gb10"])),
-        "timeout_s": int(timeout_s),
         # A row is one memoized action and a retry re-runs the same argv over
         # the same checkpoint, which is exactly what the journal is for.  The
         # policy is sealed into the action key, so it is spelled even though
         # pbcampaign submits every row detached and cannot retry one itself.
         "retry_safe": True,
     }
+    if progress_phases:
+        # What bounds this row is whether it is still committing anchors, not
+        # how long it has been running.  ``tessera_campaign`` reports each
+        # journal flush through ``prismaquant.prismabuild_progress``; PB then
+        # applies no total-duration limit while the count advances, and ends
+        # the row within the declared allowance when it stops.
+        row["progress_phases"] = [f"{name}={grace}" for name, grace in progress_phases]
+    if timeout_s is not None:
+        # Only when somebody asked for one.  A blanket default here is what
+        # sealed 14,400 s into every pricing row and killed two of them mid
+        # round (PB #480); the ceiling a row needs is not a property of the
+        # dispatcher.
+        row["timeout_s"] = int(timeout_s)
     return row
 
 
@@ -685,7 +714,8 @@ def cmd_plan(args) -> int:
                 argv += ["--seed-wire-dir", str(args.seed_wire_dir)]
         rows.append(_row(spec, argv,
                          mem_gb=_row_memory_gb(spec, members, census, selected_source=selected_source),
-                         timeout_s=int(args.timeout_s)))
+                         timeout_s=(None if args.timeout_s is None
+                                    else int(args.timeout_s))))
         planned.append({"row_id": row_id, "groups": bundle, "members": sorted(members),
                         "dir": str(row_dir), "units": str(units_path),
                         **({'seed': row_seed} if row_seed is not None else {}),
@@ -1456,7 +1486,15 @@ def main(argv=None) -> int:
                            "that does not fit is left out of the manifest and "
                            "recorded in the plan, and only a plan with no "
                            "admissible row at all refuses.")
-    plan.add_argument("--timeout-s", type=int, default=14400)
+    plan.add_argument("--timeout-s", type=int, default=None,
+                      help="a hard wall-clock deadline for every row, ending "
+                           "it whatever it is doing. Unset by default: rows "
+                           "declare the phases they walk and the quiet they "
+                           "are allowed in each instead, so a row that keeps "
+                           "committing anchors keeps running and one that "
+                           "stops ends within "
+                           f"{sum(g for _, g in CAMPAIGN_PROGRESS_PHASES)}s. "
+                           "Set it only to cap a row's cost deliberately")
     plan.add_argument("--stack-sample", type=int, default=None,
                       help="price each routed stack from this many experts "
                            "per role, drawn proportional to the probe's "
