@@ -54,6 +54,20 @@ against it, so a seeded row adopts only bytes it would itself have encoded.
 The adaptive state needs nothing else -- ``grid``, the leave-one-out error and
 the stop reason are all recomputed from the anchor set at the top of every
 round -- so adopting the anchors resumes the group exactly where it stood.
+
+Rows planned before the progress contract
+-----------------------------------------
+Nothing migrates in place.  A row already in ``ready/`` was sealed with its
+own ``execution_timeout_s``; that request is immutable and stays exactly as
+it is, still bounded by the number it was submitted with.  The stall policy
+is sealed too, so a plan made after it produces different action keys, and a
+key that has never been priced is not a cache hit.  What carries the work
+across is the journal rather than the queue: the new row resumes from the
+same identity-bound ``cost_stage_checkpoint`` directory (or is handed the
+monolith's anchors with ``--seed-workspace`` / ``--seed-checkpoint``), so the
+anchors already committed under the old key are re-adopted rather than
+re-measured.  Withdraw the old rows once the new ones are running; do not
+edit them.
 """
 from __future__ import annotations
 

@@ -14,6 +14,7 @@ import re
 import subprocess
 
 from tools.container_runtime_identity import image_content_sha256
+from prismaquant.prismabuild_progress import PATH_ENV, TOKEN_ENV
 
 
 def validate_container(spec: dict) -> None:
@@ -97,9 +98,6 @@ def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
         if value == "":
             return False, f"{source} declares no visible device"
     return True, "no declaration withheld the device"
-
-
-from prismaquant.prismabuild_progress import PATH_ENV, TOKEN_ENV
 
 
 def progress_environment(spec: dict, environ) -> dict:

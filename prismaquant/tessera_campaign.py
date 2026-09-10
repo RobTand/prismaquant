@@ -5340,6 +5340,14 @@ def _main(argv, *, source_scope) -> int:
         # the row says it has reached that phase and is bounded by the
         # finalization allowance its submission declared rather than by the
         # pricing loop's, which is much shorter.
+        #
+        # The drain below still calls ``flush_checkpoint``, which reports
+        # "pricing" again after this.  Neither outcome shortens the allowance:
+        # an unchanged count is refused as replayed, and a higher one is
+        # accepted while the watchdog keeps finalize's grace, because the
+        # allowance follows the furthest phase entered and never an earlier
+        # name.  What such a record does change is the phase the observation
+        # displays, so a late drain can read "pricing" while finalize governs.
         report_progress("finalize", sum(
             len(anchors) for by_format in measured.values()
             for anchors in by_format.values()))
