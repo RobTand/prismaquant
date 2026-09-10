@@ -1641,7 +1641,9 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                                  else api.tensor_identity(acts[name])),
                 "hessian": (None if hessians.get(name) is None else
                             (bound_units[name].campaign_inputs()["hessian"]
-                             if bound_units is not None else api.tensor_identity(hessians[name]))),
+                             if (bound_units is not None and
+                                 bound_units[name].campaign_inputs()["hessian"] is not None)
+                             else api.tensor_identity(hessians[name]))),
                 "input_global_scale": (
                     None if static_scales.get(name) is None
                     else float(static_scales[name])),
@@ -1707,15 +1709,11 @@ class _BoundCheckpointUnitIdentity:
             calibration_source=calibration_source, static_scales=static_scales,
             projected_units={} if projected_unit is None else {self._name: projected_unit})
         self._settings = self._calibration_settings()
-        # The run-level journal binds H whenever the campaign has one, even
-        # if this unit's closed roster happens to contain only H-free wires.
-        # Reuse the producer template where possible; otherwise take the one
-        # direct receipt the old campaign identity took for this unit.
-        self._campaign_hessian = (
-            None if calibration_source is None else
-            (copy.deepcopy(self._template["calibration"]["hessian"])
-             if self._template["calibration"] is not None else
-             _checkpoint_identity_api().tensor_identity(calibration_source.hessians[self._name])))
+        # H-free rosters retain no H receipt. The run-level identity uses its
+        # ordinary direct H receipt for those units, keeping every retained H
+        # record behind this holder's source/version guard.
+        self._campaign_hessian = (None if self._template["calibration"] is None else
+                                  copy.deepcopy(self._template["calibration"]["hessian"]))
         # Joint AURA needs this separate cache receipt. Campaign pricing only
         # keeps producer identities, so it must not add a second full CPU hash.
         self._source_receipt = (_cb_cache_tensor_identity(source_weight)
@@ -1874,86 +1872,69 @@ def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_s
     return anchors
 
 
+# An opt-in campaign retains producer receipt dictionaries for the whole closed
+# roster. These terms bound CPython object headers/slots and the producer JSON
+# receipt topology independently of a particular digest value. They are
+# deliberately stated as admission terms, not as a measurement: the live
+# `observed_metadata_bytes` diagnostic below tests the bound on each run.
+IDENTITY_HOLD_UNIT_OBJECT_BYTES = 32 * 1024
+IDENTITY_HOLD_FORMAT_REFERENCE_BYTES = 1024
+IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER = 8
+
+
 def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
                                      projected_units, static_scales):
-    """Bound the opt-in holder from receipt topology without reading tensors.
+    """Conservatively bound holder metadata without producer or tensor mutation.
 
-    Tessera's own ``encoding_input_identity`` remains the receipt authority.
-    For planning only, its value digest is replaced by a same-schema record
-    derived from dtype and shape. That preserves every retained metadata
-    allocation while avoiding the producer's DtoH copies. The real hold checks
-    its observed graph against this model before publication.
+    One unit retains a holder/result mapping, signatures, the producer receipt
+    dictionaries, and a frozenset of references to every closed menu format.
+    The fixed object term covers the first three; the per-format term covers
+    frozenset slots and result mapping growth.  Receipt strings and dict keys
+    are bounded from known unit/format/settings/projection serialization
+    lengths, multiplied by the documented CPython object/slot envelope.
     """
-    import copy
-    from types import SimpleNamespace
-    api = _checkpoint_identity_api()
-    original = api.tensor_identity
-
-    def synthetic_identity(tensor):
-        return {"algorithm": "sha256.dtype_shape_contiguous.v1",
-                "dtype": str(tensor.dtype), "shape": list(tensor.shape),
-                "sha256": "0" * 64}
-
-    planned, scratch = {}, 0
-    api.tensor_identity = synthetic_identity
-    try:
-        for name in sorted(weights):
-            anchors = _campaign_identity_anchor_roster(
-                name, menus[name], calibration_source=calibration_source,
-                static_scales=static_scales)
-            representative = max(anchors, key=lambda anchor: bool(anchor.hessian_applied))
-            calibration = calibration_source if representative.hessian_applied else None
-            template = _checkpoint_anchor_identity(
-                representative, weights={name: weights[name]},
-                menus={name: [SimpleNamespace(format_name=entry.format_name)
-                              for entry in menus[name]]},
-                calibration_source=calibration_source, static_scales=static_scales,
-                projected_units={} if (projected_units or {}).get(name) is None
-                else {name: projected_units[name]})
-            model = object.__new__(_BoundCheckpointUnitIdentity)
-            model._closed = False
-            model._name = name
-            model._formats = frozenset(anchor.format_name for anchor in anchors)
-            model._weight = weights[name]
-            model._weight_signature = _bound_tensor_signature(weights[name])
-            model._calibration = calibration
-            model._hessian = None if calibration is None else calibration.hessians[name]
-            model._hessian_signature = (None if model._hessian is None
-                                        else _bound_tensor_signature(model._hessian))
-            model._projection = (projected_units or {}).get(name)
-            model._projection_record = copy.deepcopy(model._projection)
-            model._template = template
-            model._settings = model._calibration_settings()
-            model._campaign_hessian = (
-                None if calibration_source is None else
-                (copy.deepcopy(template["calibration"]["hessian"])
-                 if template["calibration"] is not None else
-                 synthetic_identity(calibration_source.hessians[name])))
-            model._source_receipt = None
-            value = model.observed_metadata_bytes()
-            planned[name] = value
-            scratch = max(scratch, value)
-            del model
-    finally:
-        api.tensor_identity = original
-    return planned, scratch
+    import json
+    settings = ({} if calibration_source is None else
+                calibration_source.config_block())
+    settings.pop("note", None)
+    settings_bytes = len(json.dumps(settings, sort_keys=True,
+                                    separators=(",", ":"), allow_nan=False).encode())
+    planned = {}
+    for name in sorted(weights):
+        shape_bytes = len(json.dumps(list(weights[name].shape), separators=(",", ":")).encode())
+        format_bytes = sum(len(entry.format_name.encode()) for entry in menus[name])
+        projection_bytes = len(json.dumps((projected_units or {}).get(name),
+            sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
+        receipt_bytes = len(name.encode()) + shape_bytes + settings_bytes + projection_bytes
+        planned[name] = (IDENTITY_HOLD_UNIT_OBJECT_BYTES +
+                         IDENTITY_HOLD_FORMAT_REFERENCE_BYTES * len(menus[name]) +
+                         IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER *
+                         (receipt_bytes + format_bytes))
+    # This arithmetic has no constructed holder graph, so it adds no planning
+    # allocation beyond scalar counters already present in the campaign.
+    return planned, 0
 
 
 def _campaign_bound_identities(*, weights, menus, calibration_source,
                                projected_units, static_scales, metadata_bounds=None):
     """One producer receipt template per priced unit, held through publication."""
     result = {}
-    for name in sorted(weights):
-        anchors = _campaign_identity_anchor_roster(
-            name, menus[name], calibration_source=calibration_source,
-            static_scales=static_scales)
-        result[name] = bind_checkpoint_unit_identity(
-            anchors, source_weight=weights[name], calibration_source=calibration_source,
-            projected_unit=(projected_units or {}).get(name), static_scales=static_scales,
-            retain_source_receipt=False)
-        if metadata_bounds is not None and result[name].observed_metadata_bytes() > metadata_bounds[name]:
-            raise RuntimeError("campaign identity metadata exceeded its preallocation model")
-    return result
+    try:
+        for name in sorted(weights):
+            anchors = _campaign_identity_anchor_roster(
+                name, menus[name], calibration_source=calibration_source,
+                static_scales=static_scales)
+            result[name] = bind_checkpoint_unit_identity(
+                anchors, source_weight=weights[name], calibration_source=calibration_source,
+                projected_unit=(projected_units or {}).get(name), static_scales=static_scales,
+                retain_source_receipt=False)
+            if metadata_bounds is not None and result[name].observed_metadata_bytes() > metadata_bounds[name]:
+                raise RuntimeError("campaign identity metadata exceeded its preallocation bound")
+        return result
+    except BaseException:
+        for unit in result.values():
+            unit.close()
+        raise
 
 
 def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,

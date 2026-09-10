@@ -122,7 +122,7 @@ def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_h
     metadata_bounds, scratch = tc._campaign_identity_metadata_plan(
         weights=kwargs["weights"], menus=kwargs["menus"], calibration_source=source,
         projected_units={name: projection}, static_scales=kwargs["static_scales"])
-    assert scratch == max(metadata_bounds.values())
+    assert scratch == 0
     bound = tc._campaign_bound_identities(weights=kwargs["weights"], menus=kwargs["menus"],
         calibration_source=source, projected_units={name: projection},
         static_scales=kwargs["static_scales"], metadata_bounds=metadata_bounds)

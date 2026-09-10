@@ -1,7 +1,35 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `perf/glm-selected-source-snapshot`. Stamps
+As of: 2026-09-10 · `perf/glm-publication-transition-optimization`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-10, `perf/glm-publication-transition-optimization`) for
+experimental `--reuse-campaign-identity`. It is off by default. When enabled,
+a campaign creates one Tessera producer input-receipt template per priced unit
+before journal admission, then derives each closed-menu anchor receipt from
+that template using Tessera's current `wire_recipe`. The option changes neither
+source/H/calibration identity nor wire bytes and is excluded from checkpoint
+identity like publication staging; the normal PrismaQuant package-source seal
+remains strict, so journals from a different package source still require the
+existing rebind gates. A reference-backed activation owner may replace the
+pre-export owner only after it proves the same resident H objects and producer
+settings. H-free rosters retain no H receipt and use the ordinary run-level H
+check.
+
+For selected-source rows, the shared `selected_anchor_resources` plan receives
+an opt-in `campaign_identity_metadata_bytes` resident-anchors term plus its
+planning scratch term before real holders are created. The term is a documented
+conservative topology bound over one holder/result mapping, signatures,
+producer receipt dictionaries, closed-format references, settings, projection
+serialization and shape/name lengths; it does not read source tensors or
+change the producer authentication API. Each real hold reports an
+interpreter-specific observed metadata diagnostic and refuses if it exceeds
+its admitted bound. Holder construction failure closes prior holders; normal
+and exceptional exits close them only after the publication drain. Qualification
+requires balanced native campaign profiles that include startup and drain,
+energy, and Netdata evidence. Gates: `tests/test_tessera_bound_identity.py`,
+`tests/test_tessera_publication.py`, `tests/test_selected_source_authentication.py`
+and selected-source admission tests.
 
 Re-stamped (2026-09-09, `perf/glm-selected-source-snapshot`) for
 `dispatch_tessera_campaign.py plan --seed-workspace`. A new plan can offer each
