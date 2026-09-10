@@ -24,8 +24,9 @@ For selected-source rows, the dispatcher forwards `N` to the shared
 resident-anchors term before PB admission. The runtime's conservative topology
 bound covers one holder/result mapping, signatures, producer receipt
 dictionaries, closed-format references, settings, projection serialization and
-shape/name lengths; it does not read source tensors or change the producer
-authentication API. Each real hold reports an
+shape/name lengths, plus the bound-map and largest per-unit JSON planning
+transient. It does not read source tensors or change the producer authentication
+API. `N` covers both retained and planning terms. Each real hold reports an
 interpreter-specific observed metadata diagnostic and refuses if it exceeds
 its admitted bound. Holder construction failure closes prior holders; normal
 and exceptional exits close them only after the publication drain. Qualification

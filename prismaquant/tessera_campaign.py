@@ -1899,6 +1899,9 @@ def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_s
 IDENTITY_HOLD_UNIT_OBJECT_BYTES = 32 * 1024
 IDENTITY_HOLD_FORMAT_REFERENCE_BYTES = 1024
 IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER = 8
+IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES = 256
+IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES = 4096
+IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER = 4
 
 
 def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
@@ -1917,7 +1920,7 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
     # not invoke it before the one real receipt; reserve its bounded JSON
     # settings envelope in the fixed holder term instead.
     settings_bytes = 4096 if calibration_source is not None else 0
-    planned = {}
+    planned, largest_serialization = {}, 0
     for name in sorted(weights):
         shape_bytes = len(json.dumps(list(weights[name].shape), separators=(",", ":")).encode())
         format_bytes = sum(len(entry.format_name.encode()) for entry in menus[name])
@@ -1928,9 +1931,14 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
                          IDENTITY_HOLD_FORMAT_REFERENCE_BYTES * len(menus[name]) +
                          IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER *
                          (receipt_bytes + format_bytes))
-    # This arithmetic has no constructed holder graph, so it adds no planning
-    # allocation beyond scalar counters already present in the campaign.
-    return planned, 0
+        largest_serialization = max(largest_serialization, receipt_bytes + format_bytes)
+    # `planned` remains live until holders are built. Each loop iteration also
+    # materializes one shape/projection JSON string; its worst live string plus
+    # the map's entry table is a separate, pre-admitted planning transient.
+    scratch = (IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES +
+               IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES * len(planned) +
+               IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER * largest_serialization)
+    return planned, scratch
 
 
 def _campaign_bound_identities(*, weights, menus, calibration_source,
