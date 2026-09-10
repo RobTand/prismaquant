@@ -1,7 +1,28 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-09 · `fix/qwen35-tf517-rotary-positions`. Stamps
+As of: 2026-09-10 · `claude/480-campaign-progress`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-10, `claude/480-campaign-progress`) for the campaign
+execution contract. `dispatch_tessera_campaign.py plan` no longer seals a
+14,400 s deadline into every pricing row; `--timeout-s` is unset by default
+and seals only when asked for. Rows instead declare the phases they walk and
+the quiet each is allowed -- `startup=3600 pricing=900 finalize=1800`, from a
+least-squares fit of elapsed time against committed batches over the 23
+completed full 864-unit GLM rows in the fleet's terminal records (18.4 s per
+committed batch, 943 s outside the pricing loop, every full-length row within
+±180 s) -- and `tessera_campaign` reports its committed anchor count through
+`prismaquant/prismabuild_progress.py` after each journal flush, once the
+shards are durable. A row that keeps committing is given no total-duration
+limit; one that stops ends within 6,300 s, less than half the limit that
+killed row-0050 and row-0065 mid-round. The container wrapper carries the
+progress channel in and refuses at launch when the file would land outside a
+writable declared mount. Requires the PrismaBuild generation carrying
+RobTand/prismabuild#480; an older fleet refuses these rows at submit rather
+than admitting and killing them. No cost currency, wire recipe, format menu,
+serving pin or ship-gate change. Gates:
+`tests/test_campaign_progress_replaces_the_blanket_timeout.py`,
+`tests/test_tessera_campaign_container.py`.
 
 Re-stamped (2026-09-09, `fix/qwen35-tf517-rotary-positions`) for the
 profile-owned `rotary_position_ids` hook at the shared streamed rotary call.
