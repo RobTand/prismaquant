@@ -1549,7 +1549,7 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
                                   expert_projection=None, stack_sampling_identity=None,
-                                  structure_by_unit=None):
+                                  structure_by_unit=None, bound_units=None):
     """Bind the priced population, including score inputs when H is off.
 
     The static A-side contract is a scoring input like the score rows: the
@@ -1578,9 +1578,9 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     # campaign settings remain bound by default.
     #
     # ``publication_overlap_bytes`` chooses which thread performs two writes
-    # whose arguments it does not touch.  Binding it would make a run that
-    # staged its artifacts unable to resume a journal written without staging,
-    # which is a refusal about scheduling wearing an identity's clothes.
+    # whose arguments it does not touch.  ``reuse_campaign_identity`` changes
+    # when the same producer receipt is made and retained. Neither changes the
+    # receipt, so binding either would make scheduling wear an identity's clothes.
     #
     # ``units``, ``calibration_census`` and ``census_out`` are locations too,
     # and each one's load-bearing content is already bound by value somewhere
@@ -1599,7 +1599,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "units", "calibration_census", "census_out",
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
-                 "publication_overlap_bytes", "source_snapshot_policy"):
+                 "publication_overlap_bytes", "reuse_campaign_identity",
+                 "source_snapshot_policy"):
         settings.pop(name, None)
     return {
         **({"family_restriction": {"policy": restriction,
@@ -1630,11 +1631,17 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
             }),
         "units": {
             name: {
-                "weight": api.tensor_identity(weight),
+                # A campaign hold creates this exact producer template once
+                # before journal admission.  The journal retains the same
+                # source/H records the former direct calls made, without a
+                # second DtoH copy later for every published receipt.
+                "weight": (bound_units[name].campaign_inputs()["source"]
+                           if bound_units is not None else api.tensor_identity(weight)),
                 "scoring_rows": (None if acts.get(name) is None
                                  else api.tensor_identity(acts[name])),
-                "hessian": (None if hessians.get(name) is None
-                            else api.tensor_identity(hessians[name])),
+                "hessian": (None if hessians.get(name) is None else
+                            (bound_units[name].campaign_inputs()["hessian"]
+                             if bound_units is not None else api.tensor_identity(hessians[name]))),
                 "input_global_scale": (
                     None if static_scales.get(name) is None
                     else float(static_scales[name])),
@@ -1666,7 +1673,7 @@ class _BoundCheckpointUnitIdentity:
     """
 
     def __init__(self, anchors, *, source_weight, calibration_source,
-                 projected_unit, static_scales):
+                 projected_unit, static_scales, retain_source_receipt=True):
         import copy
         import torch
         from types import SimpleNamespace
@@ -1700,7 +1707,19 @@ class _BoundCheckpointUnitIdentity:
             calibration_source=calibration_source, static_scales=static_scales,
             projected_units={} if projected_unit is None else {self._name: projected_unit})
         self._settings = self._calibration_settings()
-        self._source_receipt = _cb_cache_tensor_identity(source_weight)
+        # The run-level journal binds H whenever the campaign has one, even
+        # if this unit's closed roster happens to contain only H-free wires.
+        # Reuse the producer template where possible; otherwise take the one
+        # direct receipt the old campaign identity took for this unit.
+        self._campaign_hessian = (
+            None if calibration_source is None else
+            (copy.deepcopy(self._template["calibration"]["hessian"])
+             if self._template["calibration"] is not None else
+             _checkpoint_identity_api().tensor_identity(calibration_source.hessians[self._name])))
+        # Joint AURA needs this separate cache receipt. Campaign pricing only
+        # keeps producer identities, so it must not add a second full CPU hash.
+        self._source_receipt = (_cb_cache_tensor_identity(source_weight)
+                                if retain_source_receipt else None)
         self._guard()
 
     def _calibration_settings(self):
@@ -1748,14 +1767,69 @@ class _BoundCheckpointUnitIdentity:
     def source_receipt(self, source_weight):
         import copy
         self._guard()
-        if source_weight is not self._weight:
-            raise ValueError("source differs from bound checkpoint unit")
+        if source_weight is not self._weight or self._source_receipt is None:
+            raise ValueError("bound checkpoint unit has no source receipt")
         return copy.deepcopy(self._source_receipt)
+
+    def replace_calibration_source(self, calibration_source):
+        """Adopt the post-export resident owner without changing the receipt.
+
+        The reference source authenticates the same resident H objects.  The
+        equality and identity checks make that handoff explicit: a new source,
+        H, or numerical setting cannot silently inherit the old receipt.
+        """
+        if self._calibration is None:
+            # This unit has an H-free closed roster. Its campaign H receipt
+            # was sealed at construction, while derive() never consults an
+            # activation owner for this roster; the later shared reference
+            # owner therefore needs no per-unit rebinding.
+            return
+        if calibration_source is None or calibration_source.hessians.get(self._name) is not self._hessian:
+            raise ValueError("replacement calibration Hessian differs from bound checkpoint unit")
+        old = self._calibration
+        self._calibration = calibration_source
+        try:
+            if self._calibration_settings() != self._settings:
+                raise ValueError("replacement calibration settings differ from bound checkpoint unit")
+            self._guard()
+        except BaseException:
+            self._calibration = old
+            raise
+
+    def campaign_inputs(self):
+        """The unchanged producer source/H fields for the run-level receipt."""
+        import copy
+        self._guard()
+        calibration = self._template["calibration"]
+        return {"source": copy.deepcopy(self._template["source"]),
+                "hessian": copy.deepcopy(self._campaign_hessian)}
+
+    def observed_metadata_bytes(self):
+        """Report CPython reachable metadata after construction; not admission."""
+        import sys
+        # The source maps, tensors, and menu strings pre-date this hold.  This
+        # diagnostic counts only its newly retained graph and is intentionally
+        # not an allocator promise: `getsizeof` is interpreter-specific.
+        borrowed = {id(self._weight), id(self._hessian), id(self._calibration),
+                    id(self._name), *(id(value) for value in self._formats)}
+        seen = set()
+        def size(value):
+            marker = id(value)
+            if marker in seen or marker in borrowed:
+                return 0
+            seen.add(marker)
+            total = sys.getsizeof(value)
+            if isinstance(value, dict):
+                total += sum(size(k) + size(v) for k, v in value.items())
+            elif isinstance(value, (tuple, list, frozenset, set)):
+                total += sum(size(item) for item in value)
+            return total
+        return size(self) + size(self.__dict__)
 
     def close(self):
         self._closed = True
         self._weight = self._hessian = self._calibration = None
-        self._template = self._source_receipt = self._projection = None
+        self._template = self._source_receipt = self._campaign_hessian = self._projection = None
 
     def __enter__(self):
         self._guard()
@@ -1770,11 +1844,49 @@ class _BoundCheckpointUnitIdentity:
 
 
 def bind_checkpoint_unit_identity(anchors, *, source_weight, calibration_source,
-                                  projected_unit, static_scales):
+                                  projected_unit, static_scales,
+                                  retain_source_receipt=True):
     """Bind actual inputs once; accepts no caller-supplied hash or receipt."""
     return _BoundCheckpointUnitIdentity(anchors, source_weight=source_weight,
         calibration_source=calibration_source, projected_unit=projected_unit,
-        static_scales=static_scales)
+        static_scales=static_scales, retain_source_receipt=retain_source_receipt)
+
+
+def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_scales):
+    """Construct the closed producer-format roster once from existing menu refs."""
+    from types import SimpleNamespace
+    from .tessera_formats import parse_tessera_format_name, tessera_wire_recipe
+    from .tessera_render import rung_accepts_hessian
+    anchors = []
+    for entry in menu:
+        family, rung = parse_tessera_format_name(entry.format_name)
+        if family is None:
+            raise RuntimeError(f"campaign menu is not Tessera: {entry.format_name!r}")
+        wire = tessera_wire_recipe(family, rung)
+        anchors.append(SimpleNamespace(
+            qname=name, format_name=entry.format_name, family=family.name,
+            body_rate_q256=rung,
+            hessian_applied=(calibration_source is not None and
+                             rung_accepts_hessian(entry.format_name, wire)),
+            input_global_scale=(static_scales.get(name)
+                                if _format_executes_static_activation_contract(entry.format_name)
+                                else None)))
+    return anchors
+
+
+def _campaign_bound_identities(*, weights, menus, calibration_source,
+                               projected_units, static_scales):
+    """One producer receipt template per priced unit, held through publication."""
+    result = {}
+    for name in sorted(weights):
+        anchors = _campaign_identity_anchor_roster(
+            name, menus[name], calibration_source=calibration_source,
+            static_scales=static_scales)
+        result[name] = bind_checkpoint_unit_identity(
+            anchors, source_weight=weights[name], calibration_source=calibration_source,
+            projected_unit=(projected_units or {}).get(name), static_scales=static_scales,
+            retain_source_receipt=False)
+    return result
 
 
 def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
@@ -4109,6 +4221,10 @@ def _main(argv, *, source_scope) -> int:
                     help="maximum compatible expert anchors in one producer "
                          "batch within this action (1 = scalar). Does not "
                          "change the anchor schedule or PB placement.")
+    ap.add_argument("--reuse-campaign-identity", action="store_true",
+                    help="experimental: retain one producer identity template per priced "
+                         "unit through publication. Default off pending balanced "
+                         "campaign qualification and an admitted metadata contract.")
     ap.add_argument("--publication-overlap-bytes", type=int, default=0,
                     help="stage up to N bytes of already-encoded render/wire "
                          "artifacts on one writer thread so the next batch "
@@ -4758,6 +4874,23 @@ def _main(argv, *, source_scope) -> int:
 
     from .cost_stage_checkpoint import prepare_journal, write_unit
 
+    # The source/H template is deliberately built BEFORE the resume gate: it
+    # is the producer computation that supplies that gate's exact records.
+    # The hold owns metadata only; caller-owned tensors remain in the existing
+    # resident maps.  Register its close before replacement sources are added
+    # to the ExitStack, so publication drains before either owner is released.
+    bound_checkpoint_units = ({
+        } if not args.reuse_campaign_identity else _campaign_bound_identities(
+            weights=weights, menus=menus, calibration_source=calibration_source,
+            projected_units=projected_units, static_scales=static_scales))
+    if bound_checkpoint_units:
+        source_scope.callback(lambda: [unit.close() for unit in bound_checkpoint_units.values()])
+    identity_metadata_observed_bytes = sum(unit.observed_metadata_bytes()
+                                           for unit in bound_checkpoint_units.values())
+    # Observation only until `selected_anchor_resources` receives its
+    # pre-allocation bound.  Do not rewrite an admitted phase after these
+    # objects exist: its planner is the owner of selected-source admission.
+
     # The resume identity, run level: everything a price is a function of,
     # including the static A-side contract (scales + policy) the W4A4 rows
     # are scored under.  A checkpoint from another calibration or policy is
@@ -4773,6 +4906,7 @@ def _main(argv, *, source_scope) -> int:
             for entry in (selection or {}).get("groups", [])
             for name, record in entry.get("stack_samples", {}).items()},
         structure_by_unit=structure_by_unit,
+        **({"bound_units": bound_checkpoint_units} if bound_checkpoint_units else {}),
     )
     journal, identity_sha256, resumed = prepare_journal(
         checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
@@ -4854,7 +4988,8 @@ def _main(argv, *, source_scope) -> int:
             identity = _checkpoint_anchor_identity(
                 anchor, weights=weights, menus=menus,
                 calibration_source=calibration_source, static_scales=static_scales,
-                projected_units=projected_units)
+                projected_units=projected_units,
+                **({"bound_unit": bound_checkpoint_units[name]} if bound_checkpoint_units else {}))
             wire_records[name][anchor.format_name] = _checkpoint_wire_record(
                 anchor, wire_dir, identity, existing=state["wire_records"][anchor.format_name])
             measured.setdefault(name, {}).setdefault(anchor.family, []).append(anchor)
@@ -4934,6 +5069,8 @@ def _main(argv, *, source_scope) -> int:
         # mapping; its per-unit content checks remain at consumption.
         calibration_source = th.activation_source(hessians, hessian_identity,
             reference_path=hessian_capture_path, source_scope=source_scope)
+        for unit in bound_checkpoint_units.values():
+            unit.replace_calibration_source(calibration_source)
         _activation_kwargs_for = activation_kwargs_for(calibration_source)
 
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
@@ -5300,7 +5437,9 @@ def _main(argv, *, source_scope) -> int:
                     ledger.record(anchor, _checkpoint_anchor_identity(
                         anchor, weights=weights, menus=menus,
                         calibration_source=calibration_source, static_scales=static_scales,
-                        projected_units=projected_units))
+                        projected_units=projected_units,
+                        **({"bound_unit": bound_checkpoint_units[anchor.qname]}
+                           if bound_checkpoint_units else {})))
                 completed += len(anchors)
                 # Commit every joined quantum before advancing. The scalar mode
                 # keeps its existing ten-anchor flush cadence.
@@ -5376,6 +5515,15 @@ def _main(argv, *, source_scope) -> int:
             # thread spent blocked on it -- which is the number that says
             # whether the bound was the limit or the disk was.
             "publication_overlap": publication_stats,
+            # An interpreter-specific observation of the opt-in holder's
+            # retained metadata. This is evidence for the future admission
+            # contract, never an admitted bound.
+            "campaign_identity_hold": (
+                None if not bound_checkpoint_units else {
+                    "units": len(bound_checkpoint_units),
+                    "metadata_observed_bytes": identity_metadata_observed_bytes,
+                    "admission": "unqualified-observation-only",
+                }),
             # Units the mode admitted no rung for. Empty on a healthy run;
             # never absent, so a reader never has to guess whether the run
             # was asked the question.

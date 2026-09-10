@@ -100,3 +100,58 @@ def test_bound_unit_refuses_nonfinite_source():
     with pytest.raises(ValueError, match="nonfinite"):
         tc.bind_checkpoint_unit_identity(anchors, source_weight=weight,
             calibration_source=source, projected_unit=projection, static_scales=kwargs["static_scales"])
+
+
+def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_handoff(monkeypatch):
+    """Campaign startup owns one producer source/H receipt per unit."""
+    from tessera import cached_unit
+    tc, name, weight, hessian, source, anchors, projection, kwargs = fixture(projected=True)
+    args = SimpleNamespace(family_restriction=None)
+    common = dict(weights=kwargs["weights"], acts={name: torch.ones(2, 2)},
+        hessians={name: hessian}, menus=kwargs["menus"], args=args,
+        calibration_identity=source.provenance, serving_scope=None,
+        static_scales=kwargs["static_scales"], static_scale_policy="fixture",
+        expert_projection=None)
+    expected = tc._campaign_checkpoint_identity(**common)
+    actual_hash = cached_unit.tensor_identity
+    calls = []
+    def observed(value):
+        calls.append(id(value))
+        return actual_hash(value)
+    monkeypatch.setattr(cached_unit, "tensor_identity", observed)
+    bound = tc._campaign_bound_identities(weights=kwargs["weights"], menus=kwargs["menus"],
+        calibration_source=source, projected_units={name: projection},
+        static_scales=kwargs["static_scales"])
+    actual = tc._campaign_checkpoint_identity(**common, bound_units=bound)
+    assert actual == expected
+    # Exact identity parity is the same-campaign resume/merge compatibility
+    # predicate; source identity is intentionally still a normal identity field.
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    assert canonical_json_sha256(actual, where="bound") == canonical_json_sha256(
+        expected, where="legacy")
+    assert calls.count(id(weight)) == 1
+    assert calls.count(id(hessian)) == 1
+    assert bound[name].observed_metadata_bytes() > 0
+    replacement = tc.th.activation_source({name: hessian}, source.provenance)
+    bound[name].replace_calibration_source(replacement)
+    replacement_kwargs = {**kwargs, "calibration_source": replacement}
+    assert tc._checkpoint_anchor_identity(anchors[0], **replacement_kwargs,
+        bound_unit=bound[name]) == tc._checkpoint_anchor_identity(
+            anchors[0], **replacement_kwargs)
+    bound[name].close()
+
+
+def test_h_free_hold_accepts_later_shared_reference_owner(monkeypatch):
+    tc, name, weight, hessian, source, anchors, _, kwargs = fixture()
+    h_free = [replace(anchor, hessian_applied=False) for anchor in anchors]
+    # This isolates the holder's lifetime branch: real H-free producer wires
+    # have the same `calibration: None` receipt, while grammar applicability is
+    # separately exercised by the producer integration suite.
+    monkeypatch.setattr(tc, "_checkpoint_anchor_identity", lambda *a, **k: {
+        "source": {"sha256": "a" * 64}, "calibration": None, "recipe": {}})
+    bound = tc.bind_checkpoint_unit_identity(h_free, source_weight=weight,
+        calibration_source=source, projected_unit=None,
+        static_scales=kwargs["static_scales"], retain_source_receipt=False)
+    replacement = tc.th.activation_source({name: hessian}, source.provenance)
+    bound.replace_calibration_source(replacement)
+    bound.close()
