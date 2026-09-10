@@ -698,3 +698,16 @@ def test_the_plan_charges_the_staging_bound_where_the_anchors_live(monkeypatch):
             if k != "publication_staging_bytes"} == {
         k: v for k, v in off["phases"]["resident_anchors"].items()
         if k != "publication_staging_bytes"}
+
+
+def test_identity_hold_resource_phase_is_additive_and_recomputes_peak():
+    from prismaquant.autoscale import selected_anchor_resources_with_identity_hold
+    base = {"phases": {"resident_anchors": {"resident": 10}, "export_inputs": {"export": 14}},
+            "memory_bytes": 14}
+    held = selected_anchor_resources_with_identity_hold(
+        base, metadata_bytes=7, planning_scratch_bytes=3)
+    assert held["phases"]["resident_anchors"] == {
+        "resident": 10, "campaign_identity_metadata_bytes": 7,
+        "campaign_identity_planning_scratch_bytes": 3}
+    assert held["memory_bytes"] == 20
+    assert base["phases"]["resident_anchors"] == {"resident": 10}

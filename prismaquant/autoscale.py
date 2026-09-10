@@ -377,6 +377,29 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     return result
 
 
+def selected_anchor_resources_with_identity_hold(resources, *, metadata_bytes,
+                                                planning_scratch_bytes=0):
+    """Add a precomputed identity-hold phase without re-reading source files.
+
+    The campaign derives these bytes from the pinned producer receipt grammar
+    after X/H are resident and before it creates the hold.  Copying the
+    existing plan keeps this resource module as the sole owner of phase peaks.
+    """
+    if type(metadata_bytes) is not int or metadata_bytes < 0:
+        raise ValueError("campaign identity metadata bytes must be a non-negative int")
+    if type(planning_scratch_bytes) is not int or planning_scratch_bytes < 0:
+        raise ValueError("campaign identity planning scratch bytes must be a non-negative int")
+    result = dict(resources)
+    phases = {name: dict(values) for name, values in resources['phases'].items()}
+    phase = dict(phases['resident_anchors'])
+    phase.update(campaign_identity_metadata_bytes=metadata_bytes,
+                 campaign_identity_planning_scratch_bytes=planning_scratch_bytes)
+    phases['resident_anchors'] = phase
+    result['phases'] = phases
+    result['memory_bytes'] = max(sum(values.values()) for values in phases.values())
+    return result
+
+
 def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               cache_slots, prefetch_workers, headroom_gb,
                               anchor_batch_size=1, capture_load_policy=None,

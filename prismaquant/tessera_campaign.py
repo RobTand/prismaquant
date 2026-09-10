@@ -1874,8 +1874,73 @@ def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_s
     return anchors
 
 
+def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
+                                     projected_units, static_scales):
+    """Bound the opt-in holder from receipt topology without reading tensors.
+
+    Tessera's own ``encoding_input_identity`` remains the receipt authority.
+    For planning only, its value digest is replaced by a same-schema record
+    derived from dtype and shape. That preserves every retained metadata
+    allocation while avoiding the producer's DtoH copies. The real hold checks
+    its observed graph against this model before publication.
+    """
+    import copy
+    from types import SimpleNamespace
+    api = _checkpoint_identity_api()
+    original = api.tensor_identity
+
+    def synthetic_identity(tensor):
+        return {"algorithm": "sha256.dtype_shape_contiguous.v1",
+                "dtype": str(tensor.dtype), "shape": list(tensor.shape),
+                "sha256": "0" * 64}
+
+    planned, scratch = {}, 0
+    api.tensor_identity = synthetic_identity
+    try:
+        for name in sorted(weights):
+            anchors = _campaign_identity_anchor_roster(
+                name, menus[name], calibration_source=calibration_source,
+                static_scales=static_scales)
+            representative = max(anchors, key=lambda anchor: bool(anchor.hessian_applied))
+            calibration = calibration_source if representative.hessian_applied else None
+            template = _checkpoint_anchor_identity(
+                representative, weights={name: weights[name]},
+                menus={name: [SimpleNamespace(format_name=entry.format_name)
+                              for entry in menus[name]]},
+                calibration_source=calibration_source, static_scales=static_scales,
+                projected_units={} if (projected_units or {}).get(name) is None
+                else {name: projected_units[name]})
+            model = object.__new__(_BoundCheckpointUnitIdentity)
+            model._closed = False
+            model._name = name
+            model._formats = frozenset(anchor.format_name for anchor in anchors)
+            model._weight = weights[name]
+            model._weight_signature = _bound_tensor_signature(weights[name])
+            model._calibration = calibration
+            model._hessian = None if calibration is None else calibration.hessians[name]
+            model._hessian_signature = (None if model._hessian is None
+                                        else _bound_tensor_signature(model._hessian))
+            model._projection = (projected_units or {}).get(name)
+            model._projection_record = copy.deepcopy(model._projection)
+            model._template = template
+            model._settings = model._calibration_settings()
+            model._campaign_hessian = (
+                None if calibration_source is None else
+                (copy.deepcopy(template["calibration"]["hessian"])
+                 if template["calibration"] is not None else
+                 synthetic_identity(calibration_source.hessians[name])))
+            model._source_receipt = None
+            value = model.observed_metadata_bytes()
+            planned[name] = value
+            scratch = max(scratch, value)
+            del model
+    finally:
+        api.tensor_identity = original
+    return planned, scratch
+
+
 def _campaign_bound_identities(*, weights, menus, calibration_source,
-                               projected_units, static_scales):
+                               projected_units, static_scales, metadata_bounds=None):
     """One producer receipt template per priced unit, held through publication."""
     result = {}
     for name in sorted(weights):
@@ -1886,6 +1951,8 @@ def _campaign_bound_identities(*, weights, menus, calibration_source,
             anchors, source_weight=weights[name], calibration_source=calibration_source,
             projected_unit=(projected_units or {}).get(name), static_scales=static_scales,
             retain_source_receipt=False)
+        if metadata_bounds is not None and result[name].observed_metadata_bytes() > metadata_bounds[name]:
+            raise RuntimeError("campaign identity metadata exceeded its preallocation model")
     return result
 
 
@@ -4879,17 +4946,38 @@ def _main(argv, *, source_scope) -> int:
     # The hold owns metadata only; caller-owned tensors remain in the existing
     # resident maps.  Register its close before replacement sources are added
     # to the ExitStack, so publication drains before either owner is released.
+    identity_metadata_bounds, identity_planning_scratch_bytes = ({}, 0)
+    # An empty menu has no closed producer roster. Preserve the existing
+    # empty-menu refusal path instead of constructing a synthetic holder.
+    reuse_campaign_identity = bool(args.reuse_campaign_identity and all(menus.values()))
+    if reuse_campaign_identity:
+        # No real receipt nor tensor value is read here. This source-free
+        # model is charged as its own transient alongside the retained hold.
+        identity_metadata_bounds, identity_planning_scratch_bytes = \
+            _campaign_identity_metadata_plan(
+                weights=weights, menus=menus, calibration_source=calibration_source,
+                projected_units=projected_units, static_scales=static_scales)
+        identity_metadata_bytes = sum(identity_metadata_bounds.values())
+        if selected_source:
+            from .autoscale import selected_anchor_resources_with_identity_hold
+            selected_resources = selected_anchor_resources_with_identity_hold(
+                selected_resources, metadata_bytes=identity_metadata_bytes,
+                planning_scratch_bytes=identity_planning_scratch_bytes)
+            if selected_guard is not None:
+                if (selected_resources['memory_bytes'] >
+                        selected_guard.cap_bytes - selected_guard.baseline_bytes()):
+                    raise RuntimeError('selected anchor cgroup budget is smaller than campaign identity hold plan')
+                selected_guard.check('before_selected_campaign_identity_bind',
+                    reserve_bytes=identity_metadata_bytes + identity_planning_scratch_bytes)
     bound_checkpoint_units = ({
-        } if not args.reuse_campaign_identity else _campaign_bound_identities(
+        } if not reuse_campaign_identity else _campaign_bound_identities(
             weights=weights, menus=menus, calibration_source=calibration_source,
-            projected_units=projected_units, static_scales=static_scales))
+            projected_units=projected_units, static_scales=static_scales,
+            metadata_bounds=identity_metadata_bounds))
     if bound_checkpoint_units:
         source_scope.callback(lambda: [unit.close() for unit in bound_checkpoint_units.values()])
     identity_metadata_observed_bytes = sum(unit.observed_metadata_bytes()
                                            for unit in bound_checkpoint_units.values())
-    # Observation only until `selected_anchor_resources` receives its
-    # pre-allocation bound.  Do not rewrite an admitted phase after these
-    # objects exist: its planner is the owner of selected-source admission.
 
     # The resume identity, run level: everything a price is a function of,
     # including the static A-side contract (scales + policy) the W4A4 rows
@@ -5522,7 +5610,9 @@ def _main(argv, *, source_scope) -> int:
                 None if not bound_checkpoint_units else {
                     "units": len(bound_checkpoint_units),
                     "metadata_observed_bytes": identity_metadata_observed_bytes,
-                    "admission": "unqualified-observation-only",
+                    "metadata_bound_bytes": sum(identity_metadata_bounds.values()),
+                    "planning_scratch_bytes": identity_planning_scratch_bytes,
+                    "admission": "selected-resource-phase",
                 }),
             # Units the mode admitted no rung for. Empty on a healthy run;
             # never absent, so a reader never has to guess whether the run
