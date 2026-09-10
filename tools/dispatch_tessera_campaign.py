@@ -330,6 +330,12 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
 #: fit attributes to both together.  The sum, 6300 s, is the longest a row can
 #: run having committed nothing -- less than half the 14,400 s that killed
 #: row-0050 and row-0065 while they were committing anchors every 18 s.
+#:
+#: There is no flag to override this, on purpose: the number is a measurement
+#: of one workload and a flag would invite a guess.  A campaign whose rows
+#: measurably behave differently edits its planned manifest -- ``plan`` writes
+#: ``progress_phases`` into every row and ``submit`` reads it back -- or
+#: re-fits this constant against its own terminal records.
 CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
 
 
