@@ -114,7 +114,7 @@ def test_selected_campaign_hashes_only_consumed_shards_and_preserves_identity(
         '--calibration-census', str(census_path), '--calibration-cache', complete['path'],
         '--calibration-cache-sha256', complete['sha256'], '--nsamples', '32',
         '--seqlen', '512', '--layer-stride', '1', '--max-act-rows', '4',
-        '--reuse-campaign-identity']) == campaign.EXIT_EMPTY_MENU
+        '--campaign-identity-bytes', '1048576']) == campaign.EXIT_EMPTY_MENU
     assert copied and torch.equal(copied[0], selected)
     assert identities and all(value == canonical for value in identities)
     assert hashlib.sha256(Path(complete['path']).read_bytes()).hexdigest() == complete['sha256']

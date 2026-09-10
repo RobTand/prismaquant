@@ -653,10 +653,12 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
     monkeypatch.setattr(autoscale, "selected_anchor_resources", selected)
     dispatch._streamed_resource_plan(
         dict(model="/source", campaign_argv=[
-            "--streaming", "--publication-overlap-bytes", "8388608"]),
+            "--streaming", "--publication-overlap-bytes", "8388608",
+            "--campaign-identity-bytes", "536870912"]),
         dict(unit_shapes={"a": [3, 4]}, counts={"a": 9}), ["a"],
         selected_source=True)
     assert seen["publication_overlap_bytes"] == 8388608
+    assert seen["campaign_identity_bytes"] == 536870912
 
     seen.clear()
     dispatch._streamed_resource_plan(
@@ -664,6 +666,7 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
         dict(unit_shapes={"a": [3, 4]}, counts={"a": 9}), ["a"],
         selected_source=True)
     assert seen["publication_overlap_bytes"] == 0
+    assert seen["campaign_identity_bytes"] == 0
 
 
 def test_the_plan_charges_the_staging_bound_where_the_anchors_live(monkeypatch):
@@ -689,25 +692,14 @@ def test_the_plan_charges_the_staging_bound_where_the_anchors_live(monkeypatch):
                   headroom_gb=0)
     off = autoscale.selected_anchor_resources("/source", **kwargs)
     on = autoscale.selected_anchor_resources(
-        "/source", **kwargs, publication_overlap_bytes=8388608)
+        "/source", **kwargs, publication_overlap_bytes=8388608,
+        campaign_identity_bytes=16777216)
     assert off["phases"]["resident_anchors"].get(
         "publication_staging_bytes", 0) == 0
     assert on["phases"]["resident_anchors"]["publication_staging_bytes"] == 8388608
+    assert on["phases"]["resident_anchors"]["campaign_identity_metadata_bytes"] == 16777216
     # Nothing else moved: the term is additive, not a re-sizing.
     assert {k: v for k, v in on["phases"]["resident_anchors"].items()
-            if k != "publication_staging_bytes"} == {
+            if k not in {"publication_staging_bytes", "campaign_identity_metadata_bytes"}} == {
         k: v for k, v in off["phases"]["resident_anchors"].items()
-        if k != "publication_staging_bytes"}
-
-
-def test_identity_hold_resource_phase_is_additive_and_recomputes_peak():
-    from prismaquant.autoscale import selected_anchor_resources_with_identity_hold
-    base = {"phases": {"resident_anchors": {"resident": 10}, "export_inputs": {"export": 14}},
-            "memory_bytes": 14}
-    held = selected_anchor_resources_with_identity_hold(
-        base, metadata_bytes=7, planning_scratch_bytes=3)
-    assert held["phases"]["resident_anchors"] == {
-        "resident": 10, "campaign_identity_metadata_bytes": 7,
-        "campaign_identity_planning_scratch_bytes": 3}
-    assert held["memory_bytes"] == 20
-    assert base["phases"]["resident_anchors"] == {"resident": 10}
+        if k not in {"publication_staging_bytes", "campaign_identity_metadata_bytes"}}

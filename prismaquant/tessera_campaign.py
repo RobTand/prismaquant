@@ -1578,8 +1578,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     # campaign settings remain bound by default.
     #
     # ``publication_overlap_bytes`` chooses which thread performs two writes
-    # whose arguments it does not touch.  ``reuse_campaign_identity`` changes
-    # when the same producer receipt is made and retained. Neither changes the
+    # whose arguments it does not touch. ``campaign_identity_bytes`` reserves
+    # metadata for retaining the same producer receipt. Neither changes the
     # receipt, so binding either would make scheduling wear an identity's clothes.
     #
     # ``units``, ``calibration_census`` and ``census_out`` are locations too,
@@ -1599,7 +1599,7 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "units", "calibration_census", "census_out",
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
-                 "publication_overlap_bytes", "reuse_campaign_identity",
+                 "publication_overlap_bytes", "campaign_identity_bytes",
                  "source_snapshot_policy"):
         settings.pop(name, None)
     return {
@@ -4269,10 +4269,10 @@ def _main(argv, *, source_scope) -> int:
                     help="maximum compatible expert anchors in one producer "
                          "batch within this action (1 = scalar). Does not "
                          "change the anchor schedule or PB placement.")
-    ap.add_argument("--reuse-campaign-identity", action="store_true",
-                    help="experimental: retain one producer identity template per priced "
-                         "unit through publication. Default off pending balanced "
-                         "campaign qualification and an admitted metadata contract.")
+    ap.add_argument("--campaign-identity-bytes", type=int, default=0,
+                    help="experimental closed-roster producer identity hold reservation. "
+                         "0 keeps the feature off; a positive value is charged by "
+                         "selected-source PB admission and runtime refuses a larger plan.")
     ap.add_argument("--publication-overlap-bytes", type=int, default=0,
                     help="stage up to N bytes of already-encoded render/wire "
                          "artifacts on one writer thread so the next batch "
@@ -4390,6 +4390,8 @@ def _main(argv, *, source_scope) -> int:
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if args.campaign_identity_bytes and not selected_source:
+        ap.error('--campaign-identity-bytes requires selected streaming capture reuse')
     if args.source_snapshot_policy != 'whole-layer-v1' and not selected_source:
         ap.error('--source-snapshot-policy requires selected streaming capture reuse')
     if args.capture_load_policy is not None and not (selected_source or (
@@ -4424,6 +4426,8 @@ def _main(argv, *, source_scope) -> int:
         ap.error("--anchor-batch-size must be positive")
     if args.publication_overlap_bytes < 0:
         ap.error("--publication-overlap-bytes cannot be negative")
+    if args.campaign_identity_bytes < 0:
+        ap.error("--campaign-identity-bytes cannot be negative")
     if args.anchor_batch_size > 1:
         from .tessera_render import require_tessera_batch_encoder
         require_tessera_batch_encoder()
@@ -4668,6 +4672,7 @@ def _main(argv, *, source_scope) -> int:
             headroom_gb=args.streaming_cache_headroom_gb,
             anchor_batch_size=args.anchor_batch_size,
             publication_overlap_bytes=args.publication_overlap_bytes,
+            campaign_identity_bytes=args.campaign_identity_bytes,
             source_snapshot_policy=args.source_snapshot_policy,
             **(dict(capture_load_policy=args.capture_load_policy)
                if args.capture_load_policy is not None else {}))
@@ -4930,7 +4935,7 @@ def _main(argv, *, source_scope) -> int:
     identity_metadata_bounds, identity_planning_scratch_bytes = ({}, 0)
     # An empty menu has no closed producer roster. Preserve the existing
     # empty-menu refusal path instead of constructing a synthetic holder.
-    reuse_campaign_identity = bool(args.reuse_campaign_identity and all(menus.values()))
+    reuse_campaign_identity = bool(args.campaign_identity_bytes > 0 and all(menus.values()))
     if reuse_campaign_identity:
         # No real receipt nor tensor value is read here. This source-free
         # model is charged as its own transient alongside the retained hold.
@@ -4940,16 +4945,12 @@ def _main(argv, *, source_scope) -> int:
                 projected_units=projected_units, static_scales=static_scales)
         identity_metadata_bytes = sum(identity_metadata_bounds.values())
         if selected_source:
-            from .autoscale import selected_anchor_resources_with_identity_hold
-            selected_resources = selected_anchor_resources_with_identity_hold(
-                selected_resources, metadata_bytes=identity_metadata_bytes,
-                planning_scratch_bytes=identity_planning_scratch_bytes)
+            reserved_identity_bytes = int(args.campaign_identity_bytes)
+            if identity_metadata_bytes + identity_planning_scratch_bytes > reserved_identity_bytes:
+                raise RuntimeError('campaign identity closed-roster plan exceeds --campaign-identity-bytes')
             if selected_guard is not None:
-                if (selected_resources['memory_bytes'] >
-                        selected_guard.cap_bytes - selected_guard.baseline_bytes()):
-                    raise RuntimeError('selected anchor cgroup budget is smaller than campaign identity hold plan')
                 selected_guard.check('before_selected_campaign_identity_bind',
-                    reserve_bytes=identity_metadata_bytes + identity_planning_scratch_bytes)
+                    reserve_bytes=reserved_identity_bytes)
     bound_checkpoint_units = ({
         } if not reuse_campaign_identity else _campaign_bound_identities(
             weights=weights, menus=menus, calibration_source=calibration_source,

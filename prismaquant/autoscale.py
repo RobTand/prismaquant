@@ -377,34 +377,11 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     return result
 
 
-def selected_anchor_resources_with_identity_hold(resources, *, metadata_bytes,
-                                                planning_scratch_bytes=0):
-    """Add a precomputed identity-hold phase without re-reading source files.
-
-    The campaign derives these bytes from the pinned producer receipt grammar
-    after X/H are resident and before it creates the hold.  Copying the
-    existing plan keeps this resource module as the sole owner of phase peaks.
-    """
-    if type(metadata_bytes) is not int or metadata_bytes < 0:
-        raise ValueError("campaign identity metadata bytes must be a non-negative int")
-    if type(planning_scratch_bytes) is not int or planning_scratch_bytes < 0:
-        raise ValueError("campaign identity planning scratch bytes must be a non-negative int")
-    result = dict(resources)
-    phases = {name: dict(values) for name, values in resources['phases'].items()}
-    phase = dict(phases['resident_anchors'])
-    phase.update(campaign_identity_metadata_bytes=metadata_bytes,
-                 campaign_identity_planning_scratch_bytes=planning_scratch_bytes)
-    phases['resident_anchors'] = phase
-    result['phases'] = phases
-    result['memory_bytes'] = max(sum(values.values()) for values in phases.values())
-    return result
-
-
 def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               cache_slots, prefetch_workers, headroom_gb,
                               anchor_batch_size=1, capture_load_policy=None,
-                              publication_overlap_bytes=0, process_baseline_bytes=0,
-                              source_snapshot_policy='whole-layer-v1'):
+                              publication_overlap_bytes=0, campaign_identity_bytes=0,
+                              process_baseline_bytes=0, source_snapshot_policy='whole-layer-v1'):
     """Bound selected-source preparation separately from resident encoding.
 
     This extends the source loader's header/dtype accounting. No source
@@ -465,6 +442,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         raise ValueError('selected anchors require nonempty units and a positive batch size')
     if source_snapshot_policy not in ('whole-layer-v1', 'selected-tensors-v1'):
         raise ValueError('unknown selected source snapshot policy')
+    if type(campaign_identity_bytes) is not int or campaign_identity_bytes < 0:
+        raise ValueError('campaign identity bytes must be a non-negative int')
     source = streamed_calibration_resources(model_path, unit_shapes=unit_shapes,
         counts=counts, nsamples=1, seqlen=1, max_act_rows=max_act_rows,
         cache_slots=cache_slots, prefetch_workers=prefetch_workers,
@@ -557,7 +536,11 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # oversized job, would both have made this number smaller than what
         # the run can actually hold. A run that does not ask for staging
         # charges nothing.
-        publication_staging_bytes=int(publication_overlap_bytes))
+        publication_staging_bytes=int(publication_overlap_bytes),
+        # An opt-in pre-admitted cap for the campaign's producer-identity
+        # holders. Runtime derives its closed-roster peak before construction
+        # and fails if it exceeds this declared reservation.
+        campaign_identity_metadata_bytes=int(campaign_identity_bytes))
     export_inputs = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
         # tessera_campaign._save_hessian_capture_with_page_release pauses the

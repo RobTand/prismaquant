@@ -4,7 +4,10 @@ As of: 2026-09-10 · `perf/glm-publication-transition-optimization`. Stamps
 follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-10, `perf/glm-publication-transition-optimization`) for
-experimental `--reuse-campaign-identity`. It is off by default. When enabled,
+experimental `--campaign-identity-bytes N`. It is off when `N=0`. A positive
+value is a declared selected-source PB reservation; runtime derives the closed
+roster's conservative metadata peak before construction and refuses if it exceeds
+`N`. When enabled,
 a campaign creates one Tessera producer input-receipt template per priced unit
 before journal admission, then derives each closed-menu anchor receipt from
 that template using Tessera's current `wire_recipe`. The option changes neither
@@ -16,13 +19,13 @@ pre-export owner only after it proves the same resident H objects and producer
 settings. H-free rosters retain no H receipt and use the ordinary run-level H
 check.
 
-For selected-source rows, the shared `selected_anchor_resources` plan receives
-an opt-in `campaign_identity_metadata_bytes` resident-anchors term plus its
-planning scratch term before real holders are created. The term is a documented
-conservative topology bound over one holder/result mapping, signatures,
-producer receipt dictionaries, closed-format references, settings, projection
-serialization and shape/name lengths; it does not read source tensors or
-change the producer authentication API. Each real hold reports an
+For selected-source rows, the dispatcher forwards `N` to the shared
+`selected_anchor_resources` plan as the `campaign_identity_metadata_bytes`
+resident-anchors term before PB admission. The runtime's conservative topology
+bound covers one holder/result mapping, signatures, producer receipt
+dictionaries, closed-format references, settings, projection serialization and
+shape/name lengths; it does not read source tensors or change the producer
+authentication API. Each real hold reports an
 interpreter-specific observed metadata diagnostic and refuses if it exceeds
 its admitted bound. Holder construction failure closes prior holders; normal
 and exceptional exits close them only after the publication drain. Qualification
