@@ -1894,11 +1894,10 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
     lengths, multiplied by the documented CPython object/slot envelope.
     """
     import json
-    settings = ({} if calibration_source is None else
-                calibration_source.config_block())
-    settings.pop("note", None)
-    settings_bytes = len(json.dumps(settings, sort_keys=True,
-                                    separators=(",", ":"), allow_nan=False).encode())
+    # The producer config owner may itself verify H commitments. Planning must
+    # not invoke it before the one real receipt; reserve its bounded JSON
+    # settings envelope in the fixed holder term instead.
+    settings_bytes = 4096 if calibration_source is not None else 0
     planned = {}
     for name in sorted(weights):
         shape_bytes = len(json.dumps(list(weights[name].shape), separators=(",", ":")).encode())
