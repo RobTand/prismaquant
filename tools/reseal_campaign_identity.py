@@ -228,6 +228,9 @@ def load_bundle(path, pins):
             raise Refused(f'{path}: bundle {side} pins {bundle["pins"][side]} differ from the pins file {pins[side]}')
     if not bundle.get('encoder_fixture_id_equal'):
         raise Refused(f'{path}: encoder_fixture_id is not shown equal between the producers')
+    if bundle['pins']['old']['encoder_source_sha256'] != bundle['pins']['new']['encoder_source_sha256'] \
+            and not (bundle.get('fixture_id') or {}).get('result'):
+        raise Refused(f'{path}: the encoder pin moves but the bundle carries no fixture-id arm')
     for arm in bundle['arms']:
         actual = sha256_file(arm['result'])
         if actual != arm['result_sha256']:
@@ -239,12 +242,25 @@ def load_bundle(path, pins):
 
 def assemble_bundle(args):
     pins = load_pins(args.pins)
-    fixture = json.loads(Path(args.fixture_id).read_text())
-    if fixture.get('kind') != 'fixture_id' or not fixture.get('ok'):
-        raise Refused('fixture-id result is not an ok fixture_id arm')
-    seals = fixture['encoder_source_sha256']
-    if set(seals.values()) != {pins['old']['encoder_source_sha256'], pins['new']['encoder_source_sha256']}:
-        raise Refused(f'fixture-id arm compared producers {seals}, not the pins file old/new encoder pins')
+    encoder_moves = pins['old']['encoder_source_sha256'] != pins['new']['encoder_source_sha256']
+    if encoder_moves:
+        if not args.fixture_id:
+            raise Refused('the encoder pin moves; a fixture-id arm result is required (--fixture-id)')
+        fixture = json.loads(Path(args.fixture_id).read_text())
+        if fixture.get('kind') != 'fixture_id' or not fixture.get('ok'):
+            raise Refused('fixture-id result is not an ok fixture_id arm')
+        seals = fixture['encoder_source_sha256']
+        if set(seals.values()) != {pins['old']['encoder_source_sha256'], pins['new']['encoder_source_sha256']}:
+            raise Refused(f'fixture-id arm compared producers {seals}, not the pins file old/new encoder pins')
+        fixture_record = dict(result=str(Path(args.fixture_id).resolve()), result_sha256=sha256_file(args.fixture_id),
+                              ids=fixture['encoder_fixture_ids'], seals=seals,
+                              fixture_id_equal=bool(fixture.get('fixture_id_equal')))
+    else:
+        if args.fixture_id:
+            raise Refused('the encoder pin does not move (old == new); do not pass --fixture-id, the producer is unchanged')
+        # The producer is the one that wrote the rows: its fixture id is the stored one by definition.
+        fixture_record = dict(result=None, result_sha256=None, ids=None, seals={'unchanged': pins['old']['encoder_source_sha256']},
+                              fixture_id_equal=True, encoder_pin_unchanged=True)
     cells, arms, strata = [], [], {}
     for path in args.arm:
         result = json.loads(Path(path).read_text())
@@ -288,15 +304,13 @@ def assemble_bundle(args):
     duplicate_cells = len(cells) - len(unique)
     cells = unique
     ok = not missing and len(cells) >= MIN_CELLS
-    fixture_ids = fixture['encoder_fixture_ids']
     bundle = dict(schema=BUNDLE_SCHEMA, assembled_unix=time.time(), assembled_by=getpass.getuser(), host=platform.node(),
                   pins={'old': pins['old'], 'new': pins['new']}, sources=pins.get('sources'), source_checks=pins['source_checks'],
-                  fixture_id=dict(result=str(Path(args.fixture_id).resolve()), result_sha256=sha256_file(args.fixture_id),
-                                  ids=fixture_ids, seals=seals, fixture_id_equal=bool(fixture.get('fixture_id_equal'))),
-                  encoder_fixture_id_equal=bool(fixture.get('fixture_id_equal')), arms=arms,
+                  fixture_id=fixture_record,
+                  encoder_fixture_id_equal=fixture_record['fixture_id_equal'], arms=arms,
                   pb_actions=list(args.action or []), cells=cells, cell_count=len(cells), duplicate_cells=duplicate_cells,
                   strata={k: {f: sorted(r) for f, r in fam.items()} for k, fam in strata.items()},
-                  strata_missing=missing, min_cells=MIN_CELLS, ok=ok and bool(fixture.get('fixture_id_equal')))
+                  strata_missing=missing, min_cells=MIN_CELLS, ok=ok and fixture_record['fixture_id_equal'])
     write_json(args.out, bundle)
     print(json.dumps(dict(ok=bundle['ok'], cells=len(cells), strata=bundle['strata'], missing=missing, out=str(args.out))))
     return 0 if bundle['ok'] else 1
@@ -453,7 +467,7 @@ def migration_record(pins, bundle, plan, *, operator, run_id, when):
                 old_identity_sha256=plan['old_identity_sha256'], new_identity_sha256=plan['new_identity_sha256'],
                 proof_bundle=bundle['path'], proof_bundle_sha256=bundle['bundle_sha256'],
                 proof_cells=bundle['cell_count'], proof_pb_actions=bundle.get('pb_actions'),
-                encoder_fixture_id=sorted(set(bundle['fixture_id']['ids'].values())),
+                encoder_fixture_id=sorted(set((bundle['fixture_id'].get('ids') or {}).values())) or None,
                 shards=plan['shard_count'], receipt_seals=plan['receipt_seals'], cost_seals=plan['cost_seals'])
 
 
@@ -729,7 +743,7 @@ def main(argv=None):
     p.add_argument('--producer')
     p = sub.add_parser('proof-bundle', help='assemble a proof bundle from the fleet arm results')
     p.add_argument('--pins', required=True)
-    p.add_argument('--fixture-id', required=True)
+    p.add_argument('--fixture-id', help='fixture-id arm result; required iff the encoder pin moves')
     p.add_argument('--arm', action='append', required=True)
     p.add_argument('--action', action='append', help='PB action key of an arm, for the record')
     p.add_argument('--out', required=True)

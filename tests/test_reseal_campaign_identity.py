@@ -78,7 +78,8 @@ def write_pins(path, old=OLD, new=NEW):
 
 def write_bundle(path, old=OLD, new=NEW, ok=True):
     bundle = dict(schema=tool.BUNDLE_SCHEMA, ok=ok, pins=dict(old=old, new=new), encoder_fixture_id_equal=True,
-                  arms=[], fixture_id=dict(ids={'old': FIXTURE, 'new': FIXTURE}), cell_count=24, pb_actions=['k1'])
+                  arms=[], fixture_id=dict(result='synthetic-fixture-id-arm', ids={'old': FIXTURE, 'new': FIXTURE}),
+                  cell_count=24, pb_actions=['k1'])
     path.write_text(json.dumps(bundle))
     return path
 
@@ -223,3 +224,54 @@ def test_hash_definitions_match_the_campaign(tmp_path):
     bad.write_text(json.dumps(dict(schema=tool.PINS_SCHEMA, old=OLD, new=NEW, sources=sources)))
     with pytest.raises(tool.Refused):
         tool.load_pins(bad)
+
+
+def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(832, 960, 1088)):
+    cells = []
+    def cell(qname, family, rate):
+        cells.append(dict(ok=True, byte_identical=True, dloss=0.5, stored_dloss=0.5, qname=qname, family=family,
+                          format_name=f'{family}_R{rate}', body_rate_q256=rate, blob_sha256='e'*64, blob_bytes=10,
+                          encoder_fixture_id=FIXTURE))
+    for rate in routed_rates:
+        for j in range(4):
+            cell(f'layers.0.mlp.experts.{j}.down_proj', 'TESSERA_E4M3_K1', rate)
+    for rate in dense_rates:
+        for family in ('TESSERA_BF16_K1', 'TESSERA_E4M3_K1'):
+            for j in range(2):
+                cell(f'layers.{j}.mlp.gate_proj', family, rate)
+    cell('layers.0.mlp.up_proj', 'TESSERA_E2M1_K2', 896)
+    path.write_text(json.dumps(dict(kind='dense', comparison=dict(
+        kind='comparison', ok=True, old_pins=old, new_pins=new, identity_matches_with_pins_substituted=True, cells=cells))))
+    return path
+
+
+def test_proof_bundle_needs_a_fixture_arm_only_when_the_encoder_pin_moves(tmp_path, capsys):
+    pq_only = dict(NEW, encoder_source_sha256=OLD['encoder_source_sha256'])
+    pins_moving = write_pins(tmp_path/'pins-both.json')
+    pins_pq_only = write_pins(tmp_path/'pins-pq.json', new=pq_only)
+    arm_moving = _arm_result(tmp_path/'arm-both.json', OLD, NEW)
+    arm_pq_only = _arm_result(tmp_path/'arm-pq.json', OLD, pq_only)
+    fixture = tmp_path/'fixture.json'
+    fixture.write_text(json.dumps(dict(kind='fixture_id', ok=True, fixture_id_equal=True,
+                                       encoder_source_sha256={'old': OLD['encoder_source_sha256'], 'new': NEW['encoder_source_sha256']},
+                                       encoder_fixture_ids={'old': FIXTURE, 'new': FIXTURE})))
+    # Encoder moves: the fixture-id arm is mandatory.
+    assert run('proof-bundle', '--pins', pins_moving, '--arm', arm_moving, '--out', tmp_path/'b1.json') == 2
+    assert 'fixture-id arm result is required' in capsys.readouterr().err
+    assert run('proof-bundle', '--pins', pins_moving, '--fixture-id', fixture, '--arm', arm_moving,
+               '--out', tmp_path/'b1.json') == 0
+    assert json.loads((tmp_path/'b1.json').read_text())['ok'] is True
+    # PQ-only step: the producer is unchanged, a fixture-id arm is refused and the bundle still certifies.
+    assert run('proof-bundle', '--pins', pins_pq_only, '--fixture-id', fixture, '--arm', arm_pq_only,
+               '--out', tmp_path/'b2.json') == 2
+    assert 'does not move' in capsys.readouterr().err
+    assert run('proof-bundle', '--pins', pins_pq_only, '--arm', arm_pq_only, '--out', tmp_path/'b2.json') == 0
+    bundle = json.loads((tmp_path/'b2.json').read_text())
+    assert bundle['ok'] and bundle['encoder_fixture_id_equal'] and bundle['fixture_id']['encoder_pin_unchanged']
+    assert bundle['cell_count'] >= tool.MIN_CELLS and not bundle['strata_missing']
+    # And that bundle drives a migration whose record survives an unchanged producer.
+    row = tmp_path/'row'; make_row(row)
+    assert run('migrate', '--pins', pins_pq_only, '--proof', tmp_path/'b2.json', '--row', row) == 0
+    assert run('verify', '--pins', pins_pq_only, '--row', row) == 0
+    loaded = tool.load_bundle(tmp_path/'b2.json', tool.load_pins(pins_pq_only))
+    assert loaded['fixture_id']['ids'] is None
