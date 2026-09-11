@@ -276,9 +276,17 @@ def assemble_bundle(args):
             have = strata.get(kind, {}).get(family, set())
             if not have or not rates <= have:
                 missing.append(f'{kind}:{family}@{sorted(rates) or "any"} (have {sorted(have)})')
-    keys = {(c['qname'], c['format_name']) for c in cells}
-    if len(keys) != len(cells):
-        raise Refused('two arms report the same cell; a bundle counts each cell once')
+    # Two arms may re-encode the same cell (two prefixes of one row start
+    # at the same experts); both are evidence, but a cell is counted once.
+    unique, seen = [], set()
+    for cell in cells:
+        key = (cell['qname'], cell['format_name'])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(cell)
+    duplicate_cells = len(cells) - len(unique)
+    cells = unique
     ok = not missing and len(cells) >= MIN_CELLS
     fixture_ids = fixture['encoder_fixture_ids']
     bundle = dict(schema=BUNDLE_SCHEMA, assembled_unix=time.time(), assembled_by=getpass.getuser(), host=platform.node(),
@@ -286,7 +294,7 @@ def assemble_bundle(args):
                   fixture_id=dict(result=str(Path(args.fixture_id).resolve()), result_sha256=sha256_file(args.fixture_id),
                                   ids=fixture_ids, seals=seals, fixture_id_equal=bool(fixture.get('fixture_id_equal'))),
                   encoder_fixture_id_equal=bool(fixture.get('fixture_id_equal')), arms=arms,
-                  pb_actions=list(args.action or []), cells=cells, cell_count=len(cells),
+                  pb_actions=list(args.action or []), cells=cells, cell_count=len(cells), duplicate_cells=duplicate_cells,
                   strata={k: {f: sorted(r) for f, r in fam.items()} for k, fam in strata.items()},
                   strata_missing=missing, min_cells=MIN_CELLS, ok=ok and bool(fixture.get('fixture_id_equal')))
     write_json(args.out, bundle)
