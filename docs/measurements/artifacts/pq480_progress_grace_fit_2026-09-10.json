@@ -1,0 +1,175 @@
+{
+  "fit": {
+    "max_abs_residual_s": 160.45635778753422,
+    "nonpricing_intercept_s": 836.1036216758985,
+    "s_per_committed_batch": 18.672808072814316
+  },
+  "root_action_records": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-05/root-action-records-current.json",
+  "root_action_records_sha256": "03d6bf9f988ca7f514b37bea7d0e6001b45c44831fa7900b87162c06f5232387",
+  "rows": [
+    {
+      "action_key": "07112bb456a7764cd29d6f1347e18e4819abc43b99119b85ac7fdc4b7fa439cd",
+      "committed_batches": 324,
+      "elapsed_s": 6798.253107786179,
+      "row_id": "row-0045",
+      "terminal_sha256": "5cd53427489684d9f0caf71fa131a46bfb2d5553986d3cf0f2e2113d13067f38"
+    },
+    {
+      "action_key": "57dc5ebec89c958db06f296875355c437aab801ee897045ed6dbab931f59e00e",
+      "committed_batches": 324,
+      "elapsed_s": 6972.428298473358,
+      "row_id": "row-0046",
+      "terminal_sha256": "5a853e82f959aeab5a5e2bf5b683c09f0b1f372437bc81fdb08c33e7f22ece00"
+    },
+    {
+      "action_key": "40f304a06889b04140d194251887423858589283ae4b31b4715918242e687a09",
+      "committed_batches": 324,
+      "elapsed_s": 6865.7722108364105,
+      "row_id": "row-0047",
+      "terminal_sha256": "7cebd120fc538cd9e96dd344e9afe3bf75449c4446c408bc3f7df566c1d0155a"
+    },
+    {
+      "action_key": "395f2c532b8e7d9d0f0e037da6adbebc0457076f61b570e2391c2155741811a1",
+      "committed_batches": 324,
+      "elapsed_s": 6916.049420595169,
+      "row_id": "row-0048",
+      "terminal_sha256": "458e91f091584f03c14f86065a9915a56e882817489578133d98da676b37a489"
+    },
+    {
+      "action_key": "d68dc93df3535df4caa5d0b10e2e5ec27a389d9be0f285c6755b852075c7b264",
+      "committed_batches": 324,
+      "elapsed_s": 6831.945533514023,
+      "row_id": "row-0049",
+      "terminal_sha256": "c625835470ad244303aa492a416de53df8291b4178037673701b44eb6389f48a"
+    },
+    {
+      "action_key": "a554fbe070c6be5e0641f5604960f1d54c26cf6b2958b5020b764c52894d4101",
+      "committed_batches": 324,
+      "elapsed_s": 6823.746243476868,
+      "row_id": "row-0051",
+      "terminal_sha256": "677759f2508a1e3f815245c20a2bcd8bac911ed59b751696764f91df0121cb54"
+    },
+    {
+      "action_key": "7efa07f205e37f0f6b2436f4368c3a819863105d4a05a1e51aff4dc65c9ab729",
+      "committed_batches": 324,
+      "elapsed_s": 6865.4573969841,
+      "row_id": "row-0052",
+      "terminal_sha256": "13ea82e15f0dd0f7fcb05d5b1f8bc22fdd053da41efc52aa292e8e2262e6744e"
+    },
+    {
+      "action_key": "067d15b4f46541d11b2726f17b1fba5e65fa4a20ee0c1c1dd8811c5d0ce69479",
+      "committed_batches": 324,
+      "elapsed_s": 6855.5337789058685,
+      "row_id": "row-0053",
+      "terminal_sha256": "50095537b3834d9df33169ac0a35cdb222b70bbbc29e49ab3e9e305df0fdfb46"
+    },
+    {
+      "action_key": "51b75b8bbc194fc235902b1f7dafae634a192626c94dcf7599512af873f82fd8",
+      "committed_batches": 324,
+      "elapsed_s": 6895.5982892513275,
+      "row_id": "row-0054",
+      "terminal_sha256": "947545b689db74500d5dd9040d03cd4fe57818f777c2b10d332e7ba1f7e636be"
+    },
+    {
+      "action_key": "d6e56eb86aa0fe88e98bbc28956767fc5cf038e32fa5a2f0d60aeaa59bfc5be0",
+      "committed_batches": 127,
+      "elapsed_s": 3152.9787952899933,
+      "row_id": "row-0056",
+      "terminal_sha256": "0cb553a2208356038195ba5b3650c8e4af757b7bb3bda16a7c24856b5eb0eff1"
+    },
+    {
+      "action_key": "7debd25c7f505998170134273da93bd470d4d709e42dda48cb413d2bfe74c308",
+      "committed_batches": 324,
+      "elapsed_s": 6859.284213066101,
+      "row_id": "row-0057",
+      "terminal_sha256": "9031250df47bbdc780d5ecff81f2b46839dfbaec374fc198a4e895a3f67dbdff"
+    },
+    {
+      "action_key": "91a61ce8f577444f84640407702f99a2977be0b4bdf1b0f30489215e6d66d1b4",
+      "committed_batches": 324,
+      "elapsed_s": 6875.033477544785,
+      "row_id": "row-0058",
+      "terminal_sha256": "5c17364175e3fb671b3f33efae0d24e17dc6a337237346529965d84463c02a4e"
+    },
+    {
+      "action_key": "802adbf90236c8078337ee4c836d21df11b83bb362e252dc0512b98a25527467",
+      "committed_batches": 324,
+      "elapsed_s": 6849.5007700920105,
+      "row_id": "row-0059",
+      "terminal_sha256": "356c20c1bda594d9eee9516d2f91ce7c3797972ad784cc4062438c28908b61c1"
+    },
+    {
+      "action_key": "cd9b02eb7f472c54b84e1c886543f8f24c17c13dceb1ea89ec6489347243a453",
+      "committed_batches": 324,
+      "elapsed_s": 6870.30470085144,
+      "row_id": "row-0061",
+      "terminal_sha256": "9231c05ebbcbc2d95cd8e4022596a72b202e7797419b35c677e9eb7f9ccffef5"
+    },
+    {
+      "action_key": "b175b7470f516306834257fd961c330a16c95e3f58cf089a159f9540a45aec54",
+      "committed_batches": 324,
+      "elapsed_s": 6867.248278141022,
+      "row_id": "row-0062",
+      "terminal_sha256": "51bbbe35b40e39b8b37bd1265fb5198b509f866e7c58bf99c9059a089027f97e"
+    },
+    {
+      "action_key": "185a47da7ae83ad375b104a0a00cce11ade61d35eb938ccfb3c2684272fd3d47",
+      "committed_batches": 324,
+      "elapsed_s": 6864.798607349396,
+      "row_id": "row-0066",
+      "terminal_sha256": "29987dc0b02990506f04f22a43ed16049bbeae1a3cc205c88c8a8e516404580a"
+    },
+    {
+      "action_key": "c7b36fa417eb444adda1d41560e0eda6455117f2b7dd3d3cee2d765a801c9410",
+      "committed_batches": 324,
+      "elapsed_s": 6863.208530426025,
+      "row_id": "row-0067",
+      "terminal_sha256": "85530b4fed9bd5dca074028c6444f8d093dc03fe5eaa10f872f45f52bead2917"
+    },
+    {
+      "action_key": "1cf14c035ca089e375923a9a88115b425308452553cc03218972f99b812b0db9",
+      "committed_batches": 324,
+      "elapsed_s": 6941.04490852356,
+      "row_id": "row-0068",
+      "terminal_sha256": "6bea9bdae2eeea4c565961a1cc35786b4b6f3025cd1207da55c06edcd11a8a41"
+    },
+    {
+      "action_key": "82175a1a999fa47bd8232f00633cc36529a0e484db460e1ff5d62413ee9fec15",
+      "committed_batches": 324,
+      "elapsed_s": 6905.880634307861,
+      "row_id": "row-0069",
+      "terminal_sha256": "991d9aeda913a93a331ef8f3b75e00c926d72012b3019aa1b234e3ffcf222205"
+    },
+    {
+      "action_key": "f4e10dee189d9f2ee2c17d88c40648125229c64ed957ee7c1838fdc627d58538",
+      "committed_batches": 257,
+      "elapsed_s": 5795.471654176712,
+      "row_id": "row-0070",
+      "terminal_sha256": "2bac8788742de3c29769365fe53c5a59b5a6c8a617535d61f5dee3e618a8e1da"
+    },
+    {
+      "action_key": "7033672872bb0d4a05367a5c2c054a56821a5eecfaf24ef447f9094b16a91bf0",
+      "committed_batches": 324,
+      "elapsed_s": 6915.469630241394,
+      "row_id": "row-0072",
+      "terminal_sha256": "99656cb3b6ab4270b44fe8569f4f5b783e0b99e8e71a8aedf7ebd1422665d2af"
+    },
+    {
+      "action_key": "30e2a421214c66b22e10a0aba8a00522741a0e0fb3fea04894b62dd0e0319b4a",
+      "committed_batches": 324,
+      "elapsed_s": 6975.5473692417145,
+      "row_id": "row-0074",
+      "terminal_sha256": "b35abc0401e619e6d65d2e80b1ff573f5a1a94de19e9809e55ad32cd0f40618f"
+    },
+    {
+      "action_key": "5aa5b4ab831b305f583d687bafa46cbc283bbbd270d452beb757d951976f78d5",
+      "committed_batches": 324,
+      "elapsed_s": 6889.971876859665,
+      "row_id": "row-0081",
+      "terminal_sha256": "c99b17f8e086b0b50e776833722a95f6ac3fb1a4c721ae8b42a5f5c6620968bd"
+    }
+  ],
+  "schema": "prismaquant.tessera_progress_grace_fit.v1",
+  "selection": "successful rows with final '864 units, 2592 priced rungs'",
+  "terminal_directory": "/mnt/shared/prismabuild-fleet/pb-queue/done"
+}

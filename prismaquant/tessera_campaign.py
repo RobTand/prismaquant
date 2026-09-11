@@ -4757,6 +4757,7 @@ def _main(argv, *, source_scope) -> int:
         return 0
 
     from .cost_stage_checkpoint import prepare_journal, write_unit
+    from .prismabuild_progress import report as report_progress
 
     # The resume identity, run level: everything a price is a function of,
     # including the static A-side contract (scales + policy) the W4A4 rows
@@ -5008,10 +5009,23 @@ def _main(argv, *, source_scope) -> int:
         if not states:
             return
 
+        # The count this reports is every anchor the run holds, not the ones
+        # this flush touched: a resumed row continues from the shards its
+        # journal already carries, and a counter that restarted at zero would
+        # read as a regression to the watchdog and be refused.
+        committed = sum(len(anchors)
+                        for by_format in measured.values()
+                        for anchors in by_format.values())
+
         def write():
             for name, state in states:
                 write_unit(journal, stage="Tessera campaign", qname=name,
                            identity_sha256=identity_sha256, state=state)
+            # After the shards are on disk, never before.  This is what tells
+            # PrismaBuild the row is working rather than merely running, and
+            # it must not be able to say so on behalf of work that has not
+            # landed (PB #480).
+            report_progress("pricing", committed)
 
         ledger.submit_checkpoint(write)
 
@@ -5321,6 +5335,22 @@ def _main(argv, *, source_scope) -> int:
                     "all pending anchors failed; successful anchors are journaled. "
                     "Refusing to repeat unchanged work; retry after resolving the failure.")
 
+        # Finalization is quiet on purpose -- the last drain, the leave-one-out
+        # checks and the cost payload commit nothing the journal counts -- so
+        # the row says it has reached that phase and is bounded by the
+        # finalization allowance its submission declared rather than by the
+        # pricing loop's, which is much shorter.
+        #
+        # The drain below still calls ``flush_checkpoint``, which reports
+        # "pricing" again after this.  Neither outcome shortens the allowance:
+        # an unchanged count is refused as replayed, and a higher one is
+        # accepted while the watchdog keeps finalize's grace, because the
+        # allowance follows the furthest phase entered and never an earlier
+        # name.  What such a record does change is the phase the observation
+        # displays, so a late drain can read "pricing" while finalize governs.
+        report_progress("finalize", sum(
+            len(anchors) for by_format in measured.values()
+            for anchors in by_format.values()))
         publication_stats = None
         if publisher is not None:
             # The last barrier, and where a writer failure nothing else looked at

@@ -14,6 +14,7 @@ import re
 import subprocess
 
 from tools.container_runtime_identity import image_content_sha256
+from prismaquant.prismabuild_progress import PATH_ENV, TOKEN_ENV
 
 
 def validate_container(spec: dict) -> None:
@@ -99,8 +100,38 @@ def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
     return True, "no declaration withheld the device"
 
 
+def progress_environment(spec: dict, environ) -> dict:
+    """The PrismaBuild progress channel this container needs, if any.
+
+    The container is launched with the declared ``env`` and nothing else, so
+    without this the row inside it cannot report advancement, PB sees a silent
+    action and ends it within the startup allowance -- a stall watchdog killing
+    exactly the working rows it was added to save (PB #480).
+
+    Refused rather than dropped when the file's directory is not inside a
+    writable declared mount.  A report written into the container's own
+    ephemeral filesystem is invisible to the worker and indistinguishable from
+    not reporting at all, and failing at launch is far cheaper than failing an
+    hour into a pricing round.
+    """
+
+    path, token = environ.get(PATH_ENV), environ.get(TOKEN_ENV)
+    if not path or not token:
+        return {}
+    directory = PurePosixPath(path).parent
+    for mount in spec["container"].get("mounts", []):
+        target = PurePosixPath(mount["target"])
+        if (directory == target or target in directory.parents) and not mount.get("readonly", False):
+            return {PATH_ENV: str(path), TOKEN_ENV: str(token)}
+    raise RuntimeError(
+        f"the PrismaBuild progress file {path} is not inside any writable "
+        "container mount, so this row could not report the anchors it commits "
+        "and would be ended as a stall; declare a mount covering it")
+
+
 def docker_command(spec: dict, command: list[str], *, cwd: str,
-                   uid: int, gid: int, image_id: str, content_sha256=None, with_gpu=True) -> list[str]:
+                   uid: int, gid: int, image_id: str, content_sha256=None,
+                   with_gpu=True, environ=None) -> list[str]:
     validate_container(spec)
     argv = ["docker", "run", "--rm", *(["--gpus", "all"] if with_gpu else []), "--ipc=host",
             "--user", f"{uid}:{gid}", "--workdir", "/workspace",
@@ -111,7 +142,9 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
         if mount.get("readonly", False):
             value += ",readonly"
         argv += ["--mount", value]
-    for key, value in sorted(spec.get("env", {}).items()):
+    forwarded = {**spec.get("env", {}),
+                 **progress_environment(spec, environ if environ is not None else {})}
+    for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:
         argv += ['--env', 'PRISMAQUANT_CONTAINER_CONTENT_SHA256=' + content_sha256]
@@ -169,7 +202,8 @@ def main(argv=None) -> int:
                       "gpu_attached": with_gpu, "gpu_decision": gpu_reason}), flush=True)
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id,
-                            content_sha256=content_digest, with_gpu=with_gpu)
+                            content_sha256=content_digest, with_gpu=with_gpu,
+                            environ=os.environ)
     os.execvp(docker[0], docker)
     return 1  # exec never returns
 
