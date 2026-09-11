@@ -100,10 +100,10 @@ currency. AURA import requires its own attested measurement path; MSE cannot
 be relabeled as AURA. Interpolate within activation/recipe segments, then
 compare candidates in a common validated downstream quality currency.
 
-Current AURA propagates weight deltas through KL/Gauss–Newton adjoints. Current
 Tessera output-MSE scoring includes the local joint weight/activation residual
-but discards its direction before scalar sensitivity weighting. The proposed
-bridge projects the joint residual through AURA's output cotangent G:
+but discards its direction before scalar sensitivity weighting. The separate
+streamed AURA producer's opt-in `--joint-activation` path projects the complete
+joint residual through AURA's output cotangent G:
 
 ```text
 deltaY = Xhat What.T - X W.T
@@ -112,22 +112,22 @@ a[k] = <G[k], deltaY>
 predicted_loss = 0.5 * mean_k(a[k]**2)
 ```
 
-This must preserve signed cancellation across terms and repeated invocations
-before squaring. The archived signed-operator helper at
-`32f6b03fc063731b927ad33d143cac923c4950e9` contains an efficient equivalent:
-compute `D = G.T @ deltaX` once per activation contract, then add its projections
-against W and deltaW to the existing weight projection. Its archived harvester
-and persistence wiring were unfinished. Reuse requires adapting today's
-activation-scale contracts, completing signed sample persistence, and testing
-fixed-teacher comparisons; enabling that archive is not an implementation.
+That implementation preserves signed cancellation across terms and repeated
+invocations before squaring, persists aligned signed samples, and reuses the
+production weight and activation caches. `tessera_joint_aura` prepares these
+inputs from completed measured campaign anchors. See
+[joint AURA and runtime allocation](joint_aura_runtime_allocation.md) for the
+current implementation and its measurement gates. Its existence does not
+convert this importer's scalar MSE predictions into measured joint prices.
 
-Quality and runtime then form distinct axes. The proposed operator control is
-best quality at an exact byte/device budget while meeting a specified prefill
-latency target, with a separate decode guard. The existing prefill SLO flags
-filter assignments after a bytes/quality search; they do not preserve faster
-same-byte alternatives that search discarded. Candidate reduction and search
-must retain the discrete bytes/quality/runtime frontier. A weighted penalty
-sweep or convex hull cannot represent every nonconvex feasible choice.
+Quality and runtime form distinct axes. With a complete measured runtime table,
+the opt-in allocator preserves faster same-byte alternatives and searches the
+discrete bytes/quality/prefill frontier, with optional decode and device-memory
+limits (`measured_runtime_prices` and `solve_runtime_frontier`). Legacy prefill
+SLO flags alone still filter after bytes/quality search. The frontier requires
+joint quality inputs and complete whole-operator runtime bindings; the scalar
+replay here supplies neither. A weighted penalty sweep or convex hull cannot
+represent every nonconvex feasible choice.
 
 Use measured kernel/workload costs to propose assignments and end-to-end
 serving measurements to qualify them. Activation width, encode time and weight

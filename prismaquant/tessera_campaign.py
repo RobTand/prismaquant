@@ -51,11 +51,11 @@ What this stage does NOT do
 ---------------------------
 It measures ``output_mse`` under the route's activation contract, which is the
 render-cost currency (``COST_MODE=production-render-score``'s
-``--score-field output_mse``).  It is not the AURA adjoint: AURA prices ``dW``
-against a KL-Fisher weight gradient and applies the A side afterwards as a
-calibrated per-family multiplier, and a Tessera family has no such calibration
-yet.  The payload declares its own currency so nothing downstream can mistake
-one for the other.
+``--score-field output_mse``). It is not an AURA price. The separate streamed
+``--joint-activation`` path projects the complete signed weight/activation
+residual through KL cotangents before squaring. This campaign does not perform
+that projection; its payload declares its own currency so downstream code
+cannot mistake output MSE for measured joint AURA.
 """
 from __future__ import annotations
 
