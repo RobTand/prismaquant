@@ -200,8 +200,12 @@ def load_pins(path):
         for key, value in block.items():
             if not (isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value)):
                 raise Refused(f'{path}: {side}.{key} is not a lowercase sha256')
-    if pins['old'] == pins['new']:
-        raise Refused(f'{path}: old and new pins are identical; nothing to migrate')
+    drop = pins.get('drop_settings') or []
+    if not isinstance(drop, list) or any(not (isinstance(k, str) and k) for k in drop) or len(set(drop)) != len(drop):
+        raise Refused(f'{path}: drop_settings must be a list of distinct, non-empty setting names')
+    pins['drop_settings'] = tuple(drop)
+    if pins['old'] == pins['new'] and not drop:
+        raise Refused(f'{path}: old and new pins are identical and no setting is dropped; nothing to migrate')
     pins['source_checks'] = {}
     for name, hasher, sub in (('prismaquant', prismaquant_tree_sha256, 'prismaquant'), ('encoder', encoder_tree_sha256, 'src/tessera')):
         source = (pins.get('sources') or {}).get(name)
@@ -357,10 +361,15 @@ def discover_rows(args):
 
 
 def classify_pins(identity, pins):
+    """'pending' rows carry the old pins and every setting the pins file drops;
+    'migrated' rows carry the new pins and none of them; anything else is foreign."""
     current = {key: identity.get(key) for key in PIN_KEYS}
-    if current == pins['new']:
+    settings = identity.get('settings')
+    drop = tuple(pins.get('drop_settings') or ())
+    present = tuple(k for k in drop if isinstance(settings, dict) and k in settings)
+    if current == pins['new'] and not present:
         return 'migrated', current
-    if current == pins['old']:
+    if current == pins['old'] and present == drop:
         return 'pending', current
     return 'foreign', current
 
@@ -420,15 +429,22 @@ def plan_row(row, pins, *, run_id, audit_states=None):
         plan['migration_records'] = manifest.get('identity_migration', [])
         return plan, None
     if state == 'foreign':
-        raise Refused(f'{row}: pins {current} are neither the old nor the new pins of the pins file')
+        raise Refused(f'{row}: pins {current} with settings {sorted(identity.get("settings") or {})} are neither the old nor the new '
+                      f'(pins, dropped settings {list(pins.get("drop_settings") or ())}) of the pins file')
     encoder_moves = pins['old']['encoder_source_sha256'] != pins['new']['encoder_source_sha256']
     new_identity = json.loads(json.dumps(identity))
     for key in PIN_KEYS:
         new_identity[key] = pins['new'][key]
+    # Settings the campaign no longer binds (scheduling knobs that never touched
+    # a receipt) leave the identity; their values are kept in the migration record.
+    dropped = {k: new_identity['settings'].pop(k) for k in pins.get('drop_settings') or ()}
+    plan['dropped_settings'] = dropped
     new_sha = identity_sha256(new_identity)
     plan['new_identity_sha256'] = new_sha
-    plan['edits'].append(dict(file=str(manifest_path), fields=[f'identity.{k}' for k in PIN_KEYS if pins['old'][k] != pins['new'][k]] + ['identity_sha256', 'identity_migration[+1]'],
-                              before=dict(identity_sha256=old_sha, **current), after=dict(identity_sha256=new_sha, **pins['new'])))
+    plan['edits'].append(dict(file=str(manifest_path), fields=[f'identity.{k}' for k in PIN_KEYS if pins['old'][k] != pins['new'][k]]
+                              + [f'identity.settings.{k}' for k in dropped] + ['identity_sha256', 'identity_migration[+1]'],
+                              before=dict(identity_sha256=old_sha, **current, **({'settings': dropped} if dropped else {})),
+                              after=dict(identity_sha256=new_sha, **pins['new'])))
     shards = []
     for entry in manifest['units']:
         path = parts/entry['file']
@@ -508,6 +524,7 @@ def migration_record(pins, bundle, plan, *, operator, run_id, when):
     return dict(schema=RECORD_SCHEMA, run_id=run_id, migrated_unix=when, operator=operator, host=platform.node(),
                 tool='tools/reseal_campaign_identity.py', tool_commit=tool_commit(),
                 old_pins=dict(pins['old']), new_pins=dict(pins['new']), sources=pins.get('sources'),
+                dropped_settings=dict(plan.get('dropped_settings') or {}),
                 old_identity_sha256=plan['old_identity_sha256'], new_identity_sha256=plan['new_identity_sha256'],
                 proof_bundle=bundle['path'], proof_bundle_sha256=bundle['bundle_sha256'],
                 proof_cells=bundle['cell_count'], proof_pb_actions=bundle.get('pb_actions'),
@@ -546,7 +563,8 @@ def migrate_row(row, plan, work, record, *, keep_previous):
         atomic_write(stage/'cost.pkl', cost_raw_new)
         written += len(cost_raw_new)
     # verify the staged row exactly as a consumer would read it
-    check = verify_row(stage, pins={'new': record['new_pins']}, wire_root=row, wire_bytes=False, expect_record=record)
+    check = verify_row(stage, pins={'new': record['new_pins'], 'drop_settings': tuple(record.get('dropped_settings') or ())},
+                       wire_root=row, wire_bytes=False, expect_record=record)
     if not check['ok']:
         raise Refused(f'{row}: staged row failed verification: {check["failures"][:3]}')
     if work['cost']:
@@ -609,6 +627,9 @@ def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None
     for key in PIN_KEYS:
         if identity.get(key) != pins['new'][key]:
             fail(dict(what='pin', field=key, stored=identity.get(key), expected=pins['new'][key]))
+    for key in pins.get('drop_settings') or ():
+        if key in (identity.get('settings') or {}):
+            fail(dict(what='dropped_setting_still_bound', field=key, stored=identity['settings'][key]))
     records = manifest.get('identity_migration') or []
     if expect_record is not None and (not records or records[-1] != expect_record):
         fail(dict(what='migration_record', detail='manifest lacks the expected identity_migration record'))
@@ -700,7 +721,7 @@ def cmd_dry_run(args):
     audit_states = load_checkpoint_audit(args.checkpoint_audit) if args.checkpoint_audit else None
     rows = discover_rows(args)
     run_id = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    report = dict(mode='dry-run', pins={'old': pins['old'], 'new': pins['new']}, proof=(bundle or {}).get('path'),
+    report = dict(mode='dry-run', pins={'old': pins['old'], 'new': pins['new']}, drop_settings=list(pins['drop_settings']), proof=(bundle or {}).get('path'),
                   checkpoint_audit=args.checkpoint_audit, rows=[])
     for row in rows:
         started = time.time()
@@ -728,7 +749,7 @@ def cmd_migrate(args):
     rows = discover_rows(args)
     run_id = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
     operator = args.operator or getpass.getuser()
-    report = dict(mode='migrate', run_id=run_id, pins={'old': pins['old'], 'new': pins['new']}, proof=bundle['path'],
+    report = dict(mode='migrate', run_id=run_id, pins={'old': pins['old'], 'new': pins['new']}, drop_settings=list(pins['drop_settings']), proof=bundle['path'],
                   proof_bundle_sha256=bundle['bundle_sha256'], checkpoint_audit=args.checkpoint_audit, rows=[])
     for row in rows:
         started = time.time()

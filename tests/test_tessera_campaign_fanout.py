@@ -162,6 +162,52 @@ def test_the_checkpoint_identity_covers_only_the_selected_units(monkeypatch):
     assert left["settings"] == right["settings"] == whole["settings"]
 
 
+def test_streaming_residency_knobs_are_scheduling_not_identity(monkeypatch):
+    """Cache slots, prefetch workers and the free-memory floor change no receipt;
+    the capture policy and the streaming switch do."""
+    import argparse
+    from prismaquant import tessera_campaign as tc
+
+    class Api:
+        @staticmethod
+        def encoder_source_sha256():
+            return "encoder"
+
+        @staticmethod
+        def tensor_identity(tensor):
+            return {"id": tensor}
+
+    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: Api)
+    monkeypatch.setattr(tc.th, "encoder_recipe", lambda: {"recipe": 1})
+    monkeypatch.setattr(
+        "prismaquant.production_weight_cache._production_cache_source_sha256",
+        lambda: "package")
+
+    def identity(**overrides):
+        args = argparse.Namespace(
+            model="m", layer_stride=1, out="o", cache_dir="c", checkpoint="k",
+            deadline_seconds=0.0, units="path", calibration_census=None,
+            census_out=None, seed_checkpoint=None, seed_wire_dir=None,
+            streaming=True, streaming_capture_policy="legacy",
+            streaming_cache_headroom_gb=24.0, streaming_cache_slots=2,
+            streaming_prefetch_workers=1, anchor_batch_size=8)
+        for name, value in overrides.items():
+            setattr(args, name, value)
+        return tc._campaign_checkpoint_identity(
+            weights={"a": "wa"}, acts={"a": None}, hessians={"a": None},
+            menus={"a": []}, args=args, calibration_identity={"text_sha256": "t"},
+            serving_scope=None, static_scales={}, static_scale_policy="policy")
+
+    base = identity()
+    for name in ("streaming_cache_headroom_gb", "streaming_cache_slots",
+                 "streaming_prefetch_workers", "anchor_batch_size"):
+        assert name not in base["settings"]
+    assert identity(streaming_cache_headroom_gb=12.0, streaming_cache_slots=6,
+                    streaming_prefetch_workers=4, anchor_batch_size=32) == base
+    assert identity(streaming_capture_policy="strict") != base
+    assert identity(streaming=False) != base
+
+
 # ---------------------------------------------------------------------------
 # The census
 # ---------------------------------------------------------------------------
