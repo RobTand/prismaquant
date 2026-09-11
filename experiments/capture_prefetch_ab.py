@@ -48,14 +48,46 @@ def proc_status():
 
 
 def nfs_server_address(mount='/mnt/shared'):
-    """The address this box actually reads the capture from."""
-    for line in Path('/proc/mounts').read_text().splitlines():
-        parts = line.split()
-        if len(parts) > 3 and parts[1] == mount and parts[2].startswith('nfs'):
-            found = re.search(r'\baddr=([0-9a-fA-F.:]+)', parts[3])
+    """The address this process actually reads the capture from.
+
+    Read from the mount itself rather than a name: `dl380g10` resolves to
+    `::` on these hosts, which is the local box, and each Spark reaches the
+    server over its own direct link.
+    """
+    for source in ('/proc/mounts', '/proc/self/mountinfo'):
+        text = Path(source).read_text()
+        for line in text.splitlines():
+            if 'nfs' not in line or mount not in line:
+                continue
+            found = re.search(r'\baddr=([0-9a-fA-F.:]+)', line)
             if found:
                 return found.group(1)
-    raise RuntimeError(f'no NFS mount found at {mount}')
+    raise RuntimeError(f'no NFS mount address found for {mount}')
+
+
+def default_gateway():
+    """The host side of a bridge network, where the box's own Netdata lives."""
+    for line in Path('/proc/net/route').read_text().splitlines()[1:]:
+        fields = line.split()
+        if len(fields) > 2 and fields[1] == '00000000':
+            packed = int(fields[2], 16)
+            return '.'.join(str((packed >> shift) & 0xFF) for shift in (0, 8, 16, 24))
+    raise RuntimeError('no default route')
+
+
+def reachable_netdata(candidates):
+    """First candidate whose Netdata answers, with the identity it reports."""
+    errors = []
+    for host in candidates:
+        if not host:
+            continue
+        try:
+            with urllib.request.urlopen(f'http://{host}:19999/api/v1/info', timeout=4) as answer:
+                info = json.loads(answer.read(1024**2))
+            return host, info.get('mirrored_hosts'), errors
+        except Exception as failure:  # noqa: BLE001 - recorded, then the next candidate
+            errors.append(f'{host}: {type(failure).__name__}: {failure}')
+    return None, None, errors
 
 
 def sample_host(host, charts):
@@ -75,9 +107,10 @@ def sample_host(host, charts):
 class Sampler(threading.Thread):
     """Bounded background host evidence for both ends of the transfer."""
 
-    def __init__(self, server, period=2.0, cap=4000):
+    def __init__(self, server, spark, period=2.0, cap=4000):
         super().__init__(daemon=True, name='netdata-sampler')
         self.server = server
+        self.spark = spark
         self.period = period
         self.cap = cap
         self.samples = []
@@ -95,10 +128,13 @@ class Sampler(threading.Thread):
                 self.errors.append('sample cap reached')
                 return
             record = dict(time=time.time(), monotonic=time.monotonic())
-            for key, call in (('spark', lambda: sample_netdata('127.0.0.1')),
-                              ('server', lambda: sample_host(self.server, SERVER_CHARTS))):
+            for key, host, call in (('spark', self.spark, sample_netdata),
+                                    ('server', self.server,
+                                     lambda name: sample_host(name, SERVER_CHARTS))):
+                if host is None:
+                    continue
                 try:
-                    record[key] = call()
+                    record[key] = call(host)
                 except Exception as failure:  # noqa: BLE001 - evidence, not control flow
                     self.errors.append(f'{key}: {type(failure).__name__}: {failure}')
             self.samples.append(record)
@@ -219,6 +255,7 @@ def main():
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--server', default=None)
+    parser.add_argument('--spark', default=None)
     parser.add_argument('--limit', type=int, default=0,
         help='smoke only: load the first N units of the row instead of all of them')
     args = parser.parse_args()
@@ -240,8 +277,23 @@ def main():
     sizes = [path.stat().st_size for path in files]
 
     args.out.mkdir(parents=True, exist_ok=True)
-    server = args.server or nfs_server_address()
-    sampler = Sampler(server)
+    telemetry = {}
+    try:
+        telemetry['nfs_mount_address'] = nfs_server_address()
+    except Exception as failure:  # noqa: BLE001 - recorded; evidence is not the workload
+        telemetry['nfs_mount_address_error'] = f'{type(failure).__name__}: {failure}'
+    try:
+        telemetry['default_gateway'] = default_gateway()
+    except Exception as failure:  # noqa: BLE001 - recorded; evidence is not the workload
+        telemetry['default_gateway_error'] = f'{type(failure).__name__}: {failure}'
+    server, server_hosts, server_errors = reachable_netdata(
+        [args.server, telemetry.get('nfs_mount_address')])
+    spark, spark_hosts, spark_errors = reachable_netdata(
+        [args.spark, '127.0.0.1', telemetry.get('default_gateway')])
+    telemetry.update(server=server, server_netdata_hosts=server_hosts,
+                     server_candidate_errors=server_errors, spark=spark,
+                     spark_netdata_hosts=spark_hosts, spark_candidate_errors=spark_errors)
+    sampler = Sampler(server, spark)
     sampler.start()
     guard = None if not str(args.device).startswith('cuda') else CaptureMemoryGuard(args.device)
     if guard is None:
@@ -268,7 +320,7 @@ def main():
             units=len(names), source_bytes=sum(sizes),
             file_bytes=dict(min=min(sizes), max=max(sizes), mean=sum(sizes)//len(sizes)),
             capture=capture, census=inputs['census_path'], policy=inputs['policy'],
-            row_memory_gb=inputs['memory_gb'], server=server, limit=args.limit,
+            row_memory_gb=inputs['memory_gb'], telemetry=telemetry, limit=args.limit,
             host=os.uname().nodename, torch=torch.__version__,
             environment={key: os.environ.get(key) for key in
                          ('PRISMAQUANT_CAPTURE_READ_THREADS', 'OMP_NUM_THREADS',
