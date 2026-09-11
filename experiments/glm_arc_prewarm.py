@@ -16,7 +16,7 @@ What it does
 ------------
 1. Reads PrismaBuild's ready queue and reproduces its claim order
    (``-priority``, ``-passes``, ``published_unix``; see
-   ``prismabuild/pool.py:2563``), keeping only items that resolve to a row of
+   ``prismabuild/pool.py:2895-2901``), keeping only items that resolve to a row of
    this campaign.
 2. Resolves each action key to a row id from the sealed CAS request's argv
    (``--units .../units/row-XXXX.json``), falling back to a roster file. It
