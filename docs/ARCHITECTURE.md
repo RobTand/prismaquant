@@ -30,6 +30,15 @@ former 1 KiB-per-format retained envelope charged an 864-unit GLM expert row
 interpreter's terms and is still tested against `observed_metadata_bytes` on
 every run. The 864-unit row now fits a 256 MiB reservation.
 
+Anchor batches are emitted unit-major (`_anchor_batches`): the chunks of one
+`(family, shape, dtype, device)` key are ordered by chunk position first and
+rung second, so consecutive batches encode the same expert units at successive
+rungs and the encoder memo -- sized to the batch width by the plan -- reuses
+each unit's block-LDL factorization across its rungs instead of refactorizing
+once per (unit, rung) with every other unit's batches in between
+(PrismaQuant #389). Batch membership, wire bytes, prices and the checkpoint
+identity are unchanged; only the order of encodes moves.
+
 Re-stamped (2026-09-10, `perf/glm-publication-transition-optimization`) for
 experimental `--campaign-identity-bytes N`. It is off when `N=0`. A positive
 value is a declared selected-source PB reservation; runtime derives the closed

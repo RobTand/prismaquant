@@ -696,7 +696,22 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
 
 
 def _anchor_batches(pending, *, weights, expert_members, batch_size):
-    """Bound compatible expert encodes inside this action; never assign hosts."""
+    """Bound compatible expert encodes inside this action; never assign hosts.
+
+    Membership is by ``(family, rung, shape, dtype, device)`` for expert
+    units and by ``(unit, family, rung)`` otherwise, as before.  The ORDER of
+    the batches is unit-major: the batches of one compatible key differ only
+    by rung, and the chunk at one position holds the same members at every
+    rung when the round pended every member at every rate (round one does,
+    per member in rate order), so consecutive batches encode the same units
+    at successive rungs.  The encoder memo is sized to the batch width
+    (``encoder_memo_capacity``), so that order is what lets a unit's block-LDL
+    factorization be reused across its rungs instead of refactorized once per
+    (unit, rung) with 864 batches of other units in between
+    (RobTand/prismaquant#389).  Rung-major emission -- every batch of rung A,
+    then every batch of rung B -- is what the insertion-ordered grouping
+    produced before, and with the memo at the batch width it hit nothing.
+    """
     if batch_size < 1:
         raise ValueError("anchor batch size must be positive")
     if batch_size == 1:
@@ -705,11 +720,24 @@ def _anchor_batches(pending, *, weights, expert_members, batch_size):
     for item in pending:
         name, family, rung = item
         weight = weights[name]
-        key = ((family, rung, tuple(weight.shape), weight.dtype, weight.device)
-               if name in expert_members else (name, family, rung))
-        groups.setdefault(key, []).append(item)
-    return [group[start:start + batch_size] for group in groups.values()
-            for start in range(0, len(group), batch_size)]
+        if name in expert_members:
+            base = (family, tuple(weight.shape), weight.dtype, weight.device)
+            key = (family, rung, *base[1:])
+        else:
+            base = key = (name, family, rung)
+        groups.setdefault(key, (base, []))[1].append(item)
+    # Sort key: the base (the key minus its rung) in first-appearance order,
+    # then the chunk position, then the rung in first-appearance order -- so
+    # chunk 0 of every rung of one base precedes chunk 1 of any of them.
+    base_rank, key_rank, chunks = {}, {}, []
+    for key, (base, group) in groups.items():
+        base_rank.setdefault(base, len(base_rank))
+        key_rank[key] = len(key_rank)
+        for position, start in enumerate(range(0, len(group), batch_size)):
+            chunks.append(((base_rank[base], position, key_rank[key]),
+                           group[start:start + batch_size]))
+    chunks.sort(key=lambda chunk: chunk[0])
+    return [batch for _rank, batch in chunks]
 
 
 # ---------------------------------------------------------------------------
