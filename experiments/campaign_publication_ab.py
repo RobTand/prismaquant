@@ -243,6 +243,31 @@ def instrument(campaign, recorder, projection):
                 cache_info=dict(hits=info.hits, misses=info.misses, maxsize=info.maxsize, currsize=info.currsize)))
 
 
+def profile_settings(plan):
+    """Which anchor calls the observer traces and for how long.
+
+    The default is the 0.25 s LDL window of call 0 the five-arm plan measured.
+    A plan may carry a ``profile`` block -- ``calls`` (zero-based, must include
+    0, at most four), ``window_seconds`` and ``trace_max_bytes`` -- so a later
+    run can trace the head of a STEADY call (index 1 onward) long enough to
+    resolve the early Viterbi chunks to kernel level, which the 0.25 s window
+    could not.  Collection stays CUDA-only: the timed window is Kineto-wide.
+    """
+    settings = dict(profile_calls=[0], trace_max_bytes=512*1024**2, window_seconds=0.25)
+    block = plan.get('profile')
+    if block is None:
+        return settings
+    if not isinstance(block, dict) or set(block) - {'calls', 'window_seconds', 'trace_max_bytes'}:
+        raise ValueError('plan profile block carries calls, window_seconds, trace_max_bytes only')
+    if 'calls' in block:
+        settings['profile_calls'] = [int(i) for i in block['calls']]
+    if 'window_seconds' in block:
+        settings['window_seconds'] = float(block['window_seconds'])
+    if 'trace_max_bytes' in block:
+        settings['trace_max_bytes'] = int(block['trace_max_bytes'])
+    return settings
+
+
 def arm(plan, out, budget, identity=0):
     import torch
     from experiments.campaign_prefix_profile import run_prefix
@@ -257,8 +282,8 @@ def arm(plan, out, budget, identity=0):
     command += arm_flags(budget, identity)
     selected_anchor_command(command)
     recorder = PhaseRecorder()
-    observer = AnchorObserver(out/'profile', profile_calls=[0],
-        trace_max_bytes=512*1024**2, command=command, cuda_only=True, window_seconds=0.25)
+    observer = AnchorObserver(out/'profile', command=command, cuda_only=True,
+                              **profile_settings(plan))
     observer.result['python_sampler']['interval_seconds'] = 0.2
     try:
         with observer, instrument(campaign, recorder, plan['projection']):
