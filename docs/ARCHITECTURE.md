@@ -1,7 +1,23 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-11 · `codex/sparse-rate-20260911`. Stamps
+As of: 2026-09-11 · `codex/prospective-family-transfer-20260911`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-11, `codex/prospective-family-transfer-20260911`) for a
+research-only prospective paired-family transfer evaluator (§4.10).
+`experiments/sparse_rate_family_transfer.py` freezes all named, receipted
+curve-piece plans before their measurements, including separate singleton
+endpoints and a separate E2 terminal.  The E4 seal may read only a complete BF
+source plus two E4 endpoint curves and writes both frozen forms (an affine BF
+fit and rate-linear BF delta); the E2 seal may read only its two endpoints and
+writes a value-linear window prediction.  Neither seal accepts an interior
+curve path.  Later audits recheck protocol, plan, curve and receipt hashes,
+require the complementary interior roster, score unseen interiors only, and
+leave E2's terminal as a measured, unpredicted point.  A metadata-only ledger
+of historically preexposed rates is frozen with the protocol; reports retain
+both all-interior and fresh-only metrics, with an empty subset never passing.
+This is not a production interpolation path, qualification, or measurement
+savings claim.  Gate: `tests/test_sparse_rate_family_transfer.py`.
 
 Re-stamped (2026-09-11, `codex/adaptive-nonmonotone-20260911`) for the
 research-only adaptive nonmonotone policy (§4.10). `AdaptiveAnchoredCurve`

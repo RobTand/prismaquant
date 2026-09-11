@@ -71,7 +71,15 @@ def study_plan(*, require_strict_decrease=True, max_measurements=65):
         "oracle_source_sha256": digest(Path(__file__).with_name("sparse_rate_curve_oracle.py"))}
 
 
-def validate_curve(curve):
+def validate_curve(curve, *, min_points=3):
+    """Validate a receipted measured curve.
+
+    Complete-curve replay retains its historical three-point minimum.  A
+    prospective protocol may deliberately acquire an endpoint as its own
+    one-point curve, so it opts in explicitly with ``min_points=1``.
+    """
+    if type(min_points) is not int or min_points < 1:
+        raise ValueError("min_points must be a positive integer")
     if (curve.get("schema") != CURVE_SCHEMA or curve.get("currency") != CURRENCY
             or curve.get("measurement_kind") != "measured"):
         raise ValueError("complete-curve measurement contract is unsupported")
@@ -96,7 +104,7 @@ def validate_curve(curve):
         if plan.get(key) != curve.get(key):
             raise ValueError(f"curve differs from its pre-measurement plan: {key}")
     rates, values = curve.get("rates"), curve.get("values")
-    if (not isinstance(rates, list) or len(rates) < 3
+    if (not isinstance(rates, list) or len(rates) < min_points
             or any(type(rate) is not int for rate in rates)
             or any(left >= right for left, right in zip(rates, rates[1:]))):
         raise ValueError("curve rates must be a strictly increasing legal roster")
