@@ -223,14 +223,19 @@ def prepare_journal(
                 stored=manifest.get("stage"),
                 expected=str(stage),
             )
-        from prismaquant.production_weight_cache import first_identity_difference
+        # Same digest and same canonical identity (a C-level compare) is the
+        # accepted case, and the common one on a resume; only a difference
+        # pays for the field walk that names where it is.
+        if (manifest.get("identity_sha256") != identity_sha256
+                or manifest.get("identity") != canonical_identity):
+            from prismaquant.production_weight_cache import first_identity_difference
 
-        difference = first_identity_difference(
-            manifest.get("identity"), canonical_identity
-        )
-        if difference is not None:
-            field, stored, expected = difference
-            _mismatch(stage, field=field, stored=stored, expected=expected)
+            difference = first_identity_difference(
+                manifest.get("identity"), canonical_identity
+            )
+            if difference is not None:
+                field, stored, expected = difference
+                _mismatch(stage, field=field, stored=stored, expected=expected)
         if manifest.get("identity_sha256") != identity_sha256:
             _mismatch(
                 stage,

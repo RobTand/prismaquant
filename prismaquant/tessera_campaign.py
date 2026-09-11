@@ -1635,8 +1635,9 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
                  "publication_overlap_bytes", "campaign_identity_bytes",
-                 "source_snapshot_policy", "streaming_cache_slots",
-                 "streaming_prefetch_workers", "streaming_cache_headroom_gb"):
+                 "campaign_identity_threads", "source_snapshot_policy",
+                 "streaming_cache_slots", "streaming_prefetch_workers",
+                 "streaming_cache_headroom_gb"):
         settings.pop(name, None)
     return {
         **({"family_restriction": {"policy": restriction,
@@ -1857,6 +1858,22 @@ class _BoundCheckpointUnitIdentity:
         return {"source": copy.deepcopy(self._template["source"]),
                 "hessian": copy.deepcopy(self._campaign_hessian)}
 
+    def hessian_identity(self, hessian):
+        """The sealed producer H receipt, for exactly the bound tensor object.
+
+        ``None`` for an H-free roster, which retains no H receipt.  Anything
+        but the guarded tensor is refused: the receipt is a digest of that
+        object's bytes and of nothing else, so it may stand in for
+        ``tensor_identity`` only where the caller holds the same object.
+        """
+        import copy
+        self._guard()
+        if self._campaign_hessian is None:
+            return None
+        if hessian is not self._hessian:
+            raise ValueError("bound checkpoint unit holds no H receipt for that tensor")
+        return copy.deepcopy(self._campaign_hessian)
+
     def observed_metadata_bytes(self):
         """Report CPython reachable metadata after construction; not admission."""
         import sys
@@ -1948,6 +1965,74 @@ IDENTITY_ROSTER_TRANSIENT_FORMAT_BYTES = 1024
 IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS = 2
 
 
+def _identity_threads(threads) -> int:
+    """The builder count the identity hold and the resumed-wire verify use."""
+    if type(threads) is not int or threads < 1:
+        raise ValueError("campaign identity threads must be a positive int")
+    return threads
+
+
+def _identity_threads_for_this_process(requested) -> int:
+    """Never more builders than the CPUs this row was admitted with."""
+    import os
+    requested = _identity_threads(requested)
+    try:
+        admitted = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        admitted = os.cpu_count() or 1
+    return max(1, min(requested, admitted))
+
+
+class _SealAhead:
+    """Take the calibration owner's capture seal on a helper thread.
+
+    ``ActivationSource.capture_sha256`` digests every resident H the first
+    time it is read (``_seal``), and that first read used to be the first
+    ``config_block`` inside the identity hold: ~40 GiB of sha256 at the head
+    of an 864-unit expert row, serial, with the GPU idle behind it.  Started
+    the moment the owner exists, the same digest runs under the producer
+    projection and the identity plan instead.  ``wait`` re-raises the helper's
+    failure and MUST precede every other first read of the owner, because
+    ``_seal`` has no lock and two first readers would each digest the
+    population.  The seal is the producer's own, taken by the producer's own
+    method; nothing here reads a tensor or changes what is sealed.
+    """
+
+    def __init__(self, source):
+        import threading
+        import time
+        self._source = source
+        self._error = None
+        self._started = time.monotonic()
+        self.seconds = None
+        self._thread = threading.Thread(target=self._run, name="campaign-seal-ahead",
+                                        daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        import time
+        try:
+            self._source.capture_sha256()
+        except BaseException as error:  # re-raised on the campaign thread
+            self._error = error
+        finally:
+            self.seconds = time.monotonic() - self._started
+
+    def wait(self) -> float:
+        """Join; the seconds the campaign thread spent waiting."""
+        import time
+        started = time.monotonic()
+        self._thread.join()
+        if self._error is not None:
+            error, self._error = self._error, None
+            raise RuntimeError("the calibration owner's capture seal failed ahead of "
+                               "the identity hold") from error
+        return time.monotonic() - started
+
+    def finish(self) -> None:
+        self._thread.join()
+
+
 def _frozenset_table_bytes(entries: int) -> int:
     """The interpreter's own size of a frozenset holding ``entries`` items.
 
@@ -1961,7 +2046,7 @@ def _frozenset_table_bytes(entries: int) -> int:
 
 
 def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
-                                     projected_units, static_scales):
+                                     projected_units, static_scales, threads=1):
     """Conservatively bound holder metadata without producer or tensor mutation.
 
     One unit retains a holder/result mapping, signatures, the producer receipt
@@ -1975,11 +2060,14 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
     no per-format serialization is retained.
 
     The second value is the planning-and-construction transient: the bound
-    map and its largest JSON string, plus the two closed rosters live while
-    holders are built (`IDENTITY_ROSTER_TRANSIENT_*`), which construction
-    materializes once per unit and frees before the next.
+    map and its largest JSON string, plus the closed rosters live while
+    holders are built (`IDENTITY_ROSTER_TRANSIENT_*`): two for one builder
+    (the next unit's roster is built before the previous binding is released)
+    and one more for every further builder ``threads`` adds, each holding
+    the roster of the unit it is binding.
     """
     import json
+    live_rosters = IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS + (_identity_threads(threads) - 1)
     # The producer config owner may itself verify H commitments. Planning must
     # not invoke it before the one real receipt; reserve its bounded JSON
     # settings envelope in the fixed holder term instead.
@@ -2002,32 +2090,128 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
     scratch = (IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES +
                IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES * len(planned) +
                IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER * largest_serialization +
-               IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS * (
+               live_rosters * (
                    IDENTITY_ROSTER_TRANSIENT_FORMAT_BYTES * widest_roster +
                    _frozenset_table_bytes(widest_roster)))
     return planned, scratch
 
 
 def _campaign_bound_identities(*, weights, menus, calibration_source,
-                               projected_units, static_scales, metadata_bounds=None):
-    """One producer receipt template per priced unit, held through publication."""
+                               projected_units, static_scales, metadata_bounds=None,
+                               threads=1):
+    """One producer receipt template per priced unit, held through publication.
+
+    Binding a unit hashes its resident weight and Hessian through the
+    producer's ``encoding_input_identity``; on an 864-unit expert row that is
+    ~55 GiB of sha256 at the head, so with ``threads > 1`` the holders are
+    built on that many workers.  hashlib and the tensor staging release the
+    GIL, each producer receipt is a function of its own unit's tensors and
+    the already-sealed owner, and the mapping is filled in ``sorted(weights)``
+    order whatever the completion order, so every template and the run-level
+    identity derived from them are byte for byte the serial ones
+    (``tests/test_tessera_bound_identity.py``).  The owner MUST be sealed
+    before the workers start: ``ActivationSource._seal`` has no lock, and two
+    first ``config_block`` readers would each digest the population.  With
+    ``threads == 1`` this is the historical serial loop on the calling thread.
+    """
+    threads = _identity_threads(threads)
+    names = sorted(weights)
+
+    def build(name):
+        anchors = _campaign_identity_anchor_roster(
+            name, menus[name], calibration_source=calibration_source,
+            static_scales=static_scales)
+        return bind_checkpoint_unit_identity(
+            anchors, source_weight=weights[name], calibration_source=calibration_source,
+            projected_unit=(projected_units or {}).get(name), static_scales=static_scales,
+            retain_source_receipt=False)
+
+    def admit(name, unit):
+        if metadata_bounds is not None and unit.observed_metadata_bytes() > metadata_bounds[name]:
+            raise RuntimeError("campaign identity metadata exceeded its preallocation bound")
+
     result = {}
+    if threads == 1 or len(names) <= 1:
+        try:
+            for name in names:
+                result[name] = build(name)
+                admit(name, result[name])
+            return result
+        except BaseException:
+            for unit in result.values():
+                unit.close()
+            raise
+
+    from concurrent.futures import ThreadPoolExecutor
+    futures = []
     try:
-        for name in sorted(weights):
-            anchors = _campaign_identity_anchor_roster(
-                name, menus[name], calibration_source=calibration_source,
-                static_scales=static_scales)
-            result[name] = bind_checkpoint_unit_identity(
-                anchors, source_weight=weights[name], calibration_source=calibration_source,
-                projected_unit=(projected_units or {}).get(name), static_scales=static_scales,
-                retain_source_receipt=False)
-            if metadata_bounds is not None and result[name].observed_metadata_bytes() > metadata_bounds[name]:
-                raise RuntimeError("campaign identity metadata exceeded its preallocation bound")
+        with ThreadPoolExecutor(max_workers=min(threads, len(names)),
+                                thread_name_prefix="campaign-identity") as pool:
+            try:
+                futures = [pool.submit(build, name) for name in names]
+                for name, future in zip(names, futures):
+                    result[name] = future.result()
+                    admit(name, result[name])
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
+        if list(result) != names:
+            raise RuntimeError("campaign identity hold was not filled in sorted unit order")
         return result
     except BaseException:
-        for unit in result.values():
-            unit.close()
+        # Every holder any worker finished, whether or not it reached the
+        # result mapping, is closed on the way out.
+        for future in futures:
+            if future.done() and not future.cancelled() and future.exception() is None:
+                future.result().close()
         raise
+
+
+def _bound_hessian_identities(bound_units, hessians):
+    """The hold's sealed per-unit H receipts, for the reference descriptor.
+
+    Each is the ``tensor_identity`` the producer stamped on the unit's
+    template, handed back only for the very tensor object it was taken from;
+    H-free rosters contribute nothing and are digested by the descriptor.
+    """
+    identities = {}
+    for name, unit in bound_units.items():
+        tensor = hessians.get(name)
+        if tensor is None:
+            continue
+        identity = unit.hessian_identity(tensor)
+        if identity is not None:
+            identities[name] = identity
+    return identities
+
+
+def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
+    """Run ``_checkpoint_wire_record`` for every pending resumed row.
+
+    ``pending`` is ``[(anchor, identity, existing), ...]`` in the adopt loop's
+    own order and the records come back in that order; the first failure in
+    that order is what raises, so a refusal names the same row it always
+    did.  Each verification reads one published wire blob and re-digests it
+    through the producer's receipt grammar, which is the whole of a resumed
+    row's head, so the blobs are read and digested on ``threads`` workers.
+    """
+    threads = _identity_threads(threads)
+    if threads == 1 or len(pending) <= 1:
+        return [_checkpoint_wire_record(anchor, wire_dir, identity, existing=existing)
+                for anchor, identity, existing in pending]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(threads, len(pending)),
+                            thread_name_prefix="campaign-wire-verify") as pool:
+        futures = [pool.submit(_checkpoint_wire_record, anchor, wire_dir, identity,
+                               existing=existing)
+                   for anchor, identity, existing in pending]
+        try:
+            return [future.result() for future in futures]
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
 
 
 def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
@@ -4026,7 +4210,7 @@ def _save_hessian_capture_with_page_release(payload, path, *, resource_check=Non
 def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
                         hessian_identity, static_scales, static_scale_policy,
                         release_file_pages=False, resource_check=None,
-                        hessian_reference=None):
+                        hessian_reference=None, hessian_identities=None):
     """Write the exporter's ``--hessian`` and ``--input-scales`` inputs.
 
     ``(hessian_capture_path | None, input_scales_path | None,
@@ -4057,6 +4241,10 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
     Opt-in ``hessian_reference`` writes only a canonical reference JSON with
     the same H content seal and explicit load bounds. The producer verifies
     actual H bytes on consumption; metadata intake does not verify untouched H.
+    ``hessian_identities`` (``{unit: tensor_identity}``) are per-unit H
+    receipts the campaign's identity hold already sealed from these same
+    resident tensors; the descriptor takes them for the units it covers and
+    digests only the rest, so the commitments are not a second full pass.
 
     ``hessians=None`` is the deliberate weights-only campaign: no capture is
     written, matching the ``supplied=false`` stamp the rows carry.
@@ -4075,7 +4263,9 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
             raise RuntimeError('Hessian reference requires resident H and its canonical capture/census/load policy')
         descriptor = capture_store.canonical_hessian_reference_descriptor(
             hessians=hessians, counts=hessian_rows,
-            provenance={**dict(hessian_identity), 'hessian_role':'fit'}, **hessian_reference)
+            provenance={**dict(hessian_identity), 'hessian_role':'fit'},
+            **({} if hessian_identities is None else dict(identities=hessian_identities)),
+            **hessian_reference)
         hessian_capture_path = cache_dir/'hessian_capture.references.json'
         capture_sha256 = capture_store.write_hessian_reference(hessian_capture_path, descriptor)
         if resource_check is not None:
@@ -4423,6 +4613,12 @@ def _main(argv, *, source_scope) -> int:
                     help="experimental closed-roster producer identity hold reservation. "
                          "0 keeps the feature off; a positive value is charged by "
                          "selected-source PB admission and runtime refuses a larger plan.")
+    ap.add_argument("--campaign-identity-threads", type=int, default=1,
+                    help="build the closed-roster producer identity hold on N "
+                         "threads (each hashes one unit's resident weight and "
+                         "Hessian) and verify resumed wire receipts on N threads; "
+                         "the selected-source plan charges N in-flight host copies. "
+                         "1 keeps the serial head. Requires --campaign-identity-bytes.")
     ap.add_argument("--publication-overlap-bytes", type=int, default=0,
                     help="stage up to N bytes of already-encoded render/wire "
                          "artifacts on one writer thread so the next batch "
@@ -4578,6 +4774,10 @@ def _main(argv, *, source_scope) -> int:
         ap.error("--publication-overlap-bytes cannot be negative")
     if args.campaign_identity_bytes < 0:
         ap.error("--campaign-identity-bytes cannot be negative")
+    if args.campaign_identity_threads < 1:
+        ap.error("--campaign-identity-threads must be positive")
+    if args.campaign_identity_threads > 1 and not args.campaign_identity_bytes:
+        ap.error("--campaign-identity-threads requires --campaign-identity-bytes")
     if args.anchor_batch_size > 1:
         from .tessera_render import require_tessera_batch_encoder
         require_tessera_batch_encoder()
@@ -4823,6 +5023,7 @@ def _main(argv, *, source_scope) -> int:
             anchor_batch_size=args.anchor_batch_size,
             publication_overlap_bytes=args.publication_overlap_bytes,
             campaign_identity_bytes=args.campaign_identity_bytes,
+            campaign_identity_threads=args.campaign_identity_threads,
             source_snapshot_policy=args.source_snapshot_policy,
             **(dict(capture_load_policy=args.capture_load_policy)
                if args.capture_load_policy is not None else {}))
@@ -4983,8 +5184,16 @@ def _main(argv, *, source_scope) -> int:
     # campaign's price and the cache's render are one rendering of one draw
     # (principle 8).
     calibration_source = None
+    seal_ahead = None
     if want_h:
         calibration_source = th.activation_source(hessians, hessian_identity)
+        if args.campaign_identity_bytes > 0:
+            # The producer's capture seal, taken now on a helper thread so it
+            # runs under the projection and the identity plan rather than as
+            # the first receipt of the hold.  Joined before the hold and, on
+            # any exit, before the resident tensors go.
+            seal_ahead = _SealAhead(calibration_source)
+            source_scope.callback(seal_ahead.finish)
 
     def activation_kwargs_for(source):
         return _activation_kwargs_memo(source, weights, device,
@@ -5087,13 +5296,19 @@ def _main(argv, *, source_scope) -> int:
     # An empty menu has no closed producer roster. Preserve the existing
     # empty-menu refusal path instead of constructing a synthetic holder.
     reuse_campaign_identity = bool(args.campaign_identity_bytes > 0 and all(menus.values()))
+    identity_threads = 1
+    identity_hold_seconds = seal_wait_seconds = None
     if reuse_campaign_identity:
+        # The plan charges the requested builder count; the row never runs
+        # more builders than the CPUs it was admitted with.
+        identity_threads = _identity_threads_for_this_process(args.campaign_identity_threads)
         # No real receipt nor tensor value is read here. This source-free
         # model is charged as its own transient alongside the retained hold.
         identity_metadata_bounds, identity_planning_scratch_bytes = \
             _campaign_identity_metadata_plan(
                 weights=weights, menus=menus, calibration_source=calibration_source,
-                projected_units=projected_units, static_scales=static_scales)
+                projected_units=projected_units, static_scales=static_scales,
+                threads=args.campaign_identity_threads)
         identity_metadata_bytes = sum(identity_metadata_bounds.values())
         if selected_source:
             reserved_identity_bytes = int(args.campaign_identity_bytes)
@@ -5101,12 +5316,21 @@ def _main(argv, *, source_scope) -> int:
                 raise RuntimeError('campaign identity closed-roster plan exceeds --campaign-identity-bytes')
             if selected_guard is not None:
                 selected_guard.check('before_selected_campaign_identity_bind',
-                    reserve_bytes=reserved_identity_bytes)
+                    reserve_bytes=reserved_identity_bytes + int(
+                        selected_resources['phases']['resident_anchors']
+                        ['campaign_identity_hold_scratch_bytes']))
+        if seal_ahead is not None:
+            # The one first reader of the owner. Every builder below reads a
+            # sealed owner, so none of them digests the population.
+            seal_wait_seconds = seal_ahead.wait()
+    import time as _time
+    identity_hold_started = _time.monotonic()
     bound_checkpoint_units = ({
         } if not reuse_campaign_identity else _campaign_bound_identities(
             weights=weights, menus=menus, calibration_source=calibration_source,
             projected_units=projected_units, static_scales=static_scales,
-            metadata_bounds=identity_metadata_bounds))
+            metadata_bounds=identity_metadata_bounds, threads=identity_threads))
+    identity_hold_seconds = _time.monotonic() - identity_hold_started
     if bound_checkpoint_units:
         source_scope.callback(lambda: [unit.close() for unit in bound_checkpoint_units.values()])
     identity_metadata_observed_bytes = sum(unit.observed_metadata_bytes()
@@ -5115,7 +5339,10 @@ def _main(argv, *, source_scope) -> int:
         print(f"[campaign] campaign identity hold: {len(bound_checkpoint_units)} units, "
               f"observed metadata {identity_metadata_observed_bytes} B, planned bound "
               f"{sum(identity_metadata_bounds.values())} B + scratch "
-              f"{identity_planning_scratch_bytes} B, reserved {args.campaign_identity_bytes} B",
+              f"{identity_planning_scratch_bytes} B, reserved {args.campaign_identity_bytes} B; "
+              f"{identity_threads} threads, {identity_hold_seconds:.1f} s"
+              + ("" if seal_ahead is None else
+                 f"; capture seal ahead {seal_ahead.seconds:.1f} s, waited {seal_wait_seconds:.1f} s"),
               flush=True)
 
     # The resume identity, run level: everything a price is a function of,
@@ -5159,7 +5386,7 @@ def _main(argv, *, source_scope) -> int:
                                   structure_by_unit=structure_by_unit,
                                   rate_band=restricted_rate_band)
 
-    def adopt_state(name: str, state, *, where: str) -> None:
+    def adopt_state(name: str, state, *, where: str, deferred=None) -> None:
         """Verify one unit's stored anchors against this run and take them.
 
         The one path for both a resume of this run's own checkpoint and an
@@ -5184,6 +5411,12 @@ def _main(argv, *, source_scope) -> int:
         under a different menu is refused by ``prepare_journal`` before a row
         is read. Evidence arrives only through ``--seed-checkpoint``, which is
         the path whose whole purpose is to cross that boundary.
+
+        With ``deferred`` (a list), the row's input gates still run here, in
+        order, but its wire receipt is appended as ``(anchor, identity,
+        existing)`` instead of being verified inline; the caller verifies the
+        whole list on worker threads and fills ``wire_records`` in this same
+        order.  Without it, the receipt is verified where it always was.
         """
         if not isinstance(state, dict) \
                 or set(state) - {"unservable"} != {"anchors", "wire_records"} \
@@ -5217,8 +5450,12 @@ def _main(argv, *, source_scope) -> int:
                 calibration_source=calibration_source, static_scales=static_scales,
                 projected_units=projected_units,
                 **({"bound_unit": bound_checkpoint_units[name]} if bound_checkpoint_units else {}))
-            wire_records[name][anchor.format_name] = _checkpoint_wire_record(
-                anchor, wire_dir, identity, existing=state["wire_records"][anchor.format_name])
+            existing = state["wire_records"][anchor.format_name]
+            if deferred is not None:
+                deferred.append((name, anchor, identity, existing))
+            else:
+                wire_records[name][anchor.format_name] = _checkpoint_wire_record(
+                    anchor, wire_dir, identity, existing=existing)
             measured.setdefault(name, {}).setdefault(anchor.family, []).append(anchor)
         if formats != set(state["wire_records"]):
             raise RuntimeError(f"{where} has wire receipts outside its measured anchors: {name}")
@@ -5233,11 +5470,20 @@ def _main(argv, *, source_scope) -> int:
                     "run's menu admits that rung")
             unservable.setdefault(name, {}).setdefault(fmt, record)
 
+    deferred_wire = [] if identity_threads > 1 else None
+    resume_started = _time.monotonic()
     for name, state in resumed.items():
-        adopt_state(name, state, where="checkpoint")
+        adopt_state(name, state, where="checkpoint", deferred=deferred_wire)
+    if deferred_wire:
+        records = _verify_wire_records_on_threads(
+            [(anchor, identity, existing) for _name, anchor, identity, existing in deferred_wire],
+            wire_dir, threads=identity_threads)
+        for (name, anchor, _identity, _existing), record in zip(deferred_wire, records):
+            wire_records[name][anchor.format_name] = record
     if resumed:
         print(f"[campaign] resumed {sum(len(v) for f in measured.values() for v in f.values())} "
-              f"verified anchors from {checkpoint}", flush=True)
+              f"verified anchors from {checkpoint} in {_time.monotonic() - resume_started:.1f} s "
+              f"({identity_threads} threads)", flush=True)
 
     seed_provenance = None
     if args.seed_checkpoint:
@@ -5273,6 +5519,10 @@ def _main(argv, *, source_scope) -> int:
         phase = selected_resources['phases']['export_inputs']
         selected_guard.check('before_selected_export_input_write', reserve_bytes=
             phase['export_input_page_window_bytes']+phase['serialization_scratch_bytes'])
+    if seal_ahead is not None:
+        # Already joined before the hold; here for the empty-menu path, so no
+        # helper is digesting resident H while the encode loop runs.
+        seal_ahead.wait()
     hessian_capture_path, input_scales_path, capture_sha256 = write_export_inputs(
         cache_dir,
         hessians=hessians if want_h else None,
@@ -5281,7 +5531,11 @@ def _main(argv, *, source_scope) -> int:
         static_scales=static_scales,
         static_scale_policy=static_scale_policy,
         **(dict(hessian_reference=dict(canonical_capture=calibration_cache,
-                census_path=args.calibration_census,load_policy=args.export_hessian_reference_policy))
+                census_path=args.calibration_census,load_policy=args.export_hessian_reference_policy),
+                # The H commitments are the receipts the hold sealed from these
+                # same resident tensors; only H-free rosters are digested here.
+                **({} if not bound_checkpoint_units or not want_h else dict(
+                    hessian_identities=_bound_hessian_identities(bound_checkpoint_units, hessians))))
            if args.export_hessian_reference_policy is not None else {}),
         **(dict(release_file_pages=True,
                 resource_check=None if selected_guard is None else selected_guard.check)

@@ -698,11 +698,17 @@ def test_the_plan_charges_the_staging_bound_where_the_anchors_live(monkeypatch):
         "publication_staging_bytes", 0) == 0
     assert on["phases"]["resident_anchors"]["publication_staging_bytes"] == 8388608
     assert on["phases"]["resident_anchors"]["campaign_identity_metadata_bytes"] == 16777216
-    # Nothing else moved: the term is additive, not a re-sizing.
+    # The hold's own in-flight host copies: one builder by default, and
+    # nothing at all while the hold is off.
+    assert off["phases"]["resident_anchors"]["campaign_identity_hold_scratch_bytes"] == 0
+    assert on["phases"]["resident_anchors"]["campaign_identity_hold_scratch_bytes"] == (
+        2*(4**2*4) + 2*(3*4*4))
+    # Nothing else moved: the terms are additive, not a re-sizing.
+    moved = {"publication_staging_bytes", "campaign_identity_metadata_bytes",
+             "campaign_identity_hold_scratch_bytes"}
     assert {k: v for k, v in on["phases"]["resident_anchors"].items()
-            if k not in {"publication_staging_bytes", "campaign_identity_metadata_bytes"}} == {
-        k: v for k, v in off["phases"]["resident_anchors"].items()
-        if k not in {"publication_staging_bytes", "campaign_identity_metadata_bytes"}}
+            if k not in moved} == {
+        k: v for k, v in off["phases"]["resident_anchors"].items() if k not in moved}
 
 
 # ---------------------------------------------------------------------------

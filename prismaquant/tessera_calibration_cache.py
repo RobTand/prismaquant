@@ -795,8 +795,15 @@ def write_hessian_reference(path, descriptor):
 
 
 def canonical_hessian_reference_descriptor(*, hessians, counts, provenance,
-        canonical_capture, census_path, load_policy):
-    """Commit resident row H to the original capture without copying its bytes."""
+        canonical_capture, census_path, load_policy, identities=None):
+    """Commit resident row H to the original capture without copying its bytes.
+
+    ``identities`` (``{unit: tensor_identity}``) are receipts a caller already
+    sealed from these same resident tensors (the campaign identity hold);
+    they are taken as they are, with their dtype/shape checked against the
+    tensor, and only the units without one are digested here.  Every unit
+    named must be a resident H of this descriptor.
+    """
     try:
         from tessera.cached_unit import tensor_identity
         from tessera.hessian_capture import REFERENCE_SCHEMA, capture_sha256_from_units
@@ -809,7 +816,24 @@ def canonical_hessian_reference_descriptor(*, hessians, counts, provenance,
     census_digest = sha256(census_path)
     if census_digest != manifest['identity']['census_sha256']:
         raise RuntimeError('Hessian reference census differs from the complete capture')
-    identities = {name:tensor_identity(value) for name,value in hessians.items() if value is not None}
+    sealed = {} if identities is None else dict(identities)
+    resident = {name for name, value in hessians.items() if value is not None}
+    if set(sealed) - resident:
+        raise RuntimeError('Hessian reference identities name units without resident H: '
+                           + ', '.join(sorted(set(sealed) - resident)))
+    identities = {}
+    for name, value in hessians.items():
+        if value is None:
+            continue
+        known = sealed.get(name)
+        if known is None:
+            identities[name] = tensor_identity(value)
+            continue
+        if (not isinstance(known, dict) or set(known) != {'algorithm','dtype','shape','sha256'}
+                or known['dtype'] != str(value.dtype) or list(known['shape']) != list(value.shape)
+                or not isinstance(known['sha256'], str) or len(known['sha256']) != 64):
+            raise RuntimeError(f'Hessian reference identity for {name} does not describe its resident H')
+        identities[name] = dict(known, shape=list(known['shape']))
     digest = capture_sha256_from_units(provenance, {n:v['sha256'] for n,v in identities.items()})
     return dict(schema=REFERENCE_SCHEMA,
         canonical_capture=dict(path=str(Path(canonical_capture['path']).resolve()),

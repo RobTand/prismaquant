@@ -1,9 +1,36 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-10 · `claude/integrate-glm-perf-into-main` (the campaign
-execution contract of `claude/480-campaign-progress` and the GLM head/boundary
-performance line of `perf/glm-boundary-pipeline`, merged). Stamps follow,
-newest first, each recording its own branch and date.
+As of: 2026-09-11 · `claude/row-head-parallel`. Stamps
+follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-11, `claude/row-head-parallel`) for the **row head on
+threads** (§4.10). With `--campaign-identity-bytes M` set,
+`--campaign-identity-threads N` (default 1, the serial head) builds the
+closed-roster identity hold on N workers -- each hashes one unit's resident
+weight and Hessian through the producer's `encoding_input_identity`, and the
+mapping is filled in sorted unit order whatever the completion order, so every
+template and the run-level identity are byte for byte the serial ones -- and
+verifies a resumed journal's wire receipts on the same N workers in adopt
+order, the first refusal in that order being the one raised. The calibration
+owner's capture seal (`ActivationSource.capture_sha256`, ~40 GiB of sha256 on
+an 864-unit GLM expert row) is taken on a helper thread the moment the owner
+exists, under the producer projection and the identity plan, and joined before
+the hold: the seal is the producer's own, and the owner is sealed exactly once
+because that join precedes every other first read. The H commitments the export
+inputs write (`canonical_hessian_reference_descriptor`) are the per-unit
+receipts the hold sealed from the same resident tensor objects, handed back
+only for those objects (`_BoundCheckpointUnitIdentity.hessian_identity`), so
+they are no longer a second full digest; `prepare_journal` compares the
+manifest's digest and canonical identity before walking the identity for a
+field name. The selected-source plan charges N in-flight host copies as
+`campaign_identity_hold_scratch_bytes` in the resident-anchors phase (0 with
+the hold off), the dispatcher forwards N to it, and the row never runs more
+builders than the CPUs it was admitted with. The thread count is an execution
+knob, excluded from checkpoint identity like the identity reservation. Outputs
+are unchanged byte for byte (gate: `tests/test_tessera_row_head_parallel.py`).
+Before, on GB10 row-0079 (sparky, serial, 10 admitted CPUs): capture prefetch
+132 s, producer projection 28 s, identity hold 102 s, H commitments 38 s; the
+after-figures are recorded on the PR that landed this stamp.
 
 Re-stamped (2026-09-10, `claude/480-campaign-progress`) for the campaign
 execution contract. `dispatch_tessera_campaign.py plan` no longer seals a
@@ -35,6 +62,7 @@ forward's expansion into streaming after Transformers 5.17 removed it from
 the rotary module. Mask and decoder-layer positions remain unchanged; other
 profiles pass rotary positions through. Gates: real Qwen hybrid integration
 and the existing rotary/mask tests. See #477.
+
 Re-stamped (2026-09-10, `perf/glm-boundary-pipeline`) for the **batch-boundary
 pipeline** (§4.10): with `--publication-overlap-bytes N` and
 `--campaign-identity-bytes M` both set, every post-encode step of a batch that

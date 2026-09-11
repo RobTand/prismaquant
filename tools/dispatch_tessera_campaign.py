@@ -261,6 +261,7 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
             # campaign it is not about to run.
             publication_overlap_bytes=argument('--publication-overlap-bytes', 0),
             campaign_identity_bytes=argument('--campaign-identity-bytes', 0),
+            campaign_identity_threads=argument('--campaign-identity-threads', 1),
             **(dict(capture_load_policy=argument('--capture-load-policy', None, json.loads))
                if '--capture-load-policy' in argv else {}))
     return streamed_calibration_resources(spec['model'], **options,

@@ -381,6 +381,7 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               cache_slots, prefetch_workers, headroom_gb,
                               anchor_batch_size=1, capture_load_policy=None,
                               publication_overlap_bytes=0, campaign_identity_bytes=0,
+                              campaign_identity_threads=1,
                               process_baseline_bytes=0, source_snapshot_policy='whole-layer-v1'):
     """Bound selected-source preparation separately from resident encoding.
 
@@ -444,6 +445,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         raise ValueError('unknown selected source snapshot policy')
     if type(campaign_identity_bytes) is not int or campaign_identity_bytes < 0:
         raise ValueError('campaign identity bytes must be a non-negative int')
+    if type(campaign_identity_threads) is not int or campaign_identity_threads < 1:
+        raise ValueError('campaign identity threads must be a positive int')
     source = streamed_calibration_resources(model_path, unit_shapes=unit_shapes,
         counts=counts, nsamples=1, seqlen=1, max_act_rows=max_act_rows,
         cache_slots=cache_slots, prefetch_workers=prefetch_workers,
@@ -540,7 +543,21 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # An opt-in pre-admitted cap for the campaign's producer-identity
         # holders. Runtime derives its closed-roster peak before construction
         # and fails if it exceeds this declared reservation.
-        campaign_identity_metadata_bytes=int(campaign_identity_bytes))
+        campaign_identity_metadata_bytes=int(campaign_identity_bytes),
+        # The hold's in-flight host copies when it is built on N threads
+        # (--campaign-identity-threads).  Each builder stages, for its one
+        # unit, the CPU FP32 copy of H and that copy's bytes object -- the
+        # first of the two sequential stages factorization_scratch_bytes
+        # describes for one unit -- and the same two for the weight, bounded
+        # by the FP32 widest_weight.  The capture seal taken ahead on its own
+        # thread stages one such H pair under the projection and is joined
+        # before the hold starts, so N pairs bound both.  The resumed-wire
+        # verification runs the same N workers after the hold, each holding
+        # one published wire blob, smaller than a weight pair.  Zero when the
+        # hold is off: the serial head is charged as it always was.
+        campaign_identity_hold_scratch_bytes=(
+            0 if campaign_identity_bytes == 0
+            else int(campaign_identity_threads)*(2*widest_h+2*widest_weight)))
     export_inputs = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
         # tessera_campaign._save_hessian_capture_with_page_release pauses the
