@@ -79,17 +79,20 @@ def test_the_hold_on_threads_is_byte_identical_to_the_serial_hold(monkeypatch):
 
     monkeypatch.setattr(cached_unit, "tensor_identity", observed)
     threaded = tc._campaign_bound_identities(**kwargs, threads=3)
+    # One weight receipt and one H receipt per unit, every one on a builder
+    # thread; the sealed owner is not digested again by anyone.  (The
+    # run-level identity below hashes the scoring rows too, so the hold's own
+    # calls are read off before it runs.)
+    held_hashes = list(hashed)
+    assert sorted(value for value, _ in held_hashes) == sorted(
+        [id(weights[name]) for name in names] + [id(hessians[name]) for name in names])
+    assert {thread for _, thread in held_hashes} <= {f"campaign-identity_{i}" for i in range(3)}
     assert list(threaded) == sorted(names)
     assert {name: unit.campaign_inputs() for name, unit in threaded.items()} == expected_inputs
     assert anchor_templates(tc, names, weights, source, kwargs, threaded) == expected_templates
     actual_identity = run_level_identity(tc, names, weights, hessians, source, kwargs, threaded)
     assert canonical_json_sha256(actual_identity, where="threaded") == canonical_json_sha256(
         expected_identity, where="serial")
-    # One weight receipt and one H receipt per unit, every one on a builder
-    # thread; the sealed owner is not digested again by anyone.
-    assert sorted(value for value, _ in hashed) == sorted(
-        [id(weights[name]) for name in names] + [id(hessians[name]) for name in names])
-    assert {thread for _, thread in hashed} <= {f"campaign-identity_{i}" for i in range(3)}
     for unit in threaded.values():
         unit.close()
 
