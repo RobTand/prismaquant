@@ -23,7 +23,41 @@ from experiments.campaign_batch_prefix_ab import prefix_state
 from experiments.selected_snapshot_scope_ab import digest, write
 
 
-def prepare(spec_path, workspace, row_id, out):
+SCHEMA_V1 = 'prismaquant.campaign_publication_ab.v1'
+SCHEMA_V2 = 'prismaquant.campaign_publication_ab.v2'
+OVERLAP_BUDGET = 256*1024**2
+
+
+def arm_flags(overlap, identity):
+    """The campaign flags one arm adds to the original synchronous recipe."""
+    flags = ['--publication-overlap-bytes', str(int(overlap))]
+    if int(identity) > 0:
+        flags += ['--campaign-identity-bytes', str(int(identity))]
+    return flags
+
+
+def plan_order(plan):
+    """Every arm as an ``(overlap_bytes, identity_bytes)`` pair, v1 included."""
+    if plan['schema'] == SCHEMA_V1:
+        return [(int(budget), 0) for budget in plan['order']]
+    if plan['schema'] != SCHEMA_V2:
+        raise ValueError('unknown publication comparison schema')
+    order = [tuple(int(v) for v in pair) for pair in plan['order']]
+    if any(len(pair) != 2 or min(pair) < 0 for pair in order):
+        raise ValueError('a v2 arm is an (overlap_bytes, identity_bytes) pair')
+    return order
+
+
+def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0):
+    """Write the plan.  ``identity_bytes`` > 0 adds the pipelined arms.
+
+    v1 order was ``[0, B, B, 0]`` (synchronous, overlap, overlap,
+    synchronous).  With an identity reservation the order is
+    ``[(0,0), (B,0), (B,I), (B,I), (B,0)]``: the synchronous parity arm, the
+    overlap-only baseline, the pipelined arm twice, and the baseline again so
+    the box's drift across the run brackets both.  Memory is computed for
+    each distinct pair through the same dispatcher plan a row is admitted on.
+    """
     from tools.dispatch_tessera_campaign import load_spec, _streamed_resource_plan
     spec = load_spec(spec_path)
     workspace, out = Path(workspace), Path(out)
@@ -38,11 +72,16 @@ def prepare(spec_path, workspace, row_id, out):
     if '--publication-overlap-bytes' in command or '--seed-checkpoint' in command:
         raise ValueError('comparison requires the original fresh synchronous recipe')
     resources = {}
-    budget = 256*1024**2
-    for value in (0, budget):
+    budget = OVERLAP_BUDGET
+    identity = int(identity_bytes)
+    if identity < 0:
+        raise ValueError('identity bytes cannot be negative')
+    order = ([(0, 0), (budget, 0), (budget, identity), (budget, identity), (budget, 0)]
+             if identity else [(0, 0), (budget, 0), (budget, 0), (0, 0)])
+    for pair in sorted(set(order)):
         selected = copy.deepcopy(spec)
-        selected['campaign_argv'] += ['--publication-overlap-bytes', str(value)]
-        resources[str(value)] = _streamed_resource_plan(selected, census, row['members'], selected_source=True)
+        selected['campaign_argv'] += arm_flags(*pair)
+        resources['%d:%d' % pair] = _streamed_resource_plan(selected, census, row['members'], selected_source=True)
     # Existing measured process baseline plus a bounded CUDA trace and its
     # decoded profiler objects. This allowance is separate from staged bytes.
     workload_memory = math.ceil((max(r['memory_bytes'] for r in resources.values())+
@@ -53,17 +92,21 @@ def prepare(spec_path, workspace, row_id, out):
     inputs = [Path(spec_path), workspace/'plan.json', Path(plan['manifest']),
         Path(plan['census']), Path(row['units']),
         Path(command[command.index('--calibration-cache')+1])]
-    value = dict(schema='prismaquant.campaign_publication_ab.v1', command=command,
+    value = dict(schema=SCHEMA_V2, command=command,
         input_sha256={str(path): digest(path) for path in inputs}, resources=resources,
         row_id=row_id, groups=row['groups'], expected_source_units=864,
-        limit_anchors=64, projection='gate_up', order=[0, budget, budget, 0],
+        limit_anchors=64, projection='gate_up', order=[list(pair) for pair in order],
         environment=spec['env'], container=spec['container'],
         requested_cpus=spec['cpus'], requested_memory_gib=memory, workload_memory_gib=workload_memory,
         out=str(out/'native'), profiler_allowance_gib=2)
     out.mkdir(parents=True, exist_ok=True)
     write(out/'plan.json', value)
     print(json.dumps(dict(plan=str(out/'plan.json'), sha256=digest(out/'plan.json'),
-        memory_gib=memory, publication_staging_bytes={k:v['phases']['resident_anchors']['publication_staging_bytes']
+        memory_gib=memory, order=order,
+        resident_anchors_bytes={k: sum(v['phases']['resident_anchors'].values()) for k, v in resources.items()},
+        publication_staging_bytes={k:v['phases']['resident_anchors']['publication_staging_bytes']
+        for k,v in resources.items()},
+        campaign_identity_metadata_bytes={k:v['phases']['resident_anchors'].get('campaign_identity_metadata_bytes', 0)
         for k,v in resources.items()})), flush=True)
 
 
@@ -118,29 +161,73 @@ class PhaseRecorder:
 @contextmanager
 def instrument(campaign, recorder, projection):
     from prismaquant import production_weight_cache, perturbed_x_cache, cost_stage_checkpoint
+    from prismaquant.tessera_publication import BoundedPublisher
     targets = [
-        (campaign, name) for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record', '_finish_anchor')
+        (campaign, name) for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record', '_finish_anchor',
+                                      '_campaign_bound_identities', '_adopt_seed_checkpoint')
     ] + [
+        # The per-anchor derivation off a sealed template.  Its thread name
+        # in the record is the evidence of where the post-work ran.
+        (campaign._BoundCheckpointUnitIdentity, 'derive'),
         (production_weight_cache, '_store_rendered_weight_entry'),
         (production_weight_cache, '_canonical_rendered_weight_tensor'),
         (production_weight_cache, '_local_forward_render_score'),
         (perturbed_x_cache, 'release_activation_cache_file_pages'),
         (cost_stage_checkpoint, 'write_unit'),
     ]
+    from prismaquant import tessera_hessian
+    targets.append((tessera_hessian, 'encoder_kwargs'))
     originals = [(owner, name, getattr(owner, name)) for owner, name in targets]
     batches = campaign._anchor_batches
+    close = BoundedPublisher.close
+    memo = campaign._activation_kwargs_memo
+    memos = []
+
+    def memo_with_record(*a, **kw):
+        # The encoder memo (RobTand/prismaquant#389): its hit/miss counts are
+        # read at the end of the arm, so the profile carries the memo policy's
+        # measured effect and not only the factorization spans.
+        built = memo(*a, **kw)
+        memos.append(built)
+        return built
+
+    def close_with_stats(self):
+        # The prefix ends by exception, before the campaign would stamp the
+        # publisher's counters into provenance; take them at the close the
+        # unwind always performs.  ``submit_blocked_seconds`` is how long the
+        # encode thread waited on the byte budget, which is the writer
+        # backpressuring the encode, and it has to be reported if nonzero.
+        try:
+            stats = self.stats()
+        except Exception as error:  # pragma: no cover - diagnostic only
+            stats = dict(error=repr(error))
+        recorder.records.append(dict(phase='tessera_publication.BoundedPublisher.stats',
+            started_unix=time.time(), seconds=0.0, thread_cpu_seconds=0.0,
+            thread=threading.current_thread().name, qname=None, format_name=None, stats=stats))
+        return close(self)
+
     try:
         for owner, name, original in originals:
             setattr(owner, name, recorder.wrap(original, owner.__name__+'.'+name))
         campaign._anchor_batches = lambda *a, **kw: preferred_batches(batches(*a, **kw), projection)
+        campaign._activation_kwargs_memo = memo_with_record
+        BoundedPublisher.close = close_with_stats
         yield
     finally:
+        BoundedPublisher.close = close
         campaign._anchor_batches = batches
+        campaign._activation_kwargs_memo = memo
         for owner, name, original in originals:
             setattr(owner, name, original)
+        for built in memos:
+            info = built.cache_info()
+            recorder.records.append(dict(phase='tessera_campaign._activation_kwargs_memo.cache_info',
+                started_unix=time.time(), seconds=0.0, thread_cpu_seconds=0.0,
+                thread=threading.current_thread().name, qname=None, format_name=None,
+                cache_info=dict(hits=info.hits, misses=info.misses, maxsize=info.maxsize, currsize=info.currsize)))
 
 
-def arm(plan, out, budget):
+def arm(plan, out, budget, identity=0):
     import torch
     from experiments.campaign_prefix_profile import run_prefix
     from experiments.glm_full_capture_profile import AnchorObserver, selected_anchor_command
@@ -151,7 +238,7 @@ def arm(plan, out, budget):
     for flag, value in {'--out': out/'cost.pkl', '--cache-dir': out/'cache',
             '--checkpoint': out/'cost.anchors.json'}.items():
         command[command.index(flag)+1] = str(value)
-    command += ['--publication-overlap-bytes', str(budget)]
+    command += arm_flags(budget, identity)
     selected_anchor_command(command)
     recorder = PhaseRecorder()
     observer = AnchorObserver(out/'profile', profile_calls=[0],
@@ -173,8 +260,7 @@ def run(path, expected):
     if digest(path) != expected:
         raise ValueError('publication plan changed')
     p = json.loads(Path(path).read_text())
-    if p['schema'] != 'prismaquant.campaign_publication_ab.v1':
-        raise ValueError('unknown publication comparison schema')
+    order = plan_order(p)
     for name, sha in p['input_sha256'].items():
         if digest(name) != sha:
             raise ValueError('publication input changed: '+name)
@@ -183,16 +269,18 @@ def run(path, expected):
             raise ValueError('publication environment changed: '+name)
     root = Path(p['out']); root.mkdir(parents=True, exist_ok=False)
     rows, baseline = [], None
-    for index, budget in enumerate(p['order']):
+    for index, (budget, identity) in enumerate(order):
         out = root/f'arm-{index:02d}'; out.mkdir()
         command = [sys.executable, '-u', '-m', 'experiments.campaign_publication_ab', '--plan', str(path),
-            '--plan-sha256', expected, '--arm-out', str(out), '--budget', str(budget)]
+            '--plan-sha256', expected, '--arm-out', str(out), '--budget', str(budget),
+            '--identity-bytes', str(identity)]
         env = dict(os.environ, TRITON_CACHE_DIR=str(out/'triton'),
             TORCHINDUCTOR_CACHE_DIR=str(out/'inductor'))
         started = time.time()
         with (out/'command.log').open('x') as log:
             result = subprocess.run(command, env=env, stdout=log, stderr=subprocess.STDOUT)
-        row = dict(index=index, publication_overlap_bytes=budget, started_unix=started,
+        row = dict(index=index, publication_overlap_bytes=budget, campaign_identity_bytes=identity,
+            started_unix=started,
             finished_unix=time.time(), returncode=result.returncode, command=command)
         rows.append(row); write(out/'exit.json', row)
         if result.returncode:
@@ -222,11 +310,12 @@ def main():
     parser.add_argument('--plan-sha256', required=True)
     parser.add_argument('--arm-out', type=Path)
     parser.add_argument('--budget', type=int)
+    parser.add_argument('--identity-bytes', type=int, default=0)
     args = parser.parse_args()
     if args.arm_out:
         if digest(args.plan) != args.plan_sha256:
             raise ValueError('arm plan changed')
-        arm(json.loads(Path(args.plan).read_text()), args.arm_out, args.budget)
+        arm(json.loads(Path(args.plan).read_text()), args.arm_out, args.budget, args.identity_bytes)
     else:
         run(args.plan, args.plan_sha256)
 
