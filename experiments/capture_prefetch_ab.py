@@ -116,14 +116,14 @@ class Sampler(threading.Thread):
         self.samples = []
         self.errors = []
         self.mark = []
-        self._stop = threading.Event()
+        self._halt = threading.Event()
 
     def note(self, label):
         self.mark.append(dict(label=label, time=time.time(), monotonic=time.monotonic()))
 
     def run(self):
         from experiments.workspace_netdata import sample_netdata
-        while not self._stop.wait(self.period):
+        while not self._halt.wait(self.period):
             if len(self.samples) >= self.cap:
                 self.errors.append('sample cap reached')
                 return
@@ -140,7 +140,7 @@ class Sampler(threading.Thread):
             self.samples.append(record)
 
     def stop(self):
-        self._stop.set()
+        self._halt.set()
         self.join(timeout=15)
 
 
