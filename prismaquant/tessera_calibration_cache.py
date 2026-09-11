@@ -485,6 +485,10 @@ def preflight_verified_capture_entries(root, entries, *, names, policy, census, 
 def _verified_capture_entry(path, name, *, expected_sha256, census, max_rows,
                             policy, execution, resource_check=None,
                             release_file_pages=False, expected_stat=None):
+    """Load one admitted entry and return it beside its own load receipt.
+
+    ``execution`` folds the receipt here when it is given; a reader that
+    loads entries out of order passes ``None`` and folds in name order."""
     from .perturbed_x_cache import load_verified_activation_cache_entry
     def validate(payload, *, check_finite):
         if (not isinstance(payload, dict) or set(payload) !=
@@ -504,6 +508,19 @@ def _verified_capture_entry(path, name, *, expected_sha256, census, max_rows,
         max_storage_bytes=_capture_storage_bytes(name, census, max_rows),
         validate=validate, expected_stat=expected_stat, resource_check=resource_check,
         release_file_pages=release_file_pages)
+    if execution is not None:
+        fold_load_receipt(execution, receipt)
+    return payload, receipt
+
+
+def fold_load_receipt(execution, receipt):
+    """Accumulate one entry receipt into the run's load execution record.
+
+    The ordered identity is a chain, so the fold order IS the receipt: a
+    reader that loads out of order must still fold in the loaded-name order
+    the serial path would have used. ``merge_load_execution`` cannot stand in
+    for this, because it chains an already-chained partial.
+    """
     execution['loaded_entries'] += 1
     execution['source_read_bytes'] += receipt['source_read_bytes']
     execution['peak_buffer_bytes'] = max(execution['peak_buffer_bytes'], receipt['file_bytes'])
@@ -511,7 +528,6 @@ def _verified_capture_entry(path, name, *, expected_sha256, census, max_rows,
                                                   receipt['archive_storage_bytes'])
     execution['ordered_load_identities_sha256'] = hashlib.sha256((
         execution['ordered_load_identities_sha256'] + receipt['identity_sha256']).encode()).hexdigest()
-    return payload
 
 
 def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
@@ -570,11 +586,11 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
                 _validate_tensors(name,torch.load(path,map_location='cpu',weights_only=True),
                                   census,identity['max_act_rows'])
             else:
-                payload = _verified_capture_entry(path, name, expected_sha256=record['sha256'],
+                payload, _receipt = _verified_capture_entry(path, name, expected_sha256=record['sha256'],
                     census=census, max_rows=identity['max_act_rows'], policy=execution['policy'],
                     execution=execution, resource_check=resource_check,
                     release_file_pages=release_file_pages, expected_stat=file_stat)
-                del payload
+                del payload, _receipt
                 loaded_verified = True
         if release_file_pages and not loaded_verified:
             from .perturbed_x_cache import release_activation_cache_file_pages
@@ -659,12 +675,13 @@ class CaptureWriter:
                 file_stat = path.stat() if self.release_file_pages else None
                 if previous.get('path') != expected:
                     raise RuntimeError(f'{name}: interrupted capture entry changed')
+                _old_receipt = None
                 if self.load_execution is None:
                     if sha256(path) != previous.get('sha256'):
                         raise RuntimeError(f'{name}: interrupted capture entry changed')
                     old = torch.load(path, map_location='cpu', weights_only=True)
                 else:
-                    old = _verified_capture_entry(path, name, expected_sha256=previous.get('sha256'),
+                    old, _old_receipt = _verified_capture_entry(path, name, expected_sha256=previous.get('sha256'),
                         census=self.census, max_rows=self.identity['max_act_rows'],
                         policy=self.load_execution['policy'], execution=self.load_execution,
                         resource_check=self.resource_check, release_file_pages=self.release_file_pages,
@@ -679,7 +696,7 @@ class CaptureWriter:
                 finally:
                     # One loaded validation entry expires before its successor,
                     # including when replay equality or geometry refuses.
-                    del old, old_x, old_h
+                    del old, old_x, old_h, _old_receipt
             else:
                 path = write_activation_cache_entry(self.root/'inputs', name, acts[name],
                     source=SOURCE, durable=True, hessian=hessians[name],
@@ -870,6 +887,65 @@ def authenticate_selected_capture_source(census_path, capture_path, *, expected_
         raise
 
 
+def capture_read_threads() -> int:
+    """Reader count for the verified capture prefetch.
+
+    ``PRISMAQUANT_CAPTURE_READ_THREADS`` overrides; 1 (the default) restores
+    the byte-identical serial read. The layer-weight gather spells its own
+    count the same way in ``layer_streaming.layer_read_threads``; this is a
+    separate stage with a separate working set, so it keeps a separate name.
+    """
+    raw = str(os.environ.get('PRISMAQUANT_CAPTURE_READ_THREADS', '')).strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return 1
+
+
+class _ConcurrentReservation:
+    """Charge every concurrent reader's live future allocation to each check.
+
+    A memory guard reads absolute residency and adds ONE caller's future
+    allocation. Under N readers the peak is the sum of the live reservations,
+    so each call presents that sum; a reader that has not yet reserved
+    contributes nothing, and a refusal leaves the caller's previous
+    reservation in place. Serialising the calls also gives the guard's own
+    baseline/peak bookkeeping a single writer.
+    """
+
+    def __init__(self, check):
+        self._check = check
+        self._lock = threading.Lock()
+        self._live = {}
+
+    def check(self, label, *, reserve_bytes=0):
+        if self._check is None:
+            return None
+        key = threading.get_ident()
+        with self._lock:
+            previous = self._live.get(key, 0)
+            self._live[key] = reserve_bytes
+            try:
+                return self._check(label, reserve_bytes=sum(self._live.values()))
+            except BaseException:
+                self._live[key] = previous
+                raise
+
+    def release(self):
+        with self._lock:
+            self._live.pop(threading.get_ident(), None)
+
+
+def _capture_entry_artifact(path, manifest, name):
+    from .perturbed_x_cache import activation_cache_filename
+    relative = str(Path('inputs') / activation_cache_filename(name))
+    if manifest['entries'][name].get('path') != relative:
+        raise RuntimeError(f'{name}: noncanonical capture artifact path')
+    return path.parent/relative
+
+
 def prefetch_capture(path, *, expected_identity, census, names, device,
                      expected_sha256=None, resource_check=None,
                      release_file_pages=False, verified_load_policy=None,
@@ -892,8 +968,14 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
     if execution is not None:
         preflight_verified_capture_entries(path.parent, manifest['entries'], names=names,
             policy=execution['policy'], census=census, max_rows=expected_identity['max_act_rows'])
+        threads = capture_read_threads()
+        if threads > 1:
+            return _parallel_prefetch_capture(path, manifest=manifest,
+                expected_identity=expected_identity, census=census, names=names, device=device,
+                digest=digest, execution=execution, resource_check=resource_check,
+                release_file_pages=release_file_pages, threads=threads)
     acts, hessians, counts, maxima = {}, {}, {}, {}
-    payload = x = h = None
+    payload = x = h = _entry_receipt = None
     try:
         for name in names:
             record = manifest['entries'][name]
@@ -912,7 +994,7 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
                         columns**2+min(census['counts'][name], expected_identity['max_act_rows'])*columns))
                 payload = torch.load(artifact,map_location='cpu',weights_only=True)
             else:
-                payload = _verified_capture_entry(artifact, name, expected_sha256=record.get('sha256'),
+                payload, _entry_receipt = _verified_capture_entry(artifact, name, expected_sha256=record.get('sha256'),
                     census=census, max_rows=expected_identity['max_act_rows'], policy=execution['policy'],
                     execution=execution, resource_check=resource_check,
                     release_file_pages=release_file_pages, expected_stat=file_stat)
@@ -927,8 +1009,8 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
                 from .perturbed_x_cache import release_activation_cache_file_pages
                 if str(device).startswith('cuda'):
                     torch.cuda.synchronize(device)
-            del payload, x, h
-            payload = x = h = None
+            del payload, x, h, _entry_receipt
+            payload = x = h = _entry_receipt = None
             if release_file_pages and execution is None:
                 release_activation_cache_file_pages(artifact, expected_stat=file_stat)
             if resource_check is not None:
@@ -939,8 +1021,103 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
         if execution is not None:
             acts.clear()
             hessians.clear()
-            payload = x = h = None
+            payload = x = h = _entry_receipt = None
         raise
     resident = sum(t.numel()*t.element_size() for t in (*acts.values(),*hessians.values()))
     print(f'[campaign] calibration prefetched: {len(names)} units, {resident} resident bytes, 0 misses',flush=True)
+    return (acts,hessians,counts,maxima),dict(path=str(path.resolve()),sha256=digest)
+
+
+def _parallel_prefetch_capture(path, *, manifest, expected_identity, census, names, device,
+                               digest, execution, resource_check, release_file_pages, threads):
+    """Read and verify entries on N readers; consume them in name order.
+
+    Every entry passes through the same verified owner the serial path uses,
+    so the per-entry receipt, the payload checks and every failure mode are
+    unchanged. What differs is only that N entries are in flight at once:
+
+    * the ordered identity chain is folded by the single consumer in sorted
+      name order, which is the order the serial reader folded it in;
+    * the per-unit ``before_capture_prefetch`` / ``after_capture_prefetch``
+      calls stay in that same order because the consumer makes them;
+    * every guard call, inner and outer, presents the SUM of the live
+      concurrent reservations, because N buffers can be admitted at once.
+
+    The window lives on the CONSUMER, not on the readers: at most ``threads``
+    entries are ever submitted, and the next one is submitted only once an
+    entry has been consumed. A reader therefore never waits on anything, and
+    the entry the consumer is about to want is always already running. The
+    earlier shape -- readers taking a semaphore permit the consumer returned --
+    deadlocks, because permits are granted in wakeup order rather than name
+    order, so workers can run ahead while the consumer's own next entry is
+    still waiting for a permit that only the consumer can release.
+
+    The transfer stays on the consumer thread and the default stream. The
+    source tensors are pageable, so ``Tensor.to`` is host-synchronous and a
+    side stream would not overlap anything without pinned staging.
+    """
+    import torch
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    max_rows = expected_identity['max_act_rows']
+    guard = _ConcurrentReservation(resource_check)
+
+    def read(name):
+        artifact = _capture_entry_artifact(path, manifest, name)
+        file_stat = artifact.stat() if release_file_pages else None
+        try:
+            return _verified_capture_entry(artifact, name,
+                expected_sha256=manifest['entries'][name].get('sha256'), census=census,
+                max_rows=max_rows, policy=execution['policy'], execution=None,
+                resource_check=None if resource_check is None else guard.check,
+                release_file_pages=release_file_pages, expected_stat=file_stat)
+        finally:
+            guard.release()
+
+    acts, hessians, counts, maxima = {}, {}, {}, {}
+    payload = x = h = None
+    window = deque()
+    submitted = 0
+    pool = ThreadPoolExecutor(max_workers=threads, thread_name_prefix='capture-read')
+    try:
+        while submitted < len(names) and len(window) < threads:
+            window.append(pool.submit(read, names[submitted]))
+            submitted += 1
+        for name in names:
+            payload, receipt = window.popleft().result()
+            fold_load_receipt(execution, receipt)
+            if resource_check is not None:
+                guard.check(f'before_capture_prefetch:{name}', reserve_bytes=
+                    2*_capture_storage_bytes(name, census, max_rows))
+            x, h = _validate_tensors(name, payload, census, max_rows, check_finite=False)
+            acts[name], hessians[name] = x.to(device), h.to(device)
+            counts[name], maxima[name] = payload['count'], payload['max_abs']
+            if release_file_pages and str(device).startswith('cuda'):
+                torch.cuda.synchronize(device)
+            del payload, x, h
+            payload = x = h = None
+            if resource_check is not None:
+                guard.check(f'after_capture_prefetch:{name}')
+            if submitted < len(names):
+                window.append(pool.submit(read, names[submitted]))
+                submitted += 1
+        if str(device).startswith('cuda'):
+            torch.cuda.synchronize(device)
+    except BaseException:
+        acts.clear()
+        hessians.clear()
+        payload = x = h = None
+        raise
+    finally:
+        # An abandoned reader owns an admitted buffer; none outlives this call.
+        pool.shutdown(wait=True, cancel_futures=True)
+        for pending in window:
+            if pending.cancelled() or pending.exception() is not None:
+                continue
+            pending.result()[0].clear()
+        window.clear()
+        guard.release()
+    resident = sum(t.numel()*t.element_size() for t in (*acts.values(),*hessians.values()))
+    print(f'[campaign] calibration prefetched: {len(names)} units, {resident} resident bytes, '
+          f'0 misses, {threads} readers',flush=True)
     return (acts,hessians,counts,maxima),dict(path=str(path.resolve()),sha256=digest)
