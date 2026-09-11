@@ -1041,86 +1041,81 @@ def _parallel_prefetch_capture(path, *, manifest, expected_identity, census, nam
     * the per-unit ``before_capture_prefetch`` / ``after_capture_prefetch``
       calls stay in that same order because the consumer makes them;
     * every guard call, inner and outer, presents the SUM of the live
-      concurrent reservations, because N buffers can be admitted at once;
-    * in-flight entries are capped at N by a slot the consumer returns after
-      the transfer, so a consumer behind its readers cannot accumulate
-      payloads.
+      concurrent reservations, because N buffers can be admitted at once.
+
+    The window lives on the CONSUMER, not on the readers: at most ``threads``
+    entries are ever submitted, and the next one is submitted only once an
+    entry has been consumed. A reader therefore never waits on anything, and
+    the entry the consumer is about to want is always already running. The
+    earlier shape -- readers taking a semaphore permit the consumer returned --
+    deadlocks, because permits are granted in wakeup order rather than name
+    order, so workers can run ahead while the consumer's own next entry is
+    still waiting for a permit that only the consumer can release.
 
     The transfer stays on the consumer thread and the default stream. The
     source tensors are pageable, so ``Tensor.to`` is host-synchronous and a
     side stream would not overlap anything without pinned staging.
     """
     import torch
+    from collections import deque
     from concurrent.futures import ThreadPoolExecutor
     max_rows = expected_identity['max_act_rows']
     guard = _ConcurrentReservation(resource_check)
-    slots = threading.Semaphore(threads)
-    stop = threading.Event()
 
     def read(name):
-        while not slots.acquire(timeout=0.2):
-            # A refused consumer never returns its slots; readers must not
-            # wait on a call that has already abandoned the prefetch.
-            if stop.is_set():
-                raise RuntimeError('capture prefetch abandoned before this entry')
+        artifact = _capture_entry_artifact(path, manifest, name)
+        file_stat = artifact.stat() if release_file_pages else None
         try:
-            if stop.is_set():
-                raise RuntimeError('capture prefetch abandoned before this entry')
-            artifact = _capture_entry_artifact(path, manifest, name)
-            file_stat = artifact.stat() if release_file_pages else None
-            try:
-                return _verified_capture_entry(artifact, name,
-                    expected_sha256=manifest['entries'][name].get('sha256'), census=census,
-                    max_rows=max_rows, policy=execution['policy'], execution=None,
-                    resource_check=None if resource_check is None else guard.check,
-                    release_file_pages=release_file_pages, expected_stat=file_stat)
-            finally:
-                guard.release()
-        except BaseException:
-            slots.release()
-            raise
+            return _verified_capture_entry(artifact, name,
+                expected_sha256=manifest['entries'][name].get('sha256'), census=census,
+                max_rows=max_rows, policy=execution['policy'], execution=None,
+                resource_check=None if resource_check is None else guard.check,
+                release_file_pages=release_file_pages, expected_stat=file_stat)
+        finally:
+            guard.release()
 
     acts, hessians, counts, maxima = {}, {}, {}, {}
     payload = x = h = None
-    futures = {}
+    window = deque()
+    submitted = 0
     pool = ThreadPoolExecutor(max_workers=threads, thread_name_prefix='capture-read')
     try:
-        futures = {name: pool.submit(read, name) for name in names}
+        while submitted < len(names) and len(window) < threads:
+            window.append(pool.submit(read, names[submitted]))
+            submitted += 1
         for name in names:
-            payload, receipt = futures.pop(name).result()
-            try:
-                fold_load_receipt(execution, receipt)
-                if resource_check is not None:
-                    guard.check(f'before_capture_prefetch:{name}', reserve_bytes=
-                        2*_capture_storage_bytes(name, census, max_rows))
-                x, h = _validate_tensors(name, payload, census, max_rows, check_finite=False)
-                acts[name], hessians[name] = x.to(device), h.to(device)
-                counts[name], maxima[name] = payload['count'], payload['max_abs']
-                if release_file_pages and str(device).startswith('cuda'):
-                    torch.cuda.synchronize(device)
-                del payload, x, h
-                payload = x = h = None
-            finally:
-                slots.release()
+            payload, receipt = window.popleft().result()
+            fold_load_receipt(execution, receipt)
+            if resource_check is not None:
+                guard.check(f'before_capture_prefetch:{name}', reserve_bytes=
+                    2*_capture_storage_bytes(name, census, max_rows))
+            x, h = _validate_tensors(name, payload, census, max_rows, check_finite=False)
+            acts[name], hessians[name] = x.to(device), h.to(device)
+            counts[name], maxima[name] = payload['count'], payload['max_abs']
+            if release_file_pages and str(device).startswith('cuda'):
+                torch.cuda.synchronize(device)
+            del payload, x, h
+            payload = x = h = None
             if resource_check is not None:
                 guard.check(f'after_capture_prefetch:{name}')
+            if submitted < len(names):
+                window.append(pool.submit(read, names[submitted]))
+                submitted += 1
         if str(device).startswith('cuda'):
             torch.cuda.synchronize(device)
     except BaseException:
-        stop.set()
         acts.clear()
         hessians.clear()
         payload = x = h = None
         raise
     finally:
         # An abandoned reader owns an admitted buffer; none outlives this call.
-        stop.set()
         pool.shutdown(wait=True, cancel_futures=True)
-        for pending in futures.values():
+        for pending in window:
             if pending.cancelled() or pending.exception() is not None:
                 continue
             pending.result()[0].clear()
-        futures.clear()
+        window.clear()
         guard.release()
     resident = sum(t.numel()*t.element_size() for t in (*acts.values(),*hessians.values()))
     print(f'[campaign] calibration prefetched: {len(names)} units, {resident} resident bytes, '

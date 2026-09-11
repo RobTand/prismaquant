@@ -16,37 +16,47 @@ def policy():
                 max_buffer_bytes=4*1024**2, max_scratch_bytes=1024**2)
 
 
-@pytest.fixture
-def roster(tmp_path):
+def build_roster(tmp_path, units):
     """A capture wide enough that readers and the consumer actually overlap."""
     source = tmp_path/'source'
     source.mkdir()
     (source/'config.json').write_text('{}')
     (source/'model.safetensors').write_bytes(b'bounded source fixture')
-    census = dict(model=str(source), counts={n: 5 for n in UNITS},
-                  max_abs={n: 4. for n in UNITS},
-                  unit_shapes={n: [3, 2] for n in UNITS}, layer_stride=1,
-                  anchor_groups={f'u:{n}': [n] for n in UNITS}, **canonical_fields())
+    census = dict(model=str(source), counts={n: 5 for n in units},
+                  max_abs={n: 4. for n in units},
+                  unit_shapes={n: [3, 2] for n in units}, layer_stride=1,
+                  anchor_groups={f'u:{n}': [n] for n in units}, **canonical_fields())
     census_path = tmp_path/'census.json'
     census_path.write_text(json.dumps(census))
     capture_id = build_identity(census_path, calibration={'fit_ids_sha256': 'draw'},
                                 max_act_rows=2)
-    acts = {n: torch.tensor([[1., 2.], [3., float(index)]]) for index, n in enumerate(UNITS)}
-    hessians = {n: torch.eye(2)*(index+1) for index, n in enumerate(UNITS)}
+    acts = {n: torch.tensor([[1., 2.], [3., float(index)]]) for index, n in enumerate(units)}
+    hessians = {n: torch.eye(2)*(index+1) for index, n in enumerate(units)}
     root = tmp_path/'capture'
     record = cc.publish_capture(root, census_path=census_path, identity=capture_id,
                                 acts=acts, hessians=hessians, counts=census['counts'],
                                 maxima=census['max_abs'])
-    return root, census, capture_id, acts, hessians, record
+    return root, census, capture_id, acts, hessians, record, tuple(units)
+
+
+@pytest.fixture
+def roster(tmp_path):
+    return build_roster(tmp_path, UNITS)
+
+
+@pytest.fixture
+def wide_roster(tmp_path):
+    """Enough entries that the in-flight window turns over many times."""
+    return build_roster(tmp_path, tuple(f'wide-{index:03d}' for index in range(64)))
 
 
 def prefetch(roster, *, threads, monkeypatch, resource_check=None, names=None,
              release_file_pages=False):
-    root, census, capture_id, _acts, _hessians, record = roster
+    root, census, capture_id, _acts, _hessians, record, units = roster
     monkeypatch.setenv('PRISMAQUANT_CAPTURE_READ_THREADS', str(threads))
     execution = {}
     values, receipt = cc.prefetch_capture(record['path'], expected_identity=capture_id,
-        census=census, names=list(UNITS if names is None else names), device='cpu',
+        census=census, names=list(units if names is None else names), device='cpu',
         expected_sha256=record['sha256'], verified_load_policy=policy(),
         load_execution=execution, resource_check=resource_check,
         release_file_pages=release_file_pages)
@@ -98,7 +108,7 @@ def test_ordered_identity_is_the_name_order_not_the_completion_order(roster, mon
 def test_merge_load_execution_is_not_a_substitute_for_the_fold(roster, monkeypatch):
     """The chain is not associative over partials; the fold is the contract."""
     _values, _receipt, serial = prefetch(roster, threads=1, monkeypatch=monkeypatch)
-    root, census, capture_id, _a, _h, _record = roster
+    root, census, capture_id, _a, _h, _record, _units = roster
     total = cc._load_execution(policy(), capture_id, None)
     for name in sorted(UNITS):
         partial = cc._load_execution(policy(), capture_id, None)
@@ -236,12 +246,62 @@ def test_a_refusing_guard_does_not_wedge_the_readers(roster, monkeypatch):
     assert error and 'refused mid-prefetch' in str(error[0])
 
 
+@pytest.mark.parametrize('threads', [2, 3])
+def test_a_narrow_window_never_wedges_under_a_racy_reader(wide_roster, monkeypatch, threads):
+    """The in-flight window must not depend on which reader wakes first.
+
+    A window held by the READERS -- each taking a permit the single consumer
+    returns after it consumes an entry -- has no liveness bound: permits are
+    fungible and granted in wakeup order, so one worker can complete several
+    later entries (each holding its permit until consumed) while the entry the
+    consumer is actually waiting for sits in another worker that never wins a
+    permit. With T permits and T workers, T completed-unconsumed entries wedge
+    the load permanently. The window therefore lives on the CONSUMER: it
+    submits entry i+T only after consuming entry i, so the entry it wants next
+    is always already running and no reader ever waits.
+
+    A narrow window, many entries, a jittery reader and a slow consumer is the
+    shape that exercises the turnover.
+    """
+    import random
+    import time
+    read_original = cc._verified_capture_entry
+    validate_original = cc._validate_tensors
+
+    def jittered(path, name, **kwargs):
+        time.sleep(random.uniform(0, 0.003))
+        return read_original(path, name, **kwargs)
+
+    def slowed(name, payload, *args, **kwargs):
+        time.sleep(0.002)
+        return validate_original(name, payload, *args, **kwargs)
+
+    monkeypatch.setattr(cc, '_verified_capture_entry', jittered)
+    monkeypatch.setattr(cc, '_validate_tensors', slowed)
+    for attempt in range(4):
+        done, failure = threading.Event(), []
+
+        def run():
+            try:
+                prefetch(wide_roster, threads=threads, monkeypatch=monkeypatch)
+            except BaseException as error:  # noqa: BLE001 - reported by the assertion
+                failure.append(error)
+            finally:
+                done.set()
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        assert done.wait(60), f'parallel prefetch wedged at threads={threads}, attempt {attempt}'
+        worker.join(10)
+        assert not failure, failure
+
+
 def test_serial_default_leaves_the_existing_path_in_place(roster, monkeypatch):
     entered = []
     monkeypatch.setattr(cc, '_parallel_prefetch_capture',
                         lambda *a, **k: entered.append(True))
     monkeypatch.delenv('PRISMAQUANT_CAPTURE_READ_THREADS', raising=False)
-    root, census, capture_id, acts, _hessians, record = roster
+    root, census, capture_id, acts, _hessians, record, _units = roster
     execution = {}
     values, _ = cc.prefetch_capture(record['path'], expected_identity=capture_id,
         census=census, names=list(UNITS), device='cpu', expected_sha256=record['sha256'],

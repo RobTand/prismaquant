@@ -31,6 +31,7 @@ SCHEMA = 'prismaquant.capture_prefetch_ab.v1'
 SERVER_CHARTS = ('zfs.*', 'zfspool.*', 'nfsd.*', 'disk.sd*', 'disk.nvme*',
                  'system.cpu', 'system.io', 'system.ram', 'mem.available')
 MAX_RESPONSE_BYTES = 8*1024**2
+PROFILE_TO = None  # set by main(); cProfile of the consumer thread when a path
 
 
 def proc_io():
@@ -182,11 +183,28 @@ def run_arm(*, arm, readers, capture, identity, census, names, policy, device, g
     execution = {}
     sampler.note(f'{arm}:{readers}:begin')
     io_before, started = proc_io(), time.monotonic()
-    values, receipt = cc.prefetch_capture(capture['path'], expected_identity=identity,
-        census=census, names=names, device=device, expected_sha256=capture['sha256'],
-        resource_check=resource_check, release_file_pages=True,
-        verified_load_policy=policy, load_execution=execution)
+    profiler = None
+    if PROFILE_TO is not None:
+        import cProfile
+        profiler = cProfile.Profile()
+        profiler.enable()
+    try:
+        values, receipt = cc.prefetch_capture(capture['path'], expected_identity=identity,
+            census=census, names=names, device=device, expected_sha256=capture['sha256'],
+            resource_check=resource_check, release_file_pages=True,
+            verified_load_policy=policy, load_execution=execution)
+    finally:
+        if profiler is not None:
+            profiler.disable()
     seconds = time.monotonic() - started
+    profile_path = None
+    if profiler is not None:
+        import pstats
+        profile_path = Path(PROFILE_TO)/f'profile-{arm}-{readers}.prof'
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        profiler.dump_stats(str(profile_path))
+        with open(str(profile_path)+'.txt', 'w') as handle:
+            pstats.Stats(profiler, stream=handle).sort_stats('cumulative').print_stats(40)
     io_after = proc_io()
     sampler.note(f'{arm}:{readers}:end')
     acts, hessians, counts, maxima = values
@@ -199,6 +217,7 @@ def run_arm(*, arm, readers, capture, identity, census, names, policy, device, g
         peak_buffer_bytes=execution['peak_buffer_bytes'],
         peak_archive_storage_bytes=execution['peak_archive_storage_bytes'],
         identity_sha256=execution['identity_sha256'], capture_receipt=receipt,
+        profile_path=None if profile_path is None else str(profile_path),
         proc_io_delta={key: io_after[key]-value for key, value in io_before.items()},
         proc_status=proc_status(), phases=phase_summary(events),
         guard=dict(peak_bytes=guard.peak_bytes, peak_checkpoint=guard.peak_checkpoint,
@@ -256,10 +275,15 @@ def main():
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--server', default=None)
     parser.add_argument('--spark', default=None)
+    parser.add_argument('--profile', action='store_true',
+        help='cProfile the consumer thread; reader threads are covered by the phase split')
     parser.add_argument('--limit', type=int, default=0,
         help='smoke only: load the first N units of the row instead of all of them')
     args = parser.parse_args()
 
+    global PROFILE_TO
+    if args.profile:
+        PROFILE_TO = args.out
     import torch
     from prismaquant import tessera_calibration_cache as cc
     from prismaquant.memory_management import CaptureMemoryGuard

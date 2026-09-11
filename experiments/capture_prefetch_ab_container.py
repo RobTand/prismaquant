@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--out', required=True)
     parser.add_argument('--arms', default='cold,warm')
     parser.add_argument('--limit', type=int, default=0)
+    parser.add_argument('--profile', action='store_true')
     args = parser.parse_args()
 
     from tools.tessera_campaign_container import main as run_container
@@ -39,6 +40,8 @@ def main():
                '--arms', args.arms, '--out', args.out]
     if args.limit:
         command += ['--limit', str(args.limit)]
+    if args.profile:
+        command += ['--profile']
     return run_container(['--spec', json.dumps(spec, sort_keys=True), '--', *command])
 
 
