@@ -3842,15 +3842,52 @@ def campaign_population_block(**kwargs) -> dict:
 def _format_executes_static_activation_contract(format_name: str) -> bool:
     """Does this rung's route execute a STATIC activation contract?
 
-    The spec's answer (``FormatSpec.static_activation_contract``), which
-    ``synthesize_tessera_spec`` derives from the registry row the rung's route
-    names -- never a compare of that row's NAME against ``"NVFP4"`` (#205,
-    #221).  Same field ``_measure_anchor`` prices through, so the rung this
-    refuses to resume is exactly the rung it refuses to score.
+    The one derivation (#205, #221): the route names the registry row whose
+    contract it executes (``activation_source_format``) and the ROW owns the
+    answer (``FormatSpec.static_activation_contract``) -- never a compare of
+    that row's NAME against ``"NVFP4"``.  It is
+    ``tessera_formats.route_static_activation_contract`` off the same route
+    ``synthesize_tessera_spec`` stamps onto the rung's spec, so the rung this
+    refuses to resume is exactly the rung ``_measure_anchor`` prices.
+
+    The row is read live, every time: it is a dictionary lookup, and the
+    registry is what a test (or a lane) replaces when a second row gains a
+    contract.  What is memoised is the pure part -- canonical name to serving
+    route -- sized by the format key space: the closed-roster bind asks it
+    once per format per unit, 1,793 routes for each of an 864-unit row's
+    holders, measured at ~1.1 s per unit on the CPU worker when each ask
+    synthesized a whole spec, a GPU-idle startup phase of a quarter hour per
+    row.
     """
     from . import format_registry as fr
 
-    return fr.get_format(format_name).static_activation_contract is not None
+    canonical = fr.canonical_format_name(format_name)
+    row = fr.REGISTRY.get(canonical)
+    if row is not None:
+        return row.static_activation_contract is not None
+    if not fr.is_tessera_format_name(canonical):
+        fr.get_format(canonical)  # raises the registry's KeyError
+    from .tessera_formats import route_static_activation_contract
+
+    return route_static_activation_contract(_tessera_route_memo()(canonical)) is not None
+
+
+def _tessera_route(canonical: str):
+    from .tessera_formats import (
+        parse_tessera_format_name, tessera_serving_route, tessera_wire_recipe,
+    )
+
+    family, rung = parse_tessera_format_name(canonical)
+    return tessera_serving_route(family, tessera_wire_recipe(family, rung), rung)
+
+
+@functools.lru_cache(maxsize=1)
+def _tessera_route_memo():
+    # Built on first use so this module keeps importing without the Tessera
+    # package; the memo itself is sized by the format key space on its first
+    # call, the way every wire-recipe memo is.
+    from .tessera_formats import lazily_sized_cache, recipe_cache_bound
+    return lazily_sized_cache(recipe_cache_bound)(_tessera_route)
 
 
 def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
