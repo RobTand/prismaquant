@@ -2,6 +2,23 @@
 """Warm the dl380g10 ARC with the capture and weight bytes the next campaign
 row will read, while the current row is still on the GPU.
 
+Status: SUPERSEDED as a daemon
+------------------------------
+The warming *loop* now lives in PrismaBuild as the fleet's storage role,
+``tools/fleet/prewarm_loop.py`` (issue #487, PR #494), which reads the same
+data manifests this file's ``glm_data_manifests.py`` sibling emits, out of the
+queue's own claim order, on the box that holds the pool.  It belongs there:
+prewarm is a property of the fleet's storage, not of one campaign, and a
+second dispatcher predicting the same claim order is exactly the duplication
+the fleet's own rules forbid.
+
+What stays useful here is everything the loop does not do: the pool-ceiling
+and NFS read rigs that measured the tiers, the manifest builder, and the
+dry-run queue rig.  ``--daemon`` is kept so the measurements remain
+reproducible and so the running dry-run unit on dl380g10 can be read back; it
+is not the thing to deploy.  Retirement of that unit is step 1 of
+``/home/rob/tmp/glm-perf-20260910/w3/SWITCHOVER.md``.
+
 Why this exists
 ---------------
 Every row of the GLM-5.3-Flash Tessera census opens its 864 capture files and
