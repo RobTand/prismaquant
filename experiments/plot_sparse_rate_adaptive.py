@@ -140,7 +140,8 @@ def plot_family(ax_top, ax_bottom, label: str, curve_path: Path, report_path: Pa
                         f"held-out screen: {verdict}\n"
                         f"p99 {final_p99:.2f}% / max {final_max:.2f}%",
                         transform=ax_top.transAxes, ha="right", va="bottom", fontsize=7.5,
-                        color="#176b4d" if verdict == "PASS" else "#a33")
+                        color="#176b4d" if verdict == "PASS" else "#a33",
+                        bbox={"facecolor": "white", "alpha": .86, "edgecolor": "none", "pad": 2.5})
     counts, p99s, maxs = [], [], []
     for item in snapshots:
         p99, maximum = metrics(item)
@@ -164,6 +165,9 @@ def plot_family(ax_top, ax_bottom, label: str, curve_path: Path, report_path: Pa
             raise ValueError(f"{terminal_path}: separate terminal curve must contain exactly one point")
         ax_top.scatter(tr, tv / values[0], marker="D", s=25, color=color, edgecolors="black",
                        linewidths=.4, zorder=5, label=f"{label} terminal measured (separate)")
+        ax_top.annotate("terminal R896", (tr[0], tv[0] / values[0]), xytext=(-4, -12),
+                        textcoords="offset points", ha="right", va="top", fontsize=6.5,
+                        color="#333", bbox={"facecolor": "white", "alpha": .78, "edgecolor": "none", "pad": 1.5})
     ax_top.set_title(label)
     ax_top.grid(True, alpha=.22)
     ax_bottom.grid(True, alpha=.22)
