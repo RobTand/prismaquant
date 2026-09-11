@@ -103,3 +103,30 @@ def test_merge_accepts_stack_incomplete_rung_refusal_without_family():
     payloads["row-0000"]["non_interpolable"] = [refusal]
     merged = dispatch.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
     assert merged["non_interpolable"] == [refusal]
+
+
+def test_merge_carries_the_union_of_identity_migration_records(tmp_path):
+    import dispatch_tessera_campaign as dispatch
+    from test_tessera_campaign_fanout import _payloads
+
+    record = {"schema": "prismaquant.identity_migration.v1", "proof_bundle_sha256": "p" * 64,
+              "old_pins": {"prismaquant_source_sha256": "a" * 64}, "new_pins": {"prismaquant_source_sha256": "b" * 64},
+              "old_identity_sha256": "row-specific", "shards": 3}
+    row, manifest, _ = _journal(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["identity_migration"] = [record]
+    manifest.write_text(json.dumps(data))
+    out = tmp_path / "merged" / "cost.anchors.json"
+    merged = dispatch.merge_checkpoint({"row-0000": str(row)}, out)
+    carried = json.loads(out.read_text())["identity_migration"]
+    assert merged["identity_migration"] == carried
+    assert carried[0]["proof_bundle_sha256"] == "p" * 64 and "old_identity_sha256" not in carried[0]
+
+    payloads = _payloads()
+    for row_id, payload in payloads.items():
+        payload["provenance"]["identity_migration"] = [dict(record, old_identity_sha256=row_id)]
+    merged_payload = dispatch.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
+    assert merged_payload["provenance"]["identity_migration"] == carried
+    del payloads[sorted(payloads)[0]]["provenance"]["identity_migration"]
+    merged_payload = dispatch.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
+    assert merged_payload["provenance"]["identity_migration"] == carried

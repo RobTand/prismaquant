@@ -85,3 +85,16 @@ def test_memory_sampler_records_a_continuous_series_with_peaks(tmp_path):
     assert record['peak']['vmhwm_bytes'] >= record['peak']['vmrss_bytes'] > 64*1024**2
     assert record['peak']['mem_available_bytes'] == min(s['mem_available_bytes'] for s in record['series'])
     assert all(b['unix'] >= a['unix'] for a, b in zip(record['series'], record['series'][1:]))
+
+
+def test_with_headroom_replaces_the_floor_and_refuses_a_recipe_without_one():
+    from experiments.campaign_publication_ab import with_headroom
+    recipe = ['python3', '-m', 'prismaquant.tessera_campaign', '--streaming',
+              '--streaming-cache-headroom-gb', '24', '--anchor-batch-size', '8']
+    assert with_headroom(recipe, 12)[recipe.index('--streaming-cache-headroom-gb')+1] == '12'
+    assert with_headroom(recipe, 12.5)[recipe.index('--streaming-cache-headroom-gb')+1] == '12.5'
+    assert with_headroom(recipe, 12)[:4] == recipe[:4] and recipe[5] == '24'
+    with pytest.raises(ValueError):
+        with_headroom(['--anchor-batch-size', '8'], 12)
+    with pytest.raises(ValueError):
+        with_headroom(recipe, 0)

@@ -1039,6 +1039,11 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
 
     reference = provenances[sorted(provenances)[0]]
     provenance = {key: value for key, value in reference.items()}
+    provenance.pop("identity_migration", None)
+    carried_migration = merge_identity_migrations(
+        {row: prov.get("identity_migration") for row, prov in provenances.items()})
+    if carried_migration is not None:
+        provenance["identity_migration"] = carried_migration
     if family_policy is not None:
         provenance["family_restriction"] = {"policy": family_policy,
             "structure_by_unit": dict(sorted(restricted_structures.items()))}
@@ -1259,12 +1264,14 @@ def merge_checkpoint(row_dirs: dict, out_manifest: Path) -> dict:
     )
 
     identities = {}
+    migrations = {}
     states: dict[str, dict] = {}
     stage = "Tessera campaign"
     for row_id in sorted(row_dirs):
         manifest_path = Path(row_dirs[row_id]) / "cost.anchors.json"
         manifest = json.loads(manifest_path.read_text())
         identities[row_id] = manifest["identity"]
+        migrations[row_id] = manifest.get("identity_migration")
         parts = manifest_path.with_name(manifest_path.name + ".parts")
         listed: list[str] = []
         for entry in manifest["units"]:
@@ -1340,10 +1347,49 @@ def merge_checkpoint(row_dirs: dict, out_manifest: Path) -> dict:
                    "file": str(unit_path(parts, qname).relative_to(parts))}
                   for qname in sorted(merged_identity["units"])],
     }
+    carried = merge_identity_migrations(migrations)
+    if carried is not None:
+        manifest["identity_migration"] = carried
     atomic_write_bytes(out_manifest, json.dumps(
         manifest, indent=2, sort_keys=True, ensure_ascii=False,
         allow_nan=False).encode("utf-8"))
     return manifest
+
+
+def merge_identity_migrations(per_row: dict) -> "list | None":
+    """The union of the rows' ``identity_migration`` records, or None.
+
+    A re-sealed row (tools/reseal_campaign_identity.py) carries the pins it
+    was priced under, the pins it now carries, and the proof that licensed
+    the change.  The merged journal and payload are rebuilt from fixed keys,
+    so without this the record would end at the merge and the merged
+    checkpoint would show only its new pins with nothing saying they were
+    amended.  Records are deduplicated on the proof bundle and the pin pair;
+    rows migrated under the same proof contribute one record.  A row without
+    the key contributes nothing -- the merge already refuses rows whose pins
+    differ, so an unmigrated row cannot sit beside a migrated one.
+    """
+    merged: list = []
+    seen = set()
+    present = False
+    for row_id in sorted(per_row):
+        records = per_row[row_id]
+        if records is None:
+            continue
+        if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
+            raise MergeRefused(f"{row_id}: identity_migration is not a list of records")
+        present = True
+        for record in records:
+            key = (record.get("proof_bundle_sha256"),
+                   json.dumps(record.get("old_pins"), sort_keys=True),
+                   json.dumps(record.get("new_pins"), sort_keys=True))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append({k: v for k, v in record.items()
+                           if k not in {"old_identity_sha256", "new_identity_sha256", "shards",
+                                        "receipt_seals", "cost_seals", "run_id"}})
+    return merged if present else None
 
 
 def _merge_scope(left, right, row_id):
