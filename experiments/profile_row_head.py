@@ -505,8 +505,8 @@ def phase_headafter(args, data):
     for unit in held.values():
         unit.close()
     return {"phase": "headafter", "seal": seal, "hold": hold, "commitments": commitments,
-            "wall_seconds": round(seal["wall_seconds"] + hold["wall_seconds"]
-                                  + commitments["wall_seconds"], 3)}
+            "wall_seconds": round(seal["seconds"] + hold["seconds"]
+                                  + commitments["seconds"], 3)}
 
 
 def phase_wireverifyafter(args, data):

@@ -88,7 +88,7 @@ echo "=== results $RESULTS"
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 def show(r, key):
-    print(f"{r.get('label','?'):>18} {key:>12} wall={r.get('wall_seconds')} cpu={r.get('cpu_seconds')} t={r.get('threads')} "
+    print(f"{r.get('label','?'):>18} {key:>12} wall={r.get('seconds', r.get('wall_seconds'))} cpu={r.get('cpu_seconds')} t={r.get('threads')} "
           f"digest={str(r.get('identity_digest', r.get('capture_sha256','')))[:16]}")
 for r in rows:
     if r.get('phase') == 'headafter':
