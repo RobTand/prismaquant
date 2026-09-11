@@ -1,8 +1,11 @@
 """The comparison must preserve compatible work and report truthful spans."""
 import pytest
 
-from experiments.campaign_publication_ab import (OVERLAP_BUDGET, arm_order, preferred_batches,
-    PhaseRecorder)
+import json
+import time
+
+from experiments.campaign_publication_ab import (OVERLAP_BUDGET, SCHEMA_V1, SCHEMA_V2, SCHEMA_V3,
+    MemorySampler, arm_order, command_batch, plan_order, preferred_batches, with_batch, PhaseRecorder)
 
 
 def test_shape_permutation_preserves_whole_batches_and_internal_order():
@@ -47,3 +50,38 @@ def test_a_repeat_order_replaces_the_default_matrix_instead_of_being_shadowed():
         arm_order(I, [(B,)])
     with pytest.raises(ValueError):
         arm_order(I, [(B, -1)])
+
+
+def test_batch_width_arms_keep_the_recipe_width_unless_named():
+    B, I = OVERLAP_BUDGET, 268435456
+    command = ['--foo', '--anchor-batch-size', '8', '--bar']
+    assert command_batch(command) == 8
+    assert with_batch([(0, 0), (B, I), (B, I, 16), [B, I, 32]], 8) == [(0, 0, 8), (B, I, 8), (B, I, 16), (B, I, 32)]
+    assert arm_order(I, [(B, I, 8), (B, I, 16)]) == [(B, I, 8), (B, I, 16)]
+    for bad in ([(B, I, 0)], [(B, I, 8, 1)], [(B,)]):
+        with pytest.raises(ValueError):
+            arm_order(I, bad)
+    with pytest.raises(ValueError):
+        with_batch([(B, I, 0)], 8)
+    assert plan_order(dict(schema=SCHEMA_V1, command=command, order=[0, B])) == [(0, 0, 8), (B, 0, 8)]
+    assert plan_order(dict(schema=SCHEMA_V2, command=command, order=[[0, 0], [B, I]])) == [(0, 0, 8), (B, I, 8)]
+    assert plan_order(dict(schema=SCHEMA_V3, command=command, order=[[B, I, 8], [B, I, 32]])) == [(B, I, 8), (B, I, 32)]
+    with pytest.raises(ValueError):
+        plan_order(dict(schema=SCHEMA_V3, command=command, order=[[B, I]]))
+    with pytest.raises(ValueError):
+        plan_order(dict(schema=SCHEMA_V2, command=command, order=[[B, I, 8]]))
+
+
+def test_memory_sampler_records_a_continuous_series_with_peaks(tmp_path):
+    sampler = MemorySampler(tmp_path/'memory-samples.json', interval=0.05)
+    sampler.start()
+    ballast = bytearray(64*1024**2)
+    ballast[::4096] = b'x'*len(ballast[::4096])
+    time.sleep(0.3)
+    sampler.close()
+    del ballast
+    record = json.loads((tmp_path/'memory-samples.json').read_text())
+    assert record['samples'] >= 4 and len(record['series']) == record['samples']
+    assert record['peak']['vmhwm_bytes'] >= record['peak']['vmrss_bytes'] > 64*1024**2
+    assert record['peak']['mem_available_bytes'] == min(s['mem_available_bytes'] for s in record['series'])
+    assert all(b['unix'] >= a['unix'] for a, b in zip(record['series'], record['series'][1:]))
