@@ -1897,11 +1897,31 @@ def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_s
 # deliberately stated as admission terms, not as a measurement: the live
 # `observed_metadata_bytes` diagnostic below tests the bound on each run.
 IDENTITY_HOLD_UNIT_OBJECT_BYTES = 32 * 1024
-IDENTITY_HOLD_FORMAT_REFERENCE_BYTES = 1024
 IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER = 8
 IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES = 256
 IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES = 4096
 IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER = 4
+# The roster a holder is built from is transient: one ``SimpleNamespace`` per
+# closed-menu format with six attributes (`_campaign_identity_anchor_roster`),
+# plus the holder constructor's own one-attribute namespace per format, its
+# working tuple/sets, and the rung integers those carry.  Two rosters are live
+# at the peak, because the next unit's is built before the previous binding is
+# released.  The per-format figure is the interpreter's own object cost with
+# the six-slot instance dict counted at its CPython 3.12 size, rounded up.
+IDENTITY_ROSTER_TRANSIENT_FORMAT_BYTES = 1024
+IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS = 2
+
+
+def _frozenset_table_bytes(entries: int) -> int:
+    """The interpreter's own size of a frozenset holding ``entries`` items.
+
+    The holder retains one frozenset of format-name references; the strings
+    are the menu's and pre-date the hold, so what it adds is the set's slot
+    table, which CPython sizes by a fill rule this asks the interpreter for
+    rather than restates.  ``observed_metadata_bytes`` counts the same table.
+    """
+    import sys
+    return sys.getsizeof(frozenset(range(int(entries))))
 
 
 def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
@@ -1910,34 +1930,45 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
 
     One unit retains a holder/result mapping, signatures, the producer receipt
     dictionaries, and a frozenset of references to every closed menu format.
-    The fixed object term covers the first three; the per-format term covers
-    frozenset slots and result mapping growth.  Receipt strings and dict keys
-    are bounded from known unit/format/settings/projection serialization
-    lengths, multiplied by the documented CPython object/slot envelope.
+    The fixed object term covers the first three; the frozenset term is the
+    interpreter's own table size for that many references.  Receipt strings
+    and dict keys are bounded from known unit/shape/settings/projection
+    serialization lengths, multiplied by the documented CPython object/slot
+    envelope.  The format names themselves are the menu's objects, borrowed by
+    reference, and the sealed template carries one recipe, not the roster, so
+    no per-format serialization is retained.
+
+    The second value is the planning-and-construction transient: the bound
+    map and its largest JSON string, plus the two closed rosters live while
+    holders are built (`IDENTITY_ROSTER_TRANSIENT_*`), which construction
+    materializes once per unit and frees before the next.
     """
     import json
     # The producer config owner may itself verify H commitments. Planning must
     # not invoke it before the one real receipt; reserve its bounded JSON
     # settings envelope in the fixed holder term instead.
     settings_bytes = 4096 if calibration_source is not None else 0
-    planned, largest_serialization = {}, 0
+    planned, largest_serialization, widest_roster = {}, 0, 0
     for name in sorted(weights):
         shape_bytes = len(json.dumps(list(weights[name].shape), separators=(",", ":")).encode())
-        format_bytes = sum(len(entry.format_name.encode()) for entry in menus[name])
         projection_bytes = len(json.dumps((projected_units or {}).get(name),
             sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
         receipt_bytes = len(name.encode()) + shape_bytes + settings_bytes + projection_bytes
         planned[name] = (IDENTITY_HOLD_UNIT_OBJECT_BYTES +
-                         IDENTITY_HOLD_FORMAT_REFERENCE_BYTES * len(menus[name]) +
-                         IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER *
-                         (receipt_bytes + format_bytes))
-        largest_serialization = max(largest_serialization, receipt_bytes + format_bytes)
+                         _frozenset_table_bytes(len(menus[name])) +
+                         IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER * receipt_bytes)
+        largest_serialization = max(largest_serialization, receipt_bytes)
+        widest_roster = max(widest_roster, len(menus[name]))
     # `planned` remains live until holders are built. Each loop iteration also
     # materializes one shape/projection JSON string; its worst live string plus
-    # the map's entry table is a separate, pre-admitted planning transient.
+    # the map's entry table is a separate, pre-admitted planning transient, and
+    # so is the closed roster each holder is constructed from.
     scratch = (IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES +
                IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES * len(planned) +
-               IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER * largest_serialization)
+               IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER * largest_serialization +
+               IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS * (
+                   IDENTITY_ROSTER_TRANSIENT_FORMAT_BYTES * widest_roster +
+                   _frozenset_table_bytes(widest_roster)))
     return planned, scratch
 
 

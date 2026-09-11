@@ -20,6 +20,16 @@ receipt, no row, and the action stops. Outputs are unchanged byte for byte
 (gates: `tests/test_tessera_publication.py`, `tests/test_tessera_bound_identity.py`,
 `tests/test_tessera_campaign_publication_cli.py`).
 
+The identity reservation's planner now charges the retained per-unit hold as
+the fixed object term, the interpreter's own frozenset table size for the
+closed roster's borrowed format references, and the serialized receipt
+envelope; the roster transient (two closed rosters of per-format namespaces
+live during construction) is charged explicitly in the planning scratch. The
+former 1 KiB-per-format retained envelope charged an 864-unit GLM expert row
+~1.9 GB and pushed its admission past the box; the bound is exact in the
+interpreter's terms and is still tested against `observed_metadata_bytes` on
+every run. The 864-unit row now fits a 256 MiB reservation.
+
 Re-stamped (2026-09-10, `perf/glm-publication-transition-optimization`) for
 experimental `--campaign-identity-bytes N`. It is off when `N=0`. A positive
 value is a declared selected-source PB reservation; runtime derives the closed

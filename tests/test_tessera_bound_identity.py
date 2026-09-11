@@ -224,3 +224,43 @@ def test_a_bound_identity_is_derived_on_the_writer_without_a_tensor_read(monkeyp
         assert derived_on == ["tessera-publication"] * len(anchors)
         assert hashed_on == [], "a deferred derivation read a tensor"
 
+
+def test_the_identity_plan_bounds_a_full_closed_roster_from_interpreter_facts():
+    """The per-unit bound holds at the GLM routed-expert roster width.
+
+    The retained per-format cost is one frozenset slot table, which is asked
+    of the interpreter rather than restated; the format strings and the menu
+    entries are borrowed.  The old 1 KiB-per-format envelope charged an
+    864-unit row ~1.9 GB and pushed its admission past the box; the bound
+    here has to hold the measured hold AND leave the row inside a 256 MiB
+    reservation, and the construction transient has to charge the closed
+    rosters it materializes.
+    """
+    import sys
+    from prismaquant.tessera_formats import get_tessera_family
+    tc, name, weight, hessian, source, anchors, projection, kwargs = fixture(projected=True)
+    family = get_tessera_family("TESSERA_E4M3_K1")
+    low, high = family.mathematical_q256_bounds
+    formats = [family.format_name(rung) for rung in range(low, high + 1)]
+    assert len(formats) == 1793, "the GLM routed-expert closed roster width"
+    menus = {name: [SimpleNamespace(format_name=fmt) for fmt in formats]}
+    bounds, scratch = tc._campaign_identity_metadata_plan(
+        weights=kwargs["weights"], menus=menus, calibration_source=source,
+        projected_units={name: projection}, static_scales=kwargs["static_scales"])
+    roster = tc._campaign_identity_anchor_roster(name, menus[name],
+        calibration_source=source, static_scales=kwargs["static_scales"])
+    assert len(roster) == len(formats)
+    with tc.bind_checkpoint_unit_identity(roster, source_weight=weight,
+            calibration_source=source, projected_unit=projection,
+            static_scales=kwargs["static_scales"], retain_source_receipt=False) as bound:
+        observed = bound.observed_metadata_bytes()
+        assert observed <= bounds[name], (observed, bounds[name])
+        # And the bound is a bound, not a multiple: the retained set table is
+        # the interpreter's own figure and everything else is the fixed and
+        # serialized envelope.
+        assert bounds[name] <= (tc.IDENTITY_HOLD_UNIT_OBJECT_BYTES
+                                + sys.getsizeof(frozenset(formats))
+                                + tc.IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER * 8192)
+    per_format = sys.getsizeof(roster[0]) + sys.getsizeof(vars(roster[0]))
+    assert scratch >= 2 * per_format * len(formats)
+    assert 864 * bounds[name] + scratch <= 256 * 1024 ** 2
