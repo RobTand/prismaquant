@@ -254,14 +254,10 @@ def dense_items(dense: dict, census_groups: dict, weight_mode: str) -> list:
     return items
 
 
-def solve_mckp(items: list, costs: list, budget: int, resolution: int):
-    """Exact multi-choice knapsack: min sum cost s.t. sum bytes <= budget.
-
-    Item bytes are rounded UP to ``resolution`` so every DP-feasible choice is
-    feasible in true bytes.  Returns (choice indices, true bytes, objective).
-    """
-    S = budget // resolution
-    dp = np.zeros(S + 1)
+def _dp_pass(dp0, items: list, costs: list, S: int, resolution: int):
+    """Run the 'at most s slots' multi-choice DP over ``items`` on top of the
+    table ``dp0`` (min cost of everything already folded in, per slot)."""
+    dp = dp0
     choice = np.zeros((len(items), S + 1), dtype=np.int8)
     INF = np.inf
     for i, (it, c) in enumerate(zip(items, costs)):
@@ -278,16 +274,54 @@ def solve_mckp(items: list, costs: list, budget: int, resolution: int):
             arg[better] = o
         dp = new
         choice[i] = arg
-    if not np.isfinite(dp[S]):
-        return None
+    return dp, choice
+
+
+def _backtrack(choice, items, b, resolution):
     sel = []
-    b = S
     for i in range(len(items) - 1, -1, -1):
         o = int(choice[i, b])
         sel.append(o)
         b -= int(-(-int(items[i].bytes[o]) // resolution))
     sel.reverse()
-    true_bytes = int(sum(int(items[i].bytes[o]) for i, o in enumerate(sel)))
+    return sel, b
+
+
+class DensePrefix:
+    """The DP over the fixed (census) dense items, computed once at the largest
+    slot count and sliced per budget -- dp[s] depends only on smaller s."""
+
+    def __init__(self, items, S_max, resolution):
+        self.items = items
+        self.resolution = resolution
+        self.dp, self.choice = _dp_pass(np.zeros(S_max + 1), items,
+                                        [it.truth for it in items], S_max, resolution)
+
+
+def solve_mckp(items: list, costs: list, budget: int, resolution: int, prefix=None):
+    """Exact multi-choice knapsack: min sum cost s.t. sum bytes <= budget.
+
+    Item bytes are rounded UP to ``resolution`` so every DP-feasible choice is
+    feasible in true bytes.  ``prefix`` folds in a fixed item set first; its
+    choices are appended after ``items``' choices in the returned selection.
+    Returns (choice indices, true bytes) or None if infeasible.
+    """
+    S = budget // resolution
+    if prefix is not None:
+        assert prefix.resolution == resolution and S < len(prefix.dp)
+        dp0 = prefix.dp[: S + 1]
+    else:
+        dp0 = np.zeros(S + 1)
+    dp, choice = _dp_pass(dp0, items, costs, S, resolution)
+    if not np.isfinite(dp[S]):
+        return None
+    sel, b = _backtrack(choice, items, S, resolution)
+    all_items = list(items)
+    if prefix is not None:
+        psel, _ = _backtrack(prefix.choice, prefix.items, b, resolution)
+        sel = sel + psel
+        all_items = all_items + list(prefix.items)
+    true_bytes = int(sum(int(all_items[i].bytes[o]) for i, o in enumerate(sel)))
     assert true_bytes <= budget
     return sel, true_bytes
 
@@ -349,7 +383,7 @@ def _local_draw(weights, n, *, seed, stack):
         certainty += over; rest = [k for k in rest if k not in set(over)]; remaining -= len(over)
     if remaining == 1:
         raise RuntimeError(f"stack {stack}: one random draw")
-    rng = np.random.default_rng(hash((seed, stack)) & 0xFFFFFFFF)
+    rng = np.random.default_rng(int(hashlib.sha256(f"{seed}:{stack}".encode()).hexdigest()[:8], 16))
     pi = {k: 1.0 for k in certainty}
     drawn = list(certainty)
     if remaining > 0 and rest:
@@ -534,10 +568,11 @@ def evaluate(job):
         preds.append(pred)
         if info:
             infos[L] = info
-    items = items + base_items
+    prefix = G["dense_prefix"][weight_mode]
     n_stack = len(stacks)
-    pred_costs = preds + [it.truth for it in base_items]
-    true_costs = [it.truth for it in items]
+    stack_items = items
+    items = items + base_items
+    pred_costs = preds
     out = {"job": {"weight_mode": weight_mode, "schedule": schedule, "param": param,
                    "seed": seed, "h_seed": h_seed},
            "sampling_source": SAMPLING_SOURCE, "budgets": {}, "pred_log2_error": {}}
@@ -550,7 +585,7 @@ def evaluate(job):
         if opt is None:
             out["budgets"][tag] = {"infeasible": True}
             continue
-        r = solve_mckp(items, pred_costs, budget, G["resolution"])
+        r = solve_mckp(stack_items, pred_costs, budget, G["resolution"], prefix=prefix)
         sel, used = r
         obj = objective(items, sel)
         regret = (obj - opt["objective"]) / opt["objective"] * 100.0
@@ -727,6 +762,15 @@ def main():
                         for wm in ("uniform", "counts", "lognormal_h")}
     G["opt"] = {}
     menu = {}
+    S_max = 0
+    for (wm, hs), wts in weights.items():
+        items = [Item(f"s:layer{L}", "stack", [f"{EXPERT_FAMILY}:{r}" for r in RATES],
+                      stack_bytes(stacks[L]), stack_truth(stacks[L], wts[L])) for L in sorted(stacks)]
+        max_spend = int(sum(int(it.bytes.max()) for it in items + G["dense_items"][wm]))
+        S_max = max(S_max, int(max(max(budgets.values()), max_spend) // args.resolution))
+    G["dense_prefix"] = {wm: DensePrefix(G["dense_items"][wm], S_max, args.resolution)
+                         for wm in ("uniform", "counts", "lognormal_h")}
+    log(f"dense DP prefixes built at {S_max + 1} slots")
     for (wm, hs), wts in weights.items():
         items = [Item(f"s:layer{L}", "stack", [f"{EXPERT_FAMILY}:{r}" for r in RATES],
                       stack_bytes(stacks[L]), stack_truth(stacks[L], wts[L])) for L in sorted(stacks)]
@@ -734,8 +778,10 @@ def main():
         min_spend = int(sum(int(it.bytes.min()) for it in items))
         max_spend = int(sum(int(it.bytes.max()) for it in items))
         menu[f"{wm}:{hs}"] = {"min_spend": min_spend, "max_spend": max_spend}
+        stack_items = items[:len(stacks)]
         for tag, budget in budgets.items():
-            r = solve_mckp(items, [it.truth for it in items], budget, args.resolution)
+            r = solve_mckp(stack_items, [it.truth for it in stack_items], budget, args.resolution,
+                           prefix=G["dense_prefix"][wm])
             if r is None:
                 G["opt"][(wm, hs, tag)] = None
                 continue
@@ -783,10 +829,26 @@ def main():
                     jobs.append(("lognormal_h", est, s, seed, hs))
             for k in ks:
                 jobs.append(("lognormal_h", "d", k, seed, hs))
-    log(f"{len(jobs)} evaluations x {len(budgets)} budgets")
+    log(f"{len(jobs)} evaluations x {len(budgets)} budgets over {len(stacks)} held-out layers")
     ctx = get_context("fork")
+    partial_dir = os.path.join(args.out, "partial")
+    os.makedirs(partial_dir, exist_ok=True)
+    groups = defaultdict(list)
+    for j in jobs:
+        groups[(j[0], j[1], j[2])].append(j)
+    results = []
     with ctx.Pool(args.workers) as pool:
-        results = pool.map(evaluate, jobs, chunksize=4)
+        for gi, (gk, gjobs) in enumerate(sorted(groups.items(), key=str)):
+            t1 = time.time()
+            rs = pool.map(evaluate, gjobs, chunksize=2)
+            results.extend(rs)
+            name = f"{gk[0]}_{gk[1]}" + ("" if gk[2] is None else f"_{gk[2]:g}")
+            with open(os.path.join(partial_dir, f"{name}.json"), "w") as fh:
+                json.dump({"group": list(gk), "n": len(rs), "results": rs}, fh, default=float)
+            reg = {t: float(np.mean([r["budgets"][t]["regret_pct"] for r in rs if "regret_pct" in r["budgets"][t]] or [float("nan")]))
+                   for t in budgets}
+            log(f"group {gi + 1}/{len(groups)} {name}: {len(rs)} evals x {len(stacks)} layers in "
+                f"{time.time() - t1:.1f}s; mean regret% " + " ".join(f"{t}={v:.4f}" for t, v in reg.items()))
     log("main grid done")
 
     # continuous budget sweep (aggregate, fewer seeds), uniform + counts
@@ -801,7 +863,8 @@ def main():
             it.labels = [f"{EXPERT_FAMILY}:{r}" for r in RATES]
         G["budgets"] = sweep_budgets
         for tag, budget in sweep_budgets.items():
-            r = solve_mckp(items, [it.truth for it in items], budget, args.resolution)
+            r = solve_mckp(items[:len(stacks)], [it.truth for it in items[:len(stacks)]], budget,
+                           args.resolution, prefix=G["dense_prefix"][wm])
             G["opt"][(wm, 0, tag)] = None if r is None else {
                 "sel": r[0], "objective": objective(items, r[0]), "bytes": r[1]}
         sjobs = [(wm, "c", None, 0, 0), (wm, "c2", None, 0, 0)]
@@ -812,7 +875,10 @@ def main():
             for k in ks:
                 sjobs.append((wm, "d", k, seed, 0))
         with ctx.Pool(args.workers) as pool:
-            sres = pool.map(evaluate, sjobs, chunksize=4)
+            sres = pool.map(evaluate, sjobs, chunksize=2)
+        with open(os.path.join(partial_dir, f"sweep_{wm}.json"), "w") as fh:
+            json.dump({"budgets": sweep_budgets, "results": sres}, fh, default=float)
+        log(f"sweep {wm}: {len(sres)} evals x {len(sweep_budgets)} budgets written")
         sweep[wm] = {"budgets": sweep_budgets, "bpp": {t: b * 8 / (params_stacks + params_dense)
                                                        for t, b in sweep_budgets.items()},
                      "results": [{"job": r["job"], "budgets": {t: {"regret_pct": v.get("regret_pct"),
