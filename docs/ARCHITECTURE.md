@@ -1,7 +1,43 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-10 · `perf/glm-publication-transition-optimization`. Stamps
+As of: 2026-09-10 · `perf/glm-boundary-pipeline`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-10, `perf/glm-boundary-pipeline`) for the **batch-boundary
+pipeline** (§4.10): with `--publication-overlap-bytes N` and
+`--campaign-identity-bytes M` both set, every post-encode step of a batch that
+touches no device runs on the publisher's writer thread behind that batch's
+own files -- the render/wire writes, the per-anchor identity derived from the
+unit's sealed template (`_AnchorPublicationLedger.record(anchor, derive=...)`),
+the wire receipt read back off the published file, and the journal write --
+while the encode thread starts the next batch. The writer stays CPU/IO-only by
+contract: the producer's graph capture forbids surprise device work from
+another thread, so the render score and the device-to-host copy remain on the
+encode thread, and without a bound identity the producer's
+`encoding_input_identity` (which hashes the resident weight and Hessian)
+still runs there. A refused deferred identity is a publication failure: no
+receipt, no row, and the action stops. Outputs are unchanged byte for byte
+(gates: `tests/test_tessera_publication.py`, `tests/test_tessera_bound_identity.py`,
+`tests/test_tessera_campaign_publication_cli.py`).
+
+The identity reservation's planner now charges the retained per-unit hold as
+the fixed object term, the interpreter's own frozenset table size for the
+closed roster's borrowed format references, and the serialized receipt
+envelope; the roster transient (two closed rosters of per-format namespaces
+live during construction) is charged explicitly in the planning scratch. The
+former 1 KiB-per-format retained envelope charged an 864-unit GLM expert row
+~1.9 GB and pushed its admission past the box; the bound is exact in the
+interpreter's terms and is still tested against `observed_metadata_bytes` on
+every run. The 864-unit row now fits a 256 MiB reservation.
+
+Anchor batches are emitted unit-major (`_anchor_batches`): the chunks of one
+`(family, shape, dtype, device)` key are ordered by chunk position first and
+rung second, so consecutive batches encode the same expert units at successive
+rungs and the encoder memo -- sized to the batch width by the plan -- reuses
+each unit's block-LDL factorization across its rungs instead of refactorizing
+once per (unit, rung) with every other unit's batches in between
+(PrismaQuant #389). Batch membership, wire bytes, prices and the checkpoint
+identity are unchanged; only the order of encodes moves.
 
 Re-stamped (2026-09-10, `perf/glm-publication-transition-optimization`) for
 experimental `--campaign-identity-bytes N`. It is off when `N=0`. A positive

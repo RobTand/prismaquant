@@ -696,7 +696,22 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
 
 
 def _anchor_batches(pending, *, weights, expert_members, batch_size):
-    """Bound compatible expert encodes inside this action; never assign hosts."""
+    """Bound compatible expert encodes inside this action; never assign hosts.
+
+    Membership is by ``(family, rung, shape, dtype, device)`` for expert
+    units and by ``(unit, family, rung)`` otherwise, as before.  The ORDER of
+    the batches is unit-major: the batches of one compatible key differ only
+    by rung, and the chunk at one position holds the same members at every
+    rung when the round pended every member at every rate (round one does,
+    per member in rate order), so consecutive batches encode the same units
+    at successive rungs.  The encoder memo is sized to the batch width
+    (``encoder_memo_capacity``), so that order is what lets a unit's block-LDL
+    factorization be reused across its rungs instead of refactorized once per
+    (unit, rung) with 864 batches of other units in between
+    (RobTand/prismaquant#389).  Rung-major emission -- every batch of rung A,
+    then every batch of rung B -- is what the insertion-ordered grouping
+    produced before, and with the memo at the batch width it hit nothing.
+    """
     if batch_size < 1:
         raise ValueError("anchor batch size must be positive")
     if batch_size == 1:
@@ -705,11 +720,24 @@ def _anchor_batches(pending, *, weights, expert_members, batch_size):
     for item in pending:
         name, family, rung = item
         weight = weights[name]
-        key = ((family, rung, tuple(weight.shape), weight.dtype, weight.device)
-               if name in expert_members else (name, family, rung))
-        groups.setdefault(key, []).append(item)
-    return [group[start:start + batch_size] for group in groups.values()
-            for start in range(0, len(group), batch_size)]
+        if name in expert_members:
+            base = (family, tuple(weight.shape), weight.dtype, weight.device)
+            key = (family, rung, *base[1:])
+        else:
+            base = key = (name, family, rung)
+        groups.setdefault(key, (base, []))[1].append(item)
+    # Sort key: the base (the key minus its rung) in first-appearance order,
+    # then the chunk position, then the rung in first-appearance order -- so
+    # chunk 0 of every rung of one base precedes chunk 1 of any of them.
+    base_rank, key_rank, chunks = {}, {}, []
+    for key, (base, group) in groups.items():
+        base_rank.setdefault(base, len(base_rank))
+        key_rank[key] = len(key_rank)
+        for position, start in enumerate(range(0, len(group), batch_size)):
+            chunks.append(((base_rank[base], position, key_rank[key]),
+                           group[start:start + batch_size]))
+    chunks.sort(key=lambda chunk: chunk[0])
+    return [batch for _rank, batch in chunks]
 
 
 # ---------------------------------------------------------------------------
@@ -1897,11 +1925,31 @@ def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_s
 # deliberately stated as admission terms, not as a measurement: the live
 # `observed_metadata_bytes` diagnostic below tests the bound on each run.
 IDENTITY_HOLD_UNIT_OBJECT_BYTES = 32 * 1024
-IDENTITY_HOLD_FORMAT_REFERENCE_BYTES = 1024
 IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER = 8
 IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES = 256
 IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES = 4096
 IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER = 4
+# The roster a holder is built from is transient: one ``SimpleNamespace`` per
+# closed-menu format with six attributes (`_campaign_identity_anchor_roster`),
+# plus the holder constructor's own one-attribute namespace per format, its
+# working tuple/sets, and the rung integers those carry.  Two rosters are live
+# at the peak, because the next unit's is built before the previous binding is
+# released.  The per-format figure is the interpreter's own object cost with
+# the six-slot instance dict counted at its CPython 3.12 size, rounded up.
+IDENTITY_ROSTER_TRANSIENT_FORMAT_BYTES = 1024
+IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS = 2
+
+
+def _frozenset_table_bytes(entries: int) -> int:
+    """The interpreter's own size of a frozenset holding ``entries`` items.
+
+    The holder retains one frozenset of format-name references; the strings
+    are the menu's and pre-date the hold, so what it adds is the set's slot
+    table, which CPython sizes by a fill rule this asks the interpreter for
+    rather than restates.  ``observed_metadata_bytes`` counts the same table.
+    """
+    import sys
+    return sys.getsizeof(frozenset(range(int(entries))))
 
 
 def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
@@ -1910,34 +1958,45 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
 
     One unit retains a holder/result mapping, signatures, the producer receipt
     dictionaries, and a frozenset of references to every closed menu format.
-    The fixed object term covers the first three; the per-format term covers
-    frozenset slots and result mapping growth.  Receipt strings and dict keys
-    are bounded from known unit/format/settings/projection serialization
-    lengths, multiplied by the documented CPython object/slot envelope.
+    The fixed object term covers the first three; the frozenset term is the
+    interpreter's own table size for that many references.  Receipt strings
+    and dict keys are bounded from known unit/shape/settings/projection
+    serialization lengths, multiplied by the documented CPython object/slot
+    envelope.  The format names themselves are the menu's objects, borrowed by
+    reference, and the sealed template carries one recipe, not the roster, so
+    no per-format serialization is retained.
+
+    The second value is the planning-and-construction transient: the bound
+    map and its largest JSON string, plus the two closed rosters live while
+    holders are built (`IDENTITY_ROSTER_TRANSIENT_*`), which construction
+    materializes once per unit and frees before the next.
     """
     import json
     # The producer config owner may itself verify H commitments. Planning must
     # not invoke it before the one real receipt; reserve its bounded JSON
     # settings envelope in the fixed holder term instead.
     settings_bytes = 4096 if calibration_source is not None else 0
-    planned, largest_serialization = {}, 0
+    planned, largest_serialization, widest_roster = {}, 0, 0
     for name in sorted(weights):
         shape_bytes = len(json.dumps(list(weights[name].shape), separators=(",", ":")).encode())
-        format_bytes = sum(len(entry.format_name.encode()) for entry in menus[name])
         projection_bytes = len(json.dumps((projected_units or {}).get(name),
             sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
         receipt_bytes = len(name.encode()) + shape_bytes + settings_bytes + projection_bytes
         planned[name] = (IDENTITY_HOLD_UNIT_OBJECT_BYTES +
-                         IDENTITY_HOLD_FORMAT_REFERENCE_BYTES * len(menus[name]) +
-                         IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER *
-                         (receipt_bytes + format_bytes))
-        largest_serialization = max(largest_serialization, receipt_bytes + format_bytes)
+                         _frozenset_table_bytes(len(menus[name])) +
+                         IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER * receipt_bytes)
+        largest_serialization = max(largest_serialization, receipt_bytes)
+        widest_roster = max(widest_roster, len(menus[name]))
     # `planned` remains live until holders are built. Each loop iteration also
     # materializes one shape/projection JSON string; its worst live string plus
-    # the map's entry table is a separate, pre-admitted planning transient.
+    # the map's entry table is a separate, pre-admitted planning transient, and
+    # so is the closed roster each holder is constructed from.
     scratch = (IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES +
                IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES * len(planned) +
-               IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER * largest_serialization)
+               IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER * largest_serialization +
+               IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS * (
+                   IDENTITY_ROSTER_TRANSIENT_FORMAT_BYTES * widest_roster +
+                   _frozenset_table_bytes(widest_roster)))
     return planned, scratch
 
 
@@ -2108,9 +2167,26 @@ class _AnchorPublicationLedger:
                 f"{len(self._staged)} anchor(s) already staged")
         self._publisher = publisher
 
-    def record(self, anchor, identity) -> None:
-        """Journal now, or when this anchor's own bytes have been written."""
+    def record(self, anchor, identity=None, *, derive=None) -> None:
+        """Journal now, or when this anchor's own bytes have been written.
+
+        ``identity`` is the anchor's producer input identity, already
+        computed.  ``derive`` is instead a zero-argument callable that
+        computes it, and the two are exclusive.  A caller passes ``derive``
+        only when the derivation touches no device: the writer is a CPU/IO
+        thread by contract (the producer's graph capture forbids surprise
+        device work from another thread while a capture may be running), so
+        an identity that hashes a resident weight or Hessian is computed on
+        the encode thread and handed over as a value.  With a publisher the
+        callable runs on the writer inside this anchor's receipt job, ahead
+        of the read-back it seals; without one it runs inline, here, exactly
+        where the value would have been computed.
+        """
+        if (identity is None) == (derive is None):
+            raise ValueError("record takes exactly one of identity or derive")
         if self._publisher is None:
+            if derive is not None:
+                identity = derive()
             self._journal(anchor, self._make_record(anchor, identity))
             return
         key = (anchor.qname, anchor.format_name)
@@ -2126,8 +2202,11 @@ class _AnchorPublicationLedger:
         def make():
             # Runs on the writer, behind this unit's own file job, so the
             # read-back inside the receipt call reads a file that exists and
-            # the encode thread never waits for it.
-            self._records[key] = self._make_record(anchor, identity)
+            # the encode thread never waits for it.  A deferred identity is
+            # derived first, on this thread, and a refusal there fails the
+            # publication the same way a refused read-back does.
+            sealed = identity if derive is None else derive()
+            self._records[key] = self._make_record(anchor, sealed)
 
         self._publisher.submit(PublicationJob(
             key=(RECEIPT_JOB, *key), charged_bytes=0, publish=make))
@@ -3791,15 +3870,52 @@ def campaign_population_block(**kwargs) -> dict:
 def _format_executes_static_activation_contract(format_name: str) -> bool:
     """Does this rung's route execute a STATIC activation contract?
 
-    The spec's answer (``FormatSpec.static_activation_contract``), which
-    ``synthesize_tessera_spec`` derives from the registry row the rung's route
-    names -- never a compare of that row's NAME against ``"NVFP4"`` (#205,
-    #221).  Same field ``_measure_anchor`` prices through, so the rung this
-    refuses to resume is exactly the rung it refuses to score.
+    The one derivation (#205, #221): the route names the registry row whose
+    contract it executes (``activation_source_format``) and the ROW owns the
+    answer (``FormatSpec.static_activation_contract``) -- never a compare of
+    that row's NAME against ``"NVFP4"``.  It is
+    ``tessera_formats.route_static_activation_contract`` off the same route
+    ``synthesize_tessera_spec`` stamps onto the rung's spec, so the rung this
+    refuses to resume is exactly the rung ``_measure_anchor`` prices.
+
+    The row is read live, every time: it is a dictionary lookup, and the
+    registry is what a test (or a lane) replaces when a second row gains a
+    contract.  What is memoised is the pure part -- canonical name to serving
+    route -- sized by the format key space: the closed-roster bind asks it
+    once per format per unit, 1,793 routes for each of an 864-unit row's
+    holders, measured at ~1.1 s per unit on the CPU worker when each ask
+    synthesized a whole spec, a GPU-idle startup phase of a quarter hour per
+    row.
     """
     from . import format_registry as fr
 
-    return fr.get_format(format_name).static_activation_contract is not None
+    canonical = fr.canonical_format_name(format_name)
+    row = fr.REGISTRY.get(canonical)
+    if row is not None:
+        return row.static_activation_contract is not None
+    if not fr.is_tessera_format_name(canonical):
+        fr.get_format(canonical)  # raises the registry's KeyError
+    from .tessera_formats import route_static_activation_contract
+
+    return route_static_activation_contract(_tessera_route_memo()(canonical)) is not None
+
+
+def _tessera_route(canonical: str):
+    from .tessera_formats import (
+        parse_tessera_format_name, tessera_serving_route, tessera_wire_recipe,
+    )
+
+    family, rung = parse_tessera_format_name(canonical)
+    return tessera_serving_route(family, tessera_wire_recipe(family, rung), rung)
+
+
+@functools.lru_cache(maxsize=1)
+def _tessera_route_memo():
+    # Built on first use so this module keeps importing without the Tessera
+    # package; the memo itself is sized by the format key space on its first
+    # call, the way every wire-recipe memo is.
+    from .tessera_formats import lazily_sized_cache, recipe_cache_bound
+    return lazily_sized_cache(recipe_cache_bound)(_tessera_route)
 
 
 def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
@@ -4986,6 +5102,12 @@ def _main(argv, *, source_scope) -> int:
         source_scope.callback(lambda: [unit.close() for unit in bound_checkpoint_units.values()])
     identity_metadata_observed_bytes = sum(unit.observed_metadata_bytes()
                                            for unit in bound_checkpoint_units.values())
+    if bound_checkpoint_units:
+        print(f"[campaign] campaign identity hold: {len(bound_checkpoint_units)} units, "
+              f"observed metadata {identity_metadata_observed_bytes} B, planned bound "
+              f"{sum(identity_metadata_bounds.values())} B + scratch "
+              f"{identity_planning_scratch_bytes} B, reserved {args.campaign_identity_bytes} B",
+              flush=True)
 
     # The resume identity, run level: everything a price is a function of,
     # including the static A-side contract (scales + policy) the W4A4 rows
@@ -5530,12 +5652,22 @@ def _main(argv, *, source_scope) -> int:
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
                 for anchor in anchors:
-                    ledger.record(anchor, _checkpoint_anchor_identity(
-                        anchor, weights=weights, menus=menus,
-                        calibration_source=calibration_source, static_scales=static_scales,
-                        projected_units=projected_units,
-                        **({"bound_unit": bound_checkpoint_units[anchor.qname]}
-                           if bound_checkpoint_units else {})))
+                    identity_of = functools.partial(
+                        _checkpoint_anchor_identity, anchor, weights=weights,
+                        menus=menus, calibration_source=calibration_source,
+                        static_scales=static_scales, projected_units=projected_units)
+                    if bound_checkpoint_units:
+                        # Derived from the unit's sealed template: a deepcopy
+                        # and Tessera's wire_recipe, no tensor read.  The
+                        # writer does it behind this anchor's own files, so
+                        # the next batch's encode is not waiting on it.
+                        ledger.record(anchor, derive=functools.partial(
+                            identity_of, bound_unit=bound_checkpoint_units[anchor.qname]))
+                    else:
+                        # The producer's ``encoding_input_identity`` hashes
+                        # the resident weight and Hessian, which are device
+                        # tensors here: that stays on the encode thread.
+                        ledger.record(anchor, identity_of())
                 completed += len(anchors)
                 # Commit every joined quantum before advancing. The scalar mode
                 # keeps its existing ten-anchor flush cadence.
