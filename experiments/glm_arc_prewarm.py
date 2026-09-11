@@ -535,9 +535,13 @@ def main() -> int:
 
     if args.warm_row:
         plan = campaign.row_plan(args.warm_row)
+        jobs = jobs_for(plan, not args.no_weights)
+        planned = sum(n for _, _, n in plan["_extents"]) if not args.no_weights else 0
+        planned += plan["capture_bytes"] + plan["seed_bytes"]
         head, size, c, c_max = arc_headroom_bytes(args.arc_reserve_fraction)
         log_event(args.log, {"event": "warm_start", "row": args.warm_row,
-                             "bytes": plan["total_bytes"], "readers": args.readers,
+                             "bytes": planned, "row_total_bytes": plan["total_bytes"],
+                             "weights": not args.no_weights, "readers": args.readers,
                              "arc_size": size, "arc_c": c, "arc_c_max": c_max,
                              "arc_headroom_nominal": c_max - size,
                              "arc_headroom_effective": c - size,
@@ -547,8 +551,7 @@ def main() -> int:
                               if not k.startswith("_")}, indent=1))
             return 0
         stop = threading.Event()
-        res = Reader(args.readers).read(jobs_for(plan, not args.no_weights),
-                                        stop, plan["total_bytes"] + (1 << 30))
+        res = Reader(args.readers).read(jobs, stop, planned + (1 << 30))
         head2, size2, c2, _ = arc_headroom_bytes(args.arc_reserve_fraction)
         log_event(args.log, {"event": "warm_done", "row": args.warm_row,
                              "arc_size_after": size2, "arc_c_after": c2,
