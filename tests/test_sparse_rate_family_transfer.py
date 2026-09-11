@@ -52,6 +52,19 @@ def _curve(tmp_path, plan_path, plan, values):
     return path
 
 
+def _replace_curve_value(curve_path, index, value):
+    """Rewrite a fixture curve and its individual receipt consistently."""
+    curve = json.loads(curve_path.read_text())
+    receipt = Path(curve["receipts"][index]["path"])
+    record = json.loads(receipt.read_text())
+    record["value"] = value
+    _write(receipt, record)
+    curve["values"][index] = value
+    curve["receipts"][index]["value"] = value
+    curve["receipts"][index]["sha256"] = _sha(receipt)
+    _write(curve_path, curve)
+
+
 @pytest.fixture
 def fixture(tmp_path):
     specs = {
@@ -138,3 +151,16 @@ def test_resealed_prediction_roster_tamper_and_wrong_preselection_are_refused(fi
     selection_path = root / "bad-preselection.json"; _write(selection_path, selection)
     with pytest.raises(FamilyTransferError, match="preselection"):
         freeze_protocol(plans, root / "bad-protocol.json", preselection_path=selection_path)
+
+
+def test_sealer_refuses_a_fixed_secondary_formula_that_becomes_nonpositive(fixture, tmp_path):
+    protocol, curves = fixture
+    # All measured source and endpoint values remain valid.  The fixed delta
+    # form itself is what becomes negative at the unseen BF interior.
+    _replace_curve_value(Path(curves["bf_source"]), 1, 0.1)
+    _replace_curve_value(Path(curves["e4_left"]), 0, 0.1)
+    _replace_curve_value(Path(curves["e4_right"]), 0, 0.1)
+    with pytest.raises(FamilyTransferError, match="nonpositive"):
+        seal_predictions(protocol, "e4", {key: curves[key] for key in
+                                             ("bf_source", "e4_left", "e4_right")},
+                         tmp_path / "nonpositive.seal.json")
