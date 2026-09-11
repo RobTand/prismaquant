@@ -277,6 +277,14 @@ def assemble_bundle(args):
             raise Refused(f'{path}: arm did not pass ({comparison.get("failures")})')
         if comparison['old_pins'] != pins['old'] or comparison['new_pins'] != pins['new']:
             raise Refused(f'{path}: arm pins differ from the pins file')
+        # The arm has to have compared against the identity ``migrate`` will
+        # write, dropped settings and all.  An arm that dropped nothing proves
+        # a different migration than the one this pins file describes, and an
+        # older result that predates the field reads as "dropped nothing".
+        declared = tuple(sorted(comparison.get('dropped_settings') or ()))
+        if declared != tuple(sorted(pins['drop_settings'])):
+            raise Refused(f'{path}: arm dropped settings {list(declared)}, the pins file '
+                          f'drops {sorted(pins["drop_settings"])}')
         if not comparison.get('identity_matches_with_pins_substituted'):
             raise Refused(f'{path}: produced identity does not equal the stored identity with pins substituted')
         for cell in comparison['cells']:

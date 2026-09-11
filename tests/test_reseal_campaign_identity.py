@@ -230,7 +230,8 @@ def test_hash_definitions_match_the_campaign(tmp_path):
         tool.load_pins(bad)
 
 
-def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(832, 960, 1088)):
+def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(832, 960, 1088),
+                dropped=()):
     cells = []
     def cell(qname, family, rate):
         cells.append(dict(ok=True, byte_identical=True, dloss=0.5, stored_dloss=0.5, qname=qname, family=family,
@@ -245,7 +246,8 @@ def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(8
                 cell(f'layers.{j}.mlp.gate_proj', family, rate)
     cell('layers.0.mlp.up_proj', 'TESSERA_E2M1_K2', 896)
     path.write_text(json.dumps(dict(kind='dense', comparison=dict(
-        kind='comparison', ok=True, old_pins=old, new_pins=new, identity_matches_with_pins_substituted=True, cells=cells))))
+        kind='comparison', ok=True, old_pins=old, new_pins=new, identity_matches_with_pins_substituted=True,
+        dropped_settings=list(dropped), cells=cells))))
     return path
 
 
@@ -279,6 +281,47 @@ def test_proof_bundle_needs_a_fixture_arm_only_when_the_encoder_pin_moves(tmp_pa
     assert run('verify', '--pins', pins_pq_only, '--row', row) == 0
     loaded = tool.load_bundle(tmp_path/'b2.json', tool.load_pins(pins_pq_only))
     assert loaded['fixture_id']['ids'] is None
+
+
+def test_proof_bundle_requires_the_arm_to_have_dropped_what_the_pins_drop(tmp_path, capsys):
+    """An arm proves the migration it compared against, not a neighbouring one.
+
+    ``migrate`` pops ``drop_settings`` from the identity it writes. An arm that
+    did not pop them compared the produced row against a different identity, so
+    its pass says nothing about this migration. A result that predates the
+    field reads as "dropped nothing" and is refused the same way.
+    """
+    pq_only = dict(NEW, encoder_source_sha256=OLD['encoder_source_sha256'])
+    pins = write_pins(tmp_path/'pins.json', new=pq_only, drop_settings=list(KNOBS))
+    silent = _arm_result(tmp_path/'arm-silent.json', OLD, pq_only)
+    assert run('proof-bundle', '--pins', pins, '--arm', silent, '--out', tmp_path/'b.json') == 2
+    assert 'dropped settings' in capsys.readouterr().err
+    partial = _arm_result(tmp_path/'arm-partial.json', OLD, pq_only, dropped=list(KNOBS)[:1])
+    assert run('proof-bundle', '--pins', pins, '--arm', partial, '--out', tmp_path/'b.json') == 2
+    assert 'dropped settings' in capsys.readouterr().err
+    matching = _arm_result(tmp_path/'arm-drop.json', OLD, pq_only, dropped=list(KNOBS))
+    assert run('proof-bundle', '--pins', pins, '--arm', matching, '--out', tmp_path/'b.json') == 0
+    assert json.loads((tmp_path/'b.json').read_text())['ok'] is True
+
+
+def test_proof_expects_the_identity_the_migration_will_write(tmp_path):
+    """``substitute_pins`` drops the same settings ``migrate`` pops.
+
+    Without this the arm compares a produced row that no longer binds a
+    scheduling knob against a stored identity that still does, and a correct
+    run fails on a field neither side disputes.
+    """
+    import importlib
+    proof = importlib.import_module('experiments.reseal_identity_proof')
+    stored = dict(OLD, settings={'nsamples': 4, **{knob: 24.0 for knob in KNOBS}})
+    expected = proof.substitute_pins(stored, old=OLD, new=NEW, drop=list(KNOBS))
+    assert expected['settings'] == {'nsamples': 4}
+    assert expected['prismaquant_source_sha256'] == NEW['prismaquant_source_sha256']
+    # Untouched without the list, which is what the previous behaviour was.
+    assert set(proof.substitute_pins(stored, old=OLD, new=NEW)['settings']) == {'nsamples', *KNOBS}
+    # A name the row never bound is a refusal, not a silent no-op.
+    with pytest.raises(ValueError, match='cannot be dropped'):
+        proof.substitute_pins(stored, old=OLD, new=NEW, drop=('not_a_setting',))
 
 
 def test_rows_are_classified_by_the_checkpoint_audit_not_by_cost_pkl(tmp_path, capsys):
