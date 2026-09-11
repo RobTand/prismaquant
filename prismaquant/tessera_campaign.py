@@ -1610,6 +1610,13 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     # metadata for retaining the same producer receipt. Neither changes the
     # receipt, so binding either would make scheduling wear an identity's clothes.
     #
+    # ``streaming_cache_slots``, ``streaming_prefetch_workers`` and
+    # ``streaming_cache_headroom_gb`` size the layer cache, its prefetch pool and
+    # the free-memory floor it keeps (`cost_streaming.build_streamed_causal_lm`); every
+    # captured activation, Hessian and wire is the same object at any of their
+    # values, so they are scheduling too.  ``streaming`` itself and
+    # ``streaming_capture_policy`` stay bound: they choose what is captured.
+    #
     # ``units``, ``calibration_census`` and ``census_out`` are locations too,
     # and each one's load-bearing content is already bound by value somewhere
     # in this identity: the selection by the ``units`` map below (which holds
@@ -1628,7 +1635,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
                  "publication_overlap_bytes", "campaign_identity_bytes",
-                 "source_snapshot_policy"):
+                 "source_snapshot_policy", "streaming_cache_slots",
+                 "streaming_prefetch_workers", "streaming_cache_headroom_gb"):
         settings.pop(name, None)
     return {
         **({"family_restriction": {"policy": restriction,

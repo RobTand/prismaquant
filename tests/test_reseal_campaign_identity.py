@@ -35,10 +35,11 @@ def _wire(root, name, fmt, seal):
 
 
 def make_row(root, *, pins=OLD, units=('layers.0.mlp.experts.0.down_proj', 'layers.0.mlp.experts.1.down_proj'),
-             with_cost=True, expert_wires=True):
+             with_cost=True, expert_wires=True, settings=None):
     root.mkdir(parents=True, exist_ok=True)
     identity = dict(campaign_schema='prismaquant.tessera_campaign.v1', currency='output_mse',
-                    settings=dict(nsamples=4, seqlen=8), calibration=dict(fit_tokens=3), serving_scope=None,
+                    settings=dict(settings if settings is not None else dict(nsamples=4, seqlen=8)),
+                    calibration=dict(fit_tokens=3), serving_scope=None,
                     encoder_recipe=dict(body='window'), **pins, input_global_scale_policy='static',
                     expert_projection=None, units={u: dict(menu=['TESSERA_E4M3_K1_R832', 'TESSERA_E4M3_K1_R960'],
                                                             weight=dict(sha256='e'*64)) for u in units})
@@ -71,8 +72,11 @@ def make_row(root, *, pins=OLD, units=('layers.0.mlp.experts.0.down_proj', 'laye
     return sha
 
 
-def write_pins(path, old=OLD, new=NEW):
-    path.write_text(json.dumps(dict(schema=tool.PINS_SCHEMA, old=old, new=new)))
+def write_pins(path, old=OLD, new=NEW, drop_settings=None):
+    pins = dict(schema=tool.PINS_SCHEMA, old=old, new=new)
+    if drop_settings is not None:
+        pins['drop_settings'] = list(drop_settings)
+    path.write_text(json.dumps(pins))
     return path
 
 
@@ -304,3 +308,75 @@ def test_rows_are_classified_by_the_checkpoint_audit_not_by_cost_pkl(tmp_path, c
     audit.write_text(json.dumps(dict(schema='prismaquant.tessera_campaign.checkpoint_audit.v1', rows=[
         dict(row_id='row-0064', state='done')])))
     assert run('verify', '--pins', pins, '--row', withdrawn, '--checkpoint-audit', audit) == 1
+
+
+# ---------------------------------------------------------------------------
+# Settings that leave the identity (scheduling knobs a later pin stopped binding)
+# ---------------------------------------------------------------------------
+
+KNOBS = dict(streaming_cache_headroom_gb=24.0, streaming_cache_slots=2, streaming_prefetch_workers=1)
+BOUND = dict(nsamples=4, seqlen=8, streaming=True, streaming_capture_policy='legacy', **KNOBS)
+
+
+def test_dropped_settings_leave_the_identity_and_land_in_the_record(tmp_path, capsys):
+    row = tmp_path/'row-0007'
+    old_sha = make_row(row, settings=BOUND)
+    pins = write_pins(tmp_path/'pins.json', drop_settings=list(KNOBS))
+    bundle = write_bundle(tmp_path/'bundle.json')
+    assert run('dry-run', '--pins', pins, '--row', row, '--verbose', '--report', tmp_path/'d.json') == 0
+    out = capsys.readouterr().out
+    assert 'identity.settings.streaming_cache_headroom_gb' in out
+    plan = json.loads((tmp_path/'d.json').read_text())
+    assert plan['drop_settings'] == list(KNOBS) and plan['rows'][0]['dropped_settings'] == KNOBS
+    assert run('migrate', '--pins', pins, '--proof', bundle, '--row', row) == 0
+    manifest = json.loads((row/'cost.anchors.json').read_text())
+    identity = manifest['identity']
+    assert not set(KNOBS) & set(identity['settings'])
+    assert identity['settings'] == dict(nsamples=4, seqlen=8, streaming=True, streaming_capture_policy='legacy')
+    assert identity['prismaquant_source_sha256'] == NEW['prismaquant_source_sha256']
+    assert manifest['identity_sha256'] == tool.identity_sha256(identity) != old_sha
+    record = manifest['identity_migration'][-1]
+    assert record['dropped_settings'] == KNOBS
+    # every shard is resealed to the new digest and the migrated row verifies against the same pins file
+    for entry in manifest['units']:
+        envelope = pickle.loads((row/'cost.anchors.json.parts'/entry['file']).read_bytes())
+        assert envelope['identity_sha256'] == manifest['identity_sha256']
+    assert run('verify', '--pins', pins, '--row', row) == 0
+    snapshot = {p: p.read_bytes() for p in row.rglob('*') if p.is_file()}
+    assert run('migrate', '--pins', pins, '--proof', bundle, '--row', row) == 0
+    assert 'already carries the new pins' in capsys.readouterr().out
+    assert {p: p.read_bytes() for p in row.rglob('*') if p.is_file()} == snapshot
+
+
+def test_a_row_without_the_dropped_setting_is_foreign_and_a_bound_one_fails_verify(tmp_path, capsys):
+    pins = write_pins(tmp_path/'pins.json', drop_settings=['streaming_cache_headroom_gb'])
+    missing = tmp_path/'row-0008'
+    make_row(missing, settings=dict(nsamples=4, seqlen=8))
+    assert run('dry-run', '--pins', pins, '--row', missing) == 2
+    assert 'neither the old nor the new' in capsys.readouterr().err
+    # a row that already carries the new pins but still binds the setting is not migrated either
+    stale = tmp_path/'row-0009'
+    make_row(stale, pins=NEW, settings=BOUND)
+    assert run('dry-run', '--pins', pins, '--row', stale) == 2
+    assert run('verify', '--pins', pins, '--row', stale) == 1
+    assert 'dropped_setting_still_bound' in capsys.readouterr().out
+    # the pins file itself is checked
+    bad = tmp_path/'bad.json'
+    bad.write_text(json.dumps(dict(schema=tool.PINS_SCHEMA, old=OLD, new=NEW, drop_settings=['a', 'a'])))
+    assert run('dry-run', '--pins', bad, '--row', stale) == 2
+    assert 'distinct' in capsys.readouterr().err
+
+
+def test_a_settings_only_migration_keeps_the_pins(tmp_path):
+    row = tmp_path/'row-0010'
+    make_row(row, pins=NEW, settings=BOUND)
+    same = write_pins(tmp_path/'same.json', old=NEW, new=NEW, drop_settings=['streaming_cache_headroom_gb'])
+    bundle = write_bundle(tmp_path/'bundle.json', old=NEW, new=NEW)
+    assert run('migrate', '--pins', same, '--proof', bundle, '--row', row) == 0
+    identity = json.loads((row/'cost.anchors.json').read_text())['identity']
+    assert 'streaming_cache_headroom_gb' not in identity['settings'] and 'streaming_cache_slots' in identity['settings']
+    assert run('verify', '--pins', same, '--row', row) == 0
+    # without a drop list, identical pins are still refused
+    none = tmp_path/'none.json'
+    none.write_text(json.dumps(dict(schema=tool.PINS_SCHEMA, old=NEW, new=NEW)))
+    assert run('dry-run', '--pins', none, '--row', row) == 2
