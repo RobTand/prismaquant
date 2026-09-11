@@ -6,9 +6,14 @@ distinct already-priced expert row's capture files, straight off the local pool
 path (``/storage_pool/shared/...``), never the NFS loopback, so the number is a
 property of the pool and not of the NFS client.
 
-Coldness is established after the fact, not asserted: the arm's physical HDD
-read bytes (``/proc/diskstats`` for the four raidz1 members) are compared with
-the logical bytes the arm read. A warm arm shows physical reads near zero.
+Coldness is established after the fact, not asserted. The primary signal is
+this process's own ``/proc/self/io`` ``read_bytes``, which counts only storage
+reads this action caused and is therefore immune to whatever else the box is
+doing; ``/proc/diskstats`` for the four raidz1 members is recorded alongside as
+box-wide context. A warm arm shows near-zero physical reads on both. The box is
+shared with other PrismaBuild work, so arms are repeated in a forward-and-back
+order and the spread between the two runs of one reader count is the honest
+error bar.
 
 Nothing is written to the pool. Results go to stdout and, optionally, to
 ``--out``.
@@ -80,6 +85,35 @@ def read_diskstats() -> dict:
     return out
 
 
+def loadavg() -> list[float]:
+    try:
+        with open("/proc/loadavg") as fh:
+            return [float(x) for x in fh.read().split()[:3]]
+    except (OSError, ValueError):
+        return []
+
+
+def concurrent_claims(host: str = "dl380g10") -> int:
+    """How many other PrismaBuild actions hold this box right now.
+
+    Only the count is kept: raw queue records are broker control material and
+    are never logged.
+    """
+    d = "/mnt/shared/prismabuild-fleet/pb-queue/claimed"
+    n = 0
+    try:
+        for fn in os.listdir(d):
+            try:
+                with open(os.path.join(d, fn)) as fh:
+                    if json.load(fh).get("claimed_host") == host:
+                        n += 1
+            except (OSError, ValueError):
+                continue
+    except OSError:
+        return -1
+    return n
+
+
 def read_self_io() -> dict:
     out = {}
     try:
@@ -125,19 +159,19 @@ class Sampler(threading.Thread):
         super().__init__(daemon=True)
         self.interval = interval
         self.samples: list[dict] = []
-        self._stop = threading.Event()
+        self._stopping = threading.Event()
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stopping.is_set():
             self.samples.append({
                 "t": time.time(),
                 "arc": read_arcstats(),
                 "disk": read_diskstats(),
             })
-            self._stop.wait(self.interval)
+            self._stopping.wait(self.interval)
 
-    def stop(self) -> None:
-        self._stop.set()
+    def halt(self) -> None:
+        self._stopping.set()
 
 
 def run_arm(root: str, files: list[str], readers: int, block: int) -> dict:
@@ -175,6 +209,8 @@ def run_arm(root: str, files: list[str], readers: int, block: int) -> dict:
     io_before = read_self_io()
     arc_before = read_arcstats()
     disk_before = read_diskstats()
+    load_before = loadavg()
+    claims_before = concurrent_claims()
     t0 = time.time()
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(readers)]
@@ -187,8 +223,11 @@ def run_arm(root: str, files: list[str], readers: int, block: int) -> dict:
     disk_after = read_diskstats()
     arc_after = read_arcstats()
     io_after = read_self_io()
+    load_after = loadavg()
+    claims_after = concurrent_claims()
 
     read_bytes = sum(totals)
+    self_phys = io_after.get("read_bytes", 0) - io_before.get("read_bytes", 0)
     dd = disk_delta(disk_before, disk_after)
     arc_d = {k: arc_after.get(k, 0) - arc_before.get(k, 0)
              for k in ARC_FIELDS if k in arc_after and k in arc_before}
@@ -198,16 +237,22 @@ def run_arm(root: str, files: list[str], readers: int, block: int) -> dict:
         "logical_bytes": read_bytes,
         "wall_s": wall,
         "mb_per_s": read_bytes / wall / 1e6 if wall else None,
-        "hdd_read_bytes": dd["hdd_read_bytes"],
-        "nvme_read_bytes": dd["nvme_read_bytes"],
-        "physical_over_logical": dd["hdd_read_bytes"] / read_bytes if read_bytes else None,
-        "cold": (dd["hdd_read_bytes"] / read_bytes) > 0.8 if read_bytes else None,
+        "self_physical_read_bytes": self_phys,
+        "self_physical_over_logical": self_phys / read_bytes if read_bytes else None,
+        "cold": (self_phys / read_bytes) > 0.8 if read_bytes else None,
+        "box_hdd_read_bytes": dd["hdd_read_bytes"],
+        "box_nvme_read_bytes": dd["nvme_read_bytes"],
+        "box_hdd_over_self": (dd["hdd_read_bytes"] / self_phys) if self_phys else None,
         "per_device_delta": dd["per_device"],
         "arc_delta": arc_d,
         "arc_size_before": arc_before.get("size"),
         "arc_size_after": arc_after.get("size"),
         "proc_io_delta": {k: io_after.get(k, 0) - io_before.get(k, 0)
                           for k in ("rchar", "read_bytes") if k in io_after},
+        "loadavg_before": load_before,
+        "loadavg_after": load_after,
+        "concurrent_claims_before": claims_before,
+        "concurrent_claims_after": claims_after,
         "errors": errors,
         "started_unix": t0,
         "finished_unix": t0 + wall,
@@ -260,11 +305,14 @@ def main() -> int:
             out["source_row"] = arm["source_row"]
             result["arms"].append(out)
             print(f"[arm] {arm['arm_id']} -> {out['mb_per_s']:.1f} MB/s "
-                  f"wall={out['wall_s']:.1f}s hdd={out['hdd_read_bytes']} "
-                  f"phys/log={out['physical_over_logical']:.3f} "
+                  f"wall={out['wall_s']:.1f}s self_phys={out['self_physical_read_bytes']} "
+                  f"self/log={out['self_physical_over_logical']:.3f} "
+                  f"box_hdd/self={out['box_hdd_over_self']:.2f} "
+                  f"claims={out['concurrent_claims_before']}->"
+                  f"{out['concurrent_claims_after']} "
                   f"cold={out['cold']}", flush=True)
     finally:
-        sampler.stop()
+        sampler.halt()
         sampler.join(timeout=5)
 
     result["finished_unix"] = time.time()
@@ -273,20 +321,21 @@ def main() -> int:
     result["diskstats_after"] = read_diskstats()
     result["samples"] = sampler.samples
 
-    print("=== TABLE ===", flush=True)
-    print(f"{'arm':22} {'readers':>7} {'GiB':>7} {'wall_s':>8} {'MB/s':>8} "
-          f"{'phys/log':>9} {'cold':>5}")
-    for a in result["arms"]:
-        print(f"{a['arm_id']:22} {a['readers']:7d} "
-              f"{a['logical_bytes']/1024**3:7.2f} {a['wall_s']:8.1f} "
-              f"{a['mb_per_s']:8.1f} {a['physical_over_logical']:9.3f} "
-              f"{str(a['cold']):>5}")
-
     if args.out:
         os.makedirs(os.path.dirname(args.out), exist_ok=True)
         with open(args.out, "w") as fh:
             json.dump(result, fh, indent=1)
         print(f"[out] {args.out}", flush=True)
+
+    print("=== TABLE ===", flush=True)
+    print(f"{'arm':24} {'readers':>7} {'GiB':>7} {'wall_s':>8} {'MB/s':>8} "
+          f"{'self/log':>9} {'boxhdd/self':>12} {'claims':>7} {'cold':>5}")
+    for a in result["arms"]:
+        print(f"{a['arm_id']:24} {a['readers']:7d} "
+              f"{a['logical_bytes']/1024**3:7.2f} {a['wall_s']:8.1f} "
+              f"{a['mb_per_s']:8.1f} {a['self_physical_over_logical']:9.3f} "
+              f"{a['box_hdd_over_self']:12.2f} "
+              f"{a['concurrent_claims_before']:7d} {str(a['cold']):>5}")
 
     compact = dict(result)
     compact.pop("samples", None)
