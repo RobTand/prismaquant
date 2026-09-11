@@ -16,6 +16,7 @@ from experiments.collect_complete_rate_curve import (
     _expected_row,
     _verify_wire,
     collect,
+    main,
     sha256,
 )
 from experiments.sparse_rate_adaptive import validate_curve
@@ -393,6 +394,116 @@ def test_plan_references_and_campaign_calibration_are_bound(tmp_path):
     write_json(fixture.plan_path, fixture.plan)
     with pytest.raises(RuntimeError, match="calibration identity"):
         collect(fixture.plan_path, fixture.checkpoint, fixture.cache, fixture.out)
+
+
+def _write_audit_region_correction(fixture: Fixture, **changes) -> Path:
+    correction = {
+        "schema": "prismaquant.complete_rate_audit_region_correction.v1",
+        "original_plan_path": str(fixture.plan_path.resolve()),
+        "original_plan_sha256": sha256(fixture.plan_path),
+        "corrected_audit_regions": {
+            label: [rate for rate in region if rate in fixture.plan["legal_rates"]]
+            for label, region in fixture.plan["audit_regions"].items()
+        },
+    }
+    correction.update(changes)
+    path = fixture.plan_path.with_name("audit-region-correction.json")
+    write_json(path, correction)
+    return path
+
+
+def test_audit_region_correction_binds_original_plan_and_retains_empty_labels(tmp_path):
+    fixture = make_fixture(tmp_path, "TESSERA_E4M3_K1", [832])
+    fixture.plan["audit_regions"] = {
+        "e4m3_around_1024": list(range(1016, 1033)),
+        "declared_empty": [],
+    }
+    write_json(fixture.plan_path, fixture.plan)
+    original_bytes = fixture.plan_path.read_bytes()
+    correction = _write_audit_region_correction(fixture)
+
+    assert main([
+        "--plan", str(fixture.plan_path),
+        "--audit-region-correction", str(correction),
+        "--checkpoint", str(fixture.checkpoint),
+        "--cache-dir", str(fixture.cache),
+        "--out", str(fixture.out),
+    ]) == 0
+
+    curve = json.loads(fixture.out.read_text())
+    assert fixture.plan_path.read_bytes() == original_bytes
+    assert curve["measurement_plan"] == {
+        "path": str(fixture.plan_path.resolve()),
+        "sha256": sha256(fixture.plan_path),
+    }
+    assert curve["audit_regions"] == {
+        "e4m3_around_1024": [],
+        "declared_empty": [],
+    }
+    assert curve["audit_region_correction"] == {
+        "path": str(correction.resolve()),
+        "sha256": sha256(correction),
+    }
+    assert validate_curve(curve, min_points=1) == ((832,), (1.0,))
+
+
+@pytest.mark.parametrize("mutation,match", [
+    ({"schema": "invented"}, "unsupported audit-region correction"),
+    ({"original_plan_sha256": "0" * 64}, "original plan bytes"),
+    ({"corrected_audit_regions": {"e4m3_around_1024": [832]}}, "exact intersection"),
+    ({"extra": True}, "exactly"),
+])
+def test_audit_region_correction_is_a_closed_exact_intersection(tmp_path, mutation, match):
+    fixture = make_fixture(tmp_path, "TESSERA_E4M3_K1", [1088])
+    fixture.plan["audit_regions"] = {"e4m3_around_1024": list(range(1016, 1033))}
+    write_json(fixture.plan_path, fixture.plan)
+    correction = _write_audit_region_correction(fixture, **mutation)
+    with pytest.raises(RuntimeError, match=match):
+        collect(
+            fixture.plan_path,
+            fixture.checkpoint,
+            fixture.cache,
+            fixture.out,
+            audit_region_correction=correction,
+        )
+
+
+def test_out_of_roster_audit_region_still_fails_without_a_correction(tmp_path):
+    fixture = make_fixture(tmp_path, "TESSERA_E4M3_K1", [832])
+    fixture.plan["audit_regions"] = {"e4m3_around_1024": list(range(1016, 1033))}
+    write_json(fixture.plan_path, fixture.plan)
+    with pytest.raises(RuntimeError, match="subsets of legal_rates"):
+        collect(fixture.plan_path, fixture.checkpoint, fixture.cache, fixture.out)
+
+
+def test_correction_plan_path_and_curve_reference_are_rechecked(tmp_path):
+    fixture = make_fixture(tmp_path, "TESSERA_E4M3_K1", [832])
+    fixture.plan["audit_regions"] = {"e4m3_around_1024": list(range(1016, 1033))}
+    write_json(fixture.plan_path, fixture.plan)
+    correction = _write_audit_region_correction(fixture)
+    payload = json.loads(correction.read_text())
+    payload["original_plan_path"] = str(fixture.checkpoint.resolve())
+    write_json(correction, payload)
+    with pytest.raises(RuntimeError, match="plan path differs"):
+        collect(
+            fixture.plan_path,
+            fixture.checkpoint,
+            fixture.cache,
+            fixture.out,
+            audit_region_correction=correction,
+        )
+
+    correction = _write_audit_region_correction(fixture)
+    curve = collect(
+        fixture.plan_path,
+        fixture.checkpoint,
+        fixture.cache,
+        fixture.out,
+        audit_region_correction=correction,
+    )
+    curve["audit_region_correction"]["sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="reference differs from its bytes"):
+        validate_curve(curve, min_points=1)
 
 
 HISTORICAL = Path(

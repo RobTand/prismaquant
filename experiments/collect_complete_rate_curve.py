@@ -28,6 +28,13 @@ SCHEMA = "prismaquant.complete_rate_curve.v1"
 PLAN_SCHEMA = "prismaquant.complete_rate_measurement_plan.v1"
 POINT_SCHEMA = "prismaquant.complete_rate_point_receipt.v1"
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
+AUDIT_REGION_CORRECTION_SCHEMA = "prismaquant.complete_rate_audit_region_correction.v1"
+AUDIT_REGION_CORRECTION_KEYS = frozenset({
+    "schema",
+    "original_plan_path",
+    "original_plan_sha256",
+    "corrected_audit_regions",
+})
 
 # CampaignAnchor records the serving route's dtype name. The study plan uses a
 # more explicit semantic spelling. Keep this translation closed so a new route
@@ -88,7 +95,98 @@ def _bound_json_reference(owner: Mapping, path_key: str, sha_key: str, where: Pa
     return _json(path)
 
 
-def _validate_plan(plan: dict, path: Path) -> tuple[str, str, list[int]]:
+def _validate_audit_regions(
+    regions: object,
+    legal_rates: list[int],
+    where: object,
+    *,
+    allow_outside: bool,
+) -> dict[str, list[int]]:
+    if not isinstance(regions, dict):
+        _fail(where, "measurement plan lacks audit_regions")
+    legal = set(legal_rates)
+    for label, region in regions.items():
+        if (
+            not isinstance(label, str)
+            or not label
+            or not isinstance(region, list)
+            or any(type(rate) is not int for rate in region)
+            or len(region) != len(set(region))
+            or (not allow_outside and not set(region) <= legal)
+        ):
+            _fail(where, "audit_regions must be named subsets of legal_rates")
+    return {label: list(region) for label, region in regions.items()}
+
+
+def effective_audit_regions(
+    plan: Mapping,
+    plan_path: Path,
+    correction_path: "Path | None" = None,
+) -> tuple[dict[str, list[int]], "dict[str, str] | None"]:
+    """Return the plan's regions or one exact, receipt-bound intersection.
+
+    A correction can narrow audit metadata to the frozen plan's legal roster.
+    It cannot alter the plan, add rates, rename regions, or carry another
+    acquisition field. Empty intersections retain their original labels.
+    """
+    plan_path = plan_path.resolve(strict=True)
+    legal_rates = plan.get("legal_rates")
+    if (
+        not isinstance(legal_rates, list)
+        or not legal_rates
+        or any(type(rate) is not int for rate in legal_rates)
+        or legal_rates != sorted(set(legal_rates))
+    ):
+        _fail(plan_path, "legal_rates must be sorted unique integers")
+    original = _validate_audit_regions(
+        plan.get("audit_regions"), legal_rates, plan_path,
+        allow_outside=correction_path is not None,
+    )
+    if correction_path is None:
+        return original, None
+
+    correction_path = correction_path.resolve(strict=True)
+    correction = _json(correction_path)
+    if correction.get("schema") != AUDIT_REGION_CORRECTION_SCHEMA:
+        _fail(correction_path, "unsupported audit-region correction")
+    if set(correction) != AUDIT_REGION_CORRECTION_KEYS:
+        _fail(
+            correction_path,
+            f"audit-region correction must contain exactly {sorted(AUDIT_REGION_CORRECTION_KEYS)}",
+        )
+    original_path = correction.get("original_plan_path")
+    if not isinstance(original_path, str) or not Path(original_path).is_absolute():
+        _fail(correction_path, "original_plan_path must be an absolute path")
+    try:
+        bound_path = Path(original_path).resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(f"{correction_path}: original plan path cannot be resolved") from exc
+    if bound_path != plan_path:
+        _fail(correction_path, "original plan path differs from the collected plan")
+    original_sha256 = correction.get("original_plan_sha256")
+    if not _sha(original_sha256) or sha256(plan_path) != original_sha256:
+        _fail(correction_path, "original plan bytes differ from original_plan_sha256")
+
+    legal = set(legal_rates)
+    expected = {
+        label: [rate for rate in region if rate in legal]
+        for label, region in original.items()
+    }
+    if correction.get("corrected_audit_regions") != expected:
+        _fail(
+            correction_path,
+            "corrected_audit_regions must be the exact intersection of each original region with legal_rates",
+        )
+    _validate_audit_regions(expected, legal_rates, correction_path, allow_outside=False)
+    return expected, {"path": str(correction_path), "sha256": sha256(correction_path)}
+
+
+def _validate_plan(
+    plan: dict,
+    path: Path,
+    *,
+    allow_outside_audit_regions: bool = False,
+) -> tuple[str, str, list[int]]:
     if plan.get("schema") != PLAN_SCHEMA:
         _fail(path, "unsupported measurement plan")
     if plan.get("status") != "frozen_before_measurement":
@@ -103,8 +201,6 @@ def _validate_plan(plan: dict, path: Path) -> tuple[str, str, list[int]]:
     for name in ("source_identity", "calibration_identity", "recipe_identity", "family_restriction"):
         if not isinstance(plan.get(name), dict) or not plan[name]:
             _fail(path, f"measurement plan lacks {name}")
-    if not isinstance(plan.get("audit_regions"), dict):
-        _fail(path, "measurement plan lacks audit_regions")
     qshape = plan.get("qshape")
     if (
         not isinstance(qshape, list)
@@ -120,16 +216,10 @@ def _validate_plan(plan: dict, path: Path) -> tuple[str, str, list[int]]:
         or legal_rates != sorted(set(legal_rates))
     ):
         _fail(path, "legal_rates must be sorted unique integers")
-    for label, region in plan["audit_regions"].items():
-        if (
-            not isinstance(label, str)
-            or not label
-            or not isinstance(region, list)
-            or any(type(rate) is not int for rate in region)
-            or len(region) != len(set(region))
-            or not set(region) <= set(legal_rates)
-        ):
-            _fail(path, "audit_regions must be named subsets of legal_rates")
+    _validate_audit_regions(
+        plan.get("audit_regions"), legal_rates, path,
+        allow_outside=allow_outside_audit_regions,
+    )
     source = plan["source_identity"]
     producer = source.get("producer") if isinstance(source, Mapping) else None
     campaign_source = source.get("campaign_source") if isinstance(source, Mapping) else None
@@ -497,10 +587,24 @@ def _verify_wire(
     return wire_path
 
 
-def collect(plan_path: Path, checkpoint: Path, cache_dir: Path, out: Path) -> dict:
+def collect(
+    plan_path: Path,
+    checkpoint: Path,
+    cache_dir: Path,
+    out: Path,
+    *,
+    audit_region_correction: "Path | None" = None,
+) -> dict:
     plan_path = plan_path.resolve(strict=True)
     plan = _json(plan_path)
-    qname, family, legal_rates = _validate_plan(plan, plan_path)
+    qname, family, legal_rates = _validate_plan(
+        plan,
+        plan_path,
+        allow_outside_audit_regions=audit_region_correction is not None,
+    )
+    audit_regions, correction_reference = effective_audit_regions(
+        plan, plan_path, audit_region_correction
+    )
     checkpoint = checkpoint.resolve(strict=True)
     _manifest, identity, unit, shard, state = _load_campaign_unit(checkpoint, plan, qname)
     rows = _anchor_rows(state, plan, unit)
@@ -548,7 +652,7 @@ def collect(plan_path: Path, checkpoint: Path, cache_dir: Path, out: Path) -> di
             "sha256": sha256(wrapper_path),
         })
         values.append(value)
-    return {
+    curve = {
         "schema": SCHEMA,
         "curve_id": plan["curve_id"],
         "qname": qname,
@@ -559,18 +663,22 @@ def collect(plan_path: Path, checkpoint: Path, cache_dir: Path, out: Path) -> di
         "calibration_identity": plan["calibration_identity"],
         "recipe_identity": plan["recipe_identity"],
         "legal_rates": legal_rates,
-        "audit_regions": plan["audit_regions"],
+        "audit_regions": audit_regions,
         "measurement_plan": {"path": str(plan_path), "sha256": plan_sha256},
         "rates": legal_rates,
         "values": values,
         "measurement_kind": "measured",
         "receipts": receipts,
     }
+    if correction_reference is not None:
+        curve["audit_region_correction"] = correction_reference
+    return curve
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", required=True)
+    parser.add_argument("--audit-region-correction")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--cache-dir", required=True)
     parser.add_argument("--out", required=True)
@@ -579,7 +687,15 @@ def main(argv=None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         _fail(out, "refuse to replace a sealed curve")
-    curve = collect(Path(args.plan), Path(args.checkpoint), Path(args.cache_dir), out)
+    curve = collect(
+        Path(args.plan),
+        Path(args.checkpoint),
+        Path(args.cache_dir),
+        out,
+        audit_region_correction=(
+            None if args.audit_region_correction is None else Path(args.audit_region_correction)
+        ),
+    )
     _write_json(out, curve)
     return 0
 

@@ -1,7 +1,20 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-11 · `codex/prospective-family-transfer-20260911`. Stamps
+As of: 2026-09-11 · `codex/sparse-rate-20260911`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for explicit research
+curve audit-region annotation corrections. The complete-curve collector's
+optional `--audit-region-correction` binds the original plan path and SHA256
+and accepts only the exact intersection of every original audit region with
+the original legal-rate roster, retaining empty labels. The frozen plan,
+acquisition identity and point-receipt plan hashes remain unchanged. A curve
+records the correction's path/hash and effective regions; the existing curve
+validator verifies that binding and rederives the intersection. Prospective
+protocol implementation hashes include this shared correction helper. This
+does not change a measurement, prediction rule or production policy. Gates:
+`tests/test_collect_complete_rate_curve.py` and
+`tests/test_sparse_rate_family_transfer.py`.
 
 Re-stamped (2026-09-11, `codex/prospective-family-transfer-20260911`) for a
 research-only prospective paired-family transfer evaluator (§4.10).

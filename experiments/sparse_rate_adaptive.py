@@ -100,9 +100,38 @@ def validate_curve(curve, *, min_points=3):
     if plan.get("schema") != MEASUREMENT_PLAN_SCHEMA:
         raise ValueError("measurement plan schema is unsupported")
     for key in ("curve_id", "qname", "family", "activation_contract", "source_identity",
-                "calibration_identity", "recipe_identity", "legal_rates", "audit_regions"):
+                "calibration_identity", "recipe_identity", "legal_rates"):
         if plan.get(key) != curve.get(key):
             raise ValueError(f"curve differs from its pre-measurement plan: {key}")
+    correction_ref = curve.get("audit_region_correction")
+    if correction_ref is None:
+        if "audit_region_correction" in curve:
+            raise ValueError("audit-region correction reference is malformed")
+        effective_regions = plan.get("audit_regions")
+    else:
+        if (
+            not isinstance(correction_ref, dict)
+            or set(correction_ref) != {"path", "sha256"}
+            or not isinstance(correction_ref.get("path"), str)
+            or not isinstance(correction_ref.get("sha256"), str)
+        ):
+            raise ValueError("audit-region correction reference is malformed")
+        # Imported only for the exceptional corrected-plan path. Ordinary
+        # adaptive replay keeps its dependency-light import surface.
+        from experiments.collect_complete_rate_curve import effective_audit_regions
+
+        try:
+            effective_regions, expected_ref = effective_audit_regions(
+                plan,
+                Path(plan_ref["path"]),
+                Path(correction_ref["path"]),
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError(f"audit-region correction is invalid: {exc}") from exc
+        if correction_ref != expected_ref:
+            raise ValueError("audit-region correction reference differs from its bytes")
+    if curve.get("audit_regions") != effective_regions:
+        raise ValueError("curve differs from its pre-measurement plan: audit_regions")
     rates, values = curve.get("rates"), curve.get("values")
     if (not isinstance(rates, list) or len(rates) < min_points
             or any(type(rate) is not int for rate in rates)

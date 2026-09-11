@@ -182,7 +182,8 @@ def freeze_protocol(plan_paths, out, *, preselection_path=None, preexposed_rates
                   for role in ROLES},
         "preselection": preselection,
         "implementation": {"family_transfer_sha256": digest(__file__),
-                             "curve_validation_sha256": digest(Path(__file__).with_name("sparse_rate_adaptive.py"))},
+                             "curve_validation_sha256": digest(Path(__file__).with_name("sparse_rate_adaptive.py")),
+                             "audit_region_correction_sha256": digest(Path(__file__).with_name("collect_complete_rate_curve.py"))},
         "prediction_families": {
             "e4": {"forms": ["affine_bf_from_paired_endpoints", "rate_linear_delta_from_bf"],
                    "target_roster": bf_rates, "audit_role": "e4_interior"},
@@ -221,7 +222,8 @@ def load_protocol(path):
                  f"protocol plan {role} hash differs")
     impl = value.get("implementation", {})
     _require(impl == {"family_transfer_sha256": digest(__file__),
-                      "curve_validation_sha256": digest(Path(__file__).with_name("sparse_rate_adaptive.py"))},
+                      "curve_validation_sha256": digest(Path(__file__).with_name("sparse_rate_adaptive.py")),
+                      "audit_region_correction_sha256": digest(Path(__file__).with_name("collect_complete_rate_curve.py"))},
              "protocol implementation bytes differ")
     _require(value["plans"]["bf_source"]["payload"].get("family") == "TESSERA_BF16_K1"
              and all(value["plans"][role]["payload"].get("family") == "TESSERA_E4M3_K1"
