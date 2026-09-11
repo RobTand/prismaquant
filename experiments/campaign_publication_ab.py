@@ -104,7 +104,7 @@ def arm_order(identity_bytes=0, override=None):
             if identity else [(0, 0), (budget, 0), (budget, 0), (0, 0)])
 
 
-def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None):
+def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, profiler_allowance_gib=2):
     """Write the plan.  ``identity_bytes`` > 0 adds the pipelined arms.
 
     v1 order was ``[0, B, B, 0]`` (synchronous, overlap, overlap,
@@ -116,6 +116,8 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None):
     ``order`` overrides the arm list for a repeat run; an arm may be a
     ``(overlap, identity, anchor_batch_size)`` triple to run the same
     configuration at another batch width, checked in-plan for exact parity.
+    ``profiler_allowance_gib`` is the bounded CUDA trace plus its decoded
+    objects, charged on top of the workload; the trace cap is a quarter of it.
     """
     from tools.dispatch_tessera_campaign import load_spec, _streamed_resource_plan
     spec = load_spec(spec_path)
@@ -145,7 +147,10 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None):
         plan['process_baseline_bytes'])/1024**3)
     if workload_memory > spec['box_memory_gb']:
         raise ValueError(f'comparison workload needs {workload_memory} GiB, above the recipe budget')
-    memory = workload_memory+2
+    allowance = int(profiler_allowance_gib)
+    if allowance < 1:
+        raise ValueError('the profiler allowance is at least 1 GiB')
+    memory = workload_memory+allowance
     inputs = [Path(spec_path), workspace/'plan.json', Path(plan['manifest']),
         Path(plan['census']), Path(row['units']),
         Path(command[command.index('--calibration-cache')+1])]
@@ -155,7 +160,7 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None):
         limit_anchors=64, projection='gate_up', order=[list(arm) for arm in order],
         environment=spec['env'], container=spec['container'],
         requested_cpus=spec['cpus'], requested_memory_gib=memory, workload_memory_gib=workload_memory,
-        out=str(out/'native'), profiler_allowance_gib=2)
+        out=str(out/'native'), profiler_allowance_gib=allowance)
     out.mkdir(parents=True, exist_ok=True)
     write(out/'plan.json', value)
     print(json.dumps(dict(plan=str(out/'plan.json'), sha256=digest(out/'plan.json'),
@@ -356,7 +361,8 @@ def arm(plan, out, budget, identity=0, batch=None):
     memory = MemorySampler(out/'memory-samples.json')
     memory.start()
     observer = AnchorObserver(out/'profile', profile_calls=[0],
-        trace_max_bytes=512*1024**2, command=command, cuda_only=True, window_seconds=0.25)
+        trace_max_bytes=int(plan.get('profiler_allowance_gib', 2))*1024**3//4, command=command,
+        cuda_only=True, window_seconds=0.25)
     observer.result['python_sampler']['interval_seconds'] = 0.2
     try:
         with observer, instrument(campaign, recorder, plan['projection']):
