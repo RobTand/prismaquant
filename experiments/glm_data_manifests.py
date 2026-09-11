@@ -59,7 +59,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from glm_arc_prewarm import CAMPAIGN_BASE, Campaign, UNITS_RE  # noqa: E402
 
-SCHEMA = "prismabuild.data_manifest.v1"
+SCHEMA = "prismaquant.prismabuild.data_manifest.v1"
 SHARED_MOUNT = "/mnt/shared"
 
 
@@ -153,26 +153,31 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict) -> dict:
             raise SystemExit(f"{row_id}: entry outside the shared mount: {e['path']}")
         if e["bytes"] <= 0:
             raise SystemExit(f"{row_id}: zero-length entry: {e['path']}")
+    # The key set is the one ``prismabuild.core.validate_data_manifest``
+    # accepts exactly; everything this campaign knows and PrismaBuild does not
+    # goes under ``annotations``, which the contract carries but never reads.
     return {
         "schema": SCHEMA,
         "produced_by": produced_by,
-        "row_id": row_id,
-        "group": plan["group"],
         "mount_prefix": SHARED_MOUNT,
-        "sha256_present": False,
-        "sha256_absent_reason": (
-            "hashing 1023 GB of capture bytes costs more than the prewarm "
-            "saves; the manifest file itself is content-addressed in the CAS, "
-            "which is what binds it to the action key"),
-        "counts": {
-            "captures": plan["capture_files"],
-            "weight_extents": plan["weight_extents"],
-            "seeds": plan["seed_files"],
-        },
-        "bytes": {
-            "captures": plan["capture_bytes"],
-            "weight_extents": plan["weight_bytes"],
-            "seeds": plan["seed_bytes"],
+        "annotations": {
+            "row_id": row_id,
+            "group": plan["group"],
+            "sha256_present": False,
+            "sha256_absent_reason": (
+                "hashing 1023 GB of capture bytes costs more than the prewarm "
+                "saves; the manifest file itself is content-addressed in the "
+                "CAS, which is what binds it to the action key"),
+            "counts": {
+                "captures": plan["capture_files"],
+                "weight_extents": plan["weight_extents"],
+                "seeds": plan["seed_files"],
+            },
+            "bytes": {
+                "captures": plan["capture_bytes"],
+                "weight_extents": plan["weight_bytes"],
+                "seeds": plan["seed_bytes"],
+            },
         },
         "entry_count": len(entries),
         "total_bytes": plan["total_bytes"],
@@ -242,10 +247,10 @@ def main() -> int:
             "manifest_bytes": len(blob),
             "entry_count": man["entry_count"],
             "total_bytes": man["total_bytes"],
-            "captures": man["counts"]["captures"],
-            "weight_extents": man["counts"]["weight_extents"],
-            "capture_bytes": man["bytes"]["captures"],
-            "weight_bytes": man["bytes"]["weight_extents"],
+            "captures": man["annotations"]["counts"]["captures"],
+            "weight_extents": man["annotations"]["counts"]["weight_extents"],
+            "capture_bytes": man["annotations"]["bytes"]["captures"],
+            "weight_bytes": man["annotations"]["bytes"]["weight_extents"],
         })
 
     out_blob = json.dumps(out_rows, indent=1).encode() + b"\n"

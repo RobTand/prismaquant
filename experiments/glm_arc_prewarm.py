@@ -204,7 +204,13 @@ class Campaign:
         (``layer_streaming.py`` ``_read_chunk``), so whole-shard warming would
         pull several times the bytes the row actually touches. Ranges are
         coalesced and rounded out to record boundaries because ZFS reads a
-        whole 1 MiB record either way.
+        whole 1 MiB record either way -- but never past the end of the shard.
+        The last tensor in a shard almost never ends on a 1 MiB boundary, so
+        rounding its end out unconditionally declared bytes that do not exist:
+        every one of the 16 resume rows over-declared about 2.5 MB, and every
+        warm through the PrismaBuild prewarm loop therefore finished ``partial``
+        (2026-09-11, rows 0085 and 0086). A length is a claim about the file,
+        so it is clamped to the file.
         """
         wm = self.weight_map
         by_shard: dict[str, list[tuple[int, int]]] = {}
@@ -222,16 +228,24 @@ class Campaign:
             by_shard.setdefault(shard, []).append((base + a, base + b))
         out = []
         for shard in sorted(by_shard):
+            path = os.path.join(self.model_dir, shard)
+            try:
+                end_of_file = os.stat(to_pool(path)).st_size
+            except OSError:
+                end_of_file = 0
             spans = sorted(by_shard[shard])
             merged: list[list[int]] = []
             for a, b in spans:
                 a -= a % RECORD_SIZE
                 b += (-b) % RECORD_SIZE
+                if end_of_file:
+                    b = min(b, end_of_file)
+                if b <= a:
+                    continue
                 if merged and a <= merged[-1][1]:
                     merged[-1][1] = max(merged[-1][1], b)
                 else:
                     merged.append([a, b])
-            path = os.path.join(self.model_dir, shard)
             for a, b in merged:
                 out.append((path, a, b - a))
         return out
