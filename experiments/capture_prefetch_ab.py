@@ -348,7 +348,8 @@ def main():
             host=os.uname().nodename, torch=torch.__version__,
             environment={key: os.environ.get(key) for key in
                          ('PRISMAQUANT_CAPTURE_READ_THREADS', 'OMP_NUM_THREADS',
-                          'PRISMAQUANT_LAYER_READ_THREADS', 'PYTORCH_ALLOC_CONF')},
+                          'PRISMAQUANT_LAYER_READ_THREADS', 'PYTORCH_ALLOC_CONF',
+                          'MALLOC_ARENA_MAX')},
             netdata=dict(errors=sampler.errors, marks=sampler.mark,
                          samples=len(sampler.samples)))
         (args.out/f'summary-{args.row}-{args.readers}.json').write_text(

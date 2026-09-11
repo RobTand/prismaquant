@@ -30,11 +30,15 @@ def main():
     parser.add_argument('--arms', default='cold,warm')
     parser.add_argument('--limit', type=int, default=0)
     parser.add_argument('--profile', action='store_true')
+    parser.add_argument('--env', action='append', default=[],
+                        metavar='NAME=VALUE',
+                        help='extra environment entry for the container, repeatable')
     args = parser.parse_args()
 
     from tools.tessera_campaign_container import main as run_container
     spec = row_spec(args.base, args.row)
-    spec['env'] = dict(spec['env'], PRISMAQUANT_CAPTURE_READ_THREADS=str(args.readers))
+    extra = dict(item.split('=', 1) for item in args.env)
+    spec['env'] = dict(spec['env'], PRISMAQUANT_CAPTURE_READ_THREADS=str(args.readers), **extra)
     command = ['python3', '-u', '-m', 'experiments.capture_prefetch_ab',
                '--base', args.base, '--row', args.row, '--readers', str(args.readers),
                '--arms', args.arms, '--out', args.out]
