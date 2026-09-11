@@ -38,6 +38,25 @@ def arm_flags(overlap, identity):
     return flags
 
 
+def with_headroom(command, headroom_gb):
+    """The recipe with its streamed free-memory floor replaced.
+
+    The floor (``--streaming-cache-headroom-gb``) sizes the layer cache and is
+    priced by the dispatcher as ``declared_headroom_bytes``; since PrismaQuant
+    #490 it is not part of the checkpoint identity, so two arms at different
+    floors still compare exactly. A recipe without the flag is refused rather
+    than given one: the arm must run what the spec priced.
+    """
+    command = list(command)
+    if '--streaming-cache-headroom-gb' not in command:
+        raise ValueError('the recipe does not declare --streaming-cache-headroom-gb')
+    value = float(headroom_gb)
+    if not value > 0:
+        raise ValueError('the streamed headroom is a positive number of GiB')
+    command[command.index('--streaming-cache-headroom-gb')+1] = ('%g' % value)
+    return command
+
+
 def command_batch(command):
     """The anchor batch width the original recipe runs at."""
     command = list(command)
@@ -104,7 +123,8 @@ def arm_order(identity_bytes=0, override=None):
             if identity else [(0, 0), (budget, 0), (budget, 0), (0, 0)])
 
 
-def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, profiler_allowance_gib=2):
+def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, profiler_allowance_gib=2,
+            headroom_gb=None):
     """Write the plan.  ``identity_bytes`` > 0 adds the pipelined arms.
 
     v1 order was ``[0, B, B, 0]`` (synchronous, overlap, overlap,
@@ -132,6 +152,13 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, 
     command = original[original.index('prismaquant.tessera_campaign')+1:]
     if '--publication-overlap-bytes' in command or '--seed-checkpoint' in command:
         raise ValueError('comparison requires the original fresh synchronous recipe')
+    if headroom_gb is not None:
+        # Priced and run at the same floor: the spec copy the dispatcher prices
+        # and the command the arm executes both carry it.
+        command = with_headroom(command, headroom_gb)
+        spec = copy.deepcopy(spec)
+        spec['headroom_gb'] = float(headroom_gb)
+        spec['campaign_argv'] = with_headroom(spec['campaign_argv'], headroom_gb)
     resources = {}
     order = with_batch(arm_order(identity_bytes, order), command_batch(command))
     for budget, identity, batch in sorted(set(order)):
@@ -160,7 +187,8 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, 
         limit_anchors=64, projection='gate_up', order=[list(arm) for arm in order],
         environment=spec['env'], container=spec['container'],
         requested_cpus=spec['cpus'], requested_memory_gib=memory, workload_memory_gib=workload_memory,
-        out=str(out/'native'), profiler_allowance_gib=allowance)
+        out=str(out/'native'), profiler_allowance_gib=allowance,
+        **({'headroom_gb': float(headroom_gb)} if headroom_gb is not None else {}))
     out.mkdir(parents=True, exist_ok=True)
     write(out/'plan.json', value)
     print(json.dumps(dict(plan=str(out/'plan.json'), sha256=digest(out/'plan.json'),
