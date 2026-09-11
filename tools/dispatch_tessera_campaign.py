@@ -112,6 +112,16 @@ SHARED_HESSIAN = (
 )
 
 
+#: Checkpoint-identity keys the merge RECONCILES instead of requiring equal.
+#: Every one of them is per-selection: it describes the units this row was
+#: given, not the campaign. Everything outside this set must already agree,
+#: because a difference there means the rows priced two different campaigns.
+RECONCILED_IDENTITY_KEYS = frozenset({
+    "units", "serving_scope", "expert_projection", "stack_sampling_identity",
+    "family_restriction",
+})
+
+
 class MergeRefused(RuntimeError):
     """The rows do not describe one campaign."""
 
@@ -1310,7 +1320,7 @@ def merge_checkpoint(row_dirs: dict, out_manifest: Path) -> dict:
             merged_identity["units"] = dict(identity["units"])
             continue
         for key in sorted(set(merged_identity) | set(identity)):
-            if key in {"units", "serving_scope", "expert_projection", "stack_sampling_identity"}:
+            if key in RECONCILED_IDENTITY_KEYS:
                 continue
             if (key not in merged_identity or key not in identity
                     or merged_identity[key] != identity[key]):
@@ -1332,6 +1342,11 @@ def merge_checkpoint(row_dirs: dict, out_manifest: Path) -> dict:
         merged_identity["expert_projection"] = _merge_projection(
             merged_identity.get("expert_projection"), identity.get("expert_projection"),
             row_id)
+        merged_identity["family_restriction"] = _merge_family_restriction(
+            merged_identity.get("family_restriction"),
+            identity.get("family_restriction"), row_id)
+        if merged_identity["family_restriction"] is None:
+            del merged_identity["family_restriction"]
     merged_identity["units"] = dict(sorted(merged_identity["units"].items()))
 
     canonical = canonical_json(merged_identity, where="merged campaign identity")
@@ -1390,6 +1405,32 @@ def merge_identity_migrations(per_row: dict) -> "list | None":
                            if k not in {"old_identity_sha256", "new_identity_sha256", "shards",
                                         "receipt_seals", "cost_seals", "run_id"}})
     return merged if present else None
+
+
+def _merge_family_restriction(left, right, row_id):
+    """One policy, and the union of the rows' per-unit structure maps.
+
+    ``structure_by_unit`` is keyed by the row's OWN selected units, so a dense
+    row and a routed row of one campaign never carry the same map. Comparing
+    the whole restriction for equality therefore refuses every census that
+    fans dense and routed units onto different rows, which is every GLM census
+    (RobTand/prismaquant#487). ``merge_payloads`` already reconciles the same
+    field this way; this is the journal side of it.
+    """
+    if left is None or right is None:
+        if left != right:
+            raise MergeRefused(
+                f"{row_id}: one row restricts families and another does not")
+        return left
+    if left["policy"] != right["policy"]:
+        raise MergeRefused(f"{row_id}: rows disagree on the family restriction policy")
+    for name in left["structure_by_unit"].keys() & right["structure_by_unit"].keys():
+        if left["structure_by_unit"][name] != right["structure_by_unit"][name]:
+            raise MergeRefused(
+                f"{row_id}: different restricted structure for {name}")
+    return {"policy": left["policy"],
+            "structure_by_unit": dict(sorted(
+                {**left["structure_by_unit"], **right["structure_by_unit"]}.items()))}
 
 
 def _merge_scope(left, right, row_id):
