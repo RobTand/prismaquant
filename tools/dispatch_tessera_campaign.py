@@ -319,15 +319,15 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
 
 #: The quiet a pricing row is allowed in each phase, in the order it walks
 #: them.  Measured, not chosen: a least-squares fit of ``elapsed_s`` against
-#: committed batches over the 23 completed full 864-unit GLM pricing rows in
-#: the fleet's terminal records (2026-09-10) gives 18.4 s of wall clock per
-#: committed batch and 943 s of everything that is not the pricing loop --
-#: source and calibration load, activations, and the finalization tail --
-#: with every full-length row inside +-180 s of that fit.
+#: committed batches over the 23 completed 864-unit GLM pricing rows in the
+#: fleet's terminal records (2026-09-10) gives 18.6728 s of wall clock per
+#: committed batch and an 836.1 s non-pricing intercept; the greatest absolute
+#: residual is 160.5 s. The retained-record extraction and its exact row and
+#: terminal hashes are committed in ``docs/measurements/pq480_progress_grace_fit_2026-09-10.md``.
 #:
-#: So: ``pricing`` is 49x the measured commit cadence, and ``startup`` and
-#: ``finalize`` are each larger than the whole 943 s of non-pricing quiet the
-#: fit attributes to both together.  The sum, 6300 s, is the longest a row can
+#: So: ``pricing`` permits 48.2 fitted commit intervals, and ``startup`` and
+#: ``finalize`` each exceed the fitted non-pricing interval including its
+#: greatest residual (996.6 s). The sum, 6300 s, is the longest a row can
 #: run having committed nothing -- less than half the 14,400 s that killed
 #: row-0050 and row-0065 while they were committing anchors every 18 s.
 #:

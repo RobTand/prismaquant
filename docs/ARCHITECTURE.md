@@ -9,9 +9,10 @@ execution contract. `dispatch_tessera_campaign.py plan` no longer seals a
 and seals only when asked for. Rows instead declare the phases they walk and
 the quiet each is allowed -- `startup=3600 pricing=900 finalize=1800`, from a
 least-squares fit of elapsed time against committed batches over the 23
-completed full 864-unit GLM rows in the fleet's terminal records (18.4 s per
-committed batch, 943 s outside the pricing loop, every full-length row within
-±180 s) -- and `tessera_campaign` reports its committed anchor count through
+completed 864-unit GLM rows in the fleet's terminal records (18.6728 s per
+committed batch, 836.1 s outside the pricing loop, greatest absolute residual
+160.5 s; [reproducible evidence](measurements/pq480_progress_grace_fit_2026-09-10.md))
+-- and `tessera_campaign` reports its committed anchor count through
 `prismaquant/prismabuild_progress.py` after each journal flush, once the
 shards are durable. A row that keeps committing is given no total-duration
 limit; one that stops ends within 6,300 s, less than half the limit that

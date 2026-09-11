@@ -94,10 +94,19 @@ def test_the_declared_quiet_is_shorter_than_the_limit_that_killed_the_rows():
 
 
 def test_the_pricing_allowance_covers_the_measured_commit_cadence():
-    """18.4 s per committed batch, fitted over 23 completed 864-unit rows."""
+    """The retained-record fit measured 18.672808 s per committed batch."""
 
     pricing = dict(dispatch.CAMPAIGN_PROGRESS_PHASES)["pricing"]
-    assert pricing > 40 * 18.4
+    assert pricing / 18.672808072814316 > 48
+
+
+def test_nonpricing_allowances_cover_the_fit_and_its_largest_residual():
+    """Both cover 836.10 s outside pricing plus a 160.46 s residual."""
+
+    phases = dict(dispatch.CAMPAIGN_PROGRESS_PHASES)
+    required = 836.1036216758985 + 160.45635778753422
+    assert phases["startup"] > required
+    assert phases["finalize"] > required
 
 
 # -- the report ------------------------------------------------------------
