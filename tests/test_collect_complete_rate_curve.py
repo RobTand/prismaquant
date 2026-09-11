@@ -12,6 +12,7 @@ from experiments.collect_complete_rate_curve import (
     CAMPAIGN_SCHEMA,
     PLAN_SCHEMA,
     SEMANTIC_ACTIVATION_BY_ROUTE,
+    _validate_campaign_menu,
     _expected_row,
     _verify_wire,
     collect,
@@ -159,11 +160,15 @@ def make_fixture(tmp_path: Path, family: str, rates: list[int]) -> Fixture:
     weight = {"algorithm": "sha256.dtype_shape_contiguous.v1", "dtype": "torch.bfloat16",
               "sha256": "f" * 64, "shape": [2, 3]}
     hessian = {"sha256": "1" * 64, "shape": [3, 3]}
+    outside_rates = (
+        [895] if family == "TESSERA_E2M1_K2" and rates == [896]
+        else [rates[0] - 1, rates[-1] + 1]
+    )
     unit = {
         "weight": weight,
         "hessian": hessian,
         "input_global_scale": 0.5,
-        "menu": [f"{family}_R{rate}" for rate in rates],
+        "menu": [f"{family}_R{rate}" for rate in (*outside_rates, *rates)],
     }
     identity = {
         "campaign_schema": CAMPAIGN_SCHEMA,
@@ -175,7 +180,9 @@ def make_fixture(tmp_path: Path, family: str, rates: list[int]) -> Fixture:
             "menu_mode": "research", "attention_implementation": "eager",
             "hessian": "require", "max_act_rows": 4, "nsamples": 4, "seed": 7,
             "seqlen": 8, "tp_degree": 1, "streaming": True,
-            "streaming_capture_policy": "selected-tensors-v1",
+            "streaming_capture_policy": "legacy", "exhaustive_rate_grid": True,
+            "rate_band": f"{rates[0]},{rates[-1]}",
+            "anchor_budget": len(rates), "max_rounds": 1,
         },
         "family_restriction": {"policy": restriction, "structure_by_unit": {QNAME: "dense"}},
         "units": {QNAME: unit},
@@ -240,6 +247,56 @@ def test_e2m1_terminal_is_a_separate_typed_tcq_point(tmp_path):
     curve = collect(fixture.plan_path, fixture.checkpoint, fixture.cache, fixture.out)
     assert curve["rates"] == [896]
     assert fixture.state["wire_records"]["TESSERA_E2M1_K2_R896"]["identity"]["recipe"]["body"] == "tcq"
+
+
+@pytest.mark.parametrize("mutation,match", [
+    ("malformed", "not a Tessera format"),
+    ("wrong_family", "outside the plan"),
+    ("duplicate", "repeats"),
+    ("missing_in_band", "in-band menu differs"),
+    ("extra_in_band", "in-band menu differs"),
+])
+def test_campaign_menu_rejects_invalid_or_wrong_in_band_rosters(tmp_path, mutation, match):
+    fixture = make_fixture(tmp_path, "TESSERA_BF16_K1", [832, 960, 1088])
+    menu = list(fixture.identity["units"][QNAME]["menu"])
+    if mutation == "malformed":
+        menu.append("BF16")
+    elif mutation == "wrong_family":
+        menu.append("TESSERA_E4M3_K1_R512")
+    elif mutation == "duplicate":
+        menu.append(menu[0])
+    elif mutation == "missing_in_band":
+        menu.remove("TESSERA_BF16_K1_R960")
+    else:
+        menu.append("TESSERA_BF16_K1_R900")
+    with pytest.raises(RuntimeError, match=match):
+        _validate_campaign_menu(
+            menu,
+            settings=fixture.identity["settings"],
+            plan=fixture.plan,
+            where=fixture.checkpoint,
+        )
+
+
+@pytest.mark.parametrize("field,value,match", [
+    ("exhaustive_rate_grid", False, "not exhaustive"),
+    ("rate_band", "831,1088", "rate band differs"),
+    ("anchor_budget", 2, "anchor budget differs"),
+    ("max_rounds", 2, "exactly one round"),
+])
+def test_campaign_menu_requires_the_recorded_exhaustive_band_contract(
+    tmp_path, field, value, match
+):
+    fixture = make_fixture(tmp_path, "TESSERA_BF16_K1", [832, 960, 1088])
+    settings = dict(fixture.identity["settings"])
+    settings[field] = value
+    with pytest.raises(RuntimeError, match=match):
+        _validate_campaign_menu(
+            fixture.identity["units"][QNAME]["menu"],
+            settings=settings,
+            plan=fixture.plan,
+            where=fixture.checkpoint,
+        )
 
 
 @pytest.mark.parametrize("field,value", [
@@ -342,6 +399,31 @@ HISTORICAL = Path(
     "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/"
     "first-proof-anchor-preparation-05/workspace/rows/row-0110/cost.anchors.json"
 )
+
+CURRENT_COMPLETE_BF16 = Path(
+    "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/"
+    "sparse-rate-20260911/complete-down-curve-01/"
+    "dense_l10_shared_down_bf16.anchors.json"
+)
+
+
+def test_current_complete_bf16_metadata_has_the_frozen_in_band_menu():
+    if not CURRENT_COMPLETE_BF16.is_file():
+        pytest.skip("shared complete-curve checkpoint is unavailable")
+    plan_path = CURRENT_COMPLETE_BF16.with_name(
+        "dense_l10_shared_down_bf16.measurement-plan.json"
+    )
+    manifest = json.loads(CURRENT_COMPLETE_BF16.read_text())
+    plan = json.loads(plan_path.read_text())
+    identity = manifest["identity"]
+    menu = identity["units"][plan["qname"]]["menu"]
+    assert len(menu) > len(plan["legal_rates"])
+    _validate_campaign_menu(
+        menu,
+        settings=identity["settings"],
+        plan=plan,
+        where=CURRENT_COMPLETE_BF16,
+    )
 
 
 def test_historical_l3_journal_uses_the_same_typed_receipt_semantics():

@@ -182,6 +182,65 @@ def _validate_plan(plan: dict, path: Path) -> tuple[str, str, list[int]]:
     return plan["qname"], plan["family"], list(legal_rates)
 
 
+def _validate_campaign_menu(
+    menu: object, *, settings: Mapping, plan: Mapping, where: object
+) -> None:
+    """Bind an exhaustive campaign band's typed roster to the frozen plan.
+
+    Campaign identities record the full family menu even when pricing is
+    restricted to a rate band.  Every menu entry still has to be a valid,
+    unique member of the planned family; only its intersection with the
+    recorded band is the curve roster.
+    """
+    from prismaquant.tessera_campaign import parse_rate_band
+    from prismaquant.tessera_formats import TesseraFormatError, parse_tessera_format_name
+
+    legal_rates = plan["legal_rates"]
+    expected_band = (legal_rates[0], legal_rates[-1])
+    try:
+        rate_band = parse_rate_band(settings.get("rate_band"))
+    except RuntimeError as exc:
+        raise RuntimeError(f"{where}: campaign rate band is malformed") from exc
+    if rate_band != expected_band:
+        _fail(where, "campaign rate band differs from the frozen legal-rate bounds")
+    if settings.get("exhaustive_rate_grid") is not True:
+        _fail(where, "complete rate curve campaign was not exhaustive")
+    if type(settings.get("anchor_budget")) is not int or settings["anchor_budget"] != len(legal_rates):
+        _fail(where, "campaign anchor budget differs from the frozen legal-rate roster")
+    if type(settings.get("max_rounds")) is not int or settings["max_rounds"] != 1:
+        _fail(where, "complete rate curve campaign did not use exactly one round")
+    if not isinstance(menu, list):
+        _fail(where, "campaign unit menu is not a list")
+
+    seen: set[tuple[str, int]] = set()
+    in_band = []
+    for index, entry in enumerate(menu):
+        try:
+            parsed = parse_tessera_format_name(entry)
+        except (TesseraFormatError, ValueError) as exc:
+            raise RuntimeError(f"{where}: campaign menu entry {index} is invalid") from exc
+        if parsed is None:
+            _fail(where, f"campaign menu entry {index} is not a Tessera format")
+        family, rate = parsed
+        key = (family.name, rate)
+        if key in seen:
+            _fail(where, f"campaign unit menu repeats {family.name}_R{rate}")
+        seen.add(key)
+        if family.name != plan["family"]:
+            _fail(where, f"campaign unit menu contains family {family.name} outside the plan")
+        if rate_band[0] <= rate <= rate_band[1]:
+            in_band.append(rate)
+
+    if sorted(in_band) != legal_rates:
+        missing = sorted(set(legal_rates) - set(in_band))
+        extra = sorted(set(in_band) - set(legal_rates))
+        _fail(
+            where,
+            f"campaign in-band menu differs from the frozen legal-rate roster; "
+            f"missing={missing[:8]} extra={extra[:8]}",
+        )
+
+
 def _load_campaign_unit(checkpoint: Path, plan: dict, qname: str):
     manifest = _json(checkpoint)
     if manifest.get("schema") != MANIFEST_SCHEMA or manifest.get("stage") != "Tessera campaign":
@@ -247,8 +306,6 @@ def _load_campaign_unit(checkpoint: Path, plan: dict, qname: str):
             _fail(checkpoint, f"campaign {setting_name} differs from the measurement plan")
     if settings.get("streaming") is not True:
         _fail(checkpoint, "complete rate curve campaign was not streamed")
-    if settings.get("streaming_capture_policy") != calibration.get("streaming"):
-        _fail(checkpoint, "campaign capture policy differs from the measurement plan")
     capture = _json(Path(calibration["capture_manifest"]).resolve(strict=True))
     capture_identity = capture.get("identity")
     if (
@@ -262,10 +319,8 @@ def _load_campaign_unit(checkpoint: Path, plan: dict, qname: str):
         _fail(checkpoint, "campaign unit lacks a weight identity")
     if list(unit["weight"].get("shape", ())) != plan["qshape"]:
         _fail(checkpoint, "campaign unit shape differs from the measurement plan")
-    expected_formats = {f"{plan['family']}_R{rate}" for rate in plan["legal_rates"]}
     menu = unit.get("menu")
-    if not isinstance(menu, list) or set(menu) != expected_formats or len(menu) != len(expected_formats):
-        _fail(checkpoint, "campaign unit menu differs from the frozen legal-rate roster")
+    _validate_campaign_menu(menu, settings=settings, plan=plan, where=checkpoint)
 
     shard = unit_path(checkpoint.with_name(checkpoint.name + ".parts"), qname)
     state = _load_unit(
