@@ -16,8 +16,9 @@ What stays useful here is everything the loop does not do: the pool-ceiling
 and NFS read rigs that measured the tiers, the manifest builder, and the
 dry-run queue rig.  ``--daemon`` is kept so the measurements remain
 reproducible and so the running dry-run unit on dl380g10 can be read back; it
-is not the thing to deploy.  Retirement of that unit is step 1 of
-``/home/rob/tmp/glm-perf-20260910/w3/SWITCHOVER.md``.
+is not the thing to deploy.  Retirement of that unit is step 1 of the W3
+switchover runbook (``SWITCHOVER.md``, kept with the W3 evidence outside this
+repo).
 
 Why this exists
 ---------------

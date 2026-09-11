@@ -47,7 +47,10 @@ def _campaign(tmp_path):
     (tmp_path / "plan.json").write_text(json.dumps({
         "model": str(model),
         "calibration_cache": {"path": str(manifest)},
-        "rows": [{"row_id": "row-0000", "units": str(units)}],
+        # ``groups`` is the campaign's own label for the row and is what
+        # ``row_plan`` reads; the real plan.json carries it on every row.
+        "rows": [{"row_id": "row-0000", "units": str(units),
+                  "groups": ["expert-group-0"]}],
     }))
     return Campaign(str(tmp_path)), shard
 

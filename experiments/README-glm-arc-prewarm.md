@@ -7,9 +7,9 @@
 > follows the queue's own claim order, and runs on the box that holds the
 > pool. `glm_arc_prewarm.py --daemon` is kept for reproducing the
 > measurements below and for reading back the dry-run unit still running on
-> dl380g10; retiring that unit is step 1 of
-> `/home/rob/tmp/glm-perf-20260910/w3/SWITCHOVER.md`. Do not deploy it as the
-> production warmer.
+> dl380g10; retiring that unit is step 1 of the W3 switchover runbook
+> (`SWITCHOVER.md`, kept with the W3 evidence outside this repo). Do not
+> deploy it as the production warmer.
 
 Two programs, both aimed at one number: the ~1.83 Gbit/s a campaign row gets
 while it reads its 864 capture files and its layer's weights off dl380g10.
