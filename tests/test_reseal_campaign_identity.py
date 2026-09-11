@@ -275,3 +275,32 @@ def test_proof_bundle_needs_a_fixture_arm_only_when_the_encoder_pin_moves(tmp_pa
     assert run('verify', '--pins', pins_pq_only, '--row', row) == 0
     loaded = tool.load_bundle(tmp_path/'b2.json', tool.load_pins(pins_pq_only))
     assert loaded['fixture_id']['ids'] is None
+
+
+def test_rows_are_classified_by_the_checkpoint_audit_not_by_cost_pkl(tmp_path, capsys):
+    """A withdrawn row may carry a cost.pkl; a done row may not lack a shard."""
+    withdrawn = tmp_path/'row-0064'; make_row(withdrawn)             # cost.pkl present, journal withdrawn
+    (withdrawn/'cost.anchors.json.parts'/'units'/sorted((withdrawn/'cost.anchors.json.parts'/'units').iterdir())[0].name).unlink()
+    done = tmp_path/'row-0070'; make_row(done)
+    broken = tmp_path/'row-0099'; make_row(broken, with_cost=False)  # unlisted, no cost.pkl
+    audit = tmp_path/'checkpoint-audit.json'
+    audit.write_text(json.dumps(dict(schema='prismaquant.tessera_campaign.checkpoint_audit.v1', rows=[
+        dict(row_id='row-0064', state='withdrawn'), dict(row_id='row-0070', state='done')])))
+    pins = write_pins(tmp_path/'pins.json'); bundle = write_bundle(tmp_path/'bundle.json')
+    ws = tmp_path/'ws'; (ws/'rows').mkdir(parents=True)
+    for row in (withdrawn, done):
+        (ws/'rows'/row.name).symlink_to(row, target_is_directory=True)
+    assert run('dry-run', '--pins', pins, '--workspace', ws) == 2
+    assert 'pass --checkpoint-audit' in capsys.readouterr().err
+    assert run('dry-run', '--pins', pins, '--workspace', ws, '--checkpoint-audit', audit, '--report', tmp_path/'d.json') == 0
+    kinds = {Path(r['row']).name: (r['kind'], r['journal_state']) for r in json.loads((tmp_path/'d.json').read_text())['rows']}
+    assert kinds == {'row-0064': ('partial', 'withdrawn'), 'row-0070': ('complete', 'done')}
+    assert run('dry-run', '--pins', pins, '--row', broken, '--checkpoint-audit', audit) == 2
+    assert 'does not record the row as withdrawn' in capsys.readouterr().err
+    assert run('migrate', '--pins', pins, '--proof', bundle, '--row', withdrawn, '--checkpoint-audit', audit) == 0
+    assert run('verify', '--pins', pins, '--row', withdrawn, '--checkpoint-audit', audit, '--report', tmp_path/'v.json') == 0
+    assert json.loads((tmp_path/'v.json').read_text())['rows'][0]['missing_shards'] == 1
+    # The same missing shard on a row the audit calls done is a verify failure.
+    audit.write_text(json.dumps(dict(schema='prismaquant.tessera_campaign.checkpoint_audit.v1', rows=[
+        dict(row_id='row-0064', state='done')])))
+    assert run('verify', '--pins', pins, '--row', withdrawn, '--checkpoint-audit', audit) == 1

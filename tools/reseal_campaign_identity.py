@@ -320,9 +320,33 @@ def assemble_bundle(args):
 # rows
 # ---------------------------------------------------------------------------
 
+AUDIT_SCHEMA_PREFIX = 'prismaquant.tessera_campaign.checkpoint_audit'
+
+
+def load_checkpoint_audit(path):
+    """Row journal states from the campaign's checkpoint audit: row_id -> done | withdrawn.
+
+    A row's completeness is a fact about its journal (did the campaign commit
+    it, or withdraw it mid-way), not about which files happen to exist: a
+    withdrawn row can carry a cost.pkl from an earlier round.
+    """
+    audit = json.loads(Path(path).read_text())
+    if not str(audit.get('schema', '')).startswith(AUDIT_SCHEMA_PREFIX) and 'rows' not in audit:
+        raise Refused(f'{path}: not a checkpoint audit')
+    states = {}
+    for entry in audit['rows']:
+        state = entry.get('state')
+        if state not in ('done', 'withdrawn'):
+            raise Refused(f'{path}: row {entry.get("row_id")} has journal state {state!r}, not done/withdrawn')
+        states[entry['row_id']] = state
+    return states
+
+
 def discover_rows(args):
     rows = [Path(r) for r in (args.row or [])]
     if args.workspace:
+        if not getattr(args, 'checkpoint_audit', None):
+            raise Refused('--workspace walks every row; pass --checkpoint-audit so partial journals are selected by state, not by which files exist')
         rows += sorted(p for p in (Path(args.workspace)/'rows').iterdir() if p.is_dir() and (p/'cost.anchors.json').is_file())
     if not rows:
         raise Refused('no rows: pass --row DIR and/or --workspace WS')
@@ -352,7 +376,26 @@ def tool_commit():
         return None
 
 
-def plan_row(row, pins, *, run_id):
+def row_kind(row, cost_path, audit_states):
+    """complete | partial, from the audit when the row is listed there.
+
+    Listed withdrawn: partial (its shards may stop short, and a cost.pkl from
+    an earlier round is resealed if present). Listed done, or unlisted: the
+    row must be complete, and a missing cost.pkl or shard is refused rather
+    than silently treated as a partial journal. Without an audit the old
+    file-presence rule applies (cost.pkl present -> complete).
+    """
+    if audit_states is None:
+        return 'complete' if cost_path.is_file() else 'partial'
+    state = audit_states.get(row.name)
+    if state == 'withdrawn':
+        return 'partial'
+    if not cost_path.is_file():
+        raise Refused(f'{row}: no cost.pkl and the checkpoint audit does not record the row as withdrawn')
+    return 'complete'
+
+
+def plan_row(row, pins, *, run_id, audit_states=None):
     """Everything the rewrite would do to one row, computed without writing."""
     row = Path(row)
     manifest_path = row/'cost.anchors.json'
@@ -367,7 +410,8 @@ def plan_row(row, pins, *, run_id):
     if old_sha != manifest['identity_sha256']:
         raise Refused(f'{row}: stored identity_sha256 {manifest["identity_sha256"]} != recomputed {old_sha}; the digest reimplementation or the row is wrong')
     state, current = classify_pins(identity, pins)
-    plan = dict(row=str(row), kind='complete' if cost_path.is_file() else 'journal-only', state=state, current_pins=current,
+    plan = dict(row=str(row), kind=row_kind(row, cost_path, audit_states), journal_state=(audit_states or {}).get(row.name),
+                state=state, current_pins=current,
                 old_identity_sha256=old_sha, run_id=run_id, manifest_bytes=len(manifest_raw),
                 manifest_reserialization_identical=(manifest_bytes(manifest) in (manifest_raw, manifest_raw.rstrip(b'\n'))),
                 edits=[], shard_count=0, shard_bytes=0, receipt_seals=0, cost_seals=0, bytes_to_write=0)
@@ -552,10 +596,10 @@ def content_equality(old_raw, new_raw, *, encoder_moves):
 # verify: read a row the way its consumers do
 # ---------------------------------------------------------------------------
 
-def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None):
+def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None, partial=None):
     row = Path(row)
     wire_root = Path(wire_root) if wire_root else row
-    result = dict(row=str(row), failures=[], shards=0, wires=0, wire_bytes_checked=0)
+    result = dict(row=str(row), failures=[], shards=0, missing_shards=0, wires=0, wire_bytes_checked=0, partial=partial)
     fail = result['failures'].append
     manifest = json.loads((row/'cost.anchors.json').read_text())
     identity = manifest.get('identity', {})
@@ -572,6 +616,10 @@ def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None
     for entry in manifest['units']:
         path = parts/entry['file']
         if not path.is_file():
+            # A withdrawn journal stops short of its unit list; a done row may not.
+            result['missing_shards'] += 1
+            if partial is False:
+                fail(dict(what='shard_missing', file=path.name, qname=entry['qname']))
             continue
         raw = path.read_bytes()
         try:
@@ -649,15 +697,17 @@ def cmd_hash_tree(args):
 def cmd_dry_run(args):
     pins = load_pins(args.pins)
     bundle = load_bundle(args.proof, pins) if args.proof else None
+    audit_states = load_checkpoint_audit(args.checkpoint_audit) if args.checkpoint_audit else None
     rows = discover_rows(args)
     run_id = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    report = dict(mode='dry-run', pins={'old': pins['old'], 'new': pins['new']}, proof=(bundle or {}).get('path'), rows=[])
+    report = dict(mode='dry-run', pins={'old': pins['old'], 'new': pins['new']}, proof=(bundle or {}).get('path'),
+                  checkpoint_audit=args.checkpoint_audit, rows=[])
     for row in rows:
         started = time.time()
-        plan, _ = plan_row(row, pins, run_id=run_id)
+        plan, _ = plan_row(row, pins, run_id=run_id, audit_states=audit_states)
         plan['plan_seconds'] = time.time()-started
         report['rows'].append(plan)
-        print(json.dumps(dict(row=plan['row'], kind=plan['kind'], state=plan['state'], shards=plan['shard_count'],
+        print(json.dumps(dict(row=plan['row'], kind=plan['kind'], journal_state=plan['journal_state'], state=plan['state'], shards=plan['shard_count'],
                               receipt_seals=plan['receipt_seals'], cost_seals=plan['cost_seals'], bytes_to_write=plan['bytes_to_write'],
                               old_identity_sha256=plan['old_identity_sha256'], new_identity_sha256=plan.get('new_identity_sha256'),
                               plan_seconds=round(plan['plan_seconds'], 2))))
@@ -674,14 +724,15 @@ def cmd_migrate(args):
     if not args.proof:
         raise Refused('migrate requires --proof BUNDLE.json')
     bundle = load_bundle(args.proof, pins)
+    audit_states = load_checkpoint_audit(args.checkpoint_audit) if args.checkpoint_audit else None
     rows = discover_rows(args)
     run_id = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
     operator = args.operator or getpass.getuser()
     report = dict(mode='migrate', run_id=run_id, pins={'old': pins['old'], 'new': pins['new']}, proof=bundle['path'],
-                  proof_bundle_sha256=bundle['bundle_sha256'], rows=[])
+                  proof_bundle_sha256=bundle['bundle_sha256'], checkpoint_audit=args.checkpoint_audit, rows=[])
     for row in rows:
         started = time.time()
-        plan, work = plan_row(row, pins, run_id=run_id)
+        plan, work = plan_row(row, pins, run_id=run_id, audit_states=audit_states)
         if work is None:
             plan['seconds'] = time.time()-started
             report['rows'].append(plan)
@@ -692,7 +743,7 @@ def cmd_migrate(args):
         plan.update(migrated=True, seconds=time.time()-started, bytes_written=entry['bytes_written'], previous=entry.get('previous'),
                     cost_content=entry.get('cost_content'))
         report['rows'].append(plan)
-        print(json.dumps(dict(row=plan['row'], kind=plan['kind'], shards=plan['shard_count'], receipt_seals=plan['receipt_seals'],
+        print(json.dumps(dict(row=plan['row'], kind=plan['kind'], journal_state=plan['journal_state'], shards=plan['shard_count'], receipt_seals=plan['receipt_seals'],
                               cost_seals=plan['cost_seals'], bytes_written=entry['bytes_written'], seconds=round(plan['seconds'], 2),
                               new_identity_sha256=plan['new_identity_sha256'])))
     if args.report:
@@ -702,12 +753,14 @@ def cmd_migrate(args):
 
 def cmd_verify(args):
     pins = load_pins(args.pins)
+    audit_states = load_checkpoint_audit(args.checkpoint_audit) if args.checkpoint_audit else None
     rows = discover_rows(args)
-    report = dict(mode='verify', rows=[])
+    report = dict(mode='verify', checkpoint_audit=args.checkpoint_audit, rows=[])
     ok = True
     for row in rows:
         started = time.time()
-        result = verify_row(row, pins=pins, wire_root=args.wire_root or row, wire_bytes=not args.skip_wire_bytes)
+        partial = None if audit_states is None else (row_kind(row, row/'cost.pkl', audit_states) == 'partial')
+        result = verify_row(row, pins=pins, wire_root=args.wire_root or row, wire_bytes=not args.skip_wire_bytes, partial=partial)
         result['seconds'] = time.time()-started
         ok &= result['ok']
         report['rows'].append(result)
@@ -732,6 +785,7 @@ def _row_args(parser):
     parser.add_argument('--row', action='append')
     parser.add_argument('--workspace')
     parser.add_argument('--allow-live', action='store_true', help='allow rows inside the live campaign workspace')
+    parser.add_argument('--checkpoint-audit', help='campaign checkpoint audit; rows it lists as withdrawn are partial journals')
     parser.add_argument('--report')
 
 
