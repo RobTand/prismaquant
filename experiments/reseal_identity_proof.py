@@ -461,6 +461,7 @@ print(json.dumps(dict(tessera_file=tessera.__file__, torch=torch.__version__,
 
 def run_fixture_id(args):
     out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
     record = dict(schema=SCHEMA, kind='fixture_id', started_unix=time.time(), producers=[],
                   environment=environment_record(with_pins=False),
                   window_env=dict(TESSERA_WINDOW_BEST_FORM=args.window_best_form, TESSERA_WINDOW_BEST_TILE=args.window_best_tile))
