@@ -8,7 +8,7 @@ import pytest
 
 from experiments.sparse_rate_adaptive import (
     CAPS, CURRENCY, CURVE_SCHEMA, MEASUREMENT_PLAN_SCHEMA, error_metrics, evaluate_curve, fixed_schedule,
-    validate_curve,
+    validate_curve, policy_caps, study_plan,
 )
 
 
@@ -138,3 +138,37 @@ def test_caps_are_increasing_prefixes_of_one_trace():
         assert previous <= current
         previous = current
         assert snapshot["measurement_count"] in CAPS or snapshot is result["snapshots"][-1]
+
+
+def test_followup_plan_binds_raw_measurements_and_larger_budget():
+    plan = study_plan(require_strict_decrease=False, max_measurements=257)
+    assert plan["caps"] == [2, 3, 5, 9, 17, 33, 65, 129, 257]
+    assert plan["require_strict_decrease"] is False
+    assert plan["max_measurements"] == 257
+    assert len(plan["oracle_source_sha256"]) == 64
+    assert study_plan()["require_strict_decrease"] is True
+    assert study_plan()["caps"] == list(CAPS)
+
+
+@pytest.mark.parametrize("policy", [
+    {"require_strict_decrease": 0}, {"require_strict_decrease": "false"},
+    {"max_measurements": True}, {"max_measurements": 1},
+    {"max_measurements": 258}, {"max_measurements": 65.0},
+])
+def test_policy_rejects_ambiguous_or_out_of_range_values(policy):
+    with pytest.raises(ValueError):
+        policy_caps(**policy)
+
+
+def test_raw_followup_preserves_reversals_and_can_exhaust_full_roster():
+    source = curve([100000.0 - 100 * i + i * i for i in range(257)])
+    result = evaluate_curve(source, mode="value", tolerance=0, checks_per_interval=2,
+                            require_strict_decrease=False, max_measurements=257)
+    assert result["status"] == "empirically_checked"
+    assert result["actual_measurements"] == 257
+    assert result["require_strict_decrease"] is False
+    assert result["effective_max_measurements"] == 257
+    assert all(probe["measured_value"] == source["values"][probe["rate"] - 832]
+               for probe in result["probes"])
+    assert result["snapshots"][-1]["measurement_count"] == result["actual_measurements"]
+    assert result["snapshots"][-1]["never_revealed_metrics"]["screen_pass"] is None

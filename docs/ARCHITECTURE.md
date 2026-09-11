@@ -8904,6 +8904,13 @@ a diagnostic lower bound for the same selected policy, not a deployable
 measurement policy; `--allow-nonmonotone` records the relaxed policy in its
 report.
 
+The study CLI exposes the same raw-measurement opt-in and
+`--max-measurements` (default 65, supported range 2–257). Its frozen plan binds
+both choices and the sampler, study and oracle source hashes. Expanded budgets
+add 129- and 257-anchor checkpoints, capped by the declared legal roster.
+Measuring every candidate leaves an empty held-out audit, never an accuracy
+pass or a demonstrated measurement saving.
+
 The separate `tools/tessera_surface_replay.py` research command can compare
 the existing PWL model with shared-shape transfer from one/two anchors. It
 binds current campaign payload and journal identities, checks recorded wire

@@ -39,10 +39,24 @@ def write_json(path, value):
         handle.write("\n")
 
 
-def study_plan():
+def policy_caps(*, require_strict_decrease=True, max_measurements=65):
+    if type(require_strict_decrease) is not bool:
+        raise ValueError("require_strict_decrease must be a bool")
+    if type(max_measurements) is not int or not 2 <= max_measurements <= 257:
+        raise ValueError("max_measurements must be an integer in [2, 257]")
+    return tuple(sorted({cap for cap in (*CAPS, 129, 257) if cap <= max_measurements}
+                        | {max_measurements}))
+
+
+def study_plan(*, require_strict_decrease=True, max_measurements=65):
     """Freeze this matrix before opening the complete measured curves."""
+    caps = policy_caps(require_strict_decrease=require_strict_decrease,
+                       max_measurements=max_measurements)
     return {"schema": SCHEMA, "currency": CURRENCY, "research_only": True,
-        "caps": list(CAPS), "modes": list(MODES), "tolerances": list(TOLERANCES),
+        "caps": list(caps), "modes": list(MODES), "tolerances": list(TOLERANCES),
+        "require_strict_decrease": require_strict_decrease,
+        "max_measurements": max_measurements,
+        "measurement_transformation": "none; raw positive finite measurements are retained",
         "checks_per_interval": [1, 2],
         "primary_policy": {"mode": "value", "relative_tolerance": .005, "checks_per_interval": 2},
         "primary_policy_reason": "value interpolation led earlier studies; two sentinels guard a midpoint-only blind spot; 0.5% leaves margin below the existing 1% p99 screen",
@@ -53,7 +67,8 @@ def study_plan():
         "continuous_error_bound": False, "joint_aura_qualified": False,
         "deployment_measurement_saving_qualified": False,
         "source_sha256": digest(__file__),
-        "adaptive_core_sha256": digest(Path(__file__).resolve().parents[1] / "prismaquant/adaptive_anchored_shape.py")}
+        "adaptive_core_sha256": digest(Path(__file__).resolve().parents[1] / "prismaquant/adaptive_anchored_shape.py"),
+        "oracle_source_sha256": digest(Path(__file__).with_name("sparse_rate_curve_oracle.py"))}
 
 
 def validate_curve(curve):
@@ -178,20 +193,23 @@ def state_audit(state, truth, tolerance, fixed_order, regions):
         "all_candidates_measured": state.all_candidates_measured}
 
 
-def evaluate_curve(curve, *, mode, tolerance, checks_per_interval):
+def evaluate_curve(curve, *, mode, tolerance, checks_per_interval,
+                   require_strict_decrease=True, max_measurements=65):
+    caps = policy_caps(require_strict_decrease=require_strict_decrease,
+                       max_measurements=max_measurements)
     rates, values = validate_curve(curve)
     truth, order = dict(zip(rates, values)), fixed_schedule(rates)
     regions = curve.get("audit_regions", {})
     try:
         state = AdaptiveAnchoredCurve.start(rates, {rates[0]: values[0], rates[-1]: values[-1]},
-            mode=mode, relative_tolerance=tolerance, max_measurements=min(max(CAPS), len(rates)),
-            checks_per_interval=checks_per_interval)
+            mode=mode, relative_tolerance=tolerance, max_measurements=min(max_measurements, len(rates)),
+            checks_per_interval=checks_per_interval, require_strict_decrease=require_strict_decrease)
     except AnchoredShapeError as exc:
         return {"status": "invalid_endpoints", "reason": str(exc), "snapshots": [],
                 "actual_measurements": 2, "required_fallback": "measure every legal rung; interpolation refused"}
     snapshots, probes = [], []
     while True:
-        if state.measurement_count in CAPS:
+        if state.measurement_count in caps:
             snapshots.append(state_audit(state, truth, tolerance, order, regions))
         pending_state, probe = state.request_next()
         if probe is None:
@@ -200,11 +218,14 @@ def evaluate_curve(curve, *, mode, tolerance, checks_per_interval):
             by_count = {snapshot["measurement_count"]: i for i, snapshot in enumerate(snapshots)}
             cap_results = {str(cap): {"snapshot_index": by_count.get(cap, len(snapshots) - 1),
                 "stopped_before_cap": state.measurement_count < cap}
-                for cap in CAPS if cap <= len(rates)}
+                for cap in caps if cap <= len(rates)}
             return {"status": "budget_exhausted" if state.unverified_intervals else "empirically_checked",
                 "mode": mode, "tolerance": tolerance, "checks_per_interval": checks_per_interval,
                 "snapshots": snapshots, "cap_results": cap_results,
-                "excluded_caps_above_roster_length": [cap for cap in CAPS if cap > len(rates)],
+                "excluded_caps_above_roster_length": [cap for cap in caps if cap > len(rates)],
+                "require_strict_decrease": require_strict_decrease,
+                "max_measurements": max_measurements,
+                "effective_max_measurements": min(max_measurements, len(rates)),
                 "probes": probes, "actual_measurements": state.measurement_count,
                 "required_fallback": "unverified intervals require further measurements" if state.unverified_intervals else None}
         # Commit the acquisition decision before revealing its measured truth.
@@ -229,13 +250,18 @@ def main():
     parser.add_argument("--mode", choices=MODES)
     parser.add_argument("--tolerance", type=float, choices=TOLERANCES)
     parser.add_argument("--checks-per-interval", type=int, choices=(1, 2))
+    parser.add_argument("--allow-nonmonotone", action="store_true",
+                        help="retain raw positive measurements even when they rise or tie")
+    parser.add_argument("--max-measurements", type=int, default=65)
     args = parser.parse_args()
+    policy = {"require_strict_decrease": not args.allow_nonmonotone,
+              "max_measurements": args.max_measurements}
     if args.freeze_plan:
-        write_json(args.freeze_plan, study_plan())
+        write_json(args.freeze_plan, study_plan(**policy))
         return
     if any(v is None for v in (args.plan, args.curve, args.out, args.mode, args.tolerance, args.checks_per_interval)):
         parser.error("replay needs plan, curve, out, mode, tolerance and checks-per-interval")
-    if json.loads(Path(args.plan).read_text()) != study_plan():
+    if json.loads(Path(args.plan).read_text()) != study_plan(**policy):
         raise ValueError("frozen study plan differs from this implementation")
     curve = json.loads(Path(args.curve).read_text())
     validate_curve(curve)
@@ -243,7 +269,7 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     started, profiler = time.time(), cProfile.Profile()
     result = profiler.runcall(evaluate_curve, curve, mode=args.mode,
-        tolerance=args.tolerance, checks_per_interval=args.checks_per_interval)
+        tolerance=args.tolerance, checks_per_interval=args.checks_per_interval, **policy)
     profiler.dump_stats(out / "profile.prof")
     write_json(out / "report.json", {"schema": SCHEMA, "research_only": True,
         "plan_sha256": digest(args.plan), "curve_sha256": digest(args.curve),
@@ -251,6 +277,7 @@ def main():
         "family": curve["family"], "currency": CURRENCY, "curve_id": curve["curve_id"],
         "activation_contract": curve["activation_contract"], "source_identity": curve["source_identity"],
         "measurement_plan": curve["measurement_plan"],
+        "policy": policy,
         "calibration_identity": curve["calibration_identity"], "recipe_identity": curve["recipe_identity"],
         "started_unix": started, "finished_unix": time.time(), "result": result})
     print(json.dumps({"out": str(out), "status": result["status"],
