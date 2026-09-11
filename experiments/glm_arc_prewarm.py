@@ -86,10 +86,20 @@ def arcstats() -> dict:
     return out
 
 
-def arc_headroom_bytes(reserve_fraction: float) -> tuple[int, int, int]:
+def arc_headroom_bytes(reserve_fraction: float) -> tuple[int, int, int, int]:
+    """Usable prewarm budget, plus the two headroom numbers it sits between.
+
+    ``c_max - size`` is the optimistic bound: the room ARC is *allowed* to grow
+    into. ``c - size`` is the instantaneous one: room ARC currently *intends* to
+    hold, and it is the number that decides whether a warm evicts something.
+    ZFS raises ``c`` toward ``c_max`` under read demand, so budgeting on the
+    optimistic bound is right, but ``c`` is volatile on a shared box -- it fell
+    99 GB inside one 5-minute measurement window on 2026-09-11 -- so both are
+    reported and the caller logs them.
+    """
     a = arcstats()
-    size, c_max = a.get("size", 0), a.get("c_max", 0)
-    return max(0, int((c_max - size) * reserve_fraction)), size, c_max
+    size, c, c_max = a.get("size", 0), a.get("c", 0), a.get("c_max", 0)
+    return max(0, int((c_max - size) * reserve_fraction)), size, c, c_max
 
 
 _POOL_LOCAL = os.path.isdir("/storage_pool/shared")
@@ -525,10 +535,12 @@ def main() -> int:
 
     if args.warm_row:
         plan = campaign.row_plan(args.warm_row)
-        head, size, c_max = arc_headroom_bytes(args.arc_reserve_fraction)
+        head, size, c, c_max = arc_headroom_bytes(args.arc_reserve_fraction)
         log_event(args.log, {"event": "warm_start", "row": args.warm_row,
                              "bytes": plan["total_bytes"], "readers": args.readers,
-                             "arc_size": size, "arc_c_max": c_max,
+                             "arc_size": size, "arc_c": c, "arc_c_max": c_max,
+                             "arc_headroom_nominal": c_max - size,
+                             "arc_headroom_effective": c - size,
                              "arc_headroom_usable": head})
         if args.dry_run:
             print(json.dumps({k: v for k, v in plan.items()
@@ -537,16 +549,21 @@ def main() -> int:
         stop = threading.Event()
         res = Reader(args.readers).read(jobs_for(plan, not args.no_weights),
                                         stop, plan["total_bytes"] + (1 << 30))
-        head2, size2, _ = arc_headroom_bytes(args.arc_reserve_fraction)
+        head2, size2, c2, _ = arc_headroom_bytes(args.arc_reserve_fraction)
         log_event(args.log, {"event": "warm_done", "row": args.warm_row,
-                             "arc_size_after": size2,
+                             "arc_size_after": size2, "arc_c_after": c2,
                              "arc_size_delta": size2 - size, **res})
         return 0
 
     def cycle() -> None:
         hosts, claimed, ready, upcoming = predict(campaign, roster, args.window, simulate)
-        head, size, c_max = arc_headroom_bytes(args.arc_reserve_fraction)
+        head, size, c, c_max = arc_headroom_bytes(args.arc_reserve_fraction)
         plans = [campaign.row_plan(r["row_id"]) for r in upcoming]
+        # A dry run prices the whole predicted order, not just the horizon, so
+        # the cost of every row the queue would hand us is visible at once.
+        horizon_ids = {r["row_id"] for r in upcoming}
+        all_plans = ([campaign.row_plan(r["row_id"]) for r in ready]
+                     if args.dry_run else plans)
         summary = {
             "event": "predict",
             "gpu_hosts": hosts,
@@ -557,7 +574,15 @@ def main() -> int:
             "upcoming": [{k: v for k, v in p.items() if not k.startswith("_")}
                          for p in plans],
             "upcoming_total_bytes": sum(p["total_bytes"] for p in plans),
-            "arc_size": size, "arc_c_max": c_max, "arc_headroom_usable": head,
+            "predicted_order": [
+                dict({k: v for k, v in p.items() if not k.startswith("_")},
+                     rank=i, in_horizon=p["row_id"] in horizon_ids)
+                for i, p in enumerate(all_plans)],
+            "predicted_order_total_bytes": sum(p["total_bytes"] for p in all_plans),
+            "arc_size": size, "arc_c": c, "arc_c_max": c_max,
+            "arc_headroom_nominal": c_max - size,
+            "arc_headroom_effective": c - size,
+            "arc_headroom_usable": head,
         }
         log_event(args.log, summary)
         if args.dry_run or not plans:
@@ -573,7 +598,7 @@ def main() -> int:
                 return
         if head <= 0:
             log_event(args.log, {"event": "hold", "reason": "no ARC headroom",
-                                 "arc_size": size, "arc_c_max": c_max})
+                                 "arc_size": size, "arc_c": c, "arc_c_max": c_max})
             return
         stop = threading.Event()
         budget = head
