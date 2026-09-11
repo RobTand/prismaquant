@@ -406,6 +406,9 @@ def cmd_census(args) -> int:
          *spec["campaign_argv"]],
         mem_gb=_row_memory_gb(spec, [], {}),
         timeout_s=int(args.timeout_s),
+        # Census exits before the pricing journal/reporter exists.  Its
+        # explicit wall-clock deadline is the only bound it declares.
+        progress_phases=(),
     )
     manifest.write_text(json.dumps([row], indent=2) + "\n")
     if '--streaming' in spec['campaign_argv']:
@@ -434,7 +437,10 @@ def cmd_capture(args) -> int:
         "--capture-calibration-out", str(workspace / "calibration-cache"),
         *spec["campaign_argv"]],
         mem_gb=_row_memory_gb(spec, sorted(census["counts"]), census),
-        timeout_s=int(args.timeout_s))
+        timeout_s=int(args.timeout_s),
+        # Capture is likewise not an anchor-pricing row and makes no durable
+        # anchor-counter reports.
+        progress_phases=())
     manifest.write_text(json.dumps([row], indent=2) + "\n")
     if '--streaming' in spec['campaign_argv']:
         (workspace/'capture-resources.json').write_text(json.dumps(

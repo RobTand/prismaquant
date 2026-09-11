@@ -12,6 +12,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -49,6 +50,39 @@ def test_an_explicitly_asked_for_deadline_is_still_sealed():
     # Both, and they compose: the hard deadline caps the cost, the phases end
     # a row that stops early.
     assert row["progress_phases"][1] == "pricing=900"
+
+
+def test_nonpricing_rows_do_not_promise_anchor_progress():
+    """Census/capture exit before the pricing journal reporter is available."""
+
+    row = dispatch._row(spec(), [], mem_gb=48, timeout_s=7200,
+                        progress_phases=())
+    assert row["timeout_s"] == 7200
+    assert "progress_phases" not in row
+
+
+def test_census_and_capture_keep_their_deadlines_without_anchor_progress(tmp_path):
+    model = tmp_path / "model"
+    model.mkdir()
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({
+        **spec(), "model": str(model), "cwd": str(tmp_path),
+    }))
+    args = SimpleNamespace(spec=str(spec_path), workspace=str(tmp_path),
+                           timeout_s=7200, submit=False)
+
+    assert dispatch.cmd_census(args) == 0
+    census_row = json.loads((tmp_path / "census-manifest.json").read_text())[0]
+    assert census_row["timeout_s"] == 7200
+    assert "progress_phases" not in census_row
+
+    (tmp_path / "census.json").write_text(json.dumps({
+        "model": str(model), "counts": {}, "unit_shapes": {},
+    }))
+    assert dispatch.cmd_capture(args) == 0
+    capture_row = json.loads((tmp_path / "capture-manifest.json").read_text())[0]
+    assert capture_row["timeout_s"] == 7200
+    assert "progress_phases" not in capture_row
 
 
 def test_the_declared_quiet_is_shorter_than_the_limit_that_killed_the_rows():
