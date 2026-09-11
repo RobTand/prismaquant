@@ -51,12 +51,12 @@ def wide_roster(tmp_path):
 
 
 def prefetch(roster, *, threads, monkeypatch, resource_check=None, names=None,
-             release_file_pages=False):
+             release_file_pages=False, device='cpu'):
     root, census, capture_id, _acts, _hessians, record, units = roster
     monkeypatch.setenv('PRISMAQUANT_CAPTURE_READ_THREADS', str(threads))
     execution = {}
     values, receipt = cc.prefetch_capture(record['path'], expected_identity=capture_id,
-        census=census, names=list(units if names is None else names), device='cpu',
+        census=census, names=list(units if names is None else names), device=device,
         expected_sha256=record['sha256'], verified_load_policy=policy(),
         load_execution=execution, resource_check=resource_check,
         release_file_pages=release_file_pages)
@@ -294,6 +294,31 @@ def test_a_narrow_window_never_wedges_under_a_racy_reader(wide_roster, monkeypat
         assert done.wait(60), f'parallel prefetch wedged at threads={threads}, attempt {attempt}'
         worker.join(10)
         assert not failure, failure
+
+
+@pytest.mark.parametrize('threads', [4, 8])
+def test_cuda_transfers_match_the_serial_load_on_the_device(roster, monkeypatch, threads):
+    """The consumer's device transfer is the one the serial path makes.
+
+    The transfer runs on the consumer thread and the default stream, so the
+    tensors handed back are already ordered against the reads that produced
+    them -- there is no side stream here and therefore no ``wait_stream`` the
+    test could be missing. ``release_file_pages`` is on so the CUDA branch
+    that synchronises before the verified buffer is released is exercised.
+    """
+    if not torch.cuda.is_available():
+        pytest.skip('no CUDA device on this worker')
+    serial_values, serial_receipt, serial = prefetch(roster, threads=1, monkeypatch=monkeypatch,
+                                                     device='cuda', release_file_pages=True)
+    values, receipt, execution = prefetch(roster, threads=threads, monkeypatch=monkeypatch,
+                                          device='cuda', release_file_pages=True)
+    torch.cuda.synchronize()
+    assert execution == serial
+    assert receipt == serial_receipt
+    for name in sorted(UNITS):
+        assert values[0][name].is_cuda and values[1][name].is_cuda
+        assert torch.equal(values[0][name], serial_values[0][name])
+        assert torch.equal(values[1][name], serial_values[1][name])
 
 
 def test_serial_default_leaves_the_existing_path_in_place(roster, monkeypatch):
