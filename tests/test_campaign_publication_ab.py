@@ -1,7 +1,8 @@
 """The comparison must preserve compatible work and report truthful spans."""
 import pytest
 
-from experiments.campaign_publication_ab import preferred_batches, PhaseRecorder
+from experiments.campaign_publication_ab import (OVERLAP_BUDGET, arm_order, preferred_batches,
+    PhaseRecorder)
 
 
 def test_shape_permutation_preserves_whole_batches_and_internal_order():
@@ -34,3 +35,15 @@ def test_profile_keeps_original_error_and_records_failed_span():
     assert recorder.records[0]['phase'] == 'publication'
     assert recorder.records[0]['seconds'] >= 0
     assert recorder.records[0]['thread_cpu_seconds'] >= 0
+
+
+def test_a_repeat_order_replaces_the_default_matrix_instead_of_being_shadowed():
+    B, I = OVERLAP_BUDGET, 268435456
+    assert arm_order(I) == [(0, 0), (B, 0), (B, I), (B, I), (B, 0)]
+    assert arm_order(0) == [(0, 0), (B, 0), (B, 0), (0, 0)]
+    assert arm_order(I, [(B, I)]) == [(B, I)]
+    assert arm_order(I, [[B, I], [B, 0]]) == [(B, I), (B, 0)]
+    with pytest.raises(ValueError):
+        arm_order(I, [(B,)])
+    with pytest.raises(ValueError):
+        arm_order(I, [(B, -1)])

@@ -48,6 +48,26 @@ def plan_order(plan):
     return order
 
 
+def arm_order(identity_bytes=0, override=None):
+    """The arm list: the default matrix, or the caller's repeat of chosen arms.
+
+    A repeat (e.g. one more pipelined arm on a quiet server) has its parity
+    checked offline against the original run's synchronous arm, since ``run``
+    compares only within one plan.
+    """
+    identity = int(identity_bytes)
+    if identity < 0:
+        raise ValueError('identity bytes cannot be negative')
+    if override:
+        order = [tuple(int(v) for v in pair) for pair in override]
+        if any(len(pair) != 2 or min(pair) < 0 for pair in order):
+            raise ValueError('an arm is an (overlap_bytes, identity_bytes) pair')
+        return order
+    budget = OVERLAP_BUDGET
+    return ([(0, 0), (budget, 0), (budget, identity), (budget, identity), (budget, 0)]
+            if identity else [(0, 0), (budget, 0), (budget, 0), (0, 0)])
+
+
 def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None):
     """Write the plan.  ``identity_bytes`` > 0 adds the pipelined arms.
 
@@ -73,19 +93,7 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None):
     if '--publication-overlap-bytes' in command or '--seed-checkpoint' in command:
         raise ValueError('comparison requires the original fresh synchronous recipe')
     resources = {}
-    budget = OVERLAP_BUDGET
-    identity = int(identity_bytes)
-    if identity < 0:
-        raise ValueError('identity bytes cannot be negative')
-    order = ([(0, 0), (budget, 0), (budget, identity), (budget, identity), (budget, 0)]
-             if identity else [(0, 0), (budget, 0), (budget, 0), (0, 0)])
-    if order_override := order:
-        # A repeat of chosen arms (e.g. one more pipelined arm on a quiet
-        # server); its parity is checked offline against the original run's
-        # synchronous arm, since ``run`` compares only within one plan.
-        order = [tuple(int(v) for v in pair) for pair in order_override]
-        if any(len(pair) != 2 or min(pair) < 0 for pair in order):
-            raise ValueError('an arm is an (overlap_bytes, identity_bytes) pair')
+    order = arm_order(identity_bytes, order)
     for pair in sorted(set(order)):
         selected = copy.deepcopy(spec)
         selected['campaign_argv'] += arm_flags(*pair)
