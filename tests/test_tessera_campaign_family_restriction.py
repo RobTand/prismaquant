@@ -194,6 +194,36 @@ def test_fanout_merge_preserves_the_complete_structure_restriction():
         "policy": POLICY, "structure_by_unit": {"a": "dense", "b": "dense"}}
 
 
+def test_fanout_merge_unions_a_dense_row_and_a_routed_row():
+    """One campaign's rows never carry the same ``structure_by_unit``.
+
+    The map is keyed by the row's OWN selected units, so a dense row and a
+    routed row differ in it by construction.  Equality is required on
+    ``policy`` alone and the maps are unioned, the way ``units`` is unioned; a
+    whole-restriction equality check would make any census that mixes dense
+    and routed rows unmergeable (RobTand/prismaquant#487).
+    """
+    from tools.dispatch_tessera_campaign import merge_payloads
+    payloads = _restricted_payloads()
+    payloads["row-0001"]["provenance"]["family_restriction"]["structure_by_unit"] = {
+        "b": "routed_moe"}
+    merged = merge_payloads(payloads, census={"counts": {"a": 16384, "b": 16384}},
+                            capture_sha256="merged-digest")
+    assert merged["provenance"]["family_restriction"] == {
+        "policy": POLICY, "structure_by_unit": {"a": "dense", "b": "routed_moe"}}
+
+
+def test_fanout_merge_refuses_one_unit_claimed_by_two_rows():
+    """The union is not a silent overwrite: a repeated unit is a refusal."""
+    from tools.dispatch_tessera_campaign import merge_payloads, MergeRefused
+    payloads = _restricted_payloads()
+    payloads["row-0001"]["provenance"]["family_restriction"]["structure_by_unit"] = {
+        "a": "dense", "b": "routed_moe"}
+    with pytest.raises(MergeRefused, match="family restriction"):
+        merge_payloads(payloads, census={"counts": {"a": 16384, "b": 16384}},
+                       capture_sha256="merged-digest")
+
+
 @pytest.mark.parametrize("mutation", ["missing_policy", "different_policy", "missing_structure", "unknown_structure"])
 def test_fanout_merge_refuses_incompatible_or_incomplete_restrictions(mutation):
     from tools.dispatch_tessera_campaign import merge_payloads, MergeRefused
