@@ -1,9 +1,12 @@
 """Pure synthetic tests for the offline complete-curve oracle."""
 from itertools import combinations
+import json
 import math
+import sys
 
 import pytest
 
+import experiments.sparse_rate_curve_oracle as oracle
 from experiments.sparse_rate_curve_oracle import minimum_anchors
 from prismaquant.adaptive_anchored_shape import _predict_between
 
@@ -76,6 +79,55 @@ def test_nonmonotone_shape_is_explicitly_refused():
     assert result["status"] == "refused_shape"
     assert result["optimal_anchor_count"] is None
     assert result["actual_max_relative_error"] is None
+    assert result["require_strict_decrease"] is True
+
+
+@pytest.mark.parametrize("values,expected_count", [
+    ([10.0, 10.0, 10.0], 2),
+    ([10.0, 8.0, 9.0, 1.0], 4),
+])
+def test_nonmonotone_opt_in_finds_minimum_path_that_strict_default_refuses(values, expected_count):
+    rates = list(range(10, 10 * (len(values) + 1), 10))
+    strict = minimum_anchors(rates, values, mode="value", max_relative_error=.1)
+    relaxed = minimum_anchors(
+        rates, values, mode="value", max_relative_error=.1,
+        require_strict_decrease=False,
+    )
+    assert strict["status"] == "refused_shape"
+    assert relaxed["status"] == "optimal"
+    assert relaxed["optimal_anchor_count"] == expected_count
+    assert relaxed["require_strict_decrease"] is False
+
+
+def test_evaluate_curve_forwards_the_strict_decrease_policy(monkeypatch):
+    monkeypatch.setattr(oracle, "validate_curve", lambda curve: ((10, 20, 30), (5.0, 5.0, 5.0)))
+    relaxed = oracle.evaluate_curve(
+        object(), mode="value", tolerance=0.0, require_strict_decrease=False,
+    )
+    strict = oracle.evaluate_curve(object(), mode="value", tolerance=0.0)
+    assert relaxed["status"] == "optimal"
+    assert relaxed["require_strict_decrease"] is False
+    assert strict["status"] == "refused_shape"
+    assert strict["require_strict_decrease"] is True
+
+
+def test_allow_nonmonotone_cli_records_the_selected_policy(tmp_path, monkeypatch):
+    curve_path = tmp_path / "curve.json"
+    curve_path.write_text(json.dumps({
+        "curve_id": "synthetic", "qname": "test.linear", "family": "test",
+        "activation_contract": "test", "source_identity": {"test": True},
+        "calibration_identity": {"test": True}, "recipe_identity": {"test": True},
+    }))
+    out = tmp_path / "out"
+    monkeypatch.setattr(oracle, "validate_curve", lambda curve: ((10, 20, 30), (5.0, 5.0, 5.0)))
+    monkeypatch.setattr(sys, "argv", [
+        "sparse_rate_curve_oracle.py", "--curve", str(curve_path), "--out", str(out),
+        "--allow-nonmonotone",
+    ])
+    oracle.main()
+    report = json.loads((out / "report.json").read_text())
+    assert report["require_strict_decrease"] is False
+    assert {result["require_strict_decrease"] for result in report["results"].values()} == {False}
 
 
 @pytest.mark.parametrize("values,tolerance", [
@@ -84,3 +136,12 @@ def test_nonmonotone_shape_is_explicitly_refused():
 def test_invalid_finite_bounds_are_refused(values, tolerance):
     with pytest.raises(ValueError):
         minimum_anchors([10, 20, 30], values, mode="value", max_relative_error=tolerance)
+
+
+@pytest.mark.parametrize("require_strict_decrease", [0, 1, None, "false"])
+def test_strict_decrease_policy_must_be_boolean(require_strict_decrease):
+    with pytest.raises(ValueError, match="require_strict_decrease"):
+        minimum_anchors(
+            [10, 20, 30], [10.0, 5.0, 1.0], mode="value", max_relative_error=.01,
+            require_strict_decrease=require_strict_decrease,
+        )

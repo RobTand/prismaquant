@@ -3,6 +3,18 @@
 As of: 2026-09-11 · `codex/sparse-rate-20260911`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-11, `codex/adaptive-nonmonotone-20260911`) for the
+research-only adaptive nonmonotone policy (§4.10). `AdaptiveAnchoredCurve`
+now carries `require_strict_decrease: bool = True` as immutable state and its
+`start` API preserves that strict default. An explicit `False` accepts any
+positive finite measured values, including flat or locally increasing values;
+the finite roster, exact anchors, deterministic sentinel order, frozen-parent
+residuals, split/refinement and cap semantics do not change. The all-truth
+minimum-anchor oracle takes the same defaulted policy, and
+`--allow-nonmonotone` selects `False` while recording it in the report. This
+opt-in research path does not alter production interpolation, allocator prices,
+campaign defaults, serving qualification or ship gates.
+
 Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for the opt-in complete
 rate-grid experiment and deterministic adaptive sampler (§4.10). The campaign
 can measure every legal rung in an explicit band through its existing encoder,
@@ -8882,11 +8894,15 @@ research acquisition state machine over a declared finite rate roster. It
 starts from measured endpoints and requests one midpoint or two third-point
 checks per interval. Failed checks split the interval; accepted checks retain
 their predictions made before measurement. Value and log2 PWL modes preserve
-measured anchors exactly. Budget exhaustion leaves unresolved intervals
-explicit, while nonpositive or nonmonotone observations refuse interpolation.
-The complete-curve study audits only points never revealed to the sampler.
-Its offline all-truth minimum-anchor oracle is a diagnostic lower bound for
-the same interpolation class, not a deployable measurement policy.
+measured anchors exactly. `require_strict_decrease=True` is the default and
+refuses flat or nonmonotone observations. An explicit research API opt-in of
+`False` accepts any positive finite measurement while preserving the same
+deterministic acquisition and refinement rules. Budget exhaustion leaves
+unresolved intervals explicit. The complete-curve study audits only points
+never revealed to the sampler. Its offline all-truth minimum-anchor oracle is
+a diagnostic lower bound for the same selected policy, not a deployable
+measurement policy; `--allow-nonmonotone` records the relaxed policy in its
+report.
 
 The separate `tools/tessera_surface_replay.py` research command can compare
 the existing PWL model with shared-shape transfer from one/two anchors. It

@@ -31,7 +31,7 @@ def digest(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _validate_inputs(rates, values, mode, max_relative_error):
+def _validate_inputs(rates, values, mode, max_relative_error, require_strict_decrease):
     """Validate a finite positive roster without reading any curve artifact."""
     try:
         rates, values = tuple(rates), tuple(values)
@@ -50,7 +50,9 @@ def _validate_inputs(rates, values, mode, max_relative_error):
     if (isinstance(max_relative_error, bool) or not isinstance(max_relative_error, (int, float))
             or not math.isfinite(max_relative_error) or max_relative_error < 0):
         raise ValueError("max_relative_error must be a finite nonnegative number")
-    return rates, tuple(map(float, values)), float(max_relative_error)
+    if type(require_strict_decrease) is not bool:
+        raise ValueError("require_strict_decrease must be a boolean")
+    return rates, tuple(map(float, values)), float(max_relative_error), require_strict_decrease
 
 
 def _edge_error(rates, values, mode, left, right):
@@ -68,15 +70,21 @@ def _edge_error(rates, values, mode, left, right):
     return float(error.max())
 
 
-def minimum_anchors(rates, values, *, mode: str, max_relative_error: float):
+def minimum_anchors(
+    rates, values, *, mode: str, max_relative_error: float,
+    require_strict_decrease: bool = True,
+):
     """Find an exact all-truth minimum-anchor path over a finite roster.
 
-    An edge is legal only when its endpoint measurements strictly decrease and
-    every measured interior rung has relative interpolation error at most the
-    requested bound.  Among equal-cardinality paths, the lowest predecessor
-    index is selected at every dynamic-programming state.
+    Every measured interior rung on a legal edge has relative interpolation
+    error at most the requested bound.  By default, edge endpoints must also
+    strictly decrease; research callers can opt out of that shape constraint.
+    Among equal-cardinality paths, the lowest predecessor index is selected at
+    every dynamic-programming state.
     """
-    rates, values, max_relative_error = _validate_inputs(rates, values, mode, max_relative_error)
+    rates, values, max_relative_error, require_strict_decrease = _validate_inputs(
+        rates, values, mode, max_relative_error, require_strict_decrease,
+    )
     count = len(rates)
     predecessor = [-1] * count
     anchor_counts = [math.inf] * count
@@ -86,7 +94,7 @@ def minimum_anchors(rates, values, *, mode: str, max_relative_error: float):
 
     for right in range(1, count):
         for left in range(right):
-            if not (values[left] > values[right]) or not math.isfinite(anchor_counts[left]):
+            if (require_strict_decrease and not values[left] > values[right]) or not math.isfinite(anchor_counts[left]):
                 continue
             actual_max = _edge_error(rates, values, mode, left, right)
             if actual_max > max_relative_error:
@@ -101,8 +109,11 @@ def minimum_anchors(rates, values, *, mode: str, max_relative_error: float):
                 edge_errors[right] = actual_max
 
     if not math.isfinite(anchor_counts[-1]):
-        return {"status": "refused_shape", "reason": "no feasible strictly decreasing anchor path",
+        reason = ("no feasible strictly decreasing anchor path" if require_strict_decrease
+                  else "no feasible anchor path")
+        return {"status": "refused_shape", "reason": reason,
                 "mode": mode, "max_relative_error": max_relative_error,
+                "require_strict_decrease": require_strict_decrease,
                 "optimal_anchor_count": None, "anchor_indices": [], "anchor_rates": [],
                 "actual_max_relative_error": None, "eligible_edge_count": eligible_edges,
                 "tie_break": TIE_BREAK}
@@ -115,6 +126,7 @@ def minimum_anchors(rates, values, *, mode: str, max_relative_error: float):
     path.reverse()
     selected_errors = [edge_errors[index] for index in path[1:]]
     return {"status": "optimal", "mode": mode, "max_relative_error": max_relative_error,
+            "require_strict_decrease": require_strict_decrease,
             "optimal_anchor_count": int(anchor_counts[-1]), "anchor_indices": path,
             "anchor_rates": [rates[index] for index in path],
             "rate_choices": [rates[index] for index in path],
@@ -123,10 +135,15 @@ def minimum_anchors(rates, values, *, mode: str, max_relative_error: float):
             "eligible_edge_count": eligible_edges, "tie_break": TIE_BREAK}
 
 
-def evaluate_curve(curve, *, mode: str, tolerance: float):
+def evaluate_curve(
+    curve, *, mode: str, tolerance: float, require_strict_decrease: bool = True,
+):
     """Validate a published complete curve, then run the all-truth oracle."""
     rates, values = validate_curve(curve)
-    return minimum_anchors(rates, values, mode=mode, max_relative_error=tolerance)
+    return minimum_anchors(
+        rates, values, mode=mode, max_relative_error=tolerance,
+        require_strict_decrease=require_strict_decrease,
+    )
 
 
 def write_json(path: Path, value) -> None:
@@ -140,6 +157,8 @@ def main() -> None:
     parser.add_argument("--curve", required=True, help="published complete measured curve JSON")
     parser.add_argument("--out", required=True, help="new directory for the oracle report")
     parser.add_argument("--profile-out", help="optional cProfile output path; not a timing claim")
+    parser.add_argument("--allow-nonmonotone", dest="require_strict_decrease", action="store_false",
+                        help="research-only: allow flat or increasing anchor edges")
     args = parser.parse_args()
 
     curve_path, out = Path(args.curve), Path(args.out)
@@ -149,7 +168,10 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=False)
     profiler = cProfile.Profile() if args.profile_out else None
     invoke = (lambda: {
-        f"{mode}:{tolerance:g}": evaluate_curve(curve, mode=mode, tolerance=tolerance)
+        f"{mode}:{tolerance:g}": evaluate_curve(
+            curve, mode=mode, tolerance=tolerance,
+            require_strict_decrease=args.require_strict_decrease,
+        )
         for mode in MODES for tolerance in TOLERANCES
     })
     results = profiler.runcall(invoke) if profiler else invoke()
@@ -163,6 +185,7 @@ def main() -> None:
         "offline_all_truth_lower_bound": True,
         "not_a_deployable_adaptive_policy": True,
         "does_not_establish_measurement_savings": True,
+        "require_strict_decrease": args.require_strict_decrease,
         "input_curve_sha256": digest(curve_path), "script_sha256": digest(__file__),
         "profile_sha256": profile_sha256,
         "currency": CURRENCY, "curve_id": curve["curve_id"], "qname": curve["qname"],

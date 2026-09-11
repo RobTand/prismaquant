@@ -86,19 +86,24 @@ an achieved campaign-time reduction.
 ## Adaptive acquisition on a complete measured curve
 
 `AdaptiveAnchoredCurve` accepts a finite, strictly increasing integer roster
-and positive, strictly decreasing measured values. Its immutable state exposes
-the next requested coordinate and its prediction before that value is known.
-Callers obtain the measurement through the existing campaign machinery, then
-record that exact coordinate. The sampler has no access to unmeasured truth.
+and positive finite measured values. Its immutable
+`require_strict_decrease: bool = True` policy preserves the default requirement
+that measurements strictly decrease. A caller can explicitly set it to `False`
+for a research study with flat or locally increasing measurements. Its immutable
+state exposes the next requested coordinate and its prediction before that value
+is known. Callers obtain the measurement through the existing campaign
+machinery, then record that exact coordinate. The sampler has no access to
+unmeasured truth.
 
 Each interval gets either a midpoint check or two approximately third-point
 checks. These are compared with the parent interval's frozen value/log2 PWL
 prediction. A failed interval splits at its measured checks; an accepted
 interval retains those checks as empirical evidence. The measurement budget
 includes endpoints and every check. Unresolved intervals remain explicit at
-the budget limit, and invalid or nonmonotone measurements refuse rather than
-being smoothed into a plausible curve. Sentinel agreement cannot prove a
-bound on every unseen rate.
+the budget limit. Nonpositive measurements always refuse; flat or nonmonotone
+measurements refuse under the default strict policy and are only accepted under
+the explicit research opt-in. Sentinel agreement cannot prove a bound on every
+unseen rate.
 
 `--exhaustive-rate-grid` with an explicit `--rate-band` provides the complete
 measured curve for a bounded research experiment. It uses the existing encoder,
@@ -112,10 +117,12 @@ Families, activation contracts and recipe segments are independent curves.
 
 `experiments/sparse_rate_curve_oracle.py` uses all measured truth to compute the
 fewest anchors that meet a chosen maximum relative error with value/log2 PWL
-interpolation. This exact finite-grid lower bound distinguishes a difficult
-curve from an inefficient acquisition policy. Its selected anchors cannot be
-counted as an achieved measurement saving: the oracle already read every rung.
-An infeasible strictly decreasing path reports refusal explicitly.
+interpolation. Its `require_strict_decrease` policy defaults to `True`, matching
+the sampler. `--allow-nonmonotone` explicitly chooses `False` and records that
+policy in the report. This exact finite-grid lower bound distinguishes a
+difficult curve from an inefficient acquisition policy. Its selected anchors
+cannot be counted as an achieved measurement saving: the oracle already read
+every rung. An infeasible path reports refusal explicitly.
 
 ## Replay inputs and output
 

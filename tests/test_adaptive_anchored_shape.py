@@ -154,6 +154,7 @@ def test_direct_state_cannot_drop_unmeasured_coverage_but_exact_steps_are_termin
 @pytest.mark.parametrize("coordinates,endpoints,kwargs", [
     ((0, 0, 8), {0: 100.0, 8: 1.0}, {}),
     ((0, 4, 8), {0: 1.0, 8: 100.0}, {}),
+    ((0, 4, 8), {0: 100.0, 8: 100.0}, {}),
     ((0, 4, 8), {0: 100.0, 8: 1.0}, {"mode": "bad"}),
     ((0, 4, 8), {0: 100.0, 8: 1.0}, {"relative_tolerance": -0.1}),
     ((0, 4, 8), {0: 100.0, 8: 1.0}, {"max_measurements": 1}),
@@ -177,6 +178,60 @@ def test_invalid_measurement_and_extrapolation_are_refused():
         curve.predict(9)
     with pytest.raises(AnchoredShapeError, match="pending coordinate"):
         curve.record_measurement(3, 80.0)
+
+
+def test_opt_in_allows_flat_and_increasing_measurements_without_changing_refinement():
+    flat = AdaptiveAnchoredCurve.start(
+        (0, 2, 4), {0: 5.0, 4: 5.0}, mode="value",
+        relative_tolerance=0.0, max_measurements=3,
+        require_strict_decrease=False,
+    )
+    pending_flat, flat_probe = _request(flat)
+    assert pending_flat.require_strict_decrease is False
+    assert flat_probe.coordinate == 2
+    flat = pending_flat.record_measurement(flat_probe.coordinate, 5.0)
+    assert [flat.predict(coordinate) for coordinate in (0, 2, 4)] == [5.0, 5.0, 5.0]
+    assert flat.all_candidates_measured
+
+    increasing = AdaptiveAnchoredCurve.start(
+        (0, 2, 4, 6, 8), {0: 1.0, 8: 4.0}, mode="value",
+        relative_tolerance=0.10, max_measurements=3,
+        require_strict_decrease=False,
+    )
+    pending_increasing, increasing_probe = _request(increasing)
+    repeat_pending, repeat_probe = _request(
+        AdaptiveAnchoredCurve.start(
+            (0, 2, 4, 6, 8), {0: 1.0, 8: 4.0}, mode="value",
+            relative_tolerance=0.10, max_measurements=3,
+            require_strict_decrease=False,
+        )
+    )
+    assert repeat_pending.require_strict_decrease is False
+    assert increasing_probe == repeat_probe
+    increasing = pending_increasing.record_measurement(increasing_probe.coordinate, 4.0)
+    assert [increasing.predict(coordinate) for coordinate in (0, 4, 8)] == [1.0, 4.0, 4.0]
+    assert increasing.require_strict_decrease is False
+    assert increasing.budget_exhausted
+    assert [(item.left_coordinate, item.right_coordinate) for item in increasing.unverified_intervals] == [
+        (0, 4), (4, 8),
+    ]
+
+
+def test_strict_decrease_flag_must_be_a_boolean_and_revalidates_direct_states():
+    with pytest.raises(AnchoredShapeError, match="require_strict_decrease"):
+        AdaptiveAnchoredCurve.start(
+            (0, 2, 4), {0: 5.0, 4: 1.0}, mode="value",
+            relative_tolerance=0.0, max_measurements=3,
+            require_strict_decrease=1,
+        )
+
+    relaxed = AdaptiveAnchoredCurve.start(
+        (0, 2, 4), {0: 5.0, 4: 5.0}, mode="value",
+        relative_tolerance=0.0, max_measurements=3,
+        require_strict_decrease=False,
+    )
+    with pytest.raises(AnchoredShapeError, match="nonmonotone"):
+        replace(relaxed, require_strict_decrease=True)
 
 
 def test_modes_exact_anchors_and_request_order_are_deterministic():

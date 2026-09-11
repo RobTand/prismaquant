@@ -86,8 +86,15 @@ def _checks_per_interval(value: object) -> int:
     return value
 
 
+def _require_strict_decrease(value: object) -> bool:
+    if type(value) is not bool:
+        raise AnchoredShapeError("require_strict_decrease must be a boolean")
+    return value
+
+
 def _validate_measurements(
-    domain: tuple[int, ...], values: Mapping[int, float],
+    domain: tuple[int, ...], values: Mapping[int, float], *,
+    require_strict_decrease: bool,
 ) -> dict[int, float]:
     measured: dict[int, float] = {}
     for coordinate, value in values.items():
@@ -98,13 +105,14 @@ def _validate_measurements(
         measured[coordinate] = _finite_positive(value, "measurement value")
     if len(measured) < 2:
         raise AnchoredShapeError("adaptive interpolation needs two measured endpoints")
-    ordered = sorted(measured.items())
-    for (_, left), (_, right) in zip(ordered, ordered[1:]):
-        if right >= left:
-            raise AnchoredShapeError(
-                "measurements must strictly decrease as coordinate rises; "
-                "a nonmonotone curve is refused"
-            )
+    if require_strict_decrease:
+        ordered = sorted(measured.items())
+        for (_, left), (_, right) in zip(ordered, ordered[1:]):
+            if right >= left:
+                raise AnchoredShapeError(
+                    "measurements must strictly decrease as coordinate rises; "
+                    "a nonmonotone curve is refused"
+                )
     return measured
 
 
@@ -211,7 +219,9 @@ class AdaptiveAnchoredCurve:
     has no ``validated`` property: passing one or two points cannot establish
     an unseen function's shape.  ``unverified_intervals`` records brackets
     still awaiting a request; if the cap is exhausted they remain there rather
-    than being relabelled accepted.
+    than being relabelled accepted. ``require_strict_decrease`` defaults to
+    ``True``; an explicit ``False`` is a research-only opt-in for positive
+    finite measurements that may be flat or locally increasing.
     """
 
     candidate_coordinates: tuple[int, ...]
@@ -223,6 +233,7 @@ class AdaptiveAnchoredCurve:
     _active_intervals: tuple[AdaptiveInterval, ...]
     pending_checks: tuple[AdaptiveProbe, ...]
     accepted_intervals: tuple[AdaptiveIntervalEvidence, ...]
+    require_strict_decrease: bool = True
 
     def __post_init__(self) -> None:
         domain = _domain(self.candidate_coordinates)
@@ -230,7 +241,10 @@ class AdaptiveAnchoredCurve:
         tolerance = _relative_tolerance(self.relative_tolerance)
         cap = _measurement_cap(self.max_measurements)
         checks_per_interval = _checks_per_interval(self.checks_per_interval)
-        measurements = _validate_measurements(domain, self.measurements)
+        require_strict_decrease = _require_strict_decrease(self.require_strict_decrease)
+        measurements = _validate_measurements(
+            domain, self.measurements, require_strict_decrease=require_strict_decrease,
+        )
         if len(measurements) > cap:
             raise AnchoredShapeError("measurement cap is lower than recorded unique measurements")
         if domain[0] not in measurements or domain[-1] not in measurements:
@@ -343,6 +357,7 @@ class AdaptiveAnchoredCurve:
         object.__setattr__(self, "max_measurements", cap)
         object.__setattr__(self, "checks_per_interval", checks_per_interval)
         object.__setattr__(self, "measurements", MappingProxyType(measurements))
+        object.__setattr__(self, "require_strict_decrease", require_strict_decrease)
 
     @classmethod
     def start(
@@ -354,6 +369,7 @@ class AdaptiveAnchoredCurve:
         relative_tolerance: float,
         max_measurements: int,
         checks_per_interval: int = 1,
+        require_strict_decrease: bool = True,
     ) -> "AdaptiveAnchoredCurve":
         """Start with exactly the two measured endpoints of a fixed domain."""
         domain = _domain(candidate_coordinates)
@@ -363,8 +379,16 @@ class AdaptiveAnchoredCurve:
         if len(domain) > 2:
             active = (AdaptiveInterval(domain[0], domain[-1]),)
         return cls(
-            domain, mode, relative_tolerance, max_measurements,
-            checks_per_interval, endpoint_values, active, (), (),
+            candidate_coordinates=domain,
+            mode=mode,
+            relative_tolerance=relative_tolerance,
+            max_measurements=max_measurements,
+            checks_per_interval=checks_per_interval,
+            measurements=endpoint_values,
+            _active_intervals=active,
+            pending_checks=(),
+            accepted_intervals=(),
+            require_strict_decrease=require_strict_decrease,
         )
 
     @property
@@ -476,7 +500,10 @@ class AdaptiveAnchoredCurve:
         measured_value = _finite_positive(value, "measurement value")
         expanded_measurements = dict(self.measurements)
         expanded_measurements[coordinate] = measured_value
-        _validate_measurements(self.candidate_coordinates, expanded_measurements)
+        _validate_measurements(
+            self.candidate_coordinates, expanded_measurements,
+            require_strict_decrease=self.require_strict_decrease,
+        )
         residual = abs(measured_value - probe.prediction) / measured_value
         if not math.isfinite(residual):
             raise AnchoredShapeError("measurement residual is not representable")
