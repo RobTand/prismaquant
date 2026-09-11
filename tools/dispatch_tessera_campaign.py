@@ -554,18 +554,68 @@ def load_probe_h_trace(path) -> dict:
             if isinstance(row, dict) and row.get("_packed_experts_module")}
 
 
+def stack_expert_counts(census, frame) -> dict:
+    """Per-expert routed-row counts from the census, summed over projections.
+
+    The census counts every unit's calibration rows, so an expert's size is
+    the sum over its projections.  It is a routed-token proxy for ``h_trace``
+    and this function never calls it one: the caller records which vector a
+    draw was proportional to (``design``, ``sizes.source``), because "we drew
+    proportional to counts" and "we drew proportional to Fisher" are different
+    designs with different variance arguments, and only one of them needs a
+    probe to exist.
+    """
+    counts = census.get("counts") or {}
+    sizes = {}
+    for expert, members in sorted(frame.members.items()):
+        missing = [m for m in members if m not in counts]
+        if missing:
+            raise RuntimeError(
+                f"{frame.packed_qname}: the census has no row count for "
+                f"{missing[0]}; --stack-sample-sizes counts needs every "
+                "expert's own count, and a missing one would draw it with "
+                "probability zero")
+        sizes[str(int(expert))] = float(sum(int(counts[m]) for m in members))
+    if not any(value > 0.0 for value in sizes.values()):
+        raise RuntimeError(
+            f"{frame.packed_qname}: every expert's routed-row count is zero; "
+            "there is no size to draw proportional to")
+    return sizes
+
+
 def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
-                        seed: int, audit_rate: int) -> dict:
+                        seed: int, audit_rate: int, sizes: str = "probe",
+                        census=None) -> dict:
     """Draw once per profile-defined packed parameter, across all its roles.
 
     The same expert IDs and full-frame inclusion probabilities are persisted
     for every projection and rung. The original probe remains the allocator
     input; no per-expert expansion changes its topology or Fisher currency.
+
+    ``sizes`` chooses what the PPS draw is proportional to.  ``probe`` is the
+    per-expert Fisher vector and is the default, so a plan written without the
+    flag is byte-identical to every plan written before it.  ``counts`` draws
+    on the census's per-expert routed-row counts instead, which is the only
+    per-expert size that exists when a model has no probe with
+    ``h_trace_per_expert`` -- the case the sampling path was written for and
+    could not run on (RobTand/prismaquant#495 part 1).  A ``counts`` draw
+    declares itself: ``design`` gains a ``_counts`` suffix and the record
+    carries the size vector and its digest, so nothing has to infer from an
+    inclusion probability which vector produced it.
     """
     from prismaquant.tessera_campaign import (
+        STACK_SAMPLE_COUNTS_SUFFIX, STACK_SAMPLE_SIZE_SOURCES,
         audit_subsample, draw_stack_sample, stack_sample_from_probe,
         _validate_stack_sample, selection_stack_samples)
 
+    if sizes not in STACK_SAMPLE_SIZE_SOURCES:
+        raise RuntimeError(
+            f"--stack-sample-sizes {sizes}: not one of "
+            f"{list(STACK_SAMPLE_SIZE_SOURCES)}")
+    if sizes == "counts" and census is None:
+        raise RuntimeError(
+            "--stack-sample-sizes counts needs the census: the per-expert "
+            "sizes are its routed-row counts")
     sampled = {}
     for key, members in sorted(groups.items()):
         if not str(key).startswith("s:"):
@@ -579,9 +629,13 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
                 inclusion_prob={e: 1.0 for e in range(int(row["num_experts"]))},
                 seed=seed, design="census")
             _validate_stack_sample(frame)
-            draw = draw_stack_sample(
-                {str(e): h for e, h in enumerate(frame.h_trace_per_expert)},
-                stack_sample, seed=seed, stack=name)
+            if sizes == "counts":
+                size_vector = stack_expert_counts(census, frame)
+            else:
+                size_vector = {str(e): h
+                               for e, h in enumerate(frame.h_trace_per_expert)}
+            draw = draw_stack_sample(size_vector, stack_sample, seed=seed,
+                                     stack=name)
             audit_ids = audit_subsample(draw["units"], rate=audit_rate,
                                        seed=seed, stack=name)
             experts = sorted(int(e) for e in draw["units"])
@@ -597,8 +651,16 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
             records[name] = {
                 "probe_row": probe_row, "sampled_experts": experts,
                 "inclusion_prob": dict(draw["inclusion_probability"]),
-                "seed": seed, "design": draw["method"], "draw": draw,
+                "seed": seed,
+                "design": (draw["method"] if sizes == "probe"
+                           else draw["method"] + STACK_SAMPLE_COUNTS_SUFFIX),
+                "draw": draw,
                 "audit_experts": sorted(int(e) for e in audit_ids),
+                # Written only for a non-default size source, so a probe-sized
+                # plan stays byte-identical to the ones already on disk.
+                **({} if sizes == "probe" else {"sizes": {
+                    "source": sizes, "sha256": draw["size_sha256"],
+                    "values": dict(size_vector)}}),
             }
             for expert, names in frame.members.items():
                 for member in names:
@@ -691,15 +753,16 @@ def cmd_plan(args) -> int:
 
     stack_sample: dict[str, dict] = {}
     if args.stack_sample is not None:
+        size_source = getattr(args, "stack_sample_sizes", "probe") or "probe"
         if not args.probe:
             raise RuntimeError(
-                "--stack-sample needs --probe: the draw is proportional to "
-                "the packed probe's per-expert h_trace")
+                "--stack-sample needs --probe: the stack row's currency is the "
+                "packed probe's h_trace, whatever the draw is proportional to")
         from prismaquant.model_profiles import detect_profile
         stack_sample = sample_stack_groups(
             groups, load_probe_h_trace(args.probe), profile=detect_profile(spec["model"]),
             stack_sample=int(args.stack_sample), seed=int(args.stack_sample_seed),
-            audit_rate=int(args.audit_rate))
+            audit_rate=int(args.audit_rate), sizes=size_source, census=census)
         priced = sum(len(entry["sampled"]) for entry in stack_sample.values())
         frame = sum(len(groups[key]) for key in stack_sample)
         print(f"[dispatch] sampled {priced} of {frame} routed expert units "
@@ -824,6 +887,13 @@ def cmd_plan(args) -> int:
             "seed": int(args.stack_sample_seed),
             "audit_rate": int(args.audit_rate),
             "probe": (None if not args.probe else str(args.probe)),
+            # Which per-expert vector the draw was proportional to, written
+            # only when it is not the probe's Fisher vector -- so a plan made
+            # without the flag is byte-identical to the ones already on disk,
+            # and an absent field means ``probe`` exactly as an absent
+            # ``sizes`` block on a record does.
+            **({} if (getattr(args, "stack_sample_sizes", "probe") or "probe")
+               == "probe" else {"sizes": args.stack_sample_sizes}),
             "stacks": stack_sample,
         },
         "rows": planned,
@@ -1620,6 +1690,14 @@ def main(argv=None) -> int:
                       help="price each routed stack from this many experts "
                            "per role, drawn proportional to the probe's "
                            "h_trace. Unset prices every expert.")
+    plan.add_argument("--stack-sample-sizes", choices=("probe", "counts"),
+                      default="probe",
+                      help="what the PPS draw is proportional to: the probe's "
+                           "per-expert h_trace (the default, and what every "
+                           "plan on disk used), or the census's per-expert "
+                           "routed-row counts. counts is a routed-token proxy "
+                           "for h_trace, not h_trace; the draw records which "
+                           "one it used and the digest of the vector.")
     plan.add_argument("--stack-sample-seed", type=int, default=0,
                       help="the draw's seed; the same seed and the same probe "
                            "draw the same experts.")

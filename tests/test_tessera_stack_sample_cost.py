@@ -228,7 +228,14 @@ def test_stack_row_prices_exactly_what_the_expanded_experts_would():
     assert predicted_dloss(probe["h_trace"], row["output_mse"]) == pytest.approx(
         expanded, rel=1e-12)
     assert row["dloss_stderr"] == 0.0
-    assert row["cost_source"] == "tessera_campaign_measured_stack_sample"
+    # A census: every expert encoded with certainty, so the value IS the total
+    # and nothing about it is an estimate.  It therefore spells its source the
+    # way a dense measured row does (RobTand/prismaquant#495 part 3); the
+    # remaining obstacle to joint AURA reading a stack row is the
+    # stack-to-member indirection, debt D35(iii), not this spelling.  A row
+    # estimated from a draw keeps the sampled spelling -- see
+    # ``test_a_drawn_rung_keeps_the_sampled_cost_source``.
+    assert row["cost_source"] == "tessera_campaign_measured"
     assert row["currency"] == campaign.CURRENCY
     assert "predicted_dloss" not in row and "weight_mse" not in row
 

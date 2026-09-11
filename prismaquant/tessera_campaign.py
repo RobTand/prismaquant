@@ -89,6 +89,8 @@ __all__ = [
     "SCHEMA",
     "UNITS_SCHEMA",
     "UNITS_SCHEMA_V2",
+    "STACK_SAMPLE_COUNTS_SUFFIX",
+    "STACK_SAMPLE_SIZE_SOURCES",
     "CampaignAnchor",
     "ExpertPopulation",
     "anchor_group_key",
@@ -830,6 +832,14 @@ class StackExpertSample:
     #: The draw's seed, and its design name, carried for reproduction.
     seed: int
     design: str = "pps_wor"
+    #: The second tier of a two-tier schedule: the experts that were ALSO
+    #: encoded at the rungs the stack was not censused at, from which the
+    #: transfer law fits this stack's intercept
+    #: (``docs/results/glm_tessera_probe_reduction_regret_2026-09-10.md``
+    #: section 5).  Empty means one tier, which is every schedule before it:
+    #: every rung is measured on every expert in ``sampled_experts`` or it is
+    #: not priced at all.
+    transfer_law_experts: tuple[int, ...] = ()
 
     @property
     def is_census(self) -> bool:
@@ -846,6 +856,7 @@ def stack_sample_from_probe(
     inclusion_prob,
     seed: int,
     design: str = "pps_wor",
+    transfer_law_experts=(),
 ) -> StackExpertSample:
     """Build a sampling record from the PROBE row and the model profile.
 
@@ -902,6 +913,7 @@ def stack_sample_from_probe(
         members=members,
         seed=int(seed),
         design=str(design),
+        transfer_law_experts=tuple(sorted(int(e) for e in transfer_law_experts)),
     )
 
 
@@ -974,6 +986,24 @@ def _validate_stack_sample(sample: StackExpertSample) -> None:
                 f"{q}: expert {e} inclusion probability {pi!r} outside (0, 1]")
         if pi == 1.0 and e not in sample.sampled_experts:
             raise StackSampleError(f"{q}: certainty expert {e} is absent from the sample")
+    if sample.transfer_law_experts:
+        law = set(sample.transfer_law_experts)
+        if len(law) != len(sample.transfer_law_experts):
+            raise StackSampleError(f"{q}: duplicate transfer-law expert id")
+        if not law <= set(sample.sampled_experts):
+            raise StackSampleError(
+                f"{q}: the transfer-law tier names experts the sample does not "
+                "measure; a stack's intercept is fitted on experts that were "
+                "encoded at BOTH the reference rung and the predicted one")
+        if law == set(sample.sampled_experts):
+            raise StackSampleError(
+                f"{q}: the transfer-law tier is the whole sample, so nothing "
+                "would be predicted; drop it rather than declare a law over a "
+                "census")
+        if len(law) < 2:
+            raise StackSampleError(
+                f"{q}: {len(law)} transfer-law expert(s); an intercept fitted "
+                "on one expert has no residual spread to report")
 
 
 def _stack_member_weight(sample: StackExpertSample, expert: int, roles: int) -> float:
@@ -1101,10 +1131,22 @@ def _stack_cost_rows(
     hessian_identity: dict,
     refused: list,
     wire_backed: "frozenset[str] | set[str]" = frozenset(),
+    transfer_law: "Mapping[str, object] | None" = None,
 ) -> "tuple[dict[str, dict], object]":
-    """Build every measured + interpolated row for one packed stack."""
+    """Build every measured + interpolated row for one packed stack.
+
+    ``transfer_law`` maps a family to the ``StackTransferLaw`` fitted on the
+    OTHER stacks of that family.  It is consulted only for a rung that covers
+    exactly ``sample.transfer_law_experts`` -- the second tier of a two-tier
+    schedule -- and its rows are model predictions, written with
+    ``PROVENANCE_INTERPOLATED`` and a ``transfer_law`` block and never with
+    the Horvitz-Thompson fields, which describe a draw this value did not come
+    from.  ``None`` (the default) leaves every schedule that measured one tier
+    behaving exactly as before.
+    """
     from .tessera_rate_surface import (
         PROVENANCE_INTERPOLATED, PROVENANCE_MEASURED, TesseraRateSurface,
+        predict_stack_rates,
     )
 
     _validate_stack_sample(sample)
@@ -1133,11 +1175,35 @@ def _stack_cost_rows(
 
     rows: dict[str, dict] = {}
     measured_by_family: dict[str, list[tuple[int, float, float]]] = {}
+    #: family -> [(format_name, rung), ...] measured on the law draw only.
+    law_tier: dict[str, list[tuple[str, int]]] = {}
+    law_experts = set(sample.transfer_law_experts)
     for format_name in sorted(by_format):
         per_expert = by_format[format_name]
         missing = [e for e in sample.sampled_experts
                    if len(per_expert.get(e, ())) != roles]
         if missing:
+            covered = {e for e in sample.sampled_experts
+                       if len(per_expert.get(e, ())) == roles}
+            if law_experts and covered == law_experts:
+                # The second tier of a two-tier schedule: this rung was encoded
+                # on the transfer-law draw only, by design.  It is priced by
+                # the law below, not by HT -- the drawn experts here fit an
+                # intercept, they do not stand in for the stack.
+                contributing = [a for e in sorted(covered) for a in per_expert[e]]
+                families = {a.family for a in contributing}
+                if len(families) != 1:
+                    raise StackSampleError(
+                        f"{q}/{format_name}: transfer-law tier spans families "
+                        f"{sorted(families)}")
+                rates = {int(a.body_rate_q256) for a in contributing}
+                if len(rates) != 1:
+                    raise StackSampleError(
+                        f"{q}/{format_name}: transfer-law tier spans rungs "
+                        f"{sorted(rates)}")
+                law_tier.setdefault(next(iter(families)), []).append(
+                    (format_name, rates.pop()))
+                continue
             # A rung measured on only some of the drawn experts is not a rung
             # this sample can price: HT needs every drawn unit's y_e.
             refused.append({
@@ -1172,7 +1238,18 @@ def _stack_cost_rows(
             # the stack's summed per-expert predicted dloss.
             "output_mse": total / h_stack,
             "output_mse_measured": True,
-            "cost_source": "tessera_campaign_measured_stack_sample",
+            # A rung encoded on EVERY expert of the stack with certainty is a
+            # census, not a sample: the value is the total, the HT variance is
+            # an exact zero, and nothing about it is an estimate.  It therefore
+            # carries the same ``cost_source`` a dense measured row does
+            # (#495 part 3).  That removes one refusal in
+            # ``tessera_joint_aura.load_measured_anchor_input`` but does not
+            # make a stack row consumable there: that reader matches the cost
+            # roster against the census's SOURCE units and a stack's key is the
+            # packed qname, which is debt D35(iii).  A rung covering only the
+            # draw keeps the sampled spelling.
+            "cost_source": ("tessera_campaign_measured" if sample.is_census
+                            else "tessera_campaign_measured_stack_sample"),
             "currency": CURRENCY,
             "tessera_provenance": PROVENANCE_MEASURED,
             "tessera_family": uniform["family"],
@@ -1248,6 +1325,12 @@ def _stack_cost_rows(
     surfaces: dict[str, object] = {}
     measured_names = set(rows)
     for family, points in measured_by_family.items():
+        if family in law_tier:
+            # A two-tier family has ONE censused rung, so there is no bracket
+            # to interpolate between and the transfer law below is what prices
+            # its other rungs.  Skipping here rather than letting the surface
+            # refuse keeps a designed schedule out of the refusal record.
+            continue
         ordered = sorted(points)
         try:
             surface = TesseraRateSurface(
@@ -1299,14 +1382,247 @@ def _stack_cost_rows(
                 },
                 # An interpolated stack row inherits the sample its bracketing
                 # anchors were estimated from; it is a prediction ABOUT that
-                # sample, so the sample travels with it.
+                # sample, so the sample travels with it -- but only the fields
+                # that describe the DRAW.  Built from an allowlist rather than
+                # by subtracting ``members``, because subtraction is how
+                # ``estimator: horvitz_thompson`` used to reach a row whose
+                # value no estimator produced (#495 part 3).
                 "sampled_experts": {
-                    **{k: v for k, v in template["sampled_experts"].items()
-                       if k != "members"},
+                    **_stack_draw_description(template["sampled_experts"]),
                     "interpolated_from": sorted(measured_names),
                 },
             }
+
+    # The transfer-law tier: rungs encoded on the law draw only, predicted for
+    # every expert from its own censused reference value.  Model predictions,
+    # so they carry a ``transfer_law`` block and none of the sampling fields.
+    for family, entries in sorted(law_tier.items()):
+        pair = None if transfer_law is None else transfer_law.get(family)
+        if pair is None:
+            for format_name, rung in entries:
+                refused.append({
+                    "qname": q, "family": family, "format_name": format_name,
+                    "reason": "stack_transfer_law_absent",
+                    "detail": (f"rung {rung} was encoded on the transfer-law "
+                               "draw only and no law was fitted for this "
+                               "family; the rung is left unpriced rather than "
+                               "estimated from a partial draw"),
+                })
+            continue
+        record, law, reference_format = pair
+        try:
+            prediction = predict_stack_rates(record, law)
+        except Exception as exc:
+            for format_name, rung in entries:
+                refused.append({
+                    "qname": q, "family": family, "format_name": format_name,
+                    "reason": "stack_transfer_law_refused",
+                    "detail": str(exc),
+                })
+            continue
+        h_stack = float(sample.stack_h_trace)
+        template = rows[reference_format]
+        law_block = law.as_dict()
+        for format_name, rung in entries:
+            if format_name in rows:
+                raise StackSampleError(
+                    f"{q}/{format_name}: a transfer-law rung may not overwrite "
+                    "a measured row")
+            if rung not in prediction["predicted"]:
+                refused.append({
+                    "qname": q, "family": family, "format_name": format_name,
+                    "reason": "stack_transfer_law_rung_unfitted",
+                    "detail": (f"rung {rung} is not in the fitted law "
+                               f"{list(law.target_q256)}"),
+                })
+                continue
+            rows[format_name] = {
+                "output_mse": prediction["predicted"][rung] / h_stack,
+                "output_mse_measured": False,
+                "cost_source": "tessera_campaign_interpolated",
+                "currency": CURRENCY,
+                "tessera_provenance": PROVENANCE_INTERPOLATED,
+                "tessera_family": family,
+                "tessera_body_rate_q256": rung,
+                "activation_contract": template["activation_contract"],
+                "activation_quantized": template["activation_quantized"],
+                "_packed_experts_module": sample.packed_experts_module,
+                "num_experts": sample.num_experts,
+                "hessian_identity": {
+                    **hessian_identity,
+                    "applied": bool(template["hessian_identity"]["applied"]),
+                },
+                # Everything the prediction rests on, on the row: the pooled
+                # slopes and which stacks they were pooled over, this stack's
+                # own intercepts, the experts that fitted them, how many there
+                # were, and the residual spread of the pooled fit.  A reader
+                # can refit it; that is the point of writing it down.
+                "transfer_law": {
+                    **law_block,
+                    "predicted_q256": rung,
+                    "reference_format_name": reference_format,
+                    "intercept": {p: float(v) for p, v in sorted(
+                        prediction["intercept"][rung].items())},
+                    "sample_experts": list(prediction["sample_experts"]),
+                    "n": int(prediction["intercept_sample_size"]),
+                    "model_error": prediction["model_error"][rung],
+                },
+                # The draw that fitted the intercept, described as a draw and
+                # nothing more.  No ``estimator`` and no ``dloss_stderr``: this
+                # value came from a regression, and a sampling error would be a
+                # claim about a design that did not produce it.
+                "sampled_experts": {
+                    **_stack_draw_description(template["sampled_experts"]),
+                    "transfer_law_experts": sorted(law_experts),
+                },
+            }
     return rows, surfaces
+
+
+#: The fields of a stack row's ``sampled_experts`` block that describe the
+#: DRAW rather than an estimate made from it.  ``estimator``,
+#: ``variance_estimator`` and ``n_random_stratum`` are deliberately absent:
+#: they name a Horvitz-Thompson computation, and a row whose value no
+#: estimator produced may not claim one (#495 part 3).
+_STACK_DRAW_FIELDS = (
+    "design", "seed", "n_experts", "n_sampled", "experts", "inclusion_prob",
+    "packed_param", "projections_per_expert", "h_trace_stack",
+    "h_trace_per_sampled_expert",
+)
+
+
+def _stack_draw_description(block: "Mapping[str, object]") -> dict:
+    """The draw's own fields, by allowlist -- never by subtraction."""
+    return {field: block[field] for field in _STACK_DRAW_FIELDS if field in block}
+
+
+def _stack_rate_evidence(sample: StackExpertSample, anchors, refused: list):
+    """One two-tier stack's evidence, per family, as a ``StackRateSample``.
+
+    A family qualifies only when exactly one of its rungs was encoded on every
+    expert of the frame (the census tier, which every prediction regresses on)
+    and at least one other was encoded on exactly the transfer-law draw.  A
+    family that fails either test is recorded and skipped: the rungs it does
+    hold are still priced by the measured path.
+
+    Returns ``{family: (record, reference_format_name)}``.
+    """
+    from .tessera_rate_surface import StackRateSample
+
+    if not sample.transfer_law_experts:
+        return {}
+    q = sample.packed_qname
+    roles = len(sample.members[sample.sampled_experts[0]])
+    projections = tuple(name.rsplit(".", 1)[-1]
+                        for name in sample.members[sample.sampled_experts[0]])
+    law_experts = tuple(sorted(sample.transfer_law_experts))
+    # (family, rung) -> {expert: {projection: mse}} plus the format name.
+    seen: dict[tuple[str, int], dict] = {}
+    names: dict[tuple[str, int], str] = {}
+    for expert in sample.sampled_experts:
+        members = sample.members[expert]
+        if len(members) != roles:
+            return {}
+        for index, member in enumerate(members):
+            for family_anchors in (anchors.get(member) or {}).values():
+                for anchor in family_anchors:
+                    key = (anchor.family, int(anchor.body_rate_q256))
+                    names.setdefault(key, anchor.format_name)
+                    seen.setdefault(key, {}).setdefault(
+                        expert, {})[projections[index]] = float(anchor.dloss)
+    frame = set(sample.sampled_experts)
+    law_set = set(law_experts)
+    records: dict[str, tuple] = {}
+    for family in sorted({key[0] for key in seen}):
+        census = [rung for (fam, rung), rows in sorted(seen.items())
+                  if fam == family
+                  and {e for e, row in rows.items() if len(row) == roles} == frame]
+        law_rungs = [rung for (fam, rung), rows in sorted(seen.items())
+                     if fam == family
+                     and {e for e, row in rows.items() if len(row) == roles} == law_set]
+        if not law_rungs:
+            continue
+        if len(census) != 1:
+            refused.append({
+                "qname": q, "family": family,
+                "reason": "stack_transfer_law_reference_missing",
+                "detail": (f"{len(census)} rung(s) of family {family} cover the "
+                           "whole frame; exactly one is needed, because every "
+                           "expert is predicted from its own measured "
+                           "reference value"),
+                "census_rungs": census,
+            })
+            continue
+        reference = census[0]
+        try:
+            record = StackRateSample(
+                stack=q, projections=projections,
+                experts=tuple(sample.sampled_experts),
+                reference_q256=reference,
+                reference_mse=seen[(family, reference)],
+                sampled_experts=law_experts,
+                sampled_mse={rung: {e: seen[(family, rung)][e] for e in law_experts}
+                             for rung in law_rungs},
+                weights={e: _stack_member_weight(sample, e, roles)
+                         for e in sample.sampled_experts},
+                currency=CURRENCY)
+        except Exception as exc:
+            refused.append({
+                "qname": q, "family": family,
+                "reason": "stack_transfer_law_refused",
+                "detail": str(exc),
+            })
+            continue
+        records[family] = (record, names[(family, reference)])
+    return records
+
+
+def _fit_stack_transfer_laws(samples, anchors, refused: list) -> dict:
+    """Fit one pooled law per family, leaving out the stack it will predict.
+
+    The slope pools every OTHER stack of the same family, which is exactly the
+    hold-out the study fitted every reported number under; a stack whose family
+    has no other two-tier stack gets no law, and its unmeasured rungs are left
+    unpriced rather than predicted from their own evidence.
+
+    Returns ``{packed_qname: {family: (record, law, reference_format_name)}}``.
+    """
+    from .tessera_rate_surface import fit_stack_transfer_law
+
+    evidence = {}
+    for packed_qname, sample in sorted(samples.items()):
+        found = _stack_rate_evidence(sample, anchors, refused)
+        if found:
+            evidence[packed_qname] = found
+    by_family: dict[str, dict[str, object]] = {}
+    for packed_qname, families in evidence.items():
+        for family, (record, _) in families.items():
+            by_family.setdefault(family, {})[packed_qname] = record
+    laws: dict[str, dict[str, tuple]] = {}
+    for packed_qname, families in evidence.items():
+        for family, (record, reference_format) in families.items():
+            population = by_family[family]
+            if len(population) < 2:
+                refused.append({
+                    "qname": packed_qname, "family": family,
+                    "reason": "stack_transfer_law_population_too_small",
+                    "detail": (f"family {family} has {len(population)} two-tier "
+                               "stack(s); a pooled slope needs at least one "
+                               "other stack to hold this one out against"),
+                })
+                continue
+            try:
+                law = fit_stack_transfer_law(population, hold_out=packed_qname)
+            except Exception as exc:
+                refused.append({
+                    "qname": packed_qname, "family": family,
+                    "reason": "stack_transfer_law_fit_refused",
+                    "detail": str(exc),
+                })
+                continue
+            laws.setdefault(packed_qname, {})[family] = (
+                record, law, reference_format)
+    return laws
 
 
 # ---------------------------------------------------------------------------
@@ -1519,9 +1835,11 @@ def campaign_cost_payload(
                 formats.add(rung.format_name)
         if rows:
             costs[qname] = rows
+    laws = _fit_stack_transfer_laws(samples, anchors, refused)
     for packed_qname, sample in sorted(samples.items()):
         stack_rows, stack_surfaces = _stack_cost_rows(
-            sample, anchors, menus, hessian_identity, refused, wire_backed=wire_backed)
+            sample, anchors, menus, hessian_identity, refused,
+            wire_backed=wire_backed, transfer_law=laws.get(packed_qname))
         if not stack_rows:
             continue
         costs[packed_qname] = stack_rows
@@ -3395,6 +3713,51 @@ def load_unit_selection(path) -> dict:
     return selection
 
 
+#: The size sources a stack draw may be proportional to.  ``probe`` is the
+#: per-expert Fisher vector, which is what the estimator's variance argument
+#: rests on; ``counts`` is the census's per-expert routed-row count, which is
+#: the ONLY per-expert size available when no probe exists -- a routed-token
+#: proxy for ``h_trace`` and never a substitute for it (RobTand/prismaquant#495
+#: part 1, and the report's section 3.6 bullet on sizes).
+STACK_SAMPLE_SIZE_SOURCES = ("probe", "counts")
+
+#: The design a ``counts``-sized draw declares, so a reader of ``units.json``
+#: can tell which vector the inclusion probabilities are proportional to
+#: without re-deriving it.
+STACK_SAMPLE_COUNTS_SUFFIX = "_counts"
+
+
+def _stack_draw_sizes(record: Mapping, sample: StackExpertSample) -> dict:
+    """The sizes a stack's draw was made proportional to.
+
+    A record that declares its own ``sizes`` replays on those; one that does
+    not is a probe-sized draw and replays on the Fisher vector, exactly as
+    every record written before #495 does.
+    """
+    sizes = record.get("sizes")
+    if sizes is None:
+        return {str(e): h for e, h in enumerate(sample.h_trace_per_expert)}
+    if str(sizes.get("source")) not in STACK_SAMPLE_SIZE_SOURCES:
+        raise StackSampleError(
+            f"{sample.packed_qname}: size source {sizes.get('source')!r} is "
+            f"not one of {list(STACK_SAMPLE_SIZE_SOURCES)}")
+    values = sizes.get("values")
+    if not isinstance(values, Mapping) or len(values) != sample.num_experts:
+        raise StackSampleError(
+            f"{sample.packed_qname}: a declared size vector must carry one "
+            f"value per expert ({sample.num_experts})")
+    return {str(e): float(values[str(e)]) for e in range(sample.num_experts)}
+
+
+def _stack_design(record: Mapping, draw: Mapping) -> str:
+    """The design name a draw carries, including which sizes it used."""
+    sizes = record.get("sizes")
+    method = str(draw["method"])
+    if sizes is None or str(sizes.get("source")) == "probe":
+        return method
+    return method + STACK_SAMPLE_COUNTS_SUFFIX
+
+
 def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExpertSample]:
     """Rehydrate packed probe/draw records and bind them to the whole group.
 
@@ -3420,16 +3783,25 @@ def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExper
                 name, record["probe_row"], profile,
                 sampled_experts=record["sampled_experts"],
                 inclusion_prob=record["inclusion_prob"], seed=record["seed"],
-                design=record["design"])
+                design=record["design"],
+                transfer_law_experts=record.get("transfer_law_experts", ()))
             _validate_stack_sample(sample)
             replay = draw_stack_sample(
-                {str(e): h for e, h in enumerate(sample.h_trace_per_expert)},
+                _stack_draw_sizes(record, sample),
                 len(sample.sampled_experts), seed=sample.seed, stack=name)
-            if (record.get("draw") != replay or sample.design != replay["method"]
+            if (record.get("draw") != replay
+                    or sample.design != _stack_design(record, replay)
                     or list(sample.sampled_experts) != sorted(int(e) for e in replay["units"])
                     or dict(sample.inclusion_prob) != {
                         int(e): p for e, p in replay["inclusion_probability"].items()}):
                 raise StackSampleError(f"{name}: packed draw receipt does not replay from probe and seed")
+            declared = record.get("sizes")
+            if declared is not None and str(declared.get("sha256")) != replay["size_sha256"]:
+                # The digest is what binds the DECLARED size vector to the one
+                # the draw was actually made proportional to; without it a
+                # record could name ``counts`` and carry a probe-sized draw.
+                raise StackSampleError(
+                    f"{name}: declared size digest does not match the draw's")
             if set(sample.inclusion_prob) != set(range(sample.num_experts)):
                 raise StackSampleError(f"{name}: selection needs full-frame inclusion probabilities")
             if entry["key"] != "s:" + sample.packed_experts_module:
