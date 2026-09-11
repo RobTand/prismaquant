@@ -37,14 +37,18 @@ Ordinary least squares of elapsed seconds on committed batches gives:
 | Quantity | Seconds |
 | --- | ---: |
 | Per committed batch | 18.672808072814316 |
-| Non-pricing intercept | 836.1036216758985 |
+| Fitted intercept | 836.1036216758985 |
 | Largest absolute residual | 160.45635778753422 |
 
 `pricing=900` therefore allows 48.20 fitted batch intervals. The fitted
-non-pricing interval plus its largest observed residual is 996.56 seconds;
+intercept plus its largest observed residual is 996.56 seconds;
 both `startup=3600` and `finalize=1800` exceed it. Together the phase quiet
 limits are 6,300 seconds, below the 14,400-second blanket deadline that
 previously terminated rows despite their committed-anchor progress.
+
+The intercept estimates time outside pricing; it is not a direct measurement
+of the longest startup, pricing or finalization gap. The allowances are
+chosen margins informed by this fit, not measured worst-case bounds.
 
 The extractor deliberately fails if retained data no longer selects exactly
 23 rows, or if those rows do not vary in committed batch count. Re-run it when

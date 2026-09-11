@@ -10,7 +10,7 @@ and seals only when asked for. Rows instead declare the phases they walk and
 the quiet each is allowed -- `startup=3600 pricing=900 finalize=1800`, from a
 least-squares fit of elapsed time against committed batches over the 23
 completed 864-unit GLM rows in the fleet's terminal records (18.6728 s per
-committed batch, 836.1 s outside the pricing loop, greatest absolute residual
+committed batch, an 836.1 s fitted intercept, greatest absolute residual
 160.5 s; [reproducible evidence](measurements/pq480_progress_grace_fit_2026-09-10.md))
 -- and `tessera_campaign` reports its committed anchor count through
 `prismaquant/prismabuild_progress.py` after each journal flush, once the

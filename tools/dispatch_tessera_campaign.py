@@ -318,7 +318,7 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
 
 
 #: The quiet a pricing row is allowed in each phase, in the order it walks
-#: them.  Measured, not chosen: a least-squares fit of ``elapsed_s`` against
+#: them. Chosen with margin from a least-squares fit of ``elapsed_s`` against
 #: committed batches over the 23 completed 864-unit GLM pricing rows in the
 #: fleet's terminal records (2026-09-10) gives 18.6728 s of wall clock per
 #: committed batch and an 836.1 s non-pricing intercept; the greatest absolute
