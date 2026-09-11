@@ -12,6 +12,59 @@ The existing replay owns currency/recipe boundaries, frozen audit errors,
 measured overlays and group measurement requests. This adds no production
 interpolation default, allocator price, runtime qualification or serving cell.
 
+Re-stamped (2026-09-11, `claude/495-probe-reduction-schedule`) for the routed
+stack **probe-reduction schedule**, parts 1-3 of RobTand/prismaquant#495
+(§4.10). Three changes, all opt-in or provenance-only:
+
+* `dispatch_tessera_campaign.py plan --stack-sample-sizes {probe,counts}`
+  chooses what the PPS draw is proportional to. `probe` is the default and a
+  plan written without the flag is byte-identical, field for field, to the
+  plans already on disk (gate:
+  `tests/test_tessera_stack_sample_sizes.py::test_the_default_draw_is_byte_for_byte_what_it_was`,
+  which rebuilds the pre-change record from the campaign's own primitives and
+  compares serialisations). `counts` draws on the census's per-expert
+  routed-row counts -- the only per-expert size that exists on a model with no
+  `h_trace_per_expert` probe, which is why the sampling path was unreachable on
+  GLM-5.3-Flash. A `counts` record names the source, carries the vector and its
+  digest, and suffixes `design` with `_counts`; `selection_stack_samples`
+  replays the draw on the declared vector and refuses a record whose declared
+  digest is not the draw's. The stack row's Fisher currency is untouched: the
+  allocator still multiplies by the probe's own `h_trace`, so `--stack-sample`
+  still requires `--probe`, and §5's "run without a probe" is **not** delivered
+  (see §12 debt).
+* `prismaquant/tessera_rate_surface.py` gains the **stack transfer law**:
+  `fit_stack_transfer_law(stacks_measured, hold_out)` pools per-projection OLS
+  slopes of `log2 mse(rate)` on `log2 mse(reference)` over every stack but the
+  held-out one, and `predict_stack_rates(stack, law)` fits that stack's own
+  per-projection intercept from its sampled experts and returns the predicted
+  totals plus a model error. `TesseraRateSurface` is untouched and dense units
+  keep three anchors. Gate: `tests/test_tessera_stack_transfer_law.py`.
+* **Provenance on a two-tier stack.** A rung encoded on every expert with
+  certainty now writes `cost_source: tessera_campaign_measured` rather than
+  `tessera_campaign_measured_stack_sample` -- it is a census, not an estimate,
+  and its Horvitz-Thompson variance is an exact zero, so the sampled spelling
+  was describing a draw that did not happen. That removes the `cost_source`
+  refusal in `tessera_joint_aura.load_measured_anchor_input`; it does **not**
+  make a stack row consumable there, because that reader matches the cost
+  roster, the checkpoint journal and the receipts against the census's source
+  units (`_same(set(payload["costs"]), names, "complete merged cost roster")`)
+  while a stack's cost key is the packed qname -- the same stack-to-member
+  indirection recorded as D35(iii) is still what stands between a census stack
+  and joint AURA. A rung encoded only on the transfer-law draw is
+  predicted and written `PROVENANCE_INTERPOLATED` /
+  `cost_source: tessera_campaign_interpolated` with a `transfer_law` block
+  (slopes, pooled stacks, intercepts, sample ids, n, residual sd, model error)
+  and **neither** `dloss_stderr` **nor** `estimator: horvitz_thompson`: those
+  describe a sampling design, and no design produced this value. The
+  pre-existing stack interpolation path leaked `estimator` onto its rows by
+  building their `sampled_experts` block by subtraction; it is now built from
+  an allowlist. Gate: `tests/test_tessera_stack_transfer_law_rows.py`.
+
+No cost-mode default, stage graph, format menu, serving lane, wire recipe or
+ship gate changes. Parts 4 (selective encode of the allocated winners) and 5
+(repair loop and regret gate) of #495 are not in this stamp, and no planner
+flag emits a two-tier schedule yet.
+
 Re-stamped (2026-09-11, `claude/row-head-parallel`) for the **row head on
 threads** (§4.10). With `--campaign-identity-bytes M` set,
 `--campaign-identity-threads N` (default 1, the serial head) builds the
@@ -9115,7 +9168,15 @@ Two properties make the numbers comparable with the rest of the menu:
   scope may not invent structure it was not given); the fix is to stop expanding
   the probe, not to teach the scope to guess.
 
-  **The row shape.** `cost_source: tessera_campaign_measured_stack_sample`,
+  **The row shape.** `cost_source: tessera_campaign_measured_stack_sample`
+  when the rung was estimated from a draw, and `tessera_campaign_measured`
+  when it covers every expert of the frame with certainty -- a census is not
+  an estimate, its Horvitz-Thompson variance is an exact zero, and spelling it
+  as a sample described a draw that did not happen (#495 part 3). That is a
+  truthfulness fix, not an unblocking one: the joint-AURA reader
+  (`tessera_joint_aura.load_measured_anchor_input`) refuses a stack row on the
+  roster comparison against the census's source units long before it reads
+  `cost_source`, and D35(iii) is where that indirection is tracked.
   `currency: output_mse_under_route_activation_contract` (unchanged), and
 
   ```
@@ -9175,10 +9236,53 @@ Two properties make the numbers comparable with the rest of the menu:
   average; a member claimed by two stacks; a packed parameter that carries its
   own measured anchors *and* a sampling record. A rung measured on only some of
   the drawn experts is recorded in `non_interpolable` rather than estimated from
-  a partial sample. Interpolation inside the measured bracket goes through the
+  a partial sample -- **unless** the stack declares a transfer-law tier and
+  that rung covers exactly it, in which case it is predicted rather than
+  refused (below). Interpolation inside the measured bracket goes through the
   same `TesseraRateSurface`, on the stack's own HT anchors, and inherits
   `cost_source: tessera_campaign_interpolated` so the existing
   `drop_interpolated_candidates_dominated_by_measured` guard applies unchanged.
+
+  **The two-tier schedule and the transfer law (#495 parts 2-3).** A
+  `StackExpertSample` may name `transfer_law_experts`: a strict subset of the
+  frame that was ALSO encoded at the rungs the stack was not censused at. The
+  offline study
+  ([glm_tessera_probe_reduction_regret_2026-09-10.md](results/glm_tessera_probe_reduction_regret_2026-09-10.md))
+  measured the schedule "census at 960 plus a 3% expert sample at 832 and
+  1088" at 0.004% mean / 0.000% p90 allocation regret at the campaign's byte
+  target, for 66% less routed anchor-encode time before the selective encode
+  of the winners (~45% net). `campaign_cost_payload` fits one pooled law per
+  family over every OTHER two-tier stack (`fit_stack_transfer_law`,
+  leave-one-stack-out, which is the hold-out every reported number in the
+  study was fitted under) and `_stack_cost_rows` predicts the missing rungs
+  from each expert's own censused reference value. A family with fewer than
+  two two-tier stacks, more than one censused rung, or a refused fit gets no
+  law, and its unmeasured rungs stay in `non_interpolable` rather than being
+  estimated from a partial draw.
+
+  A predicted row carries `PROVENANCE_INTERPOLATED`,
+  `cost_source: tessera_campaign_interpolated` and a `transfer_law` block
+  holding the pooled slopes, which stacks they were pooled over, this stack's
+  own intercepts, the sample ids, `n` and the pooled residual sd, plus a
+  `model_error` field. That field reports the **common-mode** term
+  (`residual_sd / sqrt(n)`, propagated over projections by their share of the
+  predicted total) as the stack total's error, because the intercept error is
+  shared by every expert in the stack and does not average away, while the
+  per-expert residual largely does; the per-expert term is reported beside it
+  under its own name. No lognormal smearing correction is applied to the point
+  estimate -- the regret that was measured is this uncorrected estimator's --
+  and the factor is reported as `smearing_factor_not_applied` so its size is
+  visible.
+
+  **A predicted row carries no sampling estimator.** `dloss_stderr` and
+  `estimator: horvitz_thompson` describe the variance of a design over
+  repeated draws; a regression's output has no such variance, and stamping one
+  on it would let a reader, or a hedge that later learns to read the field,
+  treat a model error as a measured spread. Both are absent from a
+  transfer-law row, and the `sampled_experts` block of every interpolated
+  stack row is now built from an explicit allowlist (`_STACK_DRAW_FIELDS`)
+  rather than by subtracting `members` from the measured row's block -- which
+  is how `estimator` used to reach rows that no estimator produced.
 
   **Two gaps, recorded not papered over.** A stack row carries no scalar
   `input_global_scale` and no `wire_bytes`: both are per-expert facts and a
@@ -13784,6 +13888,7 @@ New with the 2026-07-30 merge:
 | D33 | **OPEN 2026-09-02, narrowed twice.** Tessera is priced and rendered by name (§5.7), has a *declared* lane (§9.4, `lane_specs/tessera.json`), a real serving runtime of its own (`tessera.serving`, `quant_method: "tessera"`), and since **2026-09-03** a real `EXPORT_CONTAINER=tessera` arm in `run-pipeline.sh` that plans and encodes through Tessera's OWN tools under `TESSERA_REPO` (`plan_from_layer_config.py`, `export_tessera_serving.py`). **The "no exporter codec" half is re-scoped, not closed**: this repository still writes no Tessera bytes and deliberately never will — a wire recipe with two homes is how the two halves of one format drift apart — so the debt is now *the boundary*, not *the absence*: the two Tessera scripts the arm names live in `experiments/`, which their own README calls drivers rather than a supported interface. **Producer eligibility is no longer what is missing**: since 2026-09-04 the pin names an exact Tessera commit plus the SHA-256 of the `runtime_contract.json` it packages (re-pinned 2026-09-05 to Tessera master's tip `ba582d4…`, contract v22, lane schema v9; v21 landed at `b8b1cb38…` in Tessera #313 and the release `e78959ed…` carried v20), and the packaged contract's dense `device_qualified` cells are ADMITTED under it — what the pin now withholds is any *other* Tessera, which is also what the driver's preflight refuses on. Two residues are the honest remainder of the eligibility half. **First**, the contract's two `routed_moe` cells are decided by their own published `evidence.smoke.status`, which this repository reads and does not second-guess — a measured serving property, not a structural ban here; v17–v20 published `repetitive` and the status-only predicate refused them; v21 and the pinned v22 publish `recorded`. **What that status rests on became checkable at lane schema v9**: RobTand/tessera#327 (P1) reported that v21's `recorded` rested on a repetition rule that lived only in a dated measurements file, derived and checked by nothing and satisfiable by an empty completion; v9 puts the rule, the instrument, the reference and the rows in `smoke.record`, and this reader re-derives status and attribution through Tessera's own functions and refuses a published value they do not derive (`lane_eligibility._parse_smoke_record`, `tests/test_tessera_lane_v9.py`). **Second**, three dense `decode` cells carry `evidence.grade: "route_only"` — a route with no KL at all — which is admitted today and is a promotion question for Rob rather than a gate this repository may tighten on its own. No ship gate has been run on the lane, and no runner exists to run one: the lane's six declared gates are now RECORDED — `route.census` names a shipcard slot and the arm opens a lane-gated card (§7.1, §9.4, 2026-09-03) — so an un-run gate is an unfilled slot the publisher refuses on rather than a sentence nothing reads, but nothing spawns the container that would fill it. The `experiments/` boundary is likewise declared rather than fixed: both tools carry `stability: "unsupported_experiments"` and a `tracking_issue` on `lane_specs/tessera.json`, which makes the debt visible to a reader and a gate without promoting anything. Gridbook's Tessera lane (contract v14) is withdrawn and was never released. | `tessera_render.py` (`tessera_lane_attested`), `tessera_export_lane.py` (the arm's four gates), `run-pipeline.sh` (`EXPORT_CONTAINER=tessera`), `tessera_runtime/tessera_serving_runtime_pin.json` (commit + `contract_sha256`), `tessera_serving_runtime_pin.py` | Med | Moving the pin forward is ONE reviewed commit that edits the pin JSON and the reader's three pinned constants together, verified against a clean Tessera tree; the arm can build today at the pinned commit. Independently, and both still open under RobTand/prismaquant#119: promote the two named Tessera scripts from `experiments/` to a supported entry point so the boundary is an interface rather than a path — after which their `stability` becomes `supported` and the `tracking_issue` goes — and build the lane runner that executes a lane's declared gates in a fresh plugin container and fills the slots the card already opens. |
 | D34 | **The Gridbook lane is retired but its format/cost/render plumbing is not** (added 2026-09-02). The lane, its pins, exporter, serving profiles, ship-gate slots, 73 test modules (1,691 node IDs) and 27 documents were archived at `archive/gridbook_lane_2026-09-02/` and `EXPORT_CONTAINER=nvfp4_cb` now `exit 2`s (§3.5, §9.2) — so no CB rung can be exported or served, which is the property principle 9 cares about. What remains is the machinery that *prices and renders* those rungs: `cb_layout.py`, `nvfp4_cb_formats.py`, `nvfp4_cb_footprint.py`, `cb_ldlq*.py`, `cb_minchain.py`, `cb_warm_state.py`, `cb_banked_books.py`, `cb_learned_promotion.py`, `cb_anchored_cost.py`, `cb_ladder_cross_family.py`, `routed_moe_codebooks.py`, `mxfp4_widen.py`, `source_class_format_plan.py`, plus CB branches inside `production_weight_cache.py`, `allocator.py`, `format_registry.py`, `export_native_compressed.py`, `layer_config.py`, `lane_spec.py`, `serve_constraints.py` and `model_profiles/*`, and roughly 60 tests that exercise them. **Why it was left:** the excision is several hundred diffuse edits concentrated in exactly the files the continuous-menu branch is rewriting, and merging that against a live branch is more dangerous than the debt. **The risk it carries:** a `FORMATS` menu can still name a `*_CB_*` rung, the DP can still price it, and the only thing that stops it is the exporter and the `production-render-score` pairing guard — a *refusal*, not an *absence*. Four consequences are recorded separately because they are capability losses, not debt. (i) `FP8_BLOCK_UE8M0_SOURCE` is now `ROUTE_STATUS_BLOCKED` — its only route was the plugin. (ii) `MXFP4_SOURCE` keeps a backed stock-Marlin route but has no writer and no serving profile, and `MXFP8_UE8M0_G32` is the same shape — never a compressed-tensors scheme, written only by the CB *streaming* exporter, which is archived. Both keep a live `FormatSpec` and a working render; neither has a writer. (iii) **The `serving_lanes` block of a serving-profile spec now has zero live declarations.** `serving_profile_specs/nvfp4_cb.json` was the only spec that ever declared one (verified against `d263f54`), so the per-lane structured `route_status` / `activation_contract` / `fused_mid_m` table that principle 9 reads is a parser with nothing left to parse; the native lane's route status has always come from the source-passthrough contracts instead. The parser and its `route_status_source` machinery are kept because that is the shape the Tessera lane must declare in. (iv) **The sample-parallel incremental probe is unavailable**: its `prepare-run-contract` minter and its per-worker source-census revalidation were both built on `prismaquant/rtx4090_artifact_census.py`, the strict-Ada FP8-CB campaign's closed Qwen3.8-27B layout. `incremental_probe.py --global-calibration-tensor` now refuses up front rather than admitting a pre-retirement contract with one leg of its identity replay missing (`docs/design/sample_parallel_probe.md` carries the banner). Reviving it means giving the census a lane-independent source of truth. Two production observations were surfaced by the removal, deferred at the time, and **both fixed 2026-09-03** (RobTand/tessera#20): `check_serving_shape` failed **open** on an unknown profile id — it caught `FileNotFoundError` and resolved silently to `research`, which permits every shape, while `serving_lane_route`/`serving_lane_catalog`/`check_serving_format` all fail **closed**. It now returns the same `profile_mismatch` refusal `check_serving_format` does; `profile_id=None` still resolves to `research`, which is the declared default and loads, so no legal call changed. And `activation_pricing_branches["unrecorded"]` is re-homed as its own profile-independent test in `tests/test_serving_lane_metadata.py` rather than left riding a deleted CB test. A fifth item is dead-but-kept rather than lost: `shipcard.py`'s `safetensors_content_receipt` trio has no live caller since the strict-RTX4090 publication gate retired, and is kept so receipts already on disk stay readable. `ROLE_COMPOSITE_FUSED_SOURCE_EXEMPT` still exempts `DeepseekV4Profile` from declaring a fused-sibling source, but the lane that justified the exemption is gone; discharging it is a producer-behaviour decision, not a removal. | `archive/gridbook_lane_2026-09-02/README.md`; `docs/measurements/gridbook-lane-retired-2026-09-02.md`; §9.2 | MED | Excise the CB plumbing after the continuous-menu branch merges, in one commit whose diff is deletions plus the tests that go with them; or, if a codebook rung is wanted again for the Tessera lane, port the parts worth keeping deliberately rather than inheriting them. |
 | D35 | **A sampled expert stack has no priced A-side scale and no stack wire, and the research replay reader cannot read its rows** (added 2026-09-06, §4.10, RobTand/prismaquant#290). A stack-level Tessera cost row estimates the stack from a sample of its experts, so two per-expert facts have no scalar form on it. (i) `input_global_scale`: each expert carries its own calibrated static NVFP4 A scale, so a sampled stack has none, and `tessera_menu.priced_static_scales` therefore finds no value for a selected W4A4 stack -- `tessera_export_lane.require_priced_export_inputs` refuses it by name. That is the CORRECT refusal (a price with no bound scale is not exportable), and the fix belongs on the driver side: the calibration pass can compute a scale for every expert without encoding any of them, sampled or not. Until it does, W4A4 Tessera rungs on a sampled routed stack are priced but not exportable. (ii) `wire_bytes`: only a census has a full set of member wires, so a sampled stack is not in `wire_backed` and its per-member wire bytes live in the row's `sampled_experts` block. (iii) `tessera_anchored_surface.load_campaign_measurements`, the research replay reader, keys receipts per checkpoint unit and so refuses a stack payload at `unknown source unit`. It refuses loudly rather than mis-verifying, and it emits no allocator input, so nothing shippable depends on it -- but a replay of a sampled campaign is unavailable until the reader learns the stack-to-member indirection. | §4.10; `prismaquant/tessera_campaign.py` (`StackExpertSample`, `_stack_cost_rows`); `tessera_menu.priced_static_scales`; `tessera_export_lane.require_priced_export_inputs`; `tessera_anchored_surface.py:100` | MED | (i) have the campaign driver calibrate and carry a per-expert `input_global_scale` for the whole stack, then decide with Rob whether the exporter binds per expert or the serve takes a max-over-experts input scale (a fact about the Tessera plugin, so attested per principle 14, not assumed here); (ii)+(iii) teach the replay reader to resolve a stack row's receipts through its `sampled_experts.members` block, or state that sampled campaigns are not replayable. |
+| D36 | **The routed-stack probe reduction has a size source but not a weight source, and no planner emits a two-tier schedule** (added 2026-09-11, RobTand/prismaquant#495 parts 1-3). `--stack-sample-sizes counts` makes the PPS draw follow the census's routed-row counts, which is what #495 part 1 asked for, but `--stack-sample` still requires `--probe`: a `StackExpertSample` carries `h_trace`/`h_trace_per_expert` and `_validate_stack_sample` enforces that they sum to the multiplier the allocator applies, and there is no declared convention for a stack row whose weights are not Fisher. Writing counts into those fields would launder a routed-token proxy into the Fisher currency, which principle 2 and the study's own section 3.6 both refuse, so the report's "so it can run without a probe" is **not** delivered: it needs an explicit weight convention (uniform, or counts declared as such) that the cost row, the allocator's `predicted_dloss` branch and the HT estimator all agree on. Separately, `transfer_law_experts` is honoured by `selection_stack_samples` and `_stack_cost_rows`, but nothing writes it: the per-unit-class round-1 schedule (`round_one_rates`, §5 of the study) is #495 part 4/5 work and is not in this tree, so the two-tier path is reachable only from a hand-built sample. | `tools/dispatch_tessera_campaign.py` `sample_stack_groups`/`cmd_plan`; `prismaquant/tessera_campaign.py` `_validate_stack_sample`, `_stack_rate_evidence`, `_fit_stack_transfer_laws`; `tests/test_tessera_stack_sample_sizes.py` | MED | Declare a weight convention for a probeless stack row, then drop the `--probe` requirement under it; land #495 parts 4-5 to emit the schedule. |
 
 **Open items carried from session handovers.** Of the 41 items the handover census could not
 map to a verified closure, the prior FP4-CB fast-expander/Triton item is now closed by the

@@ -86,11 +86,16 @@ if TYPE_CHECKING:
     from tessera.export import WireRecipe
 
 __all__ = [
+    "STACK_TRANSFER_REFERENCE_Q256",
+    "StackRateSample",
+    "StackTransferLaw",
     "TesseraRateSurface",
     "allocation_regret",
     "densify_rate_surface",
     "fit_rate_surface",
+    "fit_stack_transfer_law",
     "leave_one_anchor_out",
+    "predict_stack_rates",
     "rate_surface_solver_menu",
     "uniform_column_schedule",
 ]
@@ -556,4 +561,453 @@ def allocation_regret(
         / len(on_truth),
         "assignment_interpolated": on_interpolated,
         "assignment_truth": on_truth,
+    }
+
+
+# ---------------------------------------------------------------------------
+# The stack transfer law
+# ---------------------------------------------------------------------------
+#
+# Everything above this line prices ONE unit from ITS OWN anchors: a dense
+# Linear measured at three rungs, interpolated between them.  A packed routed
+# MoE stack is a different shape of problem and needs a different instrument.
+#
+# Why a second instrument.  A routed stack is ONE rate decision covering every
+# expert in the layer (``allocator_candidates.aggregate_packed_serving_groups``
+# makes the packed group a single multi-choice DP item, and the pinned Tessera
+# contract's two ``routed_moe`` cells publish no per-expert rate licence), yet
+# a census pays 3 x E x R encodes to resolve it.  The offline regret study
+# ``docs/results/glm_tessera_probe_reduction_regret_2026-09-10.md`` measured
+# what happens if a stack is instead measured as a CENSUS at one reference
+# rung plus a small expert SAMPLE at the others, with the missing rungs
+# predicted per expert by
+#
+#     log2 mse_{e,p}(r) = a_{p,r} + b_{p,r} * log2 mse_{e,p}(reference)
+#
+# where ``b`` is pooled over the OTHER stacks (their per-stack spread is sd
+# 0.02-0.03 over 28 stacks, so pooling costs nothing) and ``a`` is fitted per
+# (stack, projection) from that stack's own sampled experts.  At a 3% sample
+# this reproduced the omniscient allocation to 0.004% mean / 0.000% p90
+# regret at the campaign's byte target and cut routed anchor-encode time by
+# 66% before the selective encode of the winners (~45% net).
+#
+# ``TesseraRateSurface`` is NOT this and must not be asked to be: it
+# interpolates one unit's own measured anchors and refuses to extrapolate.
+# Dense units keep three anchors and keep that surface (report section 4).
+#
+# What this is not.  These are MODEL PREDICTIONS -- not measurements, and not
+# sampling estimates.  The distinction has teeth here: a Horvitz-Thompson
+# ``dloss_stderr`` describes the variance of a DESIGN over repeated draws and
+# is meaningful only for a row whose value came from a draw.  A transfer-law
+# row's value came from a regression, so it carries a model error under its
+# own name and never an ``estimator`` or a ``dloss_stderr``
+# (RobTand/prismaquant#495 part 3).
+
+#: The rung a stack is censused at, and therefore the regressor every
+#: prediction is made from.  Named rather than spelled at the call sites,
+#: because the law is defined relative to whichever rung was censused.
+STACK_TRANSFER_REFERENCE_Q256 = 960
+
+
+def _check_positive_mse(stack, row, projections, where) -> None:
+    for projection in projections:
+        value = row.get(projection)
+        if value is None:
+            raise TesseraFormatError(
+                f"{stack}: {where} is missing projection {projection!r}")
+        value = float(value)
+        if not math.isfinite(value) or value <= 0.0:
+            raise TesseraFormatError(
+                f"{stack}: {where} projection {projection!r} is {value!r}; the "
+                "law is fitted in log2 space and a non-positive mse has no log")
+
+
+@dataclass(frozen=True, slots=True)
+class StackRateSample:
+    """One packed stack's evidence: a census at one rung, a sample at others.
+
+    ``reference_mse`` is expert -> projection -> ``output_mse`` at
+    ``reference_q256`` over EVERY expert in the stack (the census tier).
+    ``sampled_mse`` is q256 -> expert -> projection -> ``output_mse`` over the
+    drawn experts only (the transfer-law tier).
+
+    ``weights`` is the weight applied to EACH projection's mse, i.e. the
+    production ``h_trace_per_expert[e] / roles`` that
+    ``tessera_campaign._stack_member_weight`` applies, so that
+    ``sum_e weights[e] * sum_p mse_{e,p}`` reproduces exactly the total
+    ``_horvitz_thompson_stack`` estimates on the same evidence.  ``None`` means
+    uniform 1.0, which is the study's ``uniform`` weighting and the only
+    honest convention when no Fisher probe exists.
+    """
+
+    stack: str
+    projections: tuple[str, ...]
+    experts: tuple[int, ...]
+    reference_q256: int
+    reference_mse: "Mapping[int, Mapping[str, float]]"
+    sampled_experts: tuple[int, ...]
+    sampled_mse: "Mapping[int, Mapping[int, Mapping[str, float]]]"
+    weights: "Mapping[int, float] | None" = None
+    currency: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.projections:
+            raise TesseraFormatError(f"{self.stack}: a stack sample needs projections")
+        if len(set(self.projections)) != len(self.projections):
+            raise TesseraFormatError(f"{self.stack}: duplicate projection name")
+        if not self.experts:
+            raise TesseraFormatError(f"{self.stack}: a stack sample needs experts")
+        if len(set(self.experts)) != len(self.experts):
+            raise TesseraFormatError(f"{self.stack}: duplicate expert id")
+        if not self.sampled_experts:
+            raise TesseraFormatError(
+                f"{self.stack}: no sampled experts; the per-stack intercept is "
+                "fitted on the sample and cannot be fitted on nothing")
+        if not set(self.sampled_experts) <= set(self.experts):
+            raise TesseraFormatError(
+                f"{self.stack}: sampled experts are not a subset of the frame")
+        for expert in self.experts:
+            row = self.reference_mse.get(expert)
+            if not isinstance(row, Mapping):
+                raise TesseraFormatError(
+                    f"{self.stack}: expert {expert} has no reference row; the "
+                    f"reference rung {self.reference_q256} must be a census, "
+                    "because every expert's prediction is made from its own "
+                    "measured reference value")
+            _check_positive_mse(self.stack, row, self.projections,
+                                f"reference {self.reference_q256}")
+        if not self.sampled_mse:
+            raise TesseraFormatError(f"{self.stack}: no sampled rungs to fit")
+        for rate, by_expert in self.sampled_mse.items():
+            if int(rate) == int(self.reference_q256):
+                raise TesseraFormatError(
+                    f"{self.stack}: rung {rate} is the reference; a rung cannot "
+                    "be both the regressor and the prediction")
+            for expert in self.sampled_experts:
+                row = by_expert.get(expert)
+                if not isinstance(row, Mapping):
+                    raise TesseraFormatError(
+                        f"{self.stack}: sampled expert {expert} has no row at "
+                        f"rung {rate}; a rung measured on only some of the "
+                        "drawn experts cannot fit this stack's intercept")
+                _check_positive_mse(self.stack, row, self.projections,
+                                    f"rung {rate}")
+
+    @property
+    def target_q256(self) -> tuple[int, ...]:
+        return tuple(sorted(int(rate) for rate in self.sampled_mse))
+
+    def weight(self, expert: int) -> float:
+        return 1.0 if self.weights is None else float(self.weights[expert])
+
+    def reference_total(self) -> float:
+        """The weighted total at the censused rung -- the one measured total.
+
+        Only the reference rung covers every expert, so this is the only total
+        this record can state without a model.
+        """
+        return math.fsum(
+            self.weight(e) * math.fsum(
+                float(self.reference_mse[e][p]) for p in self.projections)
+            for e in self.experts)
+
+
+@dataclass(frozen=True, slots=True)
+class StackTransferLaw:
+    """Pooled per-projection slopes, and what their residuals were.
+
+    ``slope[rate][projection]`` is the OLS slope of ``log2 mse(rate)`` on
+    ``log2 mse(reference)`` over the pooled experts of every stack other than
+    ``held_out`` -- ONE pooled centring, exactly as the study fitted it, not a
+    fixed-effects fit.  ``residual_sd_log2`` is that fit's residual standard
+    deviation in log2 units: the per-expert pointwise MODEL error, and not a
+    sampling error of any design.
+    """
+
+    reference_q256: int
+    target_q256: tuple[int, ...]
+    projections: tuple[str, ...]
+    slope: "Mapping[int, Mapping[str, float]]"
+    residual_sd_log2: "Mapping[int, Mapping[str, float]]"
+    pooled_rows: "Mapping[int, int]"
+    pooled_stacks: tuple[str, ...]
+    held_out: str | None
+    currency: str = ""
+
+    def as_dict(self) -> dict:
+        """The JSON-portable form a cost row carries."""
+        return {
+            "reference_q256": int(self.reference_q256),
+            "target_q256": [int(r) for r in self.target_q256],
+            "projections": list(self.projections),
+            "slope": {str(r): {p: float(v) for p, v in sorted(row.items())}
+                      for r, row in sorted(self.slope.items())},
+            "residual_sd_log2": {
+                str(r): {p: float(v) for p, v in sorted(row.items())}
+                for r, row in sorted(self.residual_sd_log2.items())},
+            "pooled_rows": {str(r): int(n)
+                            for r, n in sorted(self.pooled_rows.items())},
+            "pooled_stacks": list(self.pooled_stacks),
+            "held_out": self.held_out,
+            "currency": self.currency,
+        }
+
+
+def _stack_rate_samples(stacks_measured) -> "dict[str, StackRateSample]":
+    if isinstance(stacks_measured, Mapping):
+        items = list(stacks_measured.values())
+    else:
+        items = list(stacks_measured)
+    samples: dict[str, StackRateSample] = {}
+    for sample in items:
+        if not isinstance(sample, StackRateSample):
+            raise TesseraFormatError(
+                "fit_stack_transfer_law takes StackRateSample records; "
+                f"got {type(sample).__name__}")
+        if sample.stack in samples:
+            raise TesseraFormatError(f"{sample.stack}: duplicate stack record")
+        samples[sample.stack] = sample
+    if not samples:
+        raise TesseraFormatError("no stack records to fit a transfer law on")
+    return samples
+
+
+def fit_stack_transfer_law(
+    stacks_measured: "Mapping[str, StackRateSample] | Sequence[StackRateSample]",
+    hold_out: str | None = None,
+) -> StackTransferLaw:
+    """Pool per-projection slopes over every stack except ``hold_out``.
+
+    The fit is the study's, reproduced rather than reinvented: for each target
+    rung and projection, concatenate the sampled experts of all the OTHER
+    stacks, centre ``log2 mse(reference)`` and ``log2 mse(rate)`` on one pooled
+    mean each, and take ``sum(xc*yc) / sum(xc*xc)``.  The pooled centring is
+    what leaves the intercept a per-stack quantity: the slope carries the
+    cross-expert shape, the intercept carries each stack's own level.
+
+    ``hold_out`` names the stack this law will be used to predict, which is
+    what keeps a prediction out of its own fit.  The study fitted every
+    reported number leave-one-stack-out and found the per-layer slope spread
+    (sd 0.02-0.03 over 28 stacks) small enough that the hold-out costs nothing.
+
+    Known sensitivity, stated rather than hidden.  ONE pooled centring is the
+    study's estimator and is reproduced here because the regret it measured is
+    this estimator's; but it is unbiased for ``b`` only when the pooled stacks'
+    per-stack intercepts are uncorrelated with their per-stack MEAN reference
+    level.  A population whose deeper layers sit both higher on the reference
+    axis and higher in intercept would tilt the pooled slope toward the
+    BETWEEN-stack relation, which is a different quantity from the
+    within-stack one the prediction uses.  A within-stack (fixed-effects)
+    centring would remove that, and would also change the estimator that was
+    validated, so it is not done here.  What the study offers against the risk
+    is evidence rather than an argument: the 28 per-layer slopes agree to sd
+    0.02-0.03, which a strong between-stack tilt would not survive.  Any
+    residual tilt inflates ``residual_sd_log2``, so the reported model error
+    errs conservatively.
+    """
+    samples = _stack_rate_samples(stacks_measured)
+    pooled = [s for name, s in samples.items() if name != hold_out]
+    if not pooled:
+        raise TesseraFormatError(
+            "a pooled slope needs at least one stack other than the held-out "
+            "one; a law fitted on the stack it predicts is not a hold-out")
+    references = {int(s.reference_q256) for s in pooled}
+    if len(references) != 1:
+        raise TesseraFormatError(
+            f"the pooled stacks disagree about the reference rung "
+            f"({sorted(references)}); a slope regressed on two different "
+            "regressors is not one slope")
+    reference_q256 = references.pop()
+    projections = pooled[0].projections
+    for sample in pooled:
+        if sample.projections != projections:
+            raise TesseraFormatError(
+                f"{sample.stack}: projections {sample.projections} differ from "
+                f"{projections}; a per-projection slope needs one projection set")
+    currencies = {s.currency for s in pooled}
+    if len(currencies) != 1:
+        raise TesseraFormatError(
+            f"the pooled stacks disagree about the currency "
+            f"({sorted(currencies)}); a law fitted across objectives prices "
+            "nothing")
+    targets = sorted(set.intersection(*(set(s.target_q256) for s in pooled)))
+    if not targets:
+        raise TesseraFormatError(
+            "the pooled stacks share no target rung; there is nothing to fit")
+
+    slope: dict[int, dict[str, float]] = {}
+    residual: dict[int, dict[str, float]] = {}
+    rows: dict[int, int] = {}
+    for rate in targets:
+        slope[rate], residual[rate] = {}, {}
+        for projection in projections:
+            xs: list[float] = []
+            ys: list[float] = []
+            for sample in pooled:
+                for expert in sample.sampled_experts:
+                    xs.append(math.log2(float(
+                        sample.reference_mse[expert][projection])))
+                    ys.append(math.log2(float(
+                        sample.sampled_mse[rate][expert][projection])))
+            count = len(xs)
+            if count < 3:
+                raise TesseraFormatError(
+                    f"rung {rate} projection {projection!r}: {count} pooled "
+                    "row(s); a slope and a residual spread need at least three")
+            x_mean = math.fsum(xs) / count
+            y_mean = math.fsum(ys) / count
+            sxx = math.fsum((x - x_mean) ** 2 for x in xs)
+            if sxx <= 0.0:
+                raise TesseraFormatError(
+                    f"rung {rate} projection {projection!r}: the reference "
+                    "values have no spread, so no slope is identified")
+            sxy = math.fsum((x - x_mean) * (y - y_mean)
+                            for x, y in zip(xs, ys))
+            b = sxy / sxx
+            slope[rate][projection] = float(b)
+            sse = math.fsum(((y - y_mean) - b * (x - x_mean)) ** 2
+                            for x, y in zip(xs, ys))
+            # n - 2: this fit estimated a slope and a pooled intercept.
+            residual[rate][projection] = float(math.sqrt(sse / (count - 2)))
+            rows[rate] = count
+    return StackTransferLaw(
+        reference_q256=reference_q256,
+        target_q256=tuple(targets),
+        projections=tuple(projections),
+        slope={r: dict(v) for r, v in slope.items()},
+        residual_sd_log2={r: dict(v) for r, v in residual.items()},
+        pooled_rows=dict(rows),
+        pooled_stacks=tuple(sorted(s.stack for s in pooled)),
+        held_out=hold_out,
+        currency=currencies.pop(),
+    )
+
+
+def predict_stack_rates(
+    stack: StackRateSample,
+    law: StackTransferLaw,
+) -> dict:
+    """The stack's total at each target rung, and what the model error is.
+
+    Per target rung and projection the intercept is
+    ``mean_{e in sample} (log2 mse_e(rate) - b * log2 mse_e(reference))``;
+    every expert in the frame is then predicted from its OWN measured
+    reference value, and the weighted per-expert predictions are summed.
+
+    The error field, and why it is what it is
+    -----------------------------------------
+    Two errors ride on this prediction and they behave differently under the
+    sum over E experts:
+
+    * the per-expert residual, sd ``residual_sd_log2``.  It is idiosyncratic,
+      so over a few hundred experts it largely averages away in the total.
+    * the intercept error, sd ``residual_sd_log2 / sqrt(n)`` on ``n`` sampled
+      experts.  It is COMMON to every expert in the stack -- one number shifts
+      the whole predicted curve -- so it does not average away at all, and it
+      is what the error on the stack TOTAL actually is.
+
+    ``model_error`` therefore reports the common-mode term as
+    ``stack_total_sd_log2`` (a root-sum-square over projections, each weighted
+    by its share of the predicted total, because the projections' intercepts
+    are fitted independently) and reports the pointwise per-expert term beside
+    it under its own name, so neither can be read as the other.  Both are
+    MODEL errors, in log2 units.  Neither is a sampling standard error and
+    neither may be written to ``dloss_stderr``.
+
+    No smearing correction.  ``sum_e 2^lhat`` underestimates ``E[sum_e mse]``
+    by roughly ``exp((sigma ln2)^2 / 2)`` under lognormal residuals, and that
+    factor is deliberately NOT applied: the regret the study measured is the
+    regret of this uncorrected estimator, and a correction fitted on the same
+    ``n`` points would move the number that was validated.  Its size is
+    reported as ``smearing_factor_not_applied`` so a reader can see it.
+    """
+    if int(stack.reference_q256) != int(law.reference_q256):
+        raise TesseraFormatError(
+            f"{stack.stack}: censused at {stack.reference_q256}, the law "
+            f"regresses on {law.reference_q256}")
+    if stack.projections != law.projections:
+        raise TesseraFormatError(
+            f"{stack.stack}: projections {stack.projections} are not the law's "
+            f"{law.projections}")
+    if stack.currency != law.currency:
+        raise TesseraFormatError(
+            f"{stack.stack}: currency {stack.currency!r} is not the law's "
+            f"{law.currency!r}")
+    if law.held_out is not None and law.held_out != stack.stack:
+        raise TesseraFormatError(
+            f"{stack.stack}: this law held out {law.held_out!r}; predicting one "
+            "stack from a law fitted with a different hold-out mixes designs")
+    if law.held_out is None and stack.stack in law.pooled_stacks:
+        raise TesseraFormatError(
+            f"{stack.stack}: the law pooled this stack's own experts; fit it "
+            "with hold_out=<this stack> before predicting it")
+    targets = [r for r in stack.target_q256 if r in law.target_q256]
+    if not targets:
+        raise TesseraFormatError(
+            f"{stack.stack}: the law fits {list(law.target_q256)} and this "
+            f"stack samples {list(stack.target_q256)}; no rung is predictable")
+
+    sampled = list(stack.sampled_experts)
+    n = len(sampled)
+    predicted: dict[int, float] = {}
+    per_expert: dict[int, dict[int, float]] = {}
+    intercepts: dict[int, dict[str, float]] = {}
+    errors: dict[int, dict] = {}
+    for rate in targets:
+        intercept: dict[str, float] = {}
+        share: dict[str, float] = {}
+        predictions: dict[int, dict[str, float]] = {e: {} for e in stack.experts}
+        for projection in stack.projections:
+            b = float(law.slope[rate][projection])
+            value = math.fsum(
+                math.log2(float(stack.sampled_mse[rate][e][projection]))
+                - b * math.log2(float(stack.reference_mse[e][projection]))
+                for e in sampled) / n
+            intercept[projection] = float(value)
+            for expert in stack.experts:
+                predictions[expert][projection] = 2.0 ** (
+                    value + b * math.log2(
+                        float(stack.reference_mse[expert][projection])))
+            share[projection] = math.fsum(
+                stack.weight(e) * predictions[e][projection]
+                for e in stack.experts)
+        total = math.fsum(share[p] for p in stack.projections)
+        if not math.isfinite(total) or total <= 0.0:
+            raise TesseraFormatError(
+                f"{stack.stack}: predicted total {total!r} at rung {rate} is "
+                "not a positive finite cost")
+        predicted[rate] = float(total)
+        per_expert[rate] = {
+            int(e): float(math.fsum(predictions[e][p] for p in stack.projections))
+            for e in stack.experts}
+        intercepts[rate] = intercept
+        pointwise = {p: float(law.residual_sd_log2[rate][p])
+                     for p in stack.projections}
+        common = math.sqrt(math.fsum(
+            ((share[p] / total) * (pointwise[p] / math.sqrt(n))) ** 2
+            for p in stack.projections))
+        worst = max(pointwise.values())
+        errors[rate] = {
+            # The stack TOTAL's own error: the common-mode intercept term.
+            "stack_total_sd_log2": float(common),
+            # The per-expert pointwise model error, named so it cannot be read
+            # as the line above.
+            "per_expert_residual_sd_log2": dict(sorted(pointwise.items())),
+            "intercept_sample_size": int(n),
+            "smearing_factor_not_applied": float(
+                math.exp((worst * math.log(2.0)) ** 2 / 2.0)),
+            "kind": "transfer_law_model_error_log2",
+            "is_sampling_error": False,
+        }
+    return {
+        "stack": stack.stack,
+        "reference_q256": int(stack.reference_q256),
+        "predicted": predicted,
+        "predicted_per_expert": per_expert,
+        "intercept": intercepts,
+        "slope": {rate: dict(law.slope[rate]) for rate in targets},
+        "sample_experts": [int(e) for e in sampled],
+        "intercept_sample_size": int(n),
+        "model_error": errors,
+        "currency": stack.currency,
     }
