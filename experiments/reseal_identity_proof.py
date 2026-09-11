@@ -477,8 +477,16 @@ def run_gpu_arm(args, *, prefix):
             # is the third round's gate on the restricted members; stop
             # there, before the campaign finalizes a table for units it
             # never measured.
-            campaign.resolve_anchor_groups = lambda *a, **kw: restrict_groups(
-                original_groups(*a, **kw), classes=classes, per_class=args.members_per_class)
+            # ``select_anchor_groups`` resolves the same groups to check the
+            # --units selection covers every member; only the pricing loop's
+            # resolution (tessera_campaign._main, after selection) is
+            # restricted, so the selection gate still sees the whole stack.
+            def restricted_groups(*a, **kw):
+                groups = original_groups(*a, **kw)
+                if sys._getframe(1).f_code.co_name == 'select_anchor_groups':
+                    return groups
+                return restrict_groups(groups, classes=classes, per_class=args.members_per_class)
+            campaign.resolve_anchor_groups = restricted_groups
 
             def stop_after_prefix(*a, **kw):
                 if observer.result.get('completed_anchor_units', 0) >= args.limit_anchors or _prefix_done(observer, args.limit_anchors):
