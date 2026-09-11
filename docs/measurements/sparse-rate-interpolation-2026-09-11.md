@@ -319,3 +319,32 @@ The two sealed audits ran as independent PB campaign actions
 `6fb605ed901c6a3808c8bcec7a12345732b5697b0047f68f66b3ea385c4543d6`
 and `f874d8609e88cdabc1ae78a9e24705adc1c1d16d4f715bfa2e94688d77e5c700`.
 These follow-up receipts and artifact hashes are in `followup-receipts-01.json`.
+
+After merging main's separate routed-stack transfer-law work (#499), four PB
+test shards passed **85 tests**, with no skips and 56 Torch deprecation
+warnings. They cover both research replay modes, the stack sampling/transfer
+contracts and architecture staleness. `post-merge-tests-01.json` contains the
+submission results and `post-merge-verified-01.json` records independently
+checked terminal/CAS receipts. The frozen numerical core and study-script
+hashes are unchanged by this merge.
+
+## Prospective R1024 predictions
+
+`prospective-r1024-03` records 7,830 predictions from the already frozen
+`value_surface1` coefficients and the same final-layer endpoint measurements.
+It covers nine routed layers and eligible final dense curves; the three E2M1
+segments are explicitly omitted because they lack endpoint curves. No R1024
+cost or extension journal was read to generate these predictions. The artifact
+is prospective only at this new rate, not a claim that other final observations
+remain unseen. Future comparisons still need matching calibration and currency.
+
+PrismaBuild action
+`46b93fcdb1d2b4aca94ddc599e0b56e459ceea2a22598598ba350866f20089ea`
+completed with exit zero. The seal checks the frozen choice, report, dataset,
+core and study-script hashes, exact anchors, positive finite predictions and
+unique keys; it hashes `predictions.json` and records `measured=false` and
+`serving_qualified=false`. Prediction SHA256:
+`3e0fccfb597c840b9ff18b332d2df2d794f5d8b9e221850a66e41a040a8f1a77`.
+`verified-receipt.json` holds the checked terminal/CAS evidence. The standalone
+producer and prior withdrawn-attempt dispositions are archived with the
+artifact; neither earlier attempt produced an accepted artifact.
