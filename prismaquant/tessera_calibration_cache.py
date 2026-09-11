@@ -675,6 +675,7 @@ class CaptureWriter:
                 file_stat = path.stat() if self.release_file_pages else None
                 if previous.get('path') != expected:
                     raise RuntimeError(f'{name}: interrupted capture entry changed')
+                _old_receipt = None
                 if self.load_execution is None:
                     if sha256(path) != previous.get('sha256'):
                         raise RuntimeError(f'{name}: interrupted capture entry changed')
@@ -974,7 +975,7 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
                 digest=digest, execution=execution, resource_check=resource_check,
                 release_file_pages=release_file_pages, threads=threads)
     acts, hessians, counts, maxima = {}, {}, {}, {}
-    payload = x = h = None
+    payload = x = h = _entry_receipt = None
     try:
         for name in names:
             record = manifest['entries'][name]
@@ -993,7 +994,7 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
                         columns**2+min(census['counts'][name], expected_identity['max_act_rows'])*columns))
                 payload = torch.load(artifact,map_location='cpu',weights_only=True)
             else:
-                payload = _verified_capture_entry(artifact, name, expected_sha256=record.get('sha256'),
+                payload, _entry_receipt = _verified_capture_entry(artifact, name, expected_sha256=record.get('sha256'),
                     census=census, max_rows=expected_identity['max_act_rows'], policy=execution['policy'],
                     execution=execution, resource_check=resource_check,
                     release_file_pages=release_file_pages, expected_stat=file_stat)
@@ -1008,8 +1009,8 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
                 from .perturbed_x_cache import release_activation_cache_file_pages
                 if str(device).startswith('cuda'):
                     torch.cuda.synchronize(device)
-            del payload, x, h
-            payload = x = h = None
+            del payload, x, h, _entry_receipt
+            payload = x = h = _entry_receipt = None
             if release_file_pages and execution is None:
                 release_activation_cache_file_pages(artifact, expected_stat=file_stat)
             if resource_check is not None:
@@ -1020,7 +1021,7 @@ def prefetch_capture(path, *, expected_identity, census, names, device,
         if execution is not None:
             acts.clear()
             hessians.clear()
-            payload = x = h = None
+            payload = x = h = _entry_receipt = None
         raise
     resident = sum(t.numel()*t.element_size() for t in (*acts.values(),*hessians.values()))
     print(f'[campaign] calibration prefetched: {len(names)} units, {resident} resident bytes, 0 misses',flush=True)
