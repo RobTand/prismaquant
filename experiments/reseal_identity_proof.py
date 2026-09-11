@@ -160,6 +160,39 @@ def shape_interleaved(batches, *, classes, per_class):
     return chosen + rest
 
 
+def restrict_groups(groups, *, classes, per_class):
+    """Keep the first ``per_class`` members of each shape class in every group.
+
+    The campaign then prices only those members: round one places the band
+    ends and round two the interior rate (the bisection reaches R960 only
+    after every member of the group has both ends), so a restricted group
+    reaches the third rate in 3 x members anchors instead of 3 x 864.  The
+    group's rate grid is the intersection over its members, and the stored
+    rows measured every member at the same three rates, so the subset's
+    grid is the same one.  The comparator, not this permutation, judges
+    whether the rates and scores agree with the stored row.
+    """
+    kept = {}
+    for key, members in groups.items():
+        taken = {name: 0 for name in classes}
+        chosen = []
+        for member in members:
+            kind = batch_class([(member,)])
+            if kind in taken and taken[kind] < per_class:
+                taken[kind] += 1
+                chosen.append(member)
+        if chosen:
+            kept[key] = chosen
+    if not kept:
+        raise ValueError('no anchor group has members in the requested shape classes')
+    return kept
+
+
+def _prefix_done(observer, limit):
+    calls = observer.result.get('prefix_calls') or []
+    return sum(len(call['qnames']) for call in calls) >= limit
+
+
 class _SilentObserver:
     """``run_prefix`` needs a result dict and a pass-through anchor wrapper."""
 
@@ -432,15 +465,35 @@ def run_gpu_arm(args, *, prefix):
     write_json(out/'result.json', dict(record, status='running'))
     from prismaquant import tessera_campaign as campaign
     if prefix:
-        from experiments.campaign_prefix_profile import run_prefix
+        from experiments.campaign_prefix_profile import run_prefix, PrefixComplete
         classes = args.shape_classes.split(',')
         original = campaign._anchor_batches
+        original_groups = campaign.resolve_anchor_groups
+        original_loo = campaign._loo_for
         observer = _SilentObserver()
-        campaign._anchor_batches = lambda *a, **kw: shape_interleaved(original(*a, **kw), classes=classes, per_class=args.batches_per_class)
+        if args.members_per_class:
+            # Restricted groups; the campaign's own batching order applies.
+            # The first leave-one-out evaluation after the requested prefix
+            # is the third round's gate on the restricted members; stop
+            # there, before the campaign finalizes a table for units it
+            # never measured.
+            campaign.resolve_anchor_groups = lambda *a, **kw: restrict_groups(
+                original_groups(*a, **kw), classes=classes, per_class=args.members_per_class)
+
+            def stop_after_prefix(*a, **kw):
+                if observer.result.get('completed_anchor_units', 0) >= args.limit_anchors or _prefix_done(observer, args.limit_anchors):
+                    raise PrefixComplete()
+                return original_loo(*a, **kw)
+            campaign._loo_for = stop_after_prefix
+            record['group_restriction'] = dict(classes=classes, members_per_class=args.members_per_class)
+        else:
+            campaign._anchor_batches = lambda *a, **kw: shape_interleaved(original(*a, **kw), classes=classes, per_class=args.batches_per_class)
         try:
             run_prefix(campaign, command, observer, limit=args.limit_anchors, expected_source_units=args.expected_source_units)
         finally:
             campaign._anchor_batches = original
+            campaign.resolve_anchor_groups = original_groups
+            campaign._loo_for = original_loo
         record['prefix'] = {k: v for k, v in observer.result.items() if k != 'resident_prefetch'}
         record['resident_prefetch'] = {k: v for k, v in observer.result.get('resident_prefetch', {}).items()
                                        if k in ('units', 'hessian_bytes', 'activation_bytes', 'devices', 'finished_unix')}
@@ -535,6 +588,8 @@ def main(argv=None):
             p.add_argument('--expected-source-units', type=int, required=True)
             p.add_argument('--shape-classes', default='down_proj,gate_up')
             p.add_argument('--batches-per-class', type=int, default=3)
+            p.add_argument('--members-per-class', type=int, default=0,
+                           help='restrict every anchor group to its first N members per shape class, so the bisection rate is reached')
         else:
             p.add_argument('--expected-cells', type=int, required=True)
         p.add_argument('command', nargs=argparse.REMAINDER)
