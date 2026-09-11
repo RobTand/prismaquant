@@ -38,6 +38,9 @@ from pathlib import Path
 SCHEMA = 'prismaquant.reseal_identity_proof.v1'
 PIN_KEYS = ('prismaquant_source_sha256', 'encoder_source_sha256')
 ANCHOR_VOLATILE = ('seconds', 'encoding_batch_size')
+# Wall-clock and batching fields the campaign stores beside each priced rung;
+# not scores, and never equal across two runs of the same encode.
+COST_VOLATILE = ('encode_seconds', 'encode_seconds_accounting', 'encoding_batch_size')
 STRIPPED_FLAGS = ('--seed-checkpoint', '--seed-wire-dir')
 
 
@@ -350,7 +353,7 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
             p_cost = pickle.load(stream)
         with (stored/'cost.pkl').open('rb') as stream:
             s_cost = pickle.load(stream)
-        report = dict(keys_compared=[], provenance_excluded=True)
+        report = dict(keys_compared=[], provenance_excluded=True, cost_fields_masked=list(COST_VOLATILE))
         if set(p_cost) != set(s_cost):
             fail(dict(what='cost_keys', produced=sorted(p_cost), stored=sorted(s_cost)))
         for key in sorted(set(p_cost) & set(s_cost)):
@@ -359,6 +362,8 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
             a, b = p_cost[key], s_cost[key]
             if key == 'tessera_expert_wires':
                 a, b = _strip_wire_seals(a), _strip_wire_seals(b)
+            elif key == 'costs':
+                a, b = _mask_cost_timing(a), _mask_cost_timing(b)
             diffs = deep_equal(a, b, key)
             report['keys_compared'].append(key)
             if diffs:
@@ -368,6 +373,11 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
         fail(dict(what='cost_pkl', detail='produced run wrote no cost.pkl'))
     result['ok'] = not result['failures']
     return result
+
+
+def _mask_cost_timing(costs):
+    return {unit: {fmt: {k: v for k, v in entry.items() if k not in COST_VOLATILE}
+                   for fmt, entry in rungs.items()} for unit, rungs in costs.items()}
 
 
 def _strip_wire_seals(records):
