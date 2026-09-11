@@ -703,3 +703,85 @@ def test_the_plan_charges_the_staging_bound_where_the_anchors_live(monkeypatch):
             if k not in {"publication_staging_bytes", "campaign_identity_metadata_bytes"}} == {
         k: v for k, v in off["phases"]["resident_anchors"].items()
         if k not in {"publication_staging_bytes", "campaign_identity_metadata_bytes"}}
+
+
+# ---------------------------------------------------------------------------
+# A deferred identity: post-work the writer does behind the anchor's own files
+# ---------------------------------------------------------------------------
+
+def test_a_deferred_identity_is_derived_on_the_writer_behind_the_files():
+    """``record(anchor, derive=...)`` runs the derivation inside the receipt job.
+
+    Ordering, not speed: the derivation must not run on the caller's thread,
+    must run after this anchor's file job, and must seal the receipt that is
+    journalled.  The thread name is the writer's, which is what a profile of
+    the real arm attributes the phase to.
+    """
+    journalled, order = [], []
+    barrier = threading.Event()
+    pub = _publisher()
+    ledger = _ledger(pub, journalled)
+    try:
+        _files_job(pub, "a.b", lambda: (barrier.wait(WAIT), order.append("files")))
+
+        def derive():
+            order.append(("derive", threading.current_thread().name))
+            return "id-a"
+
+        ledger.record(_Anchor("a.b"), derive=derive)
+        assert order == [], "the identity was derived on the encode thread"
+        assert ledger.apply_completed() == 0
+        barrier.set()
+        assert ledger.drain() == 1
+        assert order == ["files", ("derive", "tessera-publication")]
+        assert journalled == [("a.b", "record:id-a")]
+    finally:
+        barrier.set()
+        pub.close()
+
+
+def test_without_a_publisher_a_deferred_identity_is_derived_inline():
+    journalled, threads = [], []
+    ledger = _ledger(None, journalled)
+
+    def derive():
+        threads.append(threading.current_thread().name)
+        return "id-a"
+
+    ledger.record(_Anchor("a.b"), derive=derive)
+    assert threads == [threading.current_thread().name]
+    assert journalled == [("a.b", "record:id-a")]
+
+
+def test_record_takes_exactly_one_form_of_identity():
+    ledger = _ledger(None, [])
+    with pytest.raises(ValueError, match="exactly one"):
+        ledger.record(_Anchor("a.b"))
+    with pytest.raises(ValueError, match="exactly one"):
+        ledger.record(_Anchor("a.b"), "id-a", derive=lambda: "id-a")
+
+
+def test_a_refused_deferred_identity_fails_the_publication_and_journals_nothing():
+    """An identity gate that refuses on the writer is a publication failure.
+
+    On the synchronous path the same refusal raises on the encode thread
+    before anything is journalled.  Deferred, it is raised by the writer and
+    surfaces at the next barrier, and the anchor whose identity was refused
+    has no journal row: no receipt, no row.
+    """
+    journalled = []
+    pub = _publisher()
+    ledger = _ledger(pub, journalled)
+    try:
+        _files_job(pub, "a.b", lambda: None)
+
+        def derive():
+            raise RuntimeError("checkpoint anchor is outside the current menu")
+
+        ledger.record(_Anchor("a.b"), derive=derive)
+        with pytest.raises(PublicationError):
+            ledger.drain()
+        assert journalled == []
+        assert pub.failure is not None
+    finally:
+        pub.close()

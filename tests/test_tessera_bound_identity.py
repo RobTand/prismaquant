@@ -176,3 +176,51 @@ def test_campaign_identity_hold_closes_during_error_unwind():
             raise RuntimeError("publisher failed")
     with pytest.raises(ValueError, match="closed"):
         bound.campaign_inputs()
+
+
+def test_a_bound_identity_is_derived_on_the_writer_without_a_tensor_read(monkeypatch):
+    """The deferred derivation is device-free, so it may run on the writer.
+
+    The producer's graph-capture contract forbids surprise device work from
+    another thread while a capture may be running, so the writer is CPU/IO
+    only.  Binding hashes the weight and Hessian once, on the calling thread;
+    every derivation after that is a template copy plus Tessera's recipe and
+    reads no tensor on any thread.  The receipts it seals are the ones the
+    inline path computes.
+    """
+    import threading
+    from tessera import cached_unit
+    from prismaquant.tessera_publication import BoundedPublisher
+    tc, name, weight, hessian, source, anchors, projection, kwargs = fixture()
+    expected = [tc._checkpoint_anchor_identity(anchor, **kwargs) for anchor in anchors]
+    actual_hash = cached_unit.tensor_identity
+    hashed_on = []
+
+    def observed(value):
+        hashed_on.append(threading.current_thread().name)
+        return actual_hash(value)
+
+    monkeypatch.setattr(cached_unit, "tensor_identity", observed)
+    with tc.bind_checkpoint_unit_identity(anchors, source_weight=weight,
+            calibration_source=source, projected_unit=projection,
+            static_scales=kwargs["static_scales"]) as bound:
+        assert hashed_on and set(hashed_on) == {threading.current_thread().name}
+        hashed_on.clear()
+        journalled, derived_on = [], []
+        pub = BoundedPublisher(budget_bytes=1 << 20)
+        ledger = tc._AnchorPublicationLedger(publisher=pub,
+            make_record=lambda anchor, identity: identity,
+            journal_anchor=lambda anchor, record: journalled.append(record))
+        try:
+            for anchor in anchors:
+                def derive(anchor=anchor):
+                    derived_on.append(threading.current_thread().name)
+                    return tc._checkpoint_anchor_identity(anchor, **kwargs, bound_unit=bound)
+                ledger.record(anchor, derive=derive)
+            assert ledger.drain() == len(anchors)
+        finally:
+            pub.close()
+        assert journalled == expected
+        assert derived_on == ["tessera-publication"] * len(anchors)
+        assert hashed_on == [], "a deferred derivation read a tensor"
+

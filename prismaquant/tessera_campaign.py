@@ -2108,9 +2108,26 @@ class _AnchorPublicationLedger:
                 f"{len(self._staged)} anchor(s) already staged")
         self._publisher = publisher
 
-    def record(self, anchor, identity) -> None:
-        """Journal now, or when this anchor's own bytes have been written."""
+    def record(self, anchor, identity=None, *, derive=None) -> None:
+        """Journal now, or when this anchor's own bytes have been written.
+
+        ``identity`` is the anchor's producer input identity, already
+        computed.  ``derive`` is instead a zero-argument callable that
+        computes it, and the two are exclusive.  A caller passes ``derive``
+        only when the derivation touches no device: the writer is a CPU/IO
+        thread by contract (the producer's graph capture forbids surprise
+        device work from another thread while a capture may be running), so
+        an identity that hashes a resident weight or Hessian is computed on
+        the encode thread and handed over as a value.  With a publisher the
+        callable runs on the writer inside this anchor's receipt job, ahead
+        of the read-back it seals; without one it runs inline, here, exactly
+        where the value would have been computed.
+        """
+        if (identity is None) == (derive is None):
+            raise ValueError("record takes exactly one of identity or derive")
         if self._publisher is None:
+            if derive is not None:
+                identity = derive()
             self._journal(anchor, self._make_record(anchor, identity))
             return
         key = (anchor.qname, anchor.format_name)
@@ -2126,8 +2143,11 @@ class _AnchorPublicationLedger:
         def make():
             # Runs on the writer, behind this unit's own file job, so the
             # read-back inside the receipt call reads a file that exists and
-            # the encode thread never waits for it.
-            self._records[key] = self._make_record(anchor, identity)
+            # the encode thread never waits for it.  A deferred identity is
+            # derived first, on this thread, and a refusal there fails the
+            # publication the same way a refused read-back does.
+            sealed = identity if derive is None else derive()
+            self._records[key] = self._make_record(anchor, sealed)
 
         self._publisher.submit(PublicationJob(
             key=(RECEIPT_JOB, *key), charged_bytes=0, publish=make))
@@ -4986,6 +5006,12 @@ def _main(argv, *, source_scope) -> int:
         source_scope.callback(lambda: [unit.close() for unit in bound_checkpoint_units.values()])
     identity_metadata_observed_bytes = sum(unit.observed_metadata_bytes()
                                            for unit in bound_checkpoint_units.values())
+    if bound_checkpoint_units:
+        print(f"[campaign] campaign identity hold: {len(bound_checkpoint_units)} units, "
+              f"observed metadata {identity_metadata_observed_bytes} B, planned bound "
+              f"{sum(identity_metadata_bounds.values())} B + scratch "
+              f"{identity_planning_scratch_bytes} B, reserved {args.campaign_identity_bytes} B",
+              flush=True)
 
     # The resume identity, run level: everything a price is a function of,
     # including the static A-side contract (scales + policy) the W4A4 rows
@@ -5530,12 +5556,22 @@ def _main(argv, *, source_scope) -> int:
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
                 for anchor in anchors:
-                    ledger.record(anchor, _checkpoint_anchor_identity(
-                        anchor, weights=weights, menus=menus,
-                        calibration_source=calibration_source, static_scales=static_scales,
-                        projected_units=projected_units,
-                        **({"bound_unit": bound_checkpoint_units[anchor.qname]}
-                           if bound_checkpoint_units else {})))
+                    identity_of = functools.partial(
+                        _checkpoint_anchor_identity, anchor, weights=weights,
+                        menus=menus, calibration_source=calibration_source,
+                        static_scales=static_scales, projected_units=projected_units)
+                    if bound_checkpoint_units:
+                        # Derived from the unit's sealed template: a deepcopy
+                        # and Tessera's wire_recipe, no tensor read.  The
+                        # writer does it behind this anchor's own files, so
+                        # the next batch's encode is not waiting on it.
+                        ledger.record(anchor, derive=functools.partial(
+                            identity_of, bound_unit=bound_checkpoint_units[anchor.qname]))
+                    else:
+                        # The producer's ``encoding_input_identity`` hashes
+                        # the resident weight and Hessian, which are device
+                        # tensors here: that stays on the encode thread.
+                        ledger.record(anchor, identity_of())
                 completed += len(anchors)
                 # Commit every joined quantum before advancing. The scalar mode
                 # keeps its existing ten-anchor flush cadence.

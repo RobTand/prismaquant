@@ -1,7 +1,24 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-10 · `perf/glm-publication-transition-optimization`. Stamps
+As of: 2026-09-10 · `perf/glm-boundary-pipeline`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-10, `perf/glm-boundary-pipeline`) for the **batch-boundary
+pipeline** (§4.10): with `--publication-overlap-bytes N` and
+`--campaign-identity-bytes M` both set, every post-encode step of a batch that
+touches no device runs on the publisher's writer thread behind that batch's
+own files -- the render/wire writes, the per-anchor identity derived from the
+unit's sealed template (`_AnchorPublicationLedger.record(anchor, derive=...)`),
+the wire receipt read back off the published file, and the journal write --
+while the encode thread starts the next batch. The writer stays CPU/IO-only by
+contract: the producer's graph capture forbids surprise device work from
+another thread, so the render score and the device-to-host copy remain on the
+encode thread, and without a bound identity the producer's
+`encoding_input_identity` (which hashes the resident weight and Hessian)
+still runs there. A refused deferred identity is a publication failure: no
+receipt, no row, and the action stops. Outputs are unchanged byte for byte
+(gates: `tests/test_tessera_publication.py`, `tests/test_tessera_bound_identity.py`,
+`tests/test_tessera_campaign_publication_cli.py`).
 
 Re-stamped (2026-09-10, `perf/glm-publication-transition-optimization`) for
 experimental `--campaign-identity-bytes N`. It is off when `N=0`. A positive

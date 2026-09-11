@@ -9,10 +9,15 @@ import pytest
 import torch
 
 
-def test_selected_campaign_hashes_only_consumed_shards_and_preserves_identity(
-    monkeypatch, tmp_path,
-):
-    """The public selected path must not hash an untouched payload shard."""
+def selected_source_fixture(monkeypatch, tmp_path, *, priced=False):
+    """One selected-source campaign on CPU: a real shard reader, a real capture.
+
+    Returns the campaign module, the full selected argv (streaming, units,
+    census, capture and its hash), and the observation lists the
+    authentication test reads.  ``priced`` gives the unit a one-rung menu so
+    the run encodes and journals one anchor instead of stopping at the
+    empty-menu refusal.
+    """
     import prismaquant
     from safetensors.torch import save_file
     from prismaquant import autoscale, cost_streaming, layer_streaming
@@ -20,7 +25,7 @@ def test_selected_campaign_hashes_only_consumed_shards_and_preserves_identity(
     from test_tessera_campaign_resume import _main_fixture, UNIT
 
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
-    campaign, _, argv, model, inputs = _main_fixture(monkeypatch, tmp_path)
+    campaign, _, argv, model, inputs = _main_fixture(monkeypatch, tmp_path, priced=priced)
     model.config = SimpleNamespace(_attn_implementation='eager')
     model.lm_head = torch.nn.Linear(256, 32, bias=False, dtype=torch.bfloat16)
     selected = model.model.layers[0].proj.weight.detach().clone()
@@ -109,12 +114,26 @@ def test_selected_campaign_hashes_only_consumed_shards_and_preserves_identity(
         groups=[dict(key='u:'+UNIT, members=[UNIT])])) )
     argv[argv.index('--model')+1] = str(source)
     argv[argv.index('--hessian')+1] = 'require'
-    assert campaign.main([*argv, '--attention-implementation', 'eager', '--streaming',
+    selected_argv = [*argv, '--attention-implementation', 'eager', '--streaming',
         '--streaming-cache-headroom-gb', '0', '--units', str(selection),
         '--calibration-census', str(census_path), '--calibration-cache', complete['path'],
         '--calibration-cache-sha256', complete['sha256'], '--nsamples', '32',
-        '--seqlen', '512', '--layer-stride', '1', '--max-act-rows', '4',
-        '--campaign-identity-bytes', '1048576']) == campaign.EXIT_EMPTY_MENU
+        '--seqlen', '512', '--layer-stride', '1', '--max-act-rows', '4']
+    state = dict(copied=copied, hashed=hashed, identities=identities, selected=selected,
+                 canonical=canonical, complete=complete, manifest_before=manifest_before,
+                 source=source)
+    return campaign, selected_argv, state
+
+
+def test_selected_campaign_hashes_only_consumed_shards_and_preserves_identity(
+    monkeypatch, tmp_path,
+):
+    """The public selected path must not hash an untouched payload shard."""
+    campaign, selected_argv, state = selected_source_fixture(monkeypatch, tmp_path)
+    copied, hashed, identities = state['copied'], state['hashed'], state['identities']
+    selected, canonical, complete = state['selected'], state['canonical'], state['complete']
+    manifest_before, source = state['manifest_before'], state['source']
+    assert campaign.main([*selected_argv, '--campaign-identity-bytes', '1048576']) == campaign.EXIT_EMPTY_MENU
     assert copied and torch.equal(copied[0], selected)
     assert identities and all(value == canonical for value in identities)
     assert hashlib.sha256(Path(complete['path']).read_bytes()).hexdigest() == complete['sha256']
