@@ -15,11 +15,19 @@ the GPU after its own load finishes.
 ## `glm_pool_read_ceiling.py` — is 204 MB/s the pool or the client?
 
 Reads disjoint prefixes of already-priced expert rows straight off the local
-pool mount at 1, 4, 8 and 16 concurrent readers, with a repeated single-reader
-arm last as a drift control. Each arm gets its own cold set, so no arm warms
-another. Coldness is established after the fact from the raidz1 members'
-`/proc/diskstats` read bytes against the arm's logical bytes, and arcstats plus
-every relevant `/sys/module/zfs/parameters` value are recorded on both sides.
+pool mount in a forward-and-back sweep -- 1, 4, 8, 16, 16, 8, 4, 1 -- so the
+spread between a reader count's two arms is the error bar on a box shared with
+other PrismaBuild work. Each arm gets its own set, so no arm warms another.
+arcstats, per-arm ARC/L2ARC counter deltas, box `/proc/diskstats`, loadavg, the
+count of other actions holding the box, and every relevant
+`/sys/module/zfs/parameters` value are recorded on both sides.
+
+**Coldness is judged from `l2_hits` against `l2_misses` per arm, plus box HDD
+read bytes against the arm's logical bytes.** The `cold` flag the script derives
+from `/proc/self/io read_bytes` is kept for the record but is **not** a valid
+test: on ZFS `read_bytes` is the ZPL's own accounting, not physical I/O, and it
+reads above the box-wide total on some arms. An arm with `l2_misses = 0` was
+served from the L2ARC NVMe and measures that device, not the raidz1.
 
 Run it through PrismaBuild, pinned to the server:
 
@@ -95,8 +103,17 @@ systemd-run --user --unit glm-arc-prewarm \
 
 ### Cost to watch
 
-ZFS ARC is not reclaimable through `MemAvailable` on Linux, so ARC growth
-lowers dl380g10's advertised `observed_capacity.mem_gb` in
-`pb-queue/workers/dl380g10.json` roughly one for one. Warming a 64 GB row
-therefore tightens CPU admission on that box for everything else. Check that
-field before and after a live warm.
+ARC growth is charged against `/proc/meminfo` `MemAvailable` on dl380g10 roughly
+one for one: a measured 49.3 GB warm took it from 145.9 GB to 88.4 GB. Warming a
+64 GB row therefore tightens memory on the fleet's only 80-CPU box for everyone
+else.
+
+`observed_capacity.mem_gb` in `pb-queue/workers/dl380g10.json` is **not** the
+field to watch. `prismabuild/pool.py:1953-1970` defines it as a windowed offer
+with foreign (PB-unscheduled) work subtracted, lagging by up to
+`--observe-samples` polls; across a measured +56 GB warm it moved 127 -> 159,
+i.e. the wrong way. Read `/proc/meminfo` on the box instead, before and after.
+
+Netdata's `mem.available` for dl380g10 is a third number again -- it adds ARC
+back as reclaimable and sat near 270 GB through the same warm. Name the source
+whenever quoting one of these.
