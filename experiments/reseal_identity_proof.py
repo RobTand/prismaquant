@@ -481,9 +481,16 @@ def run_gpu_arm(args, *, prefix):
             # --units selection covers every member; only the pricing loop's
             # resolution (tessera_campaign._main, after selection) is
             # restricted, so the selection gate still sees the whole stack.
+            # Both resolutions happen in tessera_campaign._main: the scope
+            # groups first (which the --units selection is checked against,
+            # member for member) and the pricing groups second (which the
+            # round loop pends anchors from).  Only the second is restricted.
+            calls = []
+
             def restricted_groups(*a, **kw):
                 groups = original_groups(*a, **kw)
-                if sys._getframe(1).f_code.co_name == 'select_anchor_groups':
+                calls.append(len(groups))
+                if len(calls) == 1:
                     return groups
                 return restrict_groups(groups, classes=classes, per_class=args.members_per_class)
             campaign.resolve_anchor_groups = restricted_groups
@@ -493,7 +500,7 @@ def run_gpu_arm(args, *, prefix):
                     raise PrefixComplete()
                 return original_loo(*a, **kw)
             campaign._loo_for = stop_after_prefix
-            record['group_restriction'] = dict(classes=classes, members_per_class=args.members_per_class)
+            record['group_restriction'] = dict(classes=classes, members_per_class=args.members_per_class, resolutions=calls)
         else:
             campaign._anchor_batches = lambda *a, **kw: shape_interleaved(original(*a, **kw), classes=classes, per_class=args.batches_per_class)
         try:
