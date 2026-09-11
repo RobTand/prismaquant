@@ -1276,6 +1276,14 @@ class ModelProfile(ABC):
         Default: False (single-rope path)."""
         return False
 
+    def rotary_position_ids(self, position_ids):
+        """Prepare rotary-only positions; mask and layer positions stay unchanged.
+
+        Default: pass through the caller's token positions. Multiaxis rotary
+        models can supply their native axis layout at this shared boundary.
+        """
+        return position_ids
+
     def rope_axis_for_layer_type(self, layer_type: str) -> str | None:
         """Map an attention-schedule layer type to a rope-table key.
 

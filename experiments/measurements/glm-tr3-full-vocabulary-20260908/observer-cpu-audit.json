@@ -1,0 +1,90 @@
+{
+  "action": "8da2e17659665c19c9e0ab4b4f7032c9607d9b4e976fdec698797e6002df0092",
+  "returncode": 0,
+  "cleanup_complete": true,
+  "receipt_sha256": "a57ad5d0aba5c3b88c240a86dbd052f070501197c136ee67a2d37eb902df9122",
+  "result": {
+    "bytes": 3045,
+    "sha256": "a94b4af06e5e25857f6a3b516d8d9dd9e69f1e99db8fa61b5ab2e57c77fe3fb0"
+  },
+  "source_snapshot": {
+    "commit": "cc2ca3d81dc695316afb64aafed15bd59130d106",
+    "input": {
+      "bytes": 27410492,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "95577732d6dca12e22702065d1f1c4f344a7059429f4a0fff897fb61a264a90f"
+    },
+    "parent": "da7e065687329419a8a6f38562b39619a922a6eb",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "stdout": "F                                                                        [100%]\n=================================== FAILURES ===================================\n______ test_worker_observation_refuses_promotion_hidden_from_coordinator _______\n\n    def test_worker_observation_refuses_promotion_hidden_from_coordinator():\n        from types import SimpleNamespace as S\n        config = S(model_config=S(enforce_eager=True, max_model_len=2049, logprobs_mode=\"raw_logprobs\",\n                                 multimodal_config=S(language_model_only=True)),\n                   cache_config=S(enable_prefix_caching=False, cache_dtype=\"auto\"),\n                   scheduler_config=S(enable_chunked_prefill=False, max_num_seqs=1, max_num_batched_tokens=2049),\n                   parallel_config=S(pipeline_parallel_size=1, data_parallel_size=1), speculative_config=None)\n        # A valid coordinator snapshot says nothing about worker-local mutation.\n        served.observed_engine_configuration(S(llm_engine=S(vllm_config=config)), expected_kv_cache_dtype=\"auto\")\n        worker = S(vllm_config=copy.deepcopy(config), cache_config=S(cache_dtype=\"auto\"),\n                   model_runner=S(cache_config=S(cache_dtype=\"fp8_ds_mla\"), kv_cache_dtype=torch.uint8,\n                                  model=S(_tr3_capture=S(rank=1))))\n        with pytest.raises(ValueError, match=\"worker/runner KV\"):\n>           served.observed_worker_configuration(worker, expected_kv_cache_dtype=\"auto\")\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE           AttributeError: module 'experiments.measure_glm_tr3_vllm' has no attribute 'observed_worker_configuration'. Did you mean: 'observed_engine_configuration'?\n\ntests/test_glm_tr3_full_vocab.py:324: AttributeError\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 14 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_glm_tr3_full_vocab.py::test_worker_observation_refuses_promotion_hidden_from_coordinator\n1 failed, 14 warnings in 6.16s\nbringing up nodes...\nbringing up nodes...\n\n.........................................................                [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 56 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n57 passed, 56 warnings in 7.35s\n",
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 16.763194852380952,
+        "busy_percent_peak": 33.3081312,
+        "psi_some_avg10_max": 0.18,
+        "psi_some_avg10_samples": 21,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 21,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788909065.3091707,
+      "errors": [
+        "no pqteld CSV for dl380g10 covering the window"
+      ],
+      "host": "dl380g10",
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata",
+      "start_unix": 1788909046.749515
+    },
+    "finished_unix": 1788909065.3091707,
+    "host": "dl380g10",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 10,
+      "processes_unreadable": 0,
+      "rchar": 826727147,
+      "read_bytes": 35729408,
+      "source": "proc_io",
+      "syscr": 78862,
+      "syscw": 1038,
+      "wchar": 2393198,
+      "write_bytes": 3798486
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 0,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 125190144,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.023037000000000085,
+      "user_seconds": 0.12720299999999973,
+      "voluntary_context_switches": 3
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 37.317761,
+      "cpu_system_seconds": 2.865212,
+      "cpu_user_seconds": 34.452549,
+      "memory_current_bytes": 38141952,
+      "memory_peak_bytes": 1424953344,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788909046.749515,
+    "wall_seconds": 18.55965566635132
+  },
+  "tested_file_sha256": {
+    "experiments/build_glm_tr3_teacher.py": "85138571a3dbbffc6cee9ba52c18906751a0e52018902d69f8fac07d34dfec94",
+    "experiments/measure_glm_tr3_vllm.py": "e4f3477b7d136c1d213c8527c69e848cc476ab8397309f7a59a31ca8d431c62a",
+    "experiments/glm_tr3_full_vocab.py": "1b2ad03e8ab70615b6d4ed04c40b73ac527cab8a03759b41e6f1459d1ab83db3",
+    "experiments/authenticate_glm_tr3_source.py": "78783f838e4d7385c37cd23cacac47c5c118f56ac583284898911f5a6e742614",
+    "tests/test_glm_tr3_full_vocab.py": "184de3b48d3df494f8b0db7fdd73736a5dbc2f65f484ee143854178e54a2f16c"
+  },
+  "source_bundle_verified": true
+}

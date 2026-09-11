@@ -54,6 +54,20 @@ against it, so a seeded row adopts only bytes it would itself have encoded.
 The adaptive state needs nothing else -- ``grid``, the leave-one-out error and
 the stop reason are all recomputed from the anchor set at the top of every
 round -- so adopting the anchors resumes the group exactly where it stood.
+
+Rows planned before the progress contract
+-----------------------------------------
+Nothing migrates in place.  A row already in ``ready/`` was sealed with its
+own ``execution_timeout_s``; that request is immutable and stays exactly as
+it is, still bounded by the number it was submitted with.  The stall policy
+is sealed too, so a plan made after it produces different action keys, and a
+key that has never been priced is not a cache hit.  What carries the work
+across is the journal rather than the queue: the new row resumes from the
+same identity-bound ``cost_stage_checkpoint`` directory (or is handed the
+monolith's anchors with ``--seed-workspace`` / ``--seed-checkpoint``), so the
+anchors already committed under the old key are re-adopted rather than
+re-measured.  Withdraw the old rows once the new ones are running; do not
+edit them.
 """
 from __future__ import annotations
 
@@ -305,7 +319,30 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
     return admissible, declined
 
 
-def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int,
+#: The quiet a pricing row is allowed in each phase, in the order it walks
+#: them. Chosen with margin from a least-squares fit of ``elapsed_s`` against
+#: committed batches over the 23 completed 864-unit GLM pricing rows in the
+#: fleet's terminal records (2026-09-10) gives 18.6728 s of wall clock per
+#: committed batch and an 836.1 s non-pricing intercept; the greatest absolute
+#: residual is 160.5 s. The retained-record extraction and its exact row and
+#: terminal hashes are committed in ``docs/measurements/pq480_progress_grace_fit_2026-09-10.md``.
+#:
+#: So: ``pricing`` permits 48.2 fitted commit intervals, and ``startup`` and
+#: ``finalize`` each exceed the fitted non-pricing interval including its
+#: greatest residual (996.6 s). The sum, 6300 s, is the longest a row can
+#: run having committed nothing -- less than half the 14,400 s that killed
+#: row-0050 and row-0065 while they were committing anchors every 18 s.
+#:
+#: There is no flag to override this, on purpose: the number is a measurement
+#: of one workload and a flag would invite a guess.  A campaign whose rows
+#: measurably behave differently edits its planned manifest -- ``plan`` writes
+#: ``progress_phases`` into every row and ``submit`` reads it back -- or
+#: re-fits this constant against its own terminal records.
+CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
+
+
+def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
+         progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
          module: str = "prismaquant.tessera_campaign") -> dict:
     env = dict(spec['env'])
     policy_flag = '--streaming-capture-policy'
@@ -330,13 +367,25 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int,
         "demand": {"gpu": 1, "cpu": int(spec.get("cpus", 4)), "mem_gb": int(mem_gb)},
         "env": env,
         "tags": list(spec.get("tags", ["gb10"])),
-        "timeout_s": int(timeout_s),
         # A row is one memoized action and a retry re-runs the same argv over
         # the same checkpoint, which is exactly what the journal is for.  The
         # policy is sealed into the action key, so it is spelled even though
         # pbcampaign submits every row detached and cannot retry one itself.
         "retry_safe": True,
     }
+    if progress_phases:
+        # What bounds this row is whether it is still committing anchors, not
+        # how long it has been running.  ``tessera_campaign`` reports each
+        # journal flush through ``prismaquant.prismabuild_progress``; PB then
+        # applies no total-duration limit while the count advances, and ends
+        # the row within the declared allowance when it stops.
+        row["progress_phases"] = [f"{name}={grace}" for name, grace in progress_phases]
+    if timeout_s is not None:
+        # Only when somebody asked for one.  A blanket default here is what
+        # sealed 14,400 s into every pricing row and killed two of them mid
+        # round (PB #480); the ceiling a row needs is not a property of the
+        # dispatcher.
+        row["timeout_s"] = int(timeout_s)
     return row
 
 
@@ -359,6 +408,9 @@ def cmd_census(args) -> int:
          *spec["campaign_argv"]],
         mem_gb=_row_memory_gb(spec, [], {}),
         timeout_s=int(args.timeout_s),
+        # Census exits before the pricing journal/reporter exists.  Its
+        # explicit wall-clock deadline is the only bound it declares.
+        progress_phases=(),
     )
     manifest.write_text(json.dumps([row], indent=2) + "\n")
     if '--streaming' in spec['campaign_argv']:
@@ -387,7 +439,10 @@ def cmd_capture(args) -> int:
         "--capture-calibration-out", str(workspace / "calibration-cache"),
         *spec["campaign_argv"]],
         mem_gb=_row_memory_gb(spec, sorted(census["counts"]), census),
-        timeout_s=int(args.timeout_s))
+        timeout_s=int(args.timeout_s),
+        # Capture is likewise not an anchor-pricing row and makes no durable
+        # anchor-counter reports.
+        progress_phases=())
     manifest.write_text(json.dumps([row], indent=2) + "\n")
     if '--streaming' in spec['campaign_argv']:
         (workspace/'capture-resources.json').write_text(json.dumps(
@@ -417,6 +472,12 @@ def _pbcampaign(manifest: Path, *, wait_s: int, receipts: Path | None = None) ->
     every row reports a key, the host it executed on and its exit status, and
     ``merge`` refuses without it.  A submission acknowledgement is not a result.
     """
+    # No ``--transport``: the fleet's own default carries these rows, and the
+    # rows say what they need.  Every row declares progress phases, which
+    # ``pbcampaign`` refuses at manifest load on SLURM because the stall
+    # watchdog is the pull-queue worker's.  Pinning ``--transport pool`` here
+    # would instead submit into a queue a cut-over fleet might not drain; the
+    # refusal is the outcome we want, and it names the reason.
     command = [sys.executable, str(PBCAMPAIGN), "--wait-s", str(wait_s), str(manifest)]
     print("[dispatch] " + " ".join(command), flush=True)
     completed = subprocess.run(command, check=False, text=True,
@@ -687,7 +748,8 @@ def cmd_plan(args) -> int:
                 argv += ["--seed-wire-dir", str(args.seed_wire_dir)]
         rows.append(_row(spec, argv,
                          mem_gb=_row_memory_gb(spec, members, census, selected_source=selected_source),
-                         timeout_s=int(args.timeout_s)))
+                         timeout_s=(None if args.timeout_s is None
+                                    else int(args.timeout_s))))
         planned.append({"row_id": row_id, "groups": bundle, "members": sorted(members),
                         "dir": str(row_dir), "units": str(units_path),
                         **({'seed': row_seed} if row_seed is not None else {}),
@@ -1458,7 +1520,15 @@ def main(argv=None) -> int:
                            "that does not fit is left out of the manifest and "
                            "recorded in the plan, and only a plan with no "
                            "admissible row at all refuses.")
-    plan.add_argument("--timeout-s", type=int, default=14400)
+    plan.add_argument("--timeout-s", type=int, default=None,
+                      help="a hard wall-clock deadline for every row, ending "
+                           "it whatever it is doing. Unset by default: rows "
+                           "declare the phases they walk and the quiet they "
+                           "are allowed in each instead, so a row that keeps "
+                           "committing anchors keeps running and one that "
+                           "stops ends within "
+                           f"{sum(g for _, g in CAMPAIGN_PROGRESS_PHASES)}s. "
+                           "Set it only to cap a row's cost deliberately")
     plan.add_argument("--stack-sample", type=int, default=None,
                       help="price each routed stack from this many experts "
                            "per role, drawn proportional to the probe's "

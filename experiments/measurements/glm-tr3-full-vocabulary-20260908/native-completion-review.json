@@ -1,0 +1,58 @@
+{
+  "schema": "prismaquant.tr3_native_review/1",
+  "reviewed_utc": "2026-09-09",
+  "scope": "Read-only audit of retained native artifacts, logs, listed producer source hashes and KL summaries; no new native execution.",
+  "full_panel": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/tr3-exl3-full-02/full-vocabulary-kl.json",
+    "sha256": "aec1930207bd18e680727ab4fac09515f30462443946dc8a87b723405f8d6ee5",
+    "bytes": 1730734,
+    "windows": 25,
+    "positions": 51175,
+    "mean": 0.02446462473923544,
+    "source_commit": "ddc9aac80cda44c519d947b8468a0577a3ec17cb",
+    "listed_source_hashes_verified": true,
+    "max_prompt_error": 5.9569720178842545e-06,
+    "log": {
+      "path": "/home/rob/tmp/exl3-inventory/offline-tp2/launch-full25.log",
+      "sha256": "e3ea5fee3d261aa4a847b60261d385e03fa5c5a15579bb16ebb7816807977a7b",
+      "head_exit": 0,
+      "limitation": "Launcher reports exit 0; shutdown force-kill and leaked IPC warnings retained in log."
+    }
+  },
+  "qualification": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/tr3-exl3-full-02/native-hook-qualification.json",
+    "sha256": "a92681e51cd5a361b7fd9ca139c217f328ec07e248c4c01553935f4c1f75d574",
+    "bytes": 300437,
+    "windows": 1,
+    "positions": 2047,
+    "mean": 0.047579063324188334,
+    "source_commit": "ddc9aac80cda44c519d947b8468a0577a3ec17cb",
+    "listed_source_hashes_verified": true,
+    "max_prompt_error": 2.7408532332628965e-06,
+    "log": {
+      "path": "/home/rob/tmp/exl3-inventory/offline-tp2/launch-qual09.log",
+      "sha256": "6c680ded216c4680a83e8277a2f6e6cd75bc1dc83bd348e9c0cb9ac9f8cc2e7f",
+      "head_exit": 0,
+      "limitation": "Launcher reports exit 0; shutdown force-kill and leaked IPC warnings retained in log."
+    }
+  },
+  "repeatability": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/tr3-exl3-repeatability-03/repeatability.json",
+    "sha256": "3ffd86be50092261d31cca61877822cb007d327207b41d2d52d4d605e41090a6",
+    "bytes": 42004958,
+    "means": [
+      0.04621361206774199,
+      0.04722864030575036,
+      0.05739063942320076,
+      0.05690082978508307
+    ],
+    "source_commit": "632e2324349bb122cbf25514ee6ecdee8126c91e",
+    "interpretation": "Four identical final-0000 requests in one engine vary; issue #468 remains open; no stable comparator or paired win established."
+  },
+  "binding_changes": {
+    "count": 66,
+    "scope": "Only positive allocated_kv_cache.shape[0] for the three known native backends"
+  },
+  "latest_preflight": "tr3-exl3-repeatability-04/preflight.log ends with nothing was launched; no repeatability04 result exists.",
+  "new_source_limit": "PR diagnostic edits and main integration require fresh native qualification before subsequent scoring; these historical receipts qualify only ddc9aac8."
+}

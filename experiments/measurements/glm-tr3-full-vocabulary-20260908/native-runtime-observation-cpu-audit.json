@@ -1,0 +1,84 @@
+{
+  "action": "e85fa6fc52495270e3b7fef4129c4db0d0804cf1fbf9ebb9f47928633ec6c373",
+  "returncode": 0,
+  "cleanup_complete": true,
+  "receipt_sha256": "48146cf4643a38c61493a5c2561f69f366c992399f5c74717bc7fc3be16e4a47",
+  "result": {
+    "bytes": 621,
+    "sha256": "759c46c0265a6f26ba338fcd5bd038a09972fd935156973769ddf5bc081967f3"
+  },
+  "source_snapshot": {
+    "commit": "7f738982a0d8ca3a4a88b3bd02937c3ddd2fdfb8",
+    "input": {
+      "bytes": 27443209,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "c53836a92b5b56e24a38f3b8e0d9b10969aca7cad7a240a204c6cb610200a151"
+    },
+    "parent": "6e3cf16e4d91468e2e512308058a0203b43ce188",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "stdout": "bringing up nodes...\nbringing up nodes...\n\n...........................................................              [100%]\n=============================== warnings summary ===============================\n../../../../venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: 112 warnings\n  /home/rob/venvs/pq-cpu312/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n59 passed, 112 warnings in 9.73s\n",
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 6.99772012,
+        "busy_percent_peak": 12.107174,
+        "psi_some_avg10_max": 8.64,
+        "psi_some_avg10_samples": 14,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 15,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1788914410.100084,
+      "errors": [
+        "no pqteld CSV for dl380g10 covering the window"
+      ],
+      "host": "dl380g10",
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata",
+      "start_unix": 1788914397.5975616
+    },
+    "finished_unix": 1788914410.100084,
+    "host": "dl380g10",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 13,
+      "processes_unreadable": 0,
+      "rchar": 49633474,
+      "read_bytes": 0,
+      "source": "proc_io",
+      "syscr": 2340,
+      "syscw": 11,
+      "wchar": 868,
+      "write_bytes": 472
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 1,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 131657728,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.017849999999999977,
+      "user_seconds": 0.11007099999999959,
+      "voluntary_context_switches": 3
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 53.690618,
+      "cpu_system_seconds": 4.211068,
+      "cpu_user_seconds": 49.47955,
+      "memory_current_bytes": 3366912,
+      "memory_peak_bytes": 2737958912,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1788914397.5975616,
+    "wall_seconds": 12.502522468566895
+  },
+  "compile_check": "py_compile experiments/glm_tr3_full_vocab.py experiments/measure_glm_tr3_vllm.py executed after pytest under the same successful PB action",
+  "placement": "dl380g10: scoped pq-cpu312 environment is installed there; portable predecessor failed on Sparky before collection, missing executable exit127."
+}

@@ -2453,6 +2453,9 @@ def _compute_position_embeddings(base_model: nn.Module,
     rotary = _get_rotary(base_model)
     if rotary is None:
         return None
+    prepare_positions = getattr(profile, "rotary_position_ids", None)
+    if prepare_positions is not None:
+        position_ids = prepare_positions(position_ids)
     layer_types = getattr(rotary, "layer_types", None)
     with torch.no_grad():
         if layer_types:
