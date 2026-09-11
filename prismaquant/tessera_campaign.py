@@ -263,7 +263,7 @@ def require_seed_family_scope(name, state, *, family_restriction, structure_by_u
 
 
 def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
-                    snap) -> list[int]:
+                    snap, exhaustive_band: bool = False) -> list[int]:
     """Where round one puts this family's anchors on this group's grid.
 
     Without a band the schedule spans the family's whole realisable range,
@@ -279,11 +279,16 @@ def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
     around the rates the artifact will actually use.
 
     A family whose realisable rungs do not reach the band gets no anchor here
-    and is left to say so, rather than being priced at a rate outside it.
+    and is left to say so, rather than being priced at a rate outside it.  An
+    explicit research acquisition may instead request every legal rung in a
+    declared band.  That mode remains bounded by the band's realisable grid;
+    it does not widen a family or change serving admission.
     """
     if not allowed:
         return []
     if band is None:
+        if exhaustive_band:
+            raise RuntimeError("an exhaustive rate grid requires --rate-band")
         return sorted({r for r in (snap(rate, allowed) for rate in
                                    anchor_schedule(allowed[0], allowed[-1], anchors))
                        if r is not None})
@@ -291,6 +296,8 @@ def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
     inside = [rate for rate in allowed if lo <= int(rate) <= hi]
     if not inside:
         return []
+    if exhaustive_band:
+        return sorted(set(inside))
     return sorted({snap(inside[0], allowed), snap(inside[-1], allowed)} - {None})
 
 
@@ -5013,6 +5020,10 @@ def _main(argv, *, source_scope) -> int:
                          "range, and an audited unit gets a third inside it. "
                          "Unset reproduces every artifact built before "
                          "2026-09-06.")
+    ap.add_argument("--exhaustive-rate-grid", action="store_true",
+                    help="Research-only: in the declared --rate-band, measure every "
+                         "legal family rung in round one. This changes neither the "
+                         "family's legal domain nor serving/export admission.")
     ap.add_argument("--anchor-budget", type=int, default=12,
                     help="max anchors per (fused group, family) surface. The "
                          "adaptive loop keeps splitting the worst-predicted "
@@ -5098,6 +5109,8 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--calibration-cache-sha256", default=None,
                     help="Expected capture manifest hash, sealed by the campaign planner.")
     args = ap.parse_args(argv)
+    if args.exhaustive_rate_grid and parse_rate_band(args.rate_band) is None:
+        ap.error("--exhaustive-rate-grid requires --rate-band")
     from .perturbed_x_cache import normalize_verified_activation_load
     try:
         args.capture_load_policy = normalize_verified_activation_load(args.capture_load_policy)
@@ -6143,7 +6156,8 @@ def _main(argv, *, source_scope) -> int:
                     grid = sorted(set.intersection(*member_rates.values())) if members else []
                     if round_index == 1:
                         want = round_one_rates(allowed, band=rate_band,
-                                               anchors=args.anchors, snap=_snap)
+                                               anchors=args.anchors, snap=_snap,
+                                               exhaustive_band=args.exhaustive_rate_grid)
                         extra = (None if not audit_units else
                                  audit_extra_rate(allowed, want, snap=_snap))
                         for m in members:

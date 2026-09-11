@@ -3,6 +3,15 @@
 As of: 2026-09-11 · `codex/sparse-rate-20260911`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for the opt-in complete
+rate-grid experiment and deterministic adaptive sampler (§4.10). The campaign
+can measure every legal rung in an explicit band through its existing encoder,
+cache and checkpoint path. The separate research sampler requests additional
+measurements using observed values only; sentinel agreement records empirical
+evidence and does not certify unseen rungs. Complete-curve audits keep families,
+activation contracts and recipe segments separate. Production interpolation
+and serving admission retain their existing contracts.
+
 Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for opt-in endpoint
 curvature in the receipt-bound research replay (§4.10). A small shared pilot
 fits curvature conditioned on each unit's two measured endpoints. Binding
@@ -8861,6 +8870,23 @@ and available-rung limits still apply; fewer than three measurements cannot
 close the leave-one-out gate and report its error as null.
 
 **Cost is an anchor campaign, not an enumeration** (`prismaquant/tessera_campaign.py`).
+
+The opt-in `--exhaustive-rate-grid --rate-band lo,hi` experiment measures every
+legal family rung in the declared band. It reuses the campaign's group grid,
+resident encoder, journal and publication path. It neither extends the legal
+rate domain nor attests a serving route. Outside this explicit experiment,
+the campaign retains its sparse adaptive policy.
+
+`prismaquant.adaptive_anchored_shape.AdaptiveAnchoredCurve` is a separate
+research acquisition state machine over a declared finite rate roster. It
+starts from measured endpoints and requests one midpoint or two third-point
+checks per interval. Failed checks split the interval; accepted checks retain
+their predictions made before measurement. Value and log2 PWL modes preserve
+measured anchors exactly. Budget exhaustion leaves unresolved intervals
+explicit, while nonpositive or nonmonotone observations refuse interpolation.
+The complete-curve study audits only points never revealed to the sampler.
+Its offline all-truth minimum-anchor oracle is a diagnostic lower bound for
+the same interpolation class, not a deployable measurement policy.
 
 The separate `tools/tessera_surface_replay.py` research command can compare
 the existing PWL model with shared-shape transfer from one/two anchors. It
