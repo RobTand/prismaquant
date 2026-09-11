@@ -1,6 +1,6 @@
 # Sparse Tessera curve replay and the activation/prefill axis
 
-Status: opt-in research replay, 2026-09-05. This capability emits a report and
+Status: opt-in research replay, updated 2026-09-11. This capability emits a report and
 measurement requests, not allocator costs or serving qualification. The normal
 Tessera campaign retains its piecewise log-linear interpolation and adaptive
 measurement policy.
@@ -38,6 +38,50 @@ exact. Invalid costs, unsupported keys and insufficient design rank refuse;
 there is no fabricated epsilon loss or inherited Gridbook modulo-four term.
 The strict `anchored_cost` AURA wrappers keep their currency, render-receipt
 and segment checks.
+
+## Two-endpoint conditional curvature
+
+`fit_endpoint_curvature` fits a shared, degree-one or degree-two polynomial
+from pilot measurements. For a unit's positive endpoint costs L and H and
+normalized rate t, the value-mode predictor is
+
+```text
+z = standardize([log2(L), log2(H)-log2(L), t])
+D(t) = (1-t)*L + t*H + L*t*(1-t)*P(z)
+```
+
+Standardization and five ridge/Huber fitting iterations use pilot observations
+only. Every pilot unit supplies both endpoints and at least one interior;
+the fit needs at least twelve interior observations. Log2 mode applies the
+same endpoint-vanishing correction to the log2 chord. No loss floor is
+invented. `EndpointCurvatureModel.bind(L, H)` expands P once into three
+coefficients in t; the resulting frozen curve uses Horner arithmetic for
+arbitrary in-range queries. It returns actual endpoints exactly and refuses
+extrapolation, nonpositive predictions and unrepresentable arithmetic.
+
+This is an opt-in alternative to the centered-log shape. A replay segment
+selects it with `shape_model: {kind: endpoint_curvature, mode: value, degree: 1}`
+and omits `features_by_key`, since this model owns its feature basis. Its
+held-out anchors must be the two declared domain endpoints, and
+`refit_after_audit` must be false. Existing currency/segment checks, independent
+audits, monotonicity checks, measured overlays and fused-group measurement
+requests apply unchanged. A rate measured in pilots is held out only by unit;
+an unobserved pilot rate is held out by both unit and rate.
+
+The offline study tools `experiments/sparse_rate_dataset.py` and
+`experiments/sparse_rate_models.py` bind a compact measured-only dataset to
+the original files and calibration contract. The study caps shared pilot
+units before reading their interior values, uses whole-layer development
+folds, and reserves `layer % 5 == 3` for a separately invoked frozen-choice
+evaluation. Saved fitted models expose reusable coefficients. These artifacts
+are scalar output-MSE evidence, not joint AURA, exact wire predictions or
+serving admission. Sparse interior measurements from an adaptive campaign
+are not a uniform sample of its full rate span.
+
+The [2026-09-11 frozen-layer evaluation](../measurements/sparse-rate-interpolation-2026-09-11.md)
+passes its declared scalar screen for expert gate/up projections and fails it
+for down projections. It does not support a universal two-measurement cap or
+an achieved campaign-time reduction.
 
 ## Replay inputs and output
 

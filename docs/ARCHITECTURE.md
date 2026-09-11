@@ -1,7 +1,16 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-11 · `claude/row-head-parallel`. Stamps
+As of: 2026-09-11 · `codex/sparse-rate-20260911`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for opt-in endpoint
+curvature in the receipt-bound research replay (§4.10). A small shared pilot
+fits curvature conditioned on each unit's two measured endpoints. Binding
+expands the fitted polynomial once; scalar queries use Horner arithmetic,
+preserve the endpoints exactly, and refuse extrapolation or invalid values.
+The existing replay owns currency/recipe boundaries, frozen audit errors,
+measured overlays and group measurement requests. This adds no production
+interpolation default, allocator price, runtime qualification or serving cell.
 
 Re-stamped (2026-09-11, `claude/row-head-parallel`) for the **row head on
 threads** (§4.10). With `--campaign-identity-bytes M` set,
@@ -8804,8 +8813,12 @@ The separate `tools/tessera_surface_replay.py` research command can compare
 the existing PWL model with shared-shape transfer from one/two anchors. It
 binds current campaign payload and journal identities, checks recorded wire
 hashes, and keeps activation/recipe segments distinct. A successful replay is
-not fresh source/producer attestation or serving qualification. Details and
-the pending joint-AURA/prefill extension (#237) are in
+not fresh source/producer attestation or serving qualification. The optional
+`shape_model.kind=endpoint_curvature` fits an endpoint-conditioned value or
+log2 polynomial from a shared pilot. It requires two measured domain endpoints
+per held-out unit, separate audits, and no post-audit refit. The original
+centered-log shape remains the default. Details and the boundary with the
+separate opt-in joint-AURA/runtime path (#237) are in
 [`docs/design/tessera_anchored_replay.md`](design/tessera_anchored_replay.md).
 
 Resume is an identity check, not a name match. The JSON checkpoint manifest
