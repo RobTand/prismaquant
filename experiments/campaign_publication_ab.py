@@ -48,7 +48,7 @@ def plan_order(plan):
     return order
 
 
-def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0):
+def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None):
     """Write the plan.  ``identity_bytes`` > 0 adds the pipelined arms.
 
     v1 order was ``[0, B, B, 0]`` (synchronous, overlap, overlap,
@@ -57,6 +57,7 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0):
     overlap-only baseline, the pipelined arm twice, and the baseline again so
     the box's drift across the run brackets both.  Memory is computed for
     each distinct pair through the same dispatcher plan a row is admitted on.
+    ``order`` overrides the arm list for a repeat run.
     """
     from tools.dispatch_tessera_campaign import load_spec, _streamed_resource_plan
     spec = load_spec(spec_path)
@@ -78,6 +79,13 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0):
         raise ValueError('identity bytes cannot be negative')
     order = ([(0, 0), (budget, 0), (budget, identity), (budget, identity), (budget, 0)]
              if identity else [(0, 0), (budget, 0), (budget, 0), (0, 0)])
+    if order_override := order:
+        # A repeat of chosen arms (e.g. one more pipelined arm on a quiet
+        # server); its parity is checked offline against the original run's
+        # synchronous arm, since ``run`` compares only within one plan.
+        order = [tuple(int(v) for v in pair) for pair in order_override]
+        if any(len(pair) != 2 or min(pair) < 0 for pair in order):
+            raise ValueError('an arm is an (overlap_bytes, identity_bytes) pair')
     for pair in sorted(set(order)):
         selected = copy.deepcopy(spec)
         selected['campaign_argv'] += arm_flags(*pair)
