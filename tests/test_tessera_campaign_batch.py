@@ -155,3 +155,48 @@ def test_requested_batch_refuses_old_producer_before_loading_model(monkeypatch, 
     with pytest.raises(RuntimeError, match="no encode_linears API"):
         campaign.main(["--model", "must-not-load", "--out", str(tmp_path / "cost.pkl"),
                        "--cache-dir", str(tmp_path / "cache"), "--anchor-batch-size", "4"])
+
+
+def test_batches_are_unit_major_so_a_batch_wide_memo_reuses_each_factorization():
+    """PrismaQuant #389: rung-major emission made every (unit, rung) refactorize.
+
+    The memo the campaign builds holds ``encoder_memo_capacity`` entries,
+    which the plan sizes to the batch width, and it is keyed on the unit (the
+    scale plane is constant across a family's rungs).  Emitting every batch
+    of rung A before any batch of rung B put 108 batches of other units
+    between one unit's rungs, so an 8-slot memo hit nothing.  Walking the
+    emitted order through a memo of exactly the batch width must miss once
+    per unit, not once per (unit, rung), while every batch still holds one
+    ``(family, rung, shape)`` key.
+    """
+    import functools
+
+    units = [f"model.layers.3.mlp.experts.{i}.up_proj" for i in range(20)]
+    weights = {name: torch.empty((2048, 4096)) for name in units}
+    weights["dense"] = torch.empty((16, 256))
+    rungs = (832, 960, 1088)
+    pending = [(name, "TESSERA_E4M3_K1", rung) for name in units for rung in rungs]
+    pending += [("dense", "TESSERA_E4M3_K1", 832), ("dense", "TESSERA_E4M3_K1", 1088)]
+    batch_size = 8
+    batches = campaign._anchor_batches(
+        pending, weights=weights, expert_members=set(units), batch_size=batch_size)
+    assert sorted(item for batch in batches for item in batch) == sorted(pending)
+    for batch in batches:
+        assert len({(family, rung, tuple(weights[name].shape)) for name, family, rung in batch}) == 1
+        assert len(batch) <= batch_size
+    misses = []
+
+    @functools.lru_cache(maxsize=batch_size)
+    def for_unit(name):
+        misses.append(name)
+        return name
+
+    for batch in batches:
+        for name, _family, _rung in batch:
+            for_unit(name)
+    assert misses == units + ["dense"], misses
+    assert for_unit.cache_info().hits == len(pending) - len(units) - 1
+    # The rungs of one chunk are consecutive, in the order the round pended them.
+    heads = [(batch[0][0], batch[0][2]) for batch in batches]
+    assert heads[:3] == [(units[0], 832), (units[0], 960), (units[0], 1088)]
+    assert heads[3:6] == [(units[8], 832), (units[8], 960), (units[8], 1088)]
