@@ -209,12 +209,28 @@ class _SilentObserver:
 # comparator
 # ---------------------------------------------------------------------------
 
-def substitute_pins(identity, *, old, new):
+def substitute_pins(identity, *, old, new, drop=()):
+    """The identity the migration will write: new pins, dropped settings gone.
+
+    ``drop`` is the pins file's ``drop_settings``: scheduling knobs the new
+    source no longer binds. ``reseal_campaign_identity.migrate`` pops exactly
+    these from ``identity['settings']``, so the proof has to pop them too --
+    otherwise it compares the produced row against an identity the migration
+    is not going to produce, and a correct run fails on a field neither side
+    disputes. A name that is not bound is refused rather than ignored, so a
+    typo in the pins file cannot quietly weaken the comparison.
+    """
     identity = json.loads(json.dumps(identity))
     for key in PIN_KEYS:
         if identity.get(key) != old[key]:
             raise ValueError(f'stored identity {key}={identity.get(key)} is not the declared old pin {old[key]}')
         identity[key] = new[key]
+    settings = identity.get('settings') or {}
+    missing = [key for key in drop if key not in settings]
+    if missing:
+        raise ValueError(f'stored identity binds no setting(s) {missing}, so they cannot be dropped')
+    for key in drop:
+        settings.pop(key)
     return identity
 
 
@@ -276,7 +292,8 @@ def load_units(root, manifest, qnames):
                              identity_sha256=manifest['identity_sha256']) for name in qnames}
 
 
-def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cost=False):
+def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cost=False,
+                 drop_settings=()):
     """Compare a produced run against the stored row it re-encodes.
 
     Returns a result dict with ``ok`` and the cell table.  Nothing here is
@@ -287,11 +304,13 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256, canonical_json
     from prismaquant.production_weight_cache import first_identity_difference
     produced, stored = Path(produced), Path(stored)
+    drop_settings = tuple(drop_settings)
     result = dict(schema=SCHEMA, kind='comparison', produced=str(produced), stored=str(stored),
-                  old_pins=dict(old), new_pins=dict(new), failures=[], cells=[])
+                  old_pins=dict(old), new_pins=dict(new), dropped_settings=list(drop_settings),
+                  failures=[], cells=[])
     fail = result['failures'].append
     pm, sm = load_manifest(produced), load_manifest(stored)
-    expected_identity = substitute_pins(sm['identity'], old=old, new=new)
+    expected_identity = substitute_pins(sm['identity'], old=old, new=new, drop=drop_settings)
     difference = first_identity_difference(pm['identity'], canonical_json(expected_identity, where='expected identity'))
     if difference is not None:
         fail(dict(what='identity', field=difference[0], produced=str(difference[1])[:300], expected=str(difference[2])[:300]))
@@ -518,7 +537,8 @@ def run_gpu_arm(args, *, prefix):
         campaign.main(command)
         expected_cells = args.expected_cells
     record['campaign_finished_unix'] = time.time()
-    comparison = compare_rows(run, args.stored_row, old=old, new=new, expected_cells=expected_cells, require_cost=not prefix)
+    comparison = compare_rows(run, args.stored_row, old=old, new=new, expected_cells=expected_cells,
+                              require_cost=not prefix, drop_settings=args.drop_setting)
     record.update(comparison=comparison, ok=comparison['ok'], finished_unix=time.time(), status='finished')
     write_json(out/'result.json', record)
     print(json.dumps(dict(ok=record['ok'], cells=len(comparison['cells']), strata=comparison['strata'],
@@ -579,7 +599,7 @@ def run_compare(args):
     bind_prismaquant(args.prismaquant_root)
     old, new = _pins(args)
     result = compare_rows(args.produced, args.stored_row, old=old, new=new, expected_cells=args.expected_cells,
-                          require_cost=args.require_cost)
+                          require_cost=args.require_cost, drop_settings=args.drop_setting)
     write_json(args.out, result)
     print(json.dumps(dict(ok=result['ok'], cells=len(result['cells']), strata=result['strata'], failures=result['failures'][:4])), flush=True)
     return 0 if result['ok'] else 1
@@ -588,6 +608,10 @@ def run_compare(args):
 def _add_pins(parser):
     for name in ('old-prismaquant-pin', 'old-encoder-pin', 'new-prismaquant-pin', 'new-encoder-pin'):
         parser.add_argument('--'+name, required=True)
+    parser.add_argument('--drop-setting', action='append', default=[], metavar='NAME',
+                        help='a settings key the migration drops (the pins file\'s '
+                             'drop_settings); repeatable. The expected identity has it '
+                             'removed, so the arm compares against what migrate writes')
 
 
 def main(argv=None):
