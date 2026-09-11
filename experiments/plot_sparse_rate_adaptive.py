@@ -139,9 +139,9 @@ def plot_family(ax_top, ax_bottom, label: str, curve_path: Path, report_path: Pa
                         f"final anchors: {len(set(anchors))}\n"
                         f"held-out screen: {verdict}\n"
                         f"p99 {final_p99:.2f}% / max {final_max:.2f}%",
-                        transform=ax_top.transAxes, ha="right", va="bottom", fontsize=7.5,
+                        transform=ax_top.transAxes, ha="right", va="bottom", fontsize=7.5, zorder=10,
                         color="#176b4d" if verdict == "PASS" else "#a33",
-                        bbox={"facecolor": "white", "alpha": .86, "edgecolor": "none", "pad": 2.5})
+                        bbox={"facecolor": "white", "alpha": .96, "edgecolor": "none", "pad": 2.5})
     counts, p99s, maxs = [], [], []
     for item in snapshots:
         p99, maximum = metrics(item)
