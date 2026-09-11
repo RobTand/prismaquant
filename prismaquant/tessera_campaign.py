@@ -696,7 +696,22 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
 
 
 def _anchor_batches(pending, *, weights, expert_members, batch_size):
-    """Bound compatible expert encodes inside this action; never assign hosts."""
+    """Bound compatible expert encodes inside this action; never assign hosts.
+
+    Membership is by ``(family, rung, shape, dtype, device)`` for expert
+    units and by ``(unit, family, rung)`` otherwise, as before.  The ORDER of
+    the batches is unit-major: the batches of one compatible key differ only
+    by rung, and the chunk at one position holds the same members at every
+    rung when the round pended every member at every rate (round one does,
+    per member in rate order), so consecutive batches encode the same units
+    at successive rungs.  The encoder memo is sized to the batch width
+    (``encoder_memo_capacity``), so that order is what lets a unit's block-LDL
+    factorization be reused across its rungs instead of refactorized once per
+    (unit, rung) with 864 batches of other units in between
+    (RobTand/prismaquant#389).  Rung-major emission -- every batch of rung A,
+    then every batch of rung B -- is what the insertion-ordered grouping
+    produced before, and with the memo at the batch width it hit nothing.
+    """
     if batch_size < 1:
         raise ValueError("anchor batch size must be positive")
     if batch_size == 1:
@@ -705,11 +720,24 @@ def _anchor_batches(pending, *, weights, expert_members, batch_size):
     for item in pending:
         name, family, rung = item
         weight = weights[name]
-        key = ((family, rung, tuple(weight.shape), weight.dtype, weight.device)
-               if name in expert_members else (name, family, rung))
-        groups.setdefault(key, []).append(item)
-    return [group[start:start + batch_size] for group in groups.values()
-            for start in range(0, len(group), batch_size)]
+        if name in expert_members:
+            base = (family, tuple(weight.shape), weight.dtype, weight.device)
+            key = (family, rung, *base[1:])
+        else:
+            base = key = (name, family, rung)
+        groups.setdefault(key, (base, []))[1].append(item)
+    # Sort key: the base (the key minus its rung) in first-appearance order,
+    # then the chunk position, then the rung in first-appearance order -- so
+    # chunk 0 of every rung of one base precedes chunk 1 of any of them.
+    base_rank, key_rank, chunks = {}, {}, []
+    for key, (base, group) in groups.items():
+        base_rank.setdefault(base, len(base_rank))
+        key_rank[key] = len(key_rank)
+        for position, start in enumerate(range(0, len(group), batch_size)):
+            chunks.append(((base_rank[base], position, key_rank[key]),
+                           group[start:start + batch_size]))
+    chunks.sort(key=lambda chunk: chunk[0])
+    return [batch for _rank, batch in chunks]
 
 
 # ---------------------------------------------------------------------------
@@ -1549,7 +1577,7 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
                                   expert_projection=None, stack_sampling_identity=None,
-                                  structure_by_unit=None):
+                                  structure_by_unit=None, bound_units=None):
     """Bind the priced population, including score inputs when H is off.
 
     The static A-side contract is a scoring input like the score rows: the
@@ -1578,9 +1606,16 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     # campaign settings remain bound by default.
     #
     # ``publication_overlap_bytes`` chooses which thread performs two writes
-    # whose arguments it does not touch.  Binding it would make a run that
-    # staged its artifacts unable to resume a journal written without staging,
-    # which is a refusal about scheduling wearing an identity's clothes.
+    # whose arguments it does not touch. ``campaign_identity_bytes`` reserves
+    # metadata for retaining the same producer receipt. Neither changes the
+    # receipt, so binding either would make scheduling wear an identity's clothes.
+    #
+    # ``streaming_cache_slots``, ``streaming_prefetch_workers`` and
+    # ``streaming_cache_headroom_gb`` size the layer cache, its prefetch pool and
+    # the free-memory floor it keeps (`cost_streaming.build_streamed_causal_lm`); every
+    # captured activation, Hessian and wire is the same object at any of their
+    # values, so they are scheduling too.  ``streaming`` itself and
+    # ``streaming_capture_policy`` stay bound: they choose what is captured.
     #
     # ``units``, ``calibration_census`` and ``census_out`` are locations too,
     # and each one's load-bearing content is already bound by value somewhere
@@ -1599,7 +1634,9 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "units", "calibration_census", "census_out",
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
-                 "publication_overlap_bytes", "source_snapshot_policy"):
+                 "publication_overlap_bytes", "campaign_identity_bytes",
+                 "source_snapshot_policy", "streaming_cache_slots",
+                 "streaming_prefetch_workers", "streaming_cache_headroom_gb"):
         settings.pop(name, None)
     return {
         **({"family_restriction": {"policy": restriction,
@@ -1630,11 +1667,19 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
             }),
         "units": {
             name: {
-                "weight": api.tensor_identity(weight),
+                # A campaign hold creates this exact producer template once
+                # before journal admission.  The journal retains the same
+                # source/H records the former direct calls made, without a
+                # second DtoH copy later for every published receipt.
+                "weight": (bound_units[name].campaign_inputs()["source"]
+                           if bound_units is not None else api.tensor_identity(weight)),
                 "scoring_rows": (None if acts.get(name) is None
                                  else api.tensor_identity(acts[name])),
-                "hessian": (None if hessians.get(name) is None
-                            else api.tensor_identity(hessians[name])),
+                "hessian": (None if hessians.get(name) is None else
+                            (bound_units[name].campaign_inputs()["hessian"]
+                             if (bound_units is not None and
+                                 bound_units[name].campaign_inputs()["hessian"] is not None)
+                             else api.tensor_identity(hessians[name]))),
                 "input_global_scale": (
                     None if static_scales.get(name) is None
                     else float(static_scales[name])),
@@ -1666,7 +1711,7 @@ class _BoundCheckpointUnitIdentity:
     """
 
     def __init__(self, anchors, *, source_weight, calibration_source,
-                 projected_unit, static_scales):
+                 projected_unit, static_scales, retain_source_receipt=True):
         import copy
         import torch
         from types import SimpleNamespace
@@ -1700,18 +1745,45 @@ class _BoundCheckpointUnitIdentity:
             calibration_source=calibration_source, static_scales=static_scales,
             projected_units={} if projected_unit is None else {self._name: projected_unit})
         self._settings = self._calibration_settings()
-        self._source_receipt = _cb_cache_tensor_identity(source_weight)
+        # H-free rosters retain no H receipt. The run-level identity uses its
+        # ordinary direct H receipt for those units, keeping every retained H
+        # record behind this holder's source/version guard.
+        self._campaign_hessian = (None if self._template["calibration"] is None else
+                                  copy.deepcopy(self._template["calibration"]["hessian"]))
+        # Joint AURA needs this separate cache receipt. Campaign pricing only
+        # keeps producer identities, so it must not add a second full CPU hash.
+        self._source_receipt = (_cb_cache_tensor_identity(source_weight)
+                                if retain_source_receipt else None)
         self._guard()
 
     def _calibration_settings(self):
+        """Snapshot producer settings without resealing the resident Hessian."""
         if self._calibration is None:
             return None
+        import copy
         api = _checkpoint_identity_api()
-        settings = self._calibration.config_block()
-        settings.pop("note", None)
-        settings["hessian"] = {key: self._calibration.provenance[key]
-                               for key in api.HESSIAN_IDENTITY}
-        return settings
+        source = self._calibration
+        # This is ActivationSource.config_block() minus its capture_sha256()
+        # call. The producer receipt has already sealed H in `_template`; a
+        # lifetime guard must compare the same scalar/provenance inputs without
+        # synchronizing and hashing H a second time.
+        return {
+            "ldlq_sigma": source.ldlq_sigma,
+            "ldlq_block": (source.ldlq_block if isinstance(source.ldlq_block, int)
+                           else copy.deepcopy(dict(source.ldlq_block))),
+            "refit_objective": (source.refit_objective if isinstance(source.refit_objective, str)
+                                else copy.deepcopy(dict(source.refit_objective))),
+            "refit_objective_trailing": (
+                None if source.refit_objective_trailing is None
+                else source.refit_objective_trailing
+                if isinstance(source.refit_objective_trailing, str)
+                else copy.deepcopy(dict(source.refit_objective_trailing))),
+            "refit_reach_floor": bool(source.refit_reach_floor),
+            "refit_gauss_seidel": (bool(source.refit_gauss_seidel)
+                                   if isinstance(source.refit_gauss_seidel, bool)
+                                   else copy.deepcopy(dict(source.refit_gauss_seidel))),
+            "hessian": {key: source.provenance[key] for key in api.HESSIAN_IDENTITY},
+        }
 
     def _guard(self):
         if self._closed:
@@ -1748,14 +1820,69 @@ class _BoundCheckpointUnitIdentity:
     def source_receipt(self, source_weight):
         import copy
         self._guard()
-        if source_weight is not self._weight:
-            raise ValueError("source differs from bound checkpoint unit")
+        if source_weight is not self._weight or self._source_receipt is None:
+            raise ValueError("bound checkpoint unit has no source receipt")
         return copy.deepcopy(self._source_receipt)
+
+    def replace_calibration_source(self, calibration_source):
+        """Adopt the post-export resident owner without changing the receipt.
+
+        The reference source authenticates the same resident H objects.  The
+        equality and identity checks make that handoff explicit: a new source,
+        H, or numerical setting cannot silently inherit the old receipt.
+        """
+        if self._calibration is None:
+            # This unit has an H-free closed roster. Its campaign H receipt
+            # was sealed at construction, while derive() never consults an
+            # activation owner for this roster; the later shared reference
+            # owner therefore needs no per-unit rebinding.
+            return
+        if calibration_source is None or calibration_source.hessians.get(self._name) is not self._hessian:
+            raise ValueError("replacement calibration Hessian differs from bound checkpoint unit")
+        old = self._calibration
+        self._calibration = calibration_source
+        try:
+            if self._calibration_settings() != self._settings:
+                raise ValueError("replacement calibration settings differ from bound checkpoint unit")
+            self._guard()
+        except BaseException:
+            self._calibration = old
+            raise
+
+    def campaign_inputs(self):
+        """The unchanged producer source/H fields for the run-level receipt."""
+        import copy
+        self._guard()
+        calibration = self._template["calibration"]
+        return {"source": copy.deepcopy(self._template["source"]),
+                "hessian": copy.deepcopy(self._campaign_hessian)}
+
+    def observed_metadata_bytes(self):
+        """Report CPython reachable metadata after construction; not admission."""
+        import sys
+        # The source maps, tensors, and menu strings pre-date this hold.  This
+        # diagnostic counts only its newly retained graph and is intentionally
+        # not an allocator promise: `getsizeof` is interpreter-specific.
+        borrowed = {id(self._weight), id(self._hessian), id(self._calibration),
+                    id(self._name), *(id(value) for value in self._formats)}
+        seen = set()
+        def size(value):
+            marker = id(value)
+            if marker in seen or marker in borrowed:
+                return 0
+            seen.add(marker)
+            total = sys.getsizeof(value)
+            if isinstance(value, dict):
+                total += sum(size(k) + size(v) for k, v in value.items())
+            elif isinstance(value, (tuple, list, frozenset, set)):
+                total += sum(size(item) for item in value)
+            return total
+        return size(self) + size(self.__dict__)
 
     def close(self):
         self._closed = True
         self._weight = self._hessian = self._calibration = None
-        self._template = self._source_receipt = self._projection = None
+        self._template = self._source_receipt = self._campaign_hessian = self._projection = None
 
     def __enter__(self):
         self._guard()
@@ -1770,11 +1897,137 @@ class _BoundCheckpointUnitIdentity:
 
 
 def bind_checkpoint_unit_identity(anchors, *, source_weight, calibration_source,
-                                  projected_unit, static_scales):
+                                  projected_unit, static_scales,
+                                  retain_source_receipt=True):
     """Bind actual inputs once; accepts no caller-supplied hash or receipt."""
     return _BoundCheckpointUnitIdentity(anchors, source_weight=source_weight,
         calibration_source=calibration_source, projected_unit=projected_unit,
-        static_scales=static_scales)
+        static_scales=static_scales, retain_source_receipt=retain_source_receipt)
+
+
+def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_scales):
+    """Construct the closed producer-format roster once from existing menu refs."""
+    from types import SimpleNamespace
+    from .tessera_formats import parse_tessera_format_name, tessera_wire_recipe
+    from .tessera_render import rung_accepts_hessian
+    anchors = []
+    for entry in menu:
+        family, rung = parse_tessera_format_name(entry.format_name)
+        if family is None:
+            raise RuntimeError(f"campaign menu is not Tessera: {entry.format_name!r}")
+        wire = tessera_wire_recipe(family, rung)
+        anchors.append(SimpleNamespace(
+            qname=name, format_name=entry.format_name, family=family.name,
+            body_rate_q256=rung,
+            hessian_applied=(calibration_source is not None and
+                             rung_accepts_hessian(entry.format_name, wire)),
+            input_global_scale=(static_scales.get(name)
+                                if _format_executes_static_activation_contract(entry.format_name)
+                                else None)))
+    return anchors
+
+
+# An opt-in campaign retains producer receipt dictionaries for the whole closed
+# roster. These terms bound CPython object headers/slots and the producer JSON
+# receipt topology independently of a particular digest value. They are
+# deliberately stated as admission terms, not as a measurement: the live
+# `observed_metadata_bytes` diagnostic below tests the bound on each run.
+IDENTITY_HOLD_UNIT_OBJECT_BYTES = 32 * 1024
+IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER = 8
+IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES = 256
+IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES = 4096
+IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER = 4
+# The roster a holder is built from is transient: one ``SimpleNamespace`` per
+# closed-menu format with six attributes (`_campaign_identity_anchor_roster`),
+# plus the holder constructor's own one-attribute namespace per format, its
+# working tuple/sets, and the rung integers those carry.  Two rosters are live
+# at the peak, because the next unit's is built before the previous binding is
+# released.  The per-format figure is the interpreter's own object cost with
+# the six-slot instance dict counted at its CPython 3.12 size, rounded up.
+IDENTITY_ROSTER_TRANSIENT_FORMAT_BYTES = 1024
+IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS = 2
+
+
+def _frozenset_table_bytes(entries: int) -> int:
+    """The interpreter's own size of a frozenset holding ``entries`` items.
+
+    The holder retains one frozenset of format-name references; the strings
+    are the menu's and pre-date the hold, so what it adds is the set's slot
+    table, which CPython sizes by a fill rule this asks the interpreter for
+    rather than restates.  ``observed_metadata_bytes`` counts the same table.
+    """
+    import sys
+    return sys.getsizeof(frozenset(range(int(entries))))
+
+
+def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
+                                     projected_units, static_scales):
+    """Conservatively bound holder metadata without producer or tensor mutation.
+
+    One unit retains a holder/result mapping, signatures, the producer receipt
+    dictionaries, and a frozenset of references to every closed menu format.
+    The fixed object term covers the first three; the frozenset term is the
+    interpreter's own table size for that many references.  Receipt strings
+    and dict keys are bounded from known unit/shape/settings/projection
+    serialization lengths, multiplied by the documented CPython object/slot
+    envelope.  The format names themselves are the menu's objects, borrowed by
+    reference, and the sealed template carries one recipe, not the roster, so
+    no per-format serialization is retained.
+
+    The second value is the planning-and-construction transient: the bound
+    map and its largest JSON string, plus the two closed rosters live while
+    holders are built (`IDENTITY_ROSTER_TRANSIENT_*`), which construction
+    materializes once per unit and frees before the next.
+    """
+    import json
+    # The producer config owner may itself verify H commitments. Planning must
+    # not invoke it before the one real receipt; reserve its bounded JSON
+    # settings envelope in the fixed holder term instead.
+    settings_bytes = 4096 if calibration_source is not None else 0
+    planned, largest_serialization, widest_roster = {}, 0, 0
+    for name in sorted(weights):
+        shape_bytes = len(json.dumps(list(weights[name].shape), separators=(",", ":")).encode())
+        projection_bytes = len(json.dumps((projected_units or {}).get(name),
+            sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
+        receipt_bytes = len(name.encode()) + shape_bytes + settings_bytes + projection_bytes
+        planned[name] = (IDENTITY_HOLD_UNIT_OBJECT_BYTES +
+                         _frozenset_table_bytes(len(menus[name])) +
+                         IDENTITY_HOLD_SERIALIZED_BYTE_MULTIPLIER * receipt_bytes)
+        largest_serialization = max(largest_serialization, receipt_bytes)
+        widest_roster = max(widest_roster, len(menus[name]))
+    # `planned` remains live until holders are built. Each loop iteration also
+    # materializes one shape/projection JSON string; its worst live string plus
+    # the map's entry table is a separate, pre-admitted planning transient, and
+    # so is the closed roster each holder is constructed from.
+    scratch = (IDENTITY_HOLD_PLAN_UNIT_FIXED_BYTES +
+               IDENTITY_HOLD_PLAN_MAPPING_ENTRY_BYTES * len(planned) +
+               IDENTITY_HOLD_PLAN_SERIALIZED_BYTE_MULTIPLIER * largest_serialization +
+               IDENTITY_ROSTER_TRANSIENT_LIVE_ROSTERS * (
+                   IDENTITY_ROSTER_TRANSIENT_FORMAT_BYTES * widest_roster +
+                   _frozenset_table_bytes(widest_roster)))
+    return planned, scratch
+
+
+def _campaign_bound_identities(*, weights, menus, calibration_source,
+                               projected_units, static_scales, metadata_bounds=None):
+    """One producer receipt template per priced unit, held through publication."""
+    result = {}
+    try:
+        for name in sorted(weights):
+            anchors = _campaign_identity_anchor_roster(
+                name, menus[name], calibration_source=calibration_source,
+                static_scales=static_scales)
+            result[name] = bind_checkpoint_unit_identity(
+                anchors, source_weight=weights[name], calibration_source=calibration_source,
+                projected_unit=(projected_units or {}).get(name), static_scales=static_scales,
+                retain_source_receipt=False)
+            if metadata_bounds is not None and result[name].observed_metadata_bytes() > metadata_bounds[name]:
+                raise RuntimeError("campaign identity metadata exceeded its preallocation bound")
+        return result
+    except BaseException:
+        for unit in result.values():
+            unit.close()
+        raise
 
 
 def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
@@ -1922,9 +2175,26 @@ class _AnchorPublicationLedger:
                 f"{len(self._staged)} anchor(s) already staged")
         self._publisher = publisher
 
-    def record(self, anchor, identity) -> None:
-        """Journal now, or when this anchor's own bytes have been written."""
+    def record(self, anchor, identity=None, *, derive=None) -> None:
+        """Journal now, or when this anchor's own bytes have been written.
+
+        ``identity`` is the anchor's producer input identity, already
+        computed.  ``derive`` is instead a zero-argument callable that
+        computes it, and the two are exclusive.  A caller passes ``derive``
+        only when the derivation touches no device: the writer is a CPU/IO
+        thread by contract (the producer's graph capture forbids surprise
+        device work from another thread while a capture may be running), so
+        an identity that hashes a resident weight or Hessian is computed on
+        the encode thread and handed over as a value.  With a publisher the
+        callable runs on the writer inside this anchor's receipt job, ahead
+        of the read-back it seals; without one it runs inline, here, exactly
+        where the value would have been computed.
+        """
+        if (identity is None) == (derive is None):
+            raise ValueError("record takes exactly one of identity or derive")
         if self._publisher is None:
+            if derive is not None:
+                identity = derive()
             self._journal(anchor, self._make_record(anchor, identity))
             return
         key = (anchor.qname, anchor.format_name)
@@ -1940,8 +2210,11 @@ class _AnchorPublicationLedger:
         def make():
             # Runs on the writer, behind this unit's own file job, so the
             # read-back inside the receipt call reads a file that exists and
-            # the encode thread never waits for it.
-            self._records[key] = self._make_record(anchor, identity)
+            # the encode thread never waits for it.  A deferred identity is
+            # derived first, on this thread, and a refusal there fails the
+            # publication the same way a refused read-back does.
+            sealed = identity if derive is None else derive()
+            self._records[key] = self._make_record(anchor, sealed)
 
         self._publisher.submit(PublicationJob(
             key=(RECEIPT_JOB, *key), charged_bytes=0, publish=make))
@@ -3605,15 +3878,52 @@ def campaign_population_block(**kwargs) -> dict:
 def _format_executes_static_activation_contract(format_name: str) -> bool:
     """Does this rung's route execute a STATIC activation contract?
 
-    The spec's answer (``FormatSpec.static_activation_contract``), which
-    ``synthesize_tessera_spec`` derives from the registry row the rung's route
-    names -- never a compare of that row's NAME against ``"NVFP4"`` (#205,
-    #221).  Same field ``_measure_anchor`` prices through, so the rung this
-    refuses to resume is exactly the rung it refuses to score.
+    The one derivation (#205, #221): the route names the registry row whose
+    contract it executes (``activation_source_format``) and the ROW owns the
+    answer (``FormatSpec.static_activation_contract``) -- never a compare of
+    that row's NAME against ``"NVFP4"``.  It is
+    ``tessera_formats.route_static_activation_contract`` off the same route
+    ``synthesize_tessera_spec`` stamps onto the rung's spec, so the rung this
+    refuses to resume is exactly the rung ``_measure_anchor`` prices.
+
+    The row is read live, every time: it is a dictionary lookup, and the
+    registry is what a test (or a lane) replaces when a second row gains a
+    contract.  What is memoised is the pure part -- canonical name to serving
+    route -- sized by the format key space: the closed-roster bind asks it
+    once per format per unit, 1,793 routes for each of an 864-unit row's
+    holders, measured at ~1.1 s per unit on the CPU worker when each ask
+    synthesized a whole spec, a GPU-idle startup phase of a quarter hour per
+    row.
     """
     from . import format_registry as fr
 
-    return fr.get_format(format_name).static_activation_contract is not None
+    canonical = fr.canonical_format_name(format_name)
+    row = fr.REGISTRY.get(canonical)
+    if row is not None:
+        return row.static_activation_contract is not None
+    if not fr.is_tessera_format_name(canonical):
+        fr.get_format(canonical)  # raises the registry's KeyError
+    from .tessera_formats import route_static_activation_contract
+
+    return route_static_activation_contract(_tessera_route_memo()(canonical)) is not None
+
+
+def _tessera_route(canonical: str):
+    from .tessera_formats import (
+        parse_tessera_format_name, tessera_serving_route, tessera_wire_recipe,
+    )
+
+    family, rung = parse_tessera_format_name(canonical)
+    return tessera_serving_route(family, tessera_wire_recipe(family, rung), rung)
+
+
+@functools.lru_cache(maxsize=1)
+def _tessera_route_memo():
+    # Built on first use so this module keeps importing without the Tessera
+    # package; the memo itself is sized by the format key space on its first
+    # call, the way every wire-recipe memo is.
+    from .tessera_formats import lazily_sized_cache, recipe_cache_bound
+    return lazily_sized_cache(recipe_cache_bound)(_tessera_route)
 
 
 def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
@@ -4109,6 +4419,10 @@ def _main(argv, *, source_scope) -> int:
                     help="maximum compatible expert anchors in one producer "
                          "batch within this action (1 = scalar). Does not "
                          "change the anchor schedule or PB placement.")
+    ap.add_argument("--campaign-identity-bytes", type=int, default=0,
+                    help="experimental closed-roster producer identity hold reservation. "
+                         "0 keeps the feature off; a positive value is charged by "
+                         "selected-source PB admission and runtime refuses a larger plan.")
     ap.add_argument("--publication-overlap-bytes", type=int, default=0,
                     help="stage up to N bytes of already-encoded render/wire "
                          "artifacts on one writer thread so the next batch "
@@ -4226,6 +4540,8 @@ def _main(argv, *, source_scope) -> int:
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if args.campaign_identity_bytes and not selected_source:
+        ap.error('--campaign-identity-bytes requires selected streaming capture reuse')
     if args.source_snapshot_policy != 'whole-layer-v1' and not selected_source:
         ap.error('--source-snapshot-policy requires selected streaming capture reuse')
     if args.capture_load_policy is not None and not (selected_source or (
@@ -4260,6 +4576,8 @@ def _main(argv, *, source_scope) -> int:
         ap.error("--anchor-batch-size must be positive")
     if args.publication_overlap_bytes < 0:
         ap.error("--publication-overlap-bytes cannot be negative")
+    if args.campaign_identity_bytes < 0:
+        ap.error("--campaign-identity-bytes cannot be negative")
     if args.anchor_batch_size > 1:
         from .tessera_render import require_tessera_batch_encoder
         require_tessera_batch_encoder()
@@ -4504,6 +4822,7 @@ def _main(argv, *, source_scope) -> int:
             headroom_gb=args.streaming_cache_headroom_gb,
             anchor_batch_size=args.anchor_batch_size,
             publication_overlap_bytes=args.publication_overlap_bytes,
+            campaign_identity_bytes=args.campaign_identity_bytes,
             source_snapshot_policy=args.source_snapshot_policy,
             **(dict(capture_load_policy=args.capture_load_policy)
                if args.capture_load_policy is not None else {}))
@@ -4759,6 +5078,46 @@ def _main(argv, *, source_scope) -> int:
     from .cost_stage_checkpoint import prepare_journal, write_unit
     from .prismabuild_progress import report as report_progress
 
+    # The source/H template is deliberately built BEFORE the resume gate: it
+    # is the producer computation that supplies that gate's exact records.
+    # The hold owns metadata only; caller-owned tensors remain in the existing
+    # resident maps.  Register its close before replacement sources are added
+    # to the ExitStack, so publication drains before either owner is released.
+    identity_metadata_bounds, identity_planning_scratch_bytes = ({}, 0)
+    # An empty menu has no closed producer roster. Preserve the existing
+    # empty-menu refusal path instead of constructing a synthetic holder.
+    reuse_campaign_identity = bool(args.campaign_identity_bytes > 0 and all(menus.values()))
+    if reuse_campaign_identity:
+        # No real receipt nor tensor value is read here. This source-free
+        # model is charged as its own transient alongside the retained hold.
+        identity_metadata_bounds, identity_planning_scratch_bytes = \
+            _campaign_identity_metadata_plan(
+                weights=weights, menus=menus, calibration_source=calibration_source,
+                projected_units=projected_units, static_scales=static_scales)
+        identity_metadata_bytes = sum(identity_metadata_bounds.values())
+        if selected_source:
+            reserved_identity_bytes = int(args.campaign_identity_bytes)
+            if identity_metadata_bytes + identity_planning_scratch_bytes > reserved_identity_bytes:
+                raise RuntimeError('campaign identity closed-roster plan exceeds --campaign-identity-bytes')
+            if selected_guard is not None:
+                selected_guard.check('before_selected_campaign_identity_bind',
+                    reserve_bytes=reserved_identity_bytes)
+    bound_checkpoint_units = ({
+        } if not reuse_campaign_identity else _campaign_bound_identities(
+            weights=weights, menus=menus, calibration_source=calibration_source,
+            projected_units=projected_units, static_scales=static_scales,
+            metadata_bounds=identity_metadata_bounds))
+    if bound_checkpoint_units:
+        source_scope.callback(lambda: [unit.close() for unit in bound_checkpoint_units.values()])
+    identity_metadata_observed_bytes = sum(unit.observed_metadata_bytes()
+                                           for unit in bound_checkpoint_units.values())
+    if bound_checkpoint_units:
+        print(f"[campaign] campaign identity hold: {len(bound_checkpoint_units)} units, "
+              f"observed metadata {identity_metadata_observed_bytes} B, planned bound "
+              f"{sum(identity_metadata_bounds.values())} B + scratch "
+              f"{identity_planning_scratch_bytes} B, reserved {args.campaign_identity_bytes} B",
+              flush=True)
+
     # The resume identity, run level: everything a price is a function of,
     # including the static A-side contract (scales + policy) the W4A4 rows
     # are scored under.  A checkpoint from another calibration or policy is
@@ -4774,6 +5133,7 @@ def _main(argv, *, source_scope) -> int:
             for entry in (selection or {}).get("groups", [])
             for name, record in entry.get("stack_samples", {}).items()},
         structure_by_unit=structure_by_unit,
+        **({"bound_units": bound_checkpoint_units} if bound_checkpoint_units else {}),
     )
     journal, identity_sha256, resumed = prepare_journal(
         checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
@@ -4855,7 +5215,8 @@ def _main(argv, *, source_scope) -> int:
             identity = _checkpoint_anchor_identity(
                 anchor, weights=weights, menus=menus,
                 calibration_source=calibration_source, static_scales=static_scales,
-                projected_units=projected_units)
+                projected_units=projected_units,
+                **({"bound_unit": bound_checkpoint_units[name]} if bound_checkpoint_units else {}))
             wire_records[name][anchor.format_name] = _checkpoint_wire_record(
                 anchor, wire_dir, identity, existing=state["wire_records"][anchor.format_name])
             measured.setdefault(name, {}).setdefault(anchor.family, []).append(anchor)
@@ -4935,6 +5296,8 @@ def _main(argv, *, source_scope) -> int:
         # mapping; its per-unit content checks remain at consumption.
         calibration_source = th.activation_source(hessians, hessian_identity,
             reference_path=hessian_capture_path, source_scope=source_scope)
+        for unit in bound_checkpoint_units.values():
+            unit.replace_calibration_source(calibration_source)
         _activation_kwargs_for = activation_kwargs_for(calibration_source)
 
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
@@ -5311,10 +5674,22 @@ def _main(argv, *, source_scope) -> int:
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
                 for anchor in anchors:
-                    ledger.record(anchor, _checkpoint_anchor_identity(
-                        anchor, weights=weights, menus=menus,
-                        calibration_source=calibration_source, static_scales=static_scales,
-                        projected_units=projected_units))
+                    identity_of = functools.partial(
+                        _checkpoint_anchor_identity, anchor, weights=weights,
+                        menus=menus, calibration_source=calibration_source,
+                        static_scales=static_scales, projected_units=projected_units)
+                    if bound_checkpoint_units:
+                        # Derived from the unit's sealed template: a deepcopy
+                        # and Tessera's wire_recipe, no tensor read.  The
+                        # writer does it behind this anchor's own files, so
+                        # the next batch's encode is not waiting on it.
+                        ledger.record(anchor, derive=functools.partial(
+                            identity_of, bound_unit=bound_checkpoint_units[anchor.qname]))
+                    else:
+                        # The producer's ``encoding_input_identity`` hashes
+                        # the resident weight and Hessian, which are device
+                        # tensors here: that stays on the encode thread.
+                        ledger.record(anchor, identity_of())
                 completed += len(anchors)
                 # Commit every joined quantum before advancing. The scalar mode
                 # keeps its existing ten-anchor flush cadence.
@@ -5406,6 +5781,17 @@ def _main(argv, *, source_scope) -> int:
             # thread spent blocked on it -- which is the number that says
             # whether the bound was the limit or the disk was.
             "publication_overlap": publication_stats,
+            # An interpreter-specific observation of the opt-in holder's
+            # retained metadata. This is evidence for the future admission
+            # contract, never an admitted bound.
+            "campaign_identity_hold": (
+                None if not bound_checkpoint_units else {
+                    "units": len(bound_checkpoint_units),
+                    "metadata_observed_bytes": identity_metadata_observed_bytes,
+                    "metadata_bound_bytes": sum(identity_metadata_bounds.values()),
+                    "planning_scratch_bytes": identity_planning_scratch_bytes,
+                    "admission": "selected-resource-phase",
+                }),
             # Units the mode admitted no rung for. Empty on a healthy run;
             # never absent, so a reader never has to guess whether the run
             # was asked the question.

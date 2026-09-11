@@ -279,3 +279,120 @@ def test_a_fatal_encode_error_still_journals_the_batch_that_succeeded(
             wire = tmp_path / "cache" / "wire" / record["file"]
             assert wire.stat().st_size == record["blob_bytes"], (
                 "a row was committed against bytes that are not there")
+
+
+def test_the_post_work_of_one_batch_runs_while_the_next_batch_encodes(
+        monkeypatch, tmp_path):
+    """The overlap itself, held open by a barrier rather than sampled.
+
+    Batch one's receipt is made on the writer by reading its published wire
+    back.  Here that read-back is held until batch two's encode has BEGUN on
+    the encode thread; the run can only complete if the two really overlap.
+    On the synchronous path the same hold sits on the encode thread before
+    batch two, so the barrier times out and the assertion fails rather than
+    the shard hanging.
+    """
+    import threading
+
+    campaign, _render = _fixture(monkeypatch, tmp_path)
+    next_encode_started = threading.Event()
+    calls: list[str] = []
+    real_encode = campaign._encode_and_render
+
+    def encode(weight, format_name, **kwargs):
+        calls.append(format_name)
+        if len(calls) == 2:
+            next_encode_started.set()
+        return real_encode(weight, format_name, **kwargs)
+
+    monkeypatch.setattr(campaign, "_encode_and_render", encode)
+    held: list[dict] = []
+    real_record = campaign._checkpoint_wire_record
+
+    def record(anchor, wire_dir, identity, **kwargs):
+        if not held:
+            held.append(dict(thread=threading.current_thread().name,
+                             next_encode_started=next_encode_started.wait(20.0)))
+        return real_record(anchor, wire_dir, identity, **kwargs)
+
+    monkeypatch.setattr(campaign, "_checkpoint_wire_record", record)
+    assert campaign.main([
+        *_argv(tmp_path), "--publication-overlap-bytes", str(1 << 20)]) == 0
+    assert held == [dict(thread="tessera-publication", next_encode_started=True)]
+    from prismaquant.cost_stage_checkpoint import unit_path
+
+    root = tmp_path / "campaign.anchors.json.parts"
+    for unit in UNITS:
+        state = pickle.loads(pickle.loads(unit_path(root, unit).read_bytes())["payload"])
+        assert state["anchors"] and state["wire_records"]
+
+
+def test_the_pipelined_selected_path_prices_the_same_bytes_and_identities(
+        monkeypatch, tmp_path):
+    """Overlap plus a bound identity, on the selected-source path, vs neither.
+
+    This is the configuration the pipelined arm runs.  The bound identity is
+    derived on the writer (the thread name is asserted), and everything a
+    resume or an export reads -- the journal identity, each unit's envelope
+    digest, its anchor rows, its wire receipt and the wire bytes -- is the
+    synchronous path's, byte for byte.
+    """
+    import json
+    import threading
+    from test_selected_source_authentication import selected_source_fixture
+    from prismaquant.cost_stage_checkpoint import unit_path
+
+    from prismaquant import tessera_campaign
+
+    UNIT = "model.layers.0.proj"
+    runs: dict[str, dict] = {}
+    derived_on: list[tuple[str, str]] = []
+    current = ["none"]
+    real_derive = tessera_campaign._BoundCheckpointUnitIdentity.derive
+
+    def derive(self, **kwargs):
+        derived_on.append((current[0], threading.current_thread().name))
+        return real_derive(self, **kwargs)
+
+    monkeypatch.setattr(tessera_campaign._BoundCheckpointUnitIdentity, "derive", derive)
+    # One source, one census, one capture: the journal identity binds the
+    # model path by value, so the two arms price the same selection out of
+    # the same tree and differ only in where their outputs land.
+    campaign, argv, _state = selected_source_fixture(monkeypatch, tmp_path, priced=True)
+    for label, extra in (("sync", []), ("pipelined", [
+            "--publication-overlap-bytes", str(1 << 20),
+            "--campaign-identity-bytes", str(1 << 20)])):
+        root = tmp_path / label
+        root.mkdir()
+        arm_argv = list(argv)
+        for flag, leaf in (("--out", "cost.pkl"), ("--cache-dir", "cache"),
+                           ("--checkpoint", "campaign.anchors.json")):
+            arm_argv[arm_argv.index(flag) + 1] = str(root / leaf)
+        current[0] = label
+        assert campaign.main([*arm_argv, *extra]) == 0
+        manifest = json.loads((root / "campaign.anchors.json").read_text())
+        envelope = pickle.loads(unit_path(root / "campaign.anchors.json.parts", UNIT).read_bytes())
+        state = pickle.loads(envelope["payload"])
+        assert state["anchors"] and state["wire_records"]
+        wires = {name: (root / "cache" / "wire" / name).read_bytes()
+                 for name in (record["file"] for record in state["wire_records"].values())}
+        costs = _payload(root)["costs"][UNIT]
+        # The envelope's payload digest binds the anchor rows' wall-clock
+        # ``seconds``, so two runs never share it; everything else in the
+        # unit state is compared by value below.
+        runs[label] = dict(
+            identity_sha256=manifest["identity_sha256"],
+            envelope_identity=envelope["identity_sha256"],
+            anchors=[{k: v for k, v in row.items() if k not in ("seconds", "encoding_batch_size")}
+                     for row in state["anchors"]],
+            state={k: v for k, v in state.items() if k != "anchors"},
+            wire_records=state["wire_records"], wires=wires,
+            costs={fmt: {k: v for k, v in row.items() if k != "encode_seconds"}
+                   for fmt, row in costs.items()},
+            provenance=_payload(root)["provenance"])
+    assert derived_on == [("pipelined", "tessera-publication")], derived_on
+    assert runs["sync"]["provenance"]["publication_overlap"] is None
+    assert runs["pipelined"]["provenance"]["publication_overlap"]["failed"] is False
+    for key in ("identity_sha256", "envelope_identity", "anchors", "state",
+                "wire_records", "wires", "costs"):
+        assert runs["sync"][key] == runs["pipelined"][key], key

@@ -1,0 +1,9 @@
+{
+  "time": "2026-09-09T21:48:19.910177+00:00",
+  "status": "deferred_at_user_request",
+  "issue": 283,
+  "measurement": "complete_verified",
+  "publication_rollout": "not_activated",
+  "candidate_manifest": "retained_unsubmitted",
+  "main_campaign": "original_configuration_resumed_on_both_gpu_workers"
+}

@@ -1,0 +1,657 @@
+{
+  "schema": "prismaquant.publication_abba_analysis.v1",
+  "scope": "56 steady anchors per arm, first profiled batch excluded; last checkpoint completion included",
+  "power_method": "Linear interpolation and trapezoidal GPU-board power integration, 0.5-second recorder; 45W is a descriptive threshold, not an idle/saturation definition",
+  "phase_scope": "Inclusive, nested, thread-local spans; do not sum across phases or threads",
+  "rows": [
+    {
+      "arm": 0,
+      "budget": 0,
+      "anchors": 56,
+      "start_unix": 1788988829.5117395,
+      "finish_unix": 1788988973.0090628,
+      "seconds": 143.49732327461243,
+      "joules": 8611.077277400293,
+      "mean_power_w": 60.00862650881075,
+      "low_power_seconds_below_45w": 29.271595324389384,
+      "low_power_fraction": 0.20398704767734244,
+      "anchors_per_kj": 6.503251358221065,
+      "coverage_seconds": 143.49732327461243,
+      "max_sample_gap_seconds": 0.501000165939331,
+      "phases": {
+        "MainThread:prismaquant.production_weight_cache._local_forward_render_score": {
+          "count": 56,
+          "wall_seconds": 0.26455722778337076,
+          "thread_cpu_seconds": 0.26218015999998556
+        },
+        "MainThread:prismaquant.production_weight_cache._canonical_rendered_weight_tensor": {
+          "count": 112,
+          "wall_seconds": 0.16567323193885386,
+          "thread_cpu_seconds": 0.1657002880001528
+        },
+        "MainThread:prismaquant.production_weight_cache._store_rendered_weight_entry": {
+          "count": 56,
+          "wall_seconds": 5.400677013734821,
+          "thread_cpu_seconds": 0.2876181919995986
+        },
+        "MainThread:prismaquant.perturbed_x_cache.release_activation_cache_file_pages": {
+          "count": 112,
+          "wall_seconds": 0.050151509523857385,
+          "thread_cpu_seconds": 0.006552128000123503
+        },
+        "MainThread:prismaquant.tessera_campaign._finish_anchor": {
+          "count": 56,
+          "wall_seconds": 8.12290690978989,
+          "thread_cpu_seconds": 0.831262864000081
+        },
+        "MainThread:prismaquant.tessera_campaign._checkpoint_anchor_identity": {
+          "count": 56,
+          "wall_seconds": 4.769198169116862,
+          "thread_cpu_seconds": 4.763740015999815
+        },
+        "MainThread:prismaquant.tessera_campaign._checkpoint_wire_record": {
+          "count": 56,
+          "wall_seconds": 0.7578190288622864,
+          "thread_cpu_seconds": 0.4567639039998994
+        },
+        "MainThread:prismaquant.cost_stage_checkpoint.write_unit": {
+          "count": 56,
+          "wall_seconds": 0.182289314980153,
+          "thread_cpu_seconds": 0.007382975999860264
+        }
+      },
+      "top_stack_samples": [
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/window_viterbi.py:1115:viterbi_window_fused",
+          494
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:45:tensor_identity",
+          39
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2782:columns_of",
+          23
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/torch/serialization.py:834:__exit__",
+          22
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/wire.py:84:_to_bits",
+          21
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/torch/cuda/graphs.py:186:replay",
+          18
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2823:trellis_pass",
+          7
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2824:trellis_pass",
+          7
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/numpy/_core/_methods.py:44:_amax",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/wire.py:263:pack_levels",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2816:trellis_pass",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:3119:_encode_unit_steps",
+          4
+        ],
+        [
+          "/workspace/prismaquant/production_weight_cache.py:1592:_store_rendered_weight_entry",
+          4
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2817:trellis_pass",
+          3
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:39:tensor_identity",
+          3
+        ]
+      ],
+      "netdata": {
+        "hosts": [
+          "sparky",
+          "sparklina"
+        ],
+        "interval_seconds": 5,
+        "byte_cap": 3221225472,
+        "bytes_written": 1958765,
+        "samples": 85,
+        "samples_scope": "rounds attempted",
+        "sample_failures": {
+          "sparky": null,
+          "sparklina": null
+        }
+      },
+      "resident_prefetch": {
+        "units": 864,
+        "hessian_bytes": 43486543872,
+        "activation_bytes": 5720309760,
+        "devices": [
+          "cuda:0"
+        ],
+        "cuda_allocated_bytes": 63702368256,
+        "cuda_reserved_bytes": 63715672064,
+        "capture": {
+          "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+          "sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c"
+        },
+        "receipt": {
+          "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-00/cache/capture-load-execution-b5e960dcab4bf97420b232014d1fe6fdbaefaf9fe1207858dca5a8b1ace55344.json",
+          "sha256": "b5e960dcab4bf97420b232014d1fe6fdbaefaf9fe1207858dca5a8b1ace55344"
+        },
+        "finished_unix": 1788988685.0001385
+      }
+    },
+    {
+      "arm": 1,
+      "budget": 268435456,
+      "anchors": 56,
+      "start_unix": 1788989247.6903522,
+      "finish_unix": 1788989384.840248,
+      "seconds": 137.14989590644836,
+      "joules": 8487.026919031267,
+      "mean_power_w": 61.88139526420328,
+      "low_power_seconds_below_45w": 22.846063355524738,
+      "low_power_fraction": 0.16657732916624537,
+      "anchors_per_kj": 6.598305924354485,
+      "coverage_seconds": 137.14989590644836,
+      "max_sample_gap_seconds": 0.501000165939331,
+      "phases": {
+        "MainThread:prismaquant.production_weight_cache._local_forward_render_score": {
+          "count": 56,
+          "wall_seconds": 0.27984617807669565,
+          "thread_cpu_seconds": 0.23409504000028392
+        },
+        "MainThread:prismaquant.production_weight_cache._canonical_rendered_weight_tensor": {
+          "count": 56,
+          "wall_seconds": 0.954937100817915,
+          "thread_cpu_seconds": 0.11451990399996248
+        },
+        "MainThread:prismaquant.tessera_campaign._finish_anchor": {
+          "count": 56,
+          "wall_seconds": 1.2427948957774788,
+          "thread_cpu_seconds": 0.35636564800009296
+        },
+        "tessera-publication:prismaquant.production_weight_cache._canonical_rendered_weight_tensor": {
+          "count": 56,
+          "wall_seconds": 0.0020390399149619043,
+          "thread_cpu_seconds": 0.002001968000000104
+        },
+        "tessera-publication:prismaquant.production_weight_cache._store_rendered_weight_entry": {
+          "count": 56,
+          "wall_seconds": 5.138520091655664,
+          "thread_cpu_seconds": 0.3093646079999997
+        },
+        "tessera-publication:prismaquant.perturbed_x_cache.release_activation_cache_file_pages": {
+          "count": 112,
+          "wall_seconds": 0.04479620367055759,
+          "thread_cpu_seconds": 0.008366528000000484
+        },
+        "MainThread:prismaquant.tessera_campaign._checkpoint_anchor_identity": {
+          "count": 56,
+          "wall_seconds": 6.728638002183288,
+          "thread_cpu_seconds": 4.043960799999809
+        },
+        "tessera-publication:prismaquant.tessera_campaign._checkpoint_wire_record": {
+          "count": 56,
+          "wall_seconds": 0.9765574148623273,
+          "thread_cpu_seconds": 0.44095265599999983
+        },
+        "tessera-publication:prismaquant.cost_stage_checkpoint.write_unit": {
+          "count": 48,
+          "wall_seconds": 0.23482658300781623,
+          "thread_cpu_seconds": 0.007670480000000229
+        },
+        "MainThread:prismaquant.cost_stage_checkpoint.write_unit": {
+          "count": 16,
+          "wall_seconds": 0.046990297036245465,
+          "thread_cpu_seconds": 0.001902480000126161
+        }
+      },
+      "top_stack_samples": [
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/window_viterbi.py:1115:viterbi_window_fused",
+          513
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:45:tensor_identity",
+          40
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/wire.py:84:_to_bits",
+          17
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2782:columns_of",
+          16
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/torch/cuda/graphs.py:186:replay",
+          11
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/wire.py:263:pack_levels",
+          7
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/numpy/_core/_methods.py:44:_amax",
+          6
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2823:trellis_pass",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:3118:_encode_unit_steps",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2816:trellis_pass",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2824:trellis_pass",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:39:tensor_identity",
+          4
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/numpy/_core/_methods.py:48:_amin",
+          3
+        ],
+        [
+          "/workspace/prismaquant/production_weight_cache.py:1976:_local_forward_render_score",
+          3
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:3119:_encode_unit_steps",
+          2
+        ]
+      ],
+      "netdata": {
+        "hosts": [
+          "sparky",
+          "sparklina"
+        ],
+        "interval_seconds": 5,
+        "byte_cap": 3221225472,
+        "bytes_written": 1822399,
+        "samples": 79,
+        "samples_scope": "rounds attempted",
+        "sample_failures": {
+          "sparky": null,
+          "sparklina": null
+        }
+      },
+      "resident_prefetch": {
+        "units": 864,
+        "hessian_bytes": 43486543872,
+        "activation_bytes": 5720309760,
+        "devices": [
+          "cuda:0"
+        ],
+        "cuda_allocated_bytes": 63702368256,
+        "cuda_reserved_bytes": 63715672064,
+        "capture": {
+          "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+          "sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c"
+        },
+        "receipt": {
+          "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-01/cache/capture-load-execution-60a723623520ac5c0892b61ed5f741e891bccdab101fd88211177436287fe5e5.json",
+          "sha256": "60a723623520ac5c0892b61ed5f741e891bccdab101fd88211177436287fe5e5"
+        },
+        "finished_unix": 1788989109.4364297
+      }
+    },
+    {
+      "arm": 2,
+      "budget": 268435456,
+      "anchors": 56,
+      "start_unix": 1788989653.8053832,
+      "finish_unix": 1788989790.8240905,
+      "seconds": 137.01870727539062,
+      "joules": 8468.11862303973,
+      "mean_power_w": 61.80264572209006,
+      "low_power_seconds_below_45w": 22.218242339058882,
+      "low_power_fraction": 0.16215480922910014,
+      "anchors_per_kj": 6.613039152243021,
+      "coverage_seconds": 137.01870727539062,
+      "max_sample_gap_seconds": 0.501000165939331,
+      "phases": {
+        "tessera-publication:prismaquant.tessera_campaign._checkpoint_wire_record": {
+          "count": 57,
+          "wall_seconds": 0.9970750349457376,
+          "thread_cpu_seconds": 0.45315084800000016
+        },
+        "MainThread:prismaquant.production_weight_cache._local_forward_render_score": {
+          "count": 56,
+          "wall_seconds": 0.3155032958020456,
+          "thread_cpu_seconds": 0.2351621760002729
+        },
+        "MainThread:prismaquant.production_weight_cache._canonical_rendered_weight_tensor": {
+          "count": 56,
+          "wall_seconds": 0.7037367912125774,
+          "thread_cpu_seconds": 0.11351220799971884
+        },
+        "MainThread:prismaquant.tessera_campaign._finish_anchor": {
+          "count": 56,
+          "wall_seconds": 1.0271998150856234,
+          "thread_cpu_seconds": 0.35634947199991984
+        },
+        "tessera-publication:prismaquant.production_weight_cache._canonical_rendered_weight_tensor": {
+          "count": 56,
+          "wall_seconds": 0.0033015039516612887,
+          "thread_cpu_seconds": 0.0021529599999996762
+        },
+        "tessera-publication:prismaquant.production_weight_cache._store_rendered_weight_entry": {
+          "count": 56,
+          "wall_seconds": 5.189757365733385,
+          "thread_cpu_seconds": 0.3072769279999997
+        },
+        "tessera-publication:prismaquant.perturbed_x_cache.release_activation_cache_file_pages": {
+          "count": 112,
+          "wall_seconds": 0.06556811241898686,
+          "thread_cpu_seconds": 0.009655439999999876
+        },
+        "MainThread:prismaquant.tessera_campaign._checkpoint_anchor_identity": {
+          "count": 56,
+          "wall_seconds": 6.740164728136733,
+          "thread_cpu_seconds": 4.076209968000029
+        },
+        "tessera-publication:prismaquant.cost_stage_checkpoint.write_unit": {
+          "count": 55,
+          "wall_seconds": 0.29090705706039444,
+          "thread_cpu_seconds": 0.00982369599999977
+        },
+        "MainThread:prismaquant.cost_stage_checkpoint.write_unit": {
+          "count": 9,
+          "wall_seconds": 0.025189440115354955,
+          "thread_cpu_seconds": 0.0010475679998762644
+        }
+      },
+      "top_stack_samples": [
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/window_viterbi.py:1115:viterbi_window_fused",
+          509
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:45:tensor_identity",
+          40
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/wire.py:84:_to_bits",
+          18
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2782:columns_of",
+          17
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/torch/cuda/graphs.py:186:replay",
+          12
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:39:tensor_identity",
+          8
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/wire.py:263:pack_levels",
+          8
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2824:trellis_pass",
+          8
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2823:trellis_pass",
+          7
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:3120:_encode_unit_steps",
+          7
+        ],
+        [
+          "/workspace/prismaquant/production_weight_cache.py:1620:_canonical_rendered_weight_tensor",
+          4
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:3118:_encode_unit_steps",
+          3
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:3124:_encode_unit_steps",
+          3
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/numpy/_core/_methods.py:48:_amin",
+          3
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/numpy/_core/_methods.py:44:_amax",
+          3
+        ]
+      ],
+      "netdata": {
+        "hosts": [
+          "sparky",
+          "sparklina"
+        ],
+        "interval_seconds": 5,
+        "byte_cap": 3221225472,
+        "bytes_written": 1821542,
+        "samples": 79,
+        "samples_scope": "rounds attempted",
+        "sample_failures": {
+          "sparky": null,
+          "sparklina": null
+        }
+      },
+      "resident_prefetch": {
+        "units": 864,
+        "hessian_bytes": 43486543872,
+        "activation_bytes": 5720309760,
+        "devices": [
+          "cuda:0"
+        ],
+        "cuda_allocated_bytes": 63702368256,
+        "cuda_reserved_bytes": 63715672064,
+        "capture": {
+          "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+          "sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c"
+        },
+        "receipt": {
+          "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-02/cache/capture-load-execution-83361da0c2d3e5151555d63abcea4fe28538ba2cb3200d235f2882314d1c2ac5.json",
+          "sha256": "83361da0c2d3e5151555d63abcea4fe28538ba2cb3200d235f2882314d1c2ac5"
+        },
+        "finished_unix": 1788989514.2464955
+      }
+    },
+    {
+      "arm": 3,
+      "budget": 0,
+      "anchors": 56,
+      "start_unix": 1788990058.9066448,
+      "finish_unix": 1788990201.7428098,
+      "seconds": 142.83616495132446,
+      "joules": 8561.603759648051,
+      "mean_power_w": 59.940028231405286,
+      "low_power_seconds_below_45w": 27.426818452286305,
+      "low_power_fraction": 0.19201592581005505,
+      "anchors_per_kj": 6.540830616798136,
+      "coverage_seconds": 142.83616495132446,
+      "max_sample_gap_seconds": 0.501000165939331,
+      "phases": {
+        "MainThread:prismaquant.production_weight_cache._local_forward_render_score": {
+          "count": 56,
+          "wall_seconds": 0.24125261110020801,
+          "thread_cpu_seconds": 0.24122184000015068
+        },
+        "MainThread:prismaquant.production_weight_cache._canonical_rendered_weight_tensor": {
+          "count": 112,
+          "wall_seconds": 0.16570042772218585,
+          "thread_cpu_seconds": 0.16581585599988102
+        },
+        "MainThread:prismaquant.production_weight_cache._store_rendered_weight_entry": {
+          "count": 56,
+          "wall_seconds": 5.239633197197691,
+          "thread_cpu_seconds": 0.2959127679998801
+        },
+        "MainThread:prismaquant.perturbed_x_cache.release_activation_cache_file_pages": {
+          "count": 112,
+          "wall_seconds": 0.04447273339610547,
+          "thread_cpu_seconds": 0.00655878400013421
+        },
+        "MainThread:prismaquant.tessera_campaign._finish_anchor": {
+          "count": 56,
+          "wall_seconds": 7.695640132180415,
+          "thread_cpu_seconds": 0.8194277919998285
+        },
+        "MainThread:prismaquant.tessera_campaign._checkpoint_anchor_identity": {
+          "count": 56,
+          "wall_seconds": 4.766125883848872,
+          "thread_cpu_seconds": 4.763327823999873
+        },
+        "MainThread:prismaquant.tessera_campaign._checkpoint_wire_record": {
+          "count": 56,
+          "wall_seconds": 0.6841611208510585,
+          "thread_cpu_seconds": 0.44805235200007587
+        },
+        "MainThread:prismaquant.cost_stage_checkpoint.write_unit": {
+          "count": 56,
+          "wall_seconds": 0.16076726093888283,
+          "thread_cpu_seconds": 0.007127904000071794
+        }
+      },
+      "top_stack_samples": [
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/window_viterbi.py:1115:viterbi_window_fused",
+          494
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:45:tensor_identity",
+          32
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/wire.py:84:_to_bits",
+          23
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/torch/serialization.py:834:__exit__",
+          22
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2782:columns_of",
+          21
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/torch/cuda/graphs.py:186:replay",
+          15
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2823:trellis_pass",
+          9
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2824:trellis_pass",
+          7
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/wire.py:263:pack_levels",
+          6
+        ],
+        [
+          "/usr/lib/python3.12/pathlib.py:1038:write_bytes",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:96:encoding_input_identity",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/encode.py:2817:trellis_pass",
+          5
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/cached_unit.py:39:tensor_identity",
+          4
+        ],
+        [
+          "/usr/local/lib/python3.12/dist-packages/numpy/_core/_methods.py:44:_amax",
+          4
+        ],
+        [
+          "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-anchor-preparation-03/producer-source-387eda36/src/tessera/decode.py:582:_decode_window",
+          4
+        ]
+      ],
+      "netdata": {
+        "hosts": [
+          "sparky",
+          "sparklina"
+        ],
+        "interval_seconds": 5,
+        "byte_cap": 3221225472,
+        "bytes_written": 1845142,
+        "samples": 80,
+        "samples_scope": "rounds attempted",
+        "sample_failures": {
+          "sparky": null,
+          "sparklina": null
+        }
+      },
+      "resident_prefetch": {
+        "units": 864,
+        "hessian_bytes": 43486543872,
+        "activation_bytes": 5720309760,
+        "devices": [
+          "cuda:0"
+        ],
+        "cuda_allocated_bytes": 63702368256,
+        "cuda_reserved_bytes": 63715672064,
+        "capture": {
+          "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+          "sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c"
+        },
+        "receipt": {
+          "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/publication-gap-optimization-02/native/arm-03/cache/capture-load-execution-ac8c77afc0c3916a6f63dab3c36970fa99000c164937a75f95c78a24adab9151.json",
+          "sha256": "ac8c77afc0c3916a6f63dab3c36970fa99000c164937a75f95c78a24adab9151"
+        },
+        "finished_unix": 1788989920.5403364
+      }
+    }
+  ],
+  "means": {
+    "sync": {
+      "seconds": 143.16674411296844,
+      "joules": 8586.340518524172,
+      "low_power_fraction": 0.19800148674369875,
+      "mean_power_w": 59.974327370108014
+    },
+    "overlap": {
+      "seconds": 137.0843015909195,
+      "joules": 8477.572771035499,
+      "low_power_fraction": 0.16436606919767277,
+      "mean_power_w": 61.84202049314667
+    }
+  },
+  "throughput_gain_pct": 4.437008797841702,
+  "energy_reduction_pct": 1.2667532490007516,
+  "power_sha256": "88cc5ebb4c86ecd1e2aba3fcefc7d19fda14aafa3b9d5f65da6d0897bdae309e"
+}
