@@ -31,7 +31,18 @@ producer in full, which is what the agreement check is for. At this schema
 version four of the six domains — `worker_startup`, `provenance_admission`,
 `cache_capacity`, `timing_partition` — carry no closing condition the report
 emits an observation for, so the resident, activation and KV terms cannot
-become numbers and the scalar composition cannot complete at all. No measured
+become numbers and the scalar composition cannot complete at all. The producer
+schema now says so on its face (tessera#450): `observations` names each owed
+member and sets it null — `worker_startup_records`, `runtime_provenance_relation`,
+`kv_observations`, `timing_captures`, `owner_views`, `observer_qualification` —
+so a capture that did not observe something is distinguishable from a producer
+that dropped it, and the consumer refuses a value there rather than reading one
+whose shape v1 does not define. `partition` owns the domain states and `derived`
+may no longer restate them, and a domain's evidence must name an observation the
+envelope carries. Only `fixed_scratch` and `candidate_scratch` are reachable at
+this version; altered cache capacity, a missing timing tail and overlapping
+streams reach the consumer only as a domain state, which is why it has no test
+for them. No measured
 table, production setting, pin, serving lane or admission behavior changes,
 and no GPU, served, latency, quality or capacity measurement was run.
 Gates: `tests/test_full_engine_resource_report.py`,

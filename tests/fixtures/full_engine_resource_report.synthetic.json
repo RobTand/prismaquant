@@ -1,40 +1,5 @@
 {
   "derived": {
-    "domains": {
-      "cache_capacity": {
-        "evidence": [],
-        "reason": "no check here recomputes pool sizes and resolved limits from the raw worker records with views deduplicated by physical backing generation",
-        "state": "open"
-      },
-      "external_closure": {
-        "evidence": [],
-        "reason": "external/static/context backings carry no disjoint observed charge",
-        "state": "open"
-      },
-      "history_join": {
-        "evidence": [
-          "unattributed_external_records",
-          "history_join"
-        ],
-        "reason": null,
-        "state": "closed"
-      },
-      "provenance_admission": {
-        "evidence": [],
-        "reason": "no check here recomputes the runtime provenance relation; the consumer's admission is what closes this domain, and it refuses today",
-        "state": "open"
-      },
-      "timing_partition": {
-        "evidence": [],
-        "reason": "no check here recomposes the measured step from ordered native apply intervals, and it needs a device with no other work on it, which no capture has had",
-        "state": "open"
-      },
-      "worker_startup": {
-        "evidence": [],
-        "reason": "the recorder is proven to attach before CUDA initialization (the replay refuses a capture that did not), but no capture yet runs inside the engine's own worker process, so startup is not covered end to end",
-        "state": "open"
-      }
-    },
     "scalar_budget_bytes": null,
     "scope": {
       "allocation_scope": "gpu_allocations_only",
@@ -64,7 +29,6 @@
   },
   "execution": {
     "graph_mode": "eager",
-    "note": "declared by the producer's caller; synthetic",
     "residency": "resident",
     "topology": "tp1"
   },
@@ -186,6 +150,11 @@
     },
     "external_native_peak_bytes": null,
     "issues": [],
+    "kv_observations": null,
+    "observer_qualification": null,
+    "owner_views": null,
+    "runtime_provenance_relation": null,
+    "timing_captures": null,
     "torch_allocations": [
       {
         "address": 4096,
@@ -252,7 +221,8 @@
     ],
     "torch_observed_live_peak_bytes": 1536,
     "torch_observed_live_peak_scope": "requested_allocation_bytes_excluding_allocator_rounding",
-    "unattributed_external_records": []
+    "unattributed_external_records": [],
+    "worker_startup_records": null
   },
   "partition": {
     "capture_sha256": "8a081fcba8985de121586a1fb201f94b8f727b7868f4662cbfd28d66f4303f56",
@@ -270,7 +240,7 @@
       "history_join": {
         "evidence": [
           "unattributed_external_records",
-          "history_join"
+          "checkpoints"
         ],
         "reason": null,
         "state": "closed"
@@ -363,14 +333,12 @@
   },
   "reference": {
     "canonical_census": null,
-    "note": "declared by the producer's caller; synthetic, no census behind it",
     "runtime_binding": null,
     "selected_rows": []
   },
   "schema": "tessera.full_engine_resource_report.v1",
   "workload": {
     "calibration": null,
-    "note": "declared by the producer's caller; synthetic, no tokens behind it",
     "prompt_ids": [],
     "sampling": null
   }

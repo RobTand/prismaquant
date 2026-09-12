@@ -349,9 +349,8 @@ def test_a_domain_that_closes_where_the_consumer_cannot_refuses(tmp_path, domain
     all reach this consumer only as a domain state, because the report carries
     no KV, timing or stream observation to recompute."""
     def mutate(report):
-        for member in ("derived", "partition"):
-            report[member]["domains"][domain] = {"state": "closed", "reason": None,
-                                                 "evidence": ["asserted"]}
+        report["partition"]["domains"][domain] = {
+            "state": "closed", "reason": None, "evidence": ["checkpoints"]}
     verdict = consume(tmp_path, mutated(mutate))
     assert any(f"calls domain {domain} closed where this consumer recomputes it as not closed"
                in reason for reason in verdict.disagreements)
@@ -374,10 +373,63 @@ def test_the_two_checkable_domains_close_only_on_their_own_observed_condition(tm
                in reason for reason in consume(tmp_path, mutated(external)).disagreements)
 
 
+def test_the_owed_observations_are_named_and_null_rather_than_absent(tmp_path):
+    """A capture that did not observe something says so by name.
+
+    The four domains with no consumer-checkable closing condition would close
+    on these; v1 carries each as an explicit null, so "not observed" is
+    distinguishable from "the producer dropped it", and dropping one is a
+    refusal rather than a silent gap.
+    """
+    report = supplied()
+    assert set(consumer.OWED_OBSERVATIONS) <= set(report["observations"])
+    assert all(report["observations"][name] is None for name in consumer.OWED_OBSERVATIONS)
+
+    for name in consumer.OWED_OBSERVATIONS:
+        def mutate(report, name=name):
+            del report["observations"][name]
+        with pytest.raises(RuntimePriceError, match="expected exactly fields"):
+            consume(tmp_path, mutated(mutate))
+
+
+@pytest.mark.parametrize("name", list(consumer.OWED_OBSERVATIONS))
+def test_an_owed_observation_that_carries_a_value_refuses(tmp_path, name):
+    """v1 defines no shape for these, so a value here is something no consumer
+    can recompute a term or close a domain from. Reading one would be trusting
+    the producer's own word, which is the failure this consumer exists to
+    prevent."""
+    def mutate(report):
+        report["observations"][name] = [{"claimed": 4096}]
+    with pytest.raises(RuntimePriceError, match="defines no shape for it"):
+        consume(tmp_path, mutated(mutate))
+
+
+def test_a_domain_that_closes_on_evidence_the_envelope_does_not_carry_refuses(tmp_path):
+    """Evidence names an observation, and the consumer goes and looks."""
+    def mutate(report):
+        report["partition"]["domains"]["history_join"]["evidence"] = ["kv_measurements"]
+    with pytest.raises(RuntimePriceError, match="names no observation this report carries"):
+        consume(tmp_path, mutated(mutate))
+
+
+def test_the_partition_owns_the_domains_and_derived_may_not_restate_them(tmp_path):
+    """Two copies of one claim are two things that can drift apart. `derived`
+    carries the numbers; `partition` carries the domain states the numbers
+    depend on, and a `derived` that restates them is an unnamed field."""
+    report = supplied()
+    assert "domains" in report["partition"]
+    assert "domains" not in report["derived"]
+
+    def mutate(report):
+        report["derived"]["domains"] = copy.deepcopy(report["partition"]["domains"])
+    with pytest.raises(RuntimePriceError, match="expected exactly fields"):
+        consume(tmp_path, mutated(mutate))
+
+
 def test_a_domain_that_closes_without_evidence_refuses(tmp_path):
     def mutate(report):
-        report["derived"]["domains"]["cache_capacity"] = {"state": "closed", "reason": None,
-                                                          "evidence": []}
+        report["partition"]["domains"]["cache_capacity"] = {"state": "closed", "reason": None,
+                                                            "evidence": []}
     with pytest.raises(RuntimePriceError, match="evidence must be present exactly when"):
         consume(tmp_path, mutated(mutate))
 
@@ -491,8 +543,11 @@ def closed_report():
     terms["candidate_scratch"] = CLOSED_CANDIDATE_SCRATCH
     domains = {name: {"state": "open", "evidence": [], "reason": "no implemented check"}
                for name in DOMAINS}
-    for name in ("history_join", "external_closure"):
-        domains[name] = {"state": "closed", "evidence": [name], "reason": None}
+    # Each closed domain cites the observation its closing condition is read
+    # from, which is now the only kind of evidence the envelope resolves.
+    for name, evidence in (("history_join", "unattributed_external_records"),
+                           ("external_closure", "external_native_peak_bytes")):
+        domains[name] = {"state": "closed", "evidence": [evidence], "reason": None}
     scope = {"allocation_scope": "gpu_allocations_only", "expressible": False,
              "invariance": "one complete assignment, one row per unit",
              "topology": "tp1_single_device_resident_eager",
@@ -507,19 +562,21 @@ def closed_report():
         "identity": {"capture_sha256": "c" * 64,
                      "fixture_provenance": "synthetic CPU-only arithmetic fixture",
                      "run": copy.deepcopy(identity)},
-        "reference": {"canonical_census": {"units": ["unit.a", "unit.b"]}, "note": "synthetic",
+        "reference": {"canonical_census": {"units": ["unit.a", "unit.b"]},
                       "runtime_binding": {"member_formats": {}},
                       "selected_rows": [{"unit": "unit.a"}, {"unit": "unit.b"}]},
-        "workload": {"calibration": {"sha256": "a" * 64}, "note": "synthetic",
+        "workload": {"calibration": {"sha256": "a" * 64},
                      "prompt_ids": [0, 1], "sampling": {"greedy": True}},
-        "execution": {"graph_mode": "eager", "note": "synthetic", "residency": "resident",
-                      "topology": "tp1"},
+        "execution": {"graph_mode": "eager", "residency": "resident", "topology": "tp1"},
         "observations": {
             "artifacts": [], "capture_sha256": "c" * 64, "checkpoints": [],
             "cuda_argument_domains": {"handled_api_keys": ["cudaMalloc"], "host_allocations": [],
                                       "host_mappings": [], "issues": [], "null_device_frees": [],
                                       "scope": "observed pinned-host lifetimes", "status": "observed"},
             "external_native_peak_bytes": 2048, "issues": [],
+            "kv_observations": None, "observer_qualification": None, "owner_views": None,
+            "runtime_provenance_relation": None, "timing_captures": None,
+            "worker_startup_records": None,
             "torch_allocations": allocations,
             "torch_observed_live_peak_bytes": CLOSED_LIVE_PEAK,
             "torch_observed_live_peak_scope": "requested_allocation_bytes_excluding_allocator_rounding",
@@ -529,8 +586,7 @@ def closed_report():
                       "schema": "tessera.full_engine_resource_partition.v1",
                       "scope": copy.deepcopy(scope), "terms": copy.deepcopy(terms),
                       "unclassified_allocations": [], "units": ["unit.a", "unit.b"]},
-        "derived": {"domains": domains, "scalar_budget_bytes": None, "scope": scope,
-                    "terms": terms},
+        "derived": {"scalar_budget_bytes": None, "scope": scope, "terms": terms},
     }
 
 

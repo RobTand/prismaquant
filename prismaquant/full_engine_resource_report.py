@@ -46,6 +46,18 @@ DOMAIN_STATES = ("closed", "open", "refused")
 #: ``qualified: true`` spelled differently.
 CHECKABLE_DOMAINS = ("history_join", "external_closure")
 
+#: The observations this schema version names and sets to null, so a consumer
+#: can tell "this capture did not observe it" from "the producer dropped it".
+#: They are what the other four domains would close on, which is why the
+#: scalar composition cannot complete at v1 even on a flawless capture: only
+#: `fixed_scratch` and `candidate_scratch` are reachable at all. A non-null
+#: value here is refused rather than read -- this consumer recomputes nothing
+#: from an observation whose shape v1 does not define, and a domain that
+#: closed on one would be certifying itself.
+OWED_OBSERVATIONS = ("kv_observations", "observer_qualification", "owner_views",
+                     "runtime_provenance_relation", "timing_captures",
+                     "worker_startup_records")
+
 TERMS = ("fixed_resident", "candidate_resident", "fixed_activation",
          "candidate_activation", "fixed_scratch", "candidate_scratch", "fixed_kv")
 
@@ -86,13 +98,15 @@ _RUN_FIELDS = ("assignment_sha256", "canonical_units_sha256", "configuration_sha
                "schema", "workload_sha256")
 _RUN_DIGESTS = ("assignment_sha256", "canonical_units_sha256", "configuration_sha256",
                 "model_sha256", "runtime_manifest_sha256", "workload_sha256")
-_EXECUTION_FIELDS = ("graph_mode", "note", "residency", "topology")
-_REFERENCE_FIELDS = ("canonical_census", "note", "runtime_binding", "selected_rows")
-_WORKLOAD_FIELDS = ("calibration", "note", "prompt_ids", "sampling")
+_EXECUTION_FIELDS = ("graph_mode", "residency", "topology")
+_REFERENCE_FIELDS = ("canonical_census", "runtime_binding", "selected_rows")
+_WORKLOAD_FIELDS = ("calibration", "prompt_ids", "sampling")
 _OBSERVATION_FIELDS = ("artifacts", "capture_sha256", "checkpoints", "cuda_argument_domains",
-                       "external_native_peak_bytes", "issues", "torch_allocations",
+                       "external_native_peak_bytes", "issues", "kv_observations",
+                       "observer_qualification", "owner_views", "runtime_provenance_relation",
+                       "timing_captures", "torch_allocations",
                        "torch_observed_live_peak_bytes", "torch_observed_live_peak_scope",
-                       "unattributed_external_records")
+                       "unattributed_external_records", "worker_startup_records")
 _ARGUMENT_DOMAIN_FIELDS = ("handled_api_keys", "host_allocations", "host_mappings", "issues",
                            "null_device_frees", "scope", "status")
 _ALLOCATION_FIELDS = ("address", "allocate_index", "allocation_id",
@@ -109,7 +123,7 @@ _PARTITION_FIELDS = ("capture_sha256", "domains", "identity", "membership", "sch
 _MEMBERSHIP_FIELDS = ("allocate_index", "allocation_id", "bytes", "free_completed_index",
                       "lifetime_class", "owner_class", "unit")
 _UNCLASSIFIED_FIELDS = ("allocation_id", "bytes", "lifetime_scope", "observed_categories", "reason")
-_DERIVED_FIELDS = ("domains", "scalar_budget_bytes", "scope", "terms")
+_DERIVED_FIELDS = ("scalar_budget_bytes", "scope", "terms")
 _SCOPE_FIELDS = ("allocation_scope", "expressible", "invariance", "topology",
                  "unavailable_terms", "unclassified_allocation_count")
 _DOMAIN_FIELDS = ("evidence", "reason", "state")
@@ -290,7 +304,25 @@ def _observations(value: Any, where: str) -> Mapping:
         raise RuntimePriceError(f"{where}: a pointer generation is reused by two allocations")
     for item in _list(observations["checkpoints"], where + " checkpoints"):
         _checkpoint(item, where + " checkpoint")
+    for name in OWED_OBSERVATIONS:
+        if observations[name] is not None:
+            raise RuntimePriceError(
+                f"{where}: {name} is not null, but this schema version defines no shape for it, "
+                "so nothing here can recompute a term or close a domain from it")
     return observations
+
+
+def _resolved_evidence(domains: Mapping, observations: Mapping, where: str) -> None:
+    """Every evidence id names an observation this envelope actually carries.
+
+    A domain citing an id nothing answers to is a status flag with a footnote:
+    the consumer is told where to look and finds nothing there.
+    """
+    for name in DOMAINS:
+        for item in domains[name]["evidence"]:
+            if item not in observations:
+                raise RuntimePriceError(
+                    f"{where} {name}: evidence {item!r} names no observation this report carries")
 
 
 def _partition(value: Any, where: str) -> Mapping:
@@ -355,15 +387,14 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
             raise RuntimePriceError(
                 f"report execution: unsupported {key} {execution[key]!r}; the scalar device budget "
                 f"covers only {supported!r}")
-    _optional_string(execution["note"], "report execution note")
     reference_member = _object(report["reference"], _REFERENCE_FIELDS, "report reference")
     _list(reference_member["selected_rows"], "report reference selected rows")
     workload = _object(report["workload"], _WORKLOAD_FIELDS, "report workload")
     _list(workload["prompt_ids"], "report workload prompt ids")
-    _observations(report["observations"], "report observations")
-    _partition(report["partition"], "report partition")
+    observations = _observations(report["observations"], "report observations")
+    partition = _partition(report["partition"], "report partition")
+    _resolved_evidence(partition["domains"], observations, "report partition domain")
     derived = _object(report["derived"], _DERIVED_FIELDS, "report derived")
-    _domains(derived["domains"], "report derived domains")
     _terms(derived["terms"], "report derived terms")
     _scope(derived["scope"], "report derived scope")
     _optional_index(derived["scalar_budget_bytes"], "report derived scalar budget bytes")
@@ -660,11 +691,11 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
 
     closed = _recompute_domains(observations)
     for name in DOMAINS:
-        for member, table in (("derived", derived["domains"]), ("partition", partition["domains"])):
-            if (table[name]["state"] == "closed") != closed[name]:
-                disagree(f"the {member} block calls domain {name} {table[name]['state']} "
-                         f"where this consumer recomputes it as "
-                         f"{'closed' if closed[name] else 'not closed'}")
+        claimed = partition["domains"][name]
+        if (claimed["state"] == "closed") != closed[name]:
+            disagree(f"the partition block calls domain {name} {claimed['state']} "
+                     f"where this consumer recomputes it as "
+                     f"{'closed' if closed[name] else 'not closed'}")
     open_domains = tuple(name for name in DOMAINS if not closed[name])
     for name in open_domains:
         blocking.append(f"domain {name} is not closed, so every term depending on it stays null")
