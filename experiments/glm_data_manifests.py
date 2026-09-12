@@ -68,6 +68,16 @@ MANIFEST_KEYS = frozenset({"schema", "produced_by", "mount_prefix", "entries",
                            "entry_count", "total_bytes", "annotations"})
 ENTRY_KEYS = frozenset({"path", "offset", "bytes", "sha256"})
 
+#: ``prismabuild.core.DATA_MANIFEST_MAX_ENTRIES`` and
+#: ``DATA_MANIFEST_MAX_BYTES``: ``validate_data_manifest`` refuses a longer
+#: entry list and ``load_data_manifest`` refuses a larger file.  A routed GLM
+#: row is about 870 capture and weight entries plus a 5,920-file seed wire, so
+#: roughly 6,800 entries and 2 MB -- well inside both, but the ceilings belong
+#: here so a future read set that crosses one is refused by the producer
+#: rather than by the fleet.
+MAX_ENTRIES = 1_000_000
+MAX_MANIFEST_BYTES = 64 * 1024 * 1024
+
 
 def check_manifest(manifest: dict, *, where: str = "data manifest") -> dict:
     """Refuse here what PrismaBuild would refuse at submission.
@@ -96,6 +106,8 @@ def check_manifest(manifest: dict, *, where: str = "data manifest") -> dict:
     entries = manifest["entries"]
     if not isinstance(entries, list) or not entries:
         raise SystemExit(f"{where}: entries must be a non-empty array")
+    if len(entries) > MAX_ENTRIES:
+        raise SystemExit(f"{where}: entries exceed {MAX_ENTRIES}")
     seen: set[tuple[str, int]] = set()
     total = 0
     for index, entry in enumerate(entries):
@@ -120,6 +132,20 @@ def check_manifest(manifest: dict, *, where: str = "data manifest") -> dict:
     if manifest["total_bytes"] != total:
         raise SystemExit(f"{where}: total_bytes disagrees with entries")
     return manifest
+
+
+def check_manifest_bytes(blob: bytes, *, where: str = "data manifest") -> bytes:
+    """Refuse a manifest file PrismaBuild would refuse to read at all.
+
+    ``load_data_manifest`` stats the file before it parses it, so an oversized
+    manifest fails at submission with nothing validated.  Checking the bytes
+    the producer is about to write keeps that refusal here.
+    """
+    if len(blob) > MAX_MANIFEST_BYTES:
+        raise SystemExit(
+            f"{where}: manifest file is {len(blob)} bytes, over the "
+            f"{MAX_MANIFEST_BYTES}-byte limit")
+    return blob
 
 
 def sha256_file(path: str) -> str:
@@ -223,6 +249,17 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
         entries.append({"path": path, "offset": 0, "bytes": int(size), "sha256": None})
     phases.append({"name": "seeds", "bytes": plan["seed_bytes"],
                    "cumulative_bytes": plan["total_bytes"]})
+    named_seed_dir = None if argv is None else argv_value(argv, SEED_WIRE_DIR_FLAG)
+    if named_seed_dir and not plan["seed_files"]:
+        # The defect this gate exists for produced exactly this shape: a row
+        # that reads 9.4-19 GB of wire, and a manifest that says ``seeds: 0``.
+        # A miss count of zero against a directory the row names is a broken
+        # read set, not an empty one, so it fails closed here rather than
+        # warming nothing at 41 MB/s.
+        raise SystemExit(
+            f"{row_id}: argv names {SEED_WIRE_DIR_FLAG} {named_seed_dir} but no "
+            "readable file was found there; refusing to declare a read set "
+            "that omits the row's seed wire")
     for e in entries:
         if not e["path"].startswith(SHARED_MOUNT + "/"):
             raise SystemExit(f"{row_id}: entry outside the shared mount: {e['path']}")

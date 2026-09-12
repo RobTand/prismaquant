@@ -168,19 +168,24 @@ def _files_under(path: str) -> list[tuple[str, int]]:
     """Every regular file at ``path``, named exactly, largest scope one tree.
 
     ``path`` is a single directory (or file) the row's argv names.  It is
-    walked with one ``os.walk`` of that named directory and nothing above it:
-    a search rooted at a parent would be a recursive scan of the shared mount,
-    which is the RPC storm that stalls the fleet's GPU clients.  Symlinks are
-    not followed -- ``os.walk`` does not descend them, and a symlinked leaf is
-    dropped rather than declared, because the prewarm reader opens every entry
-    ``O_NOFOLLOW`` and would refuse it anyway.
+    enumerated with ``os.scandir`` of that named directory and the directories
+    below it, and nothing above it: a search rooted at a parent would be a
+    recursive scan of the shared mount, which is the RPC storm that stalls the
+    fleet's GPU clients.  ``scandir`` also carries the attributes the NFS
+    READDIRPLUS reply already returned, so a 5,920-file seed wire costs one
+    round of directory reads rather than one ``stat`` per file.
+
+    The named root is followed if it is a symlink -- a campaign may point
+    ``--seed-wire-dir`` at a link -- but leaves are not: the prewarm reader
+    opens every entry ``O_NOFOLLOW``, so a symlinked leaf would only ever
+    record an error, and it is dropped rather than declared.
 
     Paths come back in the shared namespace the manifest declares, even when
     the sizes were taken through the local pool mount.
     """
     local = to_pool(path)
     try:
-        info = os.lstat(local)
+        info = os.stat(local)
     except OSError:
         return []
     if statmod.S_ISREG(info.st_mode):
@@ -188,19 +193,28 @@ def _files_under(path: str) -> list[tuple[str, int]]:
     if not statmod.S_ISDIR(info.st_mode):
         return []
     out: list[tuple[str, int]] = []
-    for root, dirs, files in os.walk(local):
-        dirs.sort()
-        for name in sorted(files):
-            full = os.path.join(root, name)
+    pending = [local]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as scan:
+                items = list(scan)
+        except OSError:
+            continue
+        for item in items:
             try:
-                leaf = os.lstat(full)
+                if item.is_dir(follow_symlinks=False):
+                    pending.append(item.path)
+                    continue
+                if not item.is_file(follow_symlinks=False):
+                    continue
+                size = item.stat(follow_symlinks=False).st_size
             except OSError:
                 continue
-            if not statmod.S_ISREG(leaf.st_mode) or leaf.st_size <= 0:
+            if size <= 0:
                 continue
-            relative = os.path.relpath(full, local)
-            out.append((os.path.normpath(os.path.join(path, relative)),
-                        leaf.st_size))
+            relative = os.path.relpath(item.path, local)
+            out.append((os.path.normpath(os.path.join(path, relative)), size))
     return sorted(out)
 
 

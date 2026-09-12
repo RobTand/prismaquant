@@ -963,8 +963,10 @@ def attach_data_manifests(workspace: Path, rows: list[dict], *,
         manifest = producer.build_manifest(
             campaign, row_id, provenance, row.get("argv"))
         path = out_dir / f"{row_id}.data-manifest.json"
-        path.write_bytes(
-            json.dumps(manifest, indent=1, sort_keys=False).encode() + b"\n")
+        blob = producer.check_manifest_bytes(
+            json.dumps(manifest, indent=1, sort_keys=False).encode() + b"\n",
+            where=row_id)
+        path.write_bytes(blob)
         attached.append({**row, "data_manifest": str(path)})
 
     missing = [producer.row_id_of(row) for row in attached
@@ -980,7 +982,9 @@ def cmd_submit(args) -> int:
     rows = attach_data_manifests(workspace, rows)
     submitted = workspace / SUBMITTED_MANIFEST
     submitted.write_text(json.dumps(rows, indent=2) + "\n")
-    print(f"[dispatch] data manifests attached to {len(rows)} rows -> {submitted}")
+    plural = "" if len(rows) == 1 else "s"
+    print(f"[dispatch] data manifests attached to {len(rows)} row{plural} "
+          f"-> {submitted}")
     # Re-running the manifest IS the resume: a finished row is a cache hit and
     # a running row is re-attached, both by pbcampaign itself.  The manifests
     # are a deterministic function of the campaign and the tree, so a second

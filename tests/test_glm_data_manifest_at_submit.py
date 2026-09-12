@@ -257,7 +257,9 @@ def test_a_row_whose_read_set_cannot_be_derived_is_refused(
         dispatch.attach_data_manifests(workspace, [unplanned])
 
 
-def test_every_submitted_row_carries_a_manifest(tmp_path, shared_mount):
+def test_every_submitted_row_carries_a_manifest(
+    tmp_path, shared_mount, monkeypatch,
+):
     workspace, units, seed_dir = _workspace(tmp_path)
     rows = [_row(units, seed_dir)]
     (workspace / "manifest.json").write_text(json.dumps(rows, indent=2) + "\n")
@@ -267,12 +269,11 @@ def test_every_submitted_row_carries_a_manifest(tmp_path, shared_mount):
         calls["manifest"] = manifest
         return 0
 
-    dispatch._pbcampaign = _record
-    try:
-        assert dispatch.cmd_submit(
-            type("Args", (), {"workspace": str(workspace), "wait_s": 1})) == 0
-    finally:
-        del dispatch._pbcampaign
+    # ``monkeypatch`` restores the real helper; deleting the attribute instead
+    # would leave the module without it for every later test in the process.
+    monkeypatch.setattr(dispatch, "_pbcampaign", _record)
+    assert dispatch.cmd_submit(
+        type("Args", (), {"workspace": str(workspace), "wait_s": 1})) == 0
 
     submitted = json.loads(Path(calls["manifest"]).read_text())
     assert submitted, "nothing was submitted"
@@ -280,3 +281,72 @@ def test_every_submitted_row_carries_a_manifest(tmp_path, shared_mount):
     # What ``plan`` wrote is not what was submitted, and is left alone.
     assert Path(calls["manifest"]).name == dispatch.SUBMITTED_MANIFEST
     assert json.loads((workspace / "manifest.json").read_text()) == rows
+
+
+def test_a_seed_wire_directory_reached_through_a_symlink_is_still_declared(
+    tmp_path, shared_mount,
+):
+    """A row may name a link; the bytes behind it are the bytes it reads."""
+
+    workspace, units, seed_dir = _workspace(tmp_path)
+    link = tmp_path / "seed-wire-link"
+    link.symlink_to(seed_dir)
+    campaign = glm_data_manifests.Campaign(str(workspace))
+
+    manifest = glm_data_manifests.build_manifest(
+        campaign, "row-0000", {"tool": "test"}, _row(units, link)["argv"])
+
+    assert manifest["annotations"]["counts"]["seeds"] == len(SEED_WIRE)
+    assert manifest["annotations"]["bytes"]["seeds"] == sum(SEED_WIRE.values())
+    declared = {entry["path"] for entry in manifest["entries"]}
+    assert str(link / "unit-0000.tessera") in declared
+
+
+def test_a_row_whose_named_seed_wire_yields_nothing_is_refused(
+    tmp_path, shared_mount,
+):
+    """Zero seeds against a named directory is the defect, not an empty row.
+
+    This is the exact shape row-0065 shipped: a manifest declaring
+    ``seeds: 0`` for a row that went on to read 9.4-19 GB of wire at 41 MB/s.
+    Whatever the cause -- a missing directory, a permission error, a renamed
+    campaign -- the submit path refuses it instead of warming nothing.
+    """
+    workspace, units, seed_dir = _workspace(tmp_path)
+
+    absent = _row(units, tmp_path / "never-written")
+    with pytest.raises(SystemExit, match="no readable file was found"):
+        dispatch.attach_data_manifests(workspace, [absent])
+
+    empty = tmp_path / "empty-wire"
+    empty.mkdir()
+    with pytest.raises(SystemExit, match="no readable file was found"):
+        dispatch.attach_data_manifests(workspace, [_row(units, empty)])
+
+
+def test_the_producer_restates_the_limits_prismabuild_enforces(
+    tmp_path, shared_mount, monkeypatch,
+):
+    """The ceilings live with the producer, not only in the fleet.
+
+    ``validate_data_manifest`` refuses more than
+    ``DATA_MANIFEST_MAX_ENTRIES`` entries and ``load_data_manifest`` refuses a
+    file over ``DATA_MANIFEST_MAX_BYTES``, both before anything is warmed.
+    """
+    assert glm_data_manifests.MAX_ENTRIES == 1_000_000
+    assert glm_data_manifests.MAX_MANIFEST_BYTES == 64 * 1024 * 1024
+
+    workspace, units, seed_dir = _workspace(tmp_path)
+    campaign = glm_data_manifests.Campaign(str(workspace))
+    manifest = glm_data_manifests.build_manifest(
+        campaign, "row-0000", {"tool": "test"}, _row(units, seed_dir)["argv"])
+
+    # The real ceilings are far above any GLM row, so the refusal is exercised
+    # by lowering them rather than by building a million entries.
+    monkeypatch.setattr(glm_data_manifests, "MAX_ENTRIES", 1)
+    with pytest.raises(SystemExit, match="entries exceed 1"):
+        glm_data_manifests.check_manifest(manifest)
+    with pytest.raises(SystemExit, match="over the"):
+        glm_data_manifests.check_manifest_bytes(
+            b"x" * (glm_data_manifests.MAX_MANIFEST_BYTES + 1))
+    assert glm_data_manifests.check_manifest_bytes(b"{}") == b"{}"

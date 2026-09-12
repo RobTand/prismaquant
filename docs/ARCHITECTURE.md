@@ -17,7 +17,9 @@ row's own `--seed-wire-dir` argv points at, in that order -- the order the row
 reads them. The seed bytes are new: the producer used to resolve them from
 the campaign's own plan, which for a re-planned campaign names a different
 workspace, so every manifest declared `seeds: 0` while the row read 9.4-19 GB
-of wire at 41 MB/s (row-0065, 2026-09-12). `submit` writes the manifests under
+of wire at 41 MB/s (row-0065, 2026-09-12). A row that names a seed directory
+and finds nothing readable in it is refused rather than submitted with
+`seeds: 0`. `submit` writes the manifests under
 `WORKSPACE/data-manifests/` and submits `WORKSPACE/manifest.submitted.json`;
 `plan` still owns `manifest.json` and is not rewritten. The campaign argv is
 byte-identical with and without the manifest -- the manifest is a `pbrun`
@@ -9153,7 +9155,9 @@ manifest -- the exact shared-mount files and byte extents the row will read,
 built by `experiments/glm_data_manifests.py` from the row's units file and its
 own argv -- and refuses a row whose read set it cannot derive, because a row
 without one is invisible to PrismaBuild's prewarm loop and starts against cold
-spindles. The manifest is a `pbrun` input and leaves the campaign argv
+spindles. A row whose argv names `--seed-wire-dir` and whose directory yields
+no readable file is refused for the same reason: zero seed bytes against a
+named directory is a broken read set, not an empty one. The manifest is a `pbrun` input and leaves the campaign argv
 byte-identical; it is written under `WORKSPACE/data-manifests/` and the rows
 that name it under `WORKSPACE/manifest.submitted.json`, so `plan`'s
 `manifest.json` is never rewritten. Re-running the manifest **is**
