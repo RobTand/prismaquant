@@ -47,6 +47,55 @@ or ship-gate change, and no GPU, served or quality measurement was run. Gates:
 `tests/test_campaign_launcher_pinned_import.py`,
 `tests/test_tessera_campaign_container.py`.
 
+Re-stamped (2026-09-12, `claude/522-derive-mem-gb-from-plan`) for the campaign
+dispatcher's derived memory demand (#522). **A row's `demand.mem_gb` now
+carries every term of the predicate the row will check itself against**, and a
+manifest that does not is refused before submission rather than after
+admission.
+
+Three terms, one `ceil`: the phase plan's `memory_bytes`, the process floor,
+and the guard's physical margin.
+
+* **The floor.** `process_baseline_bytes` on the campaign spec now defaults to
+  `DEFAULT_PROCESS_BASELINE_BYTES` = 1,150,000,000 rather than to `0`. That is
+  the top of the range of floors the GLM `extension-r1024-02` rows measured for
+  themselves on 2026-09-12 (rows 0058, 0061, 0062, 0063, 0066, 0074, 0079:
+  0.88-1.15 GB), so it covers the worst reading rather than the average one. A
+  spec still overrides it, including with `0`, and `baseline_policy` says which
+  of the two a plan carries: `explicit-spec-reservation-measured-in-row` for a
+  spec's number and `measured-fleet-default-reservation-measured-in-row` for
+  this default. The reservation is still charged on the demand and never inside
+  `memory_bytes`.
+* **The margin.** `CaptureMemoryGuard` refuses at `cap - margin_bytes`, so a
+  demand covering plan and floor alone still buys an admission the row's first
+  `check` declines. The dispatcher reads `CaptureMemoryGuard.MARGIN_BYTES`, now
+  a class attribute, instead of restating 2 GiB.
+* **The check.** `dispatch_tessera_campaign.py check` recomputes each manifest
+  row's demand **from the row's own argv**, not from the planning spec, and
+  refuses a row whose declared `demand.mem_gb` is below the derived value or
+  whose derived value exceeds a declared GPU-box capacity (`--box-memory-gb`,
+  else the spec's `box_memory_gb`). `submit` runs the same check first and
+  refuses to submit an unverifiable manifest. Both refusals name plan, floor,
+  margin, derived and declared bytes.
+
+Consequence, stated rather than engineered around: the relaunch rows derive
+108.63 GB + 1.15 GB + 2 GiB = 105 GiB, above the 104 GiB a Spark declares.
+Those rows are now refused at submit instead of dying about twenty seconds
+after admission. Making them fit is a plan-term or a box question, not an
+allowance to shrink.
+
+The row's own refusals now print their arithmetic. `memory_admission_detail`
+returns `plan_bytes`, `cap_bytes`, `baseline_bytes` (absent where no reading
+has been taken) and `slack_bytes`; both cgroup-admission refusals in
+`tessera_campaign.py` embed it, and the selected-anchor refusal also writes
+`<cache-dir>/selected-anchor-memory-refusal.json` with the guard snapshot.
+Three rows died on this predicate on 2026-09-12 and the cause had to be
+recovered by unpickling completed rows' `cost.pkl`.
+
+Gates: `tests/test_campaign_demand_derivation.py`,
+`tests/test_tessera_selected_source.py`,
+`tests/test_tessera_campaign_fanout.py`.
+
 Re-stamped (2026-09-12, `pq/420-admit-fixed-resources`) for the consumer half
 of the fixed-resource admission design's last prerequisite row, "integrate
 allocator admission" ([design](design/runtime_fixed_resource_admission.md),
@@ -445,10 +494,12 @@ dispatcher's explicit process-baseline reservation. A recipe may declare
 demand, in both the streaming and resident-source branches, and never inside
 `memory_bytes`. `baseline_policy` gains
 `explicit-spec-reservation-measured-in-row` for a plan that carries one, and
-the plan records the integer beside `row_memory_gb`. The default is `0`, which preserves
-every row's resource demand exactly; the plan file itself is not byte-identical,
-since it now carries `process_baseline_bytes: 0`. The runtime's measured
-fail-closed guard is unchanged.
+the plan records the integer beside `row_memory_gb`. The default was `0`, which
+preserved every row's resource demand exactly; the plan file itself was not
+byte-identical, since it carries `process_baseline_bytes`. The runtime's
+measured fail-closed guard is unchanged. **Superseded on 2026-09-12 (#522):
+the default is now the measured fleet floor, and the guard's margin is charged
+beside it. See the newest stamp.**
 
 Re-stamped (2026-09-09, `fix/glm-resident-hessian-source`) for resident
 Hessian commitment reuse in the selected campaign's existing opt-in
@@ -603,8 +654,9 @@ the cap less the baseline instead of with the raw cap. The guard's own refusal
 arithmetic is unchanged: its readings are already absolute. No pre-run baseline
 is derived for the dispatcher, which never enters the box a row lands on, but a
 recipe may **declare** one: `process_baseline_bytes` on the campaign spec, a
-non-negative integer of bytes defaulting to `0`. `load_spec` refuses anything
-else, `bool` included, before a row is derived. `_row_memory_gb` adds it to the
+non-negative integer of bytes. It defaulted to `0` here and defaults to the
+measured fleet floor since #522; the newest stamp carries the current rule.
+`load_spec` refuses anything else, `bool` included, before a row is derived. `_row_memory_gb` adds it to the
 demand in **both** branches, streaming and resident-source, since a process
 floor exists either way; it is never summed into `memory_bytes`, because the
 demand becomes a cap of exactly that many GiB while the row compares its plan
@@ -612,9 +664,11 @@ with the cap less its measured floor, so a reservation folded into the plan
 would inflate both sides and net to zero. That is why `headroom_gb`, a term
 inside `memory_bytes`, could not close this gap. `baseline_policy` records
 which pre-run term a plan has:
-`declared-headroom-pre-run-measured-in-row` when nothing is declared, and
-`explicit-spec-reservation-measured-in-row` beside the integer when one is, so
-an absent reservation cannot read as coverage. The row's own first
+`declared-headroom-pre-run-measured-in-row` when nothing is reserved,
+`explicit-spec-reservation-measured-in-row` beside the integer when a spec
+declares one, and `measured-fleet-default-reservation-measured-in-row` when the
+dispatcher supplied its measured default (#522), so an absent reservation
+cannot read as coverage and an inherited one cannot read as a spec's choice. The row's own first
 `CaptureMemoryGuard.check` remains the only measured floor of the three.
 Rounding was not a reservation: `ceil` leaves at most one GiB of slack and the
 floor measured on this fleet is 1,062,359,040 bytes, 0.9894 GiB, so before this
@@ -2108,8 +2162,8 @@ three scope-wide answers no shard may re-derive (the calibration row counts
 behind `fit_tokens`, the fused-unified activation maxima behind
 `input_global_scale`, and the producer's whole-scope expert projection);
 `--seed-checkpoint` offers an in-flight campaign's anchors to this run's own
-row gates. `tools/dispatch_tessera_campaign.py` is census/plan/submit/merge
-over `pbcampaign`, and the merge unions disjoint captures into the object a
+row gates. `tools/dispatch_tessera_campaign.py` is
+census/plan/check/submit/merge over `pbcampaign`, and the merge unions disjoint captures into the object a
 whole-scope run writes, recomputes its digest and refuses on any identity the
 rows do not already share. A row whose rung this run's menu does not admit is
 carried as `unservable` evidence rather than refused or priced, and
@@ -9165,10 +9219,13 @@ RobTand/prismaquant#284, and a fanned-out run selects it the way it selects any
 campaign flag, through the spec's `campaign_argv`, with `merge` refusing rows
 whose `menu_mode` disagrees.
 
-`tools/dispatch_tessera_campaign.py` is `census` / `plan` / `submit` / `merge`
-over `pbcampaign`. Rows are portable (no host pin), GPU-demanding, not
-exclusive, `retry_safe`, and carry a memory demand computed from the
-checkpoint's size and the selection's shapes. Re-running the manifest **is**
+`tools/dispatch_tessera_campaign.py` is `census` / `plan` / `check` /
+`submit` / `merge` over `pbcampaign`. Rows are portable (no host pin), GPU-demanding, not
+exclusive, `retry_safe`, and carry a memory demand computed from the phase
+plan the row checks itself against, plus the measured process floor and the
+guard's margin (#522). `check` re-derives that demand from a manifest row's
+own argv and refuses an under-declared or over-capacity row; `submit` runs it
+first. Re-running the manifest **is**
 the resume -- a finished row is a CAS hit and a running row is re-attached --
 so nothing here decides what to skip, and a row may not carry
 `--deadline-seconds`, which stops a run mid-round and would price a different
