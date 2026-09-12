@@ -19,8 +19,8 @@ silently tested nothing -- is worse than a visible skip.
 
 The producers below are test producers.  A real one measures something; these
 answer instantly, which is what makes running every child of a real cut cheap
-enough to do in one test.  Two of them deliberately do **not** use
-``write_child_result_manifest``: the point of those two is that a producer which
+enough to do in one test.  One of them deliberately does **not** use
+``write_child_result_manifest``: the point of that one is that a producer which
 bypasses PrismaQuant's own fail-closed writer is still caught, by the exact
 cover, at the merge.
 """
@@ -142,16 +142,21 @@ manifest = {
 open(envelope["result_manifest_path"], "w").write(json.dumps(manifest))
 '''
 
-#: Reports how many arguments it received and what the last one was, then
-#: answers its batch honestly.  Used for the placeholder-substitution check.
+#: Answers its batch with a record of its own ``sys.argv``.  A child's private
+#: checkout does not outlive the action, so the only evidence that survives is
+#: what goes into the declared result -- and since a result reaches the manifest
+#: as a digest, the test recomputes the digest of the record a correctly
+#: substituted child must have produced.  The assertion here fails the action
+#: outright; the digest comparison is what proves the path was the right one.
 ARGV_PRODUCER = '''
-import json, sys
+import sys
 from prismaquant import quality_prefill_pb_adapter as adapter
 
-envelope = adapter.read_batch_envelope(sys.argv[-1])
-open("argv.json", "w").write(json.dumps(sys.argv))
-results = {task["id"]: {"value": 1.0} for task in envelope["tasks"]}
-adapter.write_child_result_manifest(envelope, results)
+assert len(sys.argv) == 2, sys.argv
+envelope = adapter.read_batch_envelope(sys.argv[1])
+record = {"argv_len": len(sys.argv), "batch_path": sys.argv[1]}
+adapter.write_child_result_manifest(
+    envelope, {task["id"]: record for task in envelope["tasks"]})
 '''
 
 
@@ -325,7 +330,7 @@ def test_every_child_runs_and_the_group_closes_on_an_exact_cover(
     assert pbcampaign.close_group(group, cas=cas) == 0
 
     receipt = json.loads(_group_path(shared, group).read_text())
-    assert receipt["schema"] == dc.GROUP_RECEIPT_SCHEMA
+    assert receipt["schema"] == dc.GROUP_RECEIPT_SCHEMA_V1
     assert receipt["task_count"] == ROSTER_SIZE
     assert receipt["child_count"] == EXPECTED_CHILDREN
     assert receipt["parent_key"] == group["plan"]["parent_key"]
@@ -365,14 +370,16 @@ def test_the_batch_path_reaches_the_child_as_one_argument(fleet) -> None:
 
     The shared root this fixture builds carries a space, a single quote and a
     ``$``, so the CAS path PrismaBuild substitutes into ``{pb.task_batch}``
-    carries all three.  The child records its own ``sys.argv``: two elements,
-    the second being that exact path.  Shell expansion would have split it;
-    interpolation into a larger argument would have changed it.
+    carries all three.  What each child received is checked twice over: the
+    child asserts its own ``sys.argv`` has exactly two elements and fails the
+    action if not, and the test recomputes the digest of the record a child that
+    got exactly the right single argument would have published.  Shell expansion
+    would have split the path into several arguments; interpolation into a
+    larger argument would have changed it.  Either way the digest moves.
     """
 
     shared, queue = fleet
-    work = _checkout(shared, ARGV_PRODUCER)
-    plan = _plan(work)
+    plan = _plan(_checkout(shared, ARGV_PRODUCER))
     assert " " in str(shared) and "'" in str(shared) and "$" in str(shared)
 
     _, group = _decompose(plan)
@@ -381,16 +388,20 @@ def test_the_batch_path_reaches_the_child_as_one_argument(fleet) -> None:
     cas = pb.PrismaBuildCAS(shared / "cas")
     assert pbcampaign.close_group(group, cas=cas) == 0
 
-    # Every child wrote one; the checkouts are private, so read them all.
-    recorded = sorted(Path(shared).rglob("argv.json"))
-    assert len(recorded) == EXPECTED_CHILDREN
-    for path in recorded:
-        argv = json.loads(path.read_text())
-        assert len(argv) == 2, argv
-        batch = Path(argv[1])
-        assert batch.is_absolute() and batch.is_file()
-        assert " " in argv[1] and "'" in argv[1] and "$" in argv[1]
-        assert adapter.TASK_BATCH_PLACEHOLDER not in argv[1]
+    request, frozen = group["request"], group["plan"]
+    for ordinal, child in enumerate(group["children"]):
+        envelope = dc.batch_envelope(request, frozen, child_ordinal=ordinal)
+        # The blob is addressed by the digest of the file's bytes, so this is
+        # the path PrismaBuild resolved into the placeholder -- derived here
+        # rather than read back, which is what makes the comparison a proof.
+        batch_path = str(cas.blob_path(adapter.document_file_sha256(envelope)))
+        assert " " in batch_path and "'" in batch_path and "$" in batch_path
+        expected = adapter.canonical_sha256(
+            {"argv_len": 2, "batch_path": batch_path})
+
+        manifest = adapter.validate_child_result_manifest(
+            pbcampaign.child_result_manifest(child, cas=cas))
+        assert {entry["value_sha256"] for entry in manifest["results"]} == {expected}
 
 
 # --------------------------------------------------------------------------

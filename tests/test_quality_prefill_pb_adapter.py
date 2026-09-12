@@ -197,7 +197,7 @@ def test_write_logical_request_publishes_exactly_the_emitted_bytes(
     path = tmp_path / "request.json"
     digest = adapter.write_logical_request(phase_plan(), path)
     assert path.read_bytes() == adapter.logical_request_bytes(phase_plan())
-    assert digest == adapter.document_sha256(
+    assert digest == adapter.document_file_sha256(
         adapter.emit_logical_request(phase_plan()))
     # A request file is JSON a campaign tool loads, not only bytes we hash.
     assert json.loads(path.read_text())["schema"] == adapter.LOGICAL_REQUEST_SCHEMA
@@ -390,12 +390,14 @@ def test_the_module_records_the_deployment_dependency() -> None:
     from the file itself that it targets something the fleet does not run yet.
     """
 
-    doc = adapter.__doc__ or ""
+    # Whitespace-normalized: the sentence is the claim, and a re-wrap of the
+    # docstring must not read as the dependency having been dropped.
+    doc = " ".join((adapter.__doc__ or "").split())
     assert "#518" in doc and "#517" in doc
     assert "not deployed to the fleet" in doc
     assert "published" in doc
-    assert "in process" in doc
-    assert "no fallback" in doc.lower()
+    assert "exercised is **in process**" in doc
+    assert "there is no fallback" in doc.lower()
 
 
 def test_the_deployed_runtime_is_reported_rather_than_asserted() -> None:
@@ -466,7 +468,7 @@ def test_a_child_writes_its_manifest_where_its_action_declared_it(
     assert [entry["output_id"] for entry in manifest["results"]] == [
         task["output_id"] for task in envelope["tasks"]
     ]
-    assert manifest["results"][0]["value_sha256"] == adapter.document_sha256(
+    assert manifest["results"][0]["value_sha256"] == adapter.canonical_sha256(
         {"ms": 1.5, "n": 8})
 
 

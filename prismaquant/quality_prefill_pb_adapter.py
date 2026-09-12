@@ -76,6 +76,7 @@ validators is proved in the tests instead.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -315,11 +316,15 @@ def document_bytes(value: object) -> bytes:
     return encoded.encode("utf-8") + b"\n"
 
 
-def document_sha256(value: object) -> str:
+def canonical_sha256(value: object) -> str:
     """The digest of the value itself, without its file's trailing newline.
 
     The same digest ``prismabuild.core.canonical_sha256`` computes, so a value
-    hashed here and the same value hashed by the fleet agree.
+    hashed here and the same value hashed by the fleet agree.  This is the one
+    to hash an *identity* with; :func:`document_file_sha256` is the one a
+    content-addressed store will give the file.  PrismaBuild keeps the same two
+    and the distinction is the trailing newline, which is exactly the kind of
+    difference that reads as a tampered blob rather than a formatting choice.
     """
 
     try:
@@ -327,6 +332,16 @@ def document_sha256(value: object) -> str:
     except (TypeError, ValueError) as exc:
         _fail(f"document is not canonical JSON data: {exc}")
         raise AssertionError("unreachable")  # pragma: no cover
+
+
+def document_file_sha256(value: object) -> str:
+    """The digest the CAS will give this document's bytes, before it is written.
+
+    The file-bytes digest, matching ``prismabuild.decomposition.document_sha256``:
+    a blob's name in the store is the hash of what is on disk, newline included.
+    """
+
+    return hashlib.sha256(document_bytes(value)).hexdigest()
 
 
 # --------------------------------------------------------------------------
@@ -521,7 +536,7 @@ def validate_phase_plan(value: object) -> dict[str, object]:
 def phase_plan_sha256(phase_plan: Mapping[str, object]) -> str:
     """The digest of the validated phase plan, for an evidence record to cite."""
 
-    return document_sha256(validate_phase_plan(phase_plan))
+    return canonical_sha256(validate_phase_plan(phase_plan))
 
 
 # --------------------------------------------------------------------------
@@ -618,7 +633,7 @@ def write_logical_request(phase_plan: Mapping[str, object], path: str | Path) ->
 
     request = emit_logical_request(phase_plan)
     Path(path).write_bytes(document_bytes(request))
-    return document_sha256(request)
+    return document_file_sha256(request)
 
 
 # --------------------------------------------------------------------------
@@ -871,7 +886,7 @@ def build_child_result_manifest(
             {
                 "output_id": membership[str(task["id"])]["output_id"],
                 "task_id": str(task["id"]),
-                "value_sha256": document_sha256(results[str(task["id"])]),
+                "value_sha256": canonical_sha256(results[str(task["id"])]),
             }
             for task in tasks
         ],
