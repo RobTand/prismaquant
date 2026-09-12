@@ -38,6 +38,29 @@ the evidence needed to expand or correct the menu/model if rankings change.
 The stages below control the cost of acquiring evidence. They are not separate
 greedy weight, activation and format allocation passes.
 
+## Full numerical search space
+
+Rob clarified that the research search must cover the full legal numerical
+space of Tessera-8 and Tessera-16. Keep three separate inventories: producer
+and reader legal rates, implemented execution routes, and measured native
+qualification. A singleton qualification receipt does not define the research
+rate domain; missing routes and measurements are explicit qualification work.
+The final deployable allocation still uses options that pass the serving gate.
+
+At the frozen producer `d403cc5a3199a348cc7ee6262f4adbdab8138745` and pinned
+v22 contract, the source-derived domains for the GLM shapes with 2048, 4096 or
+12288 columns are E4M3 K1 R256–2048 and BF16 K1 R256–4096, inclusive integer
+rates. BF16's default 14-bit table is not a rate ceiling: its recipe widens to
+15 bits at R3585 and 16 bits at R3841. These source-derived domains are not
+completed encode or serving measurements. Retain those table transitions as
+explicit boundary cases when preparing qualification and timing coverage.
+
+The shared source audit is
+`/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/tessera-legal-domain-source-audit-01.md`
+(SHA256 `b2ec2c6be76c6c0c557ffa642a9290e26f960b9781fb0e843c9d101fbc2c88b2`).
+It includes immutable source citations and a machine-readable companion. No
+new probe, quality frontier, or runtime qualification is claimed by this plan.
+
 ## Quality pricing and selection
 
 1. Use AQUA's cheaper activation-aware approximation to screen a broad menu
