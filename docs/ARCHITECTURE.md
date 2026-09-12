@@ -1,7 +1,63 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `pq/420-full-engine-report-consumer`. Stamps
+As of: 2026-09-12 · `pq/420-admit-fixed-resources`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `pq/420-admit-fixed-resources`) for the consumer half
+of the fixed-resource admission design's last prerequisite row, "integrate
+allocator admission" ([design](design/runtime_fixed_resource_admission.md),
+#420). **`admit_fixed_resources` no longer refuses unconditionally; it
+recomputes, and then refuses by name.** The gate reads the
+fixed-resource receipt's `full_model_resources` as one `{path, sha256}`
+reference to a `tessera.full_engine_resource_report.v1` document -- an inline
+resource claim, a status flag or an opaque proof digest refuses before
+anything else runs, because none of them is recomputable -- and hands that
+reference to `full_engine_resource_report.consume_full_engine_resource_report`
+with the run identity it independently supplies: the source model from the
+table's own context, the serving configuration and the full-engine runtime
+manifest from the loaded runtime relation, and the device from the context's
+GPU identity. Nothing reads the report's `derived` block. The table's declared
+`fixed_resources` are then compared against what that consumer recomputed from
+`observations` and `partition`, term by term, and "not expressible" is kept
+separate from "disagrees": a null term is an absence of evidence, while an
+integer that differs from the recomputation is a refusal naming both numbers.
+A producer that restates a table's wrong number in `derived` still refuses,
+which is the property the whole split exists for.
+
+What the gate additionally refuses on its own authority: a synthetic capture
+(`fixture_provenance` travels from capture to ledger to `identity`, so a
+fixture can never read as a measurement); a table whose graph mode, residency,
+topology or batch size is outside the one supported scalar boundary (TP1, one
+device, resident, eager, one request); a table pricing more than one format
+for a unit, because one measured assignment establishes no invariant fixed
+charge under the alternatives; a canonical census or selected-row set that
+does not partition the units this table prices, duplicates a unit, names no
+format, or names a row the table does not price; and a workload naming another
+calibration than the table's. The native-row and full-engine transient charge
+boundary is deliberately *not* compared: a native row's scratch includes its
+returned output while the full-engine partition classifies by lifetime inside
+the unit interval, so the design owes a versioned boundary model ("Set
+native/full-engine charge boundary") before either may be equated to the
+other.
+
+**Admission is still closed in practice, and the prefill axis stays blocked on
+the producer.** At `tessera.full_engine_resource_report.v1` only
+`fixed_scratch` and `candidate_scratch` are reachable at all, so the resident,
+activation and KV terms that the table declares have no evidence, and the
+scalar composition cannot complete even on a flawless capture. More narrowly
+for #420's purpose: **the report carries no timing partition at all** -- there
+is no timing term, `observations.timing_captures` is one of the members the
+schema names and sets null, and the `timing_partition` domain has no closing
+condition -- so `fixed_resources.prefill_ms` and `decode_ms`, the numbers
+`serve_constraints.evaluate_measured_assignment` sums into the operator-sum
+budget `--slo-prefill-p95-ttft-ms` gates, are not recomputable. Wiring this
+gate does not open the prefill-versus-accuracy knee; a versioned producer
+change and a live isolated engine capture do. No measured table, production
+setting, pin, serving lane, format menu or export gate changes, no allocator
+default moves, and no GPU, served, latency, quality or capacity measurement
+was run. Gates: `tests/test_runtime_fixed_resource_admission.py`,
+`tests/test_runtime_provenance.py`,
+`tests/test_full_engine_resource_report.py`.
 
 Re-stamped (2026-09-12, `pq/420-full-engine-report-consumer`) for the pure
 artifact consumer half of the fixed-resource admission design's "freeze and
@@ -21,10 +77,11 @@ mismatch, a checkpoint that misstates its live extents, an unsupported
 topology or graph mode, and a boolean or nonfinite value where an integer is
 declared.
 
-**Admission stays closed and nothing reads this partition.**
-`admit_fixed_resources` keeps its unconditional refusal, no gate imports the
-consumer, and wiring one is the separate "integrate allocator admission" row of
-the same design. On the supplied producer artifact the consumer's verdict is a
+**Admission stayed closed and nothing read this partition at this stamp**
+(superseded by the stamp above, which wires the gate to it and still admits
+nothing). `admit_fixed_resources` kept its unconditional refusal, no gate
+imported the consumer, and wiring one was the separate "integrate allocator
+admission" row of the same design. On the supplied producer artifact the consumer's verdict is a
 refusal that names the five open domains and the one unclassified allocation,
 with every recomputed term null; its own recomputation agrees with that
 producer in full, which is what the agreement check is for. At this schema

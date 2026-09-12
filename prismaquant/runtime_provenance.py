@@ -373,20 +373,231 @@ def _load_runtime_relation(reference, *, context, root):
             "full_engine_run_id": full_id, "configuration_sha256": configuration_sha256}
 
 
-def admit_fixed_resources(table, relation):
-    """Refuse until a producer supplies a recomputable full resource partition.
+#: How the fixed-resource receipt names its evidence: one artifact reference,
+#: in the existing ``{path, sha256}`` form :class:`ArtifactReader` rehashes, to
+#: a ``tessera.full_engine_resource_report.v1`` document. This spelling is the
+#: PrismaQuant side of the receipt and not a frozen producer field; the
+#: producer emits neither this nor any other today. Anything else in that slot
+#: -- an inline resource claim, a status flag, an opaque proof digest -- is
+#: refused by name rather than read, because none of them is recomputable.
+FIXED_RESOURCE_REPORT_REFERENCE = ("path", "sha256")
 
-    Raw ledgers, status flags and hashed arbitrary proof blobs do not prove
-    memory closure or fixed prefill/decode work outside candidate operators.
-    No qualified full-engine partition schema is currently implemented.
+#: Which recomputed term carries the evidence for each declared fixed field.
+#:
+#: ``serialized_bytes`` has no entry: the serialized-byte partition is its own
+#: rule in the design and this schema version emits no observation for it.
+#: Neither ``prefill_ms`` nor ``decode_ms`` has one either -- the report has no
+#: timing term at all -- and both refuse by name below, which is why wiring
+#: this gate cannot by itself open the prefill axis.
+#:
+#: The candidate transients are deliberately absent as well. A native row's
+#: scratch charge includes its returned output, while the full-engine
+#: partition classifies bytes by lifetime inside the unit interval; the two are
+#: differently bounded, so an equality between them would either refuse every
+#: real report on a definitional gap or agree by coincidence. The design owes a
+#: versioned boundary model first ("Set native/full-engine charge boundary").
+FIXED_TERM_FIELDS = {"fixed_resident": "resident_bytes",
+                     "fixed_activation": "activation_bytes",
+                     "fixed_scratch": "peak_scratch_bytes",
+                     "fixed_kv": "kv_bytes"}
+
+#: What each observation the report names but leaves null costs this
+#: admission. The absence is read from the report rather than assumed here, so
+#: a capture that does supply one drops its entry and the terms it feeds become
+#: reachable once their domain also closes.
+OWED_EVIDENCE = {
+    "worker_startup_records": "the fixed resident and activation charge",
+    "kv_observations": "the fixed KV charge",
+    "owner_views": "the fixed member roster and each candidate's retained weights",
+    "timing_captures": "the fixed prefill and decode charge",
+    "observer_qualification": "the observer impact any timing charge needs",
+    "runtime_provenance_relation": "the report's own binding to this relation",
+}
+
+
+def admit_fixed_resources(table, relation):
+    """Admit fixed resources only from a partition this consumer recomputes.
+
+    Tessera observes and derives; PrismaQuant recomputes and admits only on
+    agreement. Nothing here reads the report's ``derived`` block: the
+    recomputation in :mod:`prismaquant.full_engine_resource_report` runs over
+    ``observations`` and ``partition``, and a producer total that differs from
+    it arrives as one of the refusals collected below. Reading ``derived`` and
+    believing it is the ``qualified: true`` failure the design forbids.
+
+    Refusals are collected and raised together so one call names all of them.
+    There is no admission token and no return value: the v2 loader sets
+    ``producer_admitted`` only because this raised nothing.
     """
     reader = ArtifactReader(Path(table.source_path).parent)
-    _, fixed = reader.json({"path": table.fixed_resources_receipt_path,
-                           "sha256": table.fixed_resources_receipt_sha256},
-                          "fixed-resource receipt")
-    if fixed.get("full_model_resources") is None:
+    receipt_path, receipt = reader.json({"path": table.fixed_resources_receipt_path,
+                                         "sha256": table.fixed_resources_receipt_sha256},
+                                        "fixed-resource receipt")
+    claim = receipt.get("full_model_resources")
+    if claim is None:
         raise RuntimePriceError("full-model fixed resource producer admission is incomplete")
-    raise RuntimePriceError("no qualified recomputable full-engine resource partition is supported")
+    if not isinstance(claim, Mapping) or set(claim) != set(FIXED_RESOURCE_REPORT_REFERENCE):
+        raise RuntimePriceError(
+            "full-model fixed resources must reference one recomputable full-engine resource "
+            "report as {path, sha256}; an inline claim, status flag or proof digest is not evidence")
+    refusals = _fixed_resource_refusals(table, relation, claim, root=receipt_path.parent)
+    if refusals:
+        raise RuntimePriceError("no qualified recomputable full-engine resource partition: "
+                                + "; ".join(refusals))
+
+
+def _fixed_resource_refusals(table, relation, reference, *, root):
+    """Every reason this table's declared fixed resources are not admissible.
+
+    The import is function-local because the report consumer imports this
+    module's :class:`ArtifactReader` and ``_equal``; the dependency runs one
+    way at import time and the other way at call time.
+    """
+    from .full_engine_resource_report import (
+        OWED_OBSERVATIONS, SUPPORTED_EXECUTION, consume_full_engine_resource_report,
+        read_full_engine_resource_report,
+    )
+    for key in ("runs", "full_engine_run_id", "configuration_sha256"):
+        if key not in relation:
+            raise RuntimePriceError(
+                "full-engine fixed resource admission requires the loaded runtime relation")
+    context = table.context
+    # The report was measured on other bytes unless it names the exact source
+    # model, serving configuration, full-engine runtime manifest and device
+    # this table was priced against. The relation supplies the last three: no
+    # run is handed another run's digest, and the full-engine run keeps its own.
+    full_run = relation["runs"][relation["full_engine_run_id"]]
+    expected = {"model_sha256": context.source_sha256,
+                "configuration_sha256": relation["configuration_sha256"],
+                "runtime_manifest_sha256": full_run["sha256"],
+                "device_uuid": context.gpu_identity}
+    report = read_full_engine_resource_report(reference, root=root)
+    verdict = consume_full_engine_resource_report(reference, root=root,
+                                                  expected_run_identity=expected)
+    refusals = list(verdict.refusals)
+
+    # A synthetic capture admits nothing, on this gate's own authority rather
+    # than on the report reader's: `fixture_provenance` travels from capture to
+    # ledger to `identity`, so a fixture can never read as a measurement, and
+    # a positive synthetic receipt proves the parser contract and nothing else.
+    if verdict.fixture_provenance is not None:
+        refusals.append(f"the report declares fixture provenance {verdict.fixture_provenance!r}, "
+                        "and a synthetic capture admits no measured table")
+
+    # The scalar device budget is TP1, one device, resident, eager, one
+    # request. Anything else needs a versioned resource vector, never a rank
+    # sum or a rank maximum written into these scalar fields.
+    declared_execution = {"graph_mode": context.graph_mode,
+                          "residency": context.serving_context.residency,
+                          "topology": f"tp{context.tensor_parallel}"}
+    for key, supported in SUPPORTED_EXECUTION.items():
+        if declared_execution[key] != supported:
+            refusals.append(f"the table's {key} is {declared_execution[key]!r}, and a recomputed "
+                            f"partition covers only {supported!r}")
+    if context.batch_size != 1:
+        refusals.append(f"the table's batch size is {context.batch_size}, and a recomputed "
+                        "partition covers only one request")
+
+    # One measured assignment establishes no fixed charge under the others.
+    menu = {(row.unit, row.fmt): row for row in table.rows}
+    table_units = sorted({row.unit for row in table.rows})
+    alternatives = sorted(unit for unit in table_units
+                          if sum(1 for row in table.rows if row.unit == unit) > 1)
+    if alternatives:
+        refusals.append(f"the table prices more than one format for {alternatives}, and one "
+                        "measured assignment establishes no invariant fixed charge under the others")
+
+    # The reference must partition the roster this table independently supplies.
+    census = report["reference"]["canonical_census"]
+    census_units = None
+    if not isinstance(census, Mapping) or set(census) != {"units"}:
+        refusals.append("the reference carries no canonical census naming its units, so it "
+                        "partitions no model roster")
+    else:
+        units = census["units"]
+        if (not isinstance(units, list) or not all(isinstance(unit, str) for unit in units)
+                or len(set(units)) != len(units)):
+            refusals.append("the canonical census does not name a unique roster of units")
+        else:
+            census_units = sorted(units)
+            if census_units != table_units:
+                refusals.append(f"the canonical census names units {census_units} where this "
+                                f"table prices {table_units}")
+    selected = {}
+    for index, row in enumerate(report["reference"]["selected_rows"]):
+        if not isinstance(row, Mapping) or "unit" not in row or not set(row) <= {"unit", "format"}:
+            refusals.append(f"selected row {index} is not a unit-and-format reference")
+            continue
+        unit = row["unit"]
+        if unit in selected:
+            refusals.append(f"unit {unit!r} carries more than one selected row, so the report "
+                            "measures no single complete assignment")
+        selected[unit] = row
+        if "format" not in row:
+            refusals.append(f"the selected row for unit {unit!r} names no format, so it binds to "
+                            "no priced table row")
+        elif (unit, row["format"]) not in menu:
+            refusals.append(f"selected row {(unit, row['format'])} is not a row this table prices")
+    if census_units is not None and sorted(selected) != census_units:
+        refusals.append(f"the selected rows cover units {sorted(selected)} where the census "
+                        f"names {census_units}")
+    if table.fixed_assignment:
+        refusals.append("the partition names no fixed member, so this table's fixed_assignment "
+                        "binds to no observed allocation")
+
+    # The workload the report was measured under must be this table's.
+    calibration = report["workload"]["calibration"]
+    if calibration is None:
+        refusals.append("the workload names no calibration, so this table's calibration "
+                        f"{context.calibration_sha256} is bound to nothing")
+    elif (not isinstance(calibration, Mapping)
+            or calibration.get("sha256") != context.calibration_sha256):
+        refusals.append("the workload names another calibration than this table's")
+
+    for name in OWED_OBSERVATIONS:
+        if report["observations"][name] is None:
+            refusals.append(f"the capture observes no {name}, so {OWED_EVIDENCE[name]} "
+                            "has no evidence")
+
+    # The keystone: the table's declared numbers against the recomputation.
+    # "Not expressible" and "disagrees" are separate refusals -- a null term is
+    # an absence of evidence, not a producer error -- and neither admits.
+    fixed = table.fixed_resources
+    for term, field in FIXED_TERM_FIELDS.items():
+        recomputed = verdict.recomputed_terms[term]
+        value = getattr(fixed, field)
+        if recomputed is None:
+            refusals.append(f"no {term} is recomputable, so this table's fixed {field} "
+                            f"({value}) has no evidence")
+        elif recomputed != value:
+            refusals.append(f"this table declares fixed {field} {value} where the recomputed "
+                            f"{term} is {recomputed}")
+    resident = verdict.recomputed_terms["candidate_resident"]
+    if resident is None:
+        refusals.append("no candidate_resident is recomputable, so no priced row's resident "
+                        "bytes has evidence")
+    else:
+        for unit, row in sorted(selected.items()):
+            priced = menu.get((unit, row.get("format")))
+            if priced is None:
+                continue
+            if unit not in resident:
+                refusals.append(f"the partition charges unit {unit!r} no resident bytes")
+            elif resident[unit] != priced.resources.resident_bytes:
+                refusals.append(f"this table declares {unit!r} resident bytes "
+                                f"{priced.resources.resident_bytes} where the recomputed "
+                                f"candidate_resident is {resident[unit]}")
+    refusals.append("the native-row and full-engine transient charge boundary is not versioned, "
+                    "so no candidate activation or scratch term may be compared to a priced row")
+    if fixed.serialized_bytes:
+        refusals.append("the report partitions no serialized bytes, so this table's fixed "
+                        f"serialized_bytes ({fixed.serialized_bytes}) has no evidence")
+    for field in ("prefill_ms", "decode_ms"):
+        value = getattr(fixed, field)
+        if value:
+            refusals.append("the report carries no timing partition, so this table's fixed "
+                            f"{field} ({value}) has no evidence")
+    return refusals
 
 
 def admit_native_rows(table, relation):

@@ -223,12 +223,17 @@ def test_relation_refuses_unproved_or_changed_coordinates(relation_fixture, muta
 
 @pytest.mark.parametrize("claim", [None, {}, {"status": "complete", "resident_bytes": 0}])
 def test_relation_never_admits_unproved_fixed_resources(tmp_path, claim):
+    """A receipt-level status flag is not evidence: `full_model_resources` must
+    reference a full-engine resource report this consumer recomputes itself,
+    and the surrounding `complete`/`qualified_complete` fields are read by
+    nothing. What that recomputation then refuses lives in
+    `tests/test_runtime_fixed_resource_admission.py`."""
     evidence = Evidence(tmp_path)
     ref = evidence.put("fixed.json", {"full_model_resources": claim, "full_model_fixed_resources_complete": True,
                                      "status": "qualified_complete", "closure": {"complete": True}})
     table = SimpleNamespace(source_path=str(tmp_path / "table.json"), fixed_resources_receipt_path=ref["path"],
                             fixed_resources_receipt_sha256=ref["sha256"])
-    with pytest.raises(RuntimePriceError, match="incomplete|no qualified recomputable"):
+    with pytest.raises(RuntimePriceError, match="incomplete|must reference one recomputable"):
         admit_fixed_resources(table, {})
 
 
