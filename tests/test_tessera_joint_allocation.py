@@ -43,8 +43,10 @@ def fixture(names=None):
         units[name] = {'weight': copy.deepcopy(record['identity']['source'])}
         verified[name, fmt] = {**{k: copy.deepcopy(op[k]) for k in ('source_weight', 'rendered_weight', 'activation')},
                                'wire_sha256': record['blob_sha256'],
+                               'render_origin': 'encoded',
+                               'render_comparison': 'independent_render_vs_wire',
                                'encoding_identity_sha256': canonical_json_sha256(record['identity'], where='fixture encoding')}
-        cells[name, fmt] = {'record': record}
+        cells[name, fmt] = {'record': record, 'render_origin': 'encoded'}
     probe = costs[names[0]][fmt]['probe_identity']
     prepared_binding = {'path': '/fixture/prepared.json', 'sha256': 'c'*64}
     inputs = {'merged_cost': {'path': '/fixture/anchors.pkl', 'sha256': 'd'*64}}
@@ -62,19 +64,25 @@ def fixture(names=None):
         census={'unit_shapes': {n: [2, 2] for n in names}}, manifest={'identity': {'units': units}})
     calibration = {'calibration_sha256': probe['calibration_sha256'], 'shape': [2, 4],
                    'provenance': copy.deepcopy(hessian['calibration_identity'])}
+    render_census = {'render_origins': {'encoded': len(cells), 'synthesized_from_wire': 0},
+                     'render_comparisons': {'independent_render_vs_wire': len(cells),
+                                            'wire_round_trip_only': 0}}
     prepared = {'schema': PREPARED_SCHEMA, 'status': 'complete', 'plan_sha256': '2'*64,
                 'source_model_identity': probe['source_model'], 'calibration_input': calibration,
                 'formats_by_qname': {n: list(fmts) for n, fmts in data.formats_by_qname.items()},
                 'measured_cells': len(cells), 'reader_identity': {'fixture': 'reader'},
+                **render_census,
                 'projection_backend': probe['arithmetic']['projection_backend']}
     metadata = {'schema': PREPARED_SCHEMA, 'inputs': inputs, 'verified_cells': verified,
+                **render_census,
                 'reader_identity': prepared['reader_identity'], 'projection_backend': prepared['projection_backend']}
     joint = {'schema': 'prismaquant.aura_cost.v1', 'stats': {n: {'h_trace': 1., 'n_params': 4,
                     'in_features': 2, 'out_features': 2} for n in names}, 'costs': costs,
              'formats': [fmt, 'BF16'], 'provenance': {'cost_mode': 'aura', 'joint_activation': True,
                 'cost_currency': 'joint_aura_predicted_dloss', 'tessera_joint_anchors': {
                     'plan_sha256': prepared['plan_sha256'], 'prepared': prepared_binding,
-                    'inputs': inputs, 'calibration_input': calibration, 'measured_cells': len(cells)}}}
+                    'inputs': inputs, 'calibration_input': calibration,
+                    'measured_cells': len(cells), **render_census}}}
     return joint, data, prepared, metadata, {'plan_sha256': prepared['plan_sha256'], 'prepared_binding': prepared_binding}
 
 
@@ -92,11 +100,16 @@ def test_handoff_preserves_all_joint_prices_and_identities():
     assert result['provenance']['cost_mode'] == 'aura'
     assert result['provenance']['hessian'] == data.payload['provenance']['hessian']
     assert result['provenance']['tessera_joint_allocation']['status'] == 'research_metadata_handoff'
+    handoff_block = result['provenance']['tessera_joint_allocation']
+    assert handoff_block['render_origins'] == {'encoded': len(data.cells), 'synthesized_from_wire': 0}
+    assert handoff_block['render_comparisons'] == {
+        'independent_render_vs_wire': len(data.cells), 'wire_round_trip_only': 0}
 
 
 @pytest.mark.parametrize('mutation', ['missing_unit', 'extra_format', 'source', 'render', 'activation',
     'wire', 'calibration', 'prepared', 'shape', 'overwritten_metadata', 'nonzero_bf16',
-    'encoding_identity', 'manifest_source'])
+    'encoding_identity', 'manifest_source', 'render_origin', 'render_origin_census',
+    'synthesized_claims_independent'])
 def test_handoff_refuses_changed_evidence(mutation):
     from prismaquant.tessera_joint_allocation import bind_allocation_payload
     joint, data, prepared, metadata, kwargs = fixture()
@@ -111,6 +124,19 @@ def test_handoff_refuses_changed_evidence(mutation):
     elif mutation == 'wire': metadata['verified_cells'][name, fmt]['wire_sha256'] = '8'*64
     elif mutation == 'encoding_identity': metadata['verified_cells'][name, fmt]['encoding_identity_sha256'] = '8'*64
     elif mutation == 'manifest_source': data.manifest['identity']['units'][name]['weight']['sha256'] = '8'*64
+    elif mutation == 'render_origin': data.cells[name, fmt]['render_origin'] = 'synthesized_from_wire'
+    elif mutation == 'render_origin_census':
+        prepared['render_origins'] = {'encoded': 0, 'synthesized_from_wire': len(data.cells)}
+    elif mutation == 'synthesized_claims_independent':
+        # One rung is honestly marked synthesized everywhere except in the
+        # receipt, which still claims an independent render/wire comparison.
+        census = {'render_origins': {'encoded': len(data.cells) - 1, 'synthesized_from_wire': 1},
+                  'render_comparisons': {'independent_render_vs_wire': len(data.cells) - 1,
+                                         'wire_round_trip_only': 1}}
+        data.cells[name, fmt]['render_origin'] = 'synthesized_from_wire'
+        metadata['verified_cells'][name, fmt]['render_origin'] = 'synthesized_from_wire'
+        for block in (prepared, metadata, joint['provenance']['tessera_joint_anchors']):
+            block.update(copy.deepcopy(census))
     elif mutation == 'calibration': prepared['calibration_input']['calibration_sha256'] = '7'*64
     elif mutation == 'prepared': kwargs['prepared_binding'] = {**kwargs['prepared_binding'], 'sha256': '6'*64}
     elif mutation == 'shape': joint['stats'][name]['n_params'] = 5

@@ -185,7 +185,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     execution = {'fixture': 'source-execution'}
     data = SimpleNamespace(census={'model': 'fixture', 'attention_implementation': 'eager'},
         payload={'provenance': {'hessian': {'calibration_identity': draw}}},
-        layer_render_bytes=lambda _: {0: 64}, formats_by_qname={'unit': ['BF16']}, cells={('unit', 'BF16'): {}})
+        layer_render_bytes=lambda _: {0: 64}, formats_by_qname={'unit': ['BF16']}, cells={('unit', 'BF16'): {'render_origin': 'encoded'}})
     monkeypatch.setattr(bridge, 'load_measured_anchor_input', lambda *_args, **_kwargs: data)
     monkeypatch.setattr(calibration_data, 'load_calibration_input', lambda *_args, **_kwargs:
         (torch.zeros((512, 512), dtype=torch.int64), calibration))
@@ -200,7 +200,9 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     record = {'schema': 'prismaquant.tessera_joint_aura.prepared.v1' if legacy_schema else bridge.PREPARED_SCHEMA,
         'status': 'complete', 'plan_sha256': 'd' * 64, 'implementation_sha256': 'c' * 64,
         'source_model_identity': source, 'source_execution': execution, 'calibration_input': calibration,
-        'measured_cells': 1, 'reader_identity': None, 'projection_backend': {'name': 'foreign'}}
+        'measured_cells': 1, 'reader_identity': None, 'projection_backend': {'name': 'foreign'},
+        'render_origins': {'encoded': 1, 'synthesized_from_wire': 0},
+        'render_comparisons': {'independent_render_vs_wire': 1, 'wire_round_trip_only': 0}}
     path = tmp_path / 'prepared.json'
     path.write_text(json.dumps(record))
     with pytest.raises(ValueError, match='fresh prepare and recompute' if legacy_schema else 'prepared projection_backend'):

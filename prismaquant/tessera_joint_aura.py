@@ -24,7 +24,20 @@ from .cost_stage_checkpoint import (
 )
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
-PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v2"
+PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
+RENDER_ORIGIN_SCHEMA = "prismaquant.tessera_joint_aura.render_origin.v1"
+# Closed vocabularies. ``render_origin`` says where the decoded PWC shard on
+# disk came from; ``render_comparison`` says what the ``torch.equal`` leg of
+# ``verify_anchor_render`` established for that rung. They are two different
+# facts and a record that collapses them claims verification it never had.
+RENDER_ORIGINS = ("encoded", "synthesized_from_wire")
+RENDER_COMPARISONS = ("independent_render_vs_wire", "wire_round_trip_only")
+# An encoded render is an independently produced tensor, so comparing it with
+# the decoded wire is evidence about the encode. A synthesized render was
+# written by decoding that same wire, so the comparison can only establish
+# that the ``.pt`` still round-trips to the bytes it was written from.
+RENDER_COMPARISON_BY_ORIGIN = {"encoded": "independent_render_vs_wire",
+                               "synthesized_from_wire": "wire_round_trip_only"}
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
 STAGE = "Tessera campaign"
@@ -78,7 +91,108 @@ class MeasuredAnchorInput:
         return dict(sizes)
 
 
-def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True):
+def _render_origin_marker_path(render):
+    return Path(render).with_name(Path(render).name + ".render_origin.json")
+
+
+def render_origin_census(origins):
+    """Count each closed-vocabulary value, including the ones nobody used.
+
+    A census that omits the zero keeps a reader from telling "no synthesized
+    renders" apart from "this report does not say".
+    """
+    counts = {value: 0 for value in RENDER_ORIGINS}
+    comparisons = {value: 0 for value in RENDER_COMPARISONS}
+    for origin in origins:
+        _require(origin in RENDER_ORIGINS, f"unknown render origin {origin!r}")
+        counts[origin] += 1
+        comparisons[RENDER_COMPARISON_BY_ORIGIN[origin]] += 1
+    return {"render_origins": counts, "render_comparisons": comparisons}
+
+
+def cell_render_census(cells):
+    """The census of a cell mapping, from the field every cell must carry."""
+    origins = []
+    for pair, cell in sorted(cells.items()):
+        _require(isinstance(cell, dict) and "render_origin" in cell,
+                 f"{pair}: cell carries no render_origin")
+        origins.append(cell["render_origin"])
+    return render_origin_census(origins)
+
+
+def _decode_wire(blob, *, reader, device="cpu"):
+    """The one decode seam: the bound reader's, or the module-level decoder."""
+    if reader is not None:
+        return reader.read_unit_artifact(blob, device=device)
+    from tessera.unit_artifact import read_unit_artifact
+
+    return read_unit_artifact(blob, device=device)
+
+
+def _synthesize_render_from_wire(render, *, wire, record, name, fmt, shape, reader):
+    """Write the missing decoded PWC shard from the verified wire blob.
+
+    A rung this campaign adopted rather than encoded has its wire but no
+    ``.pt``. Re-encoding it costs GPU-hours on the critical path; decoding
+    the wire costs an I/O pass. What the decode cannot buy is evidence about
+    the encode, so the marker below is written FIRST: a crash between the two
+    writes leaves a marker with no shard, which the next load re-synthesizes,
+    whereas the other order would leave a shard that reads as ``encoded``.
+    """
+    import torch
+    from .production_weight_cache import _store_rendered_weight_entry
+
+    blob = Path(wire).read_bytes()
+    _same(hashlib.sha256(blob).hexdigest(), record["blob_sha256"],
+          f"{name}@{fmt}: wire checksum before synthesizing its render")
+    try:
+        decoded = _decode_wire(blob, reader=reader).to(torch.bfloat16)
+    except Exception as exc:
+        raise ValueError(f"{name}@{fmt}: original decoded PWC shard missing and "
+                         f"its wire does not decode: {exc}") from exc
+    _require(isinstance(decoded, torch.Tensor) and decoded.dtype == torch.bfloat16 and
+             list(decoded.shape) == list(shape) and bool(torch.isfinite(decoded).all()),
+             f"{name}@{fmt}: decoded wire is not the census BF16 render")
+    marker = _render_origin_marker_path(render)
+    Path(render).parent.mkdir(parents=True, exist_ok=True)
+    _json(marker, {"schema": RENDER_ORIGIN_SCHEMA, "render_origin": "synthesized_from_wire",
+                   "unit": name, "format_name": fmt, "wire_sha256": record["blob_sha256"],
+                   "wire_file": Path(wire).name})
+    _store_rendered_weight_entry(weights={}, cache_dir_path=Path(render).parent,
+                                 qname=name, fmt=fmt, tensor=decoded,
+                                 weight_dtype=torch.bfloat16, durable=True)
+    _require(Path(render).is_file(), f"{name}@{fmt}: synthesized render was not published")
+    return "synthesized_from_wire"
+
+
+def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader):
+    """Name where this rung's decoded PWC shard came from, never guess it.
+
+    The campaign journals fresh and resumed wires through one receipt grammar
+    (``_checkpoint_wire_record``), so nothing in the record distinguishes an
+    adopted rung from an encoded one. The marker beside the shard is the only
+    place that fact can live, and its absence beside an existing shard is the
+    campaign's own render.
+    """
+    render, marker = Path(render), _render_origin_marker_path(render)
+    if render.is_file():
+        if not marker.is_file():
+            return "encoded"
+        stamp = json.loads(marker.read_text())
+        _same(stamp.get("schema"), RENDER_ORIGIN_SCHEMA, f"{name}@{fmt}: render origin schema")
+        _same(stamp.get("render_origin"), "synthesized_from_wire",
+              f"{name}@{fmt}: marked render origin")
+        _same(stamp.get("unit"), name, f"{name}@{fmt}: marked render unit")
+        _same(stamp.get("format_name"), fmt, f"{name}@{fmt}: marked render format")
+        _same(stamp.get("wire_sha256"), record["blob_sha256"],
+              f"{name}@{fmt}: synthesized render names another wire")
+        return "synthesized_from_wire"
+    _require(Path(wire).is_file(), f"{name}@{fmt}: original decoded PWC shard missing")
+    return _synthesize_render_from_wire(render, wire=wire, record=record, name=name,
+                                        fmt=fmt, shape=shape, reader=reader)
+
+
+def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True, reader=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -86,6 +200,12 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     roster gates still run here. Tensor/source/encoder verification occurs in
     ``prepare_cache`` using actual source weights and the original capture.
     Interpolated menu rows are deliberately excluded rather than converted.
+
+    A rung this campaign adopted has its wire but no decoded PWC shard. The
+    shard is synthesized from that wire here and every cell carries the
+    resulting ``render_origin``, so no later report can read "verified" as
+    "independently compared". ``reader`` is the same bound Tessera consumer
+    ``verify_anchor_render`` uses; there is one decode seam, not two.
     """
     from .production_weight_cache import _cache_weight_filename
     from tools.dispatch_tessera_campaign import _require_receipts
@@ -203,9 +323,11 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             _require(not wire.is_symlink() and wire.resolve().parent == wire_dir.resolve(), f"{name}: escaping wire path")
             _same(wire.stat().st_size, record["blob_bytes"], f"{name}: wire size")
             render = owners[name] / "cache" / _cache_weight_filename(name, fmt)
-            _require(render.is_file(), f"{name}@{fmt}: original decoded PWC shard missing")
+            origin = _resolve_render_origin(render, wire=wire, record=record, name=name,
+                                            fmt=fmt, shape=census["unit_shapes"][name],
+                                            reader=reader)
             cells[name, fmt] = {"anchor": anchor, "record": record, "wire": str(wire.resolve()),
-                               "render": str(render.resolve())}
+                               "render": str(render.resolve()), "render_origin": origin}
         formats[name] = (*sorted(anchors), "BF16")
     if not verify_payloads:
         return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells, formats)
@@ -256,14 +378,29 @@ def calibrated_maxima(data, profile):
 def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_source,
                          projected_unit, static_scales, bound_unit=None, reader=None,
                          release_file_pages=False):
-    """Re-derive encoder inputs from actual source/H and compare decoded bytes."""
+    """Re-derive encoder inputs from actual source/H and compare decoded bytes.
+
+    Two legs, and they do not establish the same thing. ``verify_cached_unit``
+    checks the wire against an encoder identity re-derived from the streamed
+    source weights and H; it is independent of anything the cache holds and it
+    is what qualifies an adopted rung at all. The ``torch.equal`` leg compares
+    the decoded wire with the render on disk: for an ``encoded`` rung that is
+    an independent render/wire agreement, and for a ``synthesized_from_wire``
+    rung the render was written by decoding that same wire, so it can only
+    establish that the shard still round-trips -- a corruption check between
+    the write and this read, not evidence about the encode. The returned
+    record names both facts so a reader never has to infer which one it holds.
+    """
     import torch
-    from tessera.unit_artifact import read_unit_artifact
     from . import tessera_campaign as tc
     from .production_weight_cache import _cb_cache_tensor_identity
 
     anchor = tc.CampaignAnchor(**cell["anchor"])
     name, fmt = anchor.qname, anchor.format_name
+    render_origin = cell.get("render_origin")
+    _require(render_origin in RENDER_ORIGINS,
+             f"{name}@{fmt}: cell carries no closed-vocabulary render_origin")
+    render_comparison = RENDER_COMPARISON_BY_ORIGIN[render_origin]
     _require(source_weight.dtype == rendered_weight.dtype == torch.bfloat16 and
              source_weight.ndim == 2 and rendered_weight.shape == source_weight.shape,
              f"{name}@{fmt}: source/render BF16 shape differs")
@@ -280,9 +417,15 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
     blob = wire_path.read_bytes()
     verifier = tc._checkpoint_identity_api() if reader is None else reader
     verifier.verify_cached_unit(blob, cell["record"], expected)
-    decode = read_unit_artifact if reader is None else reader.read_unit_artifact
-    decoded = decode(blob, device=str(rendered_weight.device)).to(torch.bfloat16)
-    _require(torch.equal(decoded, rendered_weight), f"{name}@{fmt}: decoded wire differs from original PWC render")
+    decoded = _decode_wire(blob, reader=reader,
+                           device=str(rendered_weight.device)).to(torch.bfloat16)
+    # Run on both origins. On a synthesized render it cannot fail as evidence
+    # about the encode, and it is still live evidence that the shard on disk
+    # decodes to the bytes it was written from.
+    _require(torch.equal(decoded, rendered_weight),
+             f"{name}@{fmt}: decoded wire differs from original PWC render"
+             if render_origin == "encoded" else
+             f"{name}@{fmt}: synthesized PWC render no longer decodes from its wire")
     del decoded
     if release_file_pages:
         from .perturbed_x_cache import release_activation_cache_file_pages
@@ -292,7 +435,8 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
             "rendered_weight": _cb_cache_tensor_identity(rendered_weight),
             "encoding_identity_sha256": canonical_json_sha256(expected, where="joint anchor encoding"),
             "wire_sha256": hashlib.sha256(blob).hexdigest(),
-            "render_file_sha256": cell["render_file_sha256"]}
+            "render_file_sha256": cell["render_file_sha256"],
+            "render_origin": render_origin, "render_comparison": render_comparison}
 
 
 def _live_targets(runner, names):
@@ -514,7 +658,14 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             targets.update({member.qname: member for member in refresh_packed_expert_projections(members, runner.profile)})
     _same(set(verified), set(data.cells), "complete qualified wire/render roster")
     cache.disable_file_load_receipts()
+    census_of_renders = cell_render_census(data.cells)
+    for pair, record in verified.items():
+        _same(record["render_origin"], data.cells[pair]["render_origin"],
+              f"{pair}: qualified render origin")
+    _same(render_origin_census(record["render_origin"] for record in verified.values()),
+          census_of_renders, "qualified render origin census")
     cache.metadata.update({"verified_cells": verified, "prefetch": telemetry,
+        **census_of_renders,
         **({'capture_load_execution': capture_load_execution} if capture_load_execution is not None else {}),
         **({"qualification_window": policy, "capture_resident_bytes": capture_sizes,
             "qualification_memory_guard": None if guard is None else guard.snapshot()}
@@ -709,13 +860,20 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         file_hash_workers = config.get("file_hash_workers", 1)
         _require(type(file_hash_workers) is int and 0 < file_hash_workers <= len(os.sched_getaffinity(0)),
                  "file_hash_workers exceeds PB-assigned CPU affinity")
-        data = load_measured_anchor_input(config["inputs"],
+        # The reader is bound first: synthesizing an adopted rung's missing
+        # render decodes its wire, and that decode must come from the same
+        # bound consumer the qualification leg uses, not a second one.
+        reader = load_declared_reader(config.get("reader"))
+        reader_identity = None if reader is None else reader.identity
+        data = load_measured_anchor_input(config["inputs"], reader=reader,
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
             **({"verify_payloads": False} if command == "prepare" else {}))
         result["file_hash_workers"] = file_hash_workers
-        reader = load_declared_reader(config.get("reader"))
-        reader_identity = None if reader is None else reader.identity
         result["reader_identity"] = reader_identity
+        render_census = cell_render_census(data.cells)
+        # Stated whether or not this command reaches a completion: a run that
+        # dies still says how many of its renders were only ever round-tripped.
+        result.update(render_census)
         _same(config["model"], data.census["model"], "requested source model")
         _same(data.census["attention_implementation"], "eager", "qualified source attention")
         ids, calibration = load_calibration_input(config["calibration_input"]["path"],
@@ -775,17 +933,20 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                 "reader_identity": reader_identity, "projection_backend": projection_backend.identity,
                 "source_execution": source_execution, "calibration_input": calibration,
                 "production_cache": {"path": str(cache_path), "sha256": _sha(cache_path)},
-                "formats_by_qname": data.formats_by_qname, "measured_cells": len(data.cells)}
+                "formats_by_qname": data.formats_by_qname, "measured_cells": len(data.cells),
+                **render_census}
         else:
             _require(prepared is not None, "cost execution requires independently bound prepared inputs")
             completion = json.loads(_bound(prepared, "prepared anchors").read_text())
             _same(completion.get("schema"), PREPARED_SCHEMA,
-                  "prepared v2 schema required; legacy preparation requires fresh prepare and recompute")
+                  "prepared v3 schema required; legacy preparation requires fresh prepare and recompute")
             _same(completion.get("status"), "complete", "prepared completion")
             for key, value in (("plan_sha256", plan_sha256), ("implementation_sha256", implementation),
                                ("source_model_identity", source), ("source_execution", source_execution),
                                ("calibration_input", calibration), ("measured_cells", len(data.cells)),
                                ("reader_identity", reader_identity),
+                               ("render_origins", render_census["render_origins"]),
+                               ("render_comparisons", render_census["render_comparisons"]),
                                ("projection_backend", projection_backend.identity)):
                 _same(completion.get(key), value, f"prepared {key}")
             _same(completion["formats_by_qname"], {n: list(v) for n, v in data.formats_by_qname.items()},
@@ -797,7 +958,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             _same(cache.metadata.get("projection_backend"), projection_backend.identity, "prepared backend identity")
             _same(set(cache.metadata["verified_cells"]), set(data.cells), "prepared verified cell coverage")
             _same(cache.weights, {pair: cell["render"] for pair, cell in data.cells.items()}, "prepared original render paths")
+            for key in ("render_origins", "render_comparisons"):
+                _same(cache.metadata.get(key), render_census[key], f"prepared cache {key}")
             for pair, cell in data.cells.items():
+                _same(cache.metadata["verified_cells"][pair]["render_origin"], cell["render_origin"],
+                      f"{pair}: qualified render origin changed")
                 _same(cache.metadata["verified_cells"][pair]["render_file_sha256"], cell["render_file_sha256"],
                       f"{pair}: qualified render changed")
                 _same(cache.metadata["verified_cells"][pair]["wire_sha256"], cell["record"]["blob_sha256"],
@@ -826,7 +991,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                     _require(validate_joint_aura_entry(row), f"{name}: invalid measured joint cost")
             payload["provenance"]["tessera_joint_anchors"] = {
                 "plan_sha256": plan_sha256, "prepared": prepared, "inputs": data.inputs,
-                "calibration_input": calibration, "measured_cells": len(data.cells)}
+                "calibration_input": calibration, "measured_cells": len(data.cells),
+                **render_census}
             output = root / "joint-cost.pkl"
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
@@ -882,7 +1048,9 @@ def main(argv=None):
         **({"source_transition": {"path": str(args.source_transition),
                                   "sha256": args.source_transition_sha256}}
            if args.source_transition is not None else {}))
-    print(json.dumps({key: result[key] for key in ("command", "passed", "units", "measured_cells")}))
+    print(json.dumps({key: result[key] for key in ("command", "passed", "units",
+                                                   "measured_cells", "render_origins",
+                                                   "render_comparisons")}))
     return 0
 
 
