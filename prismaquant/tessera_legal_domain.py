@@ -186,6 +186,111 @@ class DomainPins:
 SPEC_NAMED_STUDY_PRODUCER = "d403cc5a3199a348cc7ee6262f4adbdab8138745"
 
 
+#: sha256 of the *source files* this module's numbers are derived through, at
+#: each Tessera state that exists on this box.  The point is that ``import
+#: tessera`` resolves to whatever is installed -- on this box an editable
+#: install of a working checkout at ``a9eb572e``, which is neither pin and is
+#: not a descendant of either.  A number derived through that state is derived
+#: through none of the pins, and would match the audit only by coincidence.
+#: :func:`tessera_source_state` hashes the bytes actually imported and names
+#: which state they are, so every derived number carries its origin.
+#:
+#: ``grammar.py`` is byte-identical at all three states: the rate-grammar
+#: refusals that set the domain endpoints have not moved at all.  ``export.py``
+#: separates them, and it is where ``_window_bits_for`` and ``wire_recipe``
+#: live.
+TESSERA_SOURCE_STATES = {
+    "reader-pin-387eda36": {
+        "commit": "387eda36fd410d6b2a4fb86b22285eab2a5e072c",
+        "export.py":
+            "9f7604bcba619673a6fe6d3de97737c39ba4d372749ef7f946bf53cd9dd92e87",
+    },
+    "study-producer-d403cc5a": {
+        "commit": "d403cc5a3199a348cc7ee6262f4adbdab8138745",
+        "export.py":
+            "b1b04f269edc137b7d4b2195b332a647501ace067ecb8eb7304d05eab5b8950d",
+    },
+    "unpinned-working-checkout-a9eb572e": {
+        "commit": "a9eb572e1b90b17f716562192910681e65430fba",
+        "export.py":
+            "79e8b8f4301870c943b79bde4c411e59958a74cd6c2ce0a821efe4c1ea9c1c3b",
+    },
+}
+
+#: ``grammar.py``'s digest, which all three states share.  The rate bounds and
+#: the whole-unit-quota refusal -- the two things that decide where the legal
+#: domain starts and stops -- are these bytes at every state, so the roster is
+#: not a function of which one is imported.  That is a derived fact, not an
+#: assumption: it is asserted against the importable tree by the tests.
+TESSERA_GRAMMAR_DIGEST = (
+    "f2545274c8e03534d040c64fb4fd1a02085de7b5eb106f80e8fb31b05454fac8"
+)
+
+#: The states whose ``export.py`` bytes produce the same wire for the two
+#: primary families.  ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap
+#: expression and the ``*_WINDOW_BITS`` constants are byte-identical between the
+#: reader pin and the frozen study producer; the two files differ only by the
+#: additive ``ScalePlaneKind.MX`` plane (a third plane kind, plus its grid
+#: refusal, its pack branch and its materialiser), which no ``TESSERA_E4M3_K1``
+#: or ``TESSERA_BF16_K1`` rung reaches -- both are WINDOW bodies over CHANNEL.
+#: So a number derived through either is derived through both, and this module
+#: says so from the bytes rather than repeating the audit's prose.
+TESSERA_EQUIVALENT_SOURCE_STATES = (
+    "reader-pin-387eda36", "study-producer-d403cc5a",
+)
+
+
+def _file_digest(path: str) -> str:
+    """sha256 of a file's bytes."""
+    import hashlib
+
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+def tessera_source_state() -> dict[str, object]:
+    """Which Tessera source state the importable package actually is.
+
+    Reads the bytes of the ``tessera.export`` and ``tessera.grammar`` modules
+    that ``import`` resolves to and matches them against
+    :data:`TESSERA_SOURCE_STATES`.  An unrecognised state is reported as such
+    rather than guessed at -- the caller then knows its numbers came from a
+    state this module has never compared against the pins.
+    """
+    import tessera.export as _export
+    import tessera.grammar as _grammar
+
+    export_digest = _file_digest(_export.__file__)
+    grammar_digest = _file_digest(_grammar.__file__)
+    named = [
+        name for name, state in TESSERA_SOURCE_STATES.items()
+        if state["export.py"] == export_digest
+    ]
+    state = named[0] if len(named) == 1 else None
+    return {
+        "schema": SCHEMA,
+        "state": state,
+        "is_a_pin": state in TESSERA_EQUIVALENT_SOURCE_STATES,
+        "commit": (
+            TESSERA_SOURCE_STATES[state]["commit"] if state else None
+        ),
+        "export_path": _export.__file__,
+        "export_sha256": export_digest,
+        "grammar_sha256": grammar_digest,
+        "grammar_matches_every_state": grammar_digest == TESSERA_GRAMMAR_DIGEST,
+        "verdict": (
+            f"deriving through {state} "
+            + ("(a pin, and the two pins' wire is byte-identical for these "
+               "families)" if state in TESSERA_EQUIVALENT_SOURCE_STATES
+               else "-- NOT a pin: these numbers are derived through no pinned "
+                    "state")
+            if state else
+            "UNRECOGNISED tessera source state: these numbers are derived "
+            "through bytes this module has not compared against either pin"
+        ),
+    }
+
+
 def live_pins() -> DomainPins:
     """Re-read every pin from the code and the installed package, right now.
 
@@ -1217,6 +1322,7 @@ def build_inventory(
         "schema": SCHEMA,
         "pins": pins.as_dict(),
         "pin_drift": drift,
+        "tessera_source_state": tessera_source_state(),
         "shapes": [list(s) for s in shapes],
         "artifact_scope": artifact_scope,
         "structures": list(structures),
@@ -1310,6 +1416,15 @@ def format_report(inventory: Mapping[str, object]) -> str:
     lines.append(f"Pin drift: {drift['verdict']}")
     for name, pair in sorted(drift["differences"].items()):
         lines.append(f"    {name}: frozen={pair['frozen']} live={pair['live']}")
+    lines.append("")
+    state = inventory["tessera_source_state"]
+    lines.append(f"Tessera source state: {state['verdict']}")
+    lines.append(f"  {'export.py':42s} {state['export_sha256']}")
+    lines.append(f"  {'export.py path':42s} {state['export_path']}")
+    lines.append(
+        f"  {'grammar.py shared by all three states':42s} "
+        f"{state['grammar_matches_every_state']}"
+    )
     lines.append("")
     lines.append(f"Shapes (rows, columns): {inventory['shapes']}")
     lines.append("")

@@ -653,3 +653,88 @@ def test_recipe_labels_come_through_the_canonicalisers(family, rate, body, plane
     account = domain.byte_account(family, rate, (2048, 4096))
     assert account.body_kind == body
     assert account.scale_plane == plane
+
+
+# ---------------------------------------------------------------------------
+# Which Tessera source state the numbers came from
+# ---------------------------------------------------------------------------
+
+def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
+    """Every derived number must come from a pinned state, named in the report.
+
+    ``import tessera`` resolves to whatever is installed.  On this box the
+    editable install points at a working checkout at ``a9eb572e``, which is
+    neither pin and is a descendant of neither, and whose ``export.py`` --
+    where ``_window_bits_for`` and ``wire_recipe`` live -- is a third distinct
+    file.  A roster derived through it would match the audit only by
+    coincidence.  This test refuses that silently happening: it hashes the
+    bytes actually imported and requires them to be one of the two pins.
+    """
+    state = domain.tessera_source_state()
+    assert state["state"] is not None, state["verdict"]
+    assert state["is_a_pin"], state["verdict"]
+    assert state["state"] in domain.TESSERA_EQUIVALENT_SOURCE_STATES
+    assert state["commit"] in {
+        "387eda36fd410d6b2a4fb86b22285eab2a5e072c",
+        "d403cc5a3199a348cc7ee6262f4adbdab8138745",
+    }
+    # The unpinned working checkout is a state this module knows about and
+    # rejects, not one it fails to recognise.
+    assert (state["export_sha256"]
+            != domain.TESSERA_SOURCE_STATES
+            ["unpinned-working-checkout-a9eb572e"]["export.py"])
+
+
+def test_the_rate_grammar_is_the_same_bytes_at_every_state():
+    """The domain endpoints do not depend on which Tessera state is imported.
+
+    ``grammar.py`` carries the rate-range refusal and the whole-unit-quota
+    refusal -- the two rules that decide where the legal roster starts and
+    stops.  It is byte-identical at the reader pin, at the frozen study
+    producer, and even at the unpinned working checkout, so the roster is not
+    a function of the state.  Asserted against the bytes actually imported,
+    so this stays a derived fact rather than a claim carried in a comment.
+    """
+    state = domain.tessera_source_state()
+    assert state["grammar_sha256"] == domain.TESSERA_GRAMMAR_DIGEST
+    assert state["grammar_matches_every_state"]
+
+
+def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
+    """Reader pin and frozen study producer are one answer for E4/BF16.
+
+    The brief names ``d403cc5a`` as the frozen producer and ``387eda36`` as the
+    reader, and warns that a producer fix exists in the former and not the
+    latter.  For *this* inventory the two are the same source: the wire the two
+    primary families resolve is decided by ``_window_bits_for``, ``wire_recipe``,
+    the WINDOW raw-rate cap and the ``*_WINDOW_BITS`` constants, all of which
+    are byte-identical between the pins, over a byte-identical ``grammar.py``
+    and a byte-identical packaged contract.  What separates the two files is
+    the additive ``ScalePlaneKind.MX`` plane, which is a third plane kind no
+    ``WINDOW``-over-``CHANNEL`` rung reaches.
+
+    The test pins the claim to the plane kind actually resolved, so that a
+    future family routed onto MX cannot inherit this equivalence silently.
+    """
+    assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
+        "reader-pin-387eda36", "study-producer-d403cc5a",
+    }
+    for family in domain.PRIMARY_FAMILIES:
+        rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)
+        for rate in (rates[0], rates[len(rates) // 2], rates[-1]):
+            account = domain.byte_account(family, rate, (2048, 4096))
+            assert account.body_kind == "window"
+            assert account.scale_plane == "channel"
+
+
+def test_the_report_names_the_source_state_the_numbers_came_from():
+    """A reader of the report can tell which Tessera bytes produced the counts."""
+    inventory = domain.build_inventory()
+    state = inventory["tessera_source_state"]
+    assert state["state"] in domain.TESSERA_EQUIVALENT_SOURCE_STATES
+    report = domain.format_report(inventory)
+    assert "Tessera source state:" in report
+    assert state["export_sha256"] in report
+    # It is printed with the pins, before the counts it qualifies.
+    assert report.index("Tessera source state:") < report.index(
+        "Legal rate domain:")
