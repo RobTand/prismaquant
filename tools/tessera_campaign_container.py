@@ -13,8 +13,17 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
-from tools.container_runtime_identity import image_content_sha256
+from tools.container_runtime_identity import (
+    image_content_sha256, prismaquant_source_sha256)
 from prismaquant.prismabuild_progress import PATH_ENV, TOKEN_ENV
+
+
+#: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
+#: ``python -m`` sets to the working directory.  The container's working
+#: directory is the PB sealed checkout, which carries its own ``prismaquant``
+#: package, so without this the pinned mount named first in ``PYTHONPATH``
+#: never wins and the campaign runs the sealed checkout's code (#519).
+SAFE_PATH_ENV = "PYTHONSAFEPATH"
 
 
 def validate_container(spec: dict) -> None:
@@ -65,6 +74,8 @@ def validate_container(spec: dict) -> None:
         raise RuntimeError("container env must map environment names to strings")
     if 'PRISMAQUANT_CONTAINER_CONTENT_SHA256' in env:
         raise RuntimeError('actual container content is supplied by the inspected launcher')
+    if SAFE_PATH_ENV in env:
+        raise RuntimeError('the import guard is supplied by the launcher, not by a spec')
 
 
 def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
@@ -129,6 +140,128 @@ def progress_environment(spec: dict, environ) -> dict:
         "and would be ended as a stall; declare a mount covering it")
 
 
+def host_path(container_path: str, *, cwd: str, mounts: list) -> "Path | None":
+    """The host path Docker binds behind one absolute container path.
+
+    The sealed checkout is bound at ``/workspace``; every other visible path
+    comes from a declared mount. The longest matching target wins, so a
+    ``/producer/src`` entry resolves through a ``/producer`` mount.
+    """
+
+    target = PurePosixPath(container_path)
+    if not target.is_absolute():
+        return None
+    best: "tuple[int, Path] | None" = None
+    candidates = [(PurePosixPath("/workspace"), Path(cwd))]
+    candidates += [(PurePosixPath(mount["target"]), Path(mount["source"]))
+                   for mount in mounts]
+    for prefix, source in candidates:
+        if target != prefix and prefix not in target.parents:
+            continue
+        remainder = target.parts[len(prefix.parts):]
+        if best is None or len(prefix.parts) > best[0]:
+            best = (len(prefix.parts), source.joinpath(*remainder))
+    return None if best is None else best[1]
+
+
+def import_search_roots(spec: dict, *, cwd: str, safe_path: bool) -> list:
+    """The host directories the launched ``python -m`` searches, in order.
+
+    ``sys.path[0]`` is the working directory unless safe-path mode is active;
+    the ``PYTHONPATH`` entries follow it. An empty or relative entry means the
+    working directory, which is why safe-path mode alone does not decide the
+    question: a ``.`` written into ``PYTHONPATH`` reaches the same tree.
+    Entries that name nothing this launcher can see are dropped, since Python
+    would find no package there either.
+    """
+
+    mounts = spec.get("container", {}).get("mounts", [])
+    entries = [] if safe_path else [""]
+    raw = spec.get("env", {}).get("PYTHONPATH", "")
+    entries += [entry for entry in raw.split(":")] if raw else []
+    roots = []
+    for entry in entries:
+        resolved = (Path(cwd) if entry in ("", ".")
+                    else host_path(entry, cwd=cwd, mounts=mounts))
+        if resolved is not None:
+            roots.append((entry, resolved))
+    return roots
+
+
+def _package_root(roots: list) -> "tuple[str, Path] | None":
+    for entry, root in roots:
+        if (root / "prismaquant" / "__init__.py").is_file():
+            return entry, root
+    return None
+
+
+def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str, Path]":
+    """The mounted PrismaQuant the spec asks the campaign to run.
+
+    The first ``PYTHONPATH`` entry that names a declared mount and holds a
+    PrismaQuant package. ``/workspace`` is the sealed checkout, not a pinned
+    tree, so an entry that resolves into it is not a candidate.
+    """
+
+    mounts = spec.get("container", {}).get("mounts", [])
+    workspace = PurePosixPath("/workspace")
+    raw = spec.get("env", {}).get("PYTHONPATH", "")
+    for entry in raw.split(":") if raw else []:
+        target = PurePosixPath(entry)
+        if not target.is_absolute() or target == workspace or workspace in target.parents:
+            continue
+        root = host_path(entry, cwd=cwd, mounts=mounts)
+        if root is not None and (root / "prismaquant" / "__init__.py").is_file():
+            return entry, root
+    raise RuntimeError(
+        "no PYTHONPATH entry names a declared mount holding a PrismaQuant "
+        "package, so this launch has no pinned tree to run; PYTHONPATH is "
+        f"{raw!r}")
+
+
+def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
+    """Refuse a launch whose import would resolve outside the pinned mount.
+
+    111 completed rows of ``extension-r1024-02`` executed the sealed checkout
+    rather than the pinned tree, because ``python -m`` puts the working
+    directory ahead of every ``PYTHONPATH`` entry and the working directory
+    carries its own ``prismaquant`` package (#519). The guard the launcher now
+    sets removes that entry; this replays the interpreter's search rules over
+    the launched environment and working directory and compares what would be
+    imported against the pinned mount, byte for byte, using the same package
+    digest the row stamps as ``prismaquant_source_sha256``.
+
+    The launcher runs before the container, so these digests are a prediction
+    from the launched environment, not an observation of the executed process.
+    The row's own stamped digest remains the observation, and the two agreeing
+    is what closes the loop.
+    """
+
+    entry, pinned = pinned_source_root(spec, cwd=cwd)
+    pinned_sha = prismaquant_source_sha256(pinned / "prismaquant")
+    guarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=True))
+    if guarded is None:
+        raise RuntimeError(
+            "the guarded import search finds no PrismaQuant package at all")
+    resolved_sha = prismaquant_source_sha256(guarded[1] / "prismaquant")
+    if resolved_sha != pinned_sha:
+        raise RuntimeError(
+            "the launched environment imports PrismaQuant from "
+            f"{guarded[1]} ({resolved_sha}), not from the pinned mount "
+            f"{entry} -> {pinned} ({pinned_sha}); a PYTHONPATH entry ahead of "
+            "the pinned mount reaches another tree, and safe-path mode does "
+            "not remove it")
+    unguarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=False))
+    shadow_sha = (None if unguarded is None
+                  else prismaquant_source_sha256(unguarded[1] / "prismaquant"))
+    return {"pinned_source_entry": entry, "pinned_source_root": str(pinned),
+            "pinned_source_sha256": pinned_sha,
+            "import_resolution_source_sha256": resolved_sha,
+            "import_resolution_root": str(guarded[1]),
+            "working_directory_source_sha256": shadow_sha,
+            "safe_path_guard_is_load_bearing": shadow_sha != pinned_sha}
+
+
 def docker_command(spec: dict, command: list[str], *, cwd: str,
                    uid: int, gid: int, image_id: str, content_sha256=None,
                    with_gpu=True, environ=None) -> list[str]:
@@ -142,7 +275,7 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
         if mount.get("readonly", False):
             value += ",readonly"
         argv += ["--mount", value]
-    forwarded = {**spec.get("env", {}),
+    forwarded = {SAFE_PATH_ENV: "1", **spec.get("env", {}),
                  **progress_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
@@ -194,12 +327,14 @@ def main(argv=None) -> int:
         raise RuntimeError(f"Docker image content differs for {requested!r}: "
                            f"expected {declared}, observed {content_digest}")
     with_gpu, gpu_reason = gpu_attachment(spec, cpu_only=args.cpu_only, environ=os.environ)
+    imports = verify_pinned_import(spec, cwd=str(Path.cwd()))
     print(json.dumps({"schema": "prismaquant.tessera_campaign_container.v1",
                       "requested_image": requested, "image_id": image_id,
                       "image_content_sha256": content_digest,
                       "declared_content_sha256": declared,
                       "uid": os.getuid(), "gid": os.getgid(),
-                      "gpu_attached": with_gpu, "gpu_decision": gpu_reason}), flush=True)
+                      "gpu_attached": with_gpu, "gpu_decision": gpu_reason,
+                      **imports}), flush=True)
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id,
                             content_sha256=content_digest, with_gpu=with_gpu,
