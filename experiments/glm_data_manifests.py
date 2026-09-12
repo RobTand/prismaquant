@@ -250,7 +250,15 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
     phases.append({"name": "seeds", "bytes": plan["seed_bytes"],
                    "cumulative_bytes": plan["total_bytes"]})
     named_seed_dir = None if argv is None else argv_value(argv, SEED_WIRE_DIR_FLAG)
-    if named_seed_dir and not plan["seed_files"]:
+    # The wire directory's own files, not the row's seed total: a row carries
+    # ``--seed-checkpoint`` as well, and counting both together would let a
+    # present checkpoint mask an empty wire directory -- the same silent zero
+    # with one extra file in it.
+    wire_root = None if not named_seed_dir else os.path.normpath(named_seed_dir)
+    from_wire = [] if wire_root is None else [
+        path for path, _ in plan["_seeds"]
+        if path == wire_root or path.startswith(wire_root.rstrip("/") + "/")]
+    if named_seed_dir and not from_wire:
         # The defect this gate exists for produced exactly this shape: a row
         # that reads 9.4-19 GB of wire, and a manifest that says ``seeds: 0``.
         # A miss count of zero against a directory the row names is a broken

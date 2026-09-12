@@ -313,15 +313,28 @@ def test_a_row_whose_named_seed_wire_yields_nothing_is_refused(
     campaign -- the submit path refuses it instead of warming nothing.
     """
     workspace, units, seed_dir = _workspace(tmp_path)
+    # A checkpoint the row also names, and that exists: the row's seed total
+    # is then non-zero even with an empty wire directory, so the gate has to
+    # look at the wire directory's own files.
+    checkpoint = tmp_path / "seed-checkpoint.safetensors"
+    checkpoint.write_bytes(b"\0" * (1 << 20))
+    named = ["--seed-checkpoint", str(checkpoint)]
 
-    absent = _row(units, tmp_path / "never-written")
+    absent = _row(units, tmp_path / "never-written", extra=named)
     with pytest.raises(SystemExit, match="no readable file was found"):
         dispatch.attach_data_manifests(workspace, [absent])
 
     empty = tmp_path / "empty-wire"
     empty.mkdir()
     with pytest.raises(SystemExit, match="no readable file was found"):
-        dispatch.attach_data_manifests(workspace, [_row(units, empty)])
+        dispatch.attach_data_manifests(workspace, [_row(units, empty, extra=named)])
+
+    # The checkpoint on its own is still declared when the wire directory has
+    # something in it, so the gate refuses the missing wire, not the pairing.
+    ok = dispatch.attach_data_manifests(
+        workspace, [_row(units, seed_dir, extra=named)])
+    manifest = json.loads(Path(ok[0]["data_manifest"]).read_text())
+    assert manifest["annotations"]["counts"]["seeds"] == len(SEED_WIRE) + 1
 
 
 def test_the_producer_restates_the_limits_prismabuild_enforces(
