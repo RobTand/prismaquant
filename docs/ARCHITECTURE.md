@@ -1,7 +1,71 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-11 · `claude/495-probe-reduction-schedule`. Stamps
+As of: 2026-09-12 · `pq/420-full-engine-report-consumer`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `pq/420-full-engine-report-consumer`) for the pure
+artifact consumer half of the fixed-resource admission design's "freeze and
+implement producer schema" prerequisite
+([design](design/runtime_fixed_resource_admission.md)).
+`prismaquant/full_engine_resource_report.py` reads one
+`tessera.full_engine_resource_report.v1` JSON report and nothing else: it
+imports no serving runtime, shells out to none, and adds no dependency on one,
+so the artifact travels and the code does not. It recomputes the partition from
+`partition` and `observations` — the simultaneous allocation/free sweep, the
+owner and lifetime classification, the term composition — and treats `derived`
+as a claim to check rather than a number to read. A producer total that
+disagrees with the recomputation refuses, as does a domain the consumer cannot
+itself see closed, a `shared` or `unknown` owner label, an unclassified
+allocation, a foreign device, a reused pointer generation, a live/free
+mismatch, a checkpoint that misstates its live extents, an unsupported
+topology or graph mode, and a boolean or nonfinite value where an integer is
+declared.
+
+**Admission stays closed and nothing reads this partition.**
+`admit_fixed_resources` keeps its unconditional refusal, no gate imports the
+consumer, and wiring one is the separate "integrate allocator admission" row of
+the same design. On the supplied producer artifact the consumer's verdict is a
+refusal that names the five open domains and the one unclassified allocation,
+with every recomputed term null; its own recomputation agrees with that
+producer in full, which is what the agreement check is for. At this schema
+version four of the six domains — `worker_startup`, `provenance_admission`,
+`cache_capacity`, `timing_partition` — carry no closing condition the report
+emits an observation for, so the resident, activation and KV terms cannot
+become numbers and the scalar composition cannot complete at all. The producer
+schema now says so on its face (tessera#450): `observations` names each owed
+member and sets it null — `worker_startup_records`, `runtime_provenance_relation`,
+`kv_observations`, `timing_captures`, `owner_views`, `observer_qualification` —
+so a capture that did not observe something is distinguishable from a producer
+that dropped it, and the consumer refuses a value there rather than reading one
+whose shape v1 does not define. `partition` owns the domain states and `derived`
+may no longer restate them, and a domain's evidence must name an observation the
+envelope carries. That schema also records `partition.domains_source`, because
+the producer accepts a caller handing it a domain table so its own arithmetic
+stays testable; a handed-in table closes every domain on the caller's word, so
+this consumer refuses any partition whose `domains_source` is not `derived`.
+`partition.uncharged_allocations` and `partition.scope.uncharged_allocation_count`
+name the classified rows the seven terms do not reach -- a KV backing with a
+transient lifetime, a candidate allocation with no unit -- and the consumer
+derives that set itself from `observations.torch_allocations`, compares it to the
+producer's by allocation id and by `(owner_class, lifetime_class, unit)` rather
+than by the prose reason, and refuses on disagreement. One uncharged row nulls
+every term on both sides, exactly as an unclassified row does: an overcount
+wastes headroom, but a composition that silently omits an allocation hands a
+serving gate a budget smaller than the engine needs. The three candidate terms are per-unit charge tables, keyed
+as the producer keys them, and the consumer compares them unit by unit and
+reduces only inside the composition (`sum` for residency, `max` for the
+transients): two units that trade the same bytes agree on every reduction while
+both charges are wrong, so comparing totals would not see it. `kv` is a third
+owner class, so a KV backing is classified and `fixed_kv` is the sum of the
+resident KV rows -- what it waits on is `cache_capacity`, which never closes
+here. Only `fixed_scratch` and `candidate_scratch` are reachable at
+this version; altered cache capacity, a missing timing tail and overlapping
+streams reach the consumer only as a domain state, which is why it has no test
+for them. No measured
+table, production setting, pin, serving lane or admission behavior changes,
+and no GPU, served, latency, quality or capacity measurement was run.
+Gates: `tests/test_full_engine_resource_report.py`,
+`tests/test_runtime_provenance.py`.
 
 Re-stamped (2026-09-11, `claude/495-probe-reduction-schedule`) for the routed
 stack **probe-reduction schedule**, parts 1-3 of RobTand/prismaquant#495

@@ -1,0 +1,349 @@
+{
+  "derived": {
+    "scalar_budget_bytes": null,
+    "scope": {
+      "allocation_scope": "gpu_allocations_only",
+      "expressible": false,
+      "invariance": "one complete assignment, one row per unit",
+      "topology": "tp1_single_device_resident_eager",
+      "unavailable_terms": [
+        "candidate_activation",
+        "candidate_resident",
+        "candidate_scratch",
+        "fixed_activation",
+        "fixed_kv",
+        "fixed_resident",
+        "fixed_scratch"
+      ],
+      "uncharged_allocation_count": 0,
+      "unclassified_allocation_count": 1
+    },
+    "terms": {
+      "candidate_activation": null,
+      "candidate_resident": null,
+      "candidate_scratch": null,
+      "fixed_activation": null,
+      "fixed_kv": null,
+      "fixed_resident": null,
+      "fixed_scratch": null
+    }
+  },
+  "execution": {
+    "graph_mode": "eager",
+    "residency": "resident",
+    "topology": "tp1"
+  },
+  "identity": {
+    "capture_sha256": "8a081fcba8985de121586a1fb201f94b8f727b7868f4662cbfd28d66f4303f56",
+    "fixture_provenance": "synthetic CPU-only parser fixture, not a GPU measurement",
+    "run": {
+      "assignment_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "canonical_units_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "device_id": 0,
+      "device_uuid": "synthetic-device",
+      "model_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runtime_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "schema": "tessera.full_engine_resource_identity.v1",
+      "workload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "observations": {
+    "artifacts": [],
+    "capture_sha256": "8a081fcba8985de121586a1fb201f94b8f727b7868f4662cbfd28d66f4303f56",
+    "checkpoints": [
+      {
+        "label": "startup",
+        "owner_count": 2,
+        "pinned_host_storages": [],
+        "storages": [
+          {
+            "address": 4096,
+            "allocation_id": "0:4096:1",
+            "bytes": 512,
+            "category": "fixed",
+            "owner_categories": {
+              "embedding.weight": "fixed",
+              "lm_head.weight": "fixed"
+            },
+            "owners": [
+              "embedding.weight",
+              "lm_head.weight"
+            ]
+          }
+        ],
+        "trace_index": 3,
+        "unique_owned_storage_bytes": 512,
+        "unique_pinned_host_backing_bytes": 0,
+        "unmatched_storage_observations": []
+      },
+      {
+        "label": "unit_end",
+        "owner_count": 3,
+        "pinned_host_storages": [],
+        "storages": [
+          {
+            "address": 4096,
+            "allocation_id": "0:4096:1",
+            "bytes": 512,
+            "category": "fixed",
+            "owner_categories": {
+              "embedding.weight": "fixed",
+              "lm_head.weight": "fixed"
+            },
+            "owners": [
+              "embedding.weight",
+              "lm_head.weight"
+            ]
+          },
+          {
+            "address": 4608,
+            "allocation_id": "0:4608:2",
+            "bytes": 1024,
+            "category": "candidate",
+            "owner_categories": {
+              "unit.output": "candidate"
+            },
+            "owners": [
+              "unit.output"
+            ]
+          }
+        ],
+        "trace_index": 8,
+        "unique_owned_storage_bytes": 1536,
+        "unique_pinned_host_backing_bytes": 0,
+        "unmatched_storage_observations": []
+      },
+      {
+        "label": "capture_end",
+        "owner_count": 2,
+        "pinned_host_storages": [],
+        "storages": [
+          {
+            "address": 4096,
+            "allocation_id": "0:4096:1",
+            "bytes": 512,
+            "category": "fixed",
+            "owner_categories": {
+              "embedding.weight": "fixed",
+              "lm_head.weight": "fixed"
+            },
+            "owners": [
+              "embedding.weight",
+              "lm_head.weight"
+            ]
+          }
+        ],
+        "trace_index": 12,
+        "unique_owned_storage_bytes": 512,
+        "unique_pinned_host_backing_bytes": 0,
+        "unmatched_storage_observations": []
+      }
+    ],
+    "cuda_argument_domains": {
+      "handled_api_keys": [],
+      "host_allocations": [],
+      "host_mappings": [],
+      "issues": [],
+      "null_device_frees": [],
+      "scope": "observed pinned-host lifetimes and explicit pointer mappings; no whole-host/UMA closure",
+      "status": "unavailable"
+    },
+    "external_native_peak_bytes": null,
+    "issues": [],
+    "kv_observations": null,
+    "observer_qualification": null,
+    "owner_views": null,
+    "runtime_provenance_relation": null,
+    "timing_captures": null,
+    "torch_allocations": [
+      {
+        "address": 4096,
+        "allocate_index": 1,
+        "allocation_id": "0:4096:1",
+        "allocator_block_bytes_observed": [
+          512
+        ],
+        "bytes": 512,
+        "free_completed_index": null,
+        "free_requested_index": null,
+        "generation": 1,
+        "lifetime_scope": "outside_units",
+        "observed_categories": [
+          "fixed"
+        ],
+        "observed_owners": [
+          "embedding.weight",
+          "lm_head.weight"
+        ],
+        "scope_stack": [],
+        "unit_invocation": null
+      },
+      {
+        "address": 4608,
+        "allocate_index": 3,
+        "allocation_id": "0:4608:1",
+        "allocator_block_bytes_observed": [],
+        "bytes": 512,
+        "free_completed_index": 5,
+        "free_requested_index": 4,
+        "generation": 1,
+        "lifetime_scope": "inside_unit",
+        "observed_categories": [],
+        "observed_owners": [],
+        "scope_stack": [
+          "unit"
+        ],
+        "unit_invocation": "unit:0"
+      },
+      {
+        "address": 4608,
+        "allocate_index": 6,
+        "allocation_id": "0:4608:2",
+        "allocator_block_bytes_observed": [
+          1024
+        ],
+        "bytes": 1024,
+        "free_completed_index": 10,
+        "free_requested_index": 9,
+        "generation": 2,
+        "lifetime_scope": "escapes_unit",
+        "observed_categories": [
+          "candidate"
+        ],
+        "observed_owners": [
+          "unit.output"
+        ],
+        "scope_stack": [
+          "unit"
+        ],
+        "unit_invocation": "unit:0"
+      }
+    ],
+    "torch_observed_live_peak_bytes": 1536,
+    "torch_observed_live_peak_scope": "requested_allocation_bytes_excluding_allocator_rounding",
+    "unattributed_external_records": [],
+    "worker_startup_records": null
+  },
+  "partition": {
+    "capture_sha256": "8a081fcba8985de121586a1fb201f94b8f727b7868f4662cbfd28d66f4303f56",
+    "domains": {
+      "cache_capacity": {
+        "evidence": [],
+        "reason": "no check here recomputes pool sizes and resolved limits from the raw worker records with views deduplicated by physical backing generation",
+        "state": "open"
+      },
+      "external_closure": {
+        "evidence": [],
+        "reason": "external/static/context backings carry no disjoint observed charge",
+        "state": "open"
+      },
+      "history_join": {
+        "evidence": [
+          "unattributed_external_records",
+          "checkpoints"
+        ],
+        "reason": null,
+        "state": "closed"
+      },
+      "provenance_admission": {
+        "evidence": [],
+        "reason": "no check here recomputes the runtime provenance relation; the consumer's admission is what closes this domain, and it refuses today",
+        "state": "open"
+      },
+      "timing_partition": {
+        "evidence": [],
+        "reason": "no check here recomposes the measured step from ordered native apply intervals, and it needs a device with no other work on it, which no capture has had",
+        "state": "open"
+      },
+      "worker_startup": {
+        "evidence": [],
+        "reason": "the recorder is proven to attach before CUDA initialization (the replay refuses a capture that did not), but no capture yet runs inside the engine's own worker process, so startup is not covered end to end",
+        "state": "open"
+      }
+    },
+    "domains_source": "derived",
+    "identity": {
+      "assignment_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "canonical_units_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "device_id": 0,
+      "device_uuid": "synthetic-device",
+      "model_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runtime_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "schema": "tessera.full_engine_resource_identity.v1",
+      "workload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "membership": [
+      {
+        "allocate_index": 1,
+        "allocation_id": "0:4096:1",
+        "bytes": 512,
+        "free_completed_index": null,
+        "lifetime_class": "resident",
+        "owner_class": "fixed",
+        "unit": null
+      },
+      {
+        "allocate_index": 6,
+        "allocation_id": "0:4608:2",
+        "bytes": 1024,
+        "free_completed_index": 10,
+        "lifetime_class": "activation",
+        "owner_class": "candidate",
+        "unit": "unit"
+      }
+    ],
+    "schema": "tessera.full_engine_resource_partition.v1",
+    "scope": {
+      "allocation_scope": "gpu_allocations_only",
+      "expressible": false,
+      "invariance": "one complete assignment, one row per unit",
+      "topology": "tp1_single_device_resident_eager",
+      "unavailable_terms": [
+        "candidate_activation",
+        "candidate_resident",
+        "candidate_scratch",
+        "fixed_activation",
+        "fixed_kv",
+        "fixed_resident",
+        "fixed_scratch"
+      ],
+      "uncharged_allocation_count": 0,
+      "unclassified_allocation_count": 1
+    },
+    "terms": {
+      "candidate_activation": null,
+      "candidate_resident": null,
+      "candidate_scratch": null,
+      "fixed_activation": null,
+      "fixed_kv": null,
+      "fixed_resident": null,
+      "fixed_scratch": null
+    },
+    "uncharged_allocations": [],
+    "unclassified_allocations": [
+      {
+        "allocation_id": "0:4608:1",
+        "bytes": 512,
+        "lifetime_scope": "inside_unit",
+        "observed_categories": [],
+        "reason": "no single supported owner category"
+      }
+    ],
+    "units": [
+      "unit"
+    ]
+  },
+  "reference": {
+    "canonical_census": null,
+    "runtime_binding": null,
+    "selected_rows": []
+  },
+  "schema": "tessera.full_engine_resource_report.v1",
+  "workload": {
+    "calibration": null,
+    "prompt_ids": [],
+    "sampling": null
+  }
+}
