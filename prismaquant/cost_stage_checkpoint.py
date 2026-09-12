@@ -34,16 +34,28 @@ def canonical_json(value: object, *, where: str) -> object:
     return json.loads(encoded)
 
 
-def canonical_json_sha256(value: object, *, where: str) -> str:
+def canonical_json_bytes(value: object, *, where: str) -> bytes:
+    """The exact bytes ``canonical_json_sha256`` digests.
+
+    Consumers that must *publish* canonical bytes -- not only hash them --
+    read them here, so there is one canonical JSON encoding in the tree
+    rather than a second spelling of the same ``json.dumps`` keywords.
+    """
     canonical = canonical_json(value, where=where)
-    encoded = json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    try:
+        return json.dumps(
+            canonical,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{where} is not canonical JSON data") from exc
+
+
+def canonical_json_sha256(value: object, *, where: str) -> str:
+    return hashlib.sha256(canonical_json_bytes(value, where=where)).hexdigest()
 
 
 def atomic_write_bytes(path: Path, payload: bytes) -> None:
