@@ -116,6 +116,48 @@ names all three rather than defaulting: `allocation.byte_budgets`,
   load") while a document hashed into a sealed action key needs closed key sets
   and one canonical byte spelling. They meet at `SchemaValidationError`.
   Converging them is a follow-up, not a completed item.
+
+### 5.1 Disposition, 2026-09-12
+
+Appended, not rewritten: the entries above are what shipped at milestone 1.
+
+- **`RateDomain`: merged.** One definition, in
+  `quality_prefill_population`, imported by `tessera_legal_domain`. The type
+  had to land on package C's side rather than A's: `tessera_formats` raises at
+  *import* when the `tessera` package is absent, so a definition in A would
+  make C unimportable without a Tessera checkout, and C is pure. A keeps the
+  derivation (`legal_rate_domain`, `rate_domain_payload`), which is what "A
+  owns the domain" meant. Three consequences, recorded rather than smoothed:
+  A's three construction refusals now raise `PopulationSelectionError` instead
+  of `TesseraFormatError` — nothing in the tree guards a `RateDomain`
+  construction with `except TesseraFormatError`; A's unused `RateDomain.
+  as_dict` is gone, because it returned *lists* and `RateDomain(**as_dict())`
+  built a domain that compared unequal to the derived one while passing every
+  check; and `__post_init__` now refuses a non-tuple field, which is that same
+  hazard turned into a refusal, with a test on each side.
+- **Two strict readers: not merged, deliberately.** They are two contracts,
+  not two copies, and their refusals differ in five places where a union would
+  weaken one of them: the contract caps integers at `2**63 - 1` and the
+  adapter does not; the contract's `_sequence` takes a `list` and admits an
+  empty one, the adapter's takes any non-string `Sequence` and refuses empty;
+  the contract decodes `str` only, the adapter also `bytes`; the adapter's
+  error subclasses `schemas.SchemaValidationError` and the contract's does
+  not, which `tests/test_quality_prefill_pb_adapter.py` pins; and the
+  identifier grammars are different languages — PrismaBuild's
+  `[a-z0-9][a-z0-9._/-]{0,255}` against PrismaQuant's
+  `[a-z0-9][a-z0-9._:-]{0,127}` — because the adapter's ids reach a sealed
+  PB action key. A reader parameterized over all five would be the sixteenth
+  private strict reader in this tree, not a consolidation of the two. The
+  actual cause is the repo-wide one the adapter's own module docstring names:
+  at least fifteen modules carry a private strict reader, each raising its own
+  error type. That is the follow-up, and it is larger than this work package.
+- **Test-environment finding.** `tests/test_quality_prefill_dry_run.py` opened
+  with `pytest.importorskip("prismaquant.tessera_legal_domain")`, which never
+  worked: a missing `tessera` makes `tessera_formats` raise
+  `TesseraFormatError` (a `ValueError`), not `ImportError`, so the file
+  errored at collection instead of skipping. Both `importorskip` calls there,
+  and the stale one in `test_tessera_legal_domain.py` that guarded against
+  package C "not being on this branch yet", are now plain imports.
 - **The L20 shared-down confirmation exclusion is vacuous at the real N.** With
   42 eligible layers, shared-down draws confirmation from a third that does not
   contain L20. The guard is implemented and tested; only the L10 half was
@@ -138,3 +180,29 @@ All test runs through PrismaBuild at `--priority -10` on sparky, CPU-only.
 | canonicalizer regression (20 callers in main) | `70c17d0a9cab` | 490 passed, 1 pre-existing failure, 3 skipped |
 | that failure on clean main, unmodified | `609e77a2808d` | 1 failed, 10 passed — pre-existing |
 | spec merge, docs currency | `391c99ea4b4c` | 19 passed |
+
+### 6.1 Evidence for §5.1, 2026-09-12
+
+Same routing, `--priority -10`, `--cpus 1 --demand mem_gb=2` (sized from a
+measured 1,124,140 KB max RSS, not from habit — `torch` import dominates).
+The interpreter is `/home/rob/venvs/pq-cu130/bin/python` with
+`PYTHONPATH=.:/home/rob/tessera/src`: `pq-cpu312` does not exist on this box,
+and no venv here has both `pytest` and an importable `tessera`. Tessera is the
+working checkout at `a9eb572e1`, which is **neither** pin — the seven failures
+below are that fact, not this change.
+
+| tree | action key | result |
+|---|---|---|
+| before, `a1fd6e1ceb` | `3a213fba1e55` | 7 failed, 204 passed, 0 skipped |
+| after | `4187a60dd835` | 7 failed, 208 passed, 0 skipped |
+| docs currency (`test_docs_staleness`, `test_architecture_doc`) | `ad0098364785` | 19 passed |
+
+The seven are the same seven, all in `tests/test_tessera_legal_domain.py`, all
+pin-attestation: the ledger at this checkout has no `TESSERA_E4M3_K1_R1024`
+dense cell, and `test_the_importable_tessera_is_a_pin_and_not_the_working_
+checkout` says in its own name what the environment is. The four new passes are
+the four tests added here. No skips in either run, so no refusal was skipped
+past; the join test in particular no longer *can* skip.
+
+This subsection postdates the receipt it records — the amend that added it
+touched this file only.
