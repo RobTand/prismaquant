@@ -5,6 +5,7 @@ refuse, and a schema that only accepts is not a gate.
 """
 
 import copy
+import hashlib
 import itertools
 import json
 import subprocess
@@ -15,6 +16,8 @@ import pytest
 
 from prismaquant.quality_prefill_contract import (
     COVERAGE_TYPES,
+    ENVELOPE_SCHEMAS,
+    ENVELOPE_VALIDATORS,
     JOINT_CURRENCY,
     LEGAL_TRANSITIONS,
     MANIFEST_SCHEMA,
@@ -31,6 +34,7 @@ from prismaquant.quality_prefill_contract import (
     freeze_manifest,
     initial_phase_states,
     parse_manifest,
+    seal_envelope,
     transition,
     unresolved_inputs,
     validate_manifest,
@@ -517,19 +521,333 @@ def test_submit_collect_and_solve_refuse_an_unfrozen_manifest(tmp_path):
         assert "REFUSED" in result.stderr
 
 
-def test_the_submit_seam_is_unimplemented_and_says_so(tmp_path):
+def _frozen_with_roster(tmp_path, digest: str | None = None):
+    """Freeze a manifest whose first phase names a roster file on disk."""
+
     frozen = tmp_path / "frozen.json"
     roster = tmp_path / "roster.json"
-    roster.write_text('{"tasks": []}', encoding="utf-8")
+    body = '{"tasks": []}'
+    roster.write_text(body, encoding="utf-8")
     manifest = resolved_manifest()
     phase = PHASE_DAG[0].phase
     manifest["execution"]["phases"][phase]["task_roster"] = {
         "path": "/" + str(roster).lstrip("/"),
-        "sha256": _A,
+        "sha256": digest or hashlib.sha256(body.encode("utf-8")).hexdigest(),
     }
-    frozen.write_text(
-        json.dumps(freeze_manifest(manifest)), encoding="utf-8"
-    )
+    frozen.write_text(json.dumps(freeze_manifest(manifest)), encoding="utf-8")
+    return frozen, phase
+
+
+def test_the_submit_seam_is_unimplemented_and_says_so(tmp_path):
+    frozen, phase = _frozen_with_roster(tmp_path)
     result = _run("submit", "--manifest", str(frozen), "--phase", phase)
     assert result.returncode == 3
     assert "separate work package" in result.stderr
+
+
+def test_submit_refuses_a_roster_whose_bytes_do_not_match_its_reference(tmp_path):
+    """A path string is not an identity: the declared digest is checked."""
+
+    frozen, phase = _frozen_with_roster(tmp_path, digest=_A)
+    result = _run("submit", "--manifest", str(frozen), "--phase", phase)
+    assert result.returncode == 2
+    assert "REFUSED" in result.stderr
+    assert "sha256" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Evidence envelopes (section 3.2)
+# ---------------------------------------------------------------------------
+
+
+def envelope_body(kind: str) -> dict:
+    """A minimal valid body for each of the seven envelopes."""
+
+    if kind == "candidate":
+        return {
+            "candidate_id": "cand-1",
+            "unit_map": _ref("unit-map"),
+            "family": "tessera_trellis",
+            "rate_q256": 1024,
+            "recipe": _ref("recipe"),
+            "activation_contract": "w4a16",
+            "route_status": "backed",
+            "source_sha256": _A,
+            "footprint_bytes": 4096,
+            "support_facts": _ref("support"),
+        }
+    if kind == "observation":
+        return {
+            "observation_id": "obs-1",
+            "candidate_id": "cand-1",
+            "phase_id": PHASE_DAG[0].phase,
+            "task_id": "task-1",
+            "context_sha256": _A,
+            "inner_schema": "unit_kl_v1",
+            "currency": SCALAR_CURRENCY,
+            "units": "dimensionless",
+            "measurement_status": "measured",
+            "value": 0.25,
+            "artifacts": [_ref("obs-1")],
+            "action_key": "f" * 64,
+            "attempt": 1,
+            "receipt_sha256": _B,
+            "validity": "valid",
+            "unknown_reason": "",
+        }
+    if kind == "screen_decision":
+        return {
+            "decision_id": "dec-1",
+            "rule": {"name": "declared_screen", "version": "v1"},
+            "dispositions": [
+                {
+                    "candidate_id": "cand-1",
+                    "disposition": "retained",
+                    "measurement_status": "retained_pending_measurement",
+                    "evidence_observation_ids": ["obs-1"],
+                    "reason": "inside the declared screen band",
+                    "uncertainty": 0.1,
+                }
+            ],
+        }
+    if kind == "transfer_seal":
+        return {
+            "seal_id": "seal-1",
+            "form": {"name": "segment_transfer", "version": "v1"},
+            "segment_id": "seg-1",
+            "source_candidate_ids": ["cand-1"],
+            "endpoint_candidate_ids": ["cand-2"],
+            "predictions": [
+                {
+                    "candidate_id": "cand-3",
+                    "predicted_value": 0.5,
+                    "currency": SCALAR_CURRENCY,
+                    "units": "dimensionless",
+                    "measurement_status": "predicted_screen",
+                }
+            ],
+            "prior_exposure_ledger": _ref("exposure"),
+            "target_plan_sha256": _C,
+        }
+    if kind == "phase_result":
+        return {
+            "phase_id": PHASE_DAG[0].phase,
+            "plan_identity_sha256": _A,
+            "parent_phase_ids": list(PHASE_DAG[0].dependencies),
+            "expected_task_ids": ["task-1"],
+            "child_receipts": [
+                {"task_id": "task-1", "action_key": "f" * 64, "receipt_sha256": _B}
+            ],
+            "merged_output_sha256": _C,
+            "terminal_state": "complete",
+            "coverage": {name: 0 for name in COVERAGE_TYPES},
+            "refusal_reasons": [],
+        }
+    if kind == "assignment":
+        return {
+            "assignment_id": "assign-1",
+            "member_recipes": _ref("members"),
+            "serving_unit_recipes": _ref("serving-units"),
+            "total_bytes": 1 << 30,
+            "price_table": price_table(JOINT_CURRENCY),
+            "context_sha256": _A,
+            "resource_proposal": _ref("resources"),
+            "eligibility": {
+                "route_status": "backed",
+                "target_platform": "sm121",
+                "native": True,
+            },
+            "exported_artifact_sha256": _B,
+        }
+    if kind == "frontier_report":
+        return {
+            "report_id": "report-1",
+            "proposed_points": [
+                {
+                    "point_id": "point-1",
+                    "assignment_id": "assign-1",
+                    "bytes": 1 << 30,
+                    "prefill_budget": 4096,
+                    "quality_value": 0.3,
+                    "currency": SCALAR_CURRENCY,
+                    "units": "dimensionless",
+                    "measurement_status": "predicted_screen",
+                }
+            ],
+            "served_points": [
+                {
+                    "point_id": "point-2",
+                    "assignment_id": "assign-1",
+                    "bytes": 1 << 30,
+                    "prefill_budget": 4096,
+                    "quality_value": 0.2,
+                    "currency": JOINT_CURRENCY,
+                    "units": "dimensionless",
+                    "measurement_status": "measured",
+                }
+            ],
+            "uncertainty": _ref("uncertainty"),
+            "selected_neighbors": ["point-1"],
+            "controls": ["control-1"],
+            "omissions": ["the prefill runtime table is not yet acquired"],
+            "evidence_links": [_ref("evidence")],
+            "commands": ["experiments/tessera_quality_prefill.py report"],
+        }
+    raise AssertionError(f"no fixture for envelope {kind!r}")
+
+
+@pytest.mark.parametrize("kind", sorted(ENVELOPE_VALIDATORS))
+def test_every_envelope_seals_validates_and_hashes_stably(kind):
+    sealed = seal_envelope(kind, envelope_body(kind))
+    assert sealed["schema"] == ENVELOPE_SCHEMAS[kind]
+    assert sealed["identity_sha256"] == canonical_sha256(
+        {k: v for k, v in sealed.items() if k != "identity_sha256"}
+    )
+    revalidated = ENVELOPE_VALIDATORS[kind](
+        json.loads(canonical_json_bytes(sealed).decode("utf-8"))
+    )
+    assert canonical_sha256(revalidated) == canonical_sha256(sealed)
+
+
+@pytest.mark.parametrize("kind", sorted(ENVELOPE_VALIDATORS))
+def test_every_envelope_refuses_an_unknown_key(kind):
+    body = envelope_body(kind)
+    body["surprise"] = 1
+    with pytest.raises(QualityPrefillContractError):
+        seal_envelope(kind, body)
+
+
+def test_an_unknown_envelope_kind_is_refused():
+    with pytest.raises(QualityPrefillContractError):
+        seal_envelope("price_table", {})
+
+
+def test_a_joint_observation_may_not_be_a_screen():
+    body = envelope_body("observation")
+    body["currency"] = JOINT_CURRENCY
+    body["measurement_status"] = "predicted_screen"
+    with pytest.raises(QualityPrefillContractError):
+        seal_envelope("observation", body)
+
+
+def test_a_sealed_prediction_may_not_claim_a_measurement():
+    body = envelope_body("transfer_seal")
+    body["predictions"][0]["measurement_status"] = "measured"
+    with pytest.raises(QualityPrefillContractError):
+        seal_envelope("transfer_seal", body)
+
+
+def test_a_seal_may_not_predict_its_own_endpoint():
+    body = envelope_body("transfer_seal")
+    body["predictions"][0]["candidate_id"] = "cand-2"
+    with pytest.raises(QualityPrefillContractError):
+        seal_envelope("transfer_seal", body)
+
+
+def test_complete_needs_an_exact_cover_of_the_expected_tasks():
+    body = envelope_body("phase_result")
+    body["expected_task_ids"] = ["task-1", "task-2"]
+    with pytest.raises(QualityPrefillContractError) as excinfo:
+        seal_envelope("phase_result", body)
+    assert "task-2" in str(excinfo.value)
+
+
+def test_an_assignment_may_not_claim_native_on_an_unbacked_route():
+    body = envelope_body("assignment")
+    body["eligibility"]["route_status"] = "unbacked"
+    with pytest.raises(QualityPrefillContractError):
+        seal_envelope("assignment", body)
+
+
+def test_a_point_is_never_both_proposed_and_served():
+    body = envelope_body("frontier_report")
+    body["served_points"][0]["point_id"] = "point-1"
+    with pytest.raises(QualityPrefillContractError):
+        seal_envelope("frontier_report", body)
+
+
+def test_collect_walks_the_legal_chain_and_publishes_the_advanced_state(tmp_path):
+    """A submitted phase reaches 'complete' only via running -> collecting."""
+
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(
+        json.dumps(freeze_manifest(resolved_manifest())), encoding="utf-8"
+    )
+    phase = PHASE_DAG[0].phase
+    state_in = tmp_path / "state.json"
+    states = {
+        name: {"state": "planned", "attempt": 1, "reason": ""}
+        for name in initial_phase_states()
+    }
+    states[phase] = {"state": "submitted", "attempt": 1, "reason": ""}
+    state_in.write_text(json.dumps(states), encoding="utf-8")
+
+    receipts = tmp_path / "receipts.json"
+    receipts.write_text(
+        json.dumps(
+            {
+                "task_ids": ["task-1"],
+                "receipts": [
+                    {"task_id": "task-1", "action_key": "f" * 64, "receipt_sha256": _B}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    state_out = tmp_path / "state-out.json"
+    result = _run(
+        "collect",
+        "--manifest", str(frozen),
+        "--phase", phase,
+        "--state", str(state_in),
+        "--receipts", str(receipts),
+        "--state-out", str(state_out),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(state_out.read_text())[phase]["state"] == "complete"
+
+
+def test_collect_refuses_a_phase_that_was_never_submitted(tmp_path):
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(
+        json.dumps(freeze_manifest(resolved_manifest())), encoding="utf-8"
+    )
+    receipts = tmp_path / "receipts.json"
+    receipts.write_text(
+        json.dumps(
+            {
+                "task_ids": ["task-1"],
+                "receipts": [
+                    {"task_id": "task-1", "action_key": "f" * 64, "receipt_sha256": _B}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = _run(
+        "collect",
+        "--manifest", str(frozen),
+        "--phase", PHASE_DAG[0].phase,
+        "--receipts", str(receipts),
+    )
+    assert result.returncode == 2
+    assert "not a legal transition" in result.stderr
+
+
+def test_a_state_file_may_not_carry_an_unknown_phase_state(tmp_path):
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(
+        json.dumps(freeze_manifest(resolved_manifest())), encoding="utf-8"
+    )
+    state_in = tmp_path / "state.json"
+    states = {
+        name: {"state": "planned", "attempt": 1, "reason": ""}
+        for name in initial_phase_states()
+    }
+    states[PHASE_DAG[0].phase]["state"] = "nearly_done"
+    state_in.write_text(json.dumps(states), encoding="utf-8")
+    result = _run(
+        "status", "--manifest", str(frozen), "--state", str(state_in)
+    )
+    assert result.returncode == 2
+    assert "unknown state" in result.stderr

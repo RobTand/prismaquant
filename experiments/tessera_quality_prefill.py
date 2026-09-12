@@ -29,6 +29,7 @@ their artifacts by reference and never re-implements them.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -44,6 +45,7 @@ from prismaquant.cost_stage_checkpoint import atomic_write_bytes  # noqa: E402
 from prismaquant.quality_prefill_contract import (  # noqa: E402
     JOINT_CURRENCY,
     PHASE_DAG,
+    PHASE_STATES,
     PhaseState,
     QualityPrefillContractError,
     canonical_json_bytes,
@@ -122,6 +124,24 @@ def _read(path: Path) -> str:
         raise QualityPrefillContractError(f"cannot read {path}: {exc}") from exc
 
 
+def _read_checked(path: Path, expected_sha256: str, *, where: str) -> str:
+    """Read a referenced artifact and refuse it unless its bytes match.
+
+    A path string is not an identity: every artifact reference in this
+    contract is ``{path, sha256}`` and the driver reads the pair, never
+    the path alone.
+    """
+
+    text = _read(path)
+    actual = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if actual != expected_sha256:
+        raise QualityPrefillContractError(
+            f"{where} at {path} has sha256 {actual}, "
+            f"but the reference declares {expected_sha256}"
+        )
+    return text
+
+
 def _load_manifest(path: Path, *, mode: str) -> dict:
     return parse_manifest(_read(path), mode=mode)
 
@@ -152,11 +172,21 @@ def _load_states(path: Path | None) -> dict[str, PhaseState]:
             raise QualityPrefillContractError(f"unknown phase {name!r} in state file")
         if not isinstance(raw, dict) or set(raw) != {"state", "attempt", "reason"}:
             raise QualityPrefillContractError(f"phase {name} state fields differ")
+        if raw["state"] not in PHASE_STATES:
+            raise QualityPrefillContractError(
+                f"phase {name} carries unknown state {raw['state']!r}"
+            )
+        if type(raw["attempt"]) is not int or raw["attempt"] < 0:
+            raise QualityPrefillContractError(
+                f"phase {name} attempt must be a non-negative int"
+            )
+        if not isinstance(raw["reason"], str):
+            raise QualityPrefillContractError(f"phase {name} reason must be a string")
         states[name] = PhaseState(
             phase=name,
-            state=str(raw["state"]),
-            attempt=int(raw["attempt"]),
-            reason=str(raw["reason"]),
+            state=raw["state"],
+            attempt=raw["attempt"],
+            reason=raw["reason"],
         )
     return states
 
@@ -224,7 +254,12 @@ def command_submit(args: argparse.Namespace) -> int:
         states[args.phase] = transition(states[args.phase], "ready", max_attempts=budget)
     entry = manifest["execution"]["phases"][args.phase]
     roster = decode_strict_json(
-        _read(Path(entry["task_roster"]["path"])), where=f"{args.phase} task roster"
+        _read_checked(
+            Path(entry["task_roster"]["path"]),
+            entry["task_roster"]["sha256"],
+            where=f"{args.phase} task roster",
+        ),
+        where=f"{args.phase} task roster",
     )
     if not isinstance(roster, dict):
         raise QualityPrefillContractError("task roster root must be an object")
@@ -235,6 +270,8 @@ def command_submit(args: argparse.Namespace) -> int:
         priority=manifest["execution"]["pb_policy"]["priority"],
     )
     states[args.phase] = transition(states[args.phase], "submitted", max_attempts=budget)
+    if args.state_out is not None:
+        _publish(args.state_out, _dump_states(states))
     _emit({"command": "submit", "phase": args.phase, "receipt": receipt,
            "states": _dump_states(states)})
     return 0
@@ -259,25 +296,49 @@ def command_status(args: argparse.Namespace) -> int:
 def command_collect(args: argparse.Namespace) -> int:
     manifest = _load_manifest(args.manifest, mode="frozen")
     states = _load_states(args.state)
-    decoded = decode_strict_json(_read(args.receipts), where="child receipts")
+    receipts_text = (
+        _read(args.receipts)
+        if args.receipts_sha256 is None
+        else _read_checked(
+            args.receipts, args.receipts_sha256, where="child receipts"
+        )
+    )
+    decoded = decode_strict_json(receipts_text, where="child receipts")
     if not isinstance(decoded, dict) or set(decoded) != {"task_ids", "receipts"}:
         raise QualityPrefillContractError(
             "child receipts must be {'task_ids': [...], 'receipts': [...]}"
         )
+    budget = manifest["execution"]["retry_policy"]["max_attempts"]
+    # A submitted phase reaches 'complete' only through the legal chain; the
+    # state machine, not this driver, decides whether each step is allowed.
+    for step in ("running", "collecting"):
+        if states[args.phase].state != step:
+            states[args.phase] = transition(
+                states[args.phase], step, max_attempts=budget
+            )
     states[args.phase] = transition(
         states[args.phase],
         "complete",
-        max_attempts=manifest["execution"]["retry_policy"]["max_attempts"],
+        max_attempts=budget,
         receipts=decoded["receipts"],
         expected_task_ids=decoded["task_ids"],
     )
+    if args.state_out is not None:
+        _publish(args.state_out, _dump_states(states))
     _emit({"command": "collect", "phase": args.phase, "states": _dump_states(states)})
     return 0
 
 
 def command_solve(args: argparse.Namespace) -> int:
     _load_manifest(args.manifest, mode="frozen")
-    decoded = decode_strict_json(_read(args.price_table), where="price table")
+    table_text = (
+        _read(args.price_table)
+        if args.price_table_sha256 is None
+        else _read_checked(
+            args.price_table, args.price_table_sha256, where="price table"
+        )
+    )
+    decoded = decode_strict_json(table_text, where="price table")
     table = validate_price_table(decoded, where="price_table")
     if table["currency"] != JOINT_CURRENCY:
         raise QualityPrefillContractError(
@@ -348,6 +409,12 @@ def build_parser() -> argparse.ArgumentParser:
     submitted.add_argument("--manifest", required=True, type=Path)
     submitted.add_argument("--phase", required=True)
     submitted.add_argument("--state", type=Path)
+    submitted.add_argument(
+        "--state-out",
+        default=None,
+        type=Path,
+        help="write the advanced phase state here (refuses to overwrite)",
+    )
 
     status = sub.add_parser("status", help="print phase states and ready phases")
     status.add_argument("--manifest", required=True, type=Path)
@@ -358,11 +425,27 @@ def build_parser() -> argparse.ArgumentParser:
     collected.add_argument("--manifest", required=True, type=Path)
     collected.add_argument("--phase", required=True)
     collected.add_argument("--receipts", required=True, type=Path)
+    collected.add_argument(
+        "--state-out",
+        default=None,
+        type=Path,
+        help="write the advanced phase state here (refuses to overwrite)",
+    )
+    collected.add_argument(
+        "--receipts-sha256",
+        default=None,
+        help="declared sha256 of the receipts file; the read refuses on mismatch",
+    )
     collected.add_argument("--state", type=Path)
 
     solved = sub.add_parser("solve", help="validate the joint price table")
     solved.add_argument("--manifest", required=True, type=Path)
     solved.add_argument("--price-table", required=True, type=Path)
+    solved.add_argument(
+        "--price-table-sha256",
+        default=None,
+        help="declared sha256 of the price table; the read refuses on mismatch",
+    )
 
     reported = sub.add_parser("report", help="emit coverage and the frontier report")
     reported.add_argument("--manifest", required=True, type=Path)

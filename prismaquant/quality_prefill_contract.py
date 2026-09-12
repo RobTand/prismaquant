@@ -42,7 +42,10 @@ import re
 from types import MappingProxyType
 from typing import Literal
 
-from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+from prismaquant.cost_stage_checkpoint import (
+    canonical_json_bytes as _canonical_json_bytes,
+    canonical_json_sha256,
+)
 
 
 MANIFEST_SCHEMA = "prismaquant.quality_prefill_experiment.v1"
@@ -422,16 +425,14 @@ def canonical_sha256(value: object) -> str:
 
 
 def canonical_json_bytes(value: object) -> bytes:
-    """The exact bytes :func:`canonical_sha256` digests."""
+    """The exact bytes :func:`canonical_sha256` digests.
+
+    Delegates to the repo's one canonical JSON encoder rather than
+    re-spelling its keywords here.
+    """
 
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
+        return _canonical_json_bytes(value, where="quality-prefill value")
     except (TypeError, ValueError) as exc:
         raise QualityPrefillContractError(
             "quality-prefill value is not canonical JSON data"
