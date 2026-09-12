@@ -307,6 +307,13 @@ def test_submit_refuses_an_under_declared_manifest_before_submitting_it(
     submitted = []
     monkeypatch.setattr(dispatch, '_pbcampaign',
                         lambda *a, **k: submitted.append(a) or 0)
+    # ``submit`` runs a second, independent gate: every row gets the data
+    # manifest the fleet warms it from (#518). This fixture's model is a bare
+    # path with no shards behind it, so there is no read set to derive; the
+    # demand gate is what this test is about, and the two are exercised
+    # together by ``tests/test_tessera_campaign_fanout.py``.
+    monkeypatch.setattr(dispatch, 'attach_data_manifests',
+                        lambda workspace, rows, **kw: rows)
     derived = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
                                           selected_source=True)['mem_gb']
     (tmp_path / 'manifest.json').write_text(json.dumps(

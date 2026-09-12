@@ -49,18 +49,103 @@ import argparse
 import hashlib
 import json
 import os
-import re
-import socket
 import subprocess
 import sys
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from glm_arc_prewarm import CAMPAIGN_BASE, Campaign, UNITS_RE  # noqa: E402
+from glm_arc_prewarm import (  # noqa: E402
+    CAMPAIGN_BASE, Campaign, SEED_WIRE_DIR_FLAG, UNITS_RE, argv_value)
 
 SCHEMA = "prismaquant.prismabuild.data_manifest.v1"
 SHARED_MOUNT = "/mnt/shared"
+
+#: ``prismabuild.core._DATA_MANIFEST_KEYS`` and ``_DATA_MANIFEST_ENTRY_KEYS``,
+#: restated because PrismaBuild is not importable from the environments that
+#: build a manifest.  ``validate_data_manifest`` builds both through
+#: ``_exact_mapping``: an unknown key is a refusal, not an ignored extra.
+MANIFEST_KEYS = frozenset({"schema", "produced_by", "mount_prefix", "entries",
+                           "entry_count", "total_bytes", "annotations"})
+ENTRY_KEYS = frozenset({"path", "offset", "bytes", "sha256"})
+
+#: ``prismabuild.core.DATA_MANIFEST_MAX_ENTRIES`` and
+#: ``DATA_MANIFEST_MAX_BYTES``: ``validate_data_manifest`` refuses a longer
+#: entry list and ``load_data_manifest`` refuses a larger file.  A routed GLM
+#: row is about 870 capture and weight entries plus a 5,920-file seed wire, so
+#: roughly 6,800 entries and 2 MB -- well inside both, but the ceilings belong
+#: here so a future read set that crosses one is refused by the producer
+#: rather than by the fleet.
+MAX_ENTRIES = 1_000_000
+MAX_MANIFEST_BYTES = 64 * 1024 * 1024
+
+
+def check_manifest(manifest: dict, *, where: str = "data manifest") -> dict:
+    """Refuse here what PrismaBuild would refuse at submission.
+
+    The producer is in this repo and the validator is in PrismaBuild, so a
+    manifest that drifts breaks nothing in either tree: it surfaces as a
+    refused submission, after the campaign was laid out.  These are the same
+    four rules ``prismabuild.core.validate_data_manifest`` applies, and they
+    are cheap enough to apply to every row at submit time.
+    """
+    if set(manifest) != set(MANIFEST_KEYS):
+        raise SystemExit(
+            f"{where}: fields differ: "
+            f"missing={sorted(MANIFEST_KEYS - set(manifest))}, "
+            f"extra={sorted(set(manifest) - MANIFEST_KEYS)}")
+    if manifest["schema"] != SCHEMA:
+        raise SystemExit(f"{where}: schema must be {SCHEMA}")
+    for field in ("produced_by", "annotations"):
+        if not isinstance(manifest[field], dict):
+            raise SystemExit(f"{where}: {field} must be an object")
+    prefix = manifest["mount_prefix"]
+    if not prefix.startswith("/") or prefix != os.path.normpath(prefix):
+        raise SystemExit(f"{where}: mount_prefix must be a normalized absolute path")
+    if prefix == "/":
+        raise SystemExit(f"{where}: mount_prefix must name a mount, not the root")
+    entries = manifest["entries"]
+    if not isinstance(entries, list) or not entries:
+        raise SystemExit(f"{where}: entries must be a non-empty array")
+    if len(entries) > MAX_ENTRIES:
+        raise SystemExit(f"{where}: entries exceed {MAX_ENTRIES}")
+    seen: set[tuple[str, int]] = set()
+    total = 0
+    for index, entry in enumerate(entries):
+        at = f"{where} entries[{index}]"
+        if set(entry) != set(ENTRY_KEYS):
+            raise SystemExit(f"{at}: fields differ")
+        path, offset, size = entry["path"], entry["offset"], entry["bytes"]
+        if not path.startswith(prefix + "/"):
+            raise SystemExit(f"{at}: {path} is outside {prefix}")
+        if os.path.normpath(path) != path:
+            raise SystemExit(f"{at}: {path} is not normalized")
+        if not isinstance(offset, int) or offset < 0:
+            raise SystemExit(f"{at}: offset must be a non-negative integer")
+        if not isinstance(size, int) or size <= 0:
+            raise SystemExit(f"{at}: bytes must be positive")
+        if (path, offset) in seen:
+            raise SystemExit(f"{at}: repeats a (path, offset)")
+        seen.add((path, offset))
+        total += size
+    if manifest["entry_count"] != len(entries):
+        raise SystemExit(f"{where}: entry_count disagrees with entries")
+    if manifest["total_bytes"] != total:
+        raise SystemExit(f"{where}: total_bytes disagrees with entries")
+    return manifest
+
+
+def check_manifest_bytes(blob: bytes, *, where: str = "data manifest") -> bytes:
+    """Refuse a manifest file PrismaBuild would refuse to read at all.
+
+    ``load_data_manifest`` stats the file before it parses it, so an oversized
+    manifest fails at submission with nothing validated.  Checking the bytes
+    the producer is about to write keeps that refusal here.
+    """
+    if len(blob) > MAX_MANIFEST_BYTES:
+        raise SystemExit(
+            f"{where}: manifest file is {len(blob)} bytes, over the "
+            f"{MAX_MANIFEST_BYTES}-byte limit")
+    return blob
 
 
 def sha256_file(path: str) -> str:
@@ -133,21 +218,56 @@ def row_id_of(row: dict) -> str | None:
     return found.pop() if len(found) == 1 else None
 
 
-def build_manifest(campaign: Campaign, row_id: str, produced_by: dict) -> dict:
+def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
+                   argv: "list | None" = None) -> dict:
     """One row's read set, in the order the row consumes it.
 
     Captures come first because ``prefetch_capture`` runs before the layer's
-    weights are touched; within each group the order is the consumer's own.
+    weights are touched; the seed wire the row re-verifies comes last, for the
+    same reason -- within each group the order is the consumer's own, and the
+    prewarm reader walks ``entries`` in order, so a warm cut short by ARC
+    headroom is cut at the end of the row's own read, not in the middle of its
+    captures.
+
+    ``argv`` is the row's own command line.  It is what names
+    ``--seed-wire-dir``, and reading the plan instead is what made every
+    manifest of ``extension-r1024-02`` declare ``seeds: 0`` while the row read
+    9.4-19 GB of wire off cold spindles at 41 MB/s.
     """
-    plan = campaign.row_plan(row_id)
+    plan = campaign.row_plan(row_id, argv)
     entries = []
     for path, size in plan["_captures"]:
         entries.append({"path": path, "offset": 0, "bytes": int(size), "sha256": None})
     for path, offset, length in plan["_extents"]:
         entries.append({"path": path, "offset": int(offset), "bytes": int(length),
                         "sha256": None})
+    phases = [{"name": "captures", "bytes": plan["capture_bytes"],
+               "cumulative_bytes": plan["capture_bytes"]},
+              {"name": "weight_extents", "bytes": plan["weight_bytes"],
+               "cumulative_bytes": plan["capture_bytes"] + plan["weight_bytes"]}]
     for path, size in plan["_seeds"]:
         entries.append({"path": path, "offset": 0, "bytes": int(size), "sha256": None})
+    phases.append({"name": "seeds", "bytes": plan["seed_bytes"],
+                   "cumulative_bytes": plan["total_bytes"]})
+    named_seed_dir = None if argv is None else argv_value(argv, SEED_WIRE_DIR_FLAG)
+    # The wire directory's own files, not the row's seed total: a row carries
+    # ``--seed-checkpoint`` as well, and counting both together would let a
+    # present checkpoint mask an empty wire directory -- the same silent zero
+    # with one extra file in it.
+    wire_root = None if not named_seed_dir else os.path.normpath(named_seed_dir)
+    from_wire = [] if wire_root is None else [
+        path for path, _ in plan["_seeds"]
+        if path == wire_root or path.startswith(wire_root.rstrip("/") + "/")]
+    if named_seed_dir and not from_wire:
+        # The defect this gate exists for produced exactly this shape: a row
+        # that reads 9.4-19 GB of wire, and a manifest that says ``seeds: 0``.
+        # A miss count of zero against a directory the row names is a broken
+        # read set, not an empty one, so it fails closed here rather than
+        # warming nothing at 41 MB/s.
+        raise SystemExit(
+            f"{row_id}: argv names {SEED_WIRE_DIR_FLAG} {named_seed_dir} but no "
+            "readable file was found there; refusing to declare a read set "
+            "that omits the row's seed wire")
     for e in entries:
         if not e["path"].startswith(SHARED_MOUNT + "/"):
             raise SystemExit(f"{row_id}: entry outside the shared mount: {e['path']}")
@@ -156,7 +276,7 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict) -> dict:
     # The key set is the one ``prismabuild.core.validate_data_manifest``
     # accepts exactly; everything this campaign knows and PrismaBuild does not
     # goes under ``annotations``, which the contract carries but never reads.
-    return {
+    manifest = {
         "schema": SCHEMA,
         "produced_by": produced_by,
         "mount_prefix": SHARED_MOUNT,
@@ -178,10 +298,43 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict) -> dict:
                 "weight_extents": plan["weight_bytes"],
                 "seeds": plan["seed_bytes"],
             },
+            # The directory the row's argv named, so a reader can tell a row
+            # that declared no seeds from one whose seed directory was empty
+            # or unreadable when the manifest was built.
+            "seed_wire_dir": (None if argv is None
+                              else argv_value(argv, SEED_WIRE_DIR_FLAG)),
+            # Where one phase of the row's read ends and the next begins, as a
+            # running byte sum over ``entries``.  The prewarm reader walks the
+            # list in order and can stop at a byte budget, so a consumer that
+            # warms only what fits has a boundary to stop on that is a
+            # property of the row's read order rather than a guess.  Carried,
+            # not read: PrismaBuild reads only ``annotations.row_id`` today.
+            "phases": phases,
         },
         "entry_count": len(entries),
         "total_bytes": plan["total_bytes"],
         "entries": entries,
+    }
+    return check_manifest(manifest, where=row_id)
+
+
+def deterministic_provenance(workspace: str, campaign: Campaign,
+                             size_source: str) -> dict:
+    """``produced_by`` that two submissions of one campaign agree on, byte for byte.
+
+    ``pbrun`` ingests the manifest as a content-addressed input and seals its
+    digest into the action key, so a field that changes between runs -- a
+    hostname, a clock reading -- gives the same row a new key on every submit.
+    That is not a cosmetic loss: a finished row stops being a cache hit and is
+    re-run, which is the opposite of what re-running ``submit`` is for.  Every
+    field here is a property of the campaign and the tree, not of the run.
+    """
+    return {
+        "tool": "prismaquant/experiments/glm_data_manifests.py",
+        "commit": git_commit(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "workspace": workspace,
+        "capture_manifest": campaign.capture_manifest_path,
+        "size_source": size_source,
     }
 
 
@@ -211,15 +364,8 @@ def main() -> int:
 
     sizes = None if args.stat else load_sizes(args.sizes_cache)
     campaign = CachedSizeCampaign(args.workspace, sizes)
-    produced_by = {
-        "tool": "prismaquant/experiments/glm_data_manifests.py",
-        "commit": git_commit(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "workspace": args.workspace,
-        "capture_manifest": campaign.capture_manifest_path,
-        "size_source": "stat" if args.stat else args.sizes_cache,
-        "host": socket.gethostname(),
-        "unix": int(time.time()),
-    }
+    produced_by = deterministic_provenance(
+        args.workspace, campaign, "stat" if args.stat else args.sizes_cache)
 
     out_rows = []
     report = []
@@ -229,7 +375,7 @@ def main() -> int:
             raise SystemExit(f"{src}: a row's argv names no single units/row-XXXX.json")
         if rid not in campaign.rows:
             raise SystemExit(f"{src}: {rid} is not a row of {args.workspace}/plan.json")
-        man = build_manifest(campaign, rid, produced_by)
+        man = build_manifest(campaign, rid, produced_by, row.get("argv"))
         path = os.path.join(args.out_dir, f"{rid}.data-manifest.json")
         blob = json.dumps(man, indent=1, sort_keys=False).encode() + b"\n"
         if not args.dry_run:
@@ -249,8 +395,10 @@ def main() -> int:
             "total_bytes": man["total_bytes"],
             "captures": man["annotations"]["counts"]["captures"],
             "weight_extents": man["annotations"]["counts"]["weight_extents"],
+            "seeds": man["annotations"]["counts"]["seeds"],
             "capture_bytes": man["annotations"]["bytes"]["captures"],
             "weight_bytes": man["annotations"]["bytes"]["weight_extents"],
+            "seed_bytes": man["annotations"]["bytes"]["seeds"],
         })
 
     out_blob = json.dumps(out_rows, indent=1).encode() + b"\n"

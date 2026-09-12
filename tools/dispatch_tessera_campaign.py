@@ -1171,6 +1171,77 @@ def cmd_check(args) -> int:
           "their own argv supports")
     return 0
 
+#: Where ``submit`` writes the per-row read sets and the manifest that names
+#: them.  Both are derived, so both are rewritten on every submit and neither
+#: is the planned ``manifest.json``: ``plan`` owns that file.
+DATA_MANIFEST_DIR = "data-manifests"
+SUBMITTED_MANIFEST = "manifest.submitted.json"
+
+
+def _manifest_producer():
+    """The campaign's data-manifest producer, imported from ``experiments/``.
+
+    It is imported here rather than at module load because it reads the
+    campaign's plan and capture manifest, which only ``submit`` needs.
+    """
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from experiments import glm_data_manifests
+
+    return glm_data_manifests
+
+
+def attach_data_manifests(workspace: Path, rows: list[dict], *,
+                          out_dir: Path | None = None) -> list[dict]:
+    """Give every row the byte list PrismaBuild needs to warm it, or refuse.
+
+    Only the producer knows a row's read set: the capture files its members
+    name, the byte extents of those members' weights inside the safetensors
+    shards, and the seed wire the row's own argv points at.  Without that list
+    a row is invisible to the fleet's prewarm loop and starts against cold
+    spindles -- measured at 26 MB/s over 64 GB on sparky (row-0074,
+    2026-09-12), about 40 minutes of idle GPU per row.
+
+    The manifest is a ``pbrun`` input, not part of the campaign's own
+    checkpoint identity, so the row's ``argv`` is returned byte-identical to
+    what ``plan`` wrote; only the ``data_manifest`` key is added.  A row whose
+    manifest cannot be built is refused here, where the reason is readable,
+    rather than submitted blind.
+    """
+    producer = _manifest_producer()
+    campaign = producer.Campaign(str(workspace))
+    provenance = producer.deterministic_provenance(
+        str(workspace), campaign, "stat")
+    out_dir = out_dir or workspace / DATA_MANIFEST_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    attached: list[dict] = []
+    for index, row in enumerate(rows):
+        row_id = producer.row_id_of(row)
+        if row_id is None:
+            raise RuntimeError(
+                f"row {index} names no single units/row-XXXX.json in its argv, "
+                "so its read set cannot be derived; refusing to submit it "
+                "without a data manifest")
+        if row_id not in campaign.rows:
+            raise RuntimeError(
+                f"{row_id} is not a row of {workspace}/plan.json")
+        manifest = producer.build_manifest(
+            campaign, row_id, provenance, row.get("argv"))
+        path = out_dir / f"{row_id}.data-manifest.json"
+        blob = producer.check_manifest_bytes(
+            json.dumps(manifest, indent=1, sort_keys=False).encode() + b"\n",
+            where=row_id)
+        path.write_bytes(blob)
+        attached.append({**row, "data_manifest": str(path)})
+
+    missing = [producer.row_id_of(row) for row in attached
+               if not row.get("data_manifest")]
+    if missing:
+        raise RuntimeError(f"rows without a data manifest: {missing}")
+    return attached
+
 
 def cmd_submit(args) -> int:
     workspace = Path(args.workspace)
@@ -1179,10 +1250,20 @@ def cmd_submit(args) -> int:
     # about twenty seconds in, which PrismaBuild records as failed with no
     # retry (RobTand/prismaquant#522). Nothing about that is cheaper to find
     # out later, so the demands are re-derived before any row is submitted.
+    # This reads the planned rows, and attaching a manifest below changes
+    # neither ``argv`` nor ``demand``, so what is checked is what is sent.
     _checked_manifest(args, manifest=manifest)
+    rows = attach_data_manifests(workspace, json.loads(manifest.read_text()))
+    submitted = workspace / SUBMITTED_MANIFEST
+    submitted.write_text(json.dumps(rows, indent=2) + "\n")
+    plural = "" if len(rows) == 1 else "s"
+    print(f"[dispatch] data manifests attached to {len(rows)} row{plural} "
+          f"-> {submitted}")
     # Re-running the manifest IS the resume: a finished row is a cache hit and
-    # a running row is re-attached, both by pbcampaign itself.
-    return _pbcampaign(manifest, wait_s=args.wait_s,
+    # a running row is re-attached, both by pbcampaign itself.  The manifests
+    # are a deterministic function of the campaign and the tree, so a second
+    # submit addresses the same action keys as the first.
+    return _pbcampaign(submitted, wait_s=args.wait_s,
                        receipts=workspace / "receipts.json")
 
 

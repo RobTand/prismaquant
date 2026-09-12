@@ -53,6 +53,32 @@ and exercise refusal paths only; no live capture of this report exists. Gates:
 `tests/test_runtime_fixed_resource_admission.py`,
 `tests/test_runtime_provenance.py`.
 
+Re-stamped (2026-09-12, `claude/518-data-manifest-at-submit`) for the campaign
+submit path (#518). **`dispatch_tessera_campaign.py submit` now derives a
+PrismaBuild data manifest for every row and refuses a row whose read set it
+cannot derive.** Only the producer knows what a row reads, and a row that
+reaches the fleet without that list is invisible to PrismaBuild's prewarm
+loop: measured on sparky, row-0074 started against cold spindles at 26 MB/s
+over 64 GB, about 40 minutes of idle GPU, while a server-side warm of the same
+bytes ran at 1,653 MB/s and dropped the client to 0.21 ms per RPC
+(2026-09-12). The manifest names the row's capture files, the byte extents of
+its members' weights inside the safetensors shards, and the seed wire the
+row's own `--seed-wire-dir` argv points at, in that order -- the order the row
+reads them. The seed bytes are new: the producer used to resolve them from
+the campaign's own plan, which for a re-planned campaign names a different
+workspace, so every manifest declared `seeds: 0` while the row read 9.4-19 GB
+of wire at 41 MB/s (row-0065, 2026-09-12). A row that names a seed directory
+and finds nothing readable in it is refused rather than submitted with
+`seeds: 0`. `submit` writes the manifests under
+`WORKSPACE/data-manifests/` and submits `WORKSPACE/manifest.submitted.json`;
+`plan` still owns `manifest.json` and is not rewritten. The campaign argv is
+byte-identical with and without the manifest -- the manifest is a `pbrun`
+input, outside the campaign's checkpoint identity -- and `produced_by` carries
+no clock reading or hostname, because `pbrun` seals the manifest's digest into
+the action key and a field that drifted would re-key a finished row. Gates:
+`tests/test_glm_data_manifest_at_submit.py`,
+`tests/test_glm_data_manifest_matches_the_prismabuild_contract.py`.
+
 Re-stamped (2026-09-12, `claude/522-derive-mem-gb-from-plan`) for the campaign
 dispatcher's derived memory demand (#522). **A row's `demand.mem_gb` now
 carries every term of the predicate the row will check itself against**, and a
@@ -9226,12 +9252,26 @@ campaign flag, through the spec's `campaign_argv`, with `merge` refusing rows
 whose `menu_mode` disagrees.
 
 `tools/dispatch_tessera_campaign.py` is `census` / `plan` / `check` /
-`submit` / `merge` over `pbcampaign`. Rows are portable (no host pin), GPU-demanding, not
-exclusive, `retry_safe`, and carry a memory demand computed from the phase
-plan the row checks itself against, plus the measured process floor and the
-guard's margin (#522). `check` re-derives that demand from a manifest row's
-own argv and refuses an under-declared or over-capacity row; `submit` runs it
-first. Re-running the manifest **is**
+`submit` / `merge` over `pbcampaign`. Rows are portable (no host pin),
+GPU-demanding, not exclusive, `retry_safe`, and carry a memory demand computed
+from the phase plan the row checks itself against, plus the measured process
+floor and the guard's margin (#522). `check` re-derives that demand from a
+manifest row's own argv and refuses an under-declared or over-capacity row.
+`submit` runs two gates in order, both before any row reaches the fleet: that
+demand check on the planned rows first, then a data manifest for every row --
+the exact shared-mount files and byte extents the row will read, built by
+`experiments/glm_data_manifests.py` from the row's units file and its own argv
+-- refusing a row whose read set it cannot derive, because a row without one is
+invisible to PrismaBuild's prewarm loop and starts against cold spindles. A row
+whose argv names `--seed-wire-dir` and whose directory yields no readable file
+is refused for the same reason: zero seed bytes against a named directory is a
+broken read set, not an empty one. The two gates are independent -- one reads
+`demand`, the other reads the bytes the row will open -- and attaching a
+manifest changes neither `argv` nor `demand`, so what `check` verified is what
+is submitted. The manifest is a `pbrun` input and leaves the campaign argv
+byte-identical; it is written under `WORKSPACE/data-manifests/` and the rows
+that name it under `WORKSPACE/manifest.submitted.json`, so `plan`'s
+`manifest.json` is never rewritten. Re-running the manifest **is**
 the resume -- a finished row is a CAS hit and a running row is re-attached --
 so nothing here decides what to skip, and a row may not carry
 `--deadline-seconds`, which stops a run mid-round and would price a different
