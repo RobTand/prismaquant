@@ -74,8 +74,11 @@ shards, parsed from each shard's header and coalesced to 1 MiB record
 boundaries, because `--source-snapshot-policy selected-tensors-v1` reads ranges
 rather than whole shards; and the seed bytes the row's own argv names --
 `--seed-checkpoint` with its `.parts` shards, and every regular file under the
-directory `--seed-wire-dir` names, enumerated with one `os.walk` of that
-directory and nothing above it.
+directory `--seed-wire-dir` names, enumerated with `os.scandir` of that
+directory and the directories below it, and nothing above it. A row whose
+named wire directory yields no readable file is refused rather than submitted
+with `seeds: 0`, counting that directory's own files so a checkpoint that
+exists cannot stand in for a missing wire.
 
 The seed term is read off the argv, not off the campaign's plan. A row seeded
 from a `--seed-workspace` records its seed in `plan.json`; a campaign seeded
