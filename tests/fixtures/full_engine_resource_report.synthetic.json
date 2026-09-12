@@ -15,6 +15,7 @@
         "fixed_resident",
         "fixed_scratch"
       ],
+      "uncharged_allocation_count": 0,
       "unclassified_allocation_count": 1
     },
     "terms": {
@@ -261,6 +262,7 @@
         "state": "open"
       }
     },
+    "domains_source": "derived",
     "identity": {
       "assignment_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "canonical_units_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -307,6 +309,7 @@
         "fixed_resident",
         "fixed_scratch"
       ],
+      "uncharged_allocation_count": 0,
       "unclassified_allocation_count": 1
     },
     "terms": {
@@ -318,6 +321,7 @@
       "fixed_resident": null,
       "fixed_scratch": null
     },
+    "uncharged_allocations": [],
     "unclassified_allocations": [
       {
         "allocation_id": "0:4608:1",

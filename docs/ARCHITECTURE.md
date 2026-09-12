@@ -39,7 +39,19 @@ so a capture that did not observe something is distinguishable from a producer
 that dropped it, and the consumer refuses a value there rather than reading one
 whose shape v1 does not define. `partition` owns the domain states and `derived`
 may no longer restate them, and a domain's evidence must name an observation the
-envelope carries. The three candidate terms are per-unit charge tables, keyed
+envelope carries. That schema also records `partition.domains_source`, because
+the producer accepts a caller handing it a domain table so its own arithmetic
+stays testable; a handed-in table closes every domain on the caller's word, so
+this consumer refuses any partition whose `domains_source` is not `derived`.
+`partition.uncharged_allocations` and `partition.scope.uncharged_allocation_count`
+name the classified rows the seven terms do not reach -- a KV backing with a
+transient lifetime, a candidate allocation with no unit -- and the consumer
+derives that set itself from `observations.torch_allocations`, compares it to the
+producer's by allocation id and by `(owner_class, lifetime_class, unit)` rather
+than by the prose reason, and refuses on disagreement. One uncharged row nulls
+every term on both sides, exactly as an unclassified row does: an overcount
+wastes headroom, but a composition that silently omits an allocation hands a
+serving gate a budget smaller than the engine needs. The three candidate terms are per-unit charge tables, keyed
 as the producer keys them, and the consumer compares them unit by unit and
 reduces only inside the composition (`sum` for residency, `max` for the
 transients): two units that trade the same bytes agree on every reduction while

@@ -96,6 +96,15 @@ UNSUPPORTED_OWNER_LABELS = ("shared", "unknown")
 LIFETIME_SCOPES = ("outside_units", "inside_unit", "escapes_unit")
 LIFETIME_CLASSES = ("resident", "activation", "scratch")
 
+#: How the partition came by its domain states. The producer derives them from
+#: the ledger, and it also accepts a caller handing them in so its own
+#: arithmetic stays testable. A handed-in table closes every domain because a
+#: caller said so, which is the `qualified: true` failure this whole design
+#: exists to prevent, so this consumer admits only the derived spelling. The
+#: producer records the fact; declining to read it is this consumer's job.
+DOMAINS_SOURCES = ("derived", "supplied")
+ADMITTED_DOMAINS_SOURCE = "derived"
+
 SUPPORTED_SCOPE = {
     "allocation_scope": "gpu_allocations_only",
     "topology": "tp1_single_device_resident_eager",
@@ -131,14 +140,20 @@ _CHECKPOINT_FIELDS = ("label", "owner_count", "pinned_host_storages", "storages"
                       "trace_index", "unique_owned_storage_bytes",
                       "unique_pinned_host_backing_bytes", "unmatched_storage_observations")
 _STORAGE_FIELDS = ("address", "allocation_id", "bytes", "category", "owner_categories", "owners")
-_PARTITION_FIELDS = ("capture_sha256", "domains", "identity", "membership", "schema",
-                     "scope", "terms", "unclassified_allocations", "units")
+_PARTITION_FIELDS = ("capture_sha256", "domains", "domains_source", "identity", "membership",
+                     "schema", "scope", "terms", "uncharged_allocations",
+                     "unclassified_allocations", "units")
 _MEMBERSHIP_FIELDS = ("allocate_index", "allocation_id", "bytes", "free_completed_index",
                       "lifetime_class", "owner_class", "unit")
 _UNCLASSIFIED_FIELDS = ("allocation_id", "bytes", "lifetime_scope", "observed_categories", "reason")
+#: A classified row that no composition term charges. It carries its cell and
+#: its unit, which is what the consumer recomputes, plus the producer's prose
+#: reason, which no check reads.
+_UNCHARGED_FIELDS = ("allocation_id", "bytes", "lifetime_class", "owner_class", "reason", "unit")
 _DERIVED_FIELDS = ("scalar_budget_bytes", "scope", "terms")
 _SCOPE_FIELDS = ("allocation_scope", "expressible", "invariance", "topology",
-                 "unavailable_terms", "unclassified_allocation_count")
+                 "unavailable_terms", "uncharged_allocation_count",
+                 "unclassified_allocation_count")
 _DOMAIN_FIELDS = ("evidence", "reason", "state")
 
 
@@ -235,6 +250,7 @@ def _scope(value: Any, where: str) -> Mapping:
                 f"{where}: unsupported {key} {scope[key]!r}; this consumer covers only {supported!r}")
     _bool(scope["expressible"], where + " expressible")
     _index(scope["unclassified_allocation_count"], where + " unclassified allocation count")
+    _index(scope["uncharged_allocation_count"], where + " uncharged allocation count")
     for name in _string_list(scope["unavailable_terms"], where + " unavailable terms"):
         if name not in TERMS:
             raise RuntimePriceError(f"{where}: unknown term {name!r}")
@@ -356,6 +372,16 @@ def _partition(value: Any, where: str) -> Mapping:
     _sha(partition["capture_sha256"], where + " capture digest")
     _run_identity(partition["identity"], where + " identity")
     _domains(partition["domains"], where + " domains")
+    # A partition whose domains were handed in by a caller has had nothing
+    # checked: every domain closes because an argument said so, and every term
+    # is then emitted on that word. It is a well-formed value of the frozen
+    # schema and it is refused by name, exactly as an unsupported topology is.
+    source = _enum(partition["domains_source"], DOMAINS_SOURCES, where + " domains source")
+    if source != ADMITTED_DOMAINS_SOURCE:
+        raise RuntimePriceError(
+            f"{where}: domains_source is {source!r}; this consumer reads only a partition whose "
+            f"domains are {ADMITTED_DOMAINS_SOURCE!r}, because supplied domains close on a "
+            f"caller's word rather than on evidence")
     _terms(partition["terms"], where + " terms")
     _scope(partition["scope"], where + " scope")
     _string_list(partition["units"], where + " units")
@@ -382,6 +408,24 @@ def _partition(value: Any, where: str) -> Mapping:
     identities = [row["allocation_id"] for row in rows + unclassified]
     if len(set(identities)) != len(identities):
         raise RuntimePriceError(f"{where}: an allocation is partitioned more than once")
+    # Uncharged rows are classified rows the seven terms do not reach, so each
+    # one restates a membership row rather than adding an allocation.
+    uncharged_ids = []
+    for item in _list(partition["uncharged_allocations"], where + " uncharged allocations"):
+        row = _object(item, _UNCHARGED_FIELDS, where + " uncharged row")
+        _string(row["allocation_id"], where + " uncharged allocation id")
+        _index(row["bytes"], where + " uncharged bytes")
+        _enum(row["owner_class"], OWNER_CLASSES, where + " uncharged owner class")
+        _enum(row["lifetime_class"], LIFETIME_CLASSES, where + " uncharged lifetime class")
+        _optional_string(row["unit"], where + " uncharged unit")
+        _string(row["reason"], where + " uncharged reason")
+        uncharged_ids.append(row["allocation_id"])
+    if len(set(uncharged_ids)) != len(uncharged_ids):
+        raise RuntimePriceError(f"{where}: an allocation is named uncharged more than once")
+    orphans = sorted(set(uncharged_ids) - {row["allocation_id"] for row in rows})
+    if orphans:
+        raise RuntimePriceError(
+            f"{where}: uncharged allocation {orphans[0]!r} is not a classified membership row")
     return partition
 
 
@@ -525,6 +569,21 @@ def _recompute_membership(observations: Mapping) -> tuple[list[dict], list[dict]
     return membership, unclassified
 
 
+def _charged(row: Mapping) -> bool:
+    """Whether one of the seven composition terms charges this classified row.
+
+    Three fixed cells, three candidate cells and resident KV are charged; a KV
+    backing with a transient lifetime is not, and neither is a candidate
+    allocation with no unit, because every candidate term is keyed by unit.
+    A row that falls through is the one error direction that must never be
+    silent: an overcount wastes headroom, an undercount hands a serving gate a
+    budget smaller than the engine needs.
+    """
+    return (row["owner_class"] == "kv" and row["lifetime_class"] == "resident"
+            or row["owner_class"] == "fixed"
+            or row["owner_class"] == "candidate" and row["unit"] is not None)
+
+
 def _charge(lifetime: str, rows: Sequence[Mapping]) -> int:
     """Resident bytes add; transient bytes peak.
 
@@ -538,12 +597,14 @@ def _charge(lifetime: str, rows: Sequence[Mapping]) -> int:
 
 
 def _recompute_terms(membership: Sequence[Mapping], *, closed: Mapping[str, bool],
-                     unclassified: int) -> dict[str, Any]:
+                     unclassified: int, uncharged: int) -> dict[str, Any]:
     """Recompute every term the emitted observations can express.
 
     An unclassified allocation nulls every term whatever the domains say: a
     row with neither an owner nor a lifetime could belong to any of them, so
-    no term is complete while one exists.
+    no term is complete while one exists. An uncharged row nulls them for the
+    same reason from the other side: it is classified and no term reaches it,
+    so a composition built over the seven terms omits bytes the engine holds.
     """
     def rows(owner: str, lifetime: str) -> list[Mapping]:
         return [row for row in membership
@@ -551,7 +612,7 @@ def _recompute_terms(membership: Sequence[Mapping], *, closed: Mapping[str, bool
 
     units = sorted({row["unit"] for row in membership if row["unit"] is not None})
     terms: dict[str, Any] = {name: None for name in TERMS}
-    if unclassified:
+    if unclassified or uncharged:
         return terms
     for term in RECOMPUTABLE_TERMS:
         if not all(closed[name] for name in TERM_DEPENDENCIES[term]):
@@ -762,13 +823,24 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
     units = {row["unit"] for row in membership if row["unit"] is not None}
     if units != set(partition["units"]):
         disagree("the partition's units are not the units this consumer recomputes")
-    for row in membership:
-        charged = (row["owner_class"] == "kv" and row["lifetime_class"] == "resident"
-                   or row["owner_class"] == "fixed"
-                   or row["owner_class"] == "candidate" and row["unit"] is not None)
-        if not charged:
-            blocking.append(f"allocation {row['allocation_id']} is classified "
-                            f"({row['owner_class']}, {row['lifetime_class']}) but no term charges it")
+    # The uncharged set is derived here from the same observations, never read
+    # from the report: it is the one omission that hands a serving gate a
+    # budget smaller than the engine needs, so the producer's list is a claim
+    # to check. The cells are compared, the prose reasons are not.
+    uncharged = [row for row in membership if not _charged(row)]
+    for row in uncharged:
+        blocking.append(f"allocation {row['allocation_id']} is classified "
+                        f"({row['owner_class']}, {row['lifetime_class']}) but no term charges it")
+    claimed_uncharged = {row["allocation_id"]: row for row in partition["uncharged_allocations"]}
+    if {row["allocation_id"] for row in uncharged} != set(claimed_uncharged):
+        disagree("the partition's uncharged allocations are not the ones this consumer finds "
+                 "no term charges")
+    for row in uncharged:
+        claimed = claimed_uncharged.get(row["allocation_id"])
+        if claimed is not None and any(claimed[key] != row[key]
+                                       for key in ("owner_class", "lifetime_class", "unit")):
+            disagree(f"uncharged allocation {row['allocation_id']} is placed in another cell "
+                     f"than it recomputes")
 
     closed = _recompute_domains(observations)
     for name in DOMAINS:
@@ -784,7 +856,8 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
         blocking.append(f"allocation {row['allocation_id']} is unclassified ({row['reason']}), "
                         "which nulls every term")
 
-    terms = _recompute_terms(membership, closed=closed, unclassified=len(unclassified))
+    terms = _recompute_terms(membership, closed=closed, unclassified=len(unclassified),
+                             uncharged=len(uncharged))
     for name in TERMS:
         for message in _term_disagreements(name, derived["terms"][name], terms[name]):
             disagree(message)
@@ -800,6 +873,8 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
             disagree(f"the {member} scope claims a different expressibility than its terms support")
         if scope["unclassified_allocation_count"] != len(unclassified):
             disagree(f"the {member} scope claims another unclassified allocation count")
+        if scope["uncharged_allocation_count"] != len(uncharged):
+            disagree(f"the {member} scope claims another uncharged allocation count")
     if budget is None:
         blocking.append("no scalar device budget is expressible from this report")
 
