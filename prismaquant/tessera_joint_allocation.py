@@ -17,7 +17,10 @@ import pickle
 
 from .cluster_campaign import _atomic_write_new_bytes as atomic_write_bytes
 from .cost_stage_checkpoint import canonical_json_sha256
-from .tessera_joint_aura import PREPARED_SCHEMA, SCHEMA, _require, _same
+from .tessera_joint_aura import (
+    PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA, _require, _same,
+    cell_render_census, render_origin_census,
+)
 
 HANDOFF_SCHEMA = 'prismaquant.tessera_joint_allocation.v1'
 ROW_FIELDS = ('hessian_identity', 'tessera_family', 'tessera_body_rate_q256',
@@ -64,6 +67,16 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
         _same(cache_metadata.get(key), prepared.get(key), f'prepared cache {key}')
     verified = cache_metadata.get('verified_cells', {})
     _same(set(verified), set(data.cells), 'prepared tensor receipt roster')
+    # Carried, not recomputed from file state: which rungs had an independent
+    # render/wire comparison and which had only the wire round-trip is a fact
+    # about the qualification that ran, and it travels with this table.
+    render_census = cell_render_census(data.cells)
+    _same(render_origin_census(receipt['render_origin'] for receipt in verified.values()),
+          render_census, 'prepared render origin census')
+    for key, value in render_census.items():
+        _same(cache_metadata.get(key), value, f'prepared cache {key}')
+        _same(prepared.get(key), value, f'prepared {key}')
+        _same(evidence.get(key), value, f'joint {key}')
     original = data.payload['provenance']
     calibration = prepared['calibration_input']
     original_draw = original['hessian']['calibration_identity']
@@ -97,6 +110,9 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
             receipt = verified[pair]
             for key in ('source_weight', 'rendered_weight', 'activation'):
                 _same(operator[key], receipt[key], f'{name}@{fmt}: prepared {key}')
+            _same(receipt['render_comparison'],
+                  RENDER_COMPARISON_BY_ORIGIN[data.cells[pair]['render_origin']],
+                  f'{name}@{fmt}: prepared render comparison')
             record = data.cells[pair]['record']
             _same(receipt['wire_sha256'], record['blob_sha256'], f'{name}@{fmt}: original wire')
             source_record = data.manifest['identity']['units'][name]['weight']
@@ -142,6 +158,7 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
         'units': len(roster), 'measured_cells': len(data.cells),
         'cost_fields': 'all_original_joint_fields_unchanged',
         'wire_validation': 'historical_prepared_identity; current_bytes_require_export_gate',
+        **render_census,
     }, 'joint provenance')
     _same(require_run_currency(result), currency, 'unchanged joint currency')
     return result

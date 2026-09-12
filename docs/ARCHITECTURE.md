@@ -59,6 +59,44 @@ was run. Gates: `tests/test_runtime_fixed_resource_admission.py`,
 `tests/test_runtime_provenance.py`,
 `tests/test_full_engine_resource_report.py`.
 
+Re-stamped (2026-09-12, `fix/synthesize-adopted-renders`) for **synthesized
+renders on adopted joint-AURA rungs, recorded as synthesized** (#515). A rung
+the Tessera campaign adopted rather than encoded has a verified wire blob and
+no decoded PWC shard, which blocked
+`tessera_joint_aura.load_measured_anchor_input` on
+`original decoded PWC shard missing`. That shard is now synthesized from the
+wire through the one decode seam -- the bound reader's
+`read_unit_artifact` when a reader is declared, the module-level decoder
+otherwise -- and the refusal is kept for the cases that remain broken: no
+wire, a wire that does not decode, or a decode that is not the census BF16
+render. Synthesis costs an I/O and decode pass instead of a re-encode.
+
+What it does not buy is evidence about the encode, and the record says so.
+Every cell and every `verify_anchor_render` receipt carries a closed-vocabulary
+`render_origin` (`encoded | synthesized_from_wire`) and a second closed
+vocabulary, `render_comparison`, naming what the `torch.equal` leg established
+for that rung: `independent_render_vs_wire` for an encoded shard, and
+`wire_round_trip_only` for a synthesized one, where the comparison is
+`decode(wire)` against a shard written from `decode(wire)` and can only catch
+corruption between the write and the read. That leg still runs on both
+origins. The load-bearing, independent leg is unchanged:
+`verify_cached_unit` still checks the wire against an encoder identity
+re-derived from the streamed source weights and H, and it is what qualifies an
+adopted rung at all. Origin lives in a `prismaquant.tessera_joint_aura.
+render_origin.v1` marker written beside the shard, and written *before* it, so
+a crash between the two writes re-synthesizes rather than leaving a shard that
+reads as encoded; the campaign journals fresh and resumed wires through one
+receipt grammar, so nothing in the record itself distinguishes the two.
+The per-origin census travels into the prepared completion, the prepared PWC
+metadata, `results.json`, the joint payload's `tessera_joint_anchors` block and
+the allocation handoff's provenance, so "verify_anchor_render passed on all
+rungs" can never be read as "all renders were independently compared"
+(principle 12, applied to verification rather than route; principle 14's scope
+corollary). The prepared record is `prismaquant.tessera_joint_aura.prepared.v3`;
+a v2 preparation requires a fresh prepare. No format, default, wire or serving
+gate changes. Gate: `tests/test_tessera_joint_aura.py`,
+`tests/test_tessera_joint_allocation.py`.
+
 Re-stamped (2026-09-12, `pq/420-full-engine-report-consumer`) for the pure
 artifact consumer half of the fixed-resource admission design's "freeze and
 implement producer schema" prerequisite
@@ -1664,7 +1702,9 @@ token/capture artifacts. Only journaled measured wire cells enter the exact
 per-Linear format plan; interpolated MSE rows never become joint prices.
 Preparation derives the producer's encoding identity from actual streamed source
 weights and original prefetched Hessians, verifies original wire bytes, and
-requires their decoded BF16 values to equal original PWC shards. Fused-census
+requires their decoded BF16 values to equal original PWC shards (see the
+2026-09-12 `fix/synthesize-adopted-renders` stamp for what that comparison
+establishes on a rung whose shard was synthesized from its own wire). Fused-census
 maxima use the existing static-scale contract and must reproduce measured E2M1
 scales. The existing PWC indexes original absolute donor paths and owns prefetch
 and eviction; no encoder, cache store or dispatcher is added. A sealed prepared

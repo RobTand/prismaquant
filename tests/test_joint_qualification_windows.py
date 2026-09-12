@@ -44,7 +44,8 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False):
         for fmt in formats:
             path = tmp_path / (name + fmt + '.pt')
             torch.save(modules[name].weight.detach(), path)
-            cells[name, fmt] = dict(render=str(path), anchor={'qname': name, 'format_name': fmt})
+            cells[name, fmt] = dict(render=str(path), render_origin='encoded',
+                                    anchor={'qname': name, 'format_name': fmt})
     capture = dict(path=str(tmp_path / 'capture.json'), sha256='a' * 64)
     expected = dict(max_act_rows=4, calibration={'draw': 'same'}, units=names)
     data = SimpleNamespace(payload={'provenance': {'calibration_cache': capture,
@@ -90,7 +91,10 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False):
         observed.append(('verify', cell['anchor']['qname'], cell['anchor']['format_name']))
         if fail_cell:
             raise RuntimeError('intentional verification failure')
-        return {'render_file_sha256': cell['render_file_sha256']}
+        return {'render_file_sha256': cell['render_file_sha256'],
+                'render_origin': cell['render_origin'],
+                'render_comparison':
+                    bridge.RENDER_COMPARISON_BY_ORIGIN[cell['render_origin']]}
     monkeypatch.setattr(bridge, 'verify_anchor_render', verify)
     return runner, data, capture, events, live, observed
 
@@ -100,6 +104,9 @@ def test_qualification_releases_each_capture_and_window_preserving_roster(tmp_pa
     cache = bridge.prepare_cache(runner, data, capture=capture, max_render_bytes=10000,
         file_load_workers=1, qualification_window=policy())
     assert set(cache.metadata['verified_cells']) == set(data.cells)
+    assert cache.metadata['render_origins'] == {'encoded': 4, 'synthesized_from_wire': 0}
+    assert cache.metadata['render_comparisons'] == {
+        'independent_render_vs_wire': 4, 'wire_round_trip_only': 0}
     assert all(isinstance(value, str) for value in cache.weights.values())
     assert all(ref() is None for ref in live)
     assert len([row for row in observed if row[0] == 'bind']) == 2
@@ -134,3 +141,18 @@ def test_smaller_serialized_budget_plans_more_windows(tmp_path, monkeypatch):
         file_load_workers=2, qualification_window=config)
     windows = cache.metadata['prefetch'][0]['windows']
     assert len(windows) == 4 and all(len(window['keys']) == 1 for window in windows)
+
+
+def test_prepared_metadata_counts_a_synthesized_rung_apart(tmp_path, monkeypatch):
+    """A shard written from its own wire is never counted as independently
+    compared, and a receipt that disagrees with its cell refuses."""
+    runner, data, capture, _events, _live, _observed = fixture(tmp_path, monkeypatch)
+    pair = next(iter(data.cells))
+    data.cells[pair]['render_origin'] = 'synthesized_from_wire'
+    cache = bridge.prepare_cache(runner, data, capture=capture, max_render_bytes=10000,
+        file_load_workers=1, qualification_window=policy())
+    assert cache.metadata['render_origins'] == {'encoded': 3, 'synthesized_from_wire': 1}
+    assert cache.metadata['render_comparisons'] == {
+        'independent_render_vs_wire': 3, 'wire_round_trip_only': 1}
+    assert (cache.metadata['verified_cells'][pair]['render_comparison']
+            == 'wire_round_trip_only')

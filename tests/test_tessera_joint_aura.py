@@ -120,7 +120,8 @@ def test_exact_measured_roster_excludes_interpolation(tmp_path):
 
 
 @pytest.mark.parametrize("mutation", ["missing_unit", "missing_shard", "unfinished_fleet",
-    "interpolated_anchor", "unreceipted_measured", "altered_wire", "missing_render",
+    "interpolated_anchor", "unreceipted_measured", "altered_wire",
+    "missing_render_undecodable_wire", "missing_render_and_wire",
     "wrong_source", "wrong_scale", "partial_fanout"])
 def test_incomplete_or_conflicting_anchor_evidence_refuses(tmp_path, mutation):
     config, names, fmt, payload, states = fixture(tmp_path)
@@ -141,9 +142,15 @@ def test_incomplete_or_conflicting_anchor_evidence_refuses(tmp_path, mutation):
         payload["costs"][names[0]]["TESSERA_E4M3_K1_R896"] = dict(payload["costs"][names[0]][fmt])
     elif mutation == "altered_wire":
         (Path(payload["provenance"]["wire_dir"]) / states[names[0]]["wire_records"][fmt]["file"]).write_bytes(b"changed")
-    elif mutation == "missing_render":
+    elif mutation in ("missing_render_undecodable_wire", "missing_render_and_wire"):
+        # Synthesis is the answer to a missing shard only when the wire behind
+        # it decodes. The fixture's wires are inert bytes, so this is the
+        # refusal that survives; removing the wire too is the other one.
         from prismaquant.production_weight_cache import _cache_weight_filename
         (tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(names[0], fmt)).unlink()
+        if mutation == "missing_render_and_wire":
+            (Path(payload["provenance"]["wire_dir"]) /
+             states[names[0]]["wire_records"][fmt]["file"]).unlink()
     elif mutation in {"wrong_source", "wrong_scale"}:
         state = states[names[0]]
         if mutation == "wrong_source":
@@ -216,7 +223,7 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
         input_global_scale=None)
     wire = tmp_path / "fixture.wire"; wire.write_bytes(b"wire")
     cell = {"anchor": anchor, "record": {"expected": "derived"}, "wire": str(wire),
-            "render_file_sha256": "a" * 64}
+            "render_file_sha256": "a" * 64, "render_origin": "encoded"}
     seen = []
     def derive(value, *, weights, menus, calibration_source, static_scales, projected_units):
         assert value.qname == anchor["qname"]
@@ -234,8 +241,23 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
                   projected_unit=expected_inputs["projection"], static_scales={})
     result = verify_anchor_render(cell, source, rendered, **kwargs)
     assert seen and result["wire_sha256"] == sha(wire)
+    assert result["render_origin"] == "encoded"
+    assert result["render_comparison"] == "independent_render_vs_wire"
     with pytest.raises(ValueError, match="decoded wire differs"):
         verify_anchor_render(cell, source, rendered + 1, **kwargs)
+    # A synthesized render's equality leg is the same call and a different
+    # claim; it can never report the independent comparison.
+    synthesized = {**cell, "render_origin": "synthesized_from_wire"}
+    assert (verify_anchor_render(synthesized, source, rendered, **kwargs)["render_comparison"]
+            == "wire_round_trip_only")
+    with pytest.raises(ValueError, match="no longer decodes from its wire"):
+        verify_anchor_render(synthesized, source, rendered + 1, **kwargs)
+    for origin in (None, "unknown", True):
+        with pytest.raises(ValueError, match="closed-vocabulary render_origin"):
+            verify_anchor_render({**cell, "render_origin": origin}, source, rendered, **kwargs)
+    with pytest.raises(ValueError, match="closed-vocabulary render_origin"):
+        verify_anchor_render({k: v for k, v in cell.items() if k != "render_origin"},
+                             source, rendered, **kwargs)
 
 
 @pytest.mark.parametrize("field,value", [("probe_microbatch", 0), ("n_probes", 1),
@@ -282,7 +304,7 @@ def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypat
     draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
-        census={"model": "fixture", "attention_implementation": "eager"},
+        census={"model": "fixture", "attention_implementation": "eager"}, cells={},
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     # Called after the write, so it is where the live value can be read.
     during = {}
@@ -312,7 +334,7 @@ def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypat
     draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
-        census={"model": "fixture", "attention_implementation": "eager"},
+        census={"model": "fixture", "attention_implementation": "eager"}, cells={},
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((1, 512), dtype=torch.int64), {"provenance": {**draw, "nsamples": 1}}))
@@ -349,9 +371,10 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
     draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     def intake(_inputs, **kwargs):
-        assert kwargs == ({"verify_payloads": False} if command == "prepare" else {})
+        assert kwargs == {"reader": None,
+                          **({"verify_payloads": False} if command == "prepare" else {})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
-            payload={"provenance": {"hessian": {"calibration_identity": draw}}})
+            cells={}, payload={"provenance": {"hessian": {"calibration_identity": draw}}})
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((512, 512), dtype=torch.int64), {"provenance": draw}))
@@ -467,3 +490,165 @@ def test_prepare_refuses_oversized_later_render_before_loading_any_layer(tmp_pat
                                   ('later', 'fmt'): {'render': str(huge)}})
     with pytest.raises(ValueError, match='read buffer|shard|budget'):
         bridge._prepare_file_read_bound(data, max_render_bytes=4096)
+
+
+def _unlink_render(tmp_path, name, fmt):
+    from prismaquant.production_weight_cache import _cache_weight_filename
+
+    path = tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(name, fmt)
+    path.unlink()
+    return path
+
+
+def _decoder(monkeypatch, tensor):
+    """Bind the module-level decode seam to a fixed answer."""
+    from tessera import unit_artifact
+
+    seen = []
+
+    def decode(blob, device="cpu"):
+        seen.append((blob, device))
+        return tensor.clone() if hasattr(tensor, "clone") else tensor
+
+    monkeypatch.setattr(unit_artifact, "read_unit_artifact", decode)
+    return seen
+
+
+def test_adopted_rung_render_is_synthesized_from_its_wire_and_stays_marked(tmp_path, monkeypatch):
+    """An adopted rung's shard is written from its wire, and says so -- twice.
+
+    The second load is the prepare/run boundary: the ``.pt`` now exists, and
+    the origin must not quietly become ``encoded`` because of it.
+    """
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, states = fixture(tmp_path)
+    render = _unlink_render(tmp_path, names[0], fmt)
+    decoded = torch.arange(16, dtype=torch.float32).reshape(4, 4).to(torch.bfloat16)
+    seen = _decoder(monkeypatch, decoded)
+
+    data = load(config)
+    assert data.cells[names[0], fmt]["render_origin"] == "synthesized_from_wire"
+    assert data.cells[names[1], fmt]["render_origin"] == "encoded"
+    assert bridge.cell_render_census(data.cells) == {
+        "render_origins": {"encoded": 1, "synthesized_from_wire": 1},
+        "render_comparisons": {"independent_render_vs_wire": 1, "wire_round_trip_only": 1}}
+    assert len(seen) == 1 and seen[0][0] == (tmp_path / "merged/cache/wire" /
+        states[names[0]]["wire_records"][fmt]["file"]).read_bytes()
+    assert render.is_file() and torch.equal(torch.load(render, weights_only=True), decoded)
+    marker = json.loads(bridge._render_origin_marker_path(render).read_text())
+    assert marker == {"schema": bridge.RENDER_ORIGIN_SCHEMA,
+                      "render_origin": "synthesized_from_wire", "unit": names[0],
+                      "format_name": fmt, "wire_file": names[0] + ".tessera",
+                      "wire_sha256": states[names[0]]["wire_records"][fmt]["blob_sha256"]}
+
+    again = load(config)
+    assert again.cells[names[0], fmt]["render_origin"] == "synthesized_from_wire"
+    assert again.cells[names[1], fmt]["render_origin"] == "encoded"
+    assert len(seen) == 1, "an existing shard must not be re-decoded"
+
+
+def test_synthesis_uses_the_bound_reader_when_one_is_declared(tmp_path, monkeypatch):
+    import torch
+    from types import SimpleNamespace
+    from prismaquant.tessera_joint_aura import load_measured_anchor_input
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _unlink_render(tmp_path, names[0], fmt)
+    module_level = _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    bound = []
+
+    def read(blob, device="cpu"):
+        bound.append(blob)
+        return torch.ones((4, 4), dtype=torch.bfloat16)
+
+    data = load_measured_anchor_input(config, reader=SimpleNamespace(read_unit_artifact=read))
+    assert bound and not module_level
+    assert data.cells[names[0], fmt]["render_origin"] == "synthesized_from_wire"
+
+
+@pytest.mark.parametrize("field,value", [("schema", "other"), ("unit", "elsewhere"),
+    ("format_name", "TESSERA_E4M3_K1_R768"), ("wire_sha256", "0" * 64),
+    ("render_origin", "encoded")])
+def test_a_render_origin_marker_that_names_another_rung_refuses(tmp_path, monkeypatch, field, value):
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    render = _unlink_render(tmp_path, names[0], fmt)
+    _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    load(config)
+    marker = bridge._render_origin_marker_path(render)
+    stamp = json.loads(marker.read_text())
+    stamp[field] = value
+    marker.write_text(json.dumps(stamp))
+    with pytest.raises(ValueError, match="marked render|render origin schema|names another wire"):
+        load(config)
+
+
+@pytest.mark.parametrize("answer", ["raises", "wrong_shape", "nonfinite", "not_a_tensor"])
+def test_a_wire_that_does_not_decode_to_the_census_render_still_refuses(tmp_path, monkeypatch, answer):
+    import torch
+    from tessera import unit_artifact
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _unlink_render(tmp_path, names[0], fmt)
+    values = {"wrong_shape": torch.zeros((2, 8), dtype=torch.bfloat16),
+              "nonfinite": torch.full((4, 4), float("nan"), dtype=torch.bfloat16),
+              "not_a_tensor": None}
+
+    def decode(blob, device="cpu"):
+        if answer == "raises":
+            raise RuntimeError("undecodable")
+        return values[answer]
+
+    monkeypatch.setattr(unit_artifact, "read_unit_artifact", decode)
+    with pytest.raises(ValueError, match="does not decode|not the census BF16 render|NoneType"):
+        load(config)
+
+
+def test_a_corrupted_synthesized_shard_fails_its_round_trip_leg(tmp_path, monkeypatch):
+    """The equality leg is vacuous about the encode and live about the bytes."""
+    import torch
+    from types import SimpleNamespace
+    from prismaquant import tessera_campaign as tc
+    from prismaquant.tessera_joint_aura import verify_anchor_render
+    from tessera import unit_artifact
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    render = _unlink_render(tmp_path, names[0], fmt)
+    decoded = torch.arange(16, dtype=torch.float32).reshape(4, 4).to(torch.bfloat16)
+    _decoder(monkeypatch, decoded)
+    data = load(config)
+    cell = data.cells[names[0], fmt]
+    assert cell["render_origin"] == "synthesized_from_wire"
+
+    monkeypatch.setattr(tc, "_checkpoint_anchor_identity",
+                        lambda *_args, **_kwargs: {"expected": "derived"})
+    monkeypatch.setattr(tc, "_checkpoint_identity_api",
+                        lambda: SimpleNamespace(verify_cached_unit=lambda *_args: None))
+    monkeypatch.setattr(unit_artifact, "read_unit_artifact",
+                        lambda blob, device="cpu": decoded.clone())
+    source = torch.zeros((4, 4), dtype=torch.bfloat16)
+    kwargs = dict(calibration_source=None, projected_unit=None, static_scales={})
+    record = verify_anchor_render(cell, source, torch.load(render, weights_only=True), **kwargs)
+    assert record["render_comparison"] == "wire_round_trip_only"
+
+    # Corrupt the published shard: the same call now refuses, which is the
+    # only thing this leg was ever able to establish for a synthesized rung.
+    torch.save(decoded + 1, render)
+    with pytest.raises(ValueError, match="no longer decodes from its wire"):
+        verify_anchor_render(cell, source, torch.load(render, weights_only=True), **kwargs)
+
+
+def test_render_census_counts_every_vocabulary_value_and_refuses_unknown_ones():
+    from prismaquant.tessera_joint_aura import cell_render_census, render_origin_census
+
+    assert render_origin_census([]) == {
+        "render_origins": {"encoded": 0, "synthesized_from_wire": 0},
+        "render_comparisons": {"independent_render_vs_wire": 0, "wire_round_trip_only": 0}}
+    with pytest.raises(ValueError, match="unknown render origin"):
+        render_origin_census(["adopted"])
+    with pytest.raises(ValueError, match="carries no render_origin"):
+        cell_render_census({("unit", "fmt"): {}})
