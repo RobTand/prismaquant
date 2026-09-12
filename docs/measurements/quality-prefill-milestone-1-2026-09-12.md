@@ -28,9 +28,17 @@ whole-unit-quota refusals — is byte-identical at the reader pin, the producer
 pin `d403cc5a3199a348…` and the working checkout's HEAD. `_window_bits_for`,
 `wire_recipe`, the WINDOW raw-cap expression, the `*_WINDOW_BITS` constants,
 `runtime_contract.json` and `calculator.py` are byte-identical between the two
-pins. The pins' `export.py` differ only by the additive `ScalePlaneKind.MX`
-plane (tessera#443), which no WINDOW-over-CHANNEL rung reaches. The
-producer/reader divergence recorded elsewhere does not bite this domain.
+pins. The two pins are **not** otherwise close — 16 files, +1,166/-79 lines,
+including `export.py` (+288), `encode.py` (+269), `footprint.py` (+106) and
+`wire.py` — so the claim is made at function granularity, not file
+granularity: `_window_bits_for`, `wire_recipe` and each `*_WINDOW_BITS`
+constant hash identically at both pins when extracted from their respective
+`export.py`, and `wire.py`'s delta is a vectorised `pack_body` that leaves
+`field_widths` alone. What `export.py` gains at the producer pin is the
+additive `ScalePlaneKind.MX` plane (tessera#443, which no WINDOW-over-CHANNEL
+rung reaches) *and* a seal-prefetch unit-digest cache — neither touches rate
+legality, table width or byte accounting. The producer/reader divergence
+recorded elsewhere is real and large; it does not bite **this** domain.
 
 **256-multiples are resolver transitions, and so are 256k+1.** The Bresenham
 column schedule is uniform at per-column rate `k` when `R = 256k` over a column
@@ -65,7 +73,10 @@ unaffected by the native set, and a test asserts it.
 ## 3. Dry-run acquisition size
 
 Real counts from `build_mandatory_rate_set` over the derived domains, screen
-policy `coverage_first_v1`, `selection_seed = 0`:
+policy `coverage_first_v1`, `selection_seed = 0`. Every number in the table
+below is asserted by `tests/test_quality_prefill_dry_run.py`, which performs
+the A-to-C join itself, so the table is re-derivable rather than transcribed
+(PB `6f9353c8c6b4`, 5 passed):
 
 | family | legal | mandatory | roster | strata |
 |---|---|---|---|---|
