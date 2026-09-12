@@ -74,9 +74,15 @@ resource bounds, repeated prefill/decode samples, warmups, whole-unit member
 binding, exact cost/source/calibration identities and token scope. Both phases
 are required; the present native intake supports batch size one.
 
-`admit_fixed_resources` deliberately refuses every current fixed-resource claim.
-A `complete` status, opaque hashed proof, whole-engine peak, or raw ledger does
-not prove a full partition. There is no positive measured-table fixture and no
+`admit_fixed_resources` recomputes the partition and admits only on agreement,
+so it still refuses every current fixed-resource claim -- by name rather than
+unconditionally. A `complete` status, opaque hashed proof, whole-engine peak, or
+raw ledger does not prove a full partition, and none of them is recomputable:
+`full_model_resources` must reference one `tessera.full_engine_resource_report.v1`
+document, which `full_engine_resource_report` recomputes from `observations` and
+`partition` without reading its `derived` block. At that schema version only
+`fixed_scratch` and `candidate_scratch` are reachable and there is no timing
+partition at all, so every table this gate has to judge still refuses. There is no positive measured-table fixture and no
 SLO, serving-lane, release-pin or default promotion. Positive CPU fixtures test
 only relation and native-intake contracts; their synthetic numbers are not
 measurements.

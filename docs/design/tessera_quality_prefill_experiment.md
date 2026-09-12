@@ -542,8 +542,11 @@ GPU event durations, sample counts and instrumentation overhead controls.
 
 ### 8.3 Complete resource partition: dependency #420
 
-`runtime_provenance.admit_fixed_resources` currently refuses all full-engine
-v2 partitions. That refusal is correct. Implement and validate the producer
+`runtime_provenance.admit_fixed_resources` recomputes the full-engine
+partition and admits only on agreement; at the producer's current schema
+version it still refuses every v2 partition, now naming which term, identity or
+observation is missing. That refusal is correct, and the timing partition the
+prefill budget needs is one of the missing observations. Implement and validate the producer
 and independent consumer required by
 [#420](https://github.com/RobTand/prismaquant/issues/420) before reporting a
 complete allocatable runtime table. This is not a prerequisite to independent
@@ -900,7 +903,7 @@ the inspected version.
 | Exact wire-to-joint intake | `tessera_joint_aura.load_measured_anchor_input` (81–238), `prepare_cache`, `execute` |
 | Existing signed arithmetic and admission | `joint_aura.SignedJointProjectionLease` (281–502), `validate_joint_aura_entry` (787–880), `assignment_probe_summary`, `paired_assignment_difference` |
 | Whole-unit runtime binding and fail-closed lookup | `measured_runtime_prices.RuntimeContext` (99), `RuntimeResources` (188), `RuntimeBinding` (220), `load_measured_runtime_table` (446), `build_runtime_resources` (473) |
-| Fixed gate and mandatory native phases | `runtime_provenance.admit_fixed_resources` (376–389), `admit_native_rows` (392–468) |
+| Fixed gate and mandatory native phases | `runtime_provenance.admit_fixed_resources` (418 onward), `_fixed_resource_refusals` (449 onward), `admit_native_rows` (603 onward) |
 | Exact proposal and expanded assignment checks | `allocator_solver.solve_runtime_frontier`, `serve_constraints.evaluate_measured_assignment` (797 onward), allocator runtime integration (3847–3905) |
 | Existing full-engine producer design | [Full-engine fixed-resource admission](runtime_fixed_resource_admission.md), including native output ownership, UMA scope, multi-run relations and the separate direct six-variant route |
 | Narrow transfer result and raw figure | [Layer-20 result at the reviewed PR #503 commit](https://github.com/RobTand/prismaquant/blob/a115424b60cee0381d6a6e9252753c83f79f0589/docs/measurements/prospective-family-transfer-2026-09-11.md) |

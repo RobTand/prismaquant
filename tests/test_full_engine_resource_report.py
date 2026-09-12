@@ -87,20 +87,28 @@ def test_the_consumer_reads_the_artifact_and_never_the_serving_runtime():
                         mention), mention
 
 
-def test_admission_stays_closed_and_no_gate_reads_the_recomputed_partition(tmp_path):
+def test_the_admission_gate_is_the_only_reader_of_this_recomputed_partition(tmp_path):
+    """`admit_fixed_resources` reads it, and nothing else in the package may.
+
+    The gate is the design's last prerequisite row ("integrate allocator
+    admission"); its own contracts live in
+    `tests/test_runtime_fixed_resource_admission.py`. An inline resource claim
+    still refuses before any recomputation runs, because a claim is not
+    evidence whatever it says.
+    """
     from types import SimpleNamespace
     from prismaquant.runtime_provenance import admit_fixed_resources
     reference = written(tmp_path, {"full_model_resources": {"resident_bytes": 0}}, "fixed.json")
     table = SimpleNamespace(source_path=str(tmp_path / "table.json"),
                             fixed_resources_receipt_path=reference["path"],
                             fixed_resources_receipt_sha256=reference["sha256"])
-    with pytest.raises(RuntimePriceError, match="no qualified recomputable"):
+    with pytest.raises(RuntimePriceError, match="must reference one recomputable"):
         admit_fixed_resources(table, {})
     root = MODULE.parent
     importers = [path.name for path in sorted(root.glob("*.py"))
                  if "full_engine_resource_report" in path.read_text(encoding="utf-8")
                  and path != MODULE]
-    assert importers == []
+    assert importers == ["runtime_provenance.py"]
 
 
 # --------------------------------------------------------------------------
