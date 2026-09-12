@@ -625,3 +625,31 @@ def test_payload_satisfies_package_c_when_package_c_is_importable():
         assert theirs.rates == domain.legal_rate_domain(family).rates
         mandatory = population.mandatory_rates(theirs)
         assert {3584, 3585} <= set(mandatory) or family == E4
+
+
+@pytest.mark.parametrize(
+    "family, rate, body, plane",
+    [(BF, 4096, "window", "channel"), (E4, 1024, "window", "channel"),
+     (E2, 896, "tcq", "lut16")],
+)
+def test_recipe_labels_come_through_the_canonicalisers(family, rate, body, plane):
+    """Regression: the wire's body and plane are enums, not printable strings.
+
+    ``WireRecipe.body`` and ``.scale_plane`` are not guaranteed to arrive as
+    enum members, so formatting them with ``str()`` read ``2`` for the CHANNEL
+    plane and labelled a WINDOW rung "TCQ body over a 2 scale plane" -- a
+    caught-by-PB failure of the R4096 flag test.  Both go through Tessera's
+    ``BodyKind`` and the tree's ``scale_plane_name`` now, and a TCQ family is
+    in the table so the WINDOW branch cannot be right by accident.
+    """
+    facts = domain.support_facts(family, rate, "dense")
+    candidate = domain._candidate(
+        get_tessera_family(family), rate, "dense", facts)
+    assert candidate.body_kind == body
+    assert candidate.scale_plane == plane
+    assert candidate.representation == (
+        f"{body.upper()} body over a {plane.upper()} scale plane")
+    # The byte accountant resolves the same wire from the same recipe.
+    account = domain.byte_account(family, rate, (2048, 4096))
+    assert account.body_kind == body
+    assert account.scale_plane == plane

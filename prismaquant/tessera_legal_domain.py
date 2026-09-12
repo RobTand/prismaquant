@@ -52,6 +52,7 @@ from .tessera_formats import (
     TesseraFormatError,
     family_q256_bounds,
     get_tessera_family,
+    scale_plane_name,
     tessera_wire_recipe,
 )
 
@@ -724,6 +725,20 @@ def table_width_transitions(family: "str | TesseraFamily") -> tuple[tuple[int, i
     return tuple(transitions)
 
 
+def _body_kind_name(recipe) -> str:
+    """``"window"`` or ``"tcq"``, through Tessera's own enum.
+
+    ``WireRecipe.body`` is not guaranteed to arrive as an enum member -- the
+    export seam builds recipes from raw config values -- so it is normalised
+    the way every other reader in the tree does it, through ``BodyKind(...)``.
+    Formatting the attribute with ``str()`` reads ``2`` on a plain int and
+    produced a "TCQ body over a 2 scale plane" label for a WINDOW rung.
+    """
+    from tessera.manifest import BodyKind
+
+    return BodyKind(recipe.body).name.lower()
+
+
 def schedule_signature(
     family: "str | TesseraFamily",
     rate_q256: int,
@@ -750,7 +765,8 @@ def schedule_signature(
             tuple(sorted(set(spec.column_schedule(rate, columns, recipe=recipe)))),
         ))
     return (
-        str(recipe.body), int(recipe.span), str(recipe.scale_plane),
+        _body_kind_name(recipe), int(recipe.span),
+        scale_plane_name(recipe.scale_plane),
         int(recipe.window_bits), tuple(per_shape),
     )
 
@@ -1065,8 +1081,8 @@ def _candidate(
     route = tessera_serving_route(spec, rung=rate)
     lo, hi = family_q256_bounds(spec)
     width = int(recipe.window_bits)
-    body = "window" if str(recipe.body).endswith("WINDOW") else "tcq"
-    plane = str(recipe.scale_plane).rsplit(".", 1)[-1].lower()
+    body = _body_kind_name(recipe)
+    plane = scale_plane_name(recipe.scale_plane)
     terminal = route.terminal_format if route is not None else None
 
     flags: list[str] = []
