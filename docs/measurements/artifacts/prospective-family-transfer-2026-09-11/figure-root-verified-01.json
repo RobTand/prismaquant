@@ -1,0 +1,18 @@
+{
+  "verified_unix": 1789175163.9147594,
+  "action_key": "533db605b96d8b752a906fb5e57441f485f44c3ba040c0766d35d1cf981cdb1a",
+  "returncode": 0,
+  "host": "dl380g10",
+  "elapsed_s": 2.350041389465332,
+  "receipt_sha256": "5c8f15ad4a11c24d3eabc055d2117dfbc75f5effd626beef3acf0e2e6777cc9b",
+  "result_sha256": "5a9d2fa4cf26b8ccd96007142b66d5b69edb0384f8409b75563502c697c63164",
+  "input_count": 15,
+  "output_count": 2,
+  "manifest_sha256": "9e5b11ade8204f418ed08cbf3eefa086bd177cbfd3a0abf508b84d3d15fee34b",
+  "all_input_output_hashes_match": true,
+  "renderer_git_commit": "20ae48a222",
+  "renderer_snapshot_commit": "87e8f6a18e652d6fb863c38d4af9fe576d51a417",
+  "renderer_sha256": "933eeac946740716f20d0a205a7ec59f624f229f870e3a2a82be78899930465d",
+  "rendered_snapshot_matches_committed_source": true,
+  "png_visually_inspected": true
+}

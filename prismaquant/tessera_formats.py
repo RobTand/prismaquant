@@ -1369,8 +1369,8 @@ def tessera_serving_route(
         # Tessera's ``wire_recipe`` says the BF16 grid's "decoded tile is a
         # plain BF16 tensor (W16A16)", so the A side is unquantised and there
         # is no registry row whose activation RTN models it.  Whether any
-        # runtime ROUTES these bytes is ``route_admission``'s question, and
-        # today the answer is no -- Tessera issue #9.
+        # runtime ROUTES these bytes is ``route_admission``'s question, resolved
+        # against the pinned runtime contract for the exact rate and context.
         return TesseraServingRoute(
             contract="w16a16-bf16-channel",
             terminal_format=terminal,

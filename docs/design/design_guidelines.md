@@ -146,6 +146,26 @@ Use these states for new functionality:
 
 Regression or inconclusive results should demote the feature back to research.
 
+### Prospective research prediction seals
+
+An audit-region annotation error in an already frozen measurement plan must
+not be repaired by rewriting that plan or relabeling a new plan as frozen
+before measurement. An explicit correction may bind the original plan's path
+and hash and intersect each named audit region with its original legal-rate
+roster. Preserve empty labels, retain the original plan hash in point receipts,
+and bind the correction separately. Validators must rederive the intersection;
+this mechanism cannot alter acquisition fields or measured values.
+
+A rate-transfer research result is prospective only when its frozen protocol
+names every planned measured piece, its identities and its endpoint roster
+before numeric target interiors are available.  Store predictions in an
+exclusive-write, content-bound seal and audit only the complementary measured
+interior.  Keep endpoints out of that audit, preserve a separate terminal
+measurement when its recipe changes, and report both all-interior and
+fresh-only error when a frozen metadata ledger identifies historically exposed
+rates.  An empty audit subset does not pass a screen.  Such results remain
+research evidence until the ordinary promotion gates are satisfied.
+
 ### Progressive Local Gates
 
 Local render mechanisms must use the shared scorer in

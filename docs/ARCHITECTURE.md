@@ -1,7 +1,66 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-11 · `claude/495-probe-reduction-schedule`. Stamps
+As of: 2026-09-11 · `codex/sparse-rate-20260911`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for explicit research
+curve audit-region annotation corrections. The complete-curve collector's
+optional `--audit-region-correction` binds the original plan path and SHA256
+and accepts only the exact intersection of every original audit region with
+the original legal-rate roster, retaining empty labels. The frozen plan,
+acquisition identity and point-receipt plan hashes remain unchanged. A curve
+records the correction's path/hash and effective regions; the existing curve
+validator verifies that binding and rederives the intersection. Prospective
+protocol implementation hashes include this shared correction helper. This
+does not change a measurement, prediction rule or production policy. Gates:
+`tests/test_collect_complete_rate_curve.py` and
+`tests/test_sparse_rate_family_transfer.py`.
+
+Re-stamped (2026-09-11, `codex/prospective-family-transfer-20260911`) for a
+research-only prospective paired-family transfer evaluator (§4.10).
+`experiments/sparse_rate_family_transfer.py` freezes all named, receipted
+curve-piece plans before their measurements, including separate singleton
+endpoints and a separate E2 terminal.  The E4 seal may read only a complete BF
+source plus two E4 endpoint curves and writes both frozen forms (an affine BF
+fit and rate-linear BF delta); the E2 seal may read only its two endpoints and
+writes a value-linear window prediction.  Neither seal accepts an interior
+curve path.  Later audits recheck protocol, plan, curve and receipt hashes,
+require the complementary interior roster, score unseen interiors only, and
+leave E2's terminal as a measured, unpredicted point.  A metadata-only ledger
+of historically preexposed rates is frozen with the protocol; reports retain
+both all-interior and fresh-only metrics, with an empty subset never passing.
+This is not a production interpolation path, qualification, or measurement
+savings claim.  Gate: `tests/test_sparse_rate_family_transfer.py`.
+
+Re-stamped (2026-09-11, `codex/adaptive-nonmonotone-20260911`) for the
+research-only adaptive nonmonotone policy (§4.10). `AdaptiveAnchoredCurve`
+now carries `require_strict_decrease: bool = True` as immutable state and its
+`start` API preserves that strict default. An explicit `False` accepts any
+positive finite measured values, including flat or locally increasing values;
+the finite roster, exact anchors, deterministic sentinel order, frozen-parent
+residuals, split/refinement and cap semantics do not change. The all-truth
+minimum-anchor oracle takes the same defaulted policy, and
+`--allow-nonmonotone` selects `False` while recording it in the report. This
+opt-in research path does not alter production interpolation, allocator prices,
+campaign defaults, serving qualification or ship gates.
+
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for the opt-in complete
+rate-grid experiment and deterministic adaptive sampler (§4.10). The campaign
+can measure every legal rung in an explicit band through its existing encoder,
+cache and checkpoint path. The separate research sampler requests additional
+measurements using observed values only; sentinel agreement records empirical
+evidence and does not certify unseen rungs. Complete-curve audits keep families,
+activation contracts and recipe segments separate. Production interpolation
+and serving admission retain their existing contracts.
+
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for opt-in endpoint
+curvature in the receipt-bound research replay (§4.10). A small shared pilot
+fits curvature conditioned on each unit's two measured endpoints. Binding
+expands the fitted polynomial once; scalar queries use Horner arithmetic,
+preserve the endpoints exactly, and refuse extrapolation or invalid values.
+The existing replay owns currency/recipe boundaries, frozen audit errors,
+measured overlays and group measurement requests. This adds no production
+interpolation default, allocator price, runtime qualification or serving cell.
 
 Re-stamped (2026-09-11, `claude/495-probe-reduction-schedule`) for the routed
 stack **probe-reduction schedule**, parts 1-3 of RobTand/prismaquant#495
@@ -8853,12 +8912,44 @@ close the leave-one-out gate and report its error as null.
 
 **Cost is an anchor campaign, not an enumeration** (`prismaquant/tessera_campaign.py`).
 
+The opt-in `--exhaustive-rate-grid --rate-band lo,hi` experiment measures every
+legal family rung in the declared band. It reuses the campaign's group grid,
+resident encoder, journal and publication path. It neither extends the legal
+rate domain nor attests a serving route. Outside this explicit experiment,
+the campaign retains its sparse adaptive policy.
+
+`prismaquant.adaptive_anchored_shape.AdaptiveAnchoredCurve` is a separate
+research acquisition state machine over a declared finite rate roster. It
+starts from measured endpoints and requests one midpoint or two third-point
+checks per interval. Failed checks split the interval; accepted checks retain
+their predictions made before measurement. Value and log2 PWL modes preserve
+measured anchors exactly. `require_strict_decrease=True` is the default and
+refuses flat or nonmonotone observations. An explicit research API opt-in of
+`False` accepts any positive finite measurement while preserving the same
+deterministic acquisition and refinement rules. Budget exhaustion leaves
+unresolved intervals explicit. The complete-curve study audits only points
+never revealed to the sampler. Its offline all-truth minimum-anchor oracle is
+a diagnostic lower bound for the same selected policy, not a deployable
+measurement policy; `--allow-nonmonotone` records the relaxed policy in its
+report.
+
+The study CLI exposes the same raw-measurement opt-in and
+`--max-measurements` (default 65, supported range 2–257). Its frozen plan binds
+both choices and the sampler, study and oracle source hashes. Expanded budgets
+add 129- and 257-anchor checkpoints, capped by the declared legal roster.
+Measuring every candidate leaves an empty held-out audit, never an accuracy
+pass or a demonstrated measurement saving.
+
 The separate `tools/tessera_surface_replay.py` research command can compare
 the existing PWL model with shared-shape transfer from one/two anchors. It
 binds current campaign payload and journal identities, checks recorded wire
 hashes, and keeps activation/recipe segments distinct. A successful replay is
-not fresh source/producer attestation or serving qualification. Details and
-the pending joint-AURA/prefill extension (#237) are in
+not fresh source/producer attestation or serving qualification. The optional
+`shape_model.kind=endpoint_curvature` fits an endpoint-conditioned value or
+log2 polynomial from a shared pilot. It requires two measured domain endpoints
+per held-out unit, separate audits, and no post-audit refit. The original
+centered-log shape remains the default. Details and the boundary with the
+separate opt-in joint-AURA/runtime path (#237) are in
 [`docs/design/tessera_anchored_replay.md`](design/tessera_anchored_replay.md).
 
 Resume is an identity check, not a name match. The JSON checkpoint manifest

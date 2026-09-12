@@ -1,0 +1,142 @@
+{
+  "currency": "output_mse_under_route_activation_contract",
+  "inputs": [
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_bf16_full.curve.json",
+      "role": "bf_curve",
+      "sha256": "8c403d36f58c9f3351814c1eed56460edf960abe7148070587a5a85dd5f673ab"
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r832.curve.json",
+      "role": "e4_left",
+      "sha256": "ab381e4fd511185f2d038d13cc366791e7fffff6b733a85f2f52363cf057bb39"
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r1088.curve.json",
+      "role": "e4_right",
+      "sha256": "b572776059dac9f0eeba9b9d3b707978df37b61701281beda0d9db927909f080"
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_hidden_interior.curve.json",
+      "role": "e4_interior",
+      "sha256": "f89c51341460da0b0e8ab2a099eaa7be2ffc1cda3da3d57e7b7e48107b7a3160"
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_endpoint_r832.curve.json",
+      "role": "e2_left",
+      "sha256": "83962f8dc802e39f0a70dd662914070706e476f42206bff5fa2513988681d5be"
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_endpoint_r895.curve.json",
+      "role": "e2_right",
+      "sha256": "c6be0887a72a61e336f7cda9b26065b9ab669365e5a8f63c22dbd499a9458dad"
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.json",
+      "role": "e2_interior",
+      "sha256": "64eea7c430cc2adb04921fcc80fcae7ad16a95622ec80d9542ed728ef47d78f9"
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_terminal_r896.curve.json",
+      "role": "e2_terminal",
+      "sha256": "cd0c127c55c758789e82d615d5961494bb0c6b590c2872686158cea4a67926a4"
+    },
+    {
+      "kind": "protocol",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/protocol-e4-01.json",
+      "role": "protocol_e4",
+      "sha256": "8a051fc9f2d0d2d3d7423a5a9dedf6c8f8dff7dd8d941a31ca1763cf638f31bf"
+    },
+    {
+      "kind": "protocol",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/protocol-e2-01.json",
+      "role": "protocol_e2",
+      "sha256": "ceb093d398d881565bf677d24837ffe0160ddd9354232bcc8b37ae12cd7bd14c"
+    },
+    {
+      "kind": "protocol",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/preselection-01.json",
+      "role": "preselection",
+      "sha256": "2504bd45047e14d534304c9d269896efa18942f3b27dbd6643ce40b2bcd41c1c"
+    },
+    {
+      "kind": "derived-audit",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/e4-audit-01.json",
+      "role": "e4_audit",
+      "sha256": "e5c355b8d7543b754cc3a7fa78377f50bf92bc1a6d452576151c6003ab940257"
+    },
+    {
+      "kind": "derived-audit",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/e2-audit-01.json",
+      "role": "e2_audit",
+      "sha256": "798d07fbb304f720060bfa7109d7597e3e4c1890207cad9713e9c4fb592f9a0d"
+    },
+    {
+      "kind": "predicted",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/e4-seal-01.json",
+      "role": "e4_seal",
+      "sha256": "11a7b89319d7554ad2d4f62992c6431b1bb620be55479dfee1d68e75c0a8498c"
+    },
+    {
+      "kind": "predicted",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/e2-seal-01.json",
+      "role": "e2_seal",
+      "sha256": "feffc37bb3afe9716f1c553f2cb8aefe75b6641374948152ba25b868c00a13c1"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/figure-01/sparse_rate_family_transfer.png",
+      "role": "png",
+      "sha256": "f6f0673cceb45c97df2a5ac0cb6c55b9d53acb2740def06ea90cc2af678e58f1"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/figure-01/sparse_rate_family_transfer.pdf",
+      "role": "pdf",
+      "sha256": "45f309161ff98f5f4177698d7af68bfbfe8eb39b62b5855454779d628b32dd54"
+    }
+  ],
+  "protocol_sha256": {
+    "e2": "ceb093d398d881565bf677d24837ffe0160ddd9354232bcc8b37ae12cd7bd14c",
+    "e4": "8a051fc9f2d0d2d3d7423a5a9dedf6c8f8dff7dd8d941a31ca1763cf638f31bf"
+  },
+  "research_only": true,
+  "schema": "prismaquant.sparse_rate_family_transfer_figure_manifest.v1",
+  "screen": {
+    "max_percent": 5.0,
+    "metric_labels": {
+      "e2": {
+        "all": 62,
+        "fresh": 62
+      },
+      "e4": {
+        "all": 255,
+        "fresh": 254
+      }
+    },
+    "p99_percent": 1.0
+  },
+  "source": {
+    "protocol_schema": {
+      "e2": "prismaquant.prospective_paired_family_transfer_protocol.v1",
+      "e4": "prismaquant.prospective_paired_family_transfer_protocol.v1"
+    },
+    "protocol_sha256": {
+      "e2": "0251dc7d513573ca156cd69c13eb403a4410f419b5b59bede4376953b9dbba1c",
+      "e4": "e6b2abbccf253439c03090d10e90a47e2c8722c104b71c1fbedde57c566ad8a6"
+    },
+    "qname": "model.language_model.layers.20.mlp.shared_experts.down_proj",
+    "qshape": [
+      4096,
+      2048
+    ]
+  }
+}
