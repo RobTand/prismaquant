@@ -253,8 +253,12 @@ def frontier_label(
 
     Unlike :func:`require_census_equality` this does not raise on an
     incomplete proposal: an honest restricted pilot is a valid outcome, and
-    downgrading its label is the correct handling rather than an error. It
-    raises only when the inputs themselves are malformed.
+    downgrading its label is the correct handling rather than an error. An
+    unequal membership, a surplus unit and an incomplete routed stack are all
+    downgrades with a recorded reason. Malformed *input* still raises -- a
+    membership name that is missing or unknown, a repeated unit id, an empty
+    census, an unknown evidence kind -- because there is then no proposal to
+    label.
     """
     reasons: list[str] = []
     try:

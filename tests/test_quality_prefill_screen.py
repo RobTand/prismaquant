@@ -8,6 +8,7 @@ import pytest
 
 from prismaquant.quality_prefill_contract import validate_screen_decision
 from prismaquant.quality_prefill_screen import (
+    REPRESENTATIVE_TIE_RULE,
     SCREEN_RULE,
     ScreenCandidate,
     ScreenCaps,
@@ -275,3 +276,35 @@ def test_every_deferred_candidate_records_a_reason():
         assert entry["reason"]
         if entry["disposition"] == "deferred":
             assert "not a deletion" in entry["reason"]
+
+
+def test_the_route_class_representative_is_the_lowest_candidate_id():
+    """Deterministic by a stated rule, not by borrowing another purpose's draw."""
+    entries = [
+        candidate("c.boundary.0256", mandatory=True),
+        candidate("c.a16.0350", route="a16w4"),
+        candidate("c.a16.0340", route="a16w4"),
+        candidate("c.a16.0360", route="a16w4"),
+    ]
+    result = apply(entries)
+    assert "c.a16.0340" in result.retained
+    assert {"c.a16.0350", "c.a16.0360"} <= set(result.deferred)
+
+
+def test_the_representative_reason_publishes_the_tie_rule():
+    reasons = {
+        entry["candidate_id"]: entry["reason"]
+        for entry in apply().decision["dispositions"]
+    }
+    representative = next(
+        cid for cid in ("c.a16.0340", "c.a16.0350") if "representative" in reasons[cid]
+    )
+    assert REPRESENTATIVE_TIE_RULE in reasons[representative]
+
+
+def test_a_retained_candidate_holds_no_discarded_candidate_audit_rank():
+    """Section 5.1 keeps purpose domains apart: retention is not an audit draw."""
+    result = apply()
+    assert set(result.ranks) == set(result.deferred)
+    for candidate_id in result.retained:
+        assert candidate_id not in result.ranks

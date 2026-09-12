@@ -48,6 +48,7 @@ __all__ = [
     "ScreenCandidate",
     "ScreenResult",
     "SCREEN_RULE",
+    "REPRESENTATIVE_TIE_RULE",
     "expand_licensed_composites",
     "refuse_dominance_screen",
     "apply_coverage_first_v1",
@@ -162,6 +163,8 @@ class ScreenResult:
 
     retained: tuple[str, ...]
     deferred: tuple[str, ...]
+    #: Audit rank per *deferred* candidate. A retained candidate is absent:
+    #: it holds no place in the discarded-candidate audit's order.
     ranks: Mapping[str, int]
     audit: tuple[str, ...]
     required: Mapping[str, int]
@@ -209,40 +212,41 @@ def refuse_dominance_screen(candidates: Sequence[ScreenCandidate]) -> None:
         )
 
 
+#: How a route class picks its representative when nothing else has covered it.
+#: Recorded in the disposition reason so the tie handling section 5.4 asks for
+#: is readable from the ledger rather than from this source file.
+REPRESENTATIVE_TIE_RULE = "lowest candidate_id"
+
+
 def _class_representatives(
-    candidates: Sequence[ScreenCandidate],
-    already: set[str],
-    *,
-    source_sha256: str,
-    selection_seed: int,
+    candidates: Sequence[ScreenCandidate], already: set[str]
 ) -> dict[str, str]:
     """One retained representative per licensed activation/route class.
 
     A class already covered by a mandatory or interior-draw candidate needs no
-    extra representative. An uncovered class takes its first candidate by the
-    population module's stable rank, so the choice is reproducible on any box.
+    extra representative. An uncovered class takes the lexically smallest
+    candidate id in the class.
+
+    Deliberately *not* a hashed draw. Section 5.1 gives each purpose its own
+    domain, and the purposes are pilot, confirmation, rate audit, routed expert
+    selection and discarded-candidate audit. Retention is none of those, so
+    hashing a retention decision into one of their domains would put retained
+    picks into a ledger that means "these were set aside". A stated lexical
+    rule is just as reproducible and pollutes nothing.
     """
     covered = {
         candidate.route_class
         for candidate in candidates
         if candidate.candidate_id in already
     }
-    chosen: dict[str, str] = {}
     by_class: dict[str, list[str]] = {}
     for candidate in candidates:
         if candidate.route_class in covered:
             continue
         by_class.setdefault(candidate.route_class, []).append(candidate.candidate_id)
-    for route_class in sorted(by_class):
-        ranked = stable_rank(
-            sorted(by_class[route_class]),
-            source_sha256=source_sha256,
-            selection_seed=selection_seed,
-            purpose=PURPOSE_DISCARDED_CANDIDATE_AUDIT,
-            stratum_id=f"route_class:{route_class}",
-        )
-        chosen[route_class] = ranked[0]
-    return chosen
+    return {
+        route_class: min(members) for route_class, members in by_class.items()
+    }
 
 
 def apply_coverage_first_v1(
@@ -261,7 +265,8 @@ def apply_coverage_first_v1(
     1. every mandatory boundary or control candidate;
     2. every member of the frozen per-stratum interior draw;
     3. one representative of each licensed activation/route class not already
-       covered by 1 or 2.
+       covered by 1 or 2, chosen by the stated tie rule
+       (:data:`REPRESENTATIVE_TIE_RULE`) rather than by a hashed draw.
 
     Everything else is ``deferred``. Nothing is ``pruned``: this policy makes
     no hard deletion, and a later one is a separate version.
@@ -311,16 +316,12 @@ def apply_coverage_first_v1(
                 "member of the frozen per-stratum interior draw for "
                 f"{candidate.rate_stratum_id}"
             )
-    representatives = _class_representatives(
-        roster,
-        set(reasons),
-        source_sha256=source_sha256,
-        selection_seed=selection_seed,
-    )
-    for route_class, candidate_id in representatives.items():
+    representatives = _class_representatives(roster, set(reasons))
+    for route_class, candidate_id in sorted(representatives.items()):
         reasons[candidate_id] = (
-            f"sole retained representative of licensed route class {route_class}; "
-            "a class is never dropped before runtime prices exist"
+            f"sole retained representative of licensed route class {route_class} "
+            f"(tie rule: {REPRESENTATIVE_TIE_RULE}); a class is never dropped "
+            "before runtime prices exist"
         )
 
     retained = tuple(sorted(reasons))
@@ -360,24 +361,23 @@ def apply_coverage_first_v1(
             f"{len(deferred)} deferred candidate(s); it cannot draw more than "
             "the pool holds"
         )
-    audit = tuple(
+    # The audit order is drawn in the discarded-candidate audit's own purpose
+    # domain, over the deferred pool only. A retained candidate has no audit
+    # rank: it was not set aside, so ranking it here would file a retention
+    # under "these were discarded".
+    ranked_deferred = (
         stable_rank(
             list(deferred),
             source_sha256=source_sha256,
             selection_seed=selection_seed,
             purpose=PURPOSE_DISCARDED_CANDIDATE_AUDIT,
             stratum_id=f"screen:{decision_id}",
-        )[:audit_count]
-    ) if deferred else ()
-
-    ranked_all = stable_rank(
-        sorted(ids),
-        source_sha256=source_sha256,
-        selection_seed=selection_seed,
-        purpose=PURPOSE_DISCARDED_CANDIDATE_AUDIT,
-        stratum_id=f"screen:{decision_id}",
+        )
+        if deferred
+        else []
     )
-    ranks = {candidate_id: index for index, candidate_id in enumerate(ranked_all)}
+    audit = tuple(ranked_deferred[:audit_count])
+    ranks = {candidate_id: index for index, candidate_id in enumerate(ranked_deferred)}
 
     dispositions = []
     for candidate_id in sorted(ids):
