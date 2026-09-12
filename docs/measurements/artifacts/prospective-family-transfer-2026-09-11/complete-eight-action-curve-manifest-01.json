@@ -1,0 +1,772 @@
+{
+  "created_unix": 1789175053.8923976,
+  "curve_count": 8,
+  "curves": [
+    {
+      "collector_action": {
+        "action_key": "ad7cff841c168989030e92da50e11cf73a218e263913f6917ae316e9401ac4eb",
+        "cas_receipt_sha256": "fc73928afeea6c694e8fefe98a679dfa92d9aa4bae49b1f214464270024af87d",
+        "cas_result_bytes": 0,
+        "cas_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "host": "dl380g10",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "coverage_source": "netdata",
+            "end_unix": 1789172205.332114,
+            "gpu_power_reference_w": null,
+            "gpu_power_w_mean": null,
+            "gpu_power_w_peak": null,
+            "start_unix": 1789172177.24843
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              0
+            ]
+          },
+          "cpu_seconds": 24.731136,
+          "oom_kill": 0,
+          "peak_memory_bytes": 1103327232,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 28.083683967590332
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/ad7cff841c168989030e92da50e11cf73a218e263913f6917ae316e9401ac4eb.json",
+        "terminal_sha256": "75f0d908493cd89ed6ee4965bb5304d5edc4d7a61e6e3db6a59f0b2a09b58e90"
+      },
+      "curve": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_bf16_full.curve.json",
+        "point_receipt_count": 257,
+        "point_receipt_roster_sha256": "b76b826f167ff9194135f10a08cfd6f15c0312de63476b4265433d6b64a4d748",
+        "sha256": "8c403d36f58c9f3351814c1eed56460edf960abe7148070587a5a85dd5f673ab"
+      },
+      "curve_id": "l20_shared_down_bf16_full",
+      "family": "TESSERA_BF16_K1",
+      "legal_rates": {
+        "count": 257,
+        "first": 832,
+        "last": 1088,
+        "roster_sha256": "b76b826f167ff9194135f10a08cfd6f15c0312de63476b4265433d6b64a4d748"
+      },
+      "measurement_action": {
+        "action_key": "2b88c0760773043ddb4691921030860b6bed9b47c4c2c3e6ac96edaa394b9eba",
+        "cas_receipt_sha256": "43a68a4ba6341716001a44e90e22d50669ae6b60f97c66c42e67a57aa5a7f623",
+        "cas_result_bytes": 21945,
+        "cas_result_sha256": "82d8330dd0e606e117456bb31e50cc2d3b7251485d247d9a30437bb8d9c9ebc9",
+        "host": "sparklina",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [],
+            "coverage_source": "netdata+pqteld",
+            "end_unix": 1789172132.8846457,
+            "gpu_power_reference_w": 140.0,
+            "gpu_power_w_mean": 26.591770919635486,
+            "gpu_power_w_peak": 35.39,
+            "start_unix": 1789169718.6941242
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              5,
+              6,
+              7,
+              8,
+              9,
+              15
+            ]
+          },
+          "cpu_seconds": 2372.434446,
+          "oom_kill": 0,
+          "peak_memory_bytes": 3720929280,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 2414.190521478653
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/2b88c0760773043ddb4691921030860b6bed9b47c4c2c3e6ac96edaa394b9eba.json",
+        "terminal_sha256": "f3e91ed1c9c9d18cddcd3e5d5558e23ba32192f026abc3c828807f0602905d89"
+      },
+      "measurement_plan": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_bf16_full.measurement-plan.json",
+        "sha256": "1bccd8aab9bf446840acef87563e4fdde6f10df5374655995d7006536ec5fc6f"
+      },
+      "role": "bf16_full"
+    },
+    {
+      "audit_region_correction": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r832.audit-region-correction-01.json",
+        "sha256": "93edf467e6cc8cef8905a30228d9a2da198041850d35c58ca665043d8c155458",
+        "superseded_collector_actions": [
+          "0b55deab982c6094322679bc9a18b74bd62b54e33567d302400bda088adfe584",
+          "1b3d2791bb8bbddf47586321d40770542eb012fe0035236ea0ecf05b671d9e9e"
+        ]
+      },
+      "collector_action": {
+        "action_key": "fbeebdc66606fbf0f4dda3bf2c5c9318446563492fd51dc1f8da30a93342e787",
+        "cas_receipt_sha256": "a1a4323114cb50ba5b6ad7938396e5be211e2824fa0dec905a257a0e977b2f3b",
+        "cas_result_bytes": 0,
+        "cas_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "host": "dl380g10",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "coverage_source": "netdata",
+            "end_unix": 1789170865.7360334,
+            "gpu_power_reference_w": null,
+            "gpu_power_w_mean": null,
+            "gpu_power_w_peak": null,
+            "start_unix": 1789170839.368553
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              0
+            ]
+          },
+          "cpu_seconds": 22.66496,
+          "oom_kill": 0,
+          "peak_memory_bytes": 1020010496,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 26.367480516433716
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/fbeebdc66606fbf0f4dda3bf2c5c9318446563492fd51dc1f8da30a93342e787.json",
+        "terminal_sha256": "ca3daf039e7fe22da4e80a9b6b539298f8136a9829106ecc70ff330daa887b7e"
+      },
+      "curve": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r832.curve.json",
+        "point_receipt_count": 1,
+        "point_receipt_roster_sha256": "b3c433111590ec57cd0ebe796eb934718515ee5d2b3de59d091838ad398d3040",
+        "sha256": "ab381e4fd511185f2d038d13cc366791e7fffff6b733a85f2f52363cf057bb39"
+      },
+      "curve_id": "l20_shared_down_e4m3_endpoint_r832",
+      "family": "TESSERA_E4M3_K1",
+      "legal_rates": {
+        "count": 1,
+        "first": 832,
+        "last": 832,
+        "roster_sha256": "b3c433111590ec57cd0ebe796eb934718515ee5d2b3de59d091838ad398d3040"
+      },
+      "measurement_action": {
+        "action_key": "2ba110537d2ec1c9ea1330512204d14bd6df22855e8680c4ad903274f22e6d60",
+        "cas_receipt_sha256": "3404954d1483248649ff3c278ac8f5c131e55b89277a382af597a0dbb9c843b4",
+        "cas_result_bytes": 3493,
+        "cas_result_sha256": "cebe9158b48167f12a373c6c72dfdeacbe7222159df9d041b1af5a6b4ebaea26",
+        "host": "sparky",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [],
+            "coverage_source": "netdata+pqteld",
+            "end_unix": 1789169776.7129538,
+            "gpu_power_reference_w": 140.0,
+            "gpu_power_w_mean": 10.842162162162152,
+            "gpu_power_w_peak": 34.3,
+            "start_unix": 1789169721.5414915
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              5,
+              6,
+              7,
+              8
+            ]
+          },
+          "cpu_seconds": 42.972764,
+          "oom_kill": 0,
+          "peak_memory_bytes": 2646159360,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 55.171462297439575
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/2ba110537d2ec1c9ea1330512204d14bd6df22855e8680c4ad903274f22e6d60.json",
+        "terminal_sha256": "864fabfb3e5973ca936569649df923de554328ca0ff6624816b55dabe5506f0f"
+      },
+      "measurement_plan": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r832.measurement-plan.json",
+        "sha256": "dc135ffe3d65515572808fd97d020414d1cb19524ecc5000ea8d461bcd8fa1e3"
+      },
+      "role": "e4_endpoint_left"
+    },
+    {
+      "collector_action": {
+        "action_key": "c0985ad926974fa54b08281aa5542a68e86279a60943e6615fb48463fe117913",
+        "cas_receipt_sha256": "cf4ed00ce00802ef1cda79ea46eecb189678c3a4e11e8bafd89a1799e2015a9b",
+        "cas_result_bytes": 0,
+        "cas_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "host": "dl380g10",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "coverage_source": "netdata",
+            "end_unix": 1789174920.6067262,
+            "gpu_power_reference_w": null,
+            "gpu_power_w_mean": null,
+            "gpu_power_w_peak": null,
+            "start_unix": 1789174892.4426768
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              0
+            ]
+          },
+          "cpu_seconds": 24.320833,
+          "oom_kill": 0,
+          "peak_memory_bytes": 1119604736,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 28.16404938697815
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/c0985ad926974fa54b08281aa5542a68e86279a60943e6615fb48463fe117913.json",
+        "terminal_sha256": "a6b2bfa9373bed86106b6705dc26a04e0ae8bac1a7ef100cf17606fdc3f35c27"
+      },
+      "curve": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_hidden_interior.curve.json",
+        "point_receipt_count": 255,
+        "point_receipt_roster_sha256": "7613bac71356c6bd4d52422ad1d7034d9f47bdbcf814e93187aaa345d516f5fd",
+        "sha256": "f89c51341460da0b0e8ab2a099eaa7be2ffc1cda3da3d57e7b7e48107b7a3160"
+      },
+      "curve_id": "l20_shared_down_e4m3_hidden_interior",
+      "family": "TESSERA_E4M3_K1",
+      "legal_rates": {
+        "count": 255,
+        "first": 833,
+        "last": 1087,
+        "roster_sha256": "7613bac71356c6bd4d52422ad1d7034d9f47bdbcf814e93187aaa345d516f5fd"
+      },
+      "measurement_action": {
+        "action_key": "54af7a7409cf5489a60601bdc5e74f661796266a739c4a75955d899989a07385",
+        "cas_receipt_sha256": "57d57bcac0e516ee5ee52efc195cb48d57d1fc3745bb6ec5842fac70d372ecd0",
+        "cas_result_bytes": 21837,
+        "cas_result_sha256": "716c66b76a549c4a7eec58d24798f19498542b483eb3aaf9392d48ce7ff2683b",
+        "host": "sparky",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [],
+            "coverage_source": "netdata+pqteld",
+            "end_unix": 1789174744.2184134,
+            "gpu_power_reference_w": 140.0,
+            "gpu_power_w_mean": 35.41078474353352,
+            "gpu_power_w_peak": 44.94,
+            "start_unix": 1789172463.5829158
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              5,
+              6,
+              7,
+              8,
+              9,
+              15
+            ]
+          },
+          "cpu_seconds": 2234.07397,
+          "oom_kill": 0,
+          "peak_memory_bytes": 3737546752,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 2280.635497570038
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/54af7a7409cf5489a60601bdc5e74f661796266a739c4a75955d899989a07385.json",
+        "terminal_sha256": "1d117106b7778b5a231d8285c03decb6e3d16cf82586f6fea32dca43d6bd7c9a"
+      },
+      "measurement_plan": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_hidden_interior.measurement-plan.json",
+        "sha256": "cb387628e31b2c50ab449feb08f92029b57079a85ac16b905c2391bb34d42b52"
+      },
+      "role": "e4_interior"
+    },
+    {
+      "audit_region_correction": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r1088.audit-region-correction-01.json",
+        "sha256": "6f674ceeba63109f85b6d2de59d56b9e21fc65ce10bc47579a047a5b022ac764",
+        "superseded_collector_actions": [
+          "0b55deab982c6094322679bc9a18b74bd62b54e33567d302400bda088adfe584",
+          "1b3d2791bb8bbddf47586321d40770542eb012fe0035236ea0ecf05b671d9e9e"
+        ]
+      },
+      "collector_action": {
+        "action_key": "d15421cab3baddabd0371097f99d79b841ecd44bb4ec927682c37e5ce3ee8a17",
+        "cas_receipt_sha256": "4f569294b56ea3cb7592dcf4e05fccaab8d577a6b39fec550310354497765ae8",
+        "cas_result_bytes": 0,
+        "cas_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "host": "dl380g10",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "coverage_source": "netdata",
+            "end_unix": 1789170876.4357188,
+            "gpu_power_reference_w": null,
+            "gpu_power_w_mean": null,
+            "gpu_power_w_peak": null,
+            "start_unix": 1789170850.6748843
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              1
+            ]
+          },
+          "cpu_seconds": 21.74666,
+          "oom_kill": 0,
+          "peak_memory_bytes": 654532608,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 25.760834455490112
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/d15421cab3baddabd0371097f99d79b841ecd44bb4ec927682c37e5ce3ee8a17.json",
+        "terminal_sha256": "03930eebb0ff97950a289f640e2f9bc887cffbdacb085ea6398880538b9aa1f5"
+      },
+      "curve": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r1088.curve.json",
+        "point_receipt_count": 1,
+        "point_receipt_roster_sha256": "452e538a159411dd955f3708f7bfdddd36954a18f1af8b862fa2873ae4f27a93",
+        "sha256": "b572776059dac9f0eeba9b9d3b707978df37b61701281beda0d9db927909f080"
+      },
+      "curve_id": "l20_shared_down_e4m3_endpoint_r1088",
+      "family": "TESSERA_E4M3_K1",
+      "legal_rates": {
+        "count": 1,
+        "first": 1088,
+        "last": 1088,
+        "roster_sha256": "452e538a159411dd955f3708f7bfdddd36954a18f1af8b862fa2873ae4f27a93"
+      },
+      "measurement_action": {
+        "action_key": "d9b371d1ae8313502f756a690ff31d1589d6a7448e26f5eb3c4c5383c6668cfb",
+        "cas_receipt_sha256": "14c37f09b8639650f13d81467673a39de3f0cf50bae3bef1c8c37813e420b6da",
+        "cas_result_bytes": 3500,
+        "cas_result_sha256": "882ac2750c8024d0c50b1615831cedce76d762b56661e0df5cfe8e85562e0aeb",
+        "host": "sparklina",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [],
+            "coverage_source": "netdata+pqteld",
+            "end_unix": 1789169808.8743477,
+            "gpu_power_reference_w": 140.0,
+            "gpu_power_w_mean": 19.740078740157454,
+            "gpu_power_w_peak": 27.33,
+            "start_unix": 1789169745.0604362
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              16,
+              17,
+              18,
+              19
+            ]
+          },
+          "cpu_seconds": 58.23942,
+          "oom_kill": 0,
+          "peak_memory_bytes": 2672181248,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 63.81391143798828
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/d9b371d1ae8313502f756a690ff31d1589d6a7448e26f5eb3c4c5383c6668cfb.json",
+        "terminal_sha256": "4d62fa09dcb8e4c69ef82e6f1a9285f8542b9b32d48d375477c68f310584219f"
+      },
+      "measurement_plan": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r1088.measurement-plan.json",
+        "sha256": "262edbcdf641629123f42a6c9a44d3b9134b1c1fb5a42349586eba58fd186b99"
+      },
+      "role": "e4_endpoint_right"
+    },
+    {
+      "collector_action": {
+        "action_key": "c16395c6276fa5f3b2eb5e748de525f47b03235c669f3737741c9a7e08c0f4d5",
+        "cas_receipt_sha256": "2c998c9e258e13d0a91afcba817eee487b7c1bae65d09fed547d8067cd4bad0a",
+        "cas_result_bytes": 0,
+        "cas_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "host": "dl380g10",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "coverage_source": "netdata",
+            "end_unix": 1789169959.177888,
+            "gpu_power_reference_w": null,
+            "gpu_power_w_mean": null,
+            "gpu_power_w_peak": null,
+            "start_unix": 1789169935.6536176
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              0
+            ]
+          },
+          "cpu_seconds": 21.318951,
+          "oom_kill": 0,
+          "peak_memory_bytes": 579518464,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 23.5242702960968
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/c16395c6276fa5f3b2eb5e748de525f47b03235c669f3737741c9a7e08c0f4d5.json",
+        "terminal_sha256": "c75a905303ba3d0fb3dadc0495ba490334153b19481c113dd54349ad518d6bc9"
+      },
+      "curve": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_endpoint_r832.curve.json",
+        "point_receipt_count": 1,
+        "point_receipt_roster_sha256": "b3c433111590ec57cd0ebe796eb934718515ee5d2b3de59d091838ad398d3040",
+        "sha256": "83962f8dc802e39f0a70dd662914070706e476f42206bff5fa2513988681d5be"
+      },
+      "curve_id": "l20_shared_down_e2m1_window_endpoint_r832",
+      "family": "TESSERA_E2M1_K2",
+      "legal_rates": {
+        "count": 1,
+        "first": 832,
+        "last": 832,
+        "roster_sha256": "b3c433111590ec57cd0ebe796eb934718515ee5d2b3de59d091838ad398d3040"
+      },
+      "measurement_action": {
+        "action_key": "4bd3e07c44f786c91f718cf289a0b13cc6d4ec46216f0685dfc2eccf975bc5d5",
+        "cas_receipt_sha256": "accfe3715b375f5398ed86c6bfcfc414579068e281d3c24baf83774d2a5571a0",
+        "cas_result_bytes": 3521,
+        "cas_result_sha256": "589fc5e44c710d453257cfa1d3ba117ae216d64eec734a88fced33f217cf948c",
+        "host": "sparky",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [],
+            "coverage_source": "netdata+pqteld",
+            "end_unix": 1789169827.9373925,
+            "gpu_power_reference_w": 140.0,
+            "gpu_power_w_mean": 17.87671428571429,
+            "gpu_power_w_peak": 34.3,
+            "start_unix": 1789169757.7097287
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              9,
+              15,
+              16,
+              17
+            ]
+          },
+          "cpu_seconds": 60.51308,
+          "oom_kill": 0,
+          "peak_memory_bytes": 2739613696,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 70.22766375541687
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/4bd3e07c44f786c91f718cf289a0b13cc6d4ec46216f0685dfc2eccf975bc5d5.json",
+        "terminal_sha256": "4d2b398695ae533f28d126b642c98c31f9b80abce4a906d5b37b6908c9e0a193"
+      },
+      "measurement_plan": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_endpoint_r832.measurement-plan.json",
+        "sha256": "c0b324ad8cb9393efc522ffd35724c32f22d13648b932ffc35e8a5360e3f40fc"
+      },
+      "role": "e2_endpoint_left"
+    },
+    {
+      "collector_action": {
+        "action_key": "21ceeb26e9114ed90b86d25ec34c8365f3bd1731467875c5d1955d8ecffb4ce9",
+        "cas_receipt_sha256": "57179fd0fe62771c93b724d8c8f99d5d08928b57dc36670f351160f46b894b71",
+        "cas_result_bytes": 0,
+        "cas_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "host": "dl380g10",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "coverage_source": "netdata",
+            "end_unix": 1789171965.8154585,
+            "gpu_power_reference_w": null,
+            "gpu_power_w_mean": null,
+            "gpu_power_w_peak": null,
+            "start_unix": 1789171939.5504692
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              0
+            ]
+          },
+          "cpu_seconds": 22.591393,
+          "oom_kill": 0,
+          "peak_memory_bytes": 1114836992,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 26.264989376068115
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/21ceeb26e9114ed90b86d25ec34c8365f3bd1731467875c5d1955d8ecffb4ce9.json",
+        "terminal_sha256": "437d9f15e8cf46cb5d4b71f1a70de0427d5ba68a164671c92e120599448b7c75"
+      },
+      "curve": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.json",
+        "point_receipt_count": 62,
+        "point_receipt_roster_sha256": "9ea31c3ef4fc18ad1971325a5b9b29dff1475e4a6f3811724d7fb3c033f9de8a",
+        "sha256": "64eea7c430cc2adb04921fcc80fcae7ad16a95622ec80d9542ed728ef47d78f9"
+      },
+      "curve_id": "l20_shared_down_e2m1_window_hidden_interior",
+      "family": "TESSERA_E2M1_K2",
+      "legal_rates": {
+        "count": 62,
+        "first": 833,
+        "last": 894,
+        "roster_sha256": "9ea31c3ef4fc18ad1971325a5b9b29dff1475e4a6f3811724d7fb3c033f9de8a"
+      },
+      "measurement_action": {
+        "action_key": "0eb5ff1625a9fb1bb2d4edb89a8eae1bba6a5ba05250db9bf2e650a538190293",
+        "cas_receipt_sha256": "bc6766111d79d286fa977ed62329b13517c628398134f01c9cedc75358408e9e",
+        "cas_result_bytes": 7856,
+        "cas_result_sha256": "b4b050b99298bdd710ae2cb4cbfcfa253fd298d04bb22f915d4c86118e0ccb89",
+        "host": "sparky",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [],
+            "coverage_source": "netdata+pqteld",
+            "end_unix": 1789171865.6209357,
+            "gpu_power_reference_w": 140.0,
+            "gpu_power_w_mean": 24.59635619242584,
+            "gpu_power_w_peak": 48.51,
+            "start_unix": 1789170400.1079688
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              5,
+              6,
+              7,
+              8
+            ]
+          },
+          "cpu_seconds": 1447.096432,
+          "oom_kill": 0,
+          "peak_memory_bytes": 3016704000,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 1465.5129668712616
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/0eb5ff1625a9fb1bb2d4edb89a8eae1bba6a5ba05250db9bf2e650a538190293.json",
+        "terminal_sha256": "8c419431f3a886e156ca204014dfaa984bfef49ea06fa32f0871426802550f07"
+      },
+      "measurement_plan": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.measurement-plan.json",
+        "sha256": "767ed16d708b480f521afdd6cf6e6d76ef7dc10583e1933c17a45d844d76ac2b"
+      },
+      "role": "e2_interior"
+    },
+    {
+      "collector_action": {
+        "action_key": "e2529e98b766afb6996e54fb2c3f41ae40fe2f75eb66b9d6bcacb0dd021ffb18",
+        "cas_receipt_sha256": "5a7e7ede3dcf724674f04f914d65167e21c75bca755c66e4192f7066328984ed",
+        "cas_result_bytes": 0,
+        "cas_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "host": "dl380g10",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "coverage_source": "netdata",
+            "end_unix": 1789170023.242767,
+            "gpu_power_reference_w": null,
+            "gpu_power_w_mean": null,
+            "gpu_power_w_peak": null,
+            "start_unix": 1789170000.1340277
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              0
+            ]
+          },
+          "cpu_seconds": 21.020123,
+          "oom_kill": 0,
+          "peak_memory_bytes": 581341184,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 23.108739376068115
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/e2529e98b766afb6996e54fb2c3f41ae40fe2f75eb66b9d6bcacb0dd021ffb18.json",
+        "terminal_sha256": "7c4b82ed8d836315626b4868ba7697179ad47e417b05d7c90e6409c407c8a8b9"
+      },
+      "curve": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_endpoint_r895.curve.json",
+        "point_receipt_count": 1,
+        "point_receipt_roster_sha256": "83dc97226b2a7c41869afa19dd75a51b2fd567465f65b5ab9f4d0cdeeb96bdd1",
+        "sha256": "c6be0887a72a61e336f7cda9b26065b9ab669365e5a8f63c22dbd499a9458dad"
+      },
+      "curve_id": "l20_shared_down_e2m1_window_endpoint_r895",
+      "family": "TESSERA_E2M1_K2",
+      "legal_rates": {
+        "count": 1,
+        "first": 895,
+        "last": 895,
+        "roster_sha256": "83dc97226b2a7c41869afa19dd75a51b2fd567465f65b5ab9f4d0cdeeb96bdd1"
+      },
+      "measurement_action": {
+        "action_key": "8e5c87ddba0e1bd1d8ba4fb73d82b0fa2693a725ee6cd5c47ab63abc8c387ca5",
+        "cas_receipt_sha256": "5e5d11fade13ebce43d3784cb29eb3ff9de17f979e4b6f0503b97ca7afe08432",
+        "cas_result_bytes": 3493,
+        "cas_result_sha256": "58367cef9e904d5a1024eef7673343eb27ddb84b037a3e5e15ef3d8f05f3c971",
+        "host": "sparklina",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [],
+            "coverage_source": "netdata+pqteld",
+            "end_unix": 1789169910.6284487,
+            "gpu_power_reference_w": 140.0,
+            "gpu_power_w_mean": 25.000541871921175,
+            "gpu_power_w_peak": 29.53,
+            "start_unix": 1789169809.4373744
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              16,
+              17,
+              18,
+              19
+            ]
+          },
+          "cpu_seconds": 94.528331,
+          "oom_kill": 0,
+          "peak_memory_bytes": 3458736128,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 101.19107437133789
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/8e5c87ddba0e1bd1d8ba4fb73d82b0fa2693a725ee6cd5c47ab63abc8c387ca5.json",
+        "terminal_sha256": "3c7f0d63747814649ef98a9aa2556364a33b1ae380d0a76eb57d8e2514b2238a"
+      },
+      "measurement_plan": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_endpoint_r895.measurement-plan.json",
+        "sha256": "414f623e5a2f606f694428a624f3bcc30f4ccd1f2ca0e435f332308308351841"
+      },
+      "role": "e2_endpoint_right"
+    },
+    {
+      "collector_action": {
+        "action_key": "7d84d6c6e451ae2b367bcd52f3f67829ed8938e1e90230fa8de2f6733d3f2e3e",
+        "cas_receipt_sha256": "afb9e26b8be6d8d77f5e042eefd213d8e9275c44adb3d7572fd8aa19779ff344",
+        "cas_result_bytes": 0,
+        "cas_result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "host": "dl380g10",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [
+              "no pqteld CSV for dl380g10 covering the window"
+            ],
+            "coverage_source": "netdata",
+            "end_unix": 1789169966.671525,
+            "gpu_power_reference_w": null,
+            "gpu_power_w_mean": null,
+            "gpu_power_w_peak": null,
+            "start_unix": 1789169943.3273833
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              1
+            ]
+          },
+          "cpu_seconds": 21.330394,
+          "oom_kill": 0,
+          "peak_memory_bytes": 579764224,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 23.344141721725464
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/7d84d6c6e451ae2b367bcd52f3f67829ed8938e1e90230fa8de2f6733d3f2e3e.json",
+        "terminal_sha256": "e7cbeb11676ae620a06661281bfa812e6660656eb5775d04388ce6af8805c871"
+      },
+      "curve": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_terminal_r896.curve.json",
+        "point_receipt_count": 1,
+        "point_receipt_roster_sha256": "6c606c7404387d575de210f3e6721ad32735a0e035300d03637e2e067a0873b5",
+        "sha256": "cd0c127c55c758789e82d615d5961494bb0c6b590c2872686158cea4a67926a4"
+      },
+      "curve_id": "l20_shared_down_e2m1_terminal_r896",
+      "family": "TESSERA_E2M1_K2",
+      "legal_rates": {
+        "count": 1,
+        "first": 896,
+        "last": 896,
+        "roster_sha256": "6c606c7404387d575de210f3e6721ad32735a0e035300d03637e2e067a0873b5"
+      },
+      "measurement_action": {
+        "action_key": "505a95f6a7478ec01b8d71adb1feec8792edea87c04198f8ebcab9171602091c",
+        "cas_receipt_sha256": "030d001d3154a81504d43a603caa1bec6209fa4ef208c6e4eeef89e4a7c33f04",
+        "cas_result_bytes": 3521,
+        "cas_result_sha256": "793c743cab565cba935a2b322f457b601faa3f09f1ef1e61e7a0dae09dfa36bb",
+        "host": "sparky",
+        "resource": {
+          "box_window": {
+            "coverage_errors": [],
+            "coverage_source": "netdata+pqteld",
+            "end_unix": 1789169850.1736329,
+            "gpu_power_reference_w": 140.0,
+            "gpu_power_w_mean": 18.195136986301378,
+            "gpu_power_w_peak": 32.45,
+            "start_unix": 1789169777.3549988
+          },
+          "cleanup_complete": true,
+          "cpu_allocation": {
+            "fallback": [],
+            "preferred": [
+              5,
+              6,
+              7,
+              8
+            ]
+          },
+          "cpu_seconds": 60.922825,
+          "oom_kill": 0,
+          "peak_memory_bytes": 2772852736,
+          "processes_live_at_terminal": 0,
+          "wall_seconds": 72.81863403320312
+        },
+        "returncode": 0,
+        "terminal_path": "/mnt/shared/prismabuild-fleet/pb-queue/done/505a95f6a7478ec01b8d71adb1feec8792edea87c04198f8ebcab9171602091c.json",
+        "terminal_sha256": "2d8a60c9e273705ffbc0d3df03c08190b41cb39315de8dcf1017eb1f082430b8"
+      },
+      "measurement_plan": {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_terminal_r896.measurement-plan.json",
+        "sha256": "9b0fed0fd1666d125a19ca3f7002370c4f847db42402c75432371890203b3cbe"
+      },
+      "role": "e2_terminal"
+    }
+  ],
+  "durable_rate_point_count": 579,
+  "numeric_cost_values_read": false,
+  "schema": "prismaquant.l20_shared_down_complete_eight_action_curve_manifest.v1",
+  "study_root": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01",
+  "validation": {
+    "all_16_terminal_actions_returncode_zero": true,
+    "all_16_terminal_actions_scope_cleanup_complete": true,
+    "each_curve_rate_roster_equals_its_frozen_plan_legal_rates": true,
+    "obsolete_e4_collectors_excluded_from_complete_set": true
+  }
+}

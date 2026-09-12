@@ -1,0 +1,284 @@
+{
+  "audit_role": "e2_interior",
+  "currency": "output_mse_under_route_activation_contract",
+  "family": "e2",
+  "fit": {
+    "left_rate": 832,
+    "right_rate": 895,
+    "terminal": "excluded; separately measured"
+  },
+  "inputs": {
+    "e2_left": {
+      "curve_sha256": "83962f8dc802e39f0a70dd662914070706e476f42206bff5fa2513988681d5be",
+      "plan_sha256": "c0b324ad8cb9393efc522ffd35724c32f22d13648b932ffc35e8a5360e3f40fc"
+    },
+    "e2_right": {
+      "curve_sha256": "c6be0887a72a61e336f7cda9b26065b9ab669365e5a8f63c22dbd499a9458dad",
+      "plan_sha256": "414f623e5a2f606f694428a624f3bcc30f4ccd1f2ca0e435f332308308351841"
+    }
+  },
+  "measured_prediction_distinction": "all values in predictions are pre-measurement predictions",
+  "predictions": [
+    {
+      "endpoint_value_linear": 2.0984838556614704e-05,
+      "rate": 832
+    },
+    {
+      "endpoint_value_linear": 2.0938149169697206e-05,
+      "rate": 833
+    },
+    {
+      "endpoint_value_linear": 2.0891459782779704e-05,
+      "rate": 834
+    },
+    {
+      "endpoint_value_linear": 2.0844770395862205e-05,
+      "rate": 835
+    },
+    {
+      "endpoint_value_linear": 2.0798081008944703e-05,
+      "rate": 836
+    },
+    {
+      "endpoint_value_linear": 2.0751391622027205e-05,
+      "rate": 837
+    },
+    {
+      "endpoint_value_linear": 2.0704702235109706e-05,
+      "rate": 838
+    },
+    {
+      "endpoint_value_linear": 2.0658012848192204e-05,
+      "rate": 839
+    },
+    {
+      "endpoint_value_linear": 2.0611323461274705e-05,
+      "rate": 840
+    },
+    {
+      "endpoint_value_linear": 2.0564634074357207e-05,
+      "rate": 841
+    },
+    {
+      "endpoint_value_linear": 2.0517944687439705e-05,
+      "rate": 842
+    },
+    {
+      "endpoint_value_linear": 2.0471255300522206e-05,
+      "rate": 843
+    },
+    {
+      "endpoint_value_linear": 2.0424565913604704e-05,
+      "rate": 844
+    },
+    {
+      "endpoint_value_linear": 2.0377876526687205e-05,
+      "rate": 845
+    },
+    {
+      "endpoint_value_linear": 2.0331187139769707e-05,
+      "rate": 846
+    },
+    {
+      "endpoint_value_linear": 2.0284497752852205e-05,
+      "rate": 847
+    },
+    {
+      "endpoint_value_linear": 2.0237808365934706e-05,
+      "rate": 848
+    },
+    {
+      "endpoint_value_linear": 2.0191118979017208e-05,
+      "rate": 849
+    },
+    {
+      "endpoint_value_linear": 2.0144429592099705e-05,
+      "rate": 850
+    },
+    {
+      "endpoint_value_linear": 2.0097740205182207e-05,
+      "rate": 851
+    },
+    {
+      "endpoint_value_linear": 2.0051050818264705e-05,
+      "rate": 852
+    },
+    {
+      "endpoint_value_linear": 2.0004361431347206e-05,
+      "rate": 853
+    },
+    {
+      "endpoint_value_linear": 1.9957672044429708e-05,
+      "rate": 854
+    },
+    {
+      "endpoint_value_linear": 1.9910982657512206e-05,
+      "rate": 855
+    },
+    {
+      "endpoint_value_linear": 1.9864293270594707e-05,
+      "rate": 856
+    },
+    {
+      "endpoint_value_linear": 1.9817603883677205e-05,
+      "rate": 857
+    },
+    {
+      "endpoint_value_linear": 1.9770914496759706e-05,
+      "rate": 858
+    },
+    {
+      "endpoint_value_linear": 1.9724225109842208e-05,
+      "rate": 859
+    },
+    {
+      "endpoint_value_linear": 1.9677535722924706e-05,
+      "rate": 860
+    },
+    {
+      "endpoint_value_linear": 1.9630846336007207e-05,
+      "rate": 861
+    },
+    {
+      "endpoint_value_linear": 1.958415694908971e-05,
+      "rate": 862
+    },
+    {
+      "endpoint_value_linear": 1.9537467562172206e-05,
+      "rate": 863
+    },
+    {
+      "endpoint_value_linear": 1.9490778175254708e-05,
+      "rate": 864
+    },
+    {
+      "endpoint_value_linear": 1.9444088788337206e-05,
+      "rate": 865
+    },
+    {
+      "endpoint_value_linear": 1.9397399401419707e-05,
+      "rate": 866
+    },
+    {
+      "endpoint_value_linear": 1.935071001450221e-05,
+      "rate": 867
+    },
+    {
+      "endpoint_value_linear": 1.9304020627584707e-05,
+      "rate": 868
+    },
+    {
+      "endpoint_value_linear": 1.9257331240667208e-05,
+      "rate": 869
+    },
+    {
+      "endpoint_value_linear": 1.921064185374971e-05,
+      "rate": 870
+    },
+    {
+      "endpoint_value_linear": 1.9163952466832207e-05,
+      "rate": 871
+    },
+    {
+      "endpoint_value_linear": 1.911726307991471e-05,
+      "rate": 872
+    },
+    {
+      "endpoint_value_linear": 1.9070573692997207e-05,
+      "rate": 873
+    },
+    {
+      "endpoint_value_linear": 1.9023884306079708e-05,
+      "rate": 874
+    },
+    {
+      "endpoint_value_linear": 1.897719491916221e-05,
+      "rate": 875
+    },
+    {
+      "endpoint_value_linear": 1.8930505532244707e-05,
+      "rate": 876
+    },
+    {
+      "endpoint_value_linear": 1.888381614532721e-05,
+      "rate": 877
+    },
+    {
+      "endpoint_value_linear": 1.8837126758409707e-05,
+      "rate": 878
+    },
+    {
+      "endpoint_value_linear": 1.8790437371492208e-05,
+      "rate": 879
+    },
+    {
+      "endpoint_value_linear": 1.874374798457471e-05,
+      "rate": 880
+    },
+    {
+      "endpoint_value_linear": 1.8697058597657208e-05,
+      "rate": 881
+    },
+    {
+      "endpoint_value_linear": 1.865036921073971e-05,
+      "rate": 882
+    },
+    {
+      "endpoint_value_linear": 1.8603679823822207e-05,
+      "rate": 883
+    },
+    {
+      "endpoint_value_linear": 1.8556990436904708e-05,
+      "rate": 884
+    },
+    {
+      "endpoint_value_linear": 1.851030104998721e-05,
+      "rate": 885
+    },
+    {
+      "endpoint_value_linear": 1.846361166306971e-05,
+      "rate": 886
+    },
+    {
+      "endpoint_value_linear": 1.841692227615221e-05,
+      "rate": 887
+    },
+    {
+      "endpoint_value_linear": 1.837023288923471e-05,
+      "rate": 888
+    },
+    {
+      "endpoint_value_linear": 1.832354350231721e-05,
+      "rate": 889
+    },
+    {
+      "endpoint_value_linear": 1.827685411539971e-05,
+      "rate": 890
+    },
+    {
+      "endpoint_value_linear": 1.823016472848221e-05,
+      "rate": 891
+    },
+    {
+      "endpoint_value_linear": 1.818347534156471e-05,
+      "rate": 892
+    },
+    {
+      "endpoint_value_linear": 1.813678595464721e-05,
+      "rate": 893
+    },
+    {
+      "endpoint_value_linear": 1.809009656772971e-05,
+      "rate": 894
+    },
+    {
+      "endpoint_value_linear": 1.804340718081221e-05,
+      "rate": 895
+    }
+  ],
+  "protocol_sha256": "0251dc7d513573ca156cd69c13eb403a4410f419b5b59bede4376953b9dbba1c",
+  "qualification": "research audit only; no broad qualification or time-savings claim",
+  "research_only": true,
+  "schema": "prismaquant.prospective_paired_family_transfer_seal.v1",
+  "seal_sha256": "1dad5f7ae2bd7e98ab756681c61755a43efa4631627d4320ff6d22b529731f4f"
+}

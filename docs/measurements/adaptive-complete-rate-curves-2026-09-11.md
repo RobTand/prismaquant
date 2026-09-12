@@ -216,3 +216,13 @@ The practical result is to retain measured production prices under this
 contract, with E2M1 endpoint interpolation and paired BF16→E4M3 reuse as bounded
 research candidates. No production format menu, allocator default, exporter
 or serving gate changed.
+
+## Follow-up completed — 2026-09-12 UTC
+
+The [prospective layer-20 study](prospective-family-transfer-2026-09-11.md)
+fixed these paired-family forms before acquisition and sealed each prediction
+set before measuring its target interior. Both E4M3 forms and E2M1 endpoint
+interpolation passed the original screen on that second shared-down Linear.
+Primary E4M3 error was 0.534% p99 / 0.666% maximum; E2M1 was 0.952% / 1.093%.
+This adds prospective evidence while retaining the full BF16 source curve and
+the research-only limits above.
