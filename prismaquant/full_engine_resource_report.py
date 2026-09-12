@@ -61,6 +61,15 @@ OWED_OBSERVATIONS = ("kv_observations", "observer_qualification", "owner_views",
 TERMS = ("fixed_resident", "candidate_resident", "fixed_activation",
          "candidate_activation", "fixed_scratch", "candidate_scratch", "fixed_kv")
 
+#: The candidate terms are per-unit mappings, not scalars. The declared
+#: invariance is "one complete assignment, one row per unit", and it is the
+#: per-unit breakdown that makes `sum(candidate_resident)` and
+#: `max(candidate_activation)` in the composition mean anything: the reduction
+#: belongs to the composition, not to the term. Comparing mapping to mapping
+#: is also strictly stronger than comparing the reductions, which agree by
+#: coincidence whenever two units trade the same bytes.
+PER_UNIT_TERMS = ("candidate_resident", "candidate_activation", "candidate_scratch")
+
 TERM_DEPENDENCIES = {
     "fixed_resident": ("worker_startup", "history_join", "external_closure"),
     "candidate_resident": ("worker_startup", "history_join", "external_closure"),
@@ -71,12 +80,16 @@ TERM_DEPENDENCIES = {
     "fixed_kv": ("cache_capacity",),
 }
 
-#: ``fixed_kv`` has a declared term and a declared dependency but this schema
-#: emits no KV observation to recompute it from, so it is never expressible
-#: here and a report that carries a number for it is refused rather than read.
-RECOMPUTABLE_TERMS = tuple(term for term in TERMS if term != "fixed_kv")
+#: Every term is recomputed from the observations; what gates each one is its
+#: domain dependency, not this consumer's reach.
+RECOMPUTABLE_TERMS = TERMS
 
-OWNER_CLASSES = ("fixed", "candidate")
+#: The three owner classes the producer accepts. `kv` is one of them: a KV
+#: backing is an observed allocation like any other and `fixed_kv` is the sum
+#: of the resident ones, so dropping it here would unclassify a real row and
+#: null every term on any capture that has one. What `fixed_kv` still waits on
+#: is its domain, `cache_capacity`, which never closes at this schema version.
+OWNER_CLASSES = ("fixed", "candidate", "kv")
 #: Neither label supplies a classification or an invariance, so a row carrying
 #: one is unclassified and named, never bucketed.
 UNSUPPORTED_OWNER_LABELS = ("shared", "unknown")
@@ -196,9 +209,21 @@ def _domains(value: Any, where: str) -> dict[str, Mapping]:
     return {name: _domain_record(table[name], f"{where} {name}") for name in DOMAINS}
 
 
+def _unit_charges(value: Any, where: str) -> Mapping[str, int] | None:
+    """A per-unit charge table, or null when the term is not expressible."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise RuntimePriceError(f"{where}: expected a per-unit charge table")
+    return {_string(unit, where + " unit"): _index(charge, f"{where} {unit}")
+            for unit, charge in value.items()}
+
+
 def _terms(value: Any, where: str) -> dict[str, Any]:
     table = _object(value, TERMS, where)
-    return {name: _optional_index(table[name], f"{where} {name}") for name in TERMS}
+    return {name: (_unit_charges(table[name], f"{where} {name}") if name in PER_UNIT_TERMS
+                   else _optional_index(table[name], f"{where} {name}"))
+            for name in TERMS}
 
 
 def _scope(value: Any, where: str) -> Mapping:
@@ -419,31 +444,30 @@ def _classify(allocation: Mapping) -> tuple:
     if len(categories) != 1 or categories[0] not in OWNER_CLASSES:
         return None, None, "no single supported owner category"
     owner = categories[0]
-    if scope == "outside_units" and not freed:
+    if not freed:
+        # Never freed within the capture, so it is live at the terminal
+        # boundary whatever scope it was allocated in. Resident bytes add.
         lifetime = "resident"
-    elif scope == "outside_units":
+    elif scope == "inside_unit":
+        lifetime = "scratch"
+    elif scope == "escapes_unit":
+        lifetime = "activation"
+    else:
         # Freed with no unit interval containing either end. Charging it as
         # fixed scratch assumes once per step and treating it as startup
         # assumes never again; both are fills, and the capture emits no
         # declared step boundary to decide between them.
         return None, None, "freed outside every unit interval with no declared step boundary"
-    elif scope == "inside_unit" and freed:
-        lifetime = "scratch"
-    elif scope == "inside_unit":
-        return None, None, "invocation-local allocation is never freed within the capture"
-    elif scope == "escapes_unit" and freed:
-        lifetime = "activation"
-    else:
-        return None, None, "escaping allocation is never freed within the capture"
+    # The unit an allocation is charged to is the innermost scope it was made
+    # in. `unit_invocation` names the same unit from the other side, so a row
+    # where the two disagree is not a row this consumer can charge anywhere.
+    stack = allocation["scope_stack"]
+    unit = stack[-1] if stack else None
     invocation = allocation["unit_invocation"]
-    if owner == "candidate":
-        if invocation is None:
-            return None, None, "candidate allocation names no unit invocation"
-        unit = invocation.rsplit(":", 1)[0]
-        if not unit:
-            return None, None, "unit invocation names no unit"
-    else:
-        unit = None
+    if invocation is not None and invocation.rsplit(":", 1)[0] != (unit or ""):
+        return None, None, "the scope stack and the unit invocation name different units"
+    if unit is not None and invocation is None:
+        return None, None, "an allocation inside a unit scope names no unit invocation"
     return owner, lifetime, unit
 
 
@@ -501,6 +525,18 @@ def _recompute_membership(observations: Mapping) -> tuple[list[dict], list[dict]
     return membership, unclassified
 
 
+def _charge(lifetime: str, rows: Sequence[Mapping]) -> int:
+    """Resident bytes add; transient bytes peak.
+
+    Resident allocations are live at the terminal boundary by definition, so
+    their charge is the sum. A transient charge is the simultaneous sweep and
+    never a sum of per-allocation maxima.
+    """
+    if lifetime == "resident":
+        return sum(row["bytes"] for row in rows)
+    return _simultaneous_peak(rows)
+
+
 def _recompute_terms(membership: Sequence[Mapping], *, closed: Mapping[str, bool],
                      unclassified: int) -> dict[str, Any]:
     """Recompute every term the emitted observations can express.
@@ -513,6 +549,7 @@ def _recompute_terms(membership: Sequence[Mapping], *, closed: Mapping[str, bool
         return [row for row in membership
                 if row["owner_class"] == owner and row["lifetime_class"] == lifetime]
 
+    units = sorted({row["unit"] for row in membership if row["unit"] is not None})
     terms: dict[str, Any] = {name: None for name in TERMS}
     if unclassified:
         return terms
@@ -520,19 +557,49 @@ def _recompute_terms(membership: Sequence[Mapping], *, closed: Mapping[str, bool
         if not all(closed[name] for name in TERM_DEPENDENCIES[term]):
             continue
         owner, _, lifetime = term.partition("_")
+        if term == "fixed_kv":
+            owner, lifetime = "kv", "resident"
         selected = rows(owner, lifetime)
-        if owner == "fixed" or lifetime == "resident":
-            # Fixed terms and the summed candidate residency charge the whole
-            # class at once; candidate residency is summed across units by the
-            # declared composition.
-            terms[term] = _simultaneous_peak(selected)
+        if term in PER_UNIT_TERMS:
+            # One charge per unit, every unit present, including a unit whose
+            # charge is zero: the reduction is the composition's business, and
+            # a term that hid a unit would make it unauditable.
+            terms[term] = {
+                unit: _charge(lifetime, [row for row in selected if row["unit"] == unit])
+                for unit in units}
         else:
-            # `max(candidate_activation)` and `max(candidate_scratch)`: the
-            # peak within each unit, then the largest of those.
-            units = {row["unit"] for row in selected}
-            terms[term] = max((_simultaneous_peak([row for row in selected if row["unit"] == unit])
-                               for unit in units), default=0)
+            terms[term] = _charge(lifetime, selected)
     return terms
+
+
+def _term_disagreements(name: str, claimed: Any, recomputed: Any) -> list[str]:
+    """Every way the producer's term differs from this consumer's.
+
+    A per-unit term is compared unit by unit rather than by its reduction:
+    two units that trade the same bytes produce the same `max` and the same
+    `sum` while each unit's own charge is wrong, and a comparison of totals
+    cannot see it. Types are compared strictly, so a mapping never matches a
+    scalar and ``True`` never matches ``1``.
+    """
+    if claimed is None or recomputed is None or type(claimed) is not type(recomputed):
+        if claimed != recomputed or type(claimed) is not type(recomputed):
+            return [f"derived term {name} is {claimed!r} where this consumer recomputes {recomputed!r}"]
+        return []
+    if name not in PER_UNIT_TERMS:
+        return ([] if claimed == recomputed
+                else [f"derived term {name} is {claimed!r} where this consumer recomputes {recomputed!r}"])
+    messages = []
+    for unit in sorted(set(claimed) | set(recomputed)):
+        if unit not in claimed:
+            messages.append(f"derived term {name} charges no unit {unit!r}, which this consumer "
+                            f"charges {recomputed[unit]!r}")
+        elif unit not in recomputed:
+            messages.append(f"derived term {name} charges unit {unit!r} {claimed[unit]!r}, which is "
+                            "not a unit this consumer charges")
+        elif claimed[unit] != recomputed[unit] or type(claimed[unit]) is not type(recomputed[unit]):
+            messages.append(f"derived term {name} charges unit {unit!r} {claimed[unit]!r} where this "
+                            f"consumer recomputes {recomputed[unit]!r}")
+    return messages
 
 
 def _compose(terms: Mapping[str, Any]):
@@ -541,7 +608,13 @@ def _compose(terms: Mapping[str, Any]):
     + fixed_KV`, or nothing at all when a term is unknown."""
     if any(terms[name] is None for name in TERMS):
         return None
-    return sum(terms[name] for name in TERMS)
+    return (terms["fixed_resident"]
+            + sum(terms["candidate_resident"].values())
+            + terms["fixed_activation"]
+            + max(terms["candidate_activation"].values(), default=0)
+            + terms["fixed_scratch"]
+            + max(terms["candidate_scratch"].values(), default=0)
+            + terms["fixed_kv"])
 
 
 @dataclass(frozen=True)
@@ -632,9 +705,10 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
         for owner in allocation["observed_owners"]:
             if owners_seen.setdefault(owner, allocation_id) != allocation_id:
                 disagree(f"owner {owner!r} is a duplicate alias claimed by two backings")
-        categories = set(allocation["observed_categories"])
-        if categories >= set(OWNER_CLASSES):
-            disagree(f"allocation {allocation_id} is claimed by both a candidate and a fixed owner")
+        categories = set(allocation["observed_categories"]) & set(OWNER_CLASSES)
+        if len(categories) > 1:
+            disagree(f"allocation {allocation_id} is claimed by two owner classes "
+                     f"({', '.join(sorted(categories))})")
 
     # Checkpoints are a second view of the same allocations, so they are
     # recomputed too rather than trusted.
@@ -686,8 +760,15 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
         if claimed is not None and claimed["bytes"] != row["bytes"]:
             disagree(f"unclassified allocation {row['allocation_id']} restates its extent")
     units = {row["unit"] for row in membership if row["unit"] is not None}
-    if not units <= set(partition["units"]):
-        disagree("a classified candidate allocation names a unit the partition omits")
+    if units != set(partition["units"]):
+        disagree("the partition's units are not the units this consumer recomputes")
+    for row in membership:
+        charged = (row["owner_class"] == "kv" and row["lifetime_class"] == "resident"
+                   or row["owner_class"] == "fixed"
+                   or row["owner_class"] == "candidate" and row["unit"] is not None)
+        if not charged:
+            blocking.append(f"allocation {row['allocation_id']} is classified "
+                            f"({row['owner_class']}, {row['lifetime_class']}) but no term charges it")
 
     closed = _recompute_domains(observations)
     for name in DOMAINS:
@@ -705,11 +786,8 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
 
     terms = _recompute_terms(membership, closed=closed, unclassified=len(unclassified))
     for name in TERMS:
-        if derived["terms"][name] != terms[name] or type(derived["terms"][name]) is not type(terms[name]):
-            disagree(f"derived term {name} is {derived['terms'][name]!r} where this consumer recomputes "
-                     f"{terms[name]!r}")
-    if derived["terms"]["fixed_kv"] is not None:
-        disagree("derived carries a fixed KV charge that this schema emits no KV observation to recompute")
+        for message in _term_disagreements(name, derived["terms"][name], terms[name]):
+            disagree(message)
     budget = _compose(terms)
     if derived["scalar_budget_bytes"] != budget or type(derived["scalar_budget_bytes"]) is not type(budget):
         disagree(f"derived scalar budget is {derived['scalar_budget_bytes']!r} where this consumer "

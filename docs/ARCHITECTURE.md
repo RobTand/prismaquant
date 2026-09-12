@@ -39,7 +39,14 @@ so a capture that did not observe something is distinguishable from a producer
 that dropped it, and the consumer refuses a value there rather than reading one
 whose shape v1 does not define. `partition` owns the domain states and `derived`
 may no longer restate them, and a domain's evidence must name an observation the
-envelope carries. Only `fixed_scratch` and `candidate_scratch` are reachable at
+envelope carries. The three candidate terms are per-unit charge tables, keyed
+as the producer keys them, and the consumer compares them unit by unit and
+reduces only inside the composition (`sum` for residency, `max` for the
+transients): two units that trade the same bytes agree on every reduction while
+both charges are wrong, so comparing totals would not see it. `kv` is a third
+owner class, so a KV backing is classified and `fixed_kv` is the sum of the
+resident KV rows -- what it waits on is `cache_capacity`, which never closes
+here. Only `fixed_scratch` and `candidate_scratch` are reachable at
 this version; altered cache capacity, a missing timing tail and overlapping
 streams reach the consumer only as a domain state, which is why it has no test
 for them. No measured

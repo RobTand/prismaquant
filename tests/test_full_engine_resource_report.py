@@ -104,11 +104,21 @@ def test_admission_stays_closed_and_no_gate_reads_the_recomputed_partition(tmp_p
 
 @pytest.mark.parametrize("term", TERMS)
 def test_a_changed_derived_term_refuses_because_the_recomputation_disagrees(tmp_path, term):
+    """The keystone, over every term. A candidate term is a per-unit table, so
+    the claim is written in that shape and reaches the recomputation rather
+    than stopping at the reader; a scalar in its place refuses too, which
+    `test_a_per_unit_term_that_arrives_as_a_scalar_refuses` pins separately."""
+    charged = ({"unit": 4096} if term in consumer.PER_UNIT_TERMS else 4096)
+
     def mutate(report):
-        report["derived"]["terms"][term] = 4096
+        report["derived"]["terms"][term] = charged
         report["derived"]["scope"]["unavailable_terms"].remove(term)
     verdict = consume(tmp_path, mutated(mutate))
-    assert any(f"derived term {term} is 4096" in reason for reason in verdict.disagreements)
+    # Every term of this report recomputes to null, so the claim disagrees on
+    # its whole value; the per-unit form of the message is exercised where the
+    # terms are genuinely expressible, in the closed fixture below.
+    assert any(f"derived term {term} " in reason and "4096" in reason
+               for reason in verdict.disagreements)
     assert any("unavailable terms" in reason for reason in verdict.disagreements)
 
 
@@ -258,7 +268,7 @@ def test_an_omitted_unit_owner_or_extent_refuses(tmp_path, mutation):
         expected = "another owner count"
     else:
         report["partition"]["units"] = []
-        expected = "names a unit the partition omits"
+        expected = "the partition's units are not the units this consumer recomputes"
     assert any(expected in reason for reason in consume(tmp_path, report).disagreements)
 
 
@@ -281,7 +291,7 @@ def test_a_candidate_and_fixed_overlap_refuses(tmp_path):
     def mutate(report):
         report["observations"]["torch_allocations"][0]["observed_categories"] = ["candidate", "fixed"]
     verdict = consume(tmp_path, mutated(mutate))
-    assert any("claimed by both a candidate and a fixed owner" in reason
+    assert any("claimed by two owner classes (candidate, fixed)" in reason
                for reason in verdict.disagreements)
     # It also stops being classified at all, which nulls every term.
     assert "0:4096:1" in verdict.unclassified_allocations
@@ -497,28 +507,38 @@ def test_a_transient_freed_outside_every_unit_interval_stays_unclassified(tmp_pa
 # --------------------------------------------------------------------------
 
 #  id           alloc  free  bytes  lifetime_scope   owner        lifetime    unit
+# The rows, and the owner/lifetime class each one carries. Ownership comes
+# from the observed category and lifetime from whether the row is ever freed
+# and which scope it was freed in; both are recomputed by the consumer, and
+# stated here so the fixture says what it means rather than echoing the code.
 CLOSED_ROWS = [
-    ("0:1000:1",     1, None,  4096, "outside_units", "fixed",     "resident",  None),
-    ("0:2000:1",    10,   14,  1000, "inside_unit",   "fixed",     "scratch",   None),
-    ("0:3000:1",    12,   20,  2000, "inside_unit",   "fixed",     "scratch",   None),
-    ("0:4000:1",    14,   18,  3000, "inside_unit",   "fixed",     "scratch",   None),
+    # id,        alloc, free, bytes, lifetime scope,  owner,       lifetime,    unit
+    ("0:1000:1",     1, None,  4096, "outside_units", "fixed",     "resident",   None),
+    ("0:1100:1",     2, None,  2048, "outside_units", "kv",        "resident",   None),
+    ("0:2000:1",    10,   14,  1000, "inside_unit",   "fixed",     "scratch",   "unit.a"),
+    ("0:3000:1",    12,   20,  2000, "inside_unit",   "fixed",     "scratch",   "unit.a"),
+    ("0:4000:1",    14,   18,  3000, "inside_unit",   "fixed",     "scratch",   "unit.a"),
     ("0:5000:1",    11,   13,   700, "inside_unit",   "candidate", "scratch",   "unit.a"),
     ("0:6000:1",    12,   16,   800, "inside_unit",   "candidate", "scratch",   "unit.a"),
     ("0:7000:1",    30,   34,  1200, "inside_unit",   "candidate", "scratch",   "unit.b"),
     ("0:8000:1",    34,   38,  1300, "inside_unit",   "candidate", "scratch",   "unit.b"),
     ("0:9000:1",    12,   40,   500, "escapes_unit",  "candidate", "activation", "unit.a"),
+    ("0:9100:1",    31,   36,   900, "escapes_unit",  "candidate", "activation", "unit.b"),
+    ("0:9200:1",    15, None,  1600, "inside_unit",   "candidate", "resident",  "unit.b"),
 ]
-# Hand-computed from the intervals above, not from the module under test:
+CLOSED_UNITS = ["unit.a", "unit.b"]
+# Hand-computed from the intervals above, and confirmed against the producer's
+# own `derive_partition` on these same rows, so the fixture states the other
+# side's output rather than this consumer's:
 #   fixed scratch  1000[10,14) 2000[12,20) 3000[14,18): 10>1000 12>3000
 #                  14>free 1000 then take 3000 = 5000, 18>2000, 20>0.  Peak 5000.
 #                  A sum of per-allocation maxima would be 6000.
 #   unit.a scratch  700[11,13) 800[12,16): 11>700 12>1500 13>800.       Peak 1500.
 #   unit.b scratch 1200[30,34) 1300[34,38): the free at 34 settles first. Peak 1300.
-#   candidate scratch is the largest unit peak, 1500, not the 2800 sum.
-#   whole-capture peak: 4096 +1000 +700 +(2000+800+500) -700 -1000 +3000 = 10396.
+#   candidate_scratch is one charge per unit, not their max and not their sum.
 CLOSED_FIXED_SCRATCH = 5000
-CLOSED_CANDIDATE_SCRATCH = 1500
-CLOSED_LIVE_PEAK = 10396
+CLOSED_CANDIDATE_SCRATCH = {"unit.a": 1500, "unit.b": 1300}
+CLOSED_LIVE_PEAK = 14044
 
 
 def closed_report():
@@ -532,15 +552,15 @@ def closed_report():
             "free_requested_index": None if free is None else free - 1,
             "generation": int(generation), "lifetime_scope": scope,
             "observed_categories": [owner], "observed_owners": [f"owner.{index}"],
-            "scope_stack": [] if scope == "outside_units" else ["unit"],
-            "unit_invocation": None if unit is None and scope == "outside_units" else f"{unit or 'unit.a'}:0",
+            "scope_stack": [] if unit is None else [unit],
+            "unit_invocation": None if unit is None else f"{unit}:0",
         })
         membership.append({"allocate_index": alloc, "allocation_id": ident, "bytes": size,
                            "free_completed_index": free, "lifetime_class": lifetime,
-                           "owner_class": owner, "unit": unit if owner == "candidate" else None})
+                           "owner_class": owner, "unit": unit})
     terms = {name: None for name in TERMS}
     terms["fixed_scratch"] = CLOSED_FIXED_SCRATCH
-    terms["candidate_scratch"] = CLOSED_CANDIDATE_SCRATCH
+    terms["candidate_scratch"] = dict(CLOSED_CANDIDATE_SCRATCH)
     domains = {name: {"state": "open", "evidence": [], "reason": "no implemented check"}
                for name in DOMAINS}
     # Each closed domain cites the observation its closing condition is read
@@ -562,7 +582,7 @@ def closed_report():
         "identity": {"capture_sha256": "c" * 64,
                      "fixture_provenance": "synthetic CPU-only arithmetic fixture",
                      "run": copy.deepcopy(identity)},
-        "reference": {"canonical_census": {"units": ["unit.a", "unit.b"]},
+        "reference": {"canonical_census": {"units": list(CLOSED_UNITS)},
                       "runtime_binding": {"member_formats": {}},
                       "selected_rows": [{"unit": "unit.a"}, {"unit": "unit.b"}]},
         "workload": {"calibration": {"sha256": "a" * 64},
@@ -585,7 +605,7 @@ def closed_report():
                       "identity": copy.deepcopy(identity), "membership": membership,
                       "schema": "tessera.full_engine_resource_partition.v1",
                       "scope": copy.deepcopy(scope), "terms": copy.deepcopy(terms),
-                      "unclassified_allocations": [], "units": ["unit.a", "unit.b"]},
+                      "unclassified_allocations": [], "units": list(CLOSED_UNITS)},
         "derived": {"scalar_budget_bytes": None, "scope": scope, "terms": terms},
     }
 
@@ -600,13 +620,60 @@ def test_a_peak_is_a_sweep_and_not_a_sum_of_per_allocation_maxima(tmp_path):
 def test_frees_settle_before_allocations_at_the_same_index(tmp_path):
     """unit.b frees 1200 at index 34 and allocates 1300 at index 34."""
     verdict = consume(tmp_path, closed_report())
-    assert verdict.recomputed_terms["candidate_scratch"] == CLOSED_CANDIDATE_SCRATCH == 1500
-    assert verdict.recomputed_terms["candidate_scratch"] < 1500 + 1300
+    assert verdict.recomputed_terms["candidate_scratch"]["unit.b"] == 1300
+    assert verdict.recomputed_terms["candidate_scratch"]["unit.b"] < 1200 + 1300
 
 
-def test_a_candidate_term_is_the_largest_unit_peak_and_not_their_sum(tmp_path):
+def test_a_candidate_term_is_one_charge_per_unit_and_not_a_reduction(tmp_path):
+    """The term is the per-unit breakdown the declared invariance promises,
+    "one complete assignment, one row per unit". Reducing it is the
+    composition's job: `sum` for residency, `max` for the transients. A term
+    that arrived already reduced could not be audited per unit, and two units
+    trading the same bytes would look identical to two units that did not."""
     verdict = consume(tmp_path, closed_report())
-    assert verdict.recomputed_terms["candidate_scratch"] == max(1500, 1300)
+    charges = verdict.recomputed_terms["candidate_scratch"]
+    assert charges == CLOSED_CANDIDATE_SCRATCH == {"unit.a": 1500, "unit.b": 1300}
+    assert set(charges) == set(CLOSED_UNITS)
+    assert charges != max(charges.values())
+    assert charges != sum(charges.values())
+
+
+def test_a_per_unit_charge_that_differs_refuses_even_when_its_max_and_sum_agree(tmp_path):
+    """The test that proves the comparison is per unit.
+
+    unit.a and unit.b swap charges. `max` is 1500 either way and `sum` is 2800
+    either way, so every reduction of this term agrees with the producer while
+    both units are wrong. Only a unit-by-unit comparison sees it, and the
+    refusal names the unit."""
+    report = closed_report()
+    swapped = {"unit.a": CLOSED_CANDIDATE_SCRATCH["unit.b"],
+               "unit.b": CLOSED_CANDIDATE_SCRATCH["unit.a"]}
+    assert max(swapped.values()) == max(CLOSED_CANDIDATE_SCRATCH.values())
+    assert sum(swapped.values()) == sum(CLOSED_CANDIDATE_SCRATCH.values())
+    report["derived"]["terms"]["candidate_scratch"] = swapped
+    verdict = consume(tmp_path, report)
+    assert any("candidate_scratch charges unit 'unit.a' 1300 where this consumer recomputes 1500"
+               in reason for reason in verdict.disagreements)
+    assert any("candidate_scratch charges unit 'unit.b' 1500 where this consumer recomputes 1300"
+               in reason for reason in verdict.disagreements)
+
+
+def test_a_per_unit_term_that_drops_a_unit_refuses(tmp_path):
+    """Every unit gets a charge, including one whose charge is zero; a term
+    that omits a unit is a term nothing can audit against the roster."""
+    report = closed_report()
+    report["derived"]["terms"]["candidate_scratch"] = {"unit.a": CLOSED_CANDIDATE_SCRATCH["unit.a"]}
+    verdict = consume(tmp_path, report)
+    assert any("candidate_scratch charges no unit 'unit.b'" in reason
+               for reason in verdict.disagreements)
+
+
+def test_a_per_unit_term_that_arrives_as_a_scalar_refuses(tmp_path):
+    """A `max` where a mapping belongs is the defect this shape prevents."""
+    report = closed_report()
+    report["derived"]["terms"]["candidate_scratch"] = max(CLOSED_CANDIDATE_SCRATCH.values())
+    with pytest.raises(RuntimePriceError, match="expected a per-unit charge table"):
+        consume(tmp_path, report)
 
 
 def test_a_fully_recomputing_report_still_expresses_no_scalar_budget(tmp_path):
@@ -620,22 +687,38 @@ def test_a_fully_recomputing_report_still_expresses_no_scalar_budget(tmp_path):
     assert any("no scalar device budget is expressible" in reason for reason in verdict.blocking)
 
 
-@pytest.mark.parametrize("term,wrong", [("fixed_scratch", 6000), ("candidate_scratch", 2800),
-                                        ("fixed_scratch", CLOSED_FIXED_SCRATCH + 1)])
-def test_a_changed_derived_total_on_an_agreeing_report_refuses(tmp_path, term, wrong):
+@pytest.mark.parametrize("wrong", [6000, CLOSED_FIXED_SCRATCH + 1, 0])
+def test_a_changed_derived_total_on_an_agreeing_report_refuses(tmp_path, wrong):
+    """The keystone on a report whose terms are genuinely expressible, so it
+    cannot pass on all-null terms."""
     report = closed_report()
-    report["derived"]["terms"][term] = wrong
+    assert report["derived"]["terms"]["fixed_scratch"] == CLOSED_FIXED_SCRATCH
+    report["derived"]["terms"]["fixed_scratch"] = wrong
     verdict = consume(tmp_path, report)
-    assert any(f"derived term {term} is {wrong}" in reason for reason in verdict.disagreements)
+    assert any(f"derived term fixed_scratch is {wrong}" in reason
+               for reason in verdict.disagreements)
 
 
-def test_an_unrecomputable_kv_charge_refuses(tmp_path):
-    """`fixed_kv` has a declared term and no observation to recompute it from."""
+def test_a_kv_charge_refuses_while_its_own_domain_is_not_closed(tmp_path):
+    """`kv` is a real owner class and the fixture carries a KV backing, so
+    `fixed_kv` is recomputable arithmetic: the sum of the resident KV rows.
+    What it waits on is `cache_capacity`, which no report closes at this
+    schema version, so any number here is a charge the gate may not read."""
     report = closed_report()
-    report["derived"]["terms"]["fixed_kv"] = 1024
+    report["derived"]["terms"]["fixed_kv"] = 2048
     report["derived"]["scope"]["unavailable_terms"].remove("fixed_kv")
     verdict = consume(tmp_path, report)
-    assert any("no KV observation to recompute" in reason for reason in verdict.disagreements)
+    assert "cache_capacity" in verdict.open_domains
+    assert any("derived term fixed_kv is 2048 where this consumer recomputes None" in reason
+               for reason in verdict.disagreements)
+
+
+def test_a_kv_backing_is_classified_rather_than_left_unclassified(tmp_path):
+    """Dropping `kv` from the owner classes would unclassify a real row and
+    null every term on any capture that has one."""
+    verdict = consume(tmp_path, closed_report())
+    assert verdict.unclassified_allocations == ()
+    assert verdict.disagreements == ()
 
 
 def test_the_reader_returns_the_report_it_validated(tmp_path):
