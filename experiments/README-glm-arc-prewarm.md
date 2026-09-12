@@ -72,9 +72,21 @@ manifest, in the order `prefetch_capture` consumes them (sorted member name);
 the byte ranges of the layer's selected weight tensors inside the safetensors
 shards, parsed from each shard's header and coalesced to 1 MiB record
 boundaries, because `--source-snapshot-policy selected-tensors-v1` reads ranges
-rather than whole shards; and the seed checkpoint's manifest and unit shards
-when the row declares one. The 16 remaining rows declare no seed checkpoint, so
-that term is zero for them.
+rather than whole shards; and the seed bytes the row's own argv names --
+`--seed-checkpoint` with its `.parts` shards, and every regular file under the
+directory `--seed-wire-dir` names, enumerated with one `os.walk` of that
+directory and nothing above it.
+
+The seed term is read off the argv, not off the campaign's plan. A row seeded
+from a `--seed-workspace` records its seed in `plan.json`; a campaign seeded
+from the global `--seed-checkpoint` / `--seed-wire-dir` flags records neither
+per row, and the directory those flags name belongs to a different workspace.
+Reading the plan is what made every manifest of `extension-r1024-02` declare
+`seeds: 0` while the row spent minutes hashing 9.4-19 GB of wire at 41 MB/s off
+cold spindles (row-0065, 2026-09-12). Seeds come last in `entries`, after the
+captures and the weight extents, because that is the order the row reads them:
+`prewarm_loop`'s reader walks the list in order and can stop at a byte budget,
+so a warm cut short loses the bytes the row reads last.
 
 **Safety.** It holds off while any claimed row is still inside its own load
 phase, detected by the immutable `capture-load-execution-<sha>.json` the row

@@ -63,6 +63,7 @@ import json
 import os
 import queue
 import re
+import stat as statmod
 import sys
 import threading
 import time
@@ -140,6 +141,69 @@ def to_pool(path: str) -> str:
     return path
 
 
+#: The two campaign flags that name bytes a seeded row reads before it prices
+#: anything.  They are read off the row's argv because that is the only record
+#: that always carries them; see ``Campaign.seed_reads``.
+SEED_CHECKPOINT_FLAG = "--seed-checkpoint"
+SEED_WIRE_DIR_FLAG = "--seed-wire-dir"
+
+
+def argv_value(argv, flag: str) -> "str | None":
+    """The value a row's argv gives ``flag``, in either spelling, or None.
+
+    The last spelling wins, matching ``argparse``: a campaign that appends a
+    global ``--seed-checkpoint`` after a per-row one runs with the last.
+    """
+    items = [str(a) for a in argv]
+    found = None
+    for index, item in enumerate(items):
+        if item == flag and index + 1 < len(items):
+            found = items[index + 1]
+        elif item.startswith(flag + "="):
+            found = item[len(flag) + 1:]
+    return found
+
+
+def _files_under(path: str) -> list[tuple[str, int]]:
+    """Every regular file at ``path``, named exactly, largest scope one tree.
+
+    ``path`` is a single directory (or file) the row's argv names.  It is
+    walked with one ``os.walk`` of that named directory and nothing above it:
+    a search rooted at a parent would be a recursive scan of the shared mount,
+    which is the RPC storm that stalls the fleet's GPU clients.  Symlinks are
+    not followed -- ``os.walk`` does not descend them, and a symlinked leaf is
+    dropped rather than declared, because the prewarm reader opens every entry
+    ``O_NOFOLLOW`` and would refuse it anyway.
+
+    Paths come back in the shared namespace the manifest declares, even when
+    the sizes were taken through the local pool mount.
+    """
+    local = to_pool(path)
+    try:
+        info = os.lstat(local)
+    except OSError:
+        return []
+    if statmod.S_ISREG(info.st_mode):
+        return [(path, info.st_size)] if info.st_size > 0 else []
+    if not statmod.S_ISDIR(info.st_mode):
+        return []
+    out: list[tuple[str, int]] = []
+    for root, dirs, files in os.walk(local):
+        dirs.sort()
+        for name in sorted(files):
+            full = os.path.join(root, name)
+            try:
+                leaf = os.lstat(full)
+            except OSError:
+                continue
+            if not statmod.S_ISREG(leaf.st_mode) or leaf.st_size <= 0:
+                continue
+            relative = os.path.relpath(full, local)
+            out.append((os.path.normpath(os.path.join(path, relative)),
+                        leaf.st_size))
+    return sorted(out)
+
+
 # ------------------------------------------------------------ campaign model
 
 
@@ -154,13 +218,24 @@ class Campaign:
         self.plan = plan
         self.rows = {r["row_id"]: r for r in plan["rows"]}
         self.model_dir = plan["model"]
-        cap = plan["calibration_cache"]["path"]
+        cache = plan.get("calibration_cache") or {}
+        cap = cache.get("path")
         self.capture_manifest_path = cap
-        manifest = _json(cap)
-        if manifest is None:
-            raise SystemExit(f"unreadable capture manifest: {cap}")
-        self.capture_root = os.path.dirname(cap)
-        self.entries = manifest["entries"]
+        if cap is None:
+            # A campaign planned without a hash-bound calibration cache reads
+            # no capture files at all.  That is a read set with one part
+            # missing, not an unreadable campaign, and saying so here is what
+            # lets the submit-time gate refuse a row whose manifest is
+            # genuinely unbuildable rather than every row of a shape that
+            # never had captures.
+            self.capture_root = workspace
+            self.entries = {}
+        else:
+            manifest = _json(cap)
+            if manifest is None:
+                raise SystemExit(f"unreadable capture manifest: {cap}")
+            self.capture_root = os.path.dirname(cap)
+            self.entries = manifest["entries"]
         self._units_cache: dict[str, list[str]] = {}
         self._header_cache: dict[str, dict] = {}
         self._weight_map = None
@@ -268,32 +343,50 @@ class Campaign:
                 out.append((path, a, b - a))
         return out
 
-    def seed_reads(self, row_id: str) -> list[tuple[str, int]]:
-        """Seed-checkpoint reads, when the row's argv declares one.
+    def seed_reads(self, row_id: str, argv: "list | None" = None
+                   ) -> list[tuple[str, int]]:
+        """The seed bytes the row will read, taken from the argv that runs it.
 
-        The 16 remaining rows carry no ``--seed-checkpoint``, so this is empty
-        for them; it is kept because a re-planned campaign may reinstate it.
+        Two reads, and the argv is the only place that names both.  A seeded
+        row is handed ``--seed-checkpoint`` (the anchors it adopts, small) and
+        ``--seed-wire-dir`` (the cached wire it re-verifies, 9.4-19 GB of
+        ``.tessera`` blobs).  The plan's own ``rows[i].seed`` carries them only
+        for a row seeded from a ``--seed-workspace``; a campaign seeded from
+        the global ``--seed-checkpoint`` / ``--seed-wire-dir`` flags records
+        neither per row, and the directory those flags name belongs to a
+        *different* workspace than this campaign's.
+
+        Reading the plan instead of the argv is what made every manifest of
+        ``extension-r1024-02`` say ``seeds: 0`` while the row spent minutes
+        hashing its wire directory at 41 MB/s off cold spindles (row-0065,
+        2026-09-12).  With no argv the plan is still consulted, so the daemon
+        modes that never had one keep working.
         """
-        seed = self.rows[row_id].get("seed") or {}
-        ckpt = seed.get("checkpoint")
-        if not ckpt:
-            return []
-        out = []
-        for path in (ckpt, ckpt + ".parts"):
-            p = to_pool(path)
-            if os.path.isfile(p):
-                out.append((path, os.stat(p).st_size))
-            elif os.path.isdir(p):
-                for entry in sorted(os.listdir(p)):
-                    f = os.path.join(p, entry)
-                    if os.path.isfile(f):
-                        out.append((os.path.join(path, entry), os.stat(f).st_size))
-        return out
+        ckpt, wire_dir = None, None
+        if argv is not None:
+            ckpt = argv_value(argv, SEED_CHECKPOINT_FLAG)
+            wire_dir = argv_value(argv, SEED_WIRE_DIR_FLAG)
+        if ckpt is None and wire_dir is None:
+            seed = self.rows[row_id].get("seed") or {}
+            ckpt, wire_dir = seed.get("checkpoint"), seed.get("wire_dir")
+        out: list[tuple[str, int]] = []
+        for path in ((ckpt, ckpt + ".parts") if ckpt else ()):
+            out += _files_under(path)
+        if wire_dir:
+            out += _files_under(wire_dir)
+        # A path declared twice is refused by the manifest contract, and the
+        # checkpoint's ``.parts`` directory can sit inside the wire directory.
+        seen, unique = set(), []
+        for path, size in out:
+            if path not in seen:
+                seen.add(path)
+                unique.append((path, size))
+        return unique
 
-    def row_plan(self, row_id: str) -> dict:
+    def row_plan(self, row_id: str, argv: "list | None" = None) -> dict:
         caps = self.capture_files(row_id)
         ext = self.weight_extents(row_id)
-        seeds = self.seed_reads(row_id)
+        seeds = self.seed_reads(row_id, argv)
         return {
             "row_id": row_id,
             "group": self.rows[row_id]["groups"][0],
