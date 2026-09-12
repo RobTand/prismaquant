@@ -650,7 +650,7 @@ def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
     assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
             for row in manifest] == ["row-0000.json", "row-0001.json",
                                      "row-0002.json"]
-    assert {row["demand"]["mem_gb"] for row in manifest} == {2}
+    assert {row["demand"]["mem_gb"] for row in manifest} == {5}
 
     plan = json.loads((workspace / "plan.json").read_text())
     # The plan is what an auditor reads, so it keeps the whole layout: every
@@ -659,12 +659,12 @@ def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
         "row-0000", "row-0001", "row-0002", "row-0003"]
     assert [entry["admissible"] for entry in plan["rows"]] == [
         True, True, True, False]
-    assert plan["row_memory_gb"] == {"row-0000": 2, "row-0001": 2,
-                                     "row-0002": 2, "row-0003": 65}
+    assert plan["row_memory_gb"] == {"row-0000": 5, "row-0001": 5,
+                                     "row-0002": 5, "row-0003": 68}
     declined = plan["inadmissible_rows"]
     assert [record["row_id"] for record in declined] == ["row-0003"]
     # The demand is recorded as derived, never rewritten to fit the box.
-    assert declined[0]["mem_gb"] == 65
+    assert declined[0]["mem_gb"] == 68
     assert declined[0]["rows_per_box"] == 2
     assert declined[0]["box_memory_gb"] == 104
     assert declined[0]["members"] == ["wide"]
@@ -673,14 +673,14 @@ def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
     out = capsys.readouterr().out
     assert "3 of 4 rows are admissible" in out
     assert "1 declined" in out
-    assert "row-0003" in out and "65" in out and "104" in out
+    assert "row-0003" in out and "68" in out and "104" in out
 
 
 def test_a_plan_whose_every_row_is_too_wide_refuses(tmp_path):
     import dispatch_tessera_campaign as dispatch
 
     spec, workspace = _partition_workspace(tmp_path, wide=False)
-    with pytest.raises(RuntimeError, match="65 GB"):
+    with pytest.raises(RuntimeError, match="68 GB"):
         dispatch.cmd_plan(_plan_args(spec, workspace))
     # Nothing to submit means nothing was written to submit.
     assert not (workspace / "manifest.json").exists()

@@ -213,7 +213,9 @@ def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monke
     monkeypatch.setattr(dispatch, '_streamed_resource_plan', resources)
     assert dispatch.main([*common, '--calibration-cache', '/capture']) == 0
     rows = json.loads((tmp_path/'manifest.json').read_text())
-    assert rows[0]['demand']['mem_gb'] == 3
+    # 3 GiB of plan, plus the process floor this fleet measured and the margin
+    # the row's own guard holds back from its cap (RobTand/prismaquant#522).
+    assert rows[0]['demand']['mem_gb'] == 7
     assert rows[0]['env']['MIMALLOC_PURGE_DELAY'] == '0'
     assert rows[0]['env']['PRISMAQUANT_RELEASE_SOURCE_PAGES'] == '1'
     assert '--calibration-cache-sha256' in rows[0]['argv']
@@ -351,7 +353,7 @@ _ROUNDING_LOSER_PLAN_BYTES = 20 * 1024 ** 3 + 173_741_824
 
 
 def _row_is_admitted(tmp_path, mem_gb, memory_bytes, floor_bytes, monkeypatch):
-    """The two ends a row's demand actually has to meet, joined.
+    """The ends a row's demand actually has to meet, joined.
 
     The cap is built the way PrismaBuild builds it -- ``pool.py:2850``
     constructs the resource scope with ``memory * 1024 ** 3``, so ``mem_gb``
@@ -366,6 +368,13 @@ def _row_is_admitted(tmp_path, mem_gb, memory_bytes, floor_bytes, monkeypatch):
     what makes this a regression on the mechanism: a change to how the guard
     measures its baseline, or to which of the two readings it sums, moves this
     test.  A hardcoded number would not have noticed.
+
+    Two verdicts, because the row faces two refusals.  ``admitted`` is the
+    row's own admission predicate.  ``clears_margin`` is whether the plan also
+    fits under the cap less the floor **and** the guard's physical margin,
+    which is where ``check`` refuses.  A demand can pass the first and fail the
+    second, and a demand derived without the margin regularly does
+    (RobTand/prismaquant#522).
     """
     from prismaquant import memory_management as memory
     root = tmp_path/'cgroup'
@@ -387,16 +396,19 @@ def _row_is_admitted(tmp_path, mem_gb, memory_bytes, floor_bytes, monkeypatch):
     guard.check('before_selected_capture_identity')
     assert guard.baseline_bytes() == floor_bytes, 'the guard did not read the floor under test'
     assert guard.cap_bytes == mem_gb * 1024 ** 3, 'the cap is not the demand PrismaBuild would set'
-    return not (memory_bytes > guard.cap_bytes - guard.baseline_bytes())
+    return dict(
+        admitted=not (memory_bytes > guard.cap_bytes - guard.baseline_bytes()),
+        clears_margin=(memory_bytes <= guard.cap_bytes - guard.baseline_bytes()
+                       - guard.margin_bytes))
 
 
-@pytest.mark.parametrize('reservation,demand_gb,admitted', [
-    (None, 21, False),
-    (800_000_000, 21, False),
-    (2147483648, 23, True),
+@pytest.mark.parametrize('reservation,demand_gb,admitted,clears_margin', [
+    (None, 24, True, True),
+    (0, 23, True, False),
+    (2147483648, 25, True, True),
 ])
 def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
-        monkeypatch, tmp_path, reservation, demand_gb, admitted):
+        monkeypatch, tmp_path, reservation, demand_gb, admitted, clears_margin):
     """A row's demand has to cover the floor the row is judged against.
 
     The plan states **deltas** over whatever the process already holds; the cap
@@ -412,11 +424,15 @@ def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
     accident no one owns and no receipt records.  Both inspected example rows
     lose it.
 
-    The middle arm is the one worth reading twice.  A declared 800,000,000
-    bytes is *smaller than the slack it replaces*, so it does not even move the
-    demand: the row still asks for 3 GiB and still refuses.  A reservation that
-    fits inside the rounding it was supposed to make unnecessary buys nothing,
-    and must not be able to report that it did.
+    The default reservation closed that (RobTand/prismaquant#522): a spec that
+    declares nothing now gets the worst floor this fleet has measured, plus the
+    margin the guard holds back from the cap, so the first arm admits.
+
+    The middle arm is the one worth reading twice.  A spec may still declare
+    zero, and then it has opted out: the demand covers the plan and the margin
+    but not the floor, the row's own admission predicate passes, and the
+    guard's margin check is what refuses.  That is what a demand short of one
+    term buys -- an admission followed by a refusal twenty seconds later.
     """
     import json
     from tools import dispatch_tessera_campaign as dispatch
@@ -451,9 +467,11 @@ def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
                           '--calibration-cache', '/capture']) == 0
     row = json.loads((tmp_path/'manifest.json').read_text())[0]
     assert row['demand']['mem_gb'] == demand_gb
-    assert _row_is_admitted(tmp_path, row['demand']['mem_gb'],
-                            _ROUNDING_LOSER_PLAN_BYTES,
-                            GLM_MEASURED_PROCESS_FLOOR_BYTES, monkeypatch) is admitted
+    verdict = _row_is_admitted(tmp_path, row['demand']['mem_gb'],
+                               _ROUNDING_LOSER_PLAN_BYTES,
+                               GLM_MEASURED_PROCESS_FLOOR_BYTES, monkeypatch)
+    assert verdict['admitted'] is admitted
+    assert verdict['clears_margin'] is clears_margin
 
 
 @pytest.mark.parametrize('value', [-1, 1.5, '2147483648', True, None])
@@ -507,28 +525,38 @@ def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tm
     """A process floor exists whether or not the row streams.
 
     The resident-source branch of ``_row_memory_gb`` is a different expression
-    with its own ``ceil`` and its own ``headroom_gb`` addend, so a key wired
+    with its own ``ceil`` and its own ``headroom_gb`` addend, so a term wired
     into the streaming branch alone would mean one thing on one path and
-    nothing on the other, under one name.
+    nothing on the other, under one name.  Both terms outside the plan -- the
+    process floor and the guard's margin -- are charged on both branches.
     """
     import math
     from tools import dispatch_tessera_campaign as dispatch
+    from prismaquant.memory_management import CaptureMemoryGuard
     gib = 1024 ** 3
+    margin = CaptureMemoryGuard.MARGIN_BYTES
     monkeypatch.setattr(dispatch, '_model_bytes', lambda model: 10 * gib)
     census = dict(unit_shapes={'layers.0.proj': [4, 8]})
     spec = dict(model='/source', campaign_argv=[], headroom_gb=3, max_act_rows=2)
     hessian, rows = 8 ** 2 * 4, 8 * 2 * 4
     body = 10 * gib + hessian + rows
 
-    plain = dispatch._row_memory_gb(spec, ['layers.0.proj'], census)
-    assert plain == math.ceil(body / gib) + 3
+    default = dispatch._row_memory_gb(spec, ['layers.0.proj'], census)
+    assert default == math.ceil(
+        (body + dispatch.DEFAULT_PROCESS_BASELINE_BYTES + margin) / gib) + 3
 
     reserved = dispatch._row_memory_gb(
         {**spec, 'process_baseline_bytes': 2147483648}, ['layers.0.proj'], census)
     # Charged inside the same ceil as the body, so the demand covers
-    # body + reservation rather than rounding each of them up separately.
-    assert reserved == math.ceil((body + 2147483648) / gib) + 3
-    assert reserved - plain == 2
+    # body + reservation + margin rather than rounding each of them up
+    # separately.
+    assert reserved == math.ceil((body + 2147483648 + margin) / gib) + 3
+
+    # A declared zero opts out of the floor and of nothing else: the margin is
+    # the guard's, not the spec's.
+    assert dispatch._row_memory_gb(
+        {**spec, 'process_baseline_bytes': 0}, ['layers.0.proj'],
+        census) == math.ceil((body + margin) / gib) + 3
 
     # Headroom is untouched by the reservation: they are separate terms and
     # only one of them is inside ``memory_bytes``.

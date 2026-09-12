@@ -78,6 +78,15 @@ def require_bounded_capture_environment(environ):
 # predicate, which is exactly what declared headroom already does.
 BASELINE_POLICY_DECLARED_HEADROOM = 'declared-headroom-pre-run-measured-in-row'
 BASELINE_POLICY_EXPLICIT_RESERVATION = 'explicit-spec-reservation-measured-in-row'
+# A reservation the caller took from a measured fleet default rather than from
+# a spec that asked for it.  It is a separate value because a reader of a plan
+# has to be able to tell the two apart: one row's operator chose the number,
+# the other inherited a number measured on other rows.  Both are reservations,
+# and neither is the floor the row measures for itself.
+BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION = (
+    'measured-fleet-default-reservation-measured-in-row')
+RESERVATION_BASELINE_POLICIES = (BASELINE_POLICY_EXPLICIT_RESERVATION,
+                                 BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION)
 
 
 def validate_process_baseline_bytes(value, *, where='process_baseline_bytes'):
@@ -93,25 +102,42 @@ def validate_process_baseline_bytes(value, *, where='process_baseline_bytes'):
     return value
 
 
-def _baseline_fields(process_baseline_bytes):
+def validate_process_baseline_policy(policy, *, where='process_baseline_policy'):
+    """A reservation names where it came from, or it is not one."""
+    if policy not in RESERVATION_BASELINE_POLICIES:
+        raise RuntimeError(
+            f'{where} must be one of {list(RESERVATION_BASELINE_POLICIES)}, '
+            f'not {policy!r}')
+    return policy
+
+
+def _baseline_fields(process_baseline_bytes,
+                     policy=BASELINE_POLICY_EXPLICIT_RESERVATION):
     """What a plan records about its pre-run term, and only what is true.
 
     Zero is the legacy default and emits nothing at all, so a reader can tell a
     declared reservation from the absence of one.  A plan that reserved nothing
     must not be able to report coverage it does not have.
+
+    ``policy`` says where the reservation came from.  The default is the
+    caller's own number; a caller that supplied a measured fleet default passes
+    ``BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION`` instead, so the plan does
+    not report a spec reservation the spec never made.
     """
     validate_process_baseline_bytes(process_baseline_bytes)
+    validate_process_baseline_policy(policy)
     if not process_baseline_bytes:
         return {}
     return dict(process_baseline_bytes=process_baseline_bytes,
-                baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION)
+                baseline_policy=policy)
 
 
 def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
                                    prefetch_workers, headroom_gb,
                                    capture_policy='legacy', capture_load_policy=None,
-                                   process_baseline_bytes=0, selected_source_units=None):
+                                   process_baseline_bytes=0, selected_source_units=None,
+                                   process_baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -126,6 +152,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # below: a caller that declares a malformed reservation must be
     # refused before it is handed a plan that silently ignored it.
     validate_process_baseline_bytes(process_baseline_bytes)
+    validate_process_baseline_policy(process_baseline_policy)
     import math
     from .artifact_completeness import read_artifact_header
     from .model_profiles import detect_profile
@@ -292,7 +319,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         # On the v1 result, so the legacy early return below carries it too:
         # a caller that declares a reservation and gets a plan back with no
         # record of it has been told the opposite of the truth.
-        **_baseline_fields(process_baseline_bytes),
+        **_baseline_fields(process_baseline_bytes, process_baseline_policy),
         **({'source_tensor_keys': sorted(selected_keys),
             'body_source_validation_bytes': {str(k): v for k, v in validation_raw_body.items()}}
            if selected_keys is not None else {}),
@@ -382,7 +409,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               anchor_batch_size=1, capture_load_policy=None,
                               publication_overlap_bytes=0, campaign_identity_bytes=0,
                               campaign_identity_threads=1,
-                              process_baseline_bytes=0, source_snapshot_policy='whole-layer-v1'):
+                              process_baseline_bytes=0, source_snapshot_policy='whole-layer-v1',
+                              process_baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION):
     """Bound selected-source preparation separately from resident encoding.
 
     This extends the source loader's header/dtype accounting. No source
@@ -436,6 +464,7 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     steady-state step against the plan (RobTand/prismaquant#390).
     """
     validate_process_baseline_bytes(process_baseline_bytes)
+    validate_process_baseline_policy(process_baseline_policy)
     import math
     from .perturbed_x_cache import normalize_verified_activation_load
     capture_load_policy = normalize_verified_activation_load(capture_load_policy)
@@ -616,7 +645,7 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # reservation replaces this value and is emitted beside it, so an
         # absent reservation cannot read as coverage.
         **{'baseline_policy': BASELINE_POLICY_DECLARED_HEADROOM,
-           **_baseline_fields(process_baseline_bytes)},
+           **_baseline_fields(process_baseline_bytes, process_baseline_policy)},
         source_forward_count=0)
 
 

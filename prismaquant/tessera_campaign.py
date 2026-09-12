@@ -4579,6 +4579,27 @@ def _save_hessian_capture_with_page_release(payload, path, *, resource_check=Non
             'page release would be silently skipped (RobTand/prismaquant#396)')
 
 
+def memory_admission_detail(*, plan_bytes, cap_bytes, baseline_bytes=None):
+    """Every term of a cgroup admission predicate, as numbers.
+
+    The predicate is ``plan > cap - baseline``: a phase plan states deltas, the
+    cap is absolute, and the baseline is the floor the row measured for itself.
+    A refusal that prints only its verdict leaves the cause to be recovered by
+    unpickling a completed row's ``cost.pkl``, which is what three rows of the
+    GLM extension cost on 2026-09-12 (RobTand/prismaquant#522).
+
+    ``slack_bytes`` is what the plan had left; negative is the shortfall.
+    ``baseline_bytes`` is absent, not zero, where no reading has been taken:
+    zero would read as a floor that was measured and found empty.
+    """
+    detail = dict(plan_bytes=int(plan_bytes), cap_bytes=int(cap_bytes))
+    if baseline_bytes is not None:
+        detail['baseline_bytes'] = int(baseline_bytes)
+    detail['slack_bytes'] = (int(cap_bytes) - int(baseline_bytes or 0)
+                             - int(plan_bytes))
+    return detail
+
+
 def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
                         hessian_identity, static_scales, static_scale_policy,
                         release_file_pages=False, resource_check=None,
@@ -4785,7 +4806,16 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             headroom_gb=args.streaming_cache_headroom_gb, capture_policy=capture_policy,
             capture_load_policy=capture_load_policy)
         if resources['memory_bytes'] > guard.cap_bytes:
-            raise RuntimeError('capture cgroup budget is smaller than its checked phase plan')
+            # The numbers, not just the verdict: a row that dies here is
+            # otherwise diagnosable only by unpickling a completed row's
+            # cost.pkl (RobTand/prismaquant#522). This predicate is the
+            # capture path's, so it carries no baseline term -- the guard has
+            # taken no reading yet.
+            raise RuntimeError(
+                'capture cgroup budget is smaller than its checked phase plan: '
+                + json.dumps(memory_admission_detail(
+                    plan_bytes=resources['memory_bytes'],
+                    cap_bytes=guard.cap_bytes), sort_keys=True))
         additional = max(sum(value for key, value in phase.items() if key not in
             ('nonbody_source_bytes', 'declared_headroom_bytes'))
             for phase in resources['phases'].values())
@@ -5414,7 +5444,24 @@ def _main(argv, *, source_scope) -> int:
             selected_guard.check('before_selected_capture_identity')
             if (selected_resources['memory_bytes'] >
                     selected_guard.cap_bytes - selected_guard.baseline_bytes()):
-                raise RuntimeError('selected anchor cgroup budget is smaller than its checked phase plan')
+                # Every term of the predicate, in the message and on disk.
+                # Three rows died here on 2026-09-12 with 8-13 MB of slack and
+                # the message named none of it, so the cause had to be
+                # recovered by unpickling completed rows' cost.pkl
+                # (RobTand/prismaquant#522).
+                detail = memory_admission_detail(
+                    plan_bytes=selected_resources['memory_bytes'],
+                    cap_bytes=selected_guard.cap_bytes,
+                    baseline_bytes=selected_guard.baseline_bytes())
+                from .cost_stage_checkpoint import atomic_write_bytes
+                atomic_write_bytes(
+                    cache_dir/'selected-anchor-memory-refusal.json',
+                    (json.dumps(dict(detail,
+                                     memory_guard=selected_guard.snapshot()),
+                                indent=2, sort_keys=True)+'\n').encode())
+                raise RuntimeError(
+                    'selected anchor cgroup budget is smaller than its checked '
+                    'phase plan: ' + json.dumps(detail, sort_keys=True))
     if args.capture_calibration_out or args.calibration_cache:
         from . import tessera_calibration_cache as calibration_store
         hi, lo = census_token_counts(census, {})
