@@ -6,11 +6,14 @@ table was first computed by hand-joining work package A's domain to work
 package C's builder in a throwaway script, which is exactly the kind of number
 this repository retracts: nobody could re-derive it.
 
-This file is the join, committed. It also pins the seam between the two
-structurally identical ``RateDomain`` dataclasses (debt item 1 of the report's
-§5): A hands C plain data through ``rate_domain_payload``, C constructs its own
-class from it, and if either side's field set moves this test fails rather than
-the report going quietly stale.
+This file is the join, committed. It also pins the seam that used to run
+between two structurally identical ``RateDomain`` dataclasses (debt item 1 of
+the report's §5, paid 2026-09-12): there is now one class, defined in package C
+and imported by package A, and A still hands C plain data through
+``rate_domain_payload``. The payload is still the seam -- it is what a frozen
+document carries -- so this test still builds the domain from the payload and
+checks it against the grammar-derived one, and a field renamed on either side
+still fails here rather than the report going quietly stale.
 
 ``source_sha256`` is the grammar digest -- the bytes the legal domain is
 actually derived from -- so the selection hash is anchored in the tree and the
@@ -21,11 +24,8 @@ from __future__ import annotations
 
 import pytest
 
-domain = pytest.importorskip(
-    "prismaquant.tessera_legal_domain",
-    reason="requires a pinned Tessera on the path (see the report's §1)",
-)
-population = pytest.importorskip("prismaquant.quality_prefill_population")
+from prismaquant import quality_prefill_population as population
+from prismaquant import tessera_legal_domain as domain
 
 
 # The report's §3 table, keyed by family. Legal counts are independently
@@ -84,18 +84,24 @@ def test_the_roster_is_a_superset_of_the_mandatory_set_and_stays_legal():
         assert set(built.roster) <= legal
 
 
-def test_the_two_rate_domain_classes_are_distinct_but_the_payload_joins_them():
-    """Debt item 1, pinned: the duplication is real and the seam is the fix.
+def test_one_rate_domain_class_and_the_payload_still_joins_through_it():
+    """Debt item 1, paid: one class, and the payload seam still checked.
 
-    If the classes are ever merged this test should be deleted along with the
-    report's debt entry -- but until then, a field renamed on one side must
-    fail here rather than in a hand-run script nobody kept.
+    The merge removes the duplicate, not the seam.  A frozen plan carries the
+    domain as data, so the round trip that matters is grammar -> payload ->
+    class -> equality with the grammar-derived domain, and that is what runs
+    here.  A field renamed on either side still fails in this test rather than
+    in a hand-run script nobody kept.
     """
-    assert domain.RateDomain is not population.RateDomain
+    assert domain.RateDomain is population.RateDomain
     for family in domain.PRIMARY_FAMILIES:
         payload = domain.rate_domain_payload(family)
         assert set(payload) == {"family", "rates", "transition_rates"}
-        theirs = population.RateDomain(**payload)
-        mine = domain.legal_rate_domain(family)
-        assert theirs.rates == mine.rates
-        assert theirs.transition_rates == mine.transition_rates
+        rebuilt = population.RateDomain(**payload)
+        derived = domain.legal_rate_domain(family)
+        assert rebuilt == derived
+        assert rebuilt.rates == derived.rates
+        assert rebuilt.transition_rates == derived.transition_rates
+        # The builder is the consumer; the payload has to satisfy it, not just
+        # construct.
+        assert set(population.mandatory_rates(rebuilt)) <= set(derived.rates)

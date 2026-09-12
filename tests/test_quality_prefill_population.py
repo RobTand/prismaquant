@@ -307,6 +307,22 @@ def test_rate_domain_refuses_a_transition_outside_the_legal_domain():
         RateDomain(family="E4M3_K1", rates=(256, 257), transition_rates=(999,))
 
 
+@pytest.mark.parametrize("field", ["rates", "transition_rates"])
+def test_rate_domain_refuses_a_list_where_a_tuple_belongs(field):
+    """A domain rebuilt from JSON carries lists and would compare unequal.
+
+    Every other check passes on a list-valued copy -- sorted, unique, no stray
+    transition -- so without this refusal the mismatch shows up as a silent
+    inequality against the derived domain rather than as an error.
+    """
+    fields = {
+        "family": "E4M3_K1", "rates": (256, 257), "transition_rates": (257,),
+    }
+    fields[field] = list(fields[field])
+    with pytest.raises(PopulationSelectionError, match="tuple"):
+        RateDomain(**fields)
+
+
 # ------------------------------------------- criterion 7: the hash input ---
 
 

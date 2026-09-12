@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Mapping, Sequence
 
+from .quality_prefill_population import RateDomain as _RateDomain
 from .tessera_formats import (
     TesseraFamily,
     TesseraFormatError,
@@ -907,38 +908,16 @@ def resolver_transitions(
     return tuple(transitions)
 
 
-@dataclass(frozen=True, slots=True)
-class RateDomain:
-    """One family's complete legal rate domain and its resolver transitions.
-
-    The narrow object work package A hands work package C
-    (``quality_prefill_population.RateDomain``): same three fields, same names,
-    same order, same refusals, so the payload constructs that class directly.
-    A owns both values; everything C does with them is C's.
-    """
-
-    family: str
-    rates: tuple[int, ...]
-    transition_rates: tuple[int, ...]
-
-    def __post_init__(self) -> None:
-        if not self.rates:
-            raise TesseraFormatError(
-                f"rate domain for family {self.family!r} is empty")
-        if tuple(sorted(set(self.rates))) != tuple(self.rates):
-            raise TesseraFormatError(
-                f"rate domain for family {self.family!r} must be sorted and unique")
-        stray = sorted(set(self.transition_rates) - set(self.rates))
-        if stray:
-            raise TesseraFormatError(
-                f"family {self.family!r} declares transition rates outside its "
-                f"legal domain: {stray}")
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "family": self.family, "rates": list(self.rates),
-            "transition_rates": list(self.transition_rates),
-        }
+#: The narrow object work package A hands work package C — one class, defined
+#: in C (:class:`prismaquant.quality_prefill_population.RateDomain`) and
+#: imported here. A owns the derivation below; C owns the type, because C has
+#: no Tessera dependency and this module has one at import time, so a shared
+#: definition can only live on C's side. Its refusals — empty, unsorted or
+#: duplicated rates, a transition outside the domain, a non-tuple field — are
+#: C's and raise ``PopulationSelectionError``; this module previously raised
+#: :class:`~prismaquant.tessera_formats.TesseraFormatError` for the first
+#: three, and nothing in the tree guarded those constructions with it.
+RateDomain = _RateDomain
 
 
 def legal_rate_domain(

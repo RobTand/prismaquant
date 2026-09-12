@@ -20,6 +20,7 @@ from fractions import Fraction
 
 import pytest
 
+from prismaquant import quality_prefill_population as population
 from prismaquant import tessera_legal_domain as domain
 from prismaquant.tessera_formats import (
     family_q256_bounds,
@@ -521,6 +522,15 @@ def test_rate_domain_has_the_pinned_three_fields_in_order():
     assert names == ("family", "rates", "transition_rates")
 
 
+def test_the_provider_type_is_package_c_s_own_class():
+    """One definition, not two that happen to agree.
+
+    The field-order test above passed while there were two classes; this is
+    what makes it impossible for them to drift apart again.
+    """
+    assert domain.RateDomain is population.RateDomain
+
+
 @pytest.mark.parametrize("family, count", [(E4, 1793), (BF, 3841)])
 def test_provider_returns_the_full_sorted_unique_domain(family, count):
     provided = domain.legal_rate_domain(family)
@@ -540,9 +550,27 @@ def test_provider_returns_the_full_sorted_unique_domain(family, count):
     ],
 )
 def test_rate_domain_refuses_the_same_inputs_package_c_refuses(bad):
-    """Empty, unsorted, duplicated, and a transition outside the domain."""
-    with pytest.raises(Exception):
+    """Empty, unsorted, duplicated, and a transition outside the domain.
+
+    The concrete type is named rather than ``Exception``: these refusals moved
+    from ``TesseraFormatError`` to package C's error when the two classes were
+    merged, and a bare ``Exception`` would have let that pass unremarked.
+    """
+    with pytest.raises(population.PopulationSelectionError):
         domain.RateDomain(**bad)
+
+
+def test_rate_domain_refuses_a_payload_whose_arrays_arrived_as_lists():
+    """A JSON round trip hands back lists; an unequal domain is not a domain.
+
+    ``rate_domain_payload`` produces tuples, so this only fires on a domain
+    rebuilt from a document -- which is exactly where a silent inequality
+    would be hardest to see.
+    """
+    payload = dict(domain.rate_domain_payload(E4))
+    payload["rates"] = list(payload["rates"])
+    with pytest.raises(population.PopulationSelectionError):
+        domain.RateDomain(**payload)
 
 
 def test_a_transition_names_the_first_rate_of_the_new_regime():
@@ -609,17 +637,13 @@ def test_rate_domain_payload_constructs_the_dataclass():
     assert rebuilt == domain.legal_rate_domain(E4)
 
 
-def test_payload_satisfies_package_c_when_package_c_is_importable():
-    """The real compatibility check, when both packages are on one branch.
+def test_payload_satisfies_package_c():
+    """The real compatibility check: both packages are on one branch.
 
-    Skipped -- and therefore certifying nothing -- while work package C lives
-    on its own branch.  It exists so the join is checked by a test at merge
-    rather than by two matching docstrings.
+    The ``importorskip`` this used to open with dated from when work package C
+    lived on its own branch.  C is here, so the guard could only hide a real
+    break, and it is now a plain import at the top of the file.
     """
-    population = pytest.importorskip(
-        "prismaquant.quality_prefill_population",
-        reason="work package C is not on this branch yet",
-    )
     for family in domain.PRIMARY_FAMILIES:
         theirs = population.RateDomain(**domain.rate_domain_payload(family))
         assert theirs.rates == domain.legal_rate_domain(family).rates

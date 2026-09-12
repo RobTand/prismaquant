@@ -869,13 +869,24 @@ def population_freeze_digest(selection: PopulationSelection) -> str:
 # --------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RateDomain:
-    """The legal rate domain of one family.
+    """The legal rate domain of one family: the single definition of it.
 
-    Work package A owns the derivation of this object from the frozen producer
-    grammar and packaged reader contract (§2.1). Work package C consumes it
-    through :data:`LegalRateDomainProvider` and never re-derives it.
+    Work package A owns the *derivation*: ``tessera_legal_domain.
+    legal_rate_domain`` walks the frozen producer grammar and packaged reader
+    contract (§2.1) and returns this class. Work package C consumes it
+    through :data:`LegalRateDomainProvider` and never re-derives it. Owning the
+    derivation is not owning the type, so the type lives here, in the package
+    that has no Tessera dependency: ``tessera_formats`` refuses to import
+    without the ``tessera`` package, and a duplicate class in A was the price
+    of keeping C importable without it. A imports this one instead.
+
+    ``rates`` and ``transition_rates`` are tuples, refused when they are not.
+    A domain rebuilt from JSON arrives carrying lists, and a list-valued copy
+    compares unequal to the derived domain while passing every other check —
+    a difference that would surface as a silent mismatch rather than a
+    refusal.
     """
 
     family: str
@@ -883,6 +894,13 @@ class RateDomain:
     transition_rates: tuple[int, ...]
 
     def __post_init__(self) -> None:
+        for name in ("rates", "transition_rates"):
+            if type(getattr(self, name)) is not tuple:
+                raise PopulationSelectionError(
+                    f"rate domain for family {self.family!r} must carry "
+                    f"{name} as a tuple, not a "
+                    f"{type(getattr(self, name)).__name__}"
+                )
         if not self.rates:
             raise PopulationSelectionError(
                 f"rate domain for family {self.family!r} is empty"
