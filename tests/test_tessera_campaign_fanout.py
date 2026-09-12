@@ -770,8 +770,13 @@ def test_submit_hands_the_fleet_the_admissible_rows_only(tmp_path, monkeypatch):
     args = types.SimpleNamespace(workspace=workspace, wait_s=1)
     assert dispatch.cmd_submit(args) == 0
 
-    assert len(seen) == 1
-    submitted = json.loads(pathlib.Path(seen[0][-1]).read_text())
+    # ``submit`` also asks git for the tree it built the manifests from, so
+    # the submission is picked out by name rather than by being the only
+    # subprocess the run makes.
+    submissions = [command for command in seen
+                   if any("pbcampaign" in str(word) for word in command)]
+    assert len(submissions) == 1
+    submitted = json.loads(pathlib.Path(submissions[0][-1]).read_text())
     assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
             for row in submitted] == ["row-0000.json", "row-0001.json",
                                       "row-0002.json"]
