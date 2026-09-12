@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from prismaquant import quality_prefill_pb_adapter as adapter
+from prismaquant.schemas import SchemaValidationError
 
 
 EVIDENCE = "cas:sha256:" + "1e" * 32
@@ -206,6 +207,25 @@ def test_write_logical_request_publishes_exactly_the_emitted_bytes(
 # --------------------------------------------------------------------------
 # The plan is refused rather than repaired
 # --------------------------------------------------------------------------
+
+def test_a_malformed_handoff_raises_prismaquants_existing_schema_error() -> None:
+    """One exception type for "this handoff artifact is structurally invalid".
+
+    ``prismaquant.schemas`` already owns that name.  A caller that catches
+    :class:`SchemaValidationError` around the other handoff validators catches
+    this adapter's refusals too, instead of learning a second one.  A missing
+    *fleet capability* is deliberately not in that hierarchy: it is not a
+    document anybody can fix.
+    """
+
+    plan = phase_plan()
+    plan["retry_policy"] = {"attempts": 3}
+    with pytest.raises(SchemaValidationError):
+        adapter.emit_logical_request(plan)
+
+    assert issubclass(adapter.QualityPrefillAdapterError, SchemaValidationError)
+    assert not issubclass(adapter.DecompositionUnavailable, SchemaValidationError)
+
 
 def test_an_unknown_field_is_refused_rather_than_dropped() -> None:
     """A field we do not read is a field the author believes is binding."""

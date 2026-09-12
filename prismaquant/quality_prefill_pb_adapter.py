@@ -60,6 +60,19 @@ fifteen modules carry a private copy, each raising its own module's error type
 ``shipcard`` and others).  Consolidating them is a repo-wide change and is not
 this work package's scope; this note is the debt line.
 
+``prismaquant/schemas.py`` is the nearest existing home and is reused as far as
+it goes: :class:`QualityPrefillAdapterError` subclasses its
+:class:`~prismaquant.schemas.SchemaValidationError` (``schemas.py:38``).  Its
+validators stop there -- ``_fail`` (``:46``), ``_as_non_negative_int`` (``:58``)
+and ``_as_finite_cost_number`` (``:76``) check one field at a time against an
+*open* mapping, by design ("older artifacts with extra fields still load",
+``schemas.py:1-7``).  This adapter needs the opposite: closed key sets, refusal
+of a repeated JSON key, and a canonical byte spelling, because its documents are
+hashed into a sealed action key.  Extending ``schemas.py`` with that machinery
+would collide head-on with the experiment-manifest schema being built in
+parallel, so the strict reader stays here and the two meet at the exception
+type.
+
 The identifier grammar is **PrismaBuild's**, not PrismaQuant's: roster ids reach
 a sealed action key, so they must satisfy ``prismabuild.core._ID_RE``
 (``[a-z0-9][a-z0-9._/-]{0,255}``), which admits ``/`` and 256 characters where
@@ -83,6 +96,7 @@ from pathlib import Path
 import re
 
 from prismaquant.cost_stage_checkpoint import canonical_json, canonical_json_sha256
+from prismaquant.schemas import SchemaValidationError
 
 
 # --------------------------------------------------------------------------
@@ -152,11 +166,16 @@ _EVIDENCE_RE = re.compile(r"[a-z][a-z0-9+.-]*:sha256:[0-9a-f]{64}\Z")
 _MODULE_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\Z")
 
 
-class QualityPrefillAdapterError(ValueError):
-    """A phase plan, batch envelope or child result is structurally invalid."""
+class QualityPrefillAdapterError(SchemaValidationError):
+    """A phase plan, batch envelope or child result is structurally invalid.
+
+    A subclass of :class:`prismaquant.schemas.SchemaValidationError` because
+    that is PrismaQuant's existing name for "a handoff artifact is structurally
+    invalid", and a caller that already catches it should catch these too.
+    """
 
 
-class DecompositionUnavailable(QualityPrefillAdapterError):
+class DecompositionUnavailable(RuntimeError):
     """The pinned PrismaBuild runtime cannot decompose a logical request.
 
     Its own type because the caller's response differs in kind.  A schema error

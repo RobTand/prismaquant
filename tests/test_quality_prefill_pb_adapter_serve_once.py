@@ -32,6 +32,7 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -57,7 +58,17 @@ pytestmark = pytest.mark.skipif(
     ),
 )
 
+#: Wall clock just before the first import out of the #518 checkout, so a test
+#: can tell a bytecode file this process wrote from one that was already there.
+_IMPORT_EPOCH = time.time()
+
 if not _missing:
+    # The #518 checkout is another agent's worktree and this harness is a
+    # reader of it.  Importing a module normally writes a ``__pycache__``
+    # alongside its source, which would be this process modifying that
+    # worktree; refuse to, before the first import from it.
+    sys.dont_write_bytecode = True
+
     for entry in (PB517_ROOT / "src", PB517_ROOT / "tools" / "fleet",
                   PB517_ROOT / "tests"):
         if str(entry) in sys.path:
@@ -256,6 +267,28 @@ def _group_path(shared: Path, group: dict) -> Path:
 # --------------------------------------------------------------------------
 # The cut
 # --------------------------------------------------------------------------
+
+def test_the_harness_only_reads_the_other_agents_worktree() -> None:
+    """Importing must not leave bytecode behind in the #518 checkout.
+
+    The checkout is a shared branch belonging to another agent; this harness is
+    allowed to read it and nothing else.  An import writes a ``__pycache__``
+    next to the source unless bytecode writing is off, so assert it is off and
+    that every module borrowed from that tree came in without one.
+    """
+    assert sys.dont_write_bytecode is True
+
+    for module in (pb, dc, pool, pbcampaign, pbrun):
+        cached = getattr(module, "__cached__", None)
+        if cached is None or str(PB517_ROOT) not in cached:
+            continue
+        if not Path(cached).exists():
+            continue
+        assert Path(cached).stat().st_mtime < _IMPORT_EPOCH, (
+            f"importing {module.__name__} wrote {cached} into another agent's "
+            f"worktree"
+        )
+
 
 def test_the_emitted_request_is_what_the_decomposer_reads(fleet) -> None:
     """Acceptance criterion 2, without executing anything.
