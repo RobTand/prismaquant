@@ -172,6 +172,27 @@ def test_a_launch_with_no_pinned_mount_is_refused(tmp_path):
         module.verify_pinned_import(data, cwd=str(checkout))
 
 
+def test_a_launch_that_imports_no_prismaquant_is_not_this_question(tmp_path):
+    """A generic payload is not a campaign row.
+
+    ``main`` launches whatever argv it is handed, and a spec that names no
+    ``PYTHONPATH`` pins no tree. Under the guard the working directory is off
+    the search too, so nothing can shadow anything and there is nothing to
+    compare; refusing here would stop launches the defect never touched. The
+    receipt says nothing was pinned, and still records the sealed checkout.
+    """
+
+    module = runner()
+    _, checkout = trees(tmp_path)
+    receipt = module.verify_pinned_import({"container": {"image": "qualified:fixed"}},
+                                          cwd=str(checkout))
+    assert receipt["pinned_source_entry"] is None
+    assert receipt["pinned_source_sha256"] is None
+    assert receipt["import_resolution_root"] is None
+    assert receipt["working_directory_source_sha256"] is not None
+    assert receipt["safe_path_guard_is_load_bearing"] is True
+
+
 def test_the_workspace_itself_is_not_a_pinned_tree(tmp_path):
     module = runner()
     pinned, checkout = trees(tmp_path)

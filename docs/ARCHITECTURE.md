@@ -28,6 +28,9 @@ the row stamps as `prismaquant_source_sha256`. A `PYTHONPATH` that names no
 declared mount holding a PrismaQuant package, or that puts `.` or a
 `/workspace` path ahead of the pinned mount, is refused rather than launched:
 safe-path mode removes the implicit working-directory entry, not a written one.
+The comparison applies only to a launch that can import PrismaQuant at all:
+when the guarded search reaches no package, nothing can shadow anything, so the
+launch proceeds and the receipt records that nothing was pinned.
 The launcher's JSON line, schema `prismaquant.tessera_campaign_container.v1`,
 gains `pinned_source_entry`, `pinned_source_root`, `pinned_source_sha256`,
 `import_resolution_root`, `import_resolution_source_sha256`,

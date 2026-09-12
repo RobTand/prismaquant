@@ -235,14 +235,30 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
     from the launched environment, not an observation of the executed process.
     The row's own stamped digest remains the observation, and the two agreeing
     is what closes the loop.
+
+    The question only arises for a launch that can import PrismaQuant at all.
+    When the guarded search reaches no package, the guard has already removed
+    the working directory from the search, so there is no tree to shadow and
+    nothing pinned to compare against; the launch proceeds and the receipt
+    records that nothing was pinned. One route stays outside the replay either
+    way: a ``PYTHONPATH`` entry that exists only inside the image, such as a
+    pip-installed package under ``dist-packages``, maps to no declared mount,
+    and the row's stamped digest is what catches that after the fact.
     """
 
+    guarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=True))
+    unguarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=False))
+    shadow_sha = (None if unguarded is None
+                  else prismaquant_source_sha256(unguarded[1] / "prismaquant"))
+    if guarded is None:
+        return {"pinned_source_entry": None, "pinned_source_root": None,
+                "pinned_source_sha256": None,
+                "import_resolution_source_sha256": None,
+                "import_resolution_root": None,
+                "working_directory_source_sha256": shadow_sha,
+                "safe_path_guard_is_load_bearing": shadow_sha is not None}
     entry, pinned = pinned_source_root(spec, cwd=cwd)
     pinned_sha = prismaquant_source_sha256(pinned / "prismaquant")
-    guarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=True))
-    if guarded is None:
-        raise RuntimeError(
-            "the guarded import search finds no PrismaQuant package at all")
     resolved_sha = prismaquant_source_sha256(guarded[1] / "prismaquant")
     if resolved_sha != pinned_sha:
         raise RuntimeError(
@@ -251,9 +267,6 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
             f"{entry} -> {pinned} ({pinned_sha}); a PYTHONPATH entry ahead of "
             "the pinned mount reaches another tree, and safe-path mode does "
             "not remove it")
-    unguarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=False))
-    shadow_sha = (None if unguarded is None
-                  else prismaquant_source_sha256(unguarded[1] / "prismaquant"))
     return {"pinned_source_entry": entry, "pinned_source_root": str(pinned),
             "pinned_source_sha256": pinned_sha,
             "import_resolution_source_sha256": resolved_sha,
