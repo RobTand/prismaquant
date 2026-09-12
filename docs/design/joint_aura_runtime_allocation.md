@@ -5,6 +5,13 @@ streamed AURA producer, production weight cache, allocator candidate builders,
 and existing serving-constraint controls. It does not change the default
 format menu, Tessera runtime pin, or serving admission.
 
+The [full-domain Tessera quality–prefill experiment specification](tessera_quality_prefill_experiment.md)
+defines the proposed multi-unit transfer validation, matched runtime producer,
+full-model coverage expansion and empirical confirmation program. It is a
+handoff for implementation; the contracts and measured readiness below remain
+unchanged. Its optional runtime-v2 dependency does not block direct measured
+comparisons of independently configured complete artifacts.
+
 ## Measurement and objective
 
 For one Linear, a route changes both its input and its rendered weight.
