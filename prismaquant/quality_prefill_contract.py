@@ -1575,8 +1575,14 @@ def seal_envelope(kind: str, body: Mapping[str, object]) -> dict[str, object]:
 
     if kind not in ENVELOPE_VALIDATORS:
         _fail(f"unknown evidence envelope {kind!r}")
+    if "schema" in body and body["schema"] != ENVELOPE_SCHEMAS[kind]:
+        _fail(
+            f"{kind} body declares schema {body['schema']!r}, "
+            f"not {ENVELOPE_SCHEMAS[kind]}"
+        )
     validator = ENVELOPE_VALIDATORS[kind]
-    return validator(_seal(body), where=kind)  # type: ignore[operator]
+    stamped = {**body, "schema": ENVELOPE_SCHEMAS[kind]}
+    return validator(_seal(stamped), where=kind)  # type: ignore[operator]
 
 
 # ---------------------------------------------------------------------------

@@ -851,3 +851,11 @@ def test_a_state_file_may_not_carry_an_unknown_phase_state(tmp_path):
     )
     assert result.returncode == 2
     assert "unknown state" in result.stderr
+
+
+@pytest.mark.parametrize("kind", sorted(ENVELOPE_VALIDATORS))
+def test_an_envelope_may_not_declare_another_envelopes_schema(kind):
+    body = envelope_body(kind)
+    body["schema"] = "prismaquant.quality_prefill_experiment.not_this.v1"
+    with pytest.raises(QualityPrefillContractError):
+        seal_envelope(kind, body)
