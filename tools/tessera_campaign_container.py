@@ -195,12 +195,22 @@ def _package_root(roots: list) -> "tuple[str, Path] | None":
     return None
 
 
-def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str, Path]":
-    """The mounted PrismaQuant the spec asks the campaign to run.
+def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str | None, Path, bool]":
+    """The PrismaQuant tree this launch is expected to run, and how it was chosen.
 
-    The first ``PYTHONPATH`` entry that names a declared mount and holds a
-    PrismaQuant package. ``/workspace`` is the sealed checkout, not a pinned
-    tree, so an entry that resolves into it is not a candidate.
+    Returns the entry that declared it, its host path, and whether it was
+    defaulted. A declared tree is the first ``PYTHONPATH`` entry that names a
+    mount the spec declares and that holds a PrismaQuant package;
+    ``/workspace`` is the sealed checkout, not a declared mount, so an entry
+    resolving into it is not a candidate.
+
+    When no declared mount holds a PrismaQuant package there is nothing for
+    the sealed checkout to shadow, so the checkout is the tree to run and is
+    returned with ``pinned_by_default`` set. Every container ``PYTHONPATH``
+    recorded in this repository has that shape: the 2026-09-08 census
+    invocations name ``/workspace`` and then Tessera source trees, which hold
+    no ``prismaquant`` package. Refusing them would refuse the launch shape
+    the campaign actually uses.
     """
 
     mounts = spec.get("container", {}).get("mounts", [])
@@ -212,11 +222,8 @@ def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str, Path]":
             continue
         root = host_path(entry, cwd=cwd, mounts=mounts)
         if root is not None and (root / "prismaquant" / "__init__.py").is_file():
-            return entry, root
-    raise RuntimeError(
-        "no PYTHONPATH entry names a declared mount holding a PrismaQuant "
-        "package, so this launch has no pinned tree to run; PYTHONPATH is "
-        f"{raw!r}")
+            return entry, root, False
+    return None, Path(cwd), True
 
 
 def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
@@ -236,6 +243,17 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
     The row's own stamped digest remains the observation, and the two agreeing
     is what closes the loop.
 
+    The refusal is narrow on purpose. It fires when a declared mount holds a
+    PrismaQuant package and the import resolves to something else, which is
+    #519 exactly: the reseal named a tree and the row ran another. It does not
+    fire when no declared mount holds a PrismaQuant package, because nothing
+    is being shadowed -- the sealed checkout is the only PrismaQuant there is,
+    and its digest already enters the action key. That case is not silent: the
+    receipt names the checkout as ``pinned_source_root`` and sets
+    ``pinned_by_default``, so a reader or a later gate can tell a defaulted
+    root from a declared one and catch an operator who meant to pin a tree and
+    mistyped the path. The launcher states the fact and does not guess intent.
+
     The question only arises for a launch that can import PrismaQuant at all.
     When the guarded search reaches no package, the guard has already removed
     the working directory from the search, so there is no tree to shadow and
@@ -253,11 +271,12 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
     if guarded is None:
         return {"pinned_source_entry": None, "pinned_source_root": None,
                 "pinned_source_sha256": None,
+                "pinned_by_default": False,
                 "import_resolution_source_sha256": None,
                 "import_resolution_root": None,
                 "working_directory_source_sha256": shadow_sha,
                 "safe_path_guard_is_load_bearing": shadow_sha is not None}
-    entry, pinned = pinned_source_root(spec, cwd=cwd)
+    entry, pinned, by_default = pinned_source_root(spec, cwd=cwd)
     pinned_sha = prismaquant_source_sha256(pinned / "prismaquant")
     resolved_sha = prismaquant_source_sha256(guarded[1] / "prismaquant")
     if resolved_sha != pinned_sha:
@@ -269,6 +288,7 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
             "not remove it")
     return {"pinned_source_entry": entry, "pinned_source_root": str(pinned),
             "pinned_source_sha256": pinned_sha,
+            "pinned_by_default": by_default,
             "import_resolution_source_sha256": resolved_sha,
             "import_resolution_root": str(guarded[1]),
             "working_directory_source_sha256": shadow_sha,

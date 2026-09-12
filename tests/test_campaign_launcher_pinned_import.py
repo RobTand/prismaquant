@@ -134,6 +134,7 @@ def test_a_mount_target_deeper_than_its_source_still_maps(tmp_path):
                 {"source": str(pinned.parent), "target": "/producer", "readonly": True}]},
             "env": {"PYTHONPATH": "/producer/pinned"}}
     assert module.pinned_source_root(data, cwd=str(checkout))[1] == pinned
+    assert module.pinned_source_root(data, cwd=str(checkout))[2] is False
     assert module.host_path("/producer/pinned", cwd=str(checkout),
                             mounts=data["container"]["mounts"]) == pinned
 
@@ -164,12 +165,29 @@ def test_an_entry_ahead_of_the_pinned_mount_is_refused(tmp_path):
         module.verify_pinned_import(data, cwd=str(checkout))
 
 
-def test_a_launch_with_no_pinned_mount_is_refused(tmp_path):
+def test_a_mounted_tree_no_entry_reaches_stays_visible_in_the_receipt(tmp_path):
+    """The mistyped-path case: the tree is mounted, and nothing names it.
+
+    This spec mounts the pinned tree and then writes only ``.`` into
+    ``PYTHONPATH``, so no entry reaches the mount. The launch proceeds,
+    because nothing is shadowing anything the operator declared, but it is not
+    silent: the receipt names the sealed checkout as the root and sets
+    ``pinned_by_default``, which is the member that tells a reader the root
+    was defaulted rather than declared.
+    """
+
     module = runner()
+    identity = importlib.import_module("tools.container_runtime_identity")
     pinned, checkout = trees(tmp_path)
     data = spec(pinned, pythonpath=".")
-    with pytest.raises(RuntimeError, match="no pinned tree to run"):
-        module.verify_pinned_import(data, cwd=str(checkout))
+    receipt = module.verify_pinned_import(data, cwd=str(checkout))
+    assert receipt["pinned_by_default"] is True
+    assert receipt["pinned_source_entry"] is None
+    assert receipt["pinned_source_root"] == str(checkout)
+    assert receipt["pinned_source_sha256"] == identity.prismaquant_source_sha256(
+        checkout / "prismaquant")
+    assert receipt["import_resolution_root"] == str(checkout)
+    assert receipt["safe_path_guard_is_load_bearing"] is False
 
 
 def test_a_launch_that_imports_no_prismaquant_is_not_this_question(tmp_path):
@@ -188,17 +206,34 @@ def test_a_launch_that_imports_no_prismaquant_is_not_this_question(tmp_path):
                                           cwd=str(checkout))
     assert receipt["pinned_source_entry"] is None
     assert receipt["pinned_source_sha256"] is None
+    assert receipt["pinned_by_default"] is False
     assert receipt["import_resolution_root"] is None
     assert receipt["working_directory_source_sha256"] is not None
     assert receipt["safe_path_guard_is_load_bearing"] is True
 
 
-def test_the_workspace_itself_is_not_a_pinned_tree(tmp_path):
+def test_the_recorded_census_shape_launches_and_records_a_defaulted_root(tmp_path):
+    """The shape every recorded campaign invocation uses.
+
+    ``/workspace`` first, then source trees that hold no ``prismaquant``
+    package -- the 2026-09-08 census invocations are Tessera checkouts. The
+    launch runs the sealed checkout, which is what it asked for, and the
+    receipt marks the root as defaulted.
+    """
+
     module = runner()
-    pinned, checkout = trees(tmp_path)
-    data = spec(pinned, pythonpath="/workspace")
-    with pytest.raises(RuntimeError, match="no pinned tree to run"):
-        module.verify_pinned_import(data, cwd=str(checkout))
+    _, checkout = trees(tmp_path)
+    tessera = tmp_path / "tessera" / "src"
+    (tessera / "tessera").mkdir(parents=True)
+    (tessera / "tessera" / "__init__.py").write_text("")
+    data = {"container": {"image": "qualified:fixed", "mounts": [
+                {"source": str(tessera), "target": "/tessera/src", "readonly": True}]},
+            "env": {"PYTHONPATH": "/workspace" + os.pathsep + "/tessera/src"}}
+    receipt = module.verify_pinned_import(data, cwd=str(checkout))
+    assert receipt["pinned_by_default"] is True
+    assert receipt["pinned_source_entry"] is None
+    assert receipt["pinned_source_root"] == str(checkout)
+    assert receipt["import_resolution_root"] == str(checkout)
 
 
 def test_main_refuses_a_shadowed_launch_before_it_execs(tmp_path, monkeypatch):

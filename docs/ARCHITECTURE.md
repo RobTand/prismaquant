@@ -24,16 +24,22 @@ launched environment and working directory, mapping container paths back
 through `/workspace` and the declared mounts, and refuses when the package that
 would be imported is not the pinned mount's, byte for byte, under
 `tools/container_runtime_identity.prismaquant_source_sha256` — the same digest
-the row stamps as `prismaquant_source_sha256`. A `PYTHONPATH` that names no
-declared mount holding a PrismaQuant package, or that puts `.` or a
-`/workspace` path ahead of the pinned mount, is refused rather than launched:
-safe-path mode removes the implicit working-directory entry, not a written one.
-The comparison applies only to a launch that can import PrismaQuant at all:
-when the guarded search reaches no package, nothing can shadow anything, so the
-launch proceeds and the receipt records that nothing was pinned.
+the row stamps as `prismaquant_source_sha256`. The refusal is narrow: it fires
+when a declared mount holds a PrismaQuant package and the import resolves
+elsewhere, which is #519 itself, and a `.` or `/workspace` entry written ahead
+of that mount is refused rather than launched, because safe-path mode removes
+the implicit working-directory entry and not a written one. When no declared
+mount holds a PrismaQuant package there is nothing to shadow, so the launch
+runs the sealed checkout and the receipt records `pinned_by_default` against
+the checkout's own root rather than staying silent; every container
+`PYTHONPATH` recorded in this repository has that shape, since the 2026-09-08
+census invocations name `/workspace` and then Tessera trees. The comparison
+applies only to a launch that can import PrismaQuant at all: when the guarded
+search reaches no package, the receipt records that nothing was pinned.
 The launcher's JSON line, schema `prismaquant.tessera_campaign_container.v1`,
 gains `pinned_source_entry`, `pinned_source_root`, `pinned_source_sha256`,
-`import_resolution_root`, `import_resolution_source_sha256`,
+`pinned_by_default`, `import_resolution_root`,
+`import_resolution_source_sha256`,
 `working_directory_source_sha256` and `safe_path_guard_is_load_bearing`;
 existing readers take named members and are unaffected. These digests are a
 prediction made on the host from the launched environment, not an observation
