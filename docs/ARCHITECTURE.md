@@ -1,7 +1,41 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-11 · `claude/495-probe-reduction-schedule`. Stamps
+As of: 2026-09-12 · `pq/420-full-engine-report-consumer`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `pq/420-full-engine-report-consumer`) for the pure
+artifact consumer half of the fixed-resource admission design's "freeze and
+implement producer schema" prerequisite
+([design](design/runtime_fixed_resource_admission.md)).
+`prismaquant/full_engine_resource_report.py` reads one
+`tessera.full_engine_resource_report.v1` JSON report and nothing else: it
+imports no serving runtime, shells out to none, and adds no dependency on one,
+so the artifact travels and the code does not. It recomputes the partition from
+`partition` and `observations` — the simultaneous allocation/free sweep, the
+owner and lifetime classification, the term composition — and treats `derived`
+as a claim to check rather than a number to read. A producer total that
+disagrees with the recomputation refuses, as does a domain the consumer cannot
+itself see closed, a `shared` or `unknown` owner label, an unclassified
+allocation, a foreign device, a reused pointer generation, a live/free
+mismatch, a checkpoint that misstates its live extents, an unsupported
+topology or graph mode, and a boolean or nonfinite value where an integer is
+declared.
+
+**Admission stays closed and nothing reads this partition.**
+`admit_fixed_resources` keeps its unconditional refusal, no gate imports the
+consumer, and wiring one is the separate "integrate allocator admission" row of
+the same design. On the supplied producer artifact the consumer's verdict is a
+refusal that names the five open domains and the one unclassified allocation,
+with every recomputed term null; its own recomputation agrees with that
+producer in full, which is what the agreement check is for. At this schema
+version four of the six domains — `worker_startup`, `provenance_admission`,
+`cache_capacity`, `timing_partition` — carry no closing condition the report
+emits an observation for, so the resident, activation and KV terms cannot
+become numbers and the scalar composition cannot complete at all. No measured
+table, production setting, pin, serving lane or admission behavior changes,
+and no GPU, served, latency, quality or capacity measurement was run.
+Gates: `tests/test_full_engine_resource_report.py`,
+`tests/test_runtime_provenance.py`.
 
 Re-stamped (2026-09-11, `claude/495-probe-reduction-schedule`) for the routed
 stack **probe-reduction schedule**, parts 1-3 of RobTand/prismaquant#495
