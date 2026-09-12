@@ -272,6 +272,14 @@ def test_every_submitted_row_carries_a_manifest(
     # ``monkeypatch`` restores the real helper; deleting the attribute instead
     # would leave the module without it for every later test in the process.
     monkeypatch.setattr(dispatch, "_pbcampaign", _record)
+    # ``submit`` runs two independent gates: the demand check this campaign's
+    # rows were planned under (#522) and the read-set gate under test here.
+    # This fixture is a plan written by hand, with no spec to re-derive a
+    # demand from, so the demand gate is stood down and the two are exercised
+    # together end to end by
+    # ``tests/test_tessera_campaign_fanout.py::test_submit_hands_the_fleet_the_admissible_rows_only``.
+    monkeypatch.setattr(dispatch, "_checked_manifest",
+                        lambda args, *, manifest: [])
     assert dispatch.cmd_submit(
         type("Args", (), {"workspace": str(workspace), "wait_s": 1})) == 0
 

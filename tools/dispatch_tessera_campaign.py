@@ -28,8 +28,16 @@ Four steps, and each one is separately re-runnable:
 ``plan``
     One ``--units`` selection file per row and one pbcampaign manifest.  Rows
     are portable (no host pin), not exclusive, GPU-demanding, and carry a
-    memory demand derived from the checkpoint's size and the selection's
-    shapes.
+    memory demand derived from the phase plan the row will check itself
+    against -- the plan's bytes, the process floor measured on this fleet, and
+    the margin the row's own guard holds back from its cap.
+
+``check``
+    The same derivation, run against a manifest that already exists, refusing
+    any row whose declared ``demand.mem_gb`` is below it or whose derived
+    demand is wider than a GPU box.  ``submit`` runs it first, so a row is
+    never queued for an admission that its own guard will decline
+    (RobTand/prismaquant#522).
 
 ``submit``
     ``pbcampaign`` over that manifest.  Re-running it **is** the resume: a
@@ -164,19 +172,68 @@ def load_spec(path: Path) -> dict:
     return spec
 
 
-def _process_baseline_bytes(spec: dict, *, where="spec") -> int:
-    """The per-row process floor this recipe reserves, in bytes.
+#: The process floor a row reserves when its spec declares none, in bytes.
+#:
+#: Measured, not invented.  Every completed row of the GLM-5.3
+#: ``extension-r1024-02`` campaign stamps the floor its own
+#: ``CaptureMemoryGuard`` read at its first check onto its ``cost.pkl``
+#: (``selected_source_preparation.memory_guard.baseline.bytes``).  Read on
+#: 2026-09-12 across rows 0058, 0061, 0062, 0063, 0066, 0074 and 0079, those
+#: readings span 0.88-1.15 GB, and this is the top of that range: a
+#: reservation is only worth the demand it moves if it covers the worst floor
+#: observed, not the average one.  The 1,062,359,040 bytes the
+#: ``_row_memory_gb`` docstring cites is an earlier reading, recorded on the
+#: RobTand/prismaquant#390 receipt rather than traced to one of these rows; it
+#: sits inside this range.
+#:
+#: Session note: ``pb_mem_gb_must_track_the_checked_phase_plan``, and
+#: RobTand/prismaquant#522, which records the three rows this default exists
+#: to stop losing.  It is a fleet number with a date on it, so a spec that
+#: knows its own box overrides it and says so in ``baseline_policy``.
+DEFAULT_PROCESS_BASELINE_BYTES = 1_150_000_000
 
-    Zero, the legacy default, reserves nothing and is what every spec written
-    before this key meant.  The value is the recipe's, not this tool's: no
-    universal torch-plus-CUDA constant is invented here, because a floor is a
-    property of the box and the runtime a row lands on and this planner never
-    enters either.
+
+def _process_baseline(spec: dict, *, where="spec") -> "tuple[int, str]":
+    """The per-row process floor this recipe reserves, and where it came from.
+
+    A spec that declares ``process_baseline_bytes`` owns the number, including
+    a declared zero, which reserves nothing.  A spec that declares nothing gets
+    ``DEFAULT_PROCESS_BASELINE_BYTES``, the worst floor measured on this fleet.
+    The two are reported under different ``baseline_policy`` values, so a
+    reader of a plan can tell a number an operator chose from a number this
+    tool supplied.
+
+    No universal torch-plus-CUDA constant is invented here: the default is a
+    reading taken on the boxes these rows run on, and it stays a reservation
+    rather than a measurement.  The row still measures its own floor at its
+    first ``CaptureMemoryGuard.check`` and stamps it on its receipt.
     """
-    from prismaquant.autoscale import validate_process_baseline_bytes
-    return validate_process_baseline_bytes(
-        spec.get("process_baseline_bytes", 0),
+    from prismaquant.autoscale import (BASELINE_POLICY_EXPLICIT_RESERVATION,
+                                       BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION,
+                                       validate_process_baseline_bytes)
+    declared = "process_baseline_bytes" in spec
+    value = validate_process_baseline_bytes(
+        spec.get("process_baseline_bytes", DEFAULT_PROCESS_BASELINE_BYTES),
         where=f"{where}: process_baseline_bytes")
+    return value, (BASELINE_POLICY_EXPLICIT_RESERVATION if declared
+                   else BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION)
+
+
+def _process_baseline_bytes(spec: dict, *, where="spec") -> int:
+    """The reservation alone, for callers that do not record its origin."""
+    return _process_baseline(spec, where=where)[0]
+
+
+def _guard_margin_bytes() -> int:
+    """The physical safety margin the row's own guard holds back from the cap.
+
+    Read from ``CaptureMemoryGuard`` rather than restated.  The guard refuses
+    at ``cap - margin``, so a demand that does not carry the margin buys an
+    admission the guard then declines, which is the failure this derivation
+    exists to stop.
+    """
+    from prismaquant.memory_management import CaptureMemoryGuard
+    return int(CaptureMemoryGuard.MARGIN_BYTES)
 
 
 def _model_bytes(model: str) -> int:
@@ -203,9 +260,13 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     A phase plan states deltas, and the floor those deltas sit on --
     interpreter, torch, the CUDA runtime, the pages the row's process has
     touched -- is a property of the box the row lands on, which this planner
-    never enters. So it is still never derived here; it is *declared*, as the
-    spec's ``process_baseline_bytes``, defaulting to zero. Its own scope
-    travels with it: it is the recipe's number, not a universal maximum.
+    never enters. So it is still never derived here; it is *reserved*. A spec
+    that declares ``process_baseline_bytes`` owns the number, including a
+    declared zero; a spec that declares nothing gets
+    ``DEFAULT_PROCESS_BASELINE_BYTES``, the worst floor measured on this fleet.
+    ``baseline_policy`` records which of the two a plan used. Either way the
+    scope travels with the number: it is this fleet's or this recipe's
+    reservation, not a universal maximum.
 
     It is added to the demand and never to ``memory_bytes``, because the
     demand becomes a cgroup cap of exactly that many GiB
@@ -221,31 +282,67 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     one thing on one path and nothing on the other.
 
     Rounding is not a reservation. ``ceil`` leaves at most one GiB of slack,
-    and the floor measured on this fleet is 1,062,359,040 bytes -- 0.9894 GiB,
+    and the floor on the #390 receipt is 1,062,359,040 bytes -- 0.9894 GiB,
     less than the most ``ceil`` can leave -- so before this key a row admitted
     according to where its ``memory_bytes`` landed modulo one GiB, which both
     inspected example rows lost. The row
     still measures its own floor at its first ``CaptureMemoryGuard.check`` and
     stamps it on its receipt (RobTand/prismaquant#390); that reading, not this
     declaration, remains the measured number.
+
+    **The guard's own margin is charged here too.** The row is refused not at
+    its cap but at ``cap - margin``: ``CaptureMemoryGuard.check`` compares its
+    absolute reading against ``cap_bytes - margin_bytes``
+    (``prismaquant/memory_management.py``). A demand that covers the plan and
+    the floor but not the margin therefore buys an admission the row's own
+    first check declines. The number is read from the guard, never restated,
+    so the two cannot drift apart.
+    """
+    return _row_memory_demand(spec, members, census,
+                              selected_source=selected_source)["mem_gb"]
+
+
+def _row_memory_demand(spec: dict, members: list[str], census: dict, *,
+                       selected_source=False) -> dict:
+    """The row's demand and every term it is made of.
+
+    ``_row_memory_gb`` is this, reduced to its GiB. The terms are kept because
+    a refusal has to name them: a row that dies on the admission predicate is
+    diagnosable from the plan, the floor and the margin, and before this they
+    were reachable only by unpickling a completed row's ``cost.pkl``
+    (RobTand/prismaquant#522).
     """
     gib = 1024 ** 3
-    baseline = _process_baseline_bytes(spec)
+    baseline, policy = _process_baseline(spec)
+    margin = _guard_margin_bytes()
     if "--streaming" in spec['campaign_argv']:
-        resource = _streamed_resource_plan(spec, census, members, selected_source=selected_source)
-        return int(math.ceil((resource['memory_bytes'] + baseline)/gib))
-    shapes = census.get("unit_shapes") or {}
-    hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
-    rows = sum(int(shapes.get(name, [0, 0])[1]) * int(spec.get("max_act_rows", 512)) * 4
-               for name in members)
-    total = _model_bytes(spec["model"]) + hessian + rows
-    return (int(math.ceil((total + baseline) / gib))
-            + int(spec.get("headroom_gb", 24)))
+        resource = _streamed_resource_plan(spec, census, members,
+                                           selected_source=selected_source)
+        plan_bytes = int(resource['memory_bytes'])
+        headroom_gb = 0
+    else:
+        shapes = census.get("unit_shapes") or {}
+        hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
+        rows = sum(int(shapes.get(name, [0, 0])[1]) * int(spec.get("max_act_rows", 512)) * 4
+                   for name in members)
+        plan_bytes = _model_bytes(spec["model"]) + hessian + rows
+        headroom_gb = int(spec.get("headroom_gb", 24))
+    demand_bytes = plan_bytes + baseline + margin
+    return {
+        "plan_bytes": int(plan_bytes),
+        "process_baseline_bytes": int(baseline),
+        "process_baseline_policy": policy,
+        "guard_margin_bytes": int(margin),
+        "demand_bytes": int(demand_bytes),
+        "headroom_gb": headroom_gb,
+        "mem_gb": int(math.ceil(demand_bytes / gib)) + headroom_gb,
+    }
 
 
 def _streamed_resource_plan(spec, census, members, *, selected_source=False):
     from prismaquant.autoscale import streamed_calibration_resources, selected_anchor_resources
     argv = spec['campaign_argv']
+    baseline_bytes, baseline_policy = _process_baseline(spec)
     def argument(name, default, convert=int):
         return convert(argv[argv.index(name)+1]) if name in argv else default
     shapes = census.get('unit_shapes') or {}
@@ -259,8 +356,9 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
                         argument('--streaming-cache-headroom-gb', 24., float)),
         # Recorded beside ``memory_bytes``, never summed into it: the plan
         # stays pure phase deltas and the reservation is charged once, in
-        # ``_row_memory_gb``, on the demand.
-        process_baseline_bytes=_process_baseline_bytes(spec))
+        # ``_row_memory_demand``, on the demand.
+        process_baseline_bytes=baseline_bytes,
+        process_baseline_policy=baseline_policy)
     if selected_source:
         return selected_anchor_resources(spec['model'], **options,
             anchor_batch_size=argument('--anchor-batch-size', 1),
@@ -277,6 +375,120 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
     return streamed_calibration_resources(spec['model'], **options,
         nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
         capture_policy=argument('--streaming-capture-policy', 'legacy', str))
+
+
+class DemandRefused(RuntimeError):
+    """A manifest row asks for less memory than the row it will run needs."""
+
+
+def _inner_campaign_argv(row: dict) -> list:
+    """The campaign argv a manifest row will actually run.
+
+    A row's command is ``python -u -m prismaquant.tessera_campaign <argv>``,
+    wrapped by the container launcher when the spec declares one, so the
+    campaign argv is whatever follows the LAST ``-m``. Reading it back from
+    the row, rather than rebuilding it from the spec, is the point: the
+    relaunch that lost three rows carried ``--publication-overlap-bytes`` in
+    the manifest while the spec that planned it did not
+    (RobTand/prismaquant#522).
+    """
+    argv = list(row.get("argv") or [])
+    if "-m" not in argv:
+        raise DemandRefused("row argv runs no python module, so its demand "
+                            "cannot be derived")
+    index = len(argv) - 1 - argv[::-1].index("-m")
+    return argv[index + 2:]
+
+
+def _row_label(inner_argv: list, index: int) -> str:
+    """The row id, taken from the selection file it names."""
+    if "--units" in inner_argv:
+        return Path(inner_argv[inner_argv.index("--units") + 1]).stem
+    return f"row-{index:04d}"
+
+
+def _units_members(inner_argv: list) -> list:
+    selection = json.loads(Path(inner_argv[inner_argv.index("--units") + 1]).read_text())
+    return [name for entry in selection["groups"]
+            for name in (entry.get("sampled") or entry["members"])]
+
+
+def verify_row_demand(spec: dict, census: dict, row: dict, *,
+                      box_memory_gb=None, label=None) -> dict:
+    """Recompute one row's demand from its own argv and refuse an under-declared one.
+
+    Two refusals, and neither is a warning:
+
+    * a declared ``demand.mem_gb`` below the derived one buys an admission the
+      row's own guard declines about twenty seconds later, which PrismaBuild
+      records as a failed row with no retry;
+    * a derived demand above the capacity the fleet's GPU boxes declare can
+      never be admitted at all, so it is refused here rather than queued.
+
+    ``box_memory_gb`` is a parameter and not a lookup: this function states
+    what the capacity has to be compared against, and the caller states what
+    the fleet declares.
+    """
+    inner = _inner_campaign_argv(row)
+    label = label or "row"
+    model = (inner[inner.index("--model") + 1] if "--model" in inner
+             else spec["model"])
+    row_spec = {**spec, "model": model, "campaign_argv": inner}
+    members = (_units_members(inner) if "--units" in inner
+               else sorted(census.get("counts") or {}))
+    demand = _row_memory_demand(row_spec, members, census,
+                                selected_source="--streaming" in inner)
+    gib = 1024 ** 3
+    declared_gb = int(row["demand"]["mem_gb"])
+    record = {"row": label, "declared_mem_gb": declared_gb,
+              "declared_bytes": declared_gb * gib, **demand}
+    terms = (f"plan {demand['plan_bytes']} B + process baseline "
+             f"{demand['process_baseline_bytes']} B "
+             f"({demand['process_baseline_policy']}) + guard margin "
+             f"{demand['guard_margin_bytes']} B = {demand['demand_bytes']} B")
+    if box_memory_gb is not None and demand["mem_gb"] > int(box_memory_gb):
+        raise DemandRefused(
+            f"{label}: derived demand {demand['mem_gb']} GiB is above the "
+            f"{int(box_memory_gb)} GiB a GPU box declares, so no admission "
+            f"can come: {terms}"
+            + (f" + {demand['headroom_gb']} GiB declared headroom"
+               if demand["headroom_gb"] else "")
+            + f"; declared demand.mem_gb {declared_gb} "
+            f"({declared_gb * gib} B). Reduce a plan term or run it on a "
+            "wider box; do not shrink the demand to fit.")
+    if declared_gb < demand["mem_gb"]:
+        raise DemandRefused(
+            f"{label}: declared demand.mem_gb {declared_gb} "
+            f"({declared_gb * gib} B) is below the {demand['mem_gb']} GiB its "
+            f"own argv derives: {terms}"
+            + (f" + {demand['headroom_gb']} GiB declared headroom"
+               if demand["headroom_gb"] else "")
+            + ". PrismaBuild would admit the row and its CaptureMemoryGuard "
+            "would then refuse it.")
+    return record
+
+
+def verify_manifest_demands(spec: dict, census: dict, rows: list, *,
+                            box_memory_gb=None) -> list:
+    """Every row in a manifest, refusing on the whole set rather than the first.
+
+    A campaign is re-queued as a set, so an operator needs every
+    under-declared row named at once, not one per run.
+    """
+    records, refusals = [], []
+    for index, row in enumerate(rows):
+        label = _row_label(_inner_campaign_argv(row), index)
+        try:
+            records.append(verify_row_demand(spec, census, row,
+                                             box_memory_gb=box_memory_gb,
+                                             label=label))
+        except DemandRefused as error:
+            refusals.append(str(error))
+    if refusals:
+        raise DemandRefused(
+            f"{len(refusals)} of {len(rows)} rows declare a memory demand "
+            "their own argv does not support:\n" + "\n".join(refusals))
+    return records
 
 
 def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
@@ -858,6 +1070,11 @@ def cmd_plan(args) -> int:
     plan = {
         "schema": PLAN_SCHEMA,
         "model": spec["model"],
+        # The spec this plan was derived from, so ``check`` and ``submit`` can
+        # re-derive every row's demand without being told again. A plan
+        # written before this field exists is checked with an explicit
+        # ``--spec``.
+        "spec": str(args.spec),
         "census": str(workspace / "census.json"),
         "calibration_cache": calibration_cache,
         "manifest": str(manifest),
@@ -865,11 +1082,16 @@ def cmd_plan(args) -> int:
         "rows_per_box": per_box,
         "row_memory_gb": row_memory_gb,
         # The reservation those demands carry, stated once for the whole plan
-        # because it is a per-row constant. Zero means none was declared, and
-        # every row's phase plan records the same thing in its own
-        # ``baseline_policy``, so a reader cannot mistake an absent
-        # reservation for a covered one.
-        "process_baseline_bytes": _process_baseline_bytes(spec),
+        # because it is a per-row constant, with where it came from. Zero
+        # means the spec declared none, and every row's phase plan records the
+        # same thing in its own ``baseline_policy``, so a reader cannot
+        # mistake an absent reservation for a covered one.
+        "process_baseline_bytes": _process_baseline(spec)[0],
+        "process_baseline_policy": _process_baseline(spec)[1],
+        # The other term outside the phase deltas: the margin the row's own
+        # guard holds back from the cap. Recorded because a demand that does
+        # not carry it is admitted and then refused.
+        "guard_margin_bytes": _guard_margin_bytes(),
         # The rows the manifest does not hold, at the demand they were derived
         # at. A reader of the plan sees the whole layout; a reader of the
         # manifest sees only what was submitted.
@@ -903,6 +1125,51 @@ def cmd_plan(args) -> int:
           f"groups, {len(admissible)} submitted -> {manifest}")
     return 0
 
+
+def _checked_manifest(args, *, manifest: Path) -> list:
+    """Re-derive every row's demand from its own argv, or refuse to go on.
+
+    A manifest is an editable file and the plan that wrote it is not
+    authoritative over what it now says. So the check reads the rows as they
+    stand: a hand-edited argv, a hand-edited ``mem_gb``, or a plan term that
+    moved since are all the same question, asked of the bytes about to be
+    submitted.
+    """
+    workspace = Path(args.workspace)
+    plan_path = workspace / "plan.json"
+    plan = json.loads(plan_path.read_text()) if plan_path.is_file() else {}
+    spec_path = getattr(args, "spec", None) or plan.get("spec")
+    if not spec_path:
+        raise DemandRefused(
+            f"{manifest} cannot be checked: neither --spec nor a 'spec' field "
+            f"in {plan_path}. Pass the spec these rows were planned from.")
+    spec = load_spec(Path(spec_path))
+    census_path = getattr(args, "census", None) or plan.get("census") or (
+        workspace / "census.json")
+    census = json.loads(Path(census_path).read_text())
+    box_memory_gb = getattr(args, "box_memory_gb", None)
+    if box_memory_gb is None:
+        box_memory_gb = spec.get("box_memory_gb")
+    rows = json.loads(Path(manifest).read_text())
+    records = verify_manifest_demands(spec, census, rows,
+                                      box_memory_gb=box_memory_gb)
+    for record in records:
+        print(f"[dispatch] {record['row']} demands {record['declared_mem_gb']} "
+              f"GiB, derives {record['mem_gb']} GiB "
+              f"(plan {record['plan_bytes']} B, baseline "
+              f"{record['process_baseline_bytes']} B, margin "
+              f"{record['guard_margin_bytes']} B)")
+    return records
+
+
+def cmd_check(args) -> int:
+    """Recompute every manifest row's demand and refuse an under-declared one."""
+    manifest = Path(args.manifest) if getattr(args, "manifest", None) else (
+        Path(args.workspace) / "manifest.json")
+    records = _checked_manifest(args, manifest=manifest)
+    print(f"[dispatch] {len(records)} rows in {manifest} declare a demand "
+          "their own argv supports")
+    return 0
 
 #: Where ``submit`` writes the per-row read sets and the manifest that names
 #: them.  Both are derived, so both are rewritten on every submit and neither
@@ -978,8 +1245,15 @@ def attach_data_manifests(workspace: Path, rows: list[dict], *,
 
 def cmd_submit(args) -> int:
     workspace = Path(args.workspace)
-    rows = json.loads((workspace / "manifest.json").read_text())
-    rows = attach_data_manifests(workspace, rows)
+    manifest = workspace / "manifest.json"
+    # An under-declared row is admitted and then refused by its own guard
+    # about twenty seconds in, which PrismaBuild records as failed with no
+    # retry (RobTand/prismaquant#522). Nothing about that is cheaper to find
+    # out later, so the demands are re-derived before any row is submitted.
+    # This reads the planned rows, and attaching a manifest below changes
+    # neither ``argv`` nor ``demand``, so what is checked is what is sent.
+    _checked_manifest(args, manifest=manifest)
+    rows = attach_data_manifests(workspace, json.loads(manifest.read_text()))
     submitted = workspace / SUBMITTED_MANIFEST
     submitted.write_text(json.dumps(rows, indent=2) + "\n")
     plural = "" if len(rows) == 1 else "s"
@@ -1797,10 +2071,38 @@ def main(argv=None) -> int:
     plan.add_argument("--seed-wire-dir", default=None)
     plan.set_defaults(func=cmd_plan)
 
+    check = sub.add_parser(
+        "check", help="re-derive every manifest row's memory demand")
+    check.add_argument("--workspace", required=True)
+    check.add_argument("--manifest", default=None,
+                       help="the manifest to check; the workspace's "
+                            "manifest.json by default")
+    check.add_argument("--spec", default=None,
+                       help="the spec the rows were planned from; taken from "
+                            "the workspace's plan.json when it records one")
+    check.add_argument("--census", default=None,
+                       help="the census the rows were planned against; taken "
+                            "from plan.json or the workspace by default")
+    check.add_argument("--box-memory-gb", type=int, default=None,
+                       help="what a GPU box in the fleet declares, in GiB. A "
+                            "row deriving more than this can never be "
+                            "admitted and is refused. Defaults to the spec's "
+                            "'box_memory_gb'; unset on both, capacity is not "
+                            "checked.")
+    check.set_defaults(func=cmd_check)
+
     submit = sub.add_parser(
         "submit", help="submit the manifest; re-running it is the resume")
     submit.add_argument("--workspace", required=True)
     submit.add_argument("--wait-s", type=int, default=86400)
+    submit.add_argument("--spec", default=None,
+                       help="the spec the rows were planned from. Every row's "
+                            "demand is re-derived before submission, so a "
+                            "plan.json without a 'spec' field needs this.")
+    submit.add_argument("--census", default=None)
+    submit.add_argument("--box-memory-gb", type=int, default=None,
+                       help="what a GPU box in the fleet declares, in GiB; "
+                            "defaults to the spec's 'box_memory_gb'.")
     submit.set_defaults(func=cmd_submit)
 
     merge = sub.add_parser("merge", help="one cost.pkl and journal from the rows")
