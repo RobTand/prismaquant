@@ -20,7 +20,7 @@ from prismaquant.joint_aura import make_joint_aura_entry
 from prismaquant.measured_runtime_prices import (
     RuntimePriceError, identity_sha256, parse_measured_runtime_table, parse_runtime_context,
 )
-from prismaquant.native_operator_panel import freeze_native_panel
+from prismaquant.native_operator_panel import freeze_native_panel, operator_route_identity
 from prismaquant.runtime_provenance import admit_native_rows
 from test_native_operator_panel import joined, receipt_fixture
 from test_runtime_fixed_resource_admission import agreeing_report
@@ -103,10 +103,16 @@ def _argv(state, **overrides):
 
 def test_emitted_table_is_admitted_by_admit_native_rows_and_refused_only_at_fixed_resources(emitted, capsys):
     code = emitter.main(_argv(emitted))
-    assert code == 2, capsys.readouterr().out
+    printed = capsys.readouterr().out
     emission = json.loads((emitted.root / "table.emission.json").read_text())
-    assert emission["admission"]["status"] == "refused"
-    assert emission["admission"]["refusal"].startswith(FIXED_PREFIX), emission["admission"]["refusal"]
+    admission = emission["admission"]
+    assert json.loads(printed)["admission"] == admission, "the CLI prints the report's verdict verbatim"
+    assert admission["native_rows"] == {"status": "admitted", "refusal": None}
+    assert admission["fixed_resources"]["status"] == "refused"
+    assert admission["fixed_resources"]["refusal"].startswith(FIXED_PREFIX), admission["fixed_resources"]
+    assert admission["status"] == "native_rows_only"
+    assert admission["refusal"] == admission["fixed_resources"]["refusal"]
+    assert code == emitter.EXIT_NATIVE_ROWS_ONLY, printed
     # The loader got past the relation and the native rows: the only refusal is the fixed charge's.
     payload = json.loads(emitted.out.read_text())
     table = parse_measured_runtime_table(payload, expected_context=parse_runtime_context(payload["context"]),
@@ -117,7 +123,8 @@ def test_emitted_table_is_admitted_by_admit_native_rows_and_refused_only_at_fixe
     assert row.resources.prefill_ms == 2. and row.resources.decode_ms == 2.
     assert row.resources.peak_scratch_bytes == 128 and row.resources.serialized_bytes == 42
     assert row.resources.resident_bytes == 64 and row.resources.activation_bytes == 8
-    assert row.binding.operator_route == "torch.mm"
+    assert row.binding.operator_route == operator_route_identity(
+        emitted.panel["phases"]["prefill"]["expected_route"])
     assert dict(row.binding.member_operator_identity_sha256) == {row.unit: emitted.panel["joint_operator_identity_sha256"]}
     assert payload["context"]["runtime_sha256"] == identity_sha256(json.loads((emitted.evidence.root / "relation.json").read_text()))
     assert payload["context"]["prompt_tokens"] == 1 and payload["context"]["gpu_identity"] == "synthetic-gpu"
@@ -341,3 +348,53 @@ def test_a_second_native_run_on_another_box_is_still_refused(emitted, joined):
     with pytest.raises(RuntimePriceError, match="native receipts were produced on more than one runtime: gpu differs"):
         emitter.main(_argv(emitted))
     assert not emitted.out.exists()
+def test_the_emitter_never_reports_an_admission_it_does_not_have(emitted, capsys):
+    """A null refusal and exit 0 mean both gates passed, and nothing else does.
+
+    `admit_runtime_provenance` raises on the native-row gate and *returns* the
+    fixed-resource refusal. A caller that reads only the exception therefore
+    sees a table it was never told about: this one, whose fixed charge no v2
+    table can have admitted while D37 stands.
+    """
+    code = emitter.main(_argv(emitted))
+    admission = json.loads(capsys.readouterr().out)["admission"]
+    assert admission["status"] != "admitted", "no v2 table's fixed charge is admitted while D37 stands"
+    assert admission["refusal"], "and the report says why, verbatim from the gate"
+    assert (admission["refusal"] is None) == (admission["status"] == "admitted")
+    assert (code == emitter.EXIT_ADMITTED) == (admission["status"] == "admitted")
+
+
+def test_a_table_the_loader_refuses_outright_prices_nothing(emitted, capsys):
+    """Exit 2 is the other answer: no row is admitted, so the fixed gate is unreached."""
+    code = emitter.main(_argv(emitted, **{"--valid-hours": 0}))
+    admission = json.loads(capsys.readouterr().out)["admission"]
+    assert admission["status"] == "refused"
+    assert admission["native_rows"]["status"] == "refused"
+    assert "measurement window" in admission["refusal"]
+    assert admission["fixed_resources"] == {"status": "unreached", "refusal": None}
+    assert code == emitter.EXIT_REFUSED
+
+
+def _emit_with_route(state, *, policy, contract, symbol="torch._scaled_mm"):
+    """Re-emit the one cell under a declared route, and read back its binding."""
+    inputs, preflight, joint = state.cell
+    preflight["operator"]["declared_route"] = {"kind": "dense", "policy": policy, "symbol": symbol,
+                                               "decoder": "fixture-window", "contract": contract}
+    preflight["operator"]["activation_contract"] = contract
+    _write_cell(state.root, "cell", (inputs, preflight, joint), state.raw, state.cost_sha256)
+    emitter.main(_argv(state))
+    return json.loads(state.out.read_text())["rows"][0]["binding"]["operator_route"]
+
+
+def test_two_route_classes_that_share_one_gemm_symbol_are_two_bindings(emitted):
+    """TESSERA_FP8 and TESSERA_NVFP4 both execute `torch._scaled_mm`.
+
+    They do it on differently packed operands under different activation
+    contracts, so a binding carrying the GEMM symbol alone makes a downstream
+    consumer unable to tell the two apart in the one field it compares.
+    """
+    fp8 = _emit_with_route(emitted, policy="TESSERA_FP8:resident", contract="fp8_per_token_dynamic")
+    fp4 = _emit_with_route(emitted, policy="TESSERA_NVFP4:resident", contract="nvfp4_per_block_static")
+    assert fp8 != fp4, "the binding cannot tell fp8 from fp4"
+    assert "fp8_per_token_dynamic" in fp8 and "TESSERA_FP8:resident" in fp8
+    assert "nvfp4_per_block_static" in fp4 and "TESSERA_NVFP4:resident" in fp4
