@@ -21,13 +21,14 @@ one, and export fails closed without an explicit override. Backing is
 permission to PRICE; a cell is permission to ship.
 
 That answer is asserted twice, through both resolvers, because neither alone
-says it: ``ServingLaneSpec.route_status_for`` speaks the ``no_cell`` vocabulary
-but reads no default table (absence, by design, since the Gridbook lane
-retired), so it is handed the pinned contract through the module's declared
-test seam -- and ``tessera_render.tessera_attesting_cells``, the predicate
-behind ``tessera_menu.route_admission`` and therefore the path production runs,
-resolves the pinned table itself and finds no cell. Each has its own sm_121
-control, so ``unattested`` here is never allowed to mean "nothing was read".
+says it: ``ServingLaneSpec.route_status_for``, which speaks the ``no_cell``
+vocabulary, and ``tessera_render.tessera_attesting_cells``, the predicate
+behind ``tessera_menu.route_admission`` and therefore the path production runs.
+Since #537 both resolve the pinned contract themselves -- the tracked serving
+pin plus the ``runtime_contract.json`` it names -- so no fixture hands either
+one a table, and ``:no_cell`` below is the answer the pinned runtime gives.
+Each has its own sm_121 control, so ``unattested`` here is never allowed to
+mean "nothing was read".
 """
 from __future__ import annotations
 
@@ -81,42 +82,19 @@ def _version() -> str:
 
 
 @pytest.fixture
-def pinned_table(monkeypatch):
-    """Hand ``route_status_for`` the pinned contract through its own seam.
+def pinned_table():
+    """Only a cache reset: since #537 the resolver reads the pin itself.
 
-    ``load_eligibility_table()`` with no ``contract_path`` is an honest
-    ABSENCE, by design since the Gridbook lane retired: there is no default
-    table any more (``lane_eligibility.py`` docstring), and every live caller
-    passes the pinned runtime's own file --
-    ``tessera_render._pinned_serving_table`` is the one that does it for
-    Tessera. ``ServingLaneSpec.route_status_for`` is the resolver that speaks
-    the ``serving_runtime_contract:<v>:no_cell`` vocabulary, and it reads the
-    table through a per-process cache with no argument, so asking it about a
-    real platform means supplying the real table first. That is what this
-    fixture does, through the module's declared test seam
-    (``_reset_eligibility_table_cache``). It substitutes the CONTRACT, never
-    the verdict: the table below is parsed from Tessera's own packaged
-    ``runtime_contract.json`` by the same parser the export gate uses.
+    Until then ``route_status_for`` called ``load_eligibility_table()`` with no
+    ``contract_path``, which has had no default table since the Gridbook lane
+    retired, so asking it about a real platform meant substituting the contract
+    first and the ``no_cell`` assertions below were evidence only with that
+    fixture in place. The resolver now resolves the tracked serving pin and the
+    packaged ``runtime_contract.json`` on its own, so all that is left to do is
+    drop a memo another module in this process may have filled.
     """
-    from prismaquant import lane_eligibility as lane
-
-    real_table = lane.load_eligibility_table
-    real_formats = lane.load_published_formats
-    with as_file(tr.tessera_serving_contract_path()) as path:
-        table = real_table(_version(), contract_path=path)
-        formats = real_formats(_version(), contract_path=path)
-    assert table.present, table.absent_reason
-    # Both loaders, from the same file. The rung vocabulary is the second half
-    # of the same absence: with no contract in hand `resolve_payload_rung`
-    # cannot name a family either, so it returns the raw format string, no cell
-    # matches it, and the resolver reports `no_cell` for sm_121 too -- the
-    # right answer to the wrong question. A test that patched only the table
-    # would read that as a platform fact. (`tessera_render` supplies the same
-    # pair from the same file for the live path.)
-    monkeypatch.setattr(lane, "load_eligibility_table", lambda *a, **k: table)
-    monkeypatch.setattr(lane, "load_published_formats", lambda *a, **k: formats)
     sp._reset_eligibility_table_cache()
-    yield table
+    yield
     sp._reset_eligibility_table_cache()
 
 
@@ -228,23 +206,21 @@ def test_the_same_lane_still_attests_the_sm121_cells(pinned_table):
     assert "no_cell" not in source, source
 
 
-def test_the_resolver_says_absent_when_nobody_supplies_a_contract():
-    """Why the fixture above exists, asserted rather than asserted-in-prose.
+def test_the_resolver_reads_the_pin_with_nothing_supplied(pinned_table):
+    """#537, from this file's side: no fixture supplies the table any more.
 
-    With no contract in hand this resolver answers ``unattested`` with source
-    ``...:absent`` for EVERY platform, sm_121 included. That is the designed
-    fail-closed default and it is also the reason the two tests above are not
-    evidence without the fixture: an ``unattested`` that means "nobody handed
-    me a table" must never be read as "the runtime has no cell here".
+    This used to assert the opposite -- that with no contract in hand the
+    resolver answered ``...:absent`` for EVERY platform, sm_121 included -- and
+    that was the reason the two tests above needed a fixture at all. It is now
+    the defect: an ``unattested`` meaning "nobody handed me a table" is not a
+    fact about a runtime, and principle 9's structured ``route_status`` must
+    not carry one. ``tests/test_route_status_reads_the_pinned_contract.py``
+    owns the full census; this keeps the AMD file honest about its own control.
     """
-    sp._reset_eligibility_table_cache()
-    try:
-        status, _flags, source = _tessera_lane().route_status_for(
-            _rung_name("TESSERA_BF16_K1"), platform="sm_121")
-    finally:
-        sp._reset_eligibility_table_cache()
-    assert status == ROUTE_STATUS_UNATTESTED
-    assert source.endswith(":absent"), source
+    status, _flags, source = _tessera_lane().route_status_for(
+        _rung_name("TESSERA_BF16_K1"), platform="sm_121")
+    assert status != ROUTE_STATUS_UNATTESTED, (status, source)
+    assert "absent" not in source, source
 
 
 @pytest.mark.parametrize("platform", sorted(set(AMD_PROFILES.values())))
