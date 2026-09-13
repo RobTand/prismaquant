@@ -1,7 +1,31 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/553-joint-gate-ordering`. Stamps
+As of: 2026-09-13 · `claude/542-rocm-row-class`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `claude/542-rocm-row-class`) because **a campaign
+spec can now declare row classes, and a class owns its placement** (#542). A
+row was built from one spec-level `python`, one `env` and one `tags` list, so
+the only thing keeping a row off a box it cannot run on was the `["gb10"]`
+default — the moment a second tag was added to a spec, every row in it became
+eligible for that box. A class now owns `python` / `env` / `tags` / `cpus` /
+`container`, `tools/fleet_interpreters.json` says what each tag means (ISA,
+container GPU runtime, and the host interpreters observed there with the
+PrismaBuild key that ran them), and a class whose interpreter is not attested
+on its tags, or whose container's GPU runtime is not the one its tags attach
+with, is refused at spec load. The `default` class resolves to exactly the
+spec-level values and nothing about a class is written into the row, so every
+campaign in flight builds the same row dict under the same action key.
+
+The cross-ISA rule is the measured one: a Hessian-aware Tessera wire is not
+bit-comparable between gfx1201 and sm121 while a weights-only encode is
+byte-identical, so a wire-sharing class may not leave the campaign's ISA, a
+class that declares it does not share the wire must declare `weights_only`,
+and a weights-only class may neither run `prismaquant.tessera_campaign` nor
+carry a Hessian-aware flag. `tools/tessera_campaign_container.py` grew a
+per-runtime GPU attachment (`nvidia` → `--gpus all`, unchanged by default;
+`rocm-wsl` → `--device /dev/dxg` plus the `/usr/lib/wsl/lib` mount). Census in
+`tests/test_campaign_row_classes.py`.
 
 Re-stamped (2026-09-13, `claude/553-joint-gate-ordering`) for **capture-free
 identity gates before the head phase, and a qualification record that names its
@@ -10013,6 +10037,53 @@ the resume -- a finished row is a CAS hit and a running row is re-attached --
 so nothing here decides what to skip, and a row may not carry
 `--deadline-seconds`, which stops a run mid-round and would price a different
 anchor set than one run would have.
+
+**Row classes: placement is a property of the class, not of the spec**
+(2026-09-13, #542). A spec may declare a `classes` block, and a class owns the
+`python`, `env`, `tags`, `cpus` and `container` its rows are built from; `env`
+merges over the spec's, everything else replaces it. Every subcommand today
+builds the `default` class, which resolves to exactly the spec-level values, so
+a spec with no `classes` block — every campaign in flight — produces the same
+row dict it always has. **Nothing about the class is written into the row**:
+`submit` re-run is the resume, a finished row is a CAS hit on its action key,
+and a key that moved is completed work re-running. Nothing records the class
+either: every subcommand builds `default`, so no plan in flight holds a second
+class to record, and the first row kind built for another one records it in its
+own plan entry when it lands.
+
+`tools/fleet_interpreters.json` is what a placement tag means: the ISA its
+boxes execute, the GPU runtime a container there attaches with (`nvidia` is
+`--gpus all`; `rocm-wsl` is `--device /dev/dxg` plus a read-only
+`/usr/lib/wsl/lib` mount, which is what a WSL2 ROCm box needs and what a GB10
+does not have), and the host interpreters observed running work there, each
+naming the PrismaBuild action key that ran it. A declared class is refused
+when its interpreter is not attested on one of its tags, when a tag is not in
+the table at all, or when its container's GPU runtime is not the one its tags
+attach with. A spec that declares no classes is not checked: it is the shape
+every campaign in flight already has.
+
+Two refusals carry a measurement rather than a preference. A Tessera
+**Hessian-aware** wire is not bit-comparable across instruction sets — the
+first divergence is `torch.linalg.cholesky`, cuSOLVER against rocSOLVER, one
+fp32 epsilon; 54.0% of rendered elements differ, `ldl` explains 53.78% of them
+and the encoder's own consumption a further 15.28% (RobTand/tessera#472) —
+while a **weights-only** encode is byte-identical on both. So a class whose
+bytes are the campaign's (`wire_shared`, the default) may not sit on another
+ISA, and a class that declares it does not share the wire must declare
+`weights_only`. A weights-only class may not run
+`prismaquant.tessera_campaign` at all — its census row runs a calibration
+forward over the scope, its capture row writes the calibration cache, and its
+pricing rows fit and consume a Hessian — and may not carry
+`--calibration-census`, `--calibration-cache`, `--calibration-cache-sha256`,
+`--capture-calibration-out`, `--seed-checkpoint` or `--seed-wire-dir`.
+
+The tracked table attests `/home/rob/ml-venvs/torch-rocm7/bin/python` on
+`wsl-gpu` / `gfx1201` (torch 2.11.0+rocm7.2.4, HIP 7.2.53211, RX 9070 XT), so a
+weights-only ROCm class is declarable, validated and container-launchable
+today. **No subcommand emits one**: there is no encode-only quantum in this
+dispatcher, and the census, capture and pricing rows are all refused for that
+class by the gates above. Gate:
+`tests/test_campaign_row_classes.py`.
 
 The passes that run *after* the rows merge are submitted through the same
 producer. `submit-joint`, `submit-allocation` and `submit-export` build the
