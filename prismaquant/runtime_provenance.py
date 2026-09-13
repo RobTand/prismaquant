@@ -418,6 +418,12 @@ OWED_EVIDENCE = {
 def admit_fixed_resources(table, relation):
     """Admit fixed resources only from a partition this consumer recomputes.
 
+    The obligation a placement has to satisfy is
+    ``max(scalar_budget_bytes, non_step_transient_peak_bytes)``: the seven
+    composition terms price one engine step, and a row live during none of them
+    is priced beside them rather than inside them. Both sides are recomputed,
+    and a report that expresses only one of them admits nothing.
+
     Tessera observes and derives; PrismaQuant recomputes and admits only on
     agreement. Nothing here reads the report's ``derived`` block: the
     recomputation in :mod:`prismaquant.full_engine_resource_report` runs over
@@ -572,6 +578,19 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
         elif recomputed != value:
             refusals.append(f"this table declares fixed {field} {value} where the recomputed "
                             f"{term} is {recomputed}")
+    # The placement obligation, not the per-step budget alone. A table admitted
+    # on the smaller of the two numbers is admitted against a box that still has
+    # to hold the larger one, and on unified memory that is an OOM rather than a
+    # spill. Both sides move it: a larger per-step composition raises it, and so
+    # does a larger off-step peak, which is why neither side is defaulted to
+    # zero when it is not expressible.
+    if verdict.recomputed_placement_obligation_bytes is None:
+        if verdict.recomputed_non_step_transient_peak_bytes is None:
+            refusals.append("no off-step transient peak is recomputable, so this report prices "
+                            "nothing the engine holds while no engine step is running")
+        refusals.append("no placement obligation is recomputable, so this table's fixed "
+                        "resources are admitted against no device extent")
+
     resident = verdict.recomputed_terms["candidate_resident"]
     if resident is None:
         refusals.append("no candidate_resident is recomputable, so no priced row's resident "
