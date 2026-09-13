@@ -127,8 +127,9 @@ class TesseraContractError(RuntimeError):
 #: read: an older table is not a subset of this one, and "missing field" is the
 #: wrong error to hand someone whose contract predates the field.
 #: ``TESSERA_LANE_SCHEMA`` is the CURRENT lane grammar and follows
-#: ``lane_eligibility.LANE_ELIGIBILITY_SCHEMA_TESSERA`` (v8 since 2026-09-05)
-#: so that the two readers cannot disagree about which schema is newest.
+#: ``lane_eligibility.LANE_ELIGIBILITY_SCHEMA_TESSERA`` (v10 since
+#: 2026-09-12) so that the two readers cannot disagree about which schema
+#: is newest.
 TESSERA_CONTRACT_SCHEMA = "tessera.runtime-contract.v1"
 TESSERA_LANE_SCHEMA = LANE_ELIGIBILITY_SCHEMA_TESSERA
 TESSERA_LANE_SCHEMAS = frozenset(
@@ -214,18 +215,42 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: derive.  The admission itself is unchanged: ``cell_evidence_admits`` is
 #: still status-only and still ``{repetitive}``.
 #:
+#: What moved v22 -> v23 (Tessera #456, merged as #464), and nothing else --
+#: same ten cell ids in the same order, byte for byte, and no family, rung,
+#: route status, launch, activation contract, image or version:
+#:   1. lane_schema v9 -> v10;
+#:   2. ``lane_eligibility.platforms`` entries stopped being bare keys. Each
+#:      now carries ``backend`` (``cuda | hip``), exactly one of
+#:      ``compute_capability`` / ``gcn_arch``, a ``serve_image`` that is a
+#:      digest iff the platform has at least one cell and ``null`` otherwise,
+#:      and ``executes`` -- a map over every family in ``formats[]`` whose
+#:      value is that family's own route contract or ``null``;
+#:   3. two AMD platforms arrived, ``gfx1151`` (Strix Halo, RDNA3.5) and
+#:      ``gfx1201`` (RDNA4), with ``serve_image: null``, NO cells,
+#:      ``TESSERA_BF16_K1`` backed and ``TESSERA_E4M3_K1`` /
+#:      ``TESSERA_E2M1_K2`` ``null``.
+#: Why the answer below moves by exactly ONE entry: the answer is the
+#: projection an ADMISSION gate reads, and at this pin nothing here decides on
+#: a platform's ``executes``.  The platform axis is published and admitted as
+#: grammar; the first gate that reads it (the platform-aware serving route,
+#: PrismaQuant #528) widens this projection, and widening a projection is its
+#: own re-review by the rule stated above.  ``contract_version`` itself is not
+#: in the answer (22 -> 23 alone would not have re-staled it); the lane schema
+#: is, and a v10 document read by a v9-closed reader is refused by name, which
+#: is the designed fail-closed rather than a compatibility break.
+#:
 #: The resident-H integration uses the reviewed runtime tree from Tessera
-#: PR #441. Its contract blob is identical to the previous master pin; the
+#: PR #441, which this pin supersedes without changing any priced byte: the
 #: producer source identity changes and existing priced bytes keep their seal.
 #: No release tag names this development commit.
-TESSERA_DEV_PIN_COMMIT = "387eda36fd410d6b2a4fb86b22285eab2a5e072c"
+TESSERA_DEV_PIN_COMMIT = "1c827abc4affdd9bed9c6b25af0705480381bf3a"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212"
+    "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -251,7 +276,7 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: ``unattributed`` -> ``shared_with_reference`` because v9 DERIVES it from
 #: that record.  Read those three and nothing else changed.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
- 'lane_schema': 'tessera.lane-eligibility.v9',
+ 'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
  'quant_method': 'tessera',
  'fused_module': {'schema': 'tessera.fused-module.v1',

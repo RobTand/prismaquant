@@ -137,7 +137,11 @@ from typing import Any, Mapping, Sequence
 #: Schema of the eligibility table PrismaQuant consumes, published by Tessera's
 #: own vLLM plugin
 #: (``tessera.serving``, entry point ``tessera``, ``quant_method: "tessera"``).
-#: v4 adds launches/residency; v5 adds exact runtime image/execution scope.
+#: v4 adds launches/residency; v5 adds exact runtime image/execution scope;
+#: v10 turns each ``platforms`` entry from a bare key into an object that
+#: states the platform's backend and what it EXECUTES per family (Tessera
+#: #456, contract v23), so the table can say a family has no native route
+#: on a device before any cell on that device exists.
 #: The parser owns these grammars; plugin requirements remain optional only
 #: for explicitly identified legacy v3 tables.
 #:
@@ -145,6 +149,7 @@ from typing import Any, Mapping, Sequence
 #: same wire format published by the retired Gridbook codebook lane. That lane
 #: was removed with Rob's decision to put Tessera in PrismaQuant and remove
 #: Gridbook; see ``archive/gridbook_lane_2026-09-02/README.md``.
+LANE_ELIGIBILITY_SCHEMA_TESSERA_V10 = "tessera.lane-eligibility.v10"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V9 = "tessera.lane-eligibility.v9"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V8 = "tessera.lane-eligibility.v8"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V7 = "tessera.lane-eligibility.v7"
@@ -157,20 +162,23 @@ LANE_ELIGIBILITY_SCHEMA_TESSERA_LEGACY_V3 = "tessera.lane-eligibility.v3"
 #: itself against this name, which made a version bump silently demote the
 #: previous grammar from "scoped" to "legacy unscoped". Scope is a property a
 #: set answers, not a single constant: see :data:`SCOPED_LANE_SCHEMAS`.
-LANE_ELIGIBILITY_SCHEMA_TESSERA = LANE_ELIGIBILITY_SCHEMA_TESSERA_V9
+LANE_ELIGIBILITY_SCHEMA_TESSERA = LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
 
 #: The schemas whose cells carry a per-cell runtime scope, so an explicit
 #: serving context (image + execution mode) can be matched rather than
 #: borrowed from a global field. v5 introduced the block; v6 widened it with
 #: the vLLM and torch versions the cell was measured under; v7, v8 and v9
 #: widened the EVIDENCE block (a smoke's control, an artifact's encoder scope,
-#: a smoke's record) and left the runtime scope as v6 published it.
+#: a smoke's record) and left the runtime scope as v6 published it; v10
+#: widened the PLATFORM entry and left every cell byte-identical, which is
+#: why it belongs in this set and in each evidence set below.
 SCOPED_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V5,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V6,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 
 #: The schemas whose cells carry a required ``evidence`` block (v6 and every
@@ -184,15 +192,18 @@ EVIDENCE_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 ATTRIBUTED_SMOKE_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 ENCODER_SCOPED_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 
 #: The schemas whose ``smoke`` carries a ``record`` -- the rule a status was
@@ -200,8 +211,12 @@ ENCODER_SCOPED_LANE_SCHEMAS = frozenset({
 #: interface) rows it was applied to (v9, Tessera #327).  On these tables the
 #: status and the attribution are RE-DERIVED through Tessera's own functions
 #: rather than through a rule restated here; see :func:`_parse_smoke_record`.
+#: v10 republishes the same ten cells byte for byte, so it carries the
+#: record too -- a set v10 were missing from would read an attested cell as
+#: one that publishes no evidence.
 RECORDED_SMOKE_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 
 #: Every eligibility-table schema this parser accepts. The check is a set
@@ -209,6 +224,7 @@ RECORDED_SMOKE_LANE_SCHEMAS = frozenset({
 #: repository was not handed, and an unlisted version is not treated as a
 #: subset of either supported grammar (see ``_parse_table``).
 LANE_ELIGIBILITY_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
@@ -2889,6 +2905,7 @@ __all__ = [
     "EVIDENCE_WEIGHT_ERROR_RELATIONS",
     "EvidenceArtifact",
     "LANE_ELIGIBILITY_SCHEMA_TESSERA",
+    "LANE_ELIGIBILITY_SCHEMA_TESSERA_V10",
     "LANE_ELIGIBILITY_SCHEMA_TESSERA_LEGACY_V3",
     "LANE_ELIGIBILITY_SCHEMA_TESSERA_V5",
     "LANE_ELIGIBILITY_SCHEMA_TESSERA_V6",

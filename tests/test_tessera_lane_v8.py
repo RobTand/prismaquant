@@ -147,24 +147,28 @@ def _facts(structure):
 # The grammar
 # ---------------------------------------------------------------------------
 def test_the_installed_contract_is_read_at_its_own_schema(table, payload):
-    """This file's fixture is v8; the CURRENT grammar is v9.
+    """This file's fixture is v8; the CURRENT grammar is v10.
 
     Until contract v22 the installed table was v8 and this asserted the two
     were the same string. They are not any more, and the assertion that
     matters is the one that outlives every bump: the fixture reads at the
     schema it declares, and no earlier grammar was demoted out of
-    ``SCOPED_LANE_SCHEMAS`` when v9 became current.
+    ``SCOPED_LANE_SCHEMAS`` when a later one became current.  Spelled against
+    ``LANE_ELIGIBILITY_SCHEMA_TESSERA`` rather than against a version
+    constant, so the next bump does not have to edit this line.
     """
     assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8
-    assert lane.LANE_ELIGIBILITY_SCHEMA_TESSERA == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9
+    assert (lane.LANE_ELIGIBILITY_SCHEMA_TESSERA
+            != lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8)
     for older in (lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V5,
                   lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V6,
                   lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
-                  lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8):
+                  lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
+                  lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9):
         assert older in lane.SCOPED_LANE_SCHEMAS, (
-            f"{older} must stay SCOPED when v9 becomes current; a version bump "
-            "that demotes a previous grammar to 'legacy unscoped' silently "
-            "widens what a legacy table is allowed to attest")
+            f"{older} must stay SCOPED when a later grammar becomes current; a "
+            "version bump that demotes a previous grammar to 'legacy unscoped' "
+            "silently widens what a legacy table is allowed to attest")
     assert _parse(payload).lane_schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8
 
 

@@ -190,12 +190,19 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: tile controls (#437/#438), including reviewed cached-export and rank-local
 #: intake fixes (#434/#436). Actual GLM pricing preserves measured bytes and
 #: scores; the unchanged contract and answer grant no new serving qualification.
+#: Re-pinned 2026-09-12 to 1c827abc4 (Tessera #464, closing its #456): runtime
+#: contract v23 / lane-eligibility schema v10, which turns each
+#: ``lane_eligibility.platforms`` entry into an object stating its backend and
+#: what it EXECUTES per family, and adds the two AMD platforms (``gfx1151``,
+#: ``gfx1201``) with no cells. The ten ``sm_121`` cells are byte-identical and
+#: ``versions.default_serve_image`` is unchanged, so this pin admits exactly
+#: what the previous one did; what it adds is grammar, not qualification.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "387eda36fd410d6b2a4fb86b22285eab2a5e072c"
+    "1c827abc4affdd9bed9c6b25af0705480381bf3a"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212"
+    "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the

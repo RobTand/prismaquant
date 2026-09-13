@@ -1,7 +1,34 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `claude/519-launcher-safe-path`. Stamps
+As of: 2026-09-12 · `pq/527-lane-schema-v10`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `pq/527-lane-schema-v10`) for the Tessera pin at
+**runtime contract v23 / lane-eligibility schema v10** (#527, consuming
+Tessera #464). The pin moves to Tessera `1c827abc4a`, contract digest
+`bafe8a4e…0bb922a`. **What v10 changes is the `platforms` entry, and nothing
+else**: each entry stops being a bare key and becomes an object carrying
+`backend` (`cuda | hip`), exactly one of `compute_capability` / `gcn_arch`, a
+`serve_image` that is a digest iff the platform has at least one cell and
+`null` otherwise, and `executes` — a map over every family in `formats[]`
+whose value is that family's own route contract or `null`. Two AMD platforms
+arrive with it, `gfx1151` (Strix Halo, RDNA3.5) and `gfx1201` (RDNA4), with
+`serve_image: null`, **no cells**, `TESSERA_BF16_K1` backed and
+`TESSERA_E4M3_K1` / `TESSERA_E2M1_K2` `null`. The ten `sm_121` cells are
+byte-identical and `versions.default_serve_image` is unchanged, so this pin
+admits exactly what its predecessor did. `null` is the fact principle 9 needs
+and v9 had no way to say: not "no receipt yet" but "the pinned runtime has no
+native route for these bytes on this device". A schema bump is deliberately
+not additive — a v9-closed reader refuses a v10 document by NAME rather than
+reading a platform object as a key — so admitting it is a reviewed edit here:
+`LANE_ELIGIBILITY_SCHEMA_TESSERA_V10` joins every set v9 is in, because v10
+cells are v9 cells byte for byte and a set it were missing from would read an
+attested cell as one that publishes no evidence. `TESSERA_DEV_PIN_ANSWER`
+moves by exactly one entry (`lane_schema` v9 → v10): no gate here reads a
+platform's `executes` yet, and the first that does widens the projection and
+re-reviews the answer by the rule the answer already carries. Gates:
+`tests/test_tessera_lane_v10.py`, `tests/test_tessera_serving_pin.py`,
+`tests/test_tessera_lane_admission.py`.
 
 Re-stamped (2026-09-12, `claude/519-launcher-safe-path`) for **the campaign
 container launcher importing the pinned tree it was given** (§4.10; #519).
@@ -2787,10 +2814,15 @@ The immutable pin binds this private metadata API; its absence is a named
 refusal rather than a fallback grammar. Whether a cell's status was derived
 is asked through `smoke_status_is_derived` and carried into provenance.
 
-**The pin names v22, so v9 is the CURRENT grammar, not one this reader merely
-accepts.** `LANE_ELIGIBILITY_SCHEMA_TESSERA` is `tessera.lane-eligibility.v9`,
-which is what `tessera_route_receipt` compares a packaged table against, so
-the scoped-census gate fires against the table actually installed. v5–v8 stay
+**The pin names v23, so v10 is the CURRENT grammar, not one this reader
+merely accepts.** `LANE_ELIGIBILITY_SCHEMA_TESSERA` is
+`tessera.lane-eligibility.v10`, which is what `tessera_route_receipt` compares
+a packaged table against, so the scoped-census gate fires against the table
+actually installed. v10 republishes the ten `sm_121` cells byte for byte and
+widens only the `platforms` entry (§9.4), so it joins every set v9 was in —
+`SCOPED_`, `EVIDENCE_`, `ATTRIBUTED_SMOKE_`, `ENCODER_SCOPED_` and
+`RECORDED_SMOKE_LANE_SCHEMAS` — and a set it were missing from would read an
+attested cell as one that publishes no evidence. v5–v9 stay
 in `SCOPED_LANE_SCHEMAS` — a bump must never demote the grammar it succeeds to
 "legacy unscoped" — and the tests that are ABOUT those grammars now own their
 fixtures through `conftest.down_convert_lane_table`, which learned the v9 → v8
@@ -2820,12 +2852,14 @@ nothing here restates it. Nothing on the pinned table is refused by it today
 and their plan is what the lane reads); a BF16 cell claiming that launch at
 1792 (column rate 7, outside `[1,2,4]`) would be, by name. **Third, the
 pin names one reviewed producer/runtime revision**: `TESSERA_DEV_PIN_COMMIT`,
-the serving pin JSON and its module constants now name `ba582d4…` (Tessera
-#356). The contract SHA-256 remains `719daa02…` (v22, lane schema v9), with
-`TESSERA_DEV_PIN_ANSWER` unchanged from the `8ed1d9a` review. The new revision
-supplies the priced-input exporter snapshot API used by PrismaQuant #231;
-a producer API dependency requires a re-pin even when the contract digest is
-unchanged. No tag names the pinned commit, so `version_is_release` stays
+the serving pin JSON and its module constants now name `1c827abc…` (Tessera
+#464, closing its #456). The contract SHA-256 is `bafe8a4e…` (v23, lane schema
+v10), and `TESSERA_DEV_PIN_ANSWER` moved by exactly one entry — `lane_schema`
+v9 → v10 — because the platform axis v23 adds is grammar no gate here reads
+yet; the first gate that reads it widens the projection and re-reviews the
+answer by the same rule. Earlier pins: `ba582d4…` (#356) and `387eda36…`
+(#441), both contract v22 at digest `a688f8de…`; a producer API dependency
+requires a re-pin even when the contract digest is unchanged. No tag names the pinned commit, so `version_is_release` stays
 `false`. **The admission flip, stated
 once:** before this branch `tessera_lane_attested` answered `False` for every
 rung by the PENDING sentinel — no pin, so nothing admitted. After it the
@@ -10471,9 +10505,10 @@ so the pin now names an exact commit and the digest of the contract that commit
 packages, and the dense rungs are ADMITTED under it. What is refused instead is
 any *other* Tessera: `require_pinned_tessera_runtime` hashes
 `tessera/serving/runtime_contract.json` as installed and refuses when it is not
-`719daa02…824927` (Tessera master `ba582d4…`, contract v22; the release
-`e78959ed…` carried v20 at `374ce4a9…625dd4`, and the first pin, 2026-09-04,
-was `ba3a3c69…e055e6` at `5acc2a6f…`, contract v17). A stray
+`bafe8a4e…0bb922a` (Tessera master `1c827abc…`, contract v23; `a688f8de…`
+carried v22 at `387eda36…`, the release `e78959ed…` carried v20 at
+`374ce4a9…625dd4`, and the first pin, 2026-09-04, was `ba3a3c69…e055e6` at
+`5acc2a6f…`, contract v17). A stray
 checkout on `PYTHONPATH` is refused exactly as a
 PENDING pin refused it — from a fact this process can check rather than from a
 tag, because a commit string is a claim about another repository and a digest
@@ -11485,8 +11520,8 @@ schema is not `tessera.serving.route_census/2`. Under
 `tessera.lane-eligibility.v4` and the producer's `tools/tessera_route_census.py`
 emitted `route_census/1`, so no scoped receipt could be filled or replayed and
 `route.census` on a scoped card stayed `UNFILLED` by the pin. At the pin this
-document is stamped for (`ba582d4`, contract v22) the packaged table is
-`tessera.lane-eligibility.v9` -- the schema the constant names -- and the
+document is stamped for (`1c827abc`, contract v23) the packaged table is
+`tessera.lane-eligibility.v10` -- the schema the constant names -- and the
 producer at that commit emits `route_census/2`, so both refusals lift and the
 comparison below is the live gate on a scoped card. What has NOT changed: no
 scoped receipt from a real serve has been replayed yet (nothing has been
@@ -13846,12 +13881,13 @@ per-rank wires rather than a byte range. `expert_parallel.units` is empty.
 Both residency modes are receipted and both must be exercised.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `ba582d476a3b6db9057ebd1385dc52926f171451` (master's tip at review
-time, the merge of Tessera #356; version `0.1.0`, contract v22, lane schema
-v9 — v21 landed at `b8b1cb38` in Tessera #313 and the release `e78959ed…`
-carried v20; first pinned 2026-09-04 at `5acc2a6f…`, contract v17)
+Tessera `1c827abc4affdd9bed9c6b25af0705480381bf3a` (master's tip at review
+time, the merge of Tessera #464; version `0.1.0`, contract v23, lane schema
+v10 — v22 was pinned at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
+in Tessera #313 and the release `e78959ed…` carried v20; first pinned
+2026-09-04 at `5acc2a6f…`, contract v17)
 and the SHA-256 of the `runtime_contract.json` it packages
-(`719daa02…824927`);
+(`bafe8a4e…0bb922a`);
 `require_pinned_tessera_runtime` refuses unless the pin equals the reader's
 three constants AND the installed contract hashes to that digest, and
 `tessera_lane_attested` ANDs that in (§5.7), as does the container arm's

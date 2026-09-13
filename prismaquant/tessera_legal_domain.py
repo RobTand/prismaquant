@@ -200,6 +200,18 @@ SPEC_NAMED_STUDY_PRODUCER = "d403cc5a3199a348cc7ee6262f4adbdab8138745"
 #: refusals that set the domain endpoints have not moved at all.  ``export.py``
 #: separates them, and it is where ``_window_bits_for`` and ``wire_recipe``
 #: live.
+#:
+#: The key ``reader-pin-387eda36`` names the state the audit was *taken*
+#: through, not today's reader pin.  The reader pin moved to ``1c827abc``
+#: (contract v23 / lane schema v10), and ``export.py`` at ``1c827abc`` is
+#: byte-identical to the frozen study producer ``d403cc5a`` -- so
+#: :func:`tessera_source_state` resolves an import at the current pin under the
+#: name ``study-producer-d403cc5a``, which is already in
+#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES`.  The ``reader-pin-387eda36`` entry
+#: is kept because it is a real state with distinct bytes, and because
+#: re-labelling it would erase which bytes the audit actually read.  A future
+#: pin whose ``export.py`` digest is NEW belongs here as a new entry, and the
+#: numbers derived through it are a re-measurement, not a re-transcription.
 TESSERA_SOURCE_STATES = {
     "reader-pin-387eda36": {
         "commit": "387eda36fd410d6b2a4fb86b22285eab2a5e072c",
@@ -326,18 +338,38 @@ def live_pins() -> DomainPins:
 #: Every value was read from the code and the installed package at that moment,
 #: not transcribed from prose; they are literals *here* only so that a later
 #: run has something to diff against.
+#:
+#: **Re-taken 2026-09-12 for the v23 pin**, and the re-take is the reason the
+#: audited counts did not have to be re-measured with it.  The pin moved
+#: ``387eda36`` -> ``1c827abc`` (contract v22 -> v23, lane schema v9 -> v10).
+#: The counts in :data:`AUDITED_RATE_COUNTS` are decided by two files, and both
+#: were hashed at the new pin rather than assumed:
+#:
+#: * ``src/tessera/grammar.py`` is ``f2545274…`` at ``1c827abc`` -- the same
+#:   bytes as at every state in :data:`TESSERA_SOURCE_STATES`, so the rate-range
+#:   and whole-unit-quota refusals that set the domain endpoints have not moved.
+#: * ``src/tessera/export.py`` is ``b1b04f26…`` at ``1c827abc``, which is
+#:   BYTE-IDENTICAL to the frozen study producer ``d403cc5a`` already named in
+#:   :data:`TESSERA_EQUIVALENT_SOURCE_STATES`.  So the new reader pin's wire
+#:   bytes are a state this module had already audited as one answer for the
+#:   primary families, and :func:`tessera_source_state` names it by that digest.
+#:
+#: What v23 changed is the ``platforms`` entry in the packaged contract's lane
+#: table (#527), which no number here reads.  A pin move whose ``export.py`` or
+#: ``grammar.py`` digest were NEW would land here as a re-measurement, not as a
+#: re-transcription; this one is a re-transcription because the bytes say so.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="387eda36fd410d6b2a4fb86b22285eab2a5e072c",
+    reader_dev_pin_commit="1c827abc4affdd9bed9c6b25af0705480381bf3a",
     reader_dev_pin_contract_sha256=(
-        "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212"
+        "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
     ),
-    serving_runtime_pinned_commit="387eda36fd410d6b2a4fb86b22285eab2a5e072c",
+    serving_runtime_pinned_commit="1c827abc4affdd9bed9c6b25af0705480381bf3a",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212"
+        "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
     ),
     producer_installed_contract_sha256=(
-        "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212"
+        "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
     ),
 )
 
