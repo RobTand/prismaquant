@@ -90,23 +90,42 @@ def _source_digest(files):
     return digest.hexdigest()
 
 
+def _source_tree_identity(tree):
+    """The source-tree installer's own identity, recomputed from the bytes.
+
+    ``experiments/full_engine_plugin_install.py`` seals a source-tree install
+    as a SHA-256 over the compact JSON map ``{archive member: sha256}`` of the
+    build metadata plus every file under ``src/``, and records the map's size
+    as ``plugin_source_members``. That installer emits no archive digest, so
+    an archive-only binding refuses every source-tree install outright. This
+    is Tessera's function recomputed here, the way :func:`_source_digest`
+    already recomputes its source-byte seal: the producer's declared identity
+    is checked against bytes this side holds, never accepted as stated.
+    """
+    members = {name: hashlib.sha256(raw).hexdigest() for name, raw in tree.items()}
+    body = json.dumps(members, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(body).hexdigest(), len(members)
+
+
 def _package_source(declaration, reader):
     _object(declaration, ("archive", "prefix", "excluded_files"), "package source")
     _, archive = reader.bytes(declaration["archive"], "original plugin source archive")
     prefix = _string(declaration["prefix"], "package archive prefix").rstrip("/") + "/"
     if Path(prefix).is_absolute() or ".." in Path(prefix).parts:
         raise RuntimePriceError("package archive prefix must be relative and normalized")
-    files = {}
+    files, tree = {}, {}
     try:
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as source:
             for member in source:
-                if not member.name.startswith(prefix) or member.isdir():
+                if member.isdir():
                     continue
-                name = member.name[len(prefix):]
-                if (not member.isfile() or name in files or Path(name).is_absolute()
+                name = member.name
+                if (not member.isfile() or name in tree or Path(name).is_absolute()
                         or ".." in Path(name).parts or str(Path(name)) != name):
                     raise RuntimePriceError("package archive has duplicate, linked or unsafe source entries")
-                files[name] = source.extractfile(member).read()
+                tree[name] = source.extractfile(member).read()
+                if name.startswith(prefix):
+                    files[name[len(prefix):]] = tree[name]
     except tarfile.TarError as exc:
         raise RuntimePriceError(f"invalid plugin source archive: {exc}") from exc
     excluded = declaration["excluded_files"]
@@ -114,10 +133,36 @@ def _package_source(declaration, reader):
             or len(set(excluded)) != len(excluded) or not set(excluded) <= set(files)):
         raise RuntimePriceError("package source needs an exact archive and explicit excluded file roster")
     installed = {name: raw for name, raw in files.items() if name not in excluded}
+    source_identity_sha256, source_identity_members = _source_tree_identity(tree)
     return {"archive_sha256": declaration["archive"]["sha256"],
+            "source_identity_sha256": source_identity_sha256,
+            "source_identity_members": source_identity_members,
             "source_tree_sha256": _source_digest(files), "installed_source_sha256": _source_digest(installed),
             "installed_files": {name: {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
                                 for name, raw in installed.items()}}
+
+
+def _installed_from_declared_source(installation, package_source):
+    """Bind the installer's declared plugin source to the archive's bytes.
+
+    Exactly one binding, never a choice the evidence can decline to make: an
+    archive installer declares ``plugin_archive_sha256`` and a source-tree
+    installer declares ``plugin_source_sha256`` with its member count. An
+    installation that declares both, or neither, names no source.
+    """
+    archive = installation.get("plugin_archive_sha256")
+    declared = installation.get("plugin_source_sha256")
+    if (archive is None) == (declared is None):
+        raise RuntimePriceError(
+            "plugin installation must declare exactly one of plugin_archive_sha256 "
+            "(archive install) or plugin_source_sha256 (source-tree install)")
+    if archive is not None:
+        _equal(archive, package_source["archive_sha256"], "original plugin archive bytes")
+        return
+    _equal(_sha(declared, "declared plugin source"), package_source["source_identity_sha256"],
+           "recomputed plugin source-tree identity")
+    _equal(_integer(installation["plugin_source_members"], "declared plugin source members", 1),
+           package_source["source_identity_members"], "recomputed plugin source-tree member count")
 
 
 def _library_map(value, where):
@@ -233,11 +278,32 @@ def _observe_run(run, *, reader, configuration, configuration_sha256, image_mani
     declared = base["image_declaration"]["record"]
     if declared["refused"] is not False or declared["present"] is not True or declared["gated"] is not True:
         raise RuntimePriceError("runtime image declaration refused or incomplete")
-    for key in ("pinned", "resolved_reference", "requested"):
+    # ``required`` is the reference the resolver's gate demanded, and it is the
+    # field to read: Tessera's ``serving/runtime_image.resolve`` sets it to the
+    # contract pin only when the requested repository IS the pinned repository
+    # (``reason`` "pinned"), and to the explicitly requested digest otherwise
+    # (``reason`` "explicit_digest"), leaving ``pinned`` naming Tessera's own
+    # packaged default. Reading ``pinned`` demanded that every artifact serve
+    # out of that default repository, which no pinned lane image does.
+    for key in ("required", "resolved_reference", "requested"):
         _equal(declared[key], image, "declared image " + key)
+    if declared["reason"] not in ("pinned", "explicit_digest"):
+        raise RuntimePriceError("runtime image declaration was not gated on a digest")
+    if declared["reason"] == "pinned":
+        _equal(declared["pinned"], image, "declared image pinned")
     if image not in declared["repo_digests"]:
         raise RuntimePriceError("runtime image lacks actual RepoDigests evidence")
-    _equal(declared["selection"]["configuration_sha256"], configuration_sha256, "launcher configuration")
+    # A native operator record carries no configuration of its own, so its
+    # launcher stamps ``selection`` (``_pb_native_moe_measure/launch.py``) and
+    # that stamp is the only binding. The full-engine record binds its own
+    # configuration (``configuration_sha256``, checked above) and its capture
+    # stamps no ``selection``; requiring one there refused every real report.
+    selection = declared.get("selection")
+    if selection is None:
+        if run["scope"] != "full_engine":
+            raise RuntimePriceError("native runtime image declaration requires its launcher selection")
+    else:
+        _equal(selection["configuration_sha256"], configuration_sha256, "launcher configuration")
     _, installation = reader.json(run["installation"], "runtime installation")
     _equal(installation["registry_base"], image, "installed image")
     _equal(installation["launcher_declared_image_id"], declared["local_id"], "actual image ID")
@@ -259,7 +325,7 @@ def _observe_run(run, *, reader, configuration, configuration_sha256, image_mani
     if package["package_files_unchanged_from_installer"] is not True:
         raise RuntimePriceError("loaded package files changed after installation")
     _equal(package["package_files"], installation["plugin_files"], "complete installed package file roster")
-    _equal(installation["plugin_archive_sha256"], package_source["archive_sha256"], "original plugin archive bytes")
+    _installed_from_declared_source(installation, package_source)
     _equal(package["package_files"], package_source["installed_files"], "installed package bytes from source archive")
     _equal(package["encoder_source_sha256"], package_source["installed_source_sha256"], "recomputed installed source seal")
     _equal(package["encoder_source_sha256"], base["source"]["tessera_package_sha256"], "installed package source digest")
@@ -295,7 +361,8 @@ def _observe_run(run, *, reader, configuration, configuration_sha256, image_mani
         "contract_sha256": base["source"]["runtime_contract_sha256"],
         "core_manifest_sha256": core_sha, "core_files": core_count,
         "plugin_source_commit": installation["plugin_source_commit"],
-        "plugin_archive_sha256": installation["plugin_archive_sha256"],
+        "plugin_archive_sha256": installation.get("plugin_archive_sha256"),
+        "plugin_source_sha256": installation.get("plugin_source_sha256"),
         "producer_source_tree_sha256": package_source["source_tree_sha256"],
         "plugin_files": installation["plugin_files"], "plugin_entrypoints": installation["plugin_entrypoints"]}
     return {"raw": raw, "base": base, "sha256": identity_sha256(raw), "common": common,
@@ -400,6 +467,48 @@ FIXED_TERM_FIELDS = {"fixed_resident": "resident_bytes",
                      "fixed_activation": "activation_bytes",
                      "fixed_scratch": "peak_scratch_bytes",
                      "fixed_kv": "kv_bytes"}
+
+#: Fields of the fixed charge this report schema carries no observation for at
+#: all -- not a term that failed to recompute, but an axis the capture does not
+#: observe. They are declared ``0`` and named as unevidenced, and the gate
+#: refuses them by name below.
+UNOBSERVED_FIXED_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes")
+
+
+def recompute_fixed_resources(reference, *, root):
+    """The fixed charge a table may declare, recomputed by the gate that admits it.
+
+    An emitter calls this to fill ``fixed_resources``; ``admit_fixed_resources``
+    then recomputes the same partition from the same report and refuses on any
+    disagreement. Both sides run one implementation on purpose. A producer that
+    recomputed the partition with a second reader of its own would be checked
+    against a copy of itself, and the two readers would drift apart silently --
+    which is the "``derived`` is a claim" failure one module further out. The
+    emitter supplies the artifact reference; every number below is this
+    consumer's own.
+
+    Returns ``(declared, evidence, verdict)``: the fields a table declares, one
+    evidence string per field naming the term it came from or why it has none,
+    and the consumer's refusals and domain state for the emission report.
+    """
+    from .full_engine_resource_report import consume_full_engine_resource_report
+
+    try:
+        verdict = consume_full_engine_resource_report(dict(reference), root=root)
+    except RuntimePriceError as exc:
+        raise RuntimePriceError(f"full-engine resource report refused: {exc}") from exc
+    declared, evidence = {}, {}
+    for term, field in FIXED_TERM_FIELDS.items():
+        value = verdict.recomputed_terms.get(term)
+        if type(value) is int and value >= 0:
+            declared[field], evidence[field] = value, f"recomputed {term}"
+        else:
+            declared[field], evidence[field] = 0, f"no {term} is recomputable; declared 0 without evidence"
+    for field in UNOBSERVED_FIXED_FIELDS:
+        declared[field], evidence[field] = 0, "the report schema carries no observation for this field; declared 0 without evidence"
+    return declared, evidence, {"refusals": list(verdict.refusals),
+                                "expressible_terms": list(verdict.expressible_terms),
+                                "open_domains": list(verdict.open_domains)}
 
 #: What each observation the report names but leaves null costs this
 #: admission. The absence is read from the report rather than assumed here, so

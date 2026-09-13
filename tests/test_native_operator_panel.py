@@ -103,9 +103,9 @@ def test_legacy_cost_never_becomes_joint_currency(joined):
         freeze_native_panel(inputs, preflight, {"output_mse": .1}, cost_sha256="4" * 64)
 
 
-def receipt_fixture(joined, complete=False):
+def receipt_fixture(joined, complete=False, cost_sha256="4" * 64):
     inputs, preflight, _ = joined
-    panel = freeze_native_panel(*joined, cost_sha256="4" * 64)
+    panel = freeze_native_panel(*joined, cost_sha256=cost_sha256)
     numerics = {"status": "passed", "finite": True, "max_normalized_error": .5, **inputs["numerics"]}
     phases = {p: {**inputs["phases"][p], "route": {**preflight["operator"]["declared_route"],
                                                 "state": "served", "reason": None, "shape": "M1:N4:K4"},

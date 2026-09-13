@@ -482,7 +482,16 @@ class StreamedCausalLM:
             self.context.configure_selected_snapshot(names, self.profile)
 
         ordered = sorted(layers)
-        window = max(1, min(self.prefetch_lookahead, self.context.max_cache_slots - 1))
+        # `max_cache_slots` is None when the layer cache is bounded by bytes and
+        # carries no slot cap -- the ordinary autoscaled case, and what every
+        # other reader spells out (`StreamingContext.suggest_prefetch_lookahead`).
+        # This one subtracted from it, so a sparse selected-source walk on an
+        # autoscaled cache died on None - 1 instead of walking. With no cap the
+        # window is the caller's lookahead; with one it keeps a slot for the
+        # layer `install()` still owns.
+        slots = self.context.max_cache_slots
+        window = max(1, self.prefetch_lookahead if slots is None
+                     else min(self.prefetch_lookahead, slots - 1))
         weights, records = {}, []
         for layer in ordered[:window]:
             self.context.schedule_prefetch(layer)
