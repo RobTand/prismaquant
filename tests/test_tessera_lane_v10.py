@@ -104,14 +104,23 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v23_at_the_pinned_digest():
+def test_the_packaged_contract_is_v24_at_the_pinned_digest():
+    """v24 is additive for a v10 reader, so the schema string does not move.
+
+    The contract version and the lane schema are two different clocks, and
+    this is the bump that separates them: v24 adds cells and fills a
+    ``serve_image``, both of them shapes v10 already defines, so a v10 reader
+    reads the document with the code it already has.  A bump that changed what
+    a field MEANS would move the schema string and fail this reader closed, as
+    v10 itself did to v9 below.
+    """
     raw = _packaged_bytes()
     assert (hashlib.sha256(raw).hexdigest()
             == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256), (
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 23
+    assert payload["contract_version"] == 24
     assert (payload["lane_eligibility"]["schema"]
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10)
 
@@ -126,9 +135,47 @@ def test_the_v10_table_parses_and_publishes_the_two_amd_platforms():
     assert table.present
     assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
     assert {"sm_121", "gfx1151", "gfx1201"} <= set(table.platforms)
-    # No AMD cell ships at v23: a cell is a device receipt and none was taken.
-    assert {cell.platform for cell in table.cells} == {"sm_121"}
-    assert len(table.cells) == 10
+    # v24 is the first contract with a cell off ``sm_121``: two
+    # ``TESSERA_BF16_K1`` dense cells on ``gfx1201``, decode and batch.
+    assert {cell.platform for cell in table.cells} == {"sm_121", "gfx1201"}
+    assert len(table.cells) == 12
+    gfx = sorted(c.id for c in table.cells if c.platform == "gfx1201")
+    assert gfx == ["tessera_bf16_k1_dense_gfx1201_batch",
+                   "tessera_bf16_k1_dense_gfx1201_decode"], gfx
+    for cell in table.cells:
+        if cell.platform != "gfx1201":
+            continue
+        assert cell.family == "TESSERA_BF16_K1"
+        assert cell.structure == "dense"
+        assert tuple(cell.rungs_q256) == (1792,)
+        assert cell.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
+        assert cell.qualification == lane.QUALIFICATION_DEVICE_QUALIFIED
+        # The scope the receipts carry, transcribed rather than widened: a
+        # top-1024 intersection lower bound, NOT a full-vocab KL. No
+        # instrument in either repository produces one, so a gate that
+        # expected ``kl_full_vocab`` here would refuse an artifact for a
+        # measurement that does not exist.
+        assert cell.evidence.grade == lane.EVIDENCE_GRADE_KL_LOWER_BOUND
+        assert cell.evidence.grade != lane.EVIDENCE_GRADE_KL_FULL_VOCAB
+
+
+def test_the_gfx1201_cells_are_admitted_and_the_sm121_ten_did_not_move():
+    """What accepting v24 actually buys, and what it leaves alone.
+
+    ``cell_evidence_admits`` is status-only; both new cells publish
+    ``smoke.status: recorded``, so they are admitted.  That is the whole
+    behavioural content of this pin move -- a route on an AMD device that this
+    side previously answered ``unattested`` for.  The second half is the
+    control: the ten ``sm_121`` cells are byte-identical, so nothing already
+    shipping moved with them.
+    """
+    table = _packaged_table()
+    for cell in table.cells:
+        if cell.platform == "gfx1201":
+            admits, why = lane.cell_evidence_admits(cell)
+            assert admits, (cell.id, why)
+    sm121 = [c.id for c in table.cells if c.platform == "sm_121"]
+    assert len(sm121) == 10, sm121
 
 
 def test_a_declared_platform_with_no_cell_is_still_a_refusal_to_claim():
@@ -139,19 +186,26 @@ def test_a_declared_platform_with_no_cell_is_still_a_refusal_to_claim():
     attested for it: the cell-based resolution that decides export keeps
     answering ``unattested`` for every family on that platform, and export
     fails closed.  Asserted at the table, which is the object that seam reads.
+
+    Narrowed to ``gfx1151`` at v24, when ``gfx1201`` stopped being an example
+    of it.  The property is unchanged and is now carried by the one platform
+    that still has no receipt -- which is the point: this test says what a
+    declared-but-unreceipted platform answers, and a platform that has since
+    been served is no longer one.
     """
     table = _packaged_table()
-    amd = [c for c in table.cells if c.platform in ("gfx1151", "gfx1201")]
+    amd = [c for c in table.cells if c.platform == "gfx1151"]
     assert not amd, [c.id for c in amd]
+    assert "gfx1151" in table.platforms
 
 
 # ---------------------------------------------------------------------------
 # The refusal that stood before this change -- the designed fail-closed
 # ---------------------------------------------------------------------------
-def test_a_v9_closed_eligibility_reader_refuses_the_real_v23_bytes(monkeypatch):
+def test_a_v9_closed_eligibility_reader_refuses_the_real_v24_bytes(monkeypatch):
     """By NAME, not by a missing field.  The whole point of a versioned schema.
 
-    The sets are restored to their pre-#527 value and the REAL packaged v23
+    The sets are restored to their pre-#527 value and the REAL packaged v24
     block is handed to the parser.  It must refuse, and the message must name
     the schema -- "missing field(s) ['executes']" would send its reader off to
     edit a table rather than to install a release the reader was written for.
@@ -169,7 +223,7 @@ def test_a_v9_closed_eligibility_reader_refuses_the_real_v23_bytes(monkeypatch):
     assert "schema must be one of" in message
 
 
-def test_a_v9_closed_contract_reader_refuses_the_real_v23_bytes(monkeypatch, tmp_path):
+def test_a_v9_closed_contract_reader_refuses_the_real_v24_bytes(monkeypatch, tmp_path):
     """The second reader, refusing the same bytes for the same reason."""
     pre_527 = frozenset(
         contract.TESSERA_LANE_SCHEMAS - {lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10})
