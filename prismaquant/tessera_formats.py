@@ -50,6 +50,7 @@ which are worth encoding is a measurement, and only four of them have one.
 """
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -76,6 +77,8 @@ __all__ = [
     "fused_shared_signature",
     "family_rate_cap",
     "materialised_terminal_format",
+    "platform_backs",
+    "pinned_platform_axis",
     "tessera_serving_route",
     "recipe_from_wire_names",
     "scale_plane_name",
@@ -1278,10 +1281,28 @@ class TesseraServingRoute:
     act_bits: "int | None"
     act_dtype_name: "str | None"
     act_group_size: "int | None"
+    #: The NVIDIA compute capability the terminal format's stock route needs.
+    #: RECORDED, and emitted on every byte breakdown; it is no longer what
+    #: decides whether a platform serves this family, because it cannot answer
+    #: for a device that has no SM number. :func:`platform_backs` is that
+    #: decision, and it reads the pinned contract.
     min_capability_sm: int
     #: The registry format whose activation RTN models this route's A side,
     #: or None for a weight-only route.
     activation_source_format: "str | None" = None
+    #: Does the PINNED runtime execute this route natively on the platform the
+    #: route was asked for? ``True`` when no platform was named -- the route is
+    #: then the platform-blind layout fact it has always been, and this field
+    #: leaves every existing route object equal to what it was. ``False`` only
+    #: when a target was named and the contract answered for it: either
+    #: ``executes: null`` (a measured platform fact: no native route for these
+    #: bytes on that device) or a platform the document does not carry (it
+    #: declined to answer, and silence is not an attestation). The rung stays
+    #: PRICED either way -- an allocator that wants an unbacked route is
+    #: reporting a serving gap, and removing the rung would hide the signal.
+    platform_backed: bool = True
+    #: The platform this route was resolved for, or None for the blind form.
+    target_platform: "str | None" = None
 
     @property
     def materialises(self) -> bool:
@@ -1337,24 +1358,103 @@ def _hardware_min_sm(base: str) -> int:
         ) from exc
 
 
+def pinned_platform_axis():
+    """The pinned contract's platform entries, loaded once per contract file.
+
+    Returned as the whole :class:`~prismaquant.lane_eligibility.
+    EligibilityTable` rather than a bare map, because the three-state answer
+    (backed / unbacked / unstated) lives on it and a caller that reduced it to
+    a boolean here would lose the difference between "this runtime says no"
+    and "this table was never asked".
+
+    An absent or unreadable table is an absence, not a zero: every platform
+    then reads ``unstated`` and :func:`platform_backs` answers False, which is
+    fail-closed and is what "no pinned runtime claims this route" should mean.
+    """
+    from .lane_eligibility import EligibilityTable, load_eligibility_table
+    from .tessera_runtime_contract import contract_path
+
+    try:
+        from importlib.resources import as_file
+
+        with as_file(contract_path()) as path:
+            return load_eligibility_table(contract_path=path)
+    except Exception:  # pragma: no cover - an absent runtime is an absence
+        return EligibilityTable(
+            present=False, runtime_version="", runtime_commit="",
+            contract_sha256="",
+            absent_reason="the pinned Tessera contract could not be read")
+
+
+def platform_backs(
+    family: "str | TesseraFamily",
+    target_platform: str,
+    *,
+    table=None,
+) -> bool:
+    """Does the PINNED runtime execute ``family`` natively on ``target_platform``?
+
+    This replaces the SM comparison as the thing a gate decides on. An SM
+    number is an NVIDIA vocabulary: it has no answer for ``gfx1151``, and
+    resolving one from a platform id was a producer asserting what another
+    runtime does -- exactly what principle 14 refuses. The contract publishes
+    the answer per platform per family (``lane_eligibility.platforms[*]
+    .executes``), so it is READ here, never derived from an id.
+
+    Fail-closed on all three ways of not knowing: no table, a platform the
+    table does not carry, and ``executes: null``. Only the last is a measured
+    refusal; the caller that wants to tell them apart asks
+    :meth:`EligibilityTable.platform_executes` for the third state.
+    """
+    spec = get_tessera_family(family)
+    if table is None:
+        table = pinned_platform_axis()
+    if not getattr(table, "present", False):
+        return False
+    return bool(table.platform_backs(spec.name, target_platform))
+
+
 def tessera_serving_route(
     family: "str | TesseraFamily",
     recipe: "WireRecipe | None" = None,
     rung: "int | None" = None,
+    *,
+    target_platform: "str | None" = None,
+    table=None,
 ) -> TesseraServingRoute:
     """The route a unit of ``family`` under ``recipe`` executes on.
 
     ``recipe`` defaults to the wire the exporter writes for the family.
+
+    ``target_platform`` is optional and changes NOTHING about the route's
+    priced contract. With none, this is the platform-blind layout fact it has
+    always been and the returned object is byte-identical to what it was.
+    With one, the pinned contract is asked whether that device executes this
+    family natively, and the answer lands on ``platform_backed`` alone: an
+    unbacked rung is still priced, still comparable, and still refused at
+    admission. Pricing it at zero -- or dropping it from the menu -- would
+    remove the honestly priced rung principle 1 says must stay on the menu,
+    and an allocator that reaches for an unbacked route is REPORTING a serving
+    gap, which is the signal.
     """
     spec = get_tessera_family(family)
     wire = tessera_wire_recipe(spec, rung) if recipe is None else recipe
     plane = scale_plane_name(wire.scale_plane)
     hardware = _HARDWARE_BASES.get(spec.base)
+    backed = (True if target_platform is None
+              else platform_backs(spec, target_platform, table=table))
+
+    def _at(route: TesseraServingRoute) -> TesseraServingRoute:
+        if target_platform is None:
+            return route
+        return dataclasses.replace(
+            route, platform_backed=backed, target_platform=target_platform)
+
     if hardware is None:
-        return _KERNEL_ROUTE
+        return _at(_KERNEL_ROUTE)
     _size, terminal = hardware
     if spec.base == "E2M1" and plane in ("s6b", "lut16"):
-        return TesseraServingRoute(
+        return _at(TesseraServingRoute(
             contract="w4a4-nvfp4-e2m1-group16-ue4m3",
             terminal_format=terminal,
             act_bits=4,
@@ -1362,7 +1462,7 @@ def tessera_serving_route(
             act_group_size=16,
             min_capability_sm=_hardware_min_sm(spec.base),
             activation_source_format="NVFP4",
-        )
+        ))
     if spec.base == "BF16" and plane == "channel" and spec.arity == 1:
         # A statement about the LAYOUT the decode lands in, which is all a
         # producer may assert on its own (see this function's docstring):
@@ -1371,7 +1471,7 @@ def tessera_serving_route(
         # is no registry row whose activation RTN models it.  Whether any
         # runtime ROUTES these bytes is ``route_admission``'s question, and
         # today the answer is no -- Tessera issue #9.
-        return TesseraServingRoute(
+        return _at(TesseraServingRoute(
             contract="w16a16-bf16-channel",
             terminal_format=terminal,
             act_bits=16,
@@ -1379,11 +1479,11 @@ def tessera_serving_route(
             act_group_size=0,
             min_capability_sm=_hardware_min_sm(spec.base),
             activation_source_format=None,
-        )
+        ))
     if spec.base == "E4M3" and plane == "channel" and spec.arity == 1:
         # ``materialize_fp8`` refuses a tuple grid: the FP8 MMA takes one
         # scale per output channel over scalar E4M3 bytes.
-        return TesseraServingRoute(
+        return _at(TesseraServingRoute(
             contract="w8a8-dynamic-e4m3-channel",
             terminal_format=terminal,
             act_bits=8,
@@ -1391,8 +1491,8 @@ def tessera_serving_route(
             act_group_size=0,
             min_capability_sm=_hardware_min_sm(spec.base),
             activation_source_format="FP8_E4M3",
-        )
-    return _KERNEL_ROUTE
+        ))
+    return _at(_KERNEL_ROUTE)
 
 
 def route_static_activation_contract(

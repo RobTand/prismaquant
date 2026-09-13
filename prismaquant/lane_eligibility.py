@@ -129,7 +129,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -218,6 +218,42 @@ RECORDED_SMOKE_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
+
+#: The schemas whose ``platforms`` entries are OBJECTS rather than bare keys
+#: (v10, Tessera #456). Under v9 and earlier the value was never read: the
+#: only thing a platform key answered was whether a cell could name it, so the
+#: single way to say anything about a device was to have served on it. v10
+#: lets the document state what a platform EXECUTES per family before any cell
+#: on it exists, and ``null`` there is a claim somebody looked -- which is the
+#: measured platform fact principle 9's carve-out turns on, and the reason
+#: this bump is not additive.
+PLATFORM_AXIS_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
+})
+
+#: The backends a platform entry may declare. TRANSCRIBED from the publisher's
+#: own validator (``tessera.serving.contract.PLATFORM_BACKENDS``), closed the
+#: same way :data:`CELL_ROUTE_STATUSES` is. The device TYPE cannot answer this
+#: question: a ROCm torch reports ``device.type == "cuda"`` for an AMD device.
+PLATFORM_BACKENDS = frozenset({"cuda", "hip"})
+
+#: The key that names the hardware, one per backend, and exactly one is
+#: present. A CUDA platform is a compute capability and a HIP platform is a
+#: gcnArchName; an entry carrying both would be two devices under one key.
+#: Transcribed from ``tessera.serving.contract.PLATFORM_ARCH_KEYS``.
+PLATFORM_ARCH_KEYS = {"cuda": "compute_capability", "hip": "gcn_arch"}
+
+#: Keys a platform entry may carry beyond the required ones. They describe the
+#: machine rather than what it executes, and nothing here reads them; they are
+#: named so a closed key check does not refuse the entries the runtime ships.
+PLATFORM_OPTIONAL_KEYS = frozenset({"wavefront", "lds_bytes"})
+
+#: What a platform entry says about one family, when the table declares the
+#: platform at all. A platform key the table does not carry is a THIRD state
+#: and not a synonym for ``None``: the document declined to answer, and a
+#: reader that folded the two together would report an unread question as a
+#: measured refusal.
+PLATFORM_EXECUTES_UNSTATED = "unstated"
 
 #: Every eligibility-table schema this parser accepts. The check is a set
 #: membership, never a prefix match: an unrecognised vendor is a table this
@@ -1801,6 +1837,131 @@ class EligibilityCell:
 
 
 @dataclass(frozen=True)
+class PlatformEntry:
+    """One ``lane_eligibility.platforms`` entry, under a platform-axis schema.
+
+    ``executes`` is the whole point: a map over every family the contract
+    publishes, whose value is that family's OWN route contract when the
+    pinned runtime dispatches those bytes natively on this device, and
+    ``None`` when it does not. ``None`` is a claim, not an omission -- the
+    publisher's validator refuses a family left out of the map precisely so a
+    consumer can tell "unbacked here" from "this document did not say".
+
+    A producer reads this to price a target it has never served on. It is not
+    an attestation that anything WAS served: that is a cell, and a platform
+    with no cell keeps resolving ``unattested`` at the seam export gates on
+    (``serving_profiles.ServingLaneSpec.route_status_for``).
+    """
+
+    key: str
+    backend: str
+    arch_key: str
+    arch: Any
+    serve_image: "str | None"
+    executes: Mapping[str, "str | None"]
+
+    def backs(self, family: str) -> bool:
+        """Does the pinned runtime execute ``family`` natively on this device?"""
+        return self.executes.get(family) is not None
+
+    def answer(self) -> dict[str, Any]:
+        """The projection a reviewer reads, in a stable order."""
+        return {
+            "backend": self.backend,
+            self.arch_key: self.arch,
+            "serve_image": self.serve_image,
+            "executes": {k: self.executes[k] for k in sorted(self.executes)},
+        }
+
+
+def _parse_platform_entries(
+    platforms_block: Mapping[str, Any],
+    contracts_by_family: Mapping[str, "str | None"],
+    where: str,
+) -> dict[str, PlatformEntry]:
+    """The v10 platform grammar, transcribed from the publisher's validator.
+
+    Transcribed and not re-derived: the closed sets above mirror
+    ``tessera.serving.contract``'s, and the one rule this reader adds nothing
+    to is the last -- a non-null ``executes`` value must equal the
+    ``activation_contract`` the family's own ``formats[]`` row publishes. That
+    is what stops a platform entry from naming a contract the dispatch does
+    not run, and it is checked here rather than trusted because a value a gate
+    reads is either derived or refused (principle 14).
+    """
+    entries: dict[str, PlatformEntry] = {}
+    for key, entry in platforms_block.items():
+        at = f"{where}.platforms[{str(key)!r}]"
+        if not isinstance(entry, Mapping):
+            raise LaneEligibilityError(
+                f"{at} must be a JSON object. Before schema v10 a platform was "
+                "a bare KEY, and a reader that goes on treating it as one "
+                "cannot see that a family is published unbacked here -- which "
+                "is the whole point of the axis, and why v10 is not additive")
+        backend = entry.get("backend")
+        if backend not in PLATFORM_BACKENDS:
+            raise LaneEligibilityError(
+                f"{at}.backend must be one of {sorted(PLATFORM_BACKENDS)}, got "
+                f"{backend!r}; the device type cannot answer it, because a "
+                'ROCm torch reports device.type "cuda" for an AMD device')
+        arch_key = PLATFORM_ARCH_KEYS[str(backend)]
+        if arch_key not in entry:
+            raise LaneEligibilityError(
+                f"{at} declares backend {backend!r} and must carry {arch_key!r}")
+        others = sorted(
+            (set(PLATFORM_ARCH_KEYS.values()) - {arch_key}) & set(entry))
+        if others:
+            raise LaneEligibilityError(
+                f"{at} declares backend {backend!r} and also carries {others}; "
+                "a platform key names one device, and two architecture "
+                "spellings under one key is two devices sharing an identity")
+        _require_keys(
+            entry, at,
+            required={"backend", arch_key, "serve_image", "executes"},
+            optional=set(PLATFORM_OPTIONAL_KEYS),
+        )
+        serve_image = entry["serve_image"]
+        if serve_image is not None and (
+                not isinstance(serve_image, str)
+                or _DIGEST_IMAGE.fullmatch(serve_image) is None):
+            raise LaneEligibilityError(
+                f"{at}.serve_image must be a digest-pinned image or null, got "
+                f"{serve_image!r}")
+        executes = entry["executes"]
+        if not isinstance(executes, Mapping) or set(executes) != set(
+                contracts_by_family):
+            raise LaneEligibilityError(
+                f"{at}.executes must name every family in formats[] "
+                f"({sorted(contracts_by_family)}), got "
+                f"{sorted(executes) if isinstance(executes, Mapping) else executes!r}. "
+                "A family left out is not 'unbacked' -- it is a question this "
+                "document declined to answer about a platform it declares, and "
+                "a consumer cannot tell the two apart; null is how a table says "
+                "unbacked")
+        for family, value in executes.items():
+            if value is None:
+                continue
+            expected = contracts_by_family[family]
+            if value != expected:
+                raise LaneEligibilityError(
+                    f"{at}.executes[{family!r}] is {value!r}, but that family's "
+                    f"formats[] row publishes activation_contract {expected!r}. "
+                    "A platform entry does not get to name a contract the "
+                    "dispatch does not run: the value is DERIVED from the route "
+                    "or it is a claim about a runtime nobody read")
+        entries[str(key)] = PlatformEntry(
+            key=str(key),
+            backend=str(backend),
+            arch_key=arch_key,
+            arch=entry[arch_key],
+            serve_image=serve_image,
+            executes={str(f): (None if v is None else str(v))
+                      for f, v in executes.items()},
+        )
+    return entries
+
+
+@dataclass(frozen=True)
 class EligibilityTable:
     """The packaged ``lane_eligibility`` block, or the ABSENT sentinel.
 
@@ -1820,6 +1981,13 @@ class EligibilityTable:
     contract_sha256: str
     schema: str = ""
     platforms: tuple[str, ...] = ()
+    #: The v10 platform axis, keyed by platform id. Empty under every earlier
+    #: grammar, where the entry's VALUE was never read -- so a caller must
+    #: distinguish "no entry" from "``executes`` says null" and
+    #: :meth:`platform_executes` does that with a third state rather than
+    #: letting an older table read as a measured refusal.
+    platform_entries: Mapping[str, PlatformEntry] = field(
+        default_factory=dict)
     regimes: tuple[str, ...] = ()
     structures: tuple[str, ...] = ()
     cells: tuple[EligibilityCell, ...] = ()
@@ -1836,6 +2004,29 @@ class EligibilityTable:
         """Whether the pinned contract publishes a codec for this family."""
         return family in self.families
 
+    def platform_executes(self, family: str, platform: str) -> "str | None":
+        """The contract this platform executes ``family`` by, or the third state.
+
+        Returns the family's route contract when the platform backs it,
+        ``None`` when the entry publishes ``null`` -- the pinned runtime has no
+        native route for those bytes on that device, which is a measured
+        platform fact -- and :data:`PLATFORM_EXECUTES_UNSTATED` when this table
+        makes no statement at all: an earlier grammar, an absent table, or a
+        platform key the document does not carry. The three are kept apart on
+        purpose; folding ``unstated`` into ``None`` would report an unread
+        question as a measured refusal, which is the mistake principle 14's
+        corollary is about.
+        """
+        entry = self.platform_entries.get(platform)
+        if entry is None:
+            return PLATFORM_EXECUTES_UNSTATED
+        return entry.executes.get(family, PLATFORM_EXECUTES_UNSTATED)
+
+    def platform_backs(self, family: str, platform: str) -> bool:
+        """Fail-closed: only a published non-null contract is backing."""
+        executed = self.platform_executes(family, platform)
+        return executed is not None and executed != PLATFORM_EXECUTES_UNSTATED
+
     def provenance(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "status": "present" if self.present else "absent",
@@ -1848,6 +2039,11 @@ class EligibilityTable:
             payload["reason"] = self.absent_reason
         else:
             payload["platforms"] = list(self.platforms)
+            if self.platform_entries:
+                payload["platform_executes"] = {
+                    key: dict(entry.executes)
+                    for key, entry in sorted(self.platform_entries.items())
+                }
             payload["regimes"] = list(self.regimes)
             payload["structures"] = list(self.structures)
             payload["published_families"] = sorted(self.families)
@@ -2544,6 +2740,19 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
             f"{where}.platforms must be a non-empty JSON object keyed by "
             "platform id")
     platforms = tuple(str(p) for p in platforms_block)
+    platform_entries: dict[str, PlatformEntry] = {}
+    if str(block["schema"]) in PLATFORM_AXIS_LANE_SCHEMAS:
+        # The family -> executed-contract map the entries are checked against,
+        # read off the same ``formats[]`` rows the rest of this parse uses.
+        contracts_by_family = {
+            str(entry["family"]): (
+                None if entry.get("activation_contract") is None
+                else str(entry["activation_contract"]))
+            for entry in formats
+            if isinstance(entry, Mapping) and entry.get("family")
+        }
+        platform_entries = _parse_platform_entries(
+            platforms_block, contracts_by_family, where)
 
     regimes = tuple(str(r) for r in block["regimes"])
     if not regimes or len(set(regimes)) != len(regimes):
@@ -2684,6 +2893,7 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
         contract_sha256=sha,
         schema=schema,
         platforms=platforms,
+        platform_entries=platform_entries,
         regimes=regimes,
         structures=structures,
         cells=cells,
@@ -2921,6 +3131,11 @@ __all__ = [
     "LANE_REQUIREMENT_LISTS",
     "LANE_ROTATION_STATES",
     "LaneClaim",
+    "PLATFORM_AXIS_LANE_SCHEMAS",
+    "PLATFORM_BACKENDS",
+    "PLATFORM_ARCH_KEYS",
+    "PLATFORM_EXECUTES_UNSTATED",
+    "PlatformEntry",
     "SCOPED_LANE_SCHEMAS",
     "SmokeControl",
     "SmokeRecord",

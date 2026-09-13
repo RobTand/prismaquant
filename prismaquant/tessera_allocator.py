@@ -51,7 +51,6 @@ TESSERA_ADAPTIVE_RATE_PROPOSAL_SCHEMA = (
 )
 
 _VARIANT_LABEL = re.compile(r"[A-Za-z0-9_.-]+")
-_SM_PLATFORM = re.compile(r"sm[_-]?([0-9]+)")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
@@ -579,22 +578,50 @@ def _capability_gate(
     spec: TesseraFamily,
     target_platform: str | None,
 ) -> tuple[bool, str]:
+    """Does the PINNED runtime execute this family on the profile's target?
+
+    Read from the contract, never resolved from the platform id. Until
+    PrismaQuant #528 this parsed an SM number out of ``target_platform`` and
+    compared it to the terminal format's floor -- a producer asserting what
+    another runtime does, from a string, in a vocabulary that has no answer
+    for ``gfx1151``. The contract publishes the answer per platform per
+    family, so the gate reads it (principle 14).
+
+    Three ways of not knowing, all fail-closed, and the detail says which:
+    the pinned table is absent, the platform is one it does not carry, or
+    ``executes`` is ``null`` for this family there. Only the last is a
+    measured refusal, and it is the one worth reporting as a serving gap.
+    """
+    from .lane_eligibility import PLATFORM_EXECUTES_UNSTATED
+    from .tessera_formats import pinned_platform_axis
+
     if target_platform is None:
         return True, (
             "profile declares no exact hardware platform; capability remains "
             "an experiment admission responsibility"
         )
-    match = _SM_PLATFORM.fullmatch(target_platform)
-    if match is None:
+    table = pinned_platform_axis()
+    if not table.present:
         return False, (
-            f"cannot resolve exact SM capability from target platform "
-            f"{target_platform!r}"
+            f"no pinned Tessera contract is readable, so nothing is attested "
+            f"for {spec.family} on {target_platform}"
         )
-    observed = int(match.group(1))
-    legal = observed >= spec.minimum_capability_sm
-    return legal, (
-        f"target {target_platform} resolves SM{observed}; {spec.family} "
-        f"requires SM{spec.minimum_capability_sm}+"
+    executed = table.platform_executes(spec.name, target_platform)
+    if executed == PLATFORM_EXECUTES_UNSTATED:
+        return False, (
+            f"the pinned contract declares no platform {target_platform!r} "
+            f"(it publishes {list(table.platforms)}), so it makes no statement "
+            f"about {spec.family} there"
+        )
+    if executed is None:
+        return False, (
+            f"the pinned contract publishes executes: null for {spec.family} "
+            f"on {target_platform} -- the runtime has no native route for "
+            "these bytes on that device"
+        )
+    return True, (
+        f"the pinned contract publishes {spec.family} on {target_platform} as "
+        f"{executed}"
     )
 
 
