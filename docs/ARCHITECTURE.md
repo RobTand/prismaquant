@@ -9676,8 +9676,10 @@ builds the `default` class, which resolves to exactly the spec-level values, so
 a spec with no `classes` block — every campaign in flight — produces the same
 row dict it always has. **Nothing about the class is written into the row**:
 `submit` re-run is the resume, a finished row is a CAS hit on its action key,
-and a key that moved is completed work re-running. The class travels in the
-plan beside the manifest.
+and a key that moved is completed work re-running. Nothing records the class
+either: every subcommand builds `default`, so no plan in flight holds a second
+class to record, and the first row kind built for another one records it in its
+own plan entry when it lands.
 
 `tools/fleet_interpreters.json` is what a placement tag means: the ISA its
 boxes execute, the GPU runtime a container there attaches with (`nvidia` is

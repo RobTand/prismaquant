@@ -294,6 +294,21 @@ def test_a_weights_only_row_may_not_carry_a_hessian_aware_flag():
             raise AssertionError(f"a weights-only row carried {flag}")
 
 
+def test_a_weights_only_row_may_not_carry_an_attached_hessian_aware_value():
+    """``--flag=value`` is the same flag as ``--flag value``."""
+    for flag in dispatch.HESSIAN_AWARE_FLAGS:
+        try:
+            dispatch._row(rocm_spec(), ["--model", "/models/example",
+                                        f"{flag}=/some/path"],
+                          mem_gb=4, timeout_s=None,
+                          module="prismaquant.example_encode",
+                          row_class_name="rocm-encode")
+        except dispatch.RowClassRefused as error:
+            assert flag in str(error)
+        else:
+            raise AssertionError(f"a weights-only row carried {flag}=")
+
+
 def test_the_campaign_s_own_rows_are_unaffected_by_the_weights_only_gate():
     """The gate is a property of the class, not of the flag list."""
     row = dispatch._row(base_spec(), ["--model", "/models/example",

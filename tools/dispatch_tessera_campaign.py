@@ -821,7 +821,10 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
     function returned before classes existed.  Nothing about the class is
     written INTO the row: ``submit`` re-run is the resume, a finished row is a
     CAS hit on its action key, and a key that moved is a row that re-runs.
-    The class travels in the plan beside the manifest instead.
+    Nothing records the class either: every subcommand today builds the
+    ``default`` class, so there is no second class in any plan to record, and
+    the first row kind that is built for another one records it in its own
+    plan entry when it lands.
     """
     resolved = row_class(spec, row_class_name)
     if resolved["weights_only"]:
@@ -832,7 +835,9 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
                 "scope, its capture row writes the calibration cache, and its "
                 "pricing rows fit and consume a Hessian, whose wire is not "
                 "bit-comparable across instruction sets (RobTand/tessera#472)")
-        named = [flag for flag in HESSIAN_AWARE_FLAGS if flag in argv]
+        named = [flag for flag in HESSIAN_AWARE_FLAGS
+                 if any(arg == flag or arg.startswith(flag + "=")
+                        for arg in argv)]
         if named:
             raise RowClassRefused(
                 f"row class {row_class_name!r} is weights-only and this row's "
