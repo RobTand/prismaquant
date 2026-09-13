@@ -90,7 +90,8 @@ import pickle
 import re
 import time as _time
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import format_registry as fr
@@ -1667,7 +1668,48 @@ def clip_probe_fisher_outliers(stats: dict, meta: dict | None = None, *,
     return summary
 
 
-def main():
+@dataclass(frozen=True)
+class MeasuredRuntimeSweep:
+    """What ``main(measured_runtime_sweep=...)`` hands its caller.
+
+    ``solve(slo_ms, target_bits)`` runs one ordinary measured-runtime solve at
+    that prefill p95-TTFT budget -- the same ``_solve_for_target`` path, the
+    same exact payload and serving checks -- and returns a plain record:
+    ``feasible``, ``reason`` (when not), the expanded ``assignment``,
+    ``achieved_bits``, ``payload_bytes``, ``predicted_dloss``, the
+    ``serve_constraints`` verdict (whose ``predicted.operator_sum_prefill_ms``
+    is the attained prefill, fixed work included) and the solver
+    ``diagnostics`` (including ``prefill_slo_breakpoints_ms``). The two
+    prefill sums bound the SLO axis from the table alone: no assignment can
+    attain less than ``fixed_resources.prefill_ms + unit_min_prefill_sum_ms``,
+    and none needs more than the max sum.
+    """
+
+    solve: Callable[[float, float], dict]
+    table_identity: dict
+    runtime_context: dict
+    fixed_resources: dict
+    unit_min_prefill_sum_ms: float
+    unit_max_prefill_sum_ms: float
+    n_units: int
+    target_bits: float
+    slos: ServeSLOs
+    cost_path: str
+    probe_path: str
+
+
+def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
+    """Allocator CLI. ``argv`` defaults to ``sys.argv[1:]``.
+
+    ``measured_runtime_sweep`` is the one seam for a caller that needs several
+    single solves over one loaded allocator state instead of one: the prefill
+    frontier sweep (``prismaquant.prefill_frontier``). When it is given, the
+    measured-runtime inputs are loaded, checked and priced exactly as for a
+    single solve, then the callable receives a :class:`MeasuredRuntimeSweep`
+    and ``main`` returns without writing the layer config, Pareto CSV or
+    selection. ``None`` -- every existing caller -- is the unchanged
+    single-solve path.
+    """
     from .tessera_serving_scope import (
         add_serving_scope_arguments, serving_target_from_args,
         context_by_unit_from_stats, scope_provenance,
@@ -2128,17 +2170,24 @@ def main():
                     help="Operator-supplied peak scratch bytes for the "
                          "device memory constraint (not modelled by the "
                          "allocator).")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.measured_runtime_context and not args.measured_runtime_table:
         ap.error("--measured-runtime-context requires --measured-runtime-table")
+    if measured_runtime_sweep is not None and not args.measured_runtime_table:
+        ap.error("a measured runtime sweep requires --measured-runtime-table")
     if args.measured_runtime_table:
         if args.serve_dispatch_table or args.serve_workload_mix:
             ap.error("--measured-runtime-table is mutually exclusive with "
                      "--serve-dispatch-table and --serve-workload-mix")
         if not args.measured_runtime_context:
             ap.error("--measured-runtime-table requires --measured-runtime-context")
-        if args.slo_prefill_p95_ttft_ms is None:
+        if measured_runtime_sweep is not None:
+            # The sweep owns the prefill budget: it sets one per grid point.
+            if args.slo_prefill_p95_ttft_ms is not None:
+                ap.error("--slo-prefill-p95-ttft-ms belongs to the prefill "
+                         "frontier sweep grid, not to its allocator arguments")
+        elif args.slo_prefill_p95_ttft_ms is None:
             ap.error("--measured-runtime-table requires --slo-prefill-p95-ttft-ms "
                      "as an operator-sum proposal budget")
         if args.slo_decode_p05_tps is not None:
@@ -3848,7 +3897,7 @@ def main():
         requested_target = float(target_bits)
         mutable_target_bits = requested_target
         if measured_runtime_table is not None:
-            from .allocator_solver import solve_runtime_frontier
+            from .allocator_solver import RuntimeFrontierLimitError, solve_runtime_frontier
             fixed = measured_runtime_table.fixed_resources
             fixed_device = (fixed.resident_bytes + fixed.activation_bytes
                             + fixed.peak_scratch_bytes + fixed.kv_bytes
@@ -3875,9 +3924,33 @@ def main():
                     max_prefill_ms=max_prefill, max_decode_ms=max_decode,
                     max_device_bytes=serve_slos.device_budget_bytes,
                     fixed_device_bytes=fixed_device, diagnostics=diag)
+            except RuntimeFrontierLimitError as exc:
+                # Inside a sweep one grid point over the exact-search bound is
+                # that point's recorded refusal, not the end of the sweep; a
+                # single solve keeps exiting, as before.
+                if measured_runtime_sweep is None:
+                    raise SystemExit(f"[alloc] ERROR: measured runtime search: {exc}") from None
+                diag["solver_seconds"] = _time.perf_counter() - start
+                diag["reason"] = f"exact_search_refused:{diag.get('refusal')}"
+                diag["refusal_detail"] = str(exc)
+                return None, float("nan"), float("inf"), float("inf")
             except (ValueError, RuntimeError) as exc:
                 raise SystemExit(f"[alloc] ERROR: measured runtime search: {exc}") from None
             diag["solver_seconds"] = _time.perf_counter() - start
+            # The prefill values at which the lowest-loss proposal changes as
+            # the prefill budget tightens: walk the loss-ordered frontier and
+            # keep each new running minimum of operator-sum prefill. These are
+            # the exact SLO breakpoints of this solve's proposal set (before
+            # the exact payload/serving checks below), which the frontier
+            # sweep uses as its derived grid. Fixed prefill work is added back
+            # so the values are on the SLO axis.
+            breakpoints = []
+            running_min = math.inf
+            for proposal in frontier:
+                if proposal.prefill_ms < running_min:
+                    running_min = proposal.prefill_ms
+                    breakpoints.append(proposal.prefill_ms + fixed.prefill_ms)
+            diag["prefill_slo_breakpoints_ms"] = breakpoints
             for proposal in frontier:
                 raw_expanded = {}
                 for unit, fmt in proposal.assignment.items():
@@ -4068,6 +4141,71 @@ def main():
         )
 
     pareto_seed_records: list[dict] = []
+
+    if measured_runtime_sweep is not None:
+        # Prefill frontier sweep (prismaquant.prefill_frontier): several
+        # single solves over this one loaded, checked and priced allocator
+        # state, each at its own prefill budget. Every solve goes through the
+        # same _solve_for_target path a single run takes; only the prefill
+        # SLO differs between calls. Nothing below this point runs: the sweep
+        # writes its own document and no layer config or Pareto CSV exists
+        # for "the" solve, because there is no single one.
+        from dataclasses import replace as _replace
+        fixed = measured_runtime_table.fixed_resources
+        unit_min_prefill = 0.0
+        unit_max_prefill = 0.0
+        for unit, options in sorted(candidates.items()):
+            prices = [measured_runtime_resources[(unit, option.fmt)].prefill_ms
+                      for option in options]
+            unit_min_prefill += min(prices)
+            unit_max_prefill += max(prices)
+
+        def _solve_at_prefill_slo(slo_ms: float, target_bits: float) -> dict:
+            nonlocal serve_slos
+            slo_ms = float(slo_ms)
+            if not math.isfinite(slo_ms) or slo_ms <= 0:
+                raise ValueError("prefill SLO must be positive and finite")
+            serve_slos = _replace(serve_slos, p95_ttft_ms=slo_ms)
+            # The memo is keyed by target only; a new budget is a new solve.
+            _solve_cache.clear()
+            _solve_diagnostics.clear()
+            assign, achieved, total, _mutable = _solve_for_target(float(target_bits))
+            diag = _solve_diagnostics.get(round(float(target_bits), 9), {})
+            record = {"slo_ms": slo_ms, "target_bits": float(target_bits),
+                      "feasible": assign is not None,
+                      "reason": None if assign is not None else diag.get("reason"),
+                      "diagnostics": diag}
+            if assign is None:
+                return record
+            expanded = _expand_assignment_for_seed_json(assign)
+            exact = _assignment_payload_totals(
+                {name: fmt for name, fmt in expanded.items()
+                 if name not in fixed_format_assignment}, require_all_stats=True)
+            verdict = _serve_feasibility(expanded)
+            record.update({
+                "assignment": dict(expanded),
+                "achieved_bits": float(achieved),
+                "payload_bytes": int(exact["bits_total"]) // 8,
+                "quantizable_params": int(exact["quantizable_params"]),
+                "predicted_dloss": float(total),
+                "serve_constraints": verdict.as_dict(),
+            })
+            return record
+
+        measured_runtime_sweep(MeasuredRuntimeSweep(
+            solve=_solve_at_prefill_slo,
+            table_identity=measured_runtime_table.identity(),
+            runtime_context=measured_runtime_table.context.as_dict(),
+            fixed_resources=fixed.as_dict(),
+            unit_min_prefill_sum_ms=float(unit_min_prefill),
+            unit_max_prefill_sum_ms=float(unit_max_prefill),
+            n_units=len(candidates),
+            target_bits=float(args.target_bits),
+            slos=serve_slos,
+            cost_path=str(args.costs),
+            probe_path=str(args.probe),
+        ))
+        return
 
     # Pareto sweep.
     targets = [float(x) for x in args.pareto_targets.split(",")]
