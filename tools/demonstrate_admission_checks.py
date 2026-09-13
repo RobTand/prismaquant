@@ -92,6 +92,12 @@ CASES = [
      "    elif False:",
      [f"{ADMISSION}::test_a_stale_calibration_refuses"]),
 
+    ("the placement obligation is not recomputed at all",
+     "    if verdict.recomputed_placement_obligation_bytes is None:",
+     "    if False:",
+     [f"{ADMISSION}::test_the_gate_names_the_placement_obligation_it_cannot_recompute",
+      f"{ADMISSION}::test_an_unpriceable_off_step_peak_adds_its_own_refusal"]),
+
     ("an inline resource claim is accepted as a report reference",
      "    if not isinstance(claim, Mapping) or set(claim) != set(FIXED_RESOURCE_REPORT_REFERENCE):",
      "    if False:",
