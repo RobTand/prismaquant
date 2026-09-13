@@ -1378,6 +1378,12 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         "total_bytes": manifest["total_bytes"],
         "counts": manifest["annotations"]["counts"],
         "bytes": manifest["annotations"]["bytes"],
+        # Cells the campaign adopted rather than encoded: the head decodes a
+        # shard from each of those wires, so the number belongs beside the
+        # phase table a reader uses to size the warm.
+        **{key: manifest["annotations"][key]
+           for key in ("renders_absent", "synthesized_render_wire_bytes")
+           if key in manifest["annotations"]},
         "phases": manifest["annotations"]["phases"],
     }
     if args.dry_run:

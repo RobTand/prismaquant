@@ -15,6 +15,9 @@ and the exclusions that make the order true:
 * the head set first, then one ``layer-<L>`` phase per transformer layer;
 * a rung the campaign never measured contributes no wire, even though its blob
   sits in the same directory as the measured ones;
+* a rung the campaign adopted has a wire and no decoded shard, so the head
+  decodes one from that wire: those wire bytes belong to the head phase, not
+  to the layer that later verifies them;
 * ``run`` hashes every cell up front, so its wires and renders are declared in
   that order and the streaming re-read is accounted for rather than declared
   twice, which the contract refuses;
@@ -337,6 +340,37 @@ def test_a_rung_the_campaign_never_measured_contributes_no_wire(
     assert manifest["annotations"]["counts"]["wires"] == len(fixture["names"]) * len(MEASURED)
 
 
+def test_the_wire_of_a_render_the_campaign_never_wrote_is_read_in_the_head(
+    scratch, shared_mount,
+):
+    fixture = _workspace(scratch)
+    name, fmt = fixture["names"][0], MEASURED[0]
+    render = (fixture["workspace"] / "rows" / "row-0000" / "cache"
+              / glm_data_manifests._cache_weight_filename(name, fmt))
+    assert render.is_file()
+    # A rung this campaign adopted rather than encoded: wire, no shard.
+    render.unlink()
+    wire = fixture["wire_dir"] / _wire_filename(name, fmt)
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+
+    # ``_resolve_render_origin`` decodes the missing shard from this wire
+    # before any layer installs, so the warm has to reach it in the head. A
+    # declaration in ``layer-0`` would leave the pass to read it cold.
+    assert str(wire) in _paths(manifest, "head")
+    assert str(wire) not in _paths(manifest, "layer-0")
+    assert str(render) not in {entry["path"] for entry in manifest["entries"]}
+
+    annotations = manifest["annotations"]
+    assert annotations["renders_absent"] == 1
+    assert annotations["renders_absent_first"] == str(render)
+    assert annotations["synthesized_render_wire_bytes"] == wire.stat().st_size
+    # The layer verifies that wire again. The contract carries a byte range
+    # once, so the second read is recorded rather than declared twice.
+    assert annotations["reread_bytes_by_phase"]["layer-0"] >= wire.stat().st_size
+
+
 def test_the_run_manifest_hashes_every_cell_before_the_first_layer(
     scratch, shared_mount,
 ):
@@ -628,14 +662,14 @@ BASE = Path("/mnt/shared/tessera-measurements/glm-canonical-census-20260908")
 REAL_PLAN = BASE / "first-proof-joint-preparation-03" / "plan.inputs-resolved.json"
 REAL_PLAN_TEMPLATE = BASE / "first-proof-joint-preparation-03" / "dryrun" / "plan.template.json"
 #: The joint pass's whole read set, measured from the dl380g10 local pool at
-#: 05:5xZ on 2026-09-13: 5.15 TB over 368,518 entries. The band is wide on
-#: purpose. A first estimate of 4.75 TB was taken at 04:17Z, before the
-#: campaign merge had published the last of the row renders, and two builds
-#: twenty minutes apart still differed by 3.9 GB while the tree was settling.
+#: 07:57Z on 2026-09-13: 5.20 TB over 371,734 entries. The band is wide on
+#: purpose. The brief's 4.75 TB estimate was taken earlier the same morning,
+#: before the campaign merge had published the last of the row renders, and
+#: the tree was still gaining them: 5.14 TB at 07:39Z and 5.20 TB eighteen
+#: minutes later, 3,216 renders apart.
 #: What the test pins is the shape -- one head phase and one phase per layer,
 #: a read set in the terabytes, dominated by captures, renders and wires --
 #: not a byte count of a tree that is still being written.
-EXPECTED_TOTAL_BYTES = 5.15e12
 TOTAL_BYTES_BAND = (4.5e12, 5.6e12)
 EXPECTED_PHASES = 46
 
@@ -682,9 +716,17 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_46_phases(scratch):
     assert low <= manifest["total_bytes"] <= high, (
         f"{manifest['total_bytes']} bytes is outside the measured band "
         f"{low:.3g}-{high:.3g}")
-    kinds = manifest["annotations"]["bytes"]
+    annotations = manifest["annotations"]
+    kinds = annotations["bytes"]
     assert kinds["captures"] > 2e12 and kinds["renders"] > 1e12
     assert kinds["wires"] > 7e11 and kinds["source_extents"] > 5e11
+
+    # Rungs this campaign adopted have a wire and no decoded shard. The head
+    # decodes one per cell, so every such wire is declared in the head phase
+    # and its shard is declared nowhere.
+    assert annotations["renders_absent"] == (
+        annotations["measured_cells"] - annotations["counts"]["renders"])
+    assert phases[0]["bytes"] >= annotations["synthesized_render_wire_bytes"]
 
     # The gap this read set exposes, stated as a number rather than as prose.
     # PrismaBuild's data manifest v1 refuses a manifest file over

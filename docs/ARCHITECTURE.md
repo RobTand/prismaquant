@@ -9,18 +9,24 @@ and the serving export now derive the shared-mount bytes they will read, in
 the order they read them, and submit that read set with the action.** #524
 gave every campaign row a data manifest; work submitted outside the row
 dispatcher carried none, and the joint pass is where that costs the most.
-Measured on the frozen GLM census at 05:5xZ on 2026-09-13, from the dl380g10
-local pool: the `prepare` pass reads **5.15 TB** over 368,518 entries --
-2.08 TB of captures, 1.64 TB of renders, 0.80 TB of measured-rung wires,
+Measured on the frozen GLM census at 07:57Z on 2026-09-13, from the dl380g10
+local pool: the `prepare` pass reads **5.20 TB** over 371,734 entries --
+2.08 TB of captures, 1.69 TB of renders, 0.80 TB of measured-rung wires,
 0.61 TB of source extents and 7.7 GB of head records -- against a 240 GiB ARC.
 A whole-set warm is not available at that ratio, so the manifest carries the
 consumption order: a `head` phase, then one `layer-<L>` phase per transformer
-layer, and the prewarm loop windows on `annotations.phases`. One measured
-limit came with it: PrismaBuild's data manifest v1 refuses a manifest file
-over 64 MiB and reads no compressed form, and this read set is 104 MB of
-compact JSON, so the submit path fails closed on the size rather than
-submitting a truncated read set. Gates:
-`tests/test_glm_joint_data_manifest_at_submit.py`.
+layer, and the prewarm loop windows on `annotations.phases`. The head is not
+small on this census: 97,302 of its 197,990 measured cells are rungs the
+campaign adopted rather than encoded, and `load_measured_anchor_input`
+decodes a shard for each of them from its wire before the first layer
+installs, so 382.67 GB of wire bytes belong to the `head` phase and the phase
+is 390.78 GB. A loop that treats a phase as one unit does not fit that in a
+240 GiB ARC either; the entries are in read order and the running sum is per
+entry, so the window may stop inside a phase. One measured limit came with
+it: PrismaBuild's data manifest v1 refuses a manifest file over 64 MiB and
+reads no compressed form, and this read set is 105 MB of compact JSON, so the
+submit path fails closed on the size rather than submitting a truncated read
+set. Gates: `tests/test_glm_joint_data_manifest_at_submit.py`.
 
 Re-stamped (2026-09-12, `pq/536-loader-axes`) for the **loader-axis leg of
 tensor-parallel legality** (#536). The pinned contract's `tensor_parallel`
@@ -9557,7 +9563,14 @@ capture and each measured rung's render and wire. Only measured rungs
 contribute: a row cache holds the whole menu, and the wire of a rung no anchor
 priced sits in the same directory as the measured ones without ever being
 opened, so declaring it would warm bytes at the expense of bytes the pass does
-read. A pass submitted
+read. A rung the campaign adopted rather than encoded has a wire and no
+decoded shard, and `_resolve_render_origin` decodes one from that wire in the
+head: those wire bytes are declared in the head, not in the layer that later
+verifies them, and the shard is declared nowhere, because it does not exist
+when the manifest is built. Declaring a file that is not there is what made
+every #524 warm finish `partial`; `annotations.renders_absent` and
+`annotations.synthesized_render_wire_bytes` carry the count and the byte total
+so a reader can see the omission rather than infer it. A pass submitted
 before the campaign merge published the checkpoint's unit shards is refused
 with the directory named. The roster comes from the campaign plan's own
 members and each shard is addressed by `cost_stage_checkpoint.unit_path`'s

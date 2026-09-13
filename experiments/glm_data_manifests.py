@@ -603,23 +603,26 @@ def _add_capture(track: "_Phases", found: list) -> None:
         track.add(path, 0, size, "captures")
 
 
-def _add_render(track: "_Phases", owner: str, render_sizes: dict, name: str,
-                fmt: str, absent: list) -> None:
-    """Declare a cell's render, or record that the campaign wrote none.
+def _render_file(owner: str, render_sizes: dict, name: str, fmt: str):
+    """The cell's PWC shard and the bytes the campaign wrote, or zero.
 
-    A rung whose PWC shard was never decoded is synthesized from its wire in
-    the head (``_resolve_render_origin``), so the file the layer phase would
-    open does not exist. Declaring it would name bytes that are not there --
-    the defect that made every #524 warm finish ``partial`` -- so it is left
-    out and counted where a reader can see it.
+    Zero means the campaign adopted this rung rather than encoding it, so it
+    has a wire and no ``.pt``. The head synthesizes one from that wire
+    (``_resolve_render_origin``), which is why the caller reads the wire
+    early and leaves the shard out of the read set: declaring a file that is
+    not there is the defect that made every #524 warm finish ``partial``.
     """
     filename = _cache_weight_filename(name, fmt)
-    size = render_sizes.get(owner, {}).get(filename, 0)
-    path = os.path.join(owner, "cache", filename)
-    if not size:
-        absent.append(path)
-        return
-    track.add(path, 0, size, "renders")
+    return (os.path.join(owner, "cache", filename),
+            render_sizes.get(owner, {}).get(filename, 0))
+
+
+def _add_render(track: "_Phases", owner: str, render_sizes: dict, name: str,
+                fmt: str) -> None:
+    """Declare a cell's render where the campaign wrote one."""
+    path, size = _render_file(owner, render_sizes, name, fmt)
+    if size:
+        track.add(path, 0, size, "renders")
 
 def _checkpoint_unit_shards(track: "_Phases", checkpoint: str, roster) -> dict:
     """Declare one shard of the merged checkpoint per unit, or refuse.
@@ -766,6 +769,12 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     older whole-layer window instead -- all of the layer's captures, then its
     renders and wires -- and the order here follows the plan.
 
+    A rung the campaign adopted has a wire and no decoded shard, and the head
+    decodes one from that wire before any layer installs
+    (``_resolve_render_origin``). Those wires are declared in the head for
+    that reason, not in the layer that later verifies them; the shard itself
+    is left out, because it does not exist when the manifest is built.
+
     ``run`` hashes every cell's wire and render up front
     (``load_measured_anchor_input`` with ``verify_payloads=True``), so it
     carries a ``hash`` phase between the head and the layers, in the hashing
@@ -831,13 +840,27 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     render_sizes = {owner: _dir_sizes(os.path.join(owner, "cache"))
                     for owner in sorted(set(owners.values()))}
 
-    absent = []
+    # Still the head phase: a cell whose shard the campaign never wrote is
+    # synthesized from its wire inside ``load_measured_anchor_input``, before
+    # any layer installs, so that wire is read here and not first in the layer
+    # that verifies it. Declaring it in the layer phase would leave the pass
+    # to read it cold, which is the one thing this manifest exists to prevent.
+    absent, synthesized_wire_bytes = [], 0
+    for name in roster:
+        for fmt, wire, wire_bytes in cells[name]:
+            path, size = _render_file(owners[name], render_sizes, name, fmt)
+            if size:
+                continue
+            absent.append(path)
+            synthesized_wire_bytes += wire_bytes
+            track.add(wire, 0, wire_bytes, "wires")
+
     if command == "run":
         track.begin("hash")
         for name in roster:
             for fmt, wire, wire_bytes in cells[name]:
                 track.add(wire, 0, wire_bytes, "wires")
-                _add_render(track, owners[name], render_sizes, name, fmt, absent)
+                _add_render(track, owners[name], render_sizes, name, fmt)
 
     # A plan that declares a qualification window runs one unit per capture
     # window; without one the whole layer's captures are loaded together.
@@ -852,7 +875,7 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             # production cache; it takes no captures and no wire bytes.
             for name in names:
                 for fmt, _wire, _bytes in cells[name]:
-                    _add_render(track, owners[name], render_sizes, name, fmt, absent)
+                    _add_render(track, owners[name], render_sizes, name, fmt)
             continue
         captures = {name: campaign.capture_files_for([name]) for name in names}
         if not per_unit_window:
@@ -862,7 +885,7 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             if per_unit_window:
                 _add_capture(track, captures[name])
             for fmt, wire, wire_bytes in cells[name]:
-                _add_render(track, owners[name], render_sizes, name, fmt, absent)
+                _add_render(track, owners[name], render_sizes, name, fmt)
                 track.add(wire, 0, wire_bytes, "wires")
     track.end()
     if not track.counts.get("renders"):
@@ -885,6 +908,7 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         "capture_window": "per_unit" if per_unit_window else "per_layer",
         "renders_absent": len(absent),
         "renders_absent_first": absent[0] if absent else None,
+        "synthesized_render_wire_bytes": synthesized_wire_bytes,
         "sha256_present": False,
         "sha256_absent_reason": SHA256_ABSENT_REASON,
         "counts": track.counts,
