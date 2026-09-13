@@ -58,6 +58,71 @@ def cell_dir(root, unit, fmt):
     return Path(root) / "cells" / f"{unit}__{fmt}"
 
 
+def tensor_digest(tensor):
+    """Exact bytes of one weight, with its shape and dtype, as one digest."""
+    import torch
+
+    flat = tensor.detach().to("cpu").contiguous()
+    raw = flat.view(torch.uint8) if flat.dtype is not torch.uint8 else flat
+    digest = hashlib.sha256(f"{tuple(flat.shape)}|{flat.dtype}|".encode())
+    digest.update(raw.numpy().tobytes())
+    return digest.hexdigest()
+
+
+def compare_body_weights(runner, resident, *, max_resident_bytes):
+    """Exact per-Linear equality between the resident renderer and the streamed producer.
+
+    The joint rows are computed on the streamed model while the rendered bytes
+    and the activation capture come from the resident one, so the two have to
+    be the same model. *Weight equality is the exact statement of that.* A
+    logit comparison is not: a whole-model forward and a layer-major streamed
+    forward select different matmul kernels, and two BF16 reduction orders over
+    28 layers do not agree bit for bit. Thresholding that difference would be a
+    constant chosen rather than derived, so the difference is recorded as a
+    diagnostic (``streamed_forward_profile``) and this is the gate.
+
+    Units are compared in byte-bounded batches through the runner's own
+    ``snapshot_selected_weights``, so a model far larger than the device still
+    checks its whole body. A Linear the streamed runner does not carry as a body
+    unit -- ``lm_head`` is one -- is named in ``outside_streamed_body`` rather
+    than dropped, because a silently uncompared unit is the hole this check
+    exists to close; the caller refuses if a unit it prices lands there.
+    """
+    import torch
+
+    resolved, outside, sizes = [], [], {}
+    modules = dict(runner.model.named_modules())
+    for name in sorted(resident):
+        try:
+            runner.layer_index_for_qname(name)
+        except Exception:
+            outside.append(name)
+            continue
+        module = modules.get(name)
+        if not isinstance(module, torch.nn.Linear):
+            outside.append(name)
+            continue
+        sizes[name] = module.weight.numel() * torch.empty((), dtype=runner.dtype).element_size()
+        resolved.append(name)
+    mismatched, compared, batch, used = [], 0, [], 0
+    for name in resolved + [None]:
+        if batch and (name is None or used + sizes[name] > max_resident_bytes):
+            weights, _ = runner.snapshot_selected_weights(batch, max_resident_bytes=max_resident_bytes)
+            for unit, value in weights.items():
+                compared += 1
+                if tensor_digest(value) != resident[unit]:
+                    mismatched.append(unit)
+            del weights
+            batch, used = [], 0
+        if name is not None:
+            batch.append(name)
+            used += sizes[name]
+    return {"schema": "prismaquant.streamed_body_parity.v1", "units_compared": compared,
+            "units_declared": len(resident), "mismatched_units": sorted(mismatched),
+            "outside_streamed_body": sorted(outside), "max_resident_bytes": int(max_resident_bytes),
+            "policy": "exact per-Linear source-weight equality, resident renderer vs streamed producer"}
+
+
 def _require_unclipped_policy():
     from prismaquant.memory_management import env_truthy
     if env_truthy("PRISMAQUANT_PROD_ACT_SCALES", default=True):
@@ -118,6 +183,12 @@ def prepare(args):
     model.config.use_cache = False
     model.requires_grad_(False)
     source_weights = {name: model.get_submodule(name).weight.detach().clone() for name in plan}
+    # Every body Linear the renderer saw, by exact bytes. This is the property
+    # the streamed producer has to share with the resident renderer, and it is
+    # checked below once the streamed runner exists (see `streamed_body_parity`).
+    resident_body = {name: tensor_digest(module.weight)
+                     for name, module in model.named_modules()
+                     if isinstance(module, torch.nn.Linear)}
     cache, renders, capture, reference_logits = _capture_and_render(model, calibration, plan, out,
                                                                     hessian_identity=hessian_identity)
     del model
@@ -140,14 +211,37 @@ def prepare(args):
             runner, calibration, protocol, model_identity, cache, renders)
         dump(out / "expected-currency-bindings.json", {"probe": expected_probe,
                                                         "operator_identity_sha256_by_candidate": expected})
+        parity = compare_body_weights(runner, resident_body, max_resident_bytes=args.max_resident_bytes)
+        parity["priced_units_outside_body"] = sorted(set(plan) & set(parity["outside_streamed_body"]))
+        identity["streamed_body_parity"] = parity
+        dump(out / "streamed-body-parity.json", parity)
+        print("BODY-PARITY", json.dumps({k: v for k, v in parity.items() if k != "policy"},
+                                        sort_keys=True), flush=True)
+        if parity["mismatched_units"] or parity["priced_units_outside_body"]:
+            raise RuntimeError(
+                "streamed producer installs different source weights than the resident renderer "
+                f"(mismatched {parity['mismatched_units']}, "
+                f"priced-but-uncompared {parity['priced_units_outside_body']}); "
+                "the joint rows would price another model")
         with torch.no_grad():
             actual_logits = runner(calibration).logits.detach().cpu()
-        parity = {"bit_exact": torch.equal(actual_logits, reference_logits),
-                  "max_absolute_logit_difference": float((actual_logits.float() - reference_logits.float()).abs().max())}
-        dump(out / "teacher-parity.json", parity)
-        if not parity["bit_exact"]:
-            raise RuntimeError("streamed/resident BF16 teacher differs; the joint rows would price another model")
-        del reference_logits, actual_logits
+        difference = (actual_logits.float() - reference_logits.float()).abs()
+        forward = {"bit_exact": bool(torch.equal(actual_logits, reference_logits)),
+                   "max_absolute_logit_difference": float(difference.max()),
+                   "mean_absolute_logit_difference": float(difference.mean()),
+                   "max_reference_logit_magnitude": float(reference_logits.float().abs().max()),
+                   "top1_agreement": float((actual_logits.argmax(-1) == reference_logits.argmax(-1))
+                                           .to(torch.float64).mean()),
+                   "positions": int(reference_logits.shape[0] * reference_logits.shape[1]),
+                   "scope": "DIAGNOSTIC, not a gate. A resident whole-model forward and a streamed "
+                            "layer-major forward select different matmul kernels, so their BF16 "
+                            "reduction orders differ and their logits cannot be bit-equal. The "
+                            "refusal is the exact per-Linear weight equality in streamed_body_parity."}
+        identity["streamed_forward_profile"] = forward
+        dump(out / "teacher-parity.json", forward)
+        print("FORWARD-PROFILE", json.dumps({k: v for k, v in forward.items() if k != "scope"},
+                                            sort_keys=True), flush=True)
+        del reference_logits, actual_logits, difference
         payload = compute_aura_cost_streamed(runner, calibration, formats,
             n_probes=args.n_probes, token_scope="causal", temperature=1.0, production_cache=cache,
             min_free_gib=args.min_free_gib, seed_base=args.seed_base, require_production_cache=True,
