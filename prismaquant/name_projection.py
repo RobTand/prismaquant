@@ -88,6 +88,7 @@ __all__ = [
     "NAMESPACES",
     "NameProjection",
     "NameProjectionError",
+    "is_packed_expert_qname",
     "packed_expert_alias",
     "PROJECTABLE_PAIRS",
     "ProjectedName",
@@ -189,6 +190,29 @@ def packed_expert_alias(qname: str, parent_for_projection=None) -> str | None:
     if not parent:
         return None
     return ".".join(parts[:-2] + [str(parent)])
+
+
+def is_packed_expert_qname(qname: str) -> bool:
+    """Does this name sit inside an expert stack, packed or per-expert?
+
+    ``...experts.<leaf>`` (the packed 3-D parent vLLM loads) and
+    ``...experts.{i}.<leaf>`` (the per-expert spelling a checkpoint may ship)
+    both answer True; ``...shared_experts.<leaf>`` answers False, because a
+    shared expert is an ordinary dense Linear that tensor parallelism cuts
+    like any other.
+
+    The same structural ``experts`` parse :func:`packed_expert_alias` uses,
+    exposed as a predicate for the callers that need the CLASS and not the
+    packed parent's name -- the ones applying "expert parallelism cuts the
+    stack and leaves each expert's 2-D unit whole", which is the rule
+    ``ServingProfile.check_shape`` and ``allocator_candidates`` already
+    resolve to a ``none`` tensor-parallel cut.
+    """
+    parts = strip_weight_leaf(str(qname)).split(".")
+    if len(parts) >= 2 and parts[-2] == "experts":
+        return True
+    return (len(parts) >= 3 and parts[-3] == "experts"
+            and parts[-2].isdigit())
 
 
 @dataclasses.dataclass(frozen=True)

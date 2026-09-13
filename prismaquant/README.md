@@ -20,6 +20,7 @@ declarative contract layer, not the executor.
 | Select | `validate_assignments_kl`, `select_validated_frontier` |
 | Export | `export_native_compressed` (compressed-tensors), `export_gguf` / `export_gguf_direct` (GGUF) |
 | Validate | `validation_harness`, `validate_native_export`, `validate_quantized_model` |
+| Audit | `tessera_tp_audit` (read-only: does the pinned runtime's loader cut each assigned Tessera unit at this world size?) |
 
 ## Library modules with no CLI (imported by the stages above)
 

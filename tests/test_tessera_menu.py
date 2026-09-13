@@ -737,9 +737,14 @@ def test_the_answer_excludes_every_field_a_gate_does_not_read(dev_pin):
                            "mixed_rung_receipt_note"):
         assert identity_field not in flat, (
             f"{identity_field} is identity or prose, not an answer")
+    # ``loader_axes`` is answer for the same reason ``max_world_size`` is:
+    # ``tessera_menu.tessera_tp_axis_legal`` subtracts a rung on a published
+    # ``refused`` status, so the statuses are values an admission decision is
+    # made of.  The publisher's per-axis reason is prose and stays out.
     for family in ("TESSERA_E2M1_K2", "TESSERA_E4M3_K1", "TESSERA_BF16_K1"):
         assert set(answer["families"][family]) == {
-            "reader_rate_range_q256", "attested_rungs_q256", "max_world_size"}
+            "reader_rate_range_q256", "attested_rungs_q256", "max_world_size",
+            "loader_axes"}
 
 
 def test_the_fused_module_answer_is_the_values_a_gate_reads(dev_pin):
