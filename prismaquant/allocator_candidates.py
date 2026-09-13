@@ -767,7 +767,7 @@ def _tensor_parallel_applicability(
     try:
         legal, reason = tessera_tp_legal(
             family, rung, (out_features, in_features),
-            tp_degree=world, parallel_kind=kind,
+            tp_degree=world, parallel_kind=kind, unit=qname,
             require_attested_world=(menu_mode() == MENU_ATTESTED),
         )
     except TesseraMenuError as exc:

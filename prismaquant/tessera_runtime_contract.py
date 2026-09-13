@@ -319,13 +319,19 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                               'grid_arities': [1]}}}],
  'families': {'TESSERA_BF16_K1': {'reader_rate_range_q256': [256, 4096],
                                   'attested_rungs_q256': [1792],
-                                  'max_world_size': 1},
+                                  'max_world_size': 1,
+                                  'loader_axes': {'column': 'sharded',
+                                                  'row': 'sharded'}},
               'TESSERA_E2M1_K2': {'reader_rate_range_q256': [896, 896],
                                   'attested_rungs_q256': [896],
-                                  'max_world_size': 1},
+                                  'max_world_size': 1,
+                                  'loader_axes': {'column': 'sharded',
+                                                  'row': 'refused'}},
               'TESSERA_E4M3_K1': {'reader_rate_range_q256': [256, 2048],
                                   'attested_rungs_q256': [1024],
-                                  'max_world_size': 1}},
+                                  'max_world_size': 1,
+                                  'loader_axes': {'column': 'sharded',
+                                                  'row': 'sharded'}}},
  'cells': [['tessera_bf16_k1_dense_sm121_batch',
             'sm_121',
             'TESSERA_BF16_K1',
@@ -948,6 +954,12 @@ class TesseraContract:
     native_extensions: tuple[TesseraNativeExtension, ...]
     #: ``family -> max tensor-parallel world size``, closed world.
     max_world_size: Mapping[str, int]
+    #: ``family -> axis -> status`` from the same unit rows: what this build's
+    #: LOADER does with a shard on each axis.  A different question from the
+    #: ceiling beside it -- ``max_world_size`` says what a served receipt
+    #: covers, this says whether the cut loads at all -- and a family the
+    #: block does not list publishes neither.
+    loader_axes: Mapping[str, Mapping[str, str]]
     #: What one vLLM-fused module's roles must share, and what is free.
     fused_module: FusedModuleLicence
     quant_method: str
@@ -1178,6 +1190,10 @@ def contract_answer(contract: "TesseraContract") -> dict:
                 "attested_rungs_q256": sorted(
                     int(r) for r in contract.attested_rungs.get(family, ())),
                 "max_world_size": int(contract.max_world_size.get(family, 0)),
+                "loader_axes": {
+                    str(axis): str(status) for axis, status in
+                    sorted(contract.loader_axes.get(family, {}).items())
+                },
             }
             for family, rng in sorted(contract.reader_rate_range.items())
         },
@@ -1576,8 +1592,77 @@ def _parse_fused_module(payload: Mapping[str, Any], path: str
     )
 
 
-def _parse_tensor_parallel_limits(payload: Mapping[str, Any], path: str) -> dict[str, int]:
-    """Read the closed-world TP ceiling for both pin paths."""
+#: The shard axes ``tensor_parallel.units[].loader_axes`` may name, in
+#: Tessera's own vocabulary (``tessera.serving.sharding.AXES``).  A unit that
+#: names another axis, or omits one of these, is refused rather than read with
+#: the axes this reader happens to know: the point of publishing a status per
+#: axis is that the answer is not derivable from the axis's name.
+TP_LOADER_AXES = ("column", "row")
+
+#: What a published axis status may say.  ``sharded`` is "this build's loader
+#: accepts a shard on this axis", ``refused`` is "it does not, on every rank".
+#: Neither is an attestation: ``max_world_size`` in the same unit row is the
+#: attestation, and the two are separate questions (a loader that would cut an
+#: axis it has never been measured cutting is still unattested).
+TP_LOADER_AXIS_SHARDED = "sharded"
+TP_LOADER_AXIS_REFUSED = "refused"
+TP_LOADER_AXIS_STATUSES = (TP_LOADER_AXIS_SHARDED, TP_LOADER_AXIS_REFUSED)
+
+
+def _parse_loader_axes(block: Any, where: str) -> dict[str, str]:
+    """Read one unit's per-axis loader statuses, or refuse the table.
+
+    There is no default here on purpose.  A missing block, an axis this
+    reader does not share, a status it does not know, and a ``status`` read
+    off the prose beside it are all the same failure: a claim about what
+    another runtime's loader does, read as something other than what was
+    published (principle 14).  Reading absence as ``sharded`` would price a
+    cut the loader refuses on every rank.
+    """
+    if not isinstance(block, Mapping):
+        raise TesseraContractError(
+            f"{where} publishes no usable 'loader_axes' mapping (got "
+            f"{type(block).__name__}). This reader will not assume an axis "
+            "shards because the table did not say it does not."
+        )
+    if set(block) != set(TP_LOADER_AXES):
+        raise TesseraContractError(
+            f"{where}.loader_axes names axes {sorted(block)}; this reader "
+            f"implements exactly {sorted(TP_LOADER_AXES)} and refuses a "
+            "vocabulary it does not share rather than reading the axes it "
+            "recognises and dropping the rest"
+        )
+    axes: dict[str, str] = {}
+    for axis in sorted(TP_LOADER_AXES):
+        entry = block[axis]
+        if not isinstance(entry, Mapping):
+            raise TesseraContractError(
+                f"{where}.loader_axes.{axis} must be an object carrying a "
+                f"'status', got {entry!r}"
+            )
+        status = str(_require(entry, "status", f"{where}.loader_axes.{axis}"))
+        if status not in TP_LOADER_AXIS_STATUSES:
+            raise TesseraContractError(
+                f"{where}.loader_axes.{axis}.status is {status!r}; this "
+                f"reader knows {sorted(TP_LOADER_AXIS_STATUSES)}. The "
+                "``reason`` beside it is prose and is never the value a gate "
+                "reads."
+            )
+        axes[axis] = status
+    return axes
+
+
+def _parse_tensor_parallel(
+    payload: Mapping[str, Any], path: str,
+) -> tuple[dict[str, int], dict[str, dict[str, str]]]:
+    """Read both facts the ``tensor_parallel`` unit rows publish.
+
+    ``max_world_size`` is the ATTESTATION bound -- the largest world size a
+    served receipt covers -- and ``loader_axes`` is what this build's loader
+    does with each shard axis.  They answer different questions and they are
+    read together here so a unit row cannot be half-read: a family with a
+    ceiling and no axis claim is a table this reader refuses.
+    """
     tp = _require(payload, "tensor_parallel", path)
     if str(tp.get("semantics")) != "closed_world":
         raise TesseraContractError(
@@ -1587,12 +1672,19 @@ def _parse_tensor_parallel_limits(payload: Mapping[str, Any], path: str) -> dict
             "will not read an open-world table under that assumption"
         )
     world: dict[str, int] = {}
+    axes: dict[str, dict[str, str]] = {}
     for i, unit in enumerate(tp.get("units", ())):
         where = f"{path}.tensor_parallel.units[{i}]"
-        world[str(_require(unit, "unit", where))] = int(
-            _require(unit, "max_world_size", where))
+        name = str(_require(unit, "unit", where))
+        world[name] = int(_require(unit, "max_world_size", where))
+        axes[name] = _parse_loader_axes(unit.get("loader_axes"), where)
 
-    return world
+    return world, axes
+
+
+def _parse_tensor_parallel_limits(payload: Mapping[str, Any], path: str) -> dict[str, int]:
+    """Read the closed-world TP ceiling for both pin paths."""
+    return _parse_tensor_parallel(payload, path)[0]
 
 
 @lru_cache(maxsize=8)
@@ -1601,11 +1693,31 @@ def published_tensor_parallel_limits(path: str, sha: str) -> Mapping[str, int]:
 
     This accessor reports ceilings only; it does not grant TP admission.
     """
+    return _published_tensor_parallel(path, sha)[0]
+
+
+@lru_cache(maxsize=8)
+def published_tensor_parallel_axes(
+    path: str, sha: str,
+) -> Mapping[str, Mapping[str, str]]:
+    """``family -> axis -> status``, read from a contract file on disk.
+
+    The same reader the parsed contract uses, for the two callers that hold a
+    contract path rather than a loaded contract: the packaged-table route
+    admission, and ``prismaquant.tessera_tp_audit``'s ``--contract``.  One
+    reader means the vocabulary refusal is identical on every path.
+    """
+    return _published_tensor_parallel(path, sha)[1]
+
+
+def _published_tensor_parallel(
+    path: str, sha: str,
+) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
     raw = Path(path).read_bytes()
     if hashlib.sha256(raw).hexdigest() != sha:
         raise TesseraContractError(
             f"{path}: tensor-parallel metadata digest differs from attesting table")
-    return _parse_tensor_parallel_limits(json.loads(raw), path)
+    return _parse_tensor_parallel(json.loads(raw), path)
 
 
 def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
@@ -1711,7 +1823,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             evidence=cell.evidence,
         ))
 
-    world = _parse_tensor_parallel_limits(payload, path)
+    world, loader_axes = _parse_tensor_parallel(payload, path)
 
     fused = _parse_fused_module(payload, path)
 
@@ -1723,6 +1835,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
         cells=tuple(cells),
         native_extensions=extensions,
         max_world_size=world,
+        loader_axes=loader_axes,
         fused_module=fused,
         quant_method=str(method.get("canonical", "")),
         contract_version=int(payload.get("contract_version", 0)),

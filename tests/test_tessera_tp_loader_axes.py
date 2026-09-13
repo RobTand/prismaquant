@@ -44,29 +44,23 @@ _BOTH_SHARDED = {"row": "sharded", "column": "sharded"}
 _COLUMN_CUT_REFUSED = {"row": "refused", "column": "sharded"}
 
 
-@pytest.fixture
-def dev_pin(monkeypatch):
-    """Turn on the Tessera development pin for one test.
-
-    Never autouse: with no pin the contract is ``None`` and the axis leg must
-    stay out of the way, which is its own test below.
-    """
-    monkeypatch.setenv(trc.TESSERA_DEV_PIN_ENV, trc.TESSERA_DEV_PIN_COMMIT)
-    return trc.TESSERA_DEV_PIN_COMMIT
-
-
-def _axis_contract(monkeypatch, axes):
+def _axis_contract(monkeypatch, axes, *, max_world_size=8):
     """A stand-in contract that publishes ``axes`` and attests nothing.
 
     It governs no family on purpose: the axis leg is a LOADER fact and must
     answer without a route claim, so a table that attests nothing is the
     honest witness for it.
+
+    ``max_world_size`` is deliberately generous. The attestation leg is a
+    different question and it must not be the leg that answers here: a table
+    that attested nothing would refuse first and hide whether the axis leg
+    works at all.
     """
     contract = SimpleNamespace(
         commit="synthetic",
         requires_serving_context=False,
         lane_schema="legacy",
-        max_world_size={},
+        max_world_size={family: max_world_size for family in axes},
         reader_rate_range={},
         attested_rungs={},
         loader_axes=axes,
@@ -130,19 +124,38 @@ def _written(tmp_path, payload, name="runtime_contract.json"):
 # The contract reader: a published vocabulary, or a refusal
 # ---------------------------------------------------------------------------
 
-def test_the_pinned_contract_round_trips_every_declared_loader_axis(dev_pin):
-    """The real table, read through the real loader, for all three families."""
-    contract = trc.load_tessera_contract()
-    assert contract is not None, "the dev pin must load"
-    assert contract.loader_axes == {
+def _installed_contract():
+    """The contract bytes the importable Tessera actually packages."""
+    from importlib.resources import as_file
+
+    with as_file(trc.contract_path()) as path:
+        raw = path.read_bytes()
+        return str(path), hashlib.sha256(raw).hexdigest(), json.loads(raw)
+
+
+def test_the_real_pinned_contract_round_trips_every_declared_loader_axis():
+    """The real table, read by the real reader, for all three families.
+
+    Read off the packaged file rather than through ``load_tessera_contract``
+    so this says what the TABLE publishes and not what the answer pin
+    accepts: the two are separate refusals and the answer pin has its own
+    test.
+    """
+    path, sha, payload = _installed_contract()
+    assert trc.published_tensor_parallel_axes(path, sha) == {
         E2M1: {"column": "sharded", "row": "refused"},
         FP8: {"column": "sharded", "row": "sharded"},
         BF16: {"column": "sharded", "row": "sharded"},
     }
-    assert set(contract.loader_axes) == set(contract.max_world_size), (
+    assert (set(trc.published_tensor_parallel_axes(path, sha))
+            == set(trc.published_tensor_parallel_limits(path, sha))), (
         "both facts come off the same unit row; a family with a ceiling and "
         "no axis claim would be half-read"
     )
+    for unit in payload["tensor_parallel"]["units"]:
+        assert "reason" in unit["loader_axes"]["row"], (
+            "the publisher's prose is there to be ignored, not absent"
+        )
 
 
 def test_the_published_axes_accessor_reads_the_same_table(tmp_path):
@@ -194,15 +207,15 @@ def test_a_status_read_from_prose_is_refused(tmp_path):
     assert "status" in str(excinfo.value)
 
 
-def test_the_answer_carries_the_axis_statuses_and_not_their_prose(dev_pin):
-    """A value a gate reads is answer (principle 14); the reason is not.
+def test_the_reviewed_answer_carries_the_axis_statuses():
+    """A value a gate reads is answer; widening the projection is the review.
 
-    Widening the projection is itself the re-review, so this asserts the
-    shape of what was widened: statuses only, per family, beside the ceiling
-    they are deliberately not a spelling of.
+    The literal is what refuses, so this asserts the shape of what was
+    widened: statuses only, per family, beside the ceiling they are
+    deliberately not a spelling of. The publisher's reason is prose and
+    stays out.
     """
-    contract = trc.load_tessera_contract()
-    answer = trc.contract_answer(contract)
+    answer = trc.TESSERA_DEV_PIN_ANSWER
     for family in (E2M1, FP8, BF16):
         entry = answer["families"][family]
         assert set(entry) == {
@@ -215,6 +228,22 @@ def test_the_answer_carries_the_axis_statuses_and_not_their_prose(dev_pin):
     assert "state_{-1}" not in repr(answer), (
         "the publisher's reason is prose and no gate reads it"
     )
+
+
+def test_the_projection_emits_what_the_reviewed_answer_declares():
+    """``contract_answer`` really reads the field the literal was widened for.
+
+    Against the installed contract, whichever pin it carries: every build
+    that publishes this block publishes the same statuses, and a literal that
+    named a field the projection never emitted would drift on every run.
+    """
+    path, sha, payload = _installed_contract()
+    contract = trc._parse(payload, commit="installed", sha=sha, path=path)
+    answer = trc.contract_answer(contract)
+    for family in (E2M1, FP8, BF16):
+        assert (answer["families"][family]["loader_axes"]
+                == dict(sorted(contract.loader_axes[family].items())))
+    assert answer["families"][E2M1]["loader_axes"]["row"] == "refused"
 
 
 # ---------------------------------------------------------------------------
@@ -246,9 +275,13 @@ def test_the_axis_leg_does_not_wait_for_the_attestation_leg(monkeypatch):
     ``require_attested_world`` turns the world-size question on. The loader
     fact is a different question -- can the loader cut it at all -- and a
     research menu that prices unattested rungs on purpose still must not
-    price a cut the loader refuses on every rank.
+    price a cut the loader refuses on every rank. The table here attests the
+    world size, so the attestation leg passes in both modes and the axis leg
+    is the one that answers.
     """
     _axis_contract(monkeypatch, {E2M1: _COLUMN_CUT_REFUSED})
+    attested, why = tm.tessera_tp_world_attested(E2M1, 2)
+    assert attested, why
     for require in (False, True):
         legal, reason = tm.tessera_tp_legal(
             E2M1, _first_rung(E2M1), SHAPE, tp_degree=2,
