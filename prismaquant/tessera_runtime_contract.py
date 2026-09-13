@@ -72,7 +72,7 @@ import fnmatch
 import hashlib
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -111,7 +111,12 @@ __all__ = [
     "TesseraNativeExtension",
     "TesseraRouteCell",
     "cell_activation_projection",
+    "ActivationQuantizerAttestation",
+    "ActivationQuantizerVector",
+    "ACTIVATION_QUANTIZER_SCHEMA",
     "contract_answer",
+    "packaged_activation_quantizers",
+    "require_activation_quantizer_attested",
     "describe_dev_pin",
     "dev_pin_requested",
     "load_tessera_contract",
@@ -351,6 +356,12 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: A column added on either tuple is a WIDENED projection, and the rule above
 #: applies to it: it re-stales this pin even when no published value moved.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
+ # Empty at v24: the contract publishes no quantiser attestation, so every
+ # activation residual PrismaQuant prices through its own oracle is REFUSED by
+ # require_activation_quantizer_attested.  When Tessera publishes the table
+ # this list moves, and that diff is the review of a rounding rule
+ # (RobTand/prismaquant#567).
+ 'activation_quantizers': [],
  'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
  'quant_method': 'tessera',
@@ -1161,6 +1172,16 @@ class TesseraContract:
     path: str
     lane_schema: str
     regimes: tuple[str, ...]
+    #: ``activation_contract -> the runtime's own quantiser table``, empty when
+    #: the contract publishes none.  Empty is not "fine": it is what
+    #: :func:`require_activation_quantizer_attested` REFUSES on, which is the
+    #: only reading principle 14 allows for an unattested rounding rule.  The
+    #: PARSER stays permissive so a contract published before the block existed
+    #: still parses and every other gate on it keeps working; the PREFLIGHT is
+    #: where absence bites, and it bites only the lane that is about to price
+    #: an activation residual with PrismaQuant's own re-implementation.
+    activation_quantizers: Mapping[str, Mapping[
+        str, "ActivationQuantizerAttestation"]] = field(default_factory=dict)
 
     @property
     def requires_serving_context(self) -> bool:
@@ -1367,6 +1388,11 @@ def contract_answer(contract: "TesseraContract") -> dict:
             for ext in sorted(contract.native_extensions,
                               key=lambda e: e.module_name_prefix)
         ],
+        "activation_quantizers": [
+            contract.activation_quantizers[platform][name].answer()
+            for platform in sorted(contract.activation_quantizers)
+            for name in sorted(contract.activation_quantizers[platform])
+        ],
         "families": {
             family: {
                 "reader_rate_range_q256": [int(rng[0]), int(rng[1])],
@@ -1477,6 +1503,23 @@ def _answer_drift(reviewed: Mapping[str, Any], installed: Mapping[str, Any]
                         f"  native_extensions[{prefix}].{key}: reviewed "
                         f"{r_ext[prefix].get(key)!r}, installed "
                         f"{i_ext[prefix].get(key)!r}")
+    r_quant = {(row[0], row[1]): row
+               for row in reviewed.get("activation_quantizers", ())}
+    i_quant = {(row[0], row[1]): row
+               for row in installed.get("activation_quantizers", ())}
+    for name in sorted(set(r_quant) | set(i_quant)):
+        if name not in r_quant:
+            lines.append(
+                f"  activation_quantizers[{name}]: NEW, not in the reviewed "
+                "answer -- a rounding rule this producer has not read")
+        elif name not in i_quant:
+            lines.append(
+                f"  activation_quantizers[{name}]: GONE from the installed "
+                "contract -- a quantiser that was attested is now asserted")
+        elif list(r_quant[name]) != list(i_quant[name]):
+            lines.append(
+                f"  activation_quantizers[{name}]: reviewed {r_quant[name]!r}, "
+                f"installed {i_quant[name]!r}")
     r_cells = {tuple(c[:1])[0]: c for c in reviewed.get("cells", ())}
     i_cells = {tuple(c[:1])[0]: c for c in installed.get("cells", ())}
     for cell_id in sorted(set(r_cells) | set(i_cells)):
@@ -1712,6 +1755,464 @@ def require_pin_native_extensions_match_contract(
             "pin, and the tool's TESSERA_NATIVE_EXTENSIONS with it, in one "
             "commit."
         )
+
+#: The one ``activation_quantizers`` grammar this reader implements.  A block
+#: naming another schema is REFUSED rather than read with this one: the whole
+#: point of the block is that nothing here guesses at a runtime's arithmetic,
+#: and guessing at the shape it published it in is the same mistake one level
+#: up.
+ACTIVATION_QUANTIZER_SCHEMA = "tessera.activation-quantizer.v1"
+
+#: The vocabulary of one ``contracts[]`` entry this reader transcribes.  Each
+#: is a fact about what the published vectors MEAN, and a different value is a
+#: different quantiser -- so each is compared, never defaulted.
+_ATTESTED_UNIT = "group"
+_ATTESTED_GRID = "E2M1"
+_ATTESTED_BLOCK_SCALE = "UE4M3"
+
+_ACTIVATION_CONTRACT_MEMBERS = (
+    "op", "unit", "unit_length", "grid", "block_scale", "global_scale",
+    "vectors",
+)
+_ACTIVATION_VECTOR_MEMBERS = (
+    "id", "boundary", "global_scale", "input", "stored_scale", "codes",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationQuantizerVector:
+    """One probe group the runtime ran its kernel on, verbatim.
+
+    Bit patterns rather than decimal literals, because the disagreement this
+    table settles lives at ties: a decimal that re-parses one ULP off the
+    midpoint tests the arithmetic instead of the rounding RULE, and would make
+    the attestation pass or fail on the JSON writer's formatting.
+
+    A whole group of ``unit_length`` values, not one element, which is what
+    lets this attest BOTH halves of the quantiser -- the ``amax -> UE4M3``
+    scale the kernel stored, and the code each element became under it.
+    """
+
+    #: The generator's name for this probe, and the boundary it covers.
+    #: Identity: the coverage check below is numeric, so a mislabelled probe
+    #: cannot buy coverage it does not reach.
+    id: str
+    boundary: str
+    #: IEEE-754 binary32 bits of the module's ``trellis_input_global_scale``.
+    global_scale_bits: int
+    #: bfloat16 bit patterns, one per element of the group.
+    input_bits: tuple[int, ...]
+    #: The ``float8_e4m3fn`` byte the kernel STORED for this group.
+    stored_scale_byte: int
+    #: The codes the kernel emitted, read back from its packed output: bit 3
+    #: the sign, bits 0..2 the index into the positive E2M1 magnitudes.
+    codes: tuple[int, ...]
+
+    def as_row(self) -> list:
+        return [self.id, self.boundary, self.global_scale_bits,
+                list(self.input_bits), self.stored_scale_byte, list(self.codes)]
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationQuantizerAttestation:
+    """One ``activation_quantizers.platforms[p].contracts[c]`` entry.
+
+    What the name-only ``activation_contract`` field never said.  The string
+    ``"e2m1_group16_ue4m3_static"`` names a quantiser; it does not say what
+    that quantiser does at a tie, at the top of the lattice, or at the block
+    scale's underflow, and PrismaQuant's priced activation residual is the
+    output of its own re-implementation of exactly those decisions
+    (``nvfp4_activation_contract.nvfp4_activation_qdq_served``).  Two
+    implementations of one name are two objects, and on 2026-09-13 they were
+    measured to be: single E2M1 code flips on ~3.4% of one tensor, 0.0957 and
+    0.1436 of divergence on the activation representation, while the GEMM gate
+    passed on both.  This is the table that makes the rule attested rather than
+    asserted.
+    """
+
+    platform: str
+    activation_contract: str
+    op: str
+    unit: str
+    unit_length: int
+    grid: str
+    block_scale: str
+    #: How the global scale is supplied, as the runtime names it.
+    global_scale: str
+    vectors: tuple[ActivationQuantizerVector, ...]
+
+    def answer(self) -> list:
+        """The gate-read projection, for :func:`contract_answer`.
+
+        Every vector is in it.  A table that silently dropped the 1.75 midpoint
+        would admit the same families while attesting strictly less, so the
+        vectors ARE answer, not identity.  ``op`` is in it too: the same table
+        produced by a different symbol is a different claim about what a serve
+        runs.  ``generated`` and ``generator`` stay out -- they name the box
+        and the script, which is provenance.
+        """
+        return [self.platform, self.activation_contract, self.op, self.unit,
+                int(self.unit_length), self.grid, self.block_scale,
+                self.global_scale, [v.as_row() for v in self.vectors]]
+
+
+def _parse_activation_quantizers(payload: Mapping[str, Any], path: str
+                                 ) -> dict[str, dict[str, ActivationQuantizerAttestation]]:
+    """Read ``activation_quantizers``, or read that there is none.
+
+    Absence is permitted HERE and refused in
+    :func:`require_activation_quantizer_attested`.  The split is deliberate:
+    every other gate on this contract -- admission, the fingerprint, the fused
+    licence -- was sound before this block existed, and making the parser
+    refuse would take them all down to fix an activation-pricing defect they
+    have nothing to do with.  What must never happen is the other reading: a
+    missing block silently satisfying a check.
+    """
+    block = payload.get("activation_quantizers")
+    if block is None:
+        return {}
+    where = f"{path}.activation_quantizers"
+    if not isinstance(block, Mapping):
+        raise TesseraContractError(f"{where} must be a JSON object")
+    schema = block.get("schema")
+    if schema != ACTIVATION_QUANTIZER_SCHEMA:
+        raise TesseraContractError(
+            f"{where}.schema is {schema!r}; this reader implements only "
+            f"{ACTIVATION_QUANTIZER_SCHEMA!r}. A quantiser table in a grammar "
+            "this reader has not been taught is a review, not a thing to read "
+            "with the grammar it happens to have.")
+    platforms = _require(block, "platforms", where)
+    if not isinstance(platforms, Mapping):
+        raise TesseraContractError(f"{where}.platforms must be a JSON object")
+    table: dict[str, dict[str, ActivationQuantizerAttestation]] = {}
+    for platform, published in platforms.items():
+        spot = f"{where}.platforms[{platform}]"
+        if not isinstance(published, Mapping):
+            raise TesseraContractError(f"{spot} must be a JSON object")
+        contracts = _require(published, "contracts", spot)
+        if not isinstance(contracts, Mapping):
+            raise TesseraContractError(f"{spot}.contracts must be a JSON object")
+        rows: dict[str, ActivationQuantizerAttestation] = {}
+        for name, entry in contracts.items():
+            rows[str(name)] = _parse_activation_contract(
+                entry, platform=str(platform), name=str(name),
+                where=f"{spot}.contracts[{name}]")
+        table[str(platform)] = rows
+    return table
+
+
+def _parse_activation_contract(entry: Any, *, platform: str, name: str,
+                               where: str) -> ActivationQuantizerAttestation:
+    if not isinstance(entry, Mapping):
+        raise TesseraContractError(f"{where} must be a JSON object")
+    unknown = sorted(set(entry) - set(_ACTIVATION_CONTRACT_MEMBERS))
+    if unknown:
+        raise TesseraContractError(
+            f"{where} publishes {unknown} which this reader does not know. A "
+            "field in a quantiser attestation that nothing here reads is "
+            "either a value a gate should decide on or prose that does not "
+            "belong; either way it is a review, not a thing to skip.")
+    length = int(_require(entry, "unit_length", where))
+    raw = _require(entry, "vectors", where)
+    if (not isinstance(raw, Sequence) or isinstance(raw, (str, bytes))
+            or not raw):
+        raise TesseraContractError(f"{where}.vectors must be a non-empty array")
+    vectors = []
+    for i, vector in enumerate(raw):
+        spot = f"{where}.vectors[{i}]"
+        if not isinstance(vector, Mapping):
+            raise TesseraContractError(f"{spot} must be a JSON object")
+        if set(vector) != set(_ACTIVATION_VECTOR_MEMBERS):
+            raise TesseraContractError(
+                f"{spot} must publish exactly "
+                f"{sorted(_ACTIVATION_VECTOR_MEMBERS)}, got {sorted(vector)}")
+        inputs = vector["input"]
+        codes = vector["codes"]
+        for field, value in (("input", inputs), ("codes", codes)):
+            if (not isinstance(value, Sequence)
+                    or isinstance(value, (str, bytes))
+                    or len(value) != length):
+                raise TesseraContractError(
+                    f"{spot}.{field} must carry exactly unit_length "
+                    f"({length}) entries, got "
+                    f"{len(value) if hasattr(value, '__len__') else value!r}")
+        vectors.append(ActivationQuantizerVector(
+            id=str(vector["id"]), boundary=str(vector["boundary"]),
+            global_scale_bits=_parse_hex(vector["global_scale"], 8, spot,
+                                         "global_scale"),
+            input_bits=tuple(_parse_hex(bits, 4, spot, "input")
+                             for bits in inputs),
+            stored_scale_byte=_parse_byte(vector["stored_scale"], spot),
+            codes=tuple(_parse_code(code, spot) for code in codes),
+        ))
+    return ActivationQuantizerAttestation(
+        platform=platform, activation_contract=name,
+        op=str(_require(entry, "op", where)),
+        unit=str(_require(entry, "unit", where)),
+        unit_length=length,
+        grid=str(_require(entry, "grid", where)),
+        block_scale=str(_require(entry, "block_scale", where)),
+        global_scale=str(_require(entry, "global_scale", where)),
+        vectors=tuple(vectors),
+    )
+
+
+def _parse_hex(value: Any, digits: int, where: str, key: str) -> int:
+    """``"0x3f800000"`` -> ``int``, or refuse.
+
+    Lowercase, ``0x``-prefixed, exactly ``digits`` wide.  Strict because a
+    short form is ambiguous about width and a decimal integer here would be a
+    different field.
+    """
+    text = str(value)
+    if (len(text) != digits + 2 or not text.startswith("0x")
+            or any(c not in "0123456789abcdef" for c in text[2:])):
+        raise TesseraContractError(
+            f"{where}.{key} must be '0x' plus {digits} lowercase hex digits, "
+            f"got {value!r}")
+    return int(text, 16)
+
+
+def _parse_byte(value: Any, where: str) -> int:
+    if type(value) is not int or not 0 <= value <= 255:
+        raise TesseraContractError(
+            f"{where}.stored_scale must be an integer byte 0..255, got "
+            f"{value!r}")
+    return value
+
+
+def _parse_code(value: Any, where: str) -> int:
+    if type(value) is not int or not 0 <= value <= 15:
+        raise TesseraContractError(
+            f"{where}.codes entries must be integers 0..15, got {value!r}")
+    return value
+
+
+def packaged_activation_quantizers() -> tuple[str, dict]:
+    """The installed runtime's quantiser tables, with the bytes' digest.
+
+    Read straight from the packaged JSON through :func:`contract_path`, NOT
+    through :func:`load_tessera_contract`: that one is the development pin and
+    returns ``None`` when the pin is not requested, and "the pin is not
+    requested" must not be a way for an unattested quantiser to be priced.
+    The digest travels with the table so a producer can stamp WHICH bytes
+    attested it.
+    """
+    from importlib.resources import as_file
+
+    with as_file(contract_path()) as path:
+        raw = Path(path).read_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+    payload = json.loads(raw.decode("utf-8"))
+    return sha, _parse_activation_quantizers(payload, str(contract_path()))
+
+
+def require_activation_quantizer_attested(
+    activation_contract: str,
+    *,
+    platform: str,
+    table: "Mapping[str, Mapping[str, ActivationQuantizerAttestation]] | None" = None,
+    contract_sha256: str = "",
+) -> dict:
+    """Refuse to price an activation residual the runtime never attested.
+
+    The same shape as :func:`require_pin_native_extensions_match_contract`, for
+    the quantiser's ARITHMETIC instead of the extension table: the runtime
+    publishes a machine-readable table generated by running its own kernel,
+    this producer recomputes it with the code it actually prices with, and a
+    disagreement REFUSES.
+
+    Both halves of the quantiser are checked, because the table publishes a
+    whole group: the ``amax -> UE4M3`` byte the kernel stored, and the code
+    each element became under it.  Four refusals, and each of them is a state
+    that used to read as "fine":
+
+    * no table, no platform, or no row for this contract string --
+      **unattested**.  The name ``"e2m1_group16_ue4m3_static"`` says which
+      quantiser; it never said what that quantiser does at a tie.
+    * a vocabulary this reader does not transcribe -- another unit, grid or
+      block-scale format is a different quantiser, not a thing to read with
+      this one's arithmetic.
+    * a coverage gap -- a table that omits the ties attests nothing about the
+      disagreement it is here to settle, so all seven E2M1 midpoints, both
+      signs, element saturation and the block-scale underflow boundary are
+      required.  The check is NUMERIC, computed from the published bits, so a
+      mislabelled ``boundary`` cannot buy coverage it does not reach.
+    * a stored-scale or code disagreement -- named vector by vector.
+
+    Returns the stamp a producer freezes beside the reference it just
+    computed, so an admitted receipt carries WHICH bytes attested its oracle.
+
+    What this does NOT attest, recorded rather than implied: every probe is a
+    value both sides represent exactly, so the table says nothing about a
+    NON-DYADIC used scale -- and the cells that diverge in production run at
+    one.  That is where the remaining suspicion belongs, and no contract row
+    can settle it (RobTand/prismaquant#567).
+    """
+    import torch
+
+    from .nvfp4_activation_contract import (
+        E2M1_MIDPOINTS,
+        FP4_E2M1_MAX,
+        FP4_GROUP_SIZE,
+        nvfp4_e2m1_code,
+        nvfp4_e2m1_normalize,
+        nvfp4_group_stored_scale,
+    )
+
+    sha = contract_sha256
+    if table is None:
+        sha, table = packaged_activation_quantizers()
+    published = table.get(str(platform)) or {}
+    row = published.get(str(activation_contract))
+    if row is None:
+        raise TesseraContractError(
+            "the pinned Tessera contract publishes no quantiser attestation "
+            f"for {activation_contract!r} on {platform!r} (it publishes "
+            f"{ {p: sorted(c) for p, c in table.items()} or 'nothing at all'}"
+            ").\n"
+            "PrismaQuant prices this contract's activation residual with its "
+            "OWN re-implementation of the rounding rule "
+            "(nvfp4_activation_contract.nvfp4_activation_qdq_served), and "
+            "principle 14 reads an unattested claim about another runtime as "
+            "REFUSED, not as fine. Publish activation_quantizers beside "
+            "activation_contract -- generated by running the kernel -- and "
+            "this passes or names what disagrees (RobTand/prismaquant#567).")
+    for field, value, expected in (
+            ("unit", row.unit, _ATTESTED_UNIT),
+            ("grid", row.grid, _ATTESTED_GRID),
+            ("block_scale", row.block_scale, _ATTESTED_BLOCK_SCALE),
+            ("unit_length", row.unit_length, FP4_GROUP_SIZE)):
+        if value != expected:
+            raise TesseraContractError(
+                f"the quantiser attestation for {activation_contract!r} on "
+                f"{platform!r} publishes {field}={value!r}; PrismaQuant's "
+                f"oracle implements {expected!r}, and a table taken under "
+                "another vocabulary attests a different quantiser. "
+                "Transcribing a new one is a review, never a thing to admit "
+                "blind.")
+
+    scale_lines, code_lines = [], []
+    reached, signed, saturating = set(), False, False
+    for vector in row.vectors:
+        g = _bits_to_f32([vector.global_scale_bits])
+        grouped = _bits_to_bf16(vector.input_bits).reshape(1, 1, -1).float()
+        stored = nvfp4_group_stored_scale(grouped, g)
+        byte = int(stored.view(torch.uint8).reshape(-1)[0])
+        if byte != vector.stored_scale_byte:
+            scale_lines.append(
+                f"  {vector.id} ({vector.boundary}): the runtime stored "
+                f"{vector.stored_scale_byte:#04x}, PrismaQuant derives "
+                f"{byte:#04x}")
+            continue
+        used = stored.float() / g
+        underflow = used == 0
+        normalized = nvfp4_e2m1_normalize(
+            grouped, torch.where(underflow, torch.ones_like(used), used))
+        ours = nvfp4_e2m1_code(
+            torch.where(underflow, torch.zeros_like(normalized), normalized)
+        ).reshape(-1).tolist()
+        for i, (mine, theirs) in enumerate(zip(ours, vector.codes)):
+            if not _e2m1_codes_agree(int(mine), theirs):
+                code_lines.append(
+                    f"  {vector.id} ({vector.boundary}) element {i}: input "
+                    f"{vector.input_bits[i]:#06x} at stored_scale "
+                    f"{vector.stored_scale_byte:#04x} -- the runtime emitted "
+                    f"code {theirs}, PrismaQuant's oracle emits {int(mine)}")
+        if not bool(underflow.reshape(-1)[0]):
+            scale = float(used.reshape(-1)[0])
+            for value in _bits_to_bf16(vector.input_bits).float().tolist():
+                if value < 0.0:
+                    signed = True
+                magnitude = abs(value) / scale
+                if magnitude > FP4_E2M1_MAX:
+                    saturating = True
+                for midpoint in E2M1_MIDPOINTS:
+                    if magnitude == midpoint:
+                        reached.add(midpoint)
+        elif any(bits >> 15 for bits in vector.input_bits):
+            signed = True
+
+    gaps = [f"midpoint t={m} is not reached by any vector"
+            for m in E2M1_MIDPOINTS if m not in reached]
+    if not signed:
+        gaps.append("no vector has a negative input; the sign convention and "
+                    "the negative-zero code are unattested")
+    if not saturating:
+        gaps.append("no vector has an element above the top code; the "
+                    "saturation convention is unattested")
+    for byte, why in ((0x00, "the block the runtime zeroes"),
+                      (0x01, "the smallest nonzero stored scale")):
+        if not any(v.stored_scale_byte == byte for v in row.vectors):
+            gaps.append(f"no vector carries stored_scale {byte:#04x} ({why}); "
+                        "the block-scale underflow boundary is unattested")
+    if gaps and not scale_lines:
+        raise TesseraContractError(
+            f"the quantiser attestation for {activation_contract!r} on "
+            f"{platform!r} does not cover the points where the rounding RULE "
+            "decides:\n" + "\n".join(f"  {gap}" for gap in gaps) + "\n"
+            "A table that omits the ties attests nothing about the "
+            "disagreement it is here to settle.")
+    if scale_lines or code_lines:
+        raise TesseraContractError(
+            "PrismaQuant's activation quantiser is not the one the pinned "
+            f"Tessera runtime executes for {activation_contract!r} on "
+            f"{platform!r} ({row.op}):\n"
+            + "\n".join(scale_lines + code_lines) + "\n"
+            "The measurement is right and the oracle is wrong (principle 1): "
+            "fix nvfp4_group_stored_scale / nvfp4_e2m1_normalize / "
+            "nvfp4_e2m1_magnitude_index until every vector agrees. Do NOT "
+            "widen a tolerance -- with a bit-identical stored scale the honest "
+            "per-element bound is zero, and a code flip is a wrong activation, "
+            "not a rounding epsilon.")
+    return {
+        "schema": "prismaquant.activation_quantizer_attestation.v1",
+        "activation_contract": row.activation_contract,
+        "platform": row.platform,
+        "op": row.op,
+        "vectors": len(row.vectors),
+        "elements": sum(len(v.codes) for v in row.vectors),
+        "boundaries": sorted({v.boundary for v in row.vectors}),
+        "contract_sha256": sha,
+        "oracle": "prismaquant.nvfp4_activation_contract",
+        "attests": ["amax_to_ue4m3_stored_scale", "value_to_code_rounding"],
+        "does_not_attest": ["non_dyadic_used_scale"],
+    }
+
+
+def _bits_to_f32(bits: "list[int]"):
+    """Unsigned binary32 patterns as the floats they are.
+
+    Through ``int32`` because that is what ``view(torch.float32)`` needs, and a
+    negative float's pattern has the top bit set, which is out of range as an
+    unsigned Python int.  The wrap is exact: it is the same 32 bits either way.
+    """
+    import torch
+
+    return torch.tensor(
+        [b - (1 << 32) if b >= (1 << 31) else b for b in bits],
+        dtype=torch.int32).view(torch.float32)
+
+
+def _bits_to_bf16(bits: "tuple[int, ...]"):
+    """Unsigned bfloat16 patterns as the values the kernel was handed."""
+    import torch
+
+    return torch.tensor(
+        [b - (1 << 16) if b >= (1 << 15) else b for b in bits],
+        dtype=torch.int16).view(torch.bfloat16)
+
+
+def _e2m1_codes_agree(ours: int, theirs: int) -> bool:
+    """Code equality, with the one equivalence the grid actually has.
+
+    ``0`` and ``8`` are ``+0`` and ``-0``: they dequantise to the same number,
+    so no GEMM and no measurement downstream can tell them apart, and treating
+    them as a disagreement would refuse on a difference that cannot exist in
+    any observable. Every other pair of codes is a different magnitude.
+    """
+    return ours == theirs or {ours, theirs} <= {0, 8}
+
 
 def _parse_fused_module(payload: Mapping[str, Any], path: str
                         ) -> FusedModuleLicence:
@@ -2029,6 +2530,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
         path=path,
         lane_schema=table.schema,
         regimes=table.regimes,
+        activation_quantizers=_parse_activation_quantizers(payload, path),
     )
 
 
