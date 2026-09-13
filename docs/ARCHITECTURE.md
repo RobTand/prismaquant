@@ -17,10 +17,17 @@ top of it.
 **Nothing here is shippable, and the profile says so in a field a gate reads.**
 Backing is permission to PRICE; a cell is permission to SHIP. Neither AMD
 platform has a cell, because a cell is a device receipt and nobody here owns a
-Strix Halo, so `serving_profiles.route_status_for` answers `unattested` with
-source `serving_runtime_contract:<v>:no_cell` for EVERY family on both targets
-— the backed one included — and export fails closed without an explicit
-override. §9's diagram and §9.4 are updated in this commit: the 2026-07-31
+Strix Halo, so `tessera_render.tessera_attesting_cells` — the live resolver,
+which reads the pinned table through `_pinned_serving_table()` — returns no cell
+for EVERY family on both targets, the backed one included, and export fails
+closed without an explicit override. `ServingLaneSpec.route_status_for` speaks
+the `:no_cell` vocabulary too, but only for a caller that hands it the pinned
+contract: with none supplied — every production call since the Gridbook
+retirement left no default table — it answers `unattested` with source
+`serving_runtime_contract::absent`, for every lane and every platform. Both are
+`unattested` and the gate fails closed on either; what the structured
+`route_status` on a serving-profile lane reads today is `absent`, not
+`no_cell`. §9's diagram and §9.4 are updated in this commit: the 2026-07-31
 "Strix Halo CANCELED / UNSUPPORTED" node was a statement about a **Gridbook**
 prototype and about lost hardware access, and it had been standing in for a
 claim about Tessera on AMD that nobody measured. Gates:
@@ -14001,10 +14008,12 @@ families the contract does not publish as `null` for that target, which today is
 `{TESSERA_BF16_K1}` (plus passthrough `BF16`). Backing is permission to
 **price**; a **cell** is permission to **ship**, and neither AMD platform has
 one, because a cell is a device receipt and nobody here owns a Strix Halo. So
-`route_status_for` answers `unattested` with source
-`serving_runtime_contract:<v>:no_cell` for every family on both targets —
-including the backed one — and export fails closed without an explicit override
-(`serving_profiles.py`). A `gfx1201` receipt, when one exists, proves a code
+`tessera_render.tessera_attesting_cells` returns no cell for every family on
+both targets — including the backed one — and export fails closed without an
+explicit override (`tessera_menu.route_admission`). The lane-level
+`ServingLaneSpec.route_status_for` reaches the same refusal by a shorter road:
+nothing hands it the pinned contract, so it answers `unattested` with source
+`serving_runtime_contract::absent` — see §9.4. A `gfx1201` receipt, when one exists, proves a code
 path on gfx12 and never stands in for gfx1151 numerics or performance.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
@@ -14212,9 +14221,15 @@ WnA16 only**. `serving_profile_specs/tessera_strix_halo_gfx1151.json` and
 `tessera_research_gfx1201.json` allocate against that, `emulation_only: true`, no export lane.
 
 What is still absent is the thing that was absent before: a **cell**. Neither AMD platform has
-one, because a cell is a device receipt and nobody here owns a Strix Halo. So `route_status_for`
-answers `unattested` with source `serving_runtime_contract:<v>:no_cell` for every family on both
-targets — including the backed one — and export fails closed without an explicit override.
+one, because a cell is a device receipt and nobody here owns a Strix Halo. So
+`tessera_render.tessera_attesting_cells`, asked with a `ServingContext` on either target, returns
+no cell for every family — including the backed one — and export fails closed without an explicit
+override. `ServingLaneSpec.route_status_for` would say `:no_cell` if it were handed the pinned
+contract, and a test hands it one; in production nothing does, because
+`load_eligibility_table()` has had no default table since the Gridbook lane was retired
+(2026-09-02), so that resolver answers `unattested` with source `serving_runtime_contract::absent`
+for every lane on every platform, sm_121 included. Both refuse; only the first refuses because of
+something the contract says.
 Backing is permission to PRICE; a cell is permission to ship. Promotion still requires the full
 served ladder, and a `gfx1201` receipt proves a code path on gfx12 and never stands in for
 gfx1151 numerics or performance.

@@ -261,6 +261,10 @@ def test_the_live_seam_finds_no_attesting_cell_on_the_amd_targets(platform):
     """
     from prismaquant.lane_eligibility import ServingContext
 
+    # Other files in this process repoint ``tessera_runtime_contract.
+    # contract_path`` to a rewritten copy; the table behind this seam is
+    # ``lru_cache``d, so read it fresh rather than inherit what ran first.
+    tr._pinned_serving_table.cache_clear()
     image = str(_packaged()["versions"]["default_serve_image"])
     assert _packaged()["lane_eligibility"]["platforms"][platform][
         "serve_image"] is None
@@ -278,6 +282,7 @@ def test_the_live_seam_still_attests_a_sm121_rung():
     """The control for the live seam, so `()` above is about the platform."""
     from prismaquant.lane_eligibility import ServingContext
 
+    tr._pinned_serving_table.cache_clear()
     context = ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=str(_packaged()["versions"]["default_serve_image"]),
