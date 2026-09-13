@@ -1,7 +1,41 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `pq/530-amd-serving-profiles`. Stamps
+As of: 2026-09-13 · `claude/537-route-status-reads-the-pin`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `claude/537-route-status-reads-the-pin`) because
+**`ServingLaneSpec.route_status_for` now reads the pinned Tessera runtime
+contract by default** (#537). It resolved its eligibility table through
+`load_eligibility_table()` with no `contract_path`, and that loader has had no
+default table since the Gridbook lane retired (2026-09-02), so in production it
+answered `unattested` with source `serving_runtime_contract::absent` for every
+lane on every platform, sm_121 included. The gate still failed closed and no
+shipped verdict rested on that answer — the AMD and sm_121 facts are settled a
+second time through `tessera_render.tessera_attesting_cells` — but principle
+9's structured `route_status` carried the value "nobody handed me a table",
+which is not a fact about any runtime and so is not something principle 14 lets
+a producer field say.
+
+`serving_profiles._load_pinned_lane_tables` now resolves the tracked serving
+pin (`prismaquant/tessera_runtime/tessera_serving_runtime_pin.json`) and the
+`runtime_contract.json` the `tessera.serving` package it names actually
+packages, and hands the resolver BOTH the eligibility table and the published
+`formats` rows off that one file — without the second, `resolve_payload_rung`
+cannot name a family and every lane reports `:no_cell` for the wrong reason.
+**This changes a gate input on every lane.** `absent` is now reachable only
+when the pin file itself is missing, and says so
+(`serving_profiles.ROUTE_STATUS_SOURCE_NO_PIN`); each other miss carries its
+own token — `:runtime_not_importable` (the pin names a runtime this checkout
+cannot import), `:pin_unreadable`, `:contract_publishes_no_table`,
+`:installed_contract_not_pinned` (the installed contract's digest is not the
+pin's) — so an `unattested` verdict always names WHICH fact was absent. The
+resolver stays narrower than admission on purpose: it answers what the pinned
+table says about a lane's route, while `tessera_menu.route_admission` /
+`tessera_render.tessera_lane_admission` add the cell-evidence, lane-predicate
+and installed-release conjuncts that answer whether a rung may ship. Census in
+`tests/test_route_status_reads_the_pinned_contract.py`; the fixture that used
+to hand `tests/test_tessera_amd_serving_profiles.py` a contract is gone,
+because there is nothing left to hand.
 
 Re-stamped (2026-09-12, `pq/530-amd-serving-profiles`) for the two **AMD
 Tessera serving profiles** (#530): `serving_profile_specs/
@@ -23,13 +57,11 @@ for EVERY family on both targets, the backed one included, and export fails
 closed: `tessera_export_lane.require_assignment_scope` raises on any selected
 unit whose resolved route is not backed and device-qualified, and on this lane
 that refusal takes no override. `ServingLaneSpec.route_status_for` speaks
-the `:no_cell` vocabulary too, but only for a caller that hands it the pinned
-contract: with none supplied — every production call since the Gridbook
-retirement left no default table — it answers `unattested` with source
-`serving_runtime_contract::absent`, for every lane and every platform. Both are
-`unattested` and the gate fails closed on either; what the structured
-`route_status` on a serving-profile lane reads today is `absent`, not
-`no_cell`. §9's diagram and §9.4 are updated in this commit: the 2026-07-31
+the `:no_cell` vocabulary too, and since #537 (2026-09-13) it resolves the
+pinned contract itself, so on these targets it answers `unattested` with source
+`serving_runtime_contract:<v>:no_cell` — the runtime's own silence about the
+platform, not this side's silence about the runtime. Both are `unattested` and
+the gate fails closed on either. §9's diagram and §9.4 are updated in this commit: the 2026-07-31
 "Strix Halo CANCELED / UNSUPPORTED" node was a statement about a **Gridbook**
 prototype and about lost hardware access, and it had been standing in for a
 claim about Tessera on AMD that nobody measured. Gates:
@@ -14023,8 +14055,9 @@ which is this case) — while the refusal that actually stops bytes is
 takes no override on this lane. These two profiles declare no export lane at
 all, so the question never reaches it. The lane-level
 `ServingLaneSpec.route_status_for` reaches the same refusal by a shorter road:
-nothing hands it the pinned contract, so it answers `unattested` with source
-`serving_runtime_contract::absent` — see §9.4. A `gfx1201` receipt, when one exists, proves a code
+it resolves the pinned contract itself (#537) and no cell names either AMD
+platform, so it answers `unattested` with source
+`serving_runtime_contract:<v>:no_cell` — see §9.4. A `gfx1201` receipt, when one exists, proves a code
 path on gfx12 and never stands in for gfx1151 numerics or performance.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
@@ -14237,12 +14270,14 @@ one, because a cell is a device receipt and nobody here owns a Strix Halo. So
 no cell for every family — including the backed one — and export fails closed in
 `tessera_export_lane.require_assignment_scope`, which takes no override on this lane (and these
 two profiles declare no export lane to reach it with).
-`ServingLaneSpec.route_status_for` would say `:no_cell` if it were handed the pinned
-contract, and a test hands it one; in production nothing does, because
-`load_eligibility_table()` has had no default table since the Gridbook lane was retired
-(2026-09-02), so that resolver answers `unattested` with source `serving_runtime_contract::absent`
-for every lane on every platform, sm_121 included. Both refuse; only the first refuses because of
-something the contract says.
+`ServingLaneSpec.route_status_for` says `:no_cell` here too. Until #537 (2026-09-13) it did so
+only for a test that handed it a contract: in production it called `load_eligibility_table()` with
+no `contract_path`, which has had no default table since the Gridbook lane was retired
+(2026-09-02), so that resolver answered `unattested` with source `serving_runtime_contract::absent`
+for every lane on every platform, sm_121 included — a refusal about this side's own empty hands, not
+about the runtime. It now resolves the tracked serving pin and the contract that pin names, so both
+resolvers refuse because of something the contract says, and `absent` is reachable only when the pin
+file is missing.
 Backing is permission to PRICE; a cell is permission to ship. Promotion still requires the full
 served ladder, and a `gfx1201` receipt proves a code path on gfx12 and never stands in for
 gfx1151 numerics or performance.
