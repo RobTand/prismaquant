@@ -1,0 +1,55 @@
+{
+  "schema": "prismaquant.fleet_interpreters.v1",
+  "_why": "What a placement tag means to a campaign row: which instruction set its boxes execute, which GPU runtime a container there attaches with, and which host interpreters have actually been observed running work on it. A dispatcher row names a tag and an absolute interpreter path, and until this file existed nothing connected the two -- a spec could send a row to a box whose filesystem has no such interpreter, and the row failed at exec with the fleet's admission already spent. Every interpreter entry names the PrismaBuild action key that ran it there, so an entry is a receipt rather than a claim (CLAUDE.md principle 14). An entry is added by running something on the box and citing the key, never by asserting that a path exists.",
+  "_isa_why": "The ISA is a placement fact with a measured consequence: a Tessera Hessian-aware wire encoded on gfx1201 is NOT bit-comparable with one encoded on sm121. First divergence is torch.linalg.cholesky (cuSOLVER vs rocSOLVER, one fp32 epsilon); 53.78% of differing rendered elements are explained by ldl and a further 15.28% by the encoder's own consumption of it, and 54.0% of rendered elements differ overall with max |delta| 9.48e-3 -- a different quantization, not a rounding wobble (RobTand/tessera#472, docs/measurements/tessera-gfx1201-hessian-divergence-2026-09-13.md on Tessera master). Weights-only encodes ARE byte-identical across the two: the wire the reference Viterbi produced there matched GB10's on both of its paths, digest for digest. So a row class whose bytes must equal a GB10 campaign's may only carry tags of one ISA, and cross-ISA capacity is reachable only for weights-only work.",
+  "_gpu_runtime_why": "How a container on this tag reaches its GPU. `nvidia` is `--gpus all`, which is what the NVIDIA container runtime consumes. `rocm-wsl` is `--device /dev/dxg` plus a read-only `/usr/lib/wsl/lib` mount: WSL2 has no amdgpu driver and no NVIDIA runtime, so `--gpus all` attaches nothing there and `/dev/dxg` does not exist on a GB10. The value is per tag because it is a property of the box, not of the image.",
+  "tags": {
+    "gb10": {
+      "isa": "sm121",
+      "gpu_runtime": "nvidia",
+      "boxes": ["sparky", "gx10-6b77"],
+      "interpreters": {},
+      "_interpreters_why": "No host interpreter is attested here yet. The GLM-5.3 campaign's rows run through tools/tessera_campaign_container.py, so their interpreter lives in the image and is attested by the image digest the container spec pins, not by a path on the box. A class that wants to run a bare host interpreter on this tag adds it here with the PrismaBuild action key that ran it."
+    },
+    "sparky": {
+      "isa": "sm121",
+      "gpu_runtime": "nvidia",
+      "boxes": ["sparky"],
+      "interpreters": {}
+    },
+    "sparklina": {
+      "isa": "sm121",
+      "gpu_runtime": "nvidia",
+      "boxes": ["gx10-6b77"],
+      "interpreters": {}
+    },
+    "gx10-6b77": {
+      "isa": "sm121",
+      "gpu_runtime": "nvidia",
+      "boxes": ["gx10-6b77"],
+      "interpreters": {}
+    },
+    "gfx1201": {
+      "isa": "gfx1201",
+      "gpu_runtime": "rocm-wsl",
+      "boxes": ["DESKTOP-P5UOGNJ"],
+      "interpreters": {
+        "/home/rob/ml-venvs/torch-rocm7/bin/python": {
+          "attested_by": "53861600dc18eaac42663b371bd3a984b67581452249ca913966560de1ce2f8c",
+          "observed": "torch 2.11.0+rocm7.2.4.git5fbd98f3, HIP 7.2.53211, Python 3.12.14, AMD Radeon RX 9070 XT (gfx1201). PB action done, rc 0, on DESKTOP-P5UOGNJ under --tag wsl-gpu --demand gpu=1; the command names this interpreter path. Re-observed 2026-09-13 by action c6563be4124bc3bd87880c592454dedde3f3c438a3b9829c99067c8c6d21943f."
+        }
+      }
+    },
+    "wsl-gpu": {
+      "isa": "gfx1201",
+      "gpu_runtime": "rocm-wsl",
+      "boxes": ["DESKTOP-P5UOGNJ"],
+      "interpreters": {
+        "/home/rob/ml-venvs/torch-rocm7/bin/python": {
+          "attested_by": "7e5561c153f951b7ac057377a0031cd1f983c8b5f2691062eed19c528da99d05",
+          "observed": "The weights-only BF16_K1 Tessera encode of the spike (RobTand/prismaquant#542 receipts): PB action done, rc 0, on DESKTOP-P5UOGNJ under --tag wsl-gpu --demand gpu=1,mem_gb=10. 1.69 GB device reserved, 1.76 GB host maxrss, 1.25 GB PrismaBuild cgroup peak."
+        }
+      }
+    }
+  }
+}
