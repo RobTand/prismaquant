@@ -138,16 +138,26 @@ ever read them, which is why the first real table had no input to be judged on.
 
 Re-running the emitter from the same receipts, relation, cost payload and
 `--now` reproduced the table **byte for byte** (same sha256). Command and exit
-record: `$R/stage/control/` + `pb/emitter-rerun/`. The emitter's exit code is
-**2** — it emits the table and reports the fixed-resource refusal rather than
-pretending admission.
+record: `$R/stage/control/` + `$R/stage/evidence/emitter-rerun/`. The emitter's
+exit code is **2** — it emits the table and reports the fixed-resource refusal
+rather than pretending admission.
+
+It was re-emitted a **third** time after the branch's own regression fix
+(`1e8ed594`, which moved the full-engine report's recomputation out of the
+emitter and into `runtime_provenance.recompute_fixed_resources`, restoring
+`admit_fixed_resources` as that report's only reader). Same three digests:
+table `9bbb283a…`, fixed-resource receipt `58f0d3d7…`, and an emission report
+matching field for field. `$R/stage/evidence/emitter-postfix/`. The two
+emission reports differ in exactly one field, `table_path`, which is the `--out`
+they were each written to. So no number in this document depends on which side
+of that fix produced it.
 
 ### 2.6 Admission gates, reported separately
 
 `admit_runtime_provenance` raises on the first gate that refuses, so a single
 verdict cannot say whether `admit_native_rows` admitted. The three gates were
 called in order and each reported
-(`pb/admit-all.json`, sha256
+(`$R/stage/evidence/admit-all.json`, sha256
 `cfed505aa6f36ff411728d214577bc6df8cc91e03338552c605e0d9b9b2f9857`):
 
 | Gate | Verdict | Detail |
@@ -299,7 +309,7 @@ $R/frontier/command.txt  stdout.txt  stderr.txt  exit.txt  refusal-shapes.json
 
 `python3 -m prismaquant.prefill_frontier --output … --slo-grid 5 -- --probe …
 --costs … --measured-runtime-table $R/table/qwen3-0.6b-layer0-all.json
---measured-runtime-context pb/context-all.json`
+--measured-runtime-context $R/stage/evidence/context-all.json`
 
 **exit 1**, stderr beginning `[alloc] ERROR: measured runtime: no qualified
 recomputable full-engine resource partition: …`. Summary:
@@ -453,7 +463,8 @@ table: passing the whole table gives
 | Tessera source tar (78 members) | `13127ff7da5e7ec53208cb974fda8ad070a6993fa523995ea863a6928363976c` |
 | #399 a5 report | `219585f45d5e5d4c92624ed3e327200f8dd87785635ca27e345dac5ee29b904f` |
 | frontier refusal summary | `0e9daad75203b1209d4126aab451d3526a481855735a9ff30b10281f8b82d76f` |
-| admit report `pb/admit-all.json` | `cfed505aa6f36ff411728d214577bc6df8cc91e03338552c605e0d9b9b2f9857` |
+| admit report `$R/stage/evidence/admit-all.json` | `cfed505aa6f36ff411728d214577bc6df8cc91e03338552c605e0d9b9b2f9857` |
+| evidence manifest `$R/stage/evidence/SHA256SUMS.txt` | `8f59cfad4438149fdb33635b854c2637fe9301bc5947a74ef299cb3a3795a5a7` |
 
 Context digests: `runtime_sha256`
 `243010b3aa57c1b321d372a3d4ec0970bf67d2092853d66001491ced7c5fbde2`,
