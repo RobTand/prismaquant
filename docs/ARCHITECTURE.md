@@ -1,7 +1,41 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `pq/527-lane-schema-v10`. Stamps
+As of: 2026-09-12 · `pq/528-platform-aware-route`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `pq/528-platform-aware-route`) for the **platform-aware
+Tessera serving route** (#528). `tessera_serving_route` takes an optional
+`target_platform`; with none it is the platform-blind layout fact it has always
+been and the returned object is unchanged field for field. With one, the
+pinned contract is asked
+`lane_eligibility.platforms[target].executes[family]` and the answer lands on
+one new boolean, `platform_backed`. **The priced route does not move**: same
+contract string, same `(act_bits, act_group_size)`, same terminal format —
+a platform answers whether a family is served there, never how. An unbacked
+rung therefore stays priced and stays on the menu (principle 1); an allocator
+that reaches for it is reporting a serving gap, and removing the rung would
+hide the signal.
+
+**What this retires is `min_capability_sm` as a GATE INPUT.**
+`tessera_allocator._capability_gate` used to parse an SM number out of the
+profile's `target_platform` string (`_SM_PLATFORM`, now deleted) and compare it
+to the terminal format's floor. That is a producer asserting what another
+runtime executes, derived from an id — principle 14's own failure mode — and it
+has no answer at all for `gfx1151`, where it refused every family including the
+one the runtime does execute. The gate now reads the contract and fails closed
+three ways, each named in its detail: no readable pinned table, a platform the
+table does not carry (`unstated` — the document declined to answer), and
+`executes: null` (a measured platform fact). `min_capability_sm` stays on the
+route and in the byte-breakdown JSON as the recorded NVIDIA fact it is.
+
+Parser half: `lane_eligibility` gains `PlatformEntry` and
+`PLATFORM_AXIS_LANE_SCHEMAS`, with the backend / arch-key / optional-key sets
+TRANSCRIBED from `tessera.serving.contract` the way `CELL_ROUTE_STATUSES`
+already is, and one rule checked rather than trusted: a non-null `executes`
+value must equal the `activation_contract` that family's own `formats[]` row
+publishes. `EligibilityTable.platform_executes` returns three states, because
+folding `unstated` into `null` would report an unread question as a measured
+refusal. Gates: `tests/test_tessera_platform_route.py`.
 
 Re-stamped (2026-09-12, `pq/527-lane-schema-v10`) for the Tessera pin at
 **runtime contract v23 / lane-eligibility schema v10** (#527, consuming
