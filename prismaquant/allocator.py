@@ -3671,7 +3671,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     measured_option_assignments = {}
     if measured_runtime_table is not None:
         from dataclasses import replace
-        from .measured_runtime_prices import RuntimeBinding, build_runtime_resources
+        from .measured_runtime_prices import (RuntimeBinding, admitted_fixed_resources,
+                                               build_runtime_resources)
         from .joint_aura import validate_joint_aura_entry
         try:
             if dict(measured_runtime_table.fixed_assignment) != fixed_format_assignment:
@@ -3762,7 +3763,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     option_assignments=measured_option_assignments,
                     resources=measured_runtime_resources,
                     fixed_assignment=fixed_format_assignment,
-                    fixed_resources=measured_runtime_table.fixed_resources,
+                    fixed_resources=admitted_fixed_resources(measured_runtime_table),
                     slos=serve_slos,
                     table_identity=measured_runtime_table.identity(),
                 )
@@ -3898,7 +3899,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         mutable_target_bits = requested_target
         if measured_runtime_table is not None:
             from .allocator_solver import RuntimeFrontierLimitError, solve_runtime_frontier
-            fixed = measured_runtime_table.fixed_resources
+            from .measured_runtime_prices import admitted_fixed_resources
+            fixed = admitted_fixed_resources(measured_runtime_table)
             fixed_device = (fixed.resident_bytes + fixed.activation_bytes
                             + fixed.peak_scratch_bytes + fixed.kv_bytes
                             + serve_slos.kv_bytes + serve_slos.peak_scratch_bytes)
@@ -4151,7 +4153,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # writes its own document and no layer config or Pareto CSV exists
         # for "the" solve, because there is no single one.
         from dataclasses import replace as _replace
-        fixed = measured_runtime_table.fixed_resources
+        from .measured_runtime_prices import admitted_fixed_resources
+        fixed = admitted_fixed_resources(measured_runtime_table)
         unit_min_prefill = 0.0
         unit_max_prefill = 0.0
         for unit, options in sorted(candidates.items()):

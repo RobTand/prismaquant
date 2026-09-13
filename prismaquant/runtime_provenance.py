@@ -542,7 +542,7 @@ def admit_fixed_resources(table, relation):
 
     Refusals are collected and raised together so one call names all of them.
     There is no admission token and no return value: the v2 loader sets
-    ``producer_admitted`` only because this raised nothing.
+    ``fixed_resources_admitted`` only because this raised nothing.
     """
     reader = ArtifactReader(Path(table.source_path).parent)
     receipt_path, receipt = reader.json({"path": table.fixed_resources_receipt_path,
@@ -807,11 +807,28 @@ def admit_native_rows(table, relation):
 
 
 def admit_runtime_provenance(table):
-    """The v2 loader calls this after its ordinary raw-receipt hash checks."""
+    """The v2 loader calls this after its ordinary raw-receipt hash checks.
+
+    Two gates, two answers, and only one of them is fatal to the table. The
+    relation and the native rows attest the per-row prices the DP consumes: if
+    those do not hold, the table prices nothing and the load fails. The
+    fixed-resource gate attests a different object -- the whole-engine charge
+    added once outside the DP -- so its refusal is returned rather than raised,
+    and the consumer that reads `fixed_resources` spends it. Folding the two
+    into one raise discarded a native attestation that had passed.
+
+    Returns the fixed-resource refusal text, or ``None`` when that gate passed.
+    """
     try:
         relation = load_runtime_relation(table.runtime_provenance, context=table.context,
                                          root=Path(table.source_path).parent)
         admit_native_rows(table, relation)
-        admit_fixed_resources(table, relation)
     except (KeyError, TypeError, IndexError) as exc:
         raise RuntimePriceError(f"runtime producer evidence is missing or malformed: {exc}") from exc
+    try:
+        admit_fixed_resources(table, relation)
+    except (KeyError, TypeError, IndexError) as exc:
+        return f"runtime producer evidence is missing or malformed: {exc}"
+    except RuntimePriceError as exc:
+        return str(exc)
+    return None

@@ -328,7 +328,16 @@ class MeasuredRuntimeTable:
     source_path: str = ""
     runtime_provenance: Mapping | None = None
     native_receipt_bindings: tuple[Mapping, ...] = ()
-    producer_admitted: bool = False
+    #: Two gates answer two questions, so they get two answers. `admit_native_rows`
+    #: attests the per-row prices `build_runtime_resources` hands the DP;
+    #: `admit_fixed_resources` attests the whole-engine `fixed_resources` the
+    #: allocator adds once. A refusal on the second says nothing about the first,
+    #: and folding them into one flag threw a passing native attestation away.
+    native_rows_admitted: bool = False
+    fixed_resources_admitted: bool = False
+    #: Why `fixed_resources` is not admitted, verbatim from the gate, so the
+    #: consumer that needs it can say what is owed rather than that something is.
+    fixed_resources_refusal: str | None = None
 
     def as_dict(self) -> dict:
         return {"schema": PROVENANCE_TABLE_SCHEMA if self.runtime_provenance is not None else SCHEMA,
@@ -465,16 +474,39 @@ def load_measured_runtime_table(path: str | Path, *, expected_context: RuntimeCo
             raise RuntimePriceError(f"measurement receipt SHA-256 mismatch: {receipt_path}")
     if table.runtime_provenance is not None:
         from .runtime_provenance import admit_runtime_provenance
-        admit_runtime_provenance(table)
-        table = replace(table, producer_admitted=True)
+        refusal = admit_runtime_provenance(table)
+        table = replace(table, native_rows_admitted=True,
+                        fixed_resources_admitted=refusal is None,
+                        fixed_resources_refusal=refusal)
     return table
+
+
+def admitted_fixed_resources(table: MeasuredRuntimeTable) -> RuntimeResources:
+    """The whole-engine fixed resources, or the reason they have no evidence.
+
+    The per-row prices and the fixed charge are attested by different gates.
+    Anything that adds `fixed_resources` to a device budget reads it through
+    here, so a fixed-resource refusal is spent where the fixed resources are
+    used rather than where the priced rows are.
+    """
+    if table.runtime_provenance is not None and not table.fixed_resources_admitted:
+        raise RuntimePriceError(
+            "v2 fixed runtime resources require full-engine producer admission: "
+            + (table.fixed_resources_refusal or "the loader performed no admission"))
+    return table.fixed_resources
 
 
 def build_runtime_resources(table: MeasuredRuntimeTable, candidates: Mapping[str, list], *,
                             expected_bindings: Mapping[tuple[str, str], RuntimeBinding]) -> dict[tuple[str, str], RuntimeResources]:
     """Price every candidate exactly; no family fallback or unmeasured group sums."""
-    if table.runtime_provenance is not None and not table.producer_admitted:
-        raise RuntimePriceError("v2 runtime prices require producer admission through the loader")
+    # The native-row gate, not the fixed-resource one: this function reads
+    # `row.resources` for priced candidates and never touches
+    # `table.fixed_resources`, and `admit_native_rows` is what attests those
+    # rows against their receipts. The fixed charge is gated at its own
+    # consumer, `admitted_fixed_resources`.
+    if table.runtime_provenance is not None and not table.native_rows_admitted:
+        raise RuntimePriceError(
+            "v2 runtime prices require native-row producer admission through the loader")
     rows = {row.key: row for row in table.rows}
     result = {}
     for unit, options in sorted(candidates.items()):
