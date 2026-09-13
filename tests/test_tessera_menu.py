@@ -673,7 +673,17 @@ def test_a_new_cell_is_a_moved_answer_even_though_nothing_was_removed(
     # A new valid scope reaches the answer pin; a duplicate scope is already
     # malformed under v4 and must refuse in the shared parser first.
     extra["platform"] = "test_new_platform"
-    payload["lane_eligibility"]["platforms"][extra["platform"]] = {}
+    # v10 platforms are objects, so the invented scope is stated in the current
+    # grammar: same backend and executed contracts as sm_121, because the point
+    # of the test is the NEW CELL reaching the answer pin, not a malformed
+    # platform entry refusing earlier for an unrelated reason.
+    sm121 = payload["lane_eligibility"]["platforms"]["sm_121"]
+    payload["lane_eligibility"]["platforms"][extra["platform"]] = {
+        "backend": sm121["backend"],
+        "compute_capability": list(sm121["compute_capability"]),
+        "serve_image": sm121["serve_image"],
+        "executes": dict(sm121["executes"]),
+    }
     cells.append(extra)
     moved = tmp_path / "runtime_contract.json"
     moved.write_text(_json.dumps(payload), encoding="utf-8")
