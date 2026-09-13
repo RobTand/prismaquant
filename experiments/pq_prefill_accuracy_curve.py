@@ -124,10 +124,13 @@ def main(argv=None) -> int:
                                  "accuracy": None if measured is None else "present"}
             continue
         rows = [prices[(unit, assignment[unit])] for unit in priced_units]
-        samples = [list(payload_rows[(row.unit, row.fmt)]["prefill"]["samples_ms"]) for row in rows]
+        samples = {phase: [list(payload_rows[(row.unit, row.fmt)][phase]["samples_ms"]) for row in rows]
+                   for phase in ("prefill", "decode")}
         points.append({
             "prefill_ms_operator_sum_bootstrap": bootstrap_sum(
-                samples, draws=args.bootstrap_draws, seed=args.bootstrap_seed),
+                samples["prefill"], draws=args.bootstrap_draws, seed=args.bootstrap_seed),
+            "decode_ms_operator_sum_bootstrap": bootstrap_sum(
+                samples["decode"], draws=args.bootstrap_draws, seed=args.bootstrap_seed),
             "artifact": artifact, "units": priced_units,
             "assignment": {unit: assignment[unit] for unit in priced_units},
             "prefill_ms_operator_sum": sum(row.resources.prefill_ms for row in rows),
