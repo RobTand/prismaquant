@@ -16,8 +16,11 @@ only two of them come out of Tessera's harness by itself:
 This is the dense counterpart of Tessera's
 ``_pb_native_moe_measure/run_native.py`` and ``run_native_child.py``, which do
 exactly this around ``bench_native_moe_operator``. It is a consumer-side
-harness: it runs Tessera's module unmodified through ``runpy`` and adds no
-argument of its own to it.
+harness: it runs the measuring module unmodified through ``runpy`` and adds no
+argument of its own to it. ``--module`` names that module and defaults to
+Tessera's own dense harness; a consumer-side sweep over the same prepared cells
+(``experiments.pq_prefill_load_sweep``) needs the same two audits and must not
+fork this file to get them.
 """
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ import subprocess
 import sys
 
 INSTALL_EVIDENCE_NAME = "per-job-runtime.json"
-BENCH_MODULE = "experiments.bench_native_operator"
+DEFAULT_BENCH_MODULE = "experiments.bench_native_operator"
 
 
 def digest(path) -> str:
@@ -57,7 +60,7 @@ def run(args) -> int:
     stock = json.loads(core_manifest.read_text())
     child = [sys.executable, "-u", str(Path(__file__).resolve()), "child",
              "--install-evidence", str(args.install_evidence),
-             "--evidence-dir", str(evidence), "--", *args.command]
+             "--evidence-dir", str(evidence), "--module", args.module, "--", *args.command]
     result = subprocess.run(child)
     core = Path(importlib.util.find_spec("vllm").origin).parent
     if files(core) != stock["files"]:
@@ -78,10 +81,10 @@ def child(args) -> int:
     install = Path(args.install_evidence) / INSTALL_EVIDENCE_NAME
     installer_sha256 = digest(install)
     evidence = Path(args.evidence_dir)
-    sys.argv = [BENCH_MODULE, *args.command]
+    sys.argv = [args.module, *args.command]
     status = 0
     try:
-        runpy.run_module(BENCH_MODULE, run_name="__main__")
+        runpy.run_module(args.module, run_name="__main__")
     except SystemExit as exc:
         status = int(exc.code or 0)
     finally:
@@ -149,6 +152,8 @@ def main(argv=None) -> int:
         node.add_argument("--install-evidence", required=True,
                           help="directory holding the installer's per-job-runtime.json")
         node.add_argument("--evidence-dir", required=True, help="this measurement's evidence directory")
+        node.add_argument("--module", default=DEFAULT_BENCH_MODULE,
+                          help="the measuring module to run unmodified through runpy")
         if name == "run":
             node.add_argument("--core-manifest", required=True,
                               help="the attested vLLM core manifest this install was checked against")
