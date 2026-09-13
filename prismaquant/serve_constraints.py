@@ -831,6 +831,7 @@ def evaluate_measured_assignment(
     for key, members in option_assignments.items():
         by_unit.setdefault(key[0], []).append((key, members))
     selected = []
+    selected_keys: list[tuple[str, str]] = []
     covered: set[str] = set()
     for unit, options in sorted(by_unit.items()):
         matches = [(key, members) for key, members in options
@@ -847,6 +848,7 @@ def evaluate_measured_assignment(
         if key not in resources:
             raise ServeConstraintError(f"measured runtime row is missing: {key!r}")
         selected.append(resources[key])
+        selected_keys.append(key)
     if covered != set(remaining):
         raise ServeConstraintError(
             "measured runtime assignment coverage mismatch: "
@@ -907,6 +909,13 @@ def evaluate_measured_assignment(
                    "device_memory_bytes": device},
         coverage={"units_priced": len(selected), "members_priced": len(covered),
                   "fixed_auxiliary_units": len(fixed_assignment),
+                  # Which (unit, format) rows this verdict summed, in the order
+                  # it summed them. The predicted sums alone do not say which
+                  # rows produced them, so a reader cannot go back to those
+                  # rows' own samples -- and a caller that wants the sum's
+                  # dispersion (measured_runtime_prices.bootstrap_sum) needs
+                  # exactly this key.
+                  "priced_rows": [list(key) for key in selected_keys],
                   "memory": {"resident_bytes": resident, "activation_bytes": activation,
                              "peak_scratch_bytes": scratch, "kv_bytes": kv,
                              "operator_scratch_reserve_bytes": slos.peak_scratch_bytes,

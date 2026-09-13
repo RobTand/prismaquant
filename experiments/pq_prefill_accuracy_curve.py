@@ -31,14 +31,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import random
-import statistics
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.measured_runtime_prices import (  # noqa: E402
-    RuntimePriceError, parse_measured_runtime_table, parse_runtime_context)
+    RuntimePriceError, bootstrap_sum, parse_measured_runtime_table, parse_runtime_context)
 from prismaquant.runtime_provenance import admit_fixed_resources, admit_native_rows, load_runtime_relation  # noqa: E402
 
 SCHEMA = "prismaquant.prefill_accuracy_curve.v1"
@@ -47,25 +45,6 @@ SCHEMA = "prismaquant.prefill_accuracy_curve.v1"
 def sha256(path) -> str:
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def bootstrap_sum(samples_per_row, *, draws, seed):
-    """The distribution of the operator sum under each row's own samples.
-
-    Every row is resampled with replacement from its OWN measured samples and
-    re-reduced by the same median the table row was reduced by, so this
-    describes only the dispersion the measurement itself carries.
-    """
-    rng = random.Random(seed)
-    totals = []
-    for _ in range(draws):
-        totals.append(sum(statistics.median(rng.choices(samples, k=len(samples)))
-                          for samples in samples_per_row))
-    totals.sort()
-    return {"draws": draws, "seed": seed,
-            "p2.5": totals[int(0.025 * draws)], "p50": totals[draws // 2],
-            "p97.5": totals[min(draws - 1, int(0.975 * draws))],
-            "samples_per_row": [len(samples) for samples in samples_per_row]}
 
 
 def main(argv=None) -> int:

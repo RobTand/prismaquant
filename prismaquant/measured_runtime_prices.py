@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 import re
 import statistics
 from dataclasses import dataclass, replace
@@ -315,6 +316,35 @@ class OperatorMeasurement:
         return {"method": self.method, "samples_ms": list(self.samples_ms),
                 "warmup_iterations": self.warmup_iterations, "receipt_path": self.receipt_path,
                 "receipt_sha256": self.receipt_sha256}
+
+
+def bootstrap_sum(samples_per_row, *, draws: int, seed: int, offset_ms: float = 0.0) -> dict:
+    """The distribution of an operator sum under each row's own samples.
+
+    Every row is resampled with replacement from its OWN measured samples and
+    re-reduced by the same median :meth:`OperatorMeasurement.median_ms` reduced
+    the priced row by, so this describes only the dispersion the measurement
+    itself carries -- not run-to-run serving variance, and not a model.
+
+    ``offset_ms`` is a constant the caller adds to every draw (the fixed
+    whole-engine ``prefill_ms``, when a caller carries one). It shifts the
+    distribution and contributes no width: the report schema observes no
+    samples for the fixed term, so there is no dispersion to draw from and
+    inventing one would be a number with no measurement under it.
+    """
+    if draws < 1:
+        raise RuntimePriceError("bootstrap draws must be at least 1")
+    rng = random.Random(seed)
+    totals = []
+    for _ in range(draws):
+        totals.append(offset_ms + sum(statistics.median(rng.choices(samples, k=len(samples)))
+                                      for samples in samples_per_row))
+    totals.sort()
+    return {"draws": draws, "seed": seed,
+            "p2.5": totals[int(0.025 * draws)], "p50": totals[draws // 2],
+            "p97.5": totals[min(draws - 1, int(0.975 * draws))],
+            "offset_ms": float(offset_ms),
+            "samples_per_row": [len(samples) for samples in samples_per_row]}
 
 
 @dataclass(frozen=True)

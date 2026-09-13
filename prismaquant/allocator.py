@@ -1695,6 +1695,14 @@ class MeasuredRuntimeSweep:
     #: sweep writes it onto its document, so a reader sees on the document's
     #: face what the curve did not price.
     fixed_resource_scope: dict | None
+    #: ``(unit, format) -> the row's own repeated samples``, the samples the
+    #: priced ``prefill_ms``/``decode_ms`` medians were reduced from. A sum of
+    #: medians is a point estimate; a caller that reports two points as
+    #: different needs the dispersion those samples resolve, and it cannot
+    #: recover it from the reduced prices. ``decode_samples_ms`` holds a row
+    #: only where the table measured decode for it.
+    prefill_samples_ms: dict
+    decode_samples_ms: dict
     unit_min_prefill_sum_ms: float
     unit_max_prefill_sum_ms: float
     n_units: int
@@ -4273,6 +4281,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             runtime_context=measured_runtime_table.context.as_dict(),
             fixed_resources=fixed.as_dict(),
             fixed_resource_scope=fixed_resource_scope_stamp,
+            prefill_samples_ms={row.key: tuple(row.prefill.samples_ms)
+                                for row in measured_runtime_table.rows},
+            decode_samples_ms={row.key: tuple(row.decode.samples_ms)
+                               for row in measured_runtime_table.rows if row.decode is not None},
             unit_min_prefill_sum_ms=float(unit_min_prefill),
             unit_max_prefill_sum_ms=float(unit_max_prefill),
             n_units=len(candidates),

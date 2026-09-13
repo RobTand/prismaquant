@@ -33,6 +33,17 @@ What the document says, and what it does not
 * ``slo_axis``: the lower bound the table implies (fixed work plus every
   unit's fastest priced option) and that upper bound. Points below the lower
   bound are recorded as infeasible; they are not pruned.
+* ``attained_prefill_ms_bootstrap`` (and the decode twin where the table
+  prices decode): the dispersion the measurement itself carries. Each priced
+  row is resampled with replacement from its OWN samples and re-reduced by the
+  same median the row was reduced by, and the sums are re-taken
+  (``measured_runtime_prices.bootstrap_sum``, the same function the
+  prefill-vs-accuracy curve uses). An attained prefill is a sum of medians; two
+  points whose intervals overlap are not resolved by this table, and a reader
+  who sees only the point estimates cannot tell. **No threshold is applied and
+  no verdict is declared** -- nondominance, saturation and monotonicity are all
+  computed from the point estimates exactly as before, and the intervals are
+  published beside them.
 * ``fixed_resource_scope``: ``null`` when the table's fixed whole-engine charge
   is admitted, and otherwise the scope the run read it under
   (``--measured-runtime-fixed-scope shape-only``), carrying the admission
@@ -64,6 +75,11 @@ from .layer_config import LAYER_CONFIG_META_KEY
 from .measured_runtime_prices import identity_sha256
 
 SCHEMA = "prismaquant.prefill_frontier.v1"
+#: The prefill-vs-accuracy curve's own bootstrap settings
+#: (``experiments/pq_prefill_accuracy_curve.py``), so the two tools describe
+#: the same table's dispersion the same way.
+BOOTSTRAP_DRAWS = 10000
+BOOTSTRAP_SEED = 237
 ASSIGNMENT_SCHEMA = "prismaquant.prefill_frontier.assignment.v1"
 
 
@@ -202,8 +218,65 @@ def build_frontier_document(points: Sequence[dict], *, saturation: dict | None,
     }
 
 
+def point_dispersion(verdict: dict, *, prefill_samples_ms: dict, decode_samples_ms: dict,
+                     fixed_prefill_ms: float, fixed_decode_ms: float | None,
+                     draws: int, seed: int, cache: dict | None = None) -> dict:
+    """Bootstrap intervals for one solve's attained sums, from the rows it summed.
+
+    The verdict says which ``(unit, format)`` rows it summed
+    (``coverage.priced_rows``) and this resamples exactly those rows' own
+    samples. A priced row with no samples is a refusal, not an omitted
+    interval: a point published without its dispersion reads as a point whose
+    dispersion is zero.
+
+    The fixed whole-engine term enters as a constant offset so the interval is
+    on the same axis as ``attained_prefill_ms``. It carries no width because
+    the report schema observes no samples for it.
+    """
+    from .measured_runtime_prices import bootstrap_sum
+
+    coverage = verdict.get("coverage", {})
+    if "priced_rows" not in coverage:
+        raise PrefillFrontierError(
+            "the serve verdict does not say which rows it summed "
+            "(coverage.priced_rows), so the sum's dispersion cannot be drawn "
+            "from those rows' own samples")
+    keys = [tuple(row) for row in coverage["priced_rows"]]
+    predicted = verdict.get("predicted", {})
+    out = {}
+    for axis, samples_by_key, offset in (
+        ("prefill", prefill_samples_ms, fixed_prefill_ms),
+        ("decode", decode_samples_ms, fixed_decode_ms),
+    ):
+        if predicted.get(f"operator_sum_{axis}_ms") is None:
+            # The table does not price this axis for this assignment; the
+            # attained value is already null and there is nothing to disperse.
+            out[axis] = None
+            continue
+        missing = [key for key in keys if key not in samples_by_key]
+        if missing:
+            raise PrefillFrontierError(
+                f"the {axis} sum priced {len(keys)} rows but the table carries no "
+                f"{axis} samples for {missing[:4]}; a sum of medians cannot be "
+                "published without the dispersion those medians resolve")
+        token = (axis, tuple(keys), float(offset), int(draws), int(seed))
+        if cache is not None and token in cache:
+            out[axis] = cache[token]
+            continue
+        interval = bootstrap_sum([samples_by_key[key] for key in keys],
+                                 draws=draws, seed=seed, offset_ms=float(offset))
+        interval["offset_term"] = (
+            f"fixed whole-engine {axis}_ms, added to every draw; it contributes no "
+            "width because the report schema carries no samples for it")
+        interval["reduction"] = "median, per row, as the priced row itself was reduced"
+        if cache is not None:
+            cache[token] = interval
+        out[axis] = interval
+    return out
+
+
 def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
-                  fixed_resource_scope: dict | None = None) -> dict:
+                  fixed_resource_scope: dict | None = None, dispersion=None) -> dict:
     """One grid point from the allocator's solve record; writes its assignment.
 
     Under a fixed-resource scope the point must carry no device number. The
@@ -222,7 +295,9 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
         "achieved_bits": None,
         "payload_bytes": None,
         "attained_prefill_ms": None,
+        "attained_prefill_ms_bootstrap": None,
         "attained_decode_ms": None,
+        "attained_decode_ms_bootstrap": None,
         "device_memory_bytes": None,
         "assignment_sha256": None,
         "assignment_path": None,
@@ -258,6 +333,14 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
     if point["attained_prefill_ms"] is None:
         raise PrefillFrontierError(
             f"SLO {record['slo_ms']}: feasible solve carries no operator_sum_prefill_ms")
+    if dispersion is not None:
+        intervals = dispersion(record["serve_constraints"])
+        point["attained_prefill_ms_bootstrap"] = intervals["prefill"]
+        point["attained_decode_ms_bootstrap"] = intervals["decode"]
+        if point["attained_prefill_ms_bootstrap"] is None:
+            raise PrefillFrontierError(
+                f"SLO {record['slo_ms']}: feasible solve carries an attained prefill "
+                "with no interval over the samples it was reduced from")
     if fixed_resource_scope is not None and point["device_memory_bytes"] is not None:
         raise PrefillFrontierError(
             f"SLO {record['slo_ms']}: the {fixed_resource_scope['scope']} fixed-resource scope "
@@ -271,10 +354,25 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
 # --------------------------------------------------------------------------- #
 
 def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
-              loss_noise_floor: float, allocator_argv: Sequence[str]) -> dict:
+              loss_noise_floor: float, allocator_argv: Sequence[str],
+              bootstrap_draws: int = BOOTSTRAP_DRAWS,
+              bootstrap_seed: int = BOOTSTRAP_SEED) -> dict:
     """Drive ``ctx.solve`` over the grid and return the v1 document."""
     scope = ctx.fixed_resource_scope
     fixed_prefill = float(ctx.fixed_resources["prefill_ms"])
+    fixed_decode = ctx.fixed_resources["decode_ms"]
+    # One assignment recurs across many SLOs (that is what saturation means),
+    # so the draws are memoized on the exact row list they resample. Same
+    # rows, same seed, same interval -- the cache changes no number.
+    interval_cache: dict = {}
+
+    def dispersion(verdict: dict) -> dict:
+        return point_dispersion(
+            verdict, prefill_samples_ms=ctx.prefill_samples_ms,
+            decode_samples_ms=ctx.decode_samples_ms,
+            fixed_prefill_ms=fixed_prefill,
+            fixed_decode_ms=None if fixed_decode is None else float(fixed_decode),
+            draws=bootstrap_draws, seed=bootstrap_seed, cache=interval_cache)
     lower_bound = fixed_prefill + ctx.unit_min_prefill_sum_ms
     upper_bound = fixed_prefill + ctx.unit_max_prefill_sum_ms
     if not (upper_bound > 0 and math.isfinite(upper_bound)):
@@ -287,7 +385,8 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
     # maximum, so this solve is what "no prefill SLO" would return, and its
     # attained prefill is the saturation SLO.
     top_record = ctx.solve(upper_bound, ctx.target_bits)
-    top = _point_record(top_record, assignments_dir, provenance_stub=provenance_stub, fixed_resource_scope=scope)
+    top = _point_record(top_record, assignments_dir, provenance_stub=provenance_stub,
+                    fixed_resource_scope=scope, dispersion=dispersion)
     saturation = None
     if top["feasible"]:
         saturation = {"slo_ms": float(top["attained_prefill_ms"]),
@@ -315,14 +414,18 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
             # Nothing tighter can be feasible when the loosest budget is not.
             points.append({**_point_record({"slo_ms": slo_ms, "target_bits": ctx.target_bits,
                                             "feasible": False, "reason": top["refusal_reason"]},
-                                           assignments_dir, provenance_stub=provenance_stub, fixed_resource_scope=scope),
+                                           assignments_dir, provenance_stub=provenance_stub,
+                                           fixed_resource_scope=scope, dispersion=dispersion),
                            "refusal_reason": f"unconstrained_point_infeasible:{top['refusal_reason']}"})
             continue
         record = ctx.solve(slo_ms, ctx.target_bits)
-        points.append(_point_record(record, assignments_dir, provenance_stub=provenance_stub, fixed_resource_scope=scope))
+        points.append(_point_record(record, assignments_dir, provenance_stub=provenance_stub,
+                                    fixed_resource_scope=scope, dispersion=dispersion))
         point = points[-1]
         print(f"[prefill-frontier] slo={slo_ms:.6g} ms: "
               + (f"dloss={point['predicted_dloss']:.6g} prefill={point['attained_prefill_ms']:.6g} ms "
+                 f"[{point['attained_prefill_ms_bootstrap']['p2.5']:.6g}, "
+                 f"{point['attained_prefill_ms_bootstrap']['p97.5']:.6g}] "
                  f"bits={point['achieved_bits']:.4f} sha={point['assignment_sha256'][:12]}"
                  if point["feasible"] else f"INFEASIBLE ({point['refusal_reason']})"),
               flush=True)
@@ -342,6 +445,12 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
         "serve_slos_other_axes": {key: value for key, value in ctx.slos.as_dict().items()
                                   if key != "p95_ttft_ms"},
         "grid": {"kind": kind, "spec": spec if kind != "auto" else "prefill_slo_breakpoints_ms"},
+        "bootstrap": {"draws": int(bootstrap_draws), "seed": int(bootstrap_seed),
+                      "function": "prismaquant.measured_runtime_prices.bootstrap_sum",
+                      "resamples": "each priced row's own samples, with replacement, re-reduced by median",
+                      "covers": ("the priced rows this solve summed; the fixed whole-engine term is a "
+                                 "constant offset with no observed samples"),
+                      "applied_as_a_threshold": False},
         "allocator_argv": list(allocator_argv),
         "assignments_dir": str(assignments_dir),
         "n_units": int(ctx.n_units),
@@ -396,6 +505,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="'auto': the exact SLO breakpoints of the unconstrained solve's "
                          "proposal frontier; or an integer N >= 2: N linearly spaced SLOs "
                          "from the table lower bound to the saturation point.")
+    ap.add_argument("--bootstrap-draws", type=int, default=BOOTSTRAP_DRAWS,
+                    help="Bootstrap draws for each point's attained-prefill interval, "
+                         "resampling each priced row's own samples. Default matches "
+                         "experiments/pq_prefill_accuracy_curve.py.")
+    ap.add_argument("--bootstrap-seed", type=int, default=BOOTSTRAP_SEED,
+                    help="Seed for those draws, so a curve is reproducible.")
     ap.add_argument("--loss-noise-floor", type=float, default=0.0,
                     help="Nondominance noise floor on predicted_dloss, as "
                          "select_validated_frontier's --kl-noise-floor. The predicted "
@@ -415,6 +530,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         ap.error("allocator arguments are required after '--'")
     if not math.isfinite(args.loss_noise_floor) or args.loss_noise_floor < 0:
         ap.error("--loss-noise-floor must be finite and nonnegative")
+    if args.bootstrap_draws < 1:
+        # Every point publishes its interval. There is no "skip the dispersion"
+        # setting: a sum of medians without one reads as a resolved number.
+        ap.error("--bootstrap-draws must be at least 1")
     output = Path(args.output)
     assignments_dir = (Path(args.assignments_dir) if args.assignments_dir
                        else output.with_name(output.name + ".assignments"))
@@ -426,7 +545,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         nonlocal document
         document = run_sweep(ctx, grid=grid, assignments_dir=assignments_dir,
                              loss_noise_floor=args.loss_noise_floor,
-                             allocator_argv=allocator_argv)
+                             allocator_argv=allocator_argv,
+                             bootstrap_draws=args.bootstrap_draws,
+                             bootstrap_seed=args.bootstrap_seed)
 
     # Loader and identity refusals surface as the allocator's own SystemExit;
     # they are not wrapped here.

@@ -25,6 +25,26 @@ produces unscoped — tested — and it certifies no placement. One new allocato
 flag; no default, stage, format, lane or ship gate changed; §12's D37 row is
 amended.
 
+The same stamp carries the sweep's **dispersion**: an `attained_prefill_ms` is
+a sum of per-row medians, and published alone it reads as a resolved number,
+so two points whose samples cannot tell them apart look ordered. Every feasible
+point now also carries `attained_prefill_ms_bootstrap` (and the decode twin
+where the table prices decode), drawn by
+`measured_runtime_prices.bootstrap_sum` — the function
+`experiments/pq_prefill_accuracy_curve.py` already used, moved into the package
+and imported there, not a second one. Each priced row is resampled with
+replacement from its **own** samples and re-reduced by the same median the row
+was reduced by; the fixed whole-engine term enters as a constant offset and
+contributes no width, because the report schema observes no samples for it.
+`serve_constraints.evaluate_measured_assignment` publishes
+`coverage.priced_rows` so a verdict says which rows it summed; a verdict that
+does not, or a summed row with no samples, is refused rather than published
+without an interval. **No threshold is applied and no verdict is declared** —
+nondominance, saturation and monotonicity are computed from the point estimates
+exactly as before. `--bootstrap-draws` / `--bootstrap-seed` default to the
+accuracy curve's own 10000/237 and there is no setting that skips the interval.
+Gates: `tests/test_prefill_frontier_dispersion.py`.
+
 Re-stamped (2026-09-13, `claude/560-fixed-resource-admission-consumer`)
 because **a table binding names its route class, where it named the GEMM
 symbol alone** (RobTand/prismaquant#565). `TESSERA_FP8` and `TESSERA_NVFP4`
@@ -8783,10 +8803,15 @@ measured_runtime_sweep=...)` loads, checks and prices the table once and hands t
 `MeasuredRuntimeSweep` whose `solve(slo_ms, target_bits)` is the unchanged single solve at
 that budget. The output, `prismaquant.prefill_frontier.v1`, carries the whole curve -- per
 point `slo_ms`, `predicted_dloss`, `payload_bytes`, `achieved_bits`, `attained_prefill_ms`
-(fixed work included), `attained_decode_ms`, `device_memory_bytes`, `assignment_sha256` and
+(fixed work included) and its `attained_prefill_ms_bootstrap` interval, `attained_decode_ms`
+and its twin, `device_memory_bytes`, `assignment_sha256` and
 `assignment_path`, `refusal_reason`, `nondominated` -- plus `saturation` (measured at the
 table's upper bound and verified), `slo_axis` (table-derived bounds), `monotone_loss`, and
-provenance (table identity, context, cost digest, git commit, allocator argv). The grid is
+provenance (table identity, context, cost digest, git commit, allocator argv, bootstrap
+draws/seed). The intervals resample each priced row's own samples
+(`measured_runtime_prices.bootstrap_sum`, shared with
+`experiments/pq_prefill_accuracy_curve.py`) and are published, never thresholded: every
+envelope, saturation and monotonicity decision is taken on the point estimates. The grid is
 `--slo-ms`, `--slo-grid auto` (the solve's own `prefill_slo_breakpoints_ms`) or `--slo-grid N`;
 there is no default and no knee. An exact-search bound refusal inside a sweep is that point's
 `refusal_reason`; a single solve still exits. Loader refusals (stale cost digest, bad rows,
