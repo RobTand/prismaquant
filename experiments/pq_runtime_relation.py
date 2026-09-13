@@ -198,11 +198,12 @@ def build(args) -> int:
             panels = [read(item["panel"] if isinstance(item["panel"], str) else item["panel"]["path"])
                       for item in read(args.panels)] if args.panels else []
             if panels:
+                from prismaquant.native_operator_panel import operator_route_identity
                 from prismaquant.native_receipt_table import derive_context
 
                 context = derive_context(panels, relation=relation)
-                context["operator_routes"] = {panel["unit"]: {panel["format"]:
-                    panel["phases"]["prefill"]["expected_route"]["symbol"]} for panel in panels}
+                context["operator_routes"] = {panel["unit"]: {panel["format"]: operator_route_identity(
+                    panel["phases"]["prefill"]["expected_route"])} for panel in panels}
                 load_runtime_relation({"path": out.name, "sha256": sha256(out)},
                                       context=parse_runtime_context(context), root=out.parent)
                 report["verdict"] = {"status": "loaded", "error": None}

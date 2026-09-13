@@ -30,6 +30,18 @@ PROVENANCE_TABLE_SCHEMA = "prismaquant.measured_runtime_prices.v2"
 PROVENANCE_IDENTITY_KIND = "prismaquant.runtime_provenance_relation.v1"
 RESOURCE_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes", "resident_bytes",
                    "peak_scratch_bytes", "activation_bytes", "kv_bytes")
+#: The off-step half of the placement obligation
+#: `max(scalar_budget_bytes, non_step_transient_peak_bytes)`, the producer's
+#: frozen `PLACEMENT_OBLIGATION` contract string. The seven fields above
+#: price one engine step; this prices what the engine still holds while no step
+#: is running. The admission gate demands the obligation be recomputable and
+#: nothing consumed it, so the DP pruned against the smaller of two numbers
+#: whenever the off-step peak was the larger. Absent means "not priced", never
+#: zero: a maximum taken against a default would read as the other side having
+#: been checked. Optional on the wire so every table emitted before this field
+#: existed keeps its digest.
+OFF_STEP_FIELD = "non_step_transient_peak_bytes"
+RESOURCE_FIELDS_WITH_OFF_STEP = RESOURCE_FIELDS + (OFF_STEP_FIELD,)
 
 
 class RuntimePriceError(DispatchTableError):
@@ -200,6 +212,7 @@ class RuntimeResources:
     peak_scratch_bytes: int
     activation_bytes: int
     kv_bytes: int = 0
+    non_step_transient_peak_bytes: int | None = None
 
     def __post_init__(self):
         _number(self.prefill_ms, "prefill_ms")
@@ -207,13 +220,23 @@ class RuntimeResources:
             _number(self.decode_ms, "decode_ms")
         for name in RESOURCE_FIELDS[2:]:
             _integer(getattr(self, name), name)
+        if self.non_step_transient_peak_bytes is not None:
+            _integer(self.non_step_transient_peak_bytes, OFF_STEP_FIELD)
 
     def as_dict(self) -> dict:
-        return {field: getattr(self, field) for field in RESOURCE_FIELDS}
+        # The off-step field appears only when priced, so a table emitted
+        # before it existed re-emits byte-identically and keeps its digest.
+        payload = {field: getattr(self, field) for field in RESOURCE_FIELDS}
+        if self.non_step_transient_peak_bytes is not None:
+            payload[OFF_STEP_FIELD] = self.non_step_transient_peak_bytes
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping) -> RuntimeResources:
-        return cls(**_object(payload, RESOURCE_FIELDS, "resources"))
+        fields = (RESOURCE_FIELDS_WITH_OFF_STEP
+                  if isinstance(payload, Mapping) and OFF_STEP_FIELD in payload
+                  else RESOURCE_FIELDS)
+        return cls(**_object(payload, fields, "resources"))
 
 
 @dataclass(frozen=True)
@@ -328,7 +351,16 @@ class MeasuredRuntimeTable:
     source_path: str = ""
     runtime_provenance: Mapping | None = None
     native_receipt_bindings: tuple[Mapping, ...] = ()
-    producer_admitted: bool = False
+    #: Two gates answer two questions, so they get two answers. `admit_native_rows`
+    #: attests the per-row prices `build_runtime_resources` hands the DP;
+    #: `admit_fixed_resources` attests the whole-engine `fixed_resources` the
+    #: allocator adds once. A refusal on the second says nothing about the first,
+    #: and folding them into one flag threw a passing native attestation away.
+    native_rows_admitted: bool = False
+    fixed_resources_admitted: bool = False
+    #: Why `fixed_resources` is not admitted, verbatim from the gate, so the
+    #: consumer that needs it can say what is owed rather than that something is.
+    fixed_resources_refusal: str | None = None
 
     def as_dict(self) -> dict:
         return {"schema": PROVENANCE_TABLE_SCHEMA if self.runtime_provenance is not None else SCHEMA,
@@ -416,6 +448,9 @@ def parse_measured_runtime_table(payload: Mapping, *, expected_context: RuntimeC
             raise RuntimePriceError(f"{key}: resource times must equal medians of measured operator samples")
         if resources.kv_bytes:
             raise RuntimePriceError("KV belongs to fixed_resources, not per-unit rows")
+        if resources.non_step_transient_peak_bytes is not None:
+            raise RuntimePriceError("the off-step transient peak is one whole-engine obligation, "
+                                    "not a per-unit row price")
         rows.append(MeasuredRuntimeRow(unit, fmt, binding, resources, prefill, decode))
     provenance, receipt_bindings = None, ()
     if is_provenance:
@@ -465,16 +500,39 @@ def load_measured_runtime_table(path: str | Path, *, expected_context: RuntimeCo
             raise RuntimePriceError(f"measurement receipt SHA-256 mismatch: {receipt_path}")
     if table.runtime_provenance is not None:
         from .runtime_provenance import admit_runtime_provenance
-        admit_runtime_provenance(table)
-        table = replace(table, producer_admitted=True)
+        refusal = admit_runtime_provenance(table)
+        table = replace(table, native_rows_admitted=True,
+                        fixed_resources_admitted=refusal is None,
+                        fixed_resources_refusal=refusal)
     return table
+
+
+def admitted_fixed_resources(table: MeasuredRuntimeTable) -> RuntimeResources:
+    """The whole-engine fixed resources, or the reason they have no evidence.
+
+    The per-row prices and the fixed charge are attested by different gates.
+    Anything that adds `fixed_resources` to a device budget reads it through
+    here, so a fixed-resource refusal is spent where the fixed resources are
+    used rather than where the priced rows are.
+    """
+    if table.runtime_provenance is not None and not table.fixed_resources_admitted:
+        raise RuntimePriceError(
+            "v2 fixed runtime resources require full-engine producer admission: "
+            + (table.fixed_resources_refusal or "the loader performed no admission"))
+    return table.fixed_resources
 
 
 def build_runtime_resources(table: MeasuredRuntimeTable, candidates: Mapping[str, list], *,
                             expected_bindings: Mapping[tuple[str, str], RuntimeBinding]) -> dict[tuple[str, str], RuntimeResources]:
     """Price every candidate exactly; no family fallback or unmeasured group sums."""
-    if table.runtime_provenance is not None and not table.producer_admitted:
-        raise RuntimePriceError("v2 runtime prices require producer admission through the loader")
+    # The native-row gate, not the fixed-resource one: this function reads
+    # `row.resources` for priced candidates and never touches
+    # `table.fixed_resources`, and `admit_native_rows` is what attests those
+    # rows against their receipts. The fixed charge is gated at its own
+    # consumer, `admitted_fixed_resources`.
+    if table.runtime_provenance is not None and not table.native_rows_admitted:
+        raise RuntimePriceError(
+            "v2 runtime prices require native-row producer admission through the loader")
     rows = {row.key: row for row in table.rows}
     result = {}
     for unit, options in sorted(candidates.items()):

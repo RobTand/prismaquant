@@ -285,6 +285,15 @@ field is in the receipt but not in the table row: the route's `policy`
 against `e2m1_group16_ue4m3_static`). A route class is the pair (route policy,
 activation contract); the GEMM symbol alone collapses two of them. Recorded as a
 schema observation, not changed here.
+
+**Amended (PQ #565) — changed there.** `binding.operator_route` is now the
+whole declared route, canonically spelled by
+`native_operator_panel.operator_route_identity` (`native_receipt_table.py:206`,
+`:211`), so the row names its route class and the receipt no longer has to be
+opened to tell fp8 from fp4. Every measurement in this record was taken under
+the old spelling and none of them moves; a table re-emitted from these receipts
+carries a different binding string and therefore a different digest.
+
 ### 3.3 Finding 1 — prefill price at layer 0 is a route-class step
 
 The six E4M3 arms' prefill intervals **all overlap pairwise**; their union is
@@ -895,6 +904,14 @@ The §3.2 note applies to the table schema as well as to the prose: a row's
 `binding.operator_route` is the GEMM symbol alone, so an fp4 row and an fp8 row
 are indistinguishable in that field. Anything that groups rows by route class
 should read (route policy, activation contract) from the receipt.
+
+**Amended (PQ #565) — the field carries the route class now.**
+`native_operator_panel.operator_route_identity` spells `binding.operator_route`
+as the whole declared route, so a consumer reads the class from the row rather
+than from the receipt. Every number in §8 was measured under the old spelling
+and none of them moves; what changes is that a table re-emitted from these
+receipts carries a different binding string, and therefore a different digest,
+from the one recorded above.
 
 ### 8.9 Reproducing §8, and digests
 

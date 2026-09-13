@@ -15,7 +15,7 @@ import re
 
 from .joint_aura import identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import RuntimeBinding
-from .native_operator_panel import PHASES, _bytes, _equal, _number, _sha
+from .native_operator_panel import PHASES, _bytes, _equal, _number, _sha, operator_route_identity
 
 INPUT_SCHEMA = "prismaquant.native_moe_inputs.v1"
 PANEL_SCHEMA = "tessera.native_moe_panel.v1"
@@ -543,7 +543,8 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     binding = RuntimeBinding(
         {member["unit"]: member["format"] for member in members},
         {name: row["joint_operator_identity_sha256"] for name, row in rows.items()},
-        {member["unit"]: tuple(member["shape"]) for member in members}, route["symbol"])
+        {member["unit"]: tuple(member["shape"]) for member in members},
+        operator_route_identity(route))
     return json.loads(json.dumps({"schema": PANEL_SCHEMA, "unit": inputs["unit"], "format": FORMAT,
         "shape": inputs["shape"], "members": members, "profile_role_order": list(ROLES),
         "routing": inputs["routing"], "routing_capture_sha256": inputs["routing_capture_sha256"],

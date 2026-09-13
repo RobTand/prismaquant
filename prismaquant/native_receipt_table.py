@@ -10,10 +10,31 @@ producer summary, and nothing is defaulted where the evidence is absent.
 What this module does not do: it does not admit anything. The written table
 is handed to ``measured_runtime_prices.load_measured_runtime_table``, whose
 producer admission (``runtime_provenance.admit_runtime_provenance``) decides.
-The emission report next to the table records that verdict verbatim, so a
-table that exists on disk without an admitted verdict is never mistaken for a
-price the allocator may read: ``build_runtime_resources`` refuses a v2 table
-the loader did not admit.
+There are **two** admitting gates and they answer about different objects, so
+the emission report carries two verdicts and never one collapsed answer:
+``admit_native_rows`` attests the per-row prices ``build_runtime_resources``
+hands the DP, and ``admit_fixed_resources`` attests the whole-engine charge
+the allocator adds once outside it. The loader raises on the first and
+*returns* the second, so a caller that reads only the exception sees an
+admitted table whose fixed charge is refused -- which is an admission the
+emitter does not have. ``admission_report`` reads both flags and the refusal
+text, and the CLI's exit code says which of the three answers it got:
+
+=====  ================================================================
+exit   what the table is
+=====  ================================================================
+``0``  both gates admitted. Unreachable while debt D37 stands, because
+       ``admit_fixed_resources`` cannot pass for any v2 table.
+``3``  the rows are admitted and priced; the fixed charge is refused,
+       and ``admission.refusal`` is the gate's reason for it verbatim.
+``2``  the loader refused the table outright, so no row is priced and
+       the fixed-resource gate was never reached.
+=====  ================================================================
+
+Nonzero in both refusing cases, because an emitter must never certify an
+admission it does not have; distinguishable, because a caller that can use
+49 priced rows should not have to read "refused" the same way it reads
+"this table prices nothing".
 
 Fixed resources are declared by asking the admitting gate to recompute them:
 ``runtime_provenance.recompute_fixed_resources`` owns the only reader of the
@@ -44,9 +65,51 @@ from .measured_runtime_prices import (
 from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
 
 EMISSION_SCHEMA = "prismaquant.native_receipt_table_emission.v1"
+#: The CLI's three answers; see the module docstring for what each one means.
+EXIT_ADMITTED = 0
+EXIT_REFUSED = 2
+EXIT_NATIVE_ROWS_ONLY = 3
+EXIT_CODES = {"admitted": EXIT_ADMITTED, "refused": EXIT_REFUSED,
+              "native_rows_only": EXIT_NATIVE_ROWS_ONLY}
 DENSE_PANEL_SCHEMA = "tessera.native_dense_panel.v1"
 BINDING_FIELDS = ("unit", "format", "run_id", "panel", "receipt", "memory_trace")
 PHASES = ("prefill", "decode")
+
+#: The one field of an attested native runtime record that a bound panel may
+#: differ in, and the only one.
+#:
+#: Every other field is a *comparability* coordinate: the GPU and its driver,
+#: the torch/CUDA build, the arithmetic flags, the image, the installed Tessera
+#: package and runtime contract, the execution mode, the measurement collector.
+#: Two rows measured under different values of any of them are not on the same
+#: clock, and a table that priced them against each other would be comparing
+#: two boxes. That equality is untouched.
+#:
+#: ``native_libraries`` is not a coordinate of the box. It is the set of shared
+#: objects the row's own route actually dispatched to, and a route may load its
+#: own: the fp4 route JIT-builds and ``dlopen``s a ``tessera_nvfp4_<hash>.so``
+#: that no fp8 or bf16 route loads. Requiring the whole record to be equal
+#: therefore put a route's kernel inside the box's identity and made a
+#: mixed-route table -- the only kind a format menu spans -- impossible to
+#: emit, over nine same-session cells whose records were otherwise identical.
+#:
+#: Moving it loosens nothing, because the binding that matters is per row and
+#: already exists, twice over:
+#:
+#: * ``runtime_provenance.admit_native_rows`` requires each row's *whole*
+#:   runtime record, ``native_libraries`` included, to equal the raw record of
+#:   the run its own binding names (``runtime_provenance.py`` ``:771``), so a
+#:   row cannot claim a runtime it was not measured on.
+#: * ``runtime_provenance._load_runtime_relation`` requires every production
+#:   library any native run loaded to exist in the full-engine run at the same
+#:   digest (``:432``), so an extension one route loads is either shown to be
+#:   the bytes the engine serves or the table is refused by name.
+#:
+#: It is also the model the relation already applies across its own runs
+#: (``:414``): one box, one image, one package; library *sets* may differ
+#: between runs, but a path present in both must carry the same bytes. This
+#: emitter was the stricter of the two, and it was the one that refused.
+PER_ROUTE_RUNTIME_FIELD = "native_libraries"
 
 def file_sha256(path: Path) -> str:
     with Path(path).open("rb") as stream:
@@ -146,7 +209,7 @@ def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: st
     The receipt is consumed through ``consume_native_receipt`` against the
     panel as frozen, exactly as ``admit_native_rows`` will consume it again.
     """
-    from .native_operator_panel import consume_native_receipt
+    from .native_operator_panel import consume_native_receipt, operator_route_identity
 
     _object(spec, BINDING_FIELDS, "native receipt binding")
     unit, fmt, run_id = (_string(spec[key], "native receipt " + key) for key in ("unit", "format", "run_id"))
@@ -176,7 +239,7 @@ def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: st
         measurements[phase] = {"method": timing["method"], "samples_ms": list(timing["samples_ms"]),
                                "warmup_iterations": timing["warmup_iterations"],
                                "receipt_path": receipt_ref["path"], "receipt_sha256": receipt_ref["sha256"]}
-    route = panel["phases"]["prefill"]["expected_route"]["symbol"]
+    route = operator_route_identity(panel["phases"]["prefill"]["expected_route"])
     row = {
         "unit": unit, "format": fmt,
         "binding": {"member_formats": {unit: fmt},
@@ -195,14 +258,73 @@ def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: st
             "cost_row_identity_sha256": cost_row["joint_operator_identity_sha256"]}
 
 
+def _require_one_runtime(panels: list[Mapping]) -> None:
+    """Refuse panels that are not on one clock; allow one route its own kernels.
+
+    Three checks, and between them they are the whole-record equality this
+    replaced, partitioned rather than relaxed. Each comparison is over the same
+    canonical JSON digest the whole-record check used, so ``false`` and ``0``
+    stay different values here as they were before.
+
+    1. The runtime records must declare the same fields. A field one panel
+       carries and another does not is refused, not exempted, so a future
+       producer field cannot join :data:`PER_ROUTE_RUNTIME_FIELD` by accident.
+    2. Every field except :data:`PER_ROUTE_RUNTIME_FIELD` must be equal. This
+       is the comparability invariant and it is exactly as strong as it was.
+    3. A library path that more than one panel loaded must carry the same bytes
+       in each. One run may load *more* than another; it may never load a
+       different ``libtorch.so`` and call the timings comparable.
+    """
+    first = panels[0]["runtime"]
+    if not isinstance(first.get(PER_ROUTE_RUNTIME_FIELD), Mapping):
+        raise RuntimePriceError("native runtime record declares no loaded libraries")
+    for panel in panels[1:]:
+        runtime = panel["runtime"]
+        if set(runtime) != set(first):
+            raise RuntimePriceError("native receipts were produced on more than one runtime: "
+                                    "their runtime records declare different fields")
+        for field in sorted(set(first) - {PER_ROUTE_RUNTIME_FIELD}):
+            if identity_sha256(runtime[field]) != identity_sha256(first[field]):
+                raise RuntimePriceError("native receipts were produced on more than one runtime: "
+                                        f"{field} differs")
+        libraries = runtime[PER_ROUTE_RUNTIME_FIELD]
+        if not isinstance(libraries, Mapping):
+            raise RuntimePriceError("native runtime record declares no loaded libraries")
+        for path in sorted(set(libraries) & set(first[PER_ROUTE_RUNTIME_FIELD])):
+            if libraries[path] != first[PER_ROUTE_RUNTIME_FIELD][path]:
+                raise RuntimePriceError("native receipts were produced on more than one runtime: "
+                                        f"one loaded library carries different bytes: {path}")
+
+
+def unshared_native_libraries(panels: list[Mapping]) -> list[dict]:
+    """Per panel, the loaded libraries that not every bound panel loaded.
+
+    This is the emission report's answer to "which kernel did this row's own
+    route dispatch to". It is read off each panel's own attested
+    ``runtime.native_libraries`` and nothing else: no table here decides which
+    route owns which ``.so``, because a producer-side guess about that is
+    exactly the asserted runtime claim principle 14 refuses. On a table whose
+    rows all loaded the same libraries every entry is empty.
+    """
+    shared = set.intersection(*(set(panel["runtime"][PER_ROUTE_RUNTIME_FIELD]) for panel in panels))
+    return [{path: panel["runtime"][PER_ROUTE_RUNTIME_FIELD][path]
+             for path in sorted(set(panel["runtime"][PER_ROUTE_RUNTIME_FIELD]) - shared)}
+            for panel in panels]
+
+
 def derive_context(panels: list[Mapping], *, relation: Mapping) -> dict:
-    """The one workload/runtime context every bound panel was frozen under."""
+    """The one workload/runtime context every bound panel was frozen under.
+
+    "One runtime" means one box, one image, one package and one execution mode
+    -- not one set of loaded kernels. See :data:`PER_ROUTE_RUNTIME_FIELD` for
+    why those are two questions and where the second one is answered.
+    """
     if not panels:
         raise RuntimePriceError("no native receipts were bound; a table needs at least one row")
     first = panels[0]
+    _require_one_runtime(panels)
     for panel in panels[1:]:
-        for what, key in (("runtime", lambda p: identity_sha256(p["runtime"])),
-                          ("source model", lambda p: p["source_sha256"]),
+        for what, key in (("source model", lambda p: p["source_sha256"]),
                           ("calibration", lambda p: p["calibration_sha256"]),
                           ("prompt token count", lambda p: p["phases"]["prefill"]["m"])):
             if key(panel) != key(first):
@@ -245,13 +367,46 @@ def derive_fixed_resources(report_path: Path, table_dir: Path) -> tuple[dict, di
     return declared, evidence, {"reference": reference, **verdict}
 
 
+def admission_report(path: Path, *, expected_context, expected_cost_sha256: str,
+                     now: datetime) -> dict:
+    """Both admitting gates' verdicts, and the one status that follows from them.
+
+    ``native_rows`` is ``refused`` whenever the loader raised, because then no
+    row of the table is admitted for pricing -- whether it was the parse, the
+    relation or ``admit_native_rows`` that said so -- and the fixed-resource
+    gate is ``unreached`` rather than pretending to an answer it never gave.
+    ``status`` is ``admitted`` only when both gates admitted, and the top-level
+    ``refusal`` is ``None`` only then; otherwise it is the refusal that stands
+    between this table and a full admission, verbatim from the gate that wrote
+    it.
+    """
+    try:
+        table = load_measured_runtime_table(path, expected_context=expected_context,
+                                            expected_cost_sha256=expected_cost_sha256, now=now)
+    except RuntimePriceError as exc:
+        return {"status": "refused", "refusal": str(exc),
+                "native_rows": {"status": "refused", "refusal": str(exc)},
+                "fixed_resources": {"status": "unreached", "refusal": None}}
+    native = {"status": "admitted" if table.native_rows_admitted else "refused",
+              "refusal": None if table.native_rows_admitted else "the loader performed no producer admission"}
+    fixed = {"status": "admitted" if table.fixed_resources_admitted else "refused",
+             "refusal": table.fixed_resources_refusal}
+    if native["status"] == "refused":
+        return {"status": "refused", "refusal": native["refusal"],
+                "native_rows": native, "fixed_resources": fixed}
+    if fixed["status"] == "admitted":
+        return {"status": "admitted", "refusal": None, "native_rows": native, "fixed_resources": fixed}
+    return {"status": "native_rows_only", "refusal": fixed["refusal"],
+            "native_rows": native, "fixed_resources": fixed}
+
+
 def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation: Path,
                               full_engine_report: Path, receipts: list[Mapping], manifest_dir: Path,
                               fixed_assignment: Mapping[str, str], valid_hours: float,
                               now: datetime | None = None) -> dict:
     """Write the table, its fixed-resource receipt and the emission report.
 
-    Returns the emission report. The loader's verdict is inside it under
+    Returns the emission report. Both loader verdicts are inside it under
     ``admission``; a refused table stays on disk only because nothing reads a
     v2 table except through the loader that refused it.
     """
@@ -302,18 +457,15 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
         "native_receipt_bindings": [item["binding"] for item in sorted(bound, key=lambda i: (i["row"]["unit"], i["row"]["format"]))],
     }
     out.write_text(json.dumps(table, indent=1, sort_keys=True, allow_nan=False) + "\n")
-    try:
-        load_measured_runtime_table(out, expected_context=parse_runtime_context(context),
-                                    expected_cost_sha256=cost_sha256, now=current)
-        admission = {"status": "admitted", "refusal": None}
-    except RuntimePriceError as exc:
-        admission = {"status": "refused", "refusal": str(exc)}
+    admission = admission_report(out, expected_context=parse_runtime_context(context),
+                                 expected_cost_sha256=cost_sha256, now=current)
     emission = {
         "schema": EMISSION_SCHEMA, "table_path": str(out), "table_sha256": file_sha256(out),
         "table_id": table["table_id"], "cost_path": str(_resolve(costs, manifest_dir)), "cost_sha256": cost_sha256,
         "runtime_provenance": relation_ref, "context": context,
         "fixed_resources": {"declared": fixed, "evidence": fixed_evidence, "report": report_verdict},
         "rows": [{"unit": item["row"]["unit"], "format": item["row"]["format"], "run_id": item["binding"]["run_id"],
+                  "runtime_sha256": identity_sha256(item["panel"]["runtime"]), "unshared_native_libraries": unshared,
                   "prefill_ms": item["row"]["resources"]["prefill_ms"], "decode_ms": item["row"]["resources"]["decode_ms"],
                   "samples": {phase: len(item["row"][phase]["samples_ms"]) for phase in PHASES},
                   "peak_scratch_bytes": item["row"]["resources"]["peak_scratch_bytes"],
@@ -325,7 +477,7 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
                   "panel": item["binding"]["panel"], "receipt": item["binding"]["receipt"],
                   "memory_trace": item["binding"]["memory_trace"],
                   "unknown": list(item["observation"]["unknown"])}
-                 for item in bound],
+                 for item, unshared in zip(bound, unshared_native_libraries([item["panel"] for item in bound]))],
         "admission": admission,
     }
     out.with_name(out.stem + ".emission.json").write_text(json.dumps(emission, indent=1, sort_keys=True, allow_nan=False) + "\n")
@@ -371,7 +523,7 @@ def main(argv=None) -> int:
     admission = emission["admission"]
     print(json.dumps({"table": emission["table_path"], "table_sha256": emission["table_sha256"],
                       "rows": len(emission["rows"]), "admission": admission}, sort_keys=True), flush=True)
-    return 0 if admission["status"] == "admitted" else 2
+    return EXIT_CODES[admission["status"]]
 
 
 if __name__ == "__main__":

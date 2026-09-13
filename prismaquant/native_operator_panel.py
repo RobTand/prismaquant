@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from typing import Mapping
 
 from .joint_aura import identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import OperatorMeasurement
@@ -20,6 +21,27 @@ PANEL_SCHEMA = "tessera.native_dense_panel.v1"
 EXECUTION = {"owner_kind": "single_dense", "mode": "resident",
              "execution_mode": "eager", "tensor_parallel": 1, "bias": False}
 PHASES = ("prefill", "decode")
+
+
+def operator_route_identity(route):
+    """The route class a table binding names, not the GEMM symbol alone.
+
+    `TESSERA_FP8` and `TESSERA_NVFP4` both execute `torch._scaled_mm`, on
+    differently packed operands under different activation contracts. A
+    binding that carried only the symbol made the two indistinguishable in the
+    one field a downstream consumer compares, so two route classes read as one.
+
+    The identity is therefore the declared route itself -- every coordinate the
+    producer declared and `consume_native_receipt` admitted the observed route
+    against -- spelled by the same canonical `json.dumps` `identity_sha256`
+    hashes with, so no second canonical form of a route exists in this tree and
+    key order is not part of the answer. A route with no named symbol is
+    refused rather than given an identity: a route nobody can execute is not a
+    class.
+    """
+    if not isinstance(route, Mapping) or not isinstance(route.get("symbol"), str) or not route["symbol"].strip():
+        raise ValueError("a declared route must name the symbol it executes")
+    return json.dumps(route, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def _sha(value, name):

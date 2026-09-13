@@ -201,6 +201,21 @@ def _runtime_float(value, label: str, *, nonnegative: bool = True) -> float:
     return float(value)
 
 
+def _placement_bytes(totals, fixed_device_bytes, fixed_non_step_peak_bytes):
+    """`max(scalar_budget_bytes, non_step_transient_peak_bytes)`, the obligation.
+
+    The per-step composition prices one engine step. The off-step peak prices
+    what the engine still holds while no step is running, and a box has to hold
+    both. A `None` off-step peak is an absence of evidence and never a zero, so
+    it leaves this arithmetic exactly as it was; so does an off-step peak the
+    per-step composition already covers.
+    """
+    step = sum(totals[4:]) + fixed_device_bytes
+    if fixed_non_step_peak_bytes is None:
+        return step
+    return max(step, fixed_non_step_peak_bytes)
+
+
 def solve_runtime_frontier(
     candidates: dict[str, list[Candidate]],
     resources: Mapping[tuple[str, str], RuntimeResources],
@@ -210,6 +225,7 @@ def solve_runtime_frontier(
     max_decode_ms: float | None = None,
     max_device_bytes: int | None = None,
     fixed_device_bytes: int = 0,
+    fixed_non_step_peak_bytes: int | None = None,
     max_states: int = 100_000,
     max_transitions: int = 8_000_000,
     diagnostics: dict | None = None,
@@ -341,7 +357,8 @@ def solve_runtime_frontier(
                 if max_decode_ms is not None and totals[3] > max_decode_ms:
                     continue
                 if (max_device_bytes is not None
-                        and sum(totals[4:]) + fixed_device_bytes > max_device_bytes):
+                        and _placement_bytes(totals, fixed_device_bytes,
+                                             fixed_non_step_peak_bytes) > max_device_bytes):
                     continue
                 vector = tuple(totals[axis] for axis in axes)
                 formats = state.formats + (c.fmt,)
@@ -392,7 +409,7 @@ def solve_runtime_frontier(
             chosen_candidates=chosen, memory_bytes=a[0], predicted_dloss=a[1],
             prefill_ms=a[2], decode_ms=a[3], resident_bytes=a[4],
             peak_scratch_bytes=a[5], activation_bytes=a[6],
-            device_bytes=sum(a[4:]) + fixed_device_bytes))
+            device_bytes=_placement_bytes(a, fixed_device_bytes, fixed_non_step_peak_bytes)))
     diag.update(complete=True, feasible=bool(result), frontier_size=len(result))
     return result
 

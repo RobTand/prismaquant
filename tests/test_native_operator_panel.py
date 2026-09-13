@@ -12,7 +12,7 @@ import torch
 
 from prismaquant.joint_aura import arithmetic_identity, identity_sha256, make_joint_aura_entry
 from prismaquant.native_operator_panel import (EXECUTION, INPUT_SCHEMA, consume_native_receipt,
-                                               freeze_native_panel)
+                                               freeze_native_panel, operator_route_identity)
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 from test_streamed_cost_checkpoints import _model_identity
 
@@ -107,6 +107,30 @@ def test_legacy_cost_never_becomes_joint_currency(joined):
     inputs, preflight, _ = joined
     with pytest.raises(ValueError, match="actual joint"):
         freeze_native_panel(inputs, preflight, {"output_mse": .1}, cost_sha256="4" * 64)
+
+
+def test_the_route_identity_is_the_class_not_the_gemm_symbol():
+    """Two Tessera classes execute one symbol on differently packed operands.
+
+    `TESSERA_FP8` and `TESSERA_NVFP4` both dispatch `torch._scaled_mm`, so a
+    route named by its symbol alone collapses them. The identity is the whole
+    declared route, canonically ordered, and is therefore independent of the
+    order the producer happened to write its keys in.
+    """
+    fp8 = {"kind": "dense", "policy": "TESSERA_FP8:resident", "symbol": "torch._scaled_mm",
+           "decoder": "torch_materialize_stock", "contract": "fp8_per_token_dynamic"}
+    fp4 = {**fp8, "policy": "TESSERA_NVFP4:resident", "contract": "nvfp4_per_block_static"}
+    assert fp8["symbol"] == fp4["symbol"]
+    assert operator_route_identity(fp8) != operator_route_identity(fp4)
+    assert operator_route_identity(fp8) == operator_route_identity(dict(reversed(list(fp8.items()))))
+    assert fp8["contract"] in operator_route_identity(fp8)
+
+
+@pytest.mark.parametrize("route", [{}, {"kind": "dense"}, {"symbol": " ", "kind": "dense"},
+                                   {"symbol": None, "kind": "dense"}, "torch.mm"])
+def test_a_route_with_no_named_symbol_is_refused(route):
+    with pytest.raises(ValueError, match="declared route"):
+        operator_route_identity(route)
 
 
 def receipt_fixture(joined, complete=False, cost_sha256="4" * 64):
