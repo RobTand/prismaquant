@@ -20,7 +20,9 @@ platform has a cell, because a cell is a device receipt and nobody here owns a
 Strix Halo, so `tessera_render.tessera_attesting_cells` — the live resolver,
 which reads the pinned table through `_pinned_serving_table()` — returns no cell
 for EVERY family on both targets, the backed one included, and export fails
-closed without an explicit override. `ServingLaneSpec.route_status_for` speaks
+closed: `tessera_export_lane.require_assignment_scope` raises on any selected
+unit whose resolved route is not backed and device-qualified, and on this lane
+that refusal takes no override. `ServingLaneSpec.route_status_for` speaks
 the `:no_cell` vocabulary too, but only for a caller that hands it the pinned
 contract: with none supplied — every production call since the Gridbook
 retirement left no default table — it answers `unattested` with source
@@ -14230,8 +14232,10 @@ WnA16 only**. `serving_profile_specs/tessera_strix_halo_gfx1151.json` and
 What is still absent is the thing that was absent before: a **cell**. Neither AMD platform has
 one, because a cell is a device receipt and nobody here owns a Strix Halo. So
 `tessera_render.tessera_attesting_cells`, asked with a `ServingContext` on either target, returns
-no cell for every family — including the backed one — and export fails closed without an explicit
-override. `ServingLaneSpec.route_status_for` would say `:no_cell` if it were handed the pinned
+no cell for every family — including the backed one — and export fails closed in
+`tessera_export_lane.require_assignment_scope`, which takes no override on this lane (and these
+two profiles declare no export lane to reach it with).
+`ServingLaneSpec.route_status_for` would say `:no_cell` if it were handed the pinned
 contract, and a test hands it one; in production nothing does, because
 `load_eligibility_table()` has had no default table since the Gridbook lane was retired
 (2026-09-02), so that resolver answers `unattested` with source `serving_runtime_contract::absent`
