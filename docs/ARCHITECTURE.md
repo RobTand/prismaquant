@@ -1,7 +1,18 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/scoped-prefill-sweep`. Stamps
+As of: 2026-09-13 · `codex/glm-full-domain-price-bridge-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Research acquisition bridge (2026-09-13, `codex/glm-full-domain-price-bridge-20260913`, #581):
+`tessera_full_domain_acquisition` joins the grammar-derived complete rate domain
+with the existing `adaptive_trellis_rate_surface` refiner. Missing outer
+endpoints and BF16 table-width boundaries become bounded measurement requests;
+once present, the allocation multiplier prioritizes interior refinement. Every
+legal rate remains on the research domain. Missing prices stay unknown, and no
+extrapolated objective, complete-grid measurement requirement, serving approval,
+or allocator payload is introduced. Atomic serving-group acquisition and exact
+selected-rate scoring remain caller obligations. The opt-in adapter changes no
+pipeline default or shipping gate.
 
 Re-stamped (2026-09-13, `claude/scoped-prefill-sweep`) because **the prefill
 frontier sweep can now run on a table whose fixed charge no gate admits, under
