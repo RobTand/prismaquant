@@ -40,6 +40,7 @@ from prismaquant.measured_runtime_prices import (
     RuntimeBinding, RuntimeResources, OperatorMeasurement, MeasuredRuntimeRow,
     build_runtime_resources, parse_measured_runtime_table,
 )
+from prismaquant.native_operator_panel import operator_route_identity
 from test_native_operator_panel import joined, receipt_fixture
 from test_measured_runtime_prices import payload
 
@@ -292,19 +293,20 @@ def native_intake(relation_fixture, joined):
     preflight["runtime"] = raw
     preflight["runtime_sha256"] = identity_sha256(raw)
     panel, receipt, trace = receipt_fixture(joined, complete=True)
+    route_identity = operator_route_identity(panel["phases"]["prefill"]["expected_route"])
     trace["capture"]["collector_library_sha256"] = raw["resource_collector"]["library_sha256"]
     receipt["resources"]["trace_sha256"] = identity_sha256(trace)
     context.update(prompt_tokens=1, source_sha256=panel["source_sha256"],
                    calibration_sha256=panel["calibration_sha256"],
                    runtime_sha256=identity_sha256(relation),
-                   operator_routes={panel["unit"]: {panel["format"]: "torch.mm"}})
+                   operator_routes={panel["unit"]: {panel["format"]: route_identity}})
     panel_ref, receipt_ref, trace_ref = (evidence.put(name, value) for name, value in (
         ("panel.json", panel), ("receipt.json", receipt), ("trace.json", trace)))
     measurement = OperatorMeasurement.from_dict({"method": "cuda_events", "samples_ms": [3., 1., 2.],
         "warmup_iterations": 4, "receipt_path": receipt_ref["path"], "receipt_sha256": receipt_ref["sha256"]})
     binding = RuntimeBinding.from_dict({"member_formats": {panel["unit"]: panel["format"]},
         "member_operator_identity_sha256": {panel["unit"]: panel["joint_operator_identity_sha256"]},
-        "member_shapes": {panel["unit"]: panel["shape"]}, "operator_route": "torch.mm"})
+        "member_shapes": {panel["unit"]: panel["shape"]}, "operator_route": route_identity})
     row = MeasuredRuntimeRow(panel["unit"], panel["format"], binding,
         RuntimeResources(prefill_ms=2., decode_ms=2., serialized_bytes=42, resident_bytes=64,
                          peak_scratch_bytes=128, activation_bytes=8, kv_bytes=0), measurement, measurement)

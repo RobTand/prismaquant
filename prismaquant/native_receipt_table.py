@@ -173,7 +173,7 @@ def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: st
     The receipt is consumed through ``consume_native_receipt`` against the
     panel as frozen, exactly as ``admit_native_rows`` will consume it again.
     """
-    from .native_operator_panel import consume_native_receipt
+    from .native_operator_panel import consume_native_receipt, operator_route_identity
 
     _object(spec, BINDING_FIELDS, "native receipt binding")
     unit, fmt, run_id = (_string(spec[key], "native receipt " + key) for key in ("unit", "format", "run_id"))
@@ -203,7 +203,7 @@ def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: st
         measurements[phase] = {"method": timing["method"], "samples_ms": list(timing["samples_ms"]),
                                "warmup_iterations": timing["warmup_iterations"],
                                "receipt_path": receipt_ref["path"], "receipt_sha256": receipt_ref["sha256"]}
-    route = panel["phases"]["prefill"]["expected_route"]["symbol"]
+    route = operator_route_identity(panel["phases"]["prefill"]["expected_route"])
     row = {
         "unit": unit, "format": fmt,
         "binding": {"member_formats": {unit: fmt},

@@ -20,7 +20,7 @@ from prismaquant.joint_aura import make_joint_aura_entry
 from prismaquant.measured_runtime_prices import (
     RuntimePriceError, identity_sha256, parse_measured_runtime_table, parse_runtime_context,
 )
-from prismaquant.native_operator_panel import freeze_native_panel
+from prismaquant.native_operator_panel import freeze_native_panel, operator_route_identity
 from prismaquant.runtime_provenance import admit_native_rows
 from test_native_operator_panel import joined, receipt_fixture
 from test_runtime_fixed_resource_admission import agreeing_report
@@ -123,7 +123,8 @@ def test_emitted_table_is_admitted_by_admit_native_rows_and_refused_only_at_fixe
     assert row.resources.prefill_ms == 2. and row.resources.decode_ms == 2.
     assert row.resources.peak_scratch_bytes == 128 and row.resources.serialized_bytes == 42
     assert row.resources.resident_bytes == 64 and row.resources.activation_bytes == 8
-    assert row.binding.operator_route == "torch.mm"
+    assert row.binding.operator_route == operator_route_identity(
+        emitted.panel["phases"]["prefill"]["expected_route"])
     assert dict(row.binding.member_operator_identity_sha256) == {row.unit: emitted.panel["joint_operator_identity_sha256"]}
     assert payload["context"]["runtime_sha256"] == identity_sha256(json.loads((emitted.evidence.root / "relation.json").read_text()))
     assert payload["context"]["prompt_tokens"] == 1 and payload["context"]["gpu_identity"] == "synthetic-gpu"
@@ -254,3 +255,28 @@ def test_a_table_the_loader_refuses_outright_prices_nothing(emitted, capsys):
     assert "measurement window" in admission["refusal"]
     assert admission["fixed_resources"] == {"status": "unreached", "refusal": None}
     assert code == emitter.EXIT_REFUSED
+
+
+def _emit_with_route(state, *, policy, contract, symbol="torch._scaled_mm"):
+    """Re-emit the one cell under a declared route, and read back its binding."""
+    inputs, preflight, joint = state.cell
+    preflight["operator"]["declared_route"] = {"kind": "dense", "policy": policy, "symbol": symbol,
+                                               "decoder": "fixture-window", "contract": contract}
+    preflight["operator"]["activation_contract"] = contract
+    _write_cell(state.root, "cell", (inputs, preflight, joint), state.raw, state.cost_sha256)
+    emitter.main(_argv(state))
+    return json.loads(state.out.read_text())["rows"][0]["binding"]["operator_route"]
+
+
+def test_two_route_classes_that_share_one_gemm_symbol_are_two_bindings(emitted):
+    """TESSERA_FP8 and TESSERA_NVFP4 both execute `torch._scaled_mm`.
+
+    They do it on differently packed operands under different activation
+    contracts, so a binding carrying the GEMM symbol alone makes a downstream
+    consumer unable to tell the two apart in the one field it compares.
+    """
+    fp8 = _emit_with_route(emitted, policy="TESSERA_FP8:resident", contract="fp8_per_token_dynamic")
+    fp4 = _emit_with_route(emitted, policy="TESSERA_NVFP4:resident", contract="nvfp4_per_block_static")
+    assert fp8 != fp4, "the binding cannot tell fp8 from fp4"
+    assert "fp8_per_token_dynamic" in fp8 and "TESSERA_FP8:resident" in fp8
+    assert "nvfp4_per_block_static" in fp4 and "TESSERA_NVFP4:resident" in fp4

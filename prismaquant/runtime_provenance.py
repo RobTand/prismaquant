@@ -746,7 +746,7 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
 def admit_native_rows(table, relation):
     """Reuse exact same-panel producer gates before accepting v2 table rows."""
     from .native_moe_panel import consume_moe_receipt
-    from .native_operator_panel import consume_native_receipt
+    from .native_operator_panel import consume_native_receipt, operator_route_identity
     reader = ArtifactReader(Path(table.source_path).parent)
     bindings = table.native_receipt_bindings
     if not isinstance(bindings, (list, tuple)):
@@ -787,7 +787,7 @@ def admit_native_rows(table, relation):
             expected_binding = {"member_formats": {panel["unit"]: panel["format"]},
                 "member_operator_identity_sha256": {panel["unit"]: panel["joint_operator_identity_sha256"]},
                 "member_shapes": {panel["unit"]: panel["shape"]},
-                "operator_route": panel["phases"]["prefill"]["expected_route"]["symbol"]}
+                "operator_route": operator_route_identity(panel["phases"]["prefill"]["expected_route"])}
         else:
             raise RuntimePriceError("unsupported native producer panel")
         for record in wire_records:
