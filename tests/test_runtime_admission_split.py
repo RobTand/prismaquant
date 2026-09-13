@@ -119,3 +119,44 @@ def test_a_v1_table_carries_no_provenance_and_is_returned_unchanged():
     """Recorded, not endorsed: see this module's companion finding in PQ #560."""
     table = _table(runtime_provenance=None)
     assert admitted_fixed_resources(table) is table.fixed_resources
+
+
+# --------------------------------------------------------------------------
+# The placement obligation: `max(scalar_budget, non_step_transient_peak)`.
+# --------------------------------------------------------------------------
+
+def _totals(resident, scratch, activation):
+    """A solver totals tuple; only indices 4..6 reach the device filter."""
+    return (0, 0.0, 0.0, 0.0, resident, scratch, activation)
+
+
+def test_an_off_step_peak_under_the_step_total_changes_no_arithmetic():
+    """Where the two numbers coincide, or the off-step is smaller, nothing moves."""
+    from prismaquant.allocator_solver import _placement_bytes
+    totals = _totals(1000, 200, 100)
+    assert _placement_bytes(totals, 500, None) == 1800
+    assert _placement_bytes(totals, 500, 1800) == 1800
+    assert _placement_bytes(totals, 500, 1799) == 1800
+
+
+def test_an_off_step_peak_over_the_step_total_is_what_the_box_must_hold():
+    """The regression: the DP pruned against the smaller of two numbers."""
+    from prismaquant.allocator_solver import _placement_bytes
+    assert _placement_bytes(_totals(1000, 200, 100), 500, 4096) == 4096
+
+
+def test_the_off_step_peak_is_absent_rather_than_zero_when_unpriced():
+    resources = RuntimeResources(prefill_ms=1.0, decode_ms=None, serialized_bytes=1,
+                                 resident_bytes=1, peak_scratch_bytes=1, activation_bytes=1)
+    assert resources.non_step_transient_peak_bytes is None
+    # Absent from the wire too, so a table emitted before the field keeps its digest.
+    assert "non_step_transient_peak_bytes" not in resources.as_dict()
+    assert RuntimeResources.from_dict(resources.as_dict()) == resources
+
+
+def test_a_declared_off_step_peak_round_trips():
+    resources = RuntimeResources(prefill_ms=1.0, decode_ms=None, serialized_bytes=1,
+                                 resident_bytes=1, peak_scratch_bytes=1, activation_bytes=1,
+                                 non_step_transient_peak_bytes=4096)
+    assert resources.as_dict()["non_step_transient_peak_bytes"] == 4096
+    assert RuntimeResources.from_dict(resources.as_dict()) == resources

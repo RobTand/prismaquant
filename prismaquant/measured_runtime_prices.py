@@ -30,6 +30,18 @@ PROVENANCE_TABLE_SCHEMA = "prismaquant.measured_runtime_prices.v2"
 PROVENANCE_IDENTITY_KIND = "prismaquant.runtime_provenance_relation.v1"
 RESOURCE_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes", "resident_bytes",
                    "peak_scratch_bytes", "activation_bytes", "kv_bytes")
+#: The off-step half of the placement obligation
+#: `max(scalar_budget_bytes, non_step_transient_peak_bytes)`, the producer's
+#: frozen `PLACEMENT_OBLIGATION` contract string. The seven fields above
+#: price one engine step; this prices what the engine still holds while no step
+#: is running. The admission gate demands the obligation be recomputable and
+#: nothing consumed it, so the DP pruned against the smaller of two numbers
+#: whenever the off-step peak was the larger. Absent means "not priced", never
+#: zero: a maximum taken against a default would read as the other side having
+#: been checked. Optional on the wire so every table emitted before this field
+#: existed keeps its digest.
+OFF_STEP_FIELD = "non_step_transient_peak_bytes"
+RESOURCE_FIELDS_WITH_OFF_STEP = RESOURCE_FIELDS + (OFF_STEP_FIELD,)
 
 
 class RuntimePriceError(DispatchTableError):
@@ -200,6 +212,7 @@ class RuntimeResources:
     peak_scratch_bytes: int
     activation_bytes: int
     kv_bytes: int = 0
+    non_step_transient_peak_bytes: int | None = None
 
     def __post_init__(self):
         _number(self.prefill_ms, "prefill_ms")
@@ -207,13 +220,23 @@ class RuntimeResources:
             _number(self.decode_ms, "decode_ms")
         for name in RESOURCE_FIELDS[2:]:
             _integer(getattr(self, name), name)
+        if self.non_step_transient_peak_bytes is not None:
+            _integer(self.non_step_transient_peak_bytes, OFF_STEP_FIELD)
 
     def as_dict(self) -> dict:
-        return {field: getattr(self, field) for field in RESOURCE_FIELDS}
+        # The off-step field appears only when priced, so a table emitted
+        # before it existed re-emits byte-identically and keeps its digest.
+        payload = {field: getattr(self, field) for field in RESOURCE_FIELDS}
+        if self.non_step_transient_peak_bytes is not None:
+            payload[OFF_STEP_FIELD] = self.non_step_transient_peak_bytes
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping) -> RuntimeResources:
-        return cls(**_object(payload, RESOURCE_FIELDS, "resources"))
+        fields = (RESOURCE_FIELDS_WITH_OFF_STEP
+                  if isinstance(payload, Mapping) and OFF_STEP_FIELD in payload
+                  else RESOURCE_FIELDS)
+        return cls(**_object(payload, fields, "resources"))
 
 
 @dataclass(frozen=True)
@@ -425,6 +448,9 @@ def parse_measured_runtime_table(payload: Mapping, *, expected_context: RuntimeC
             raise RuntimePriceError(f"{key}: resource times must equal medians of measured operator samples")
         if resources.kv_bytes:
             raise RuntimePriceError("KV belongs to fixed_resources, not per-unit rows")
+        if resources.non_step_transient_peak_bytes is not None:
+            raise RuntimePriceError("the off-step transient peak is one whole-engine obligation, "
+                                    "not a per-unit row price")
         rows.append(MeasuredRuntimeRow(unit, fmt, binding, resources, prefill, decode))
     provenance, receipt_bindings = None, ()
     if is_provenance:

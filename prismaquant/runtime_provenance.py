@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .measured_runtime_prices import (
-    RuntimePriceError, _integer, _object,
+    OFF_STEP_FIELD, RuntimePriceError, _integer, _object,
     _sha, _string, identity_sha256,
 )
 
@@ -699,6 +699,21 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
                             "nothing the engine holds while no engine step is running")
         refusals.append("no placement obligation is recomputable, so this table's fixed "
                         "resources are admitted against no device extent")
+    # The off-step peak the table declares, against the one the report
+    # recomputes. The gate demanded the obligation and nothing carried it, so
+    # the DP pruned on the per-step composition alone; the table now declares
+    # the other half and it is checked here like every other fixed term.
+    declared_off_step = fixed.non_step_transient_peak_bytes
+    recomputed_off_step = verdict.recomputed_non_step_transient_peak_bytes
+    if declared_off_step is None:
+        refusals.append(f"this table declares no {OFF_STEP_FIELD}, so its fixed resources price "
+                        "nothing the engine holds while no engine step is running")
+    elif recomputed_off_step is None:
+        refusals.append(f"no off-step transient peak is recomputable, so this table's declared "
+                        f"{OFF_STEP_FIELD} ({declared_off_step}) has no evidence")
+    elif recomputed_off_step != declared_off_step:
+        refusals.append(f"this table declares {OFF_STEP_FIELD} {declared_off_step} where the "
+                        f"recomputed off-step transient peak is {recomputed_off_step}")
 
     resident = verdict.recomputed_terms["candidate_resident"]
     if resident is None:

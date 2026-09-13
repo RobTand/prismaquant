@@ -3925,7 +3925,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     max_memory_bytes=math.floor(requested_target * mutable_total_params / 8),
                     max_prefill_ms=max_prefill, max_decode_ms=max_decode,
                     max_device_bytes=serve_slos.device_budget_bytes,
-                    fixed_device_bytes=fixed_device, diagnostics=diag)
+                    fixed_device_bytes=fixed_device,
+                    fixed_non_step_peak_bytes=fixed.non_step_transient_peak_bytes,
+                    diagnostics=diag)
             except RuntimeFrontierLimitError as exc:
                 # Inside a sweep one grid point over the exact-search bound is
                 # that point's recorded refusal, not the end of the sweep; a

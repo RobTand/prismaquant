@@ -30,6 +30,24 @@ citations throughout this document and in that measurement are restamped to the
 shifted positions.
 
 Re-stamped (2026-09-13, `claude/560-fixed-resource-admission-consumer`)
+because **the allocator now prunes on the placement obligation, not on its
+per-step half alone** (RobTand/prismaquant#560). The admission gate refuses a
+table whose `max(scalar_budget_bytes, non_step_transient_peak_bytes)`
+(`full_engine_resource_report.PLACEMENT_OBLIGATION`) is not recomputable, and
+nothing consumed the number: `RESOURCE_FIELDS` had no off-step slot and
+`allocator.py`'s `fixed_device` summed only the four per-step fixed terms, so
+whenever the off-step peak was the larger the DP pruned against the smaller
+number. `RuntimeResources` gains an optional
+`non_step_transient_peak_bytes`; it is a whole-engine obligation, so a
+per-unit row that declares one is refused, exactly as `kv_bytes` already is.
+The gate checks the declared value against the recomputed one, and
+`allocator_solver._placement_bytes` prunes and reports
+`max(step_total, off_step)`. The field is optional on the wire and absent
+means *not priced*, never zero, so every table emitted before it existed
+re-emits byte-identically and the arithmetic is unchanged wherever the two
+numbers coincide. No default, stage, format or lane changed.
+
+Re-stamped (2026-09-13, `claude/560-fixed-resource-admission-consumer`)
 because **producer admission is now two flags, not one** (RobTand/prismaquant#560).
 `admit_native_rows` and `admit_fixed_resources` attest different objects: the
 first attests the per-row prices `build_runtime_resources` hands the DP, the
