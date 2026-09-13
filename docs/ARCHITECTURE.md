@@ -14013,8 +14013,10 @@ one, because a cell is a device receipt and nobody here owns a Strix Halo. So
 `tessera_render.tessera_attesting_cells` returns no cell for every family on
 both targets — including the backed one. Two different things then say so, and
 only one of them refuses: `tessera_menu.route_admission` *reports* the verdict
-(`unattested`, with the conjunct in `detail`) and never raises, while the
-refusal that actually stops bytes is
+— on a rung no cell attests it returns `unattested` with the conjunct in
+`detail` rather than raising (`tessera_menu.py:689`; it does raise on an
+unknown format name and on an attested-with-no-cells contradiction, neither of
+which is this case) — while the refusal that actually stops bytes is
 `tessera_export_lane.require_assignment_scope`, which raises
 `TesseraExportLaneError` on any selected unit whose resolved route is not
 `backed`/`backed_with_serve_flag` with every regime `device_qualified` — and it
