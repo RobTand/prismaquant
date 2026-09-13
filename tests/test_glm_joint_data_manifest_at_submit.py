@@ -6,8 +6,8 @@ run *after* the rows merge -- ``prismaquant.tessera_joint_aura prepare`` and
 outside the row dispatcher and carried none, so PrismaBuild's prewarm loop
 could not see their read set at all.
 
-The joint pass is where that costs the most: about 4.75 TB against the 240 GiB
-ARC on dl380g10. No warm of the whole set is possible, so a manifest that only
+The joint pass is where that costs the most: 5.20 TB measured at 07:57Z on
+2026-09-13, and still growing, against the 240 GiB ARC on dl380g10. No warm of the whole set is possible, so a manifest that only
 listed the files would be useless -- the loop has to know *when* each byte is
 read. These tests hold the consumption order, the per-layer phase boundaries
 and the exclusions that make the order true:
@@ -663,14 +663,19 @@ REAL_PLAN = BASE / "first-proof-joint-preparation-03" / "plan.inputs-resolved.js
 REAL_PLAN_TEMPLATE = BASE / "first-proof-joint-preparation-03" / "dryrun" / "plan.template.json"
 #: The joint pass's whole read set, measured from the dl380g10 local pool at
 #: 07:57Z on 2026-09-13: 5.20 TB over 371,734 entries. The band is wide on
-#: purpose. The brief's 4.75 TB estimate was taken earlier the same morning,
-#: before the campaign merge had published the last of the row renders, and
-#: the tree was still gaining them: 5.14 TB at 07:39Z and 5.20 TB eighteen
-#: minutes later, 3,216 renders apart.
+#: purpose, because the tree is being written while it is read. A joint
+#: ``prepare`` has been running against this plan since 04:59Z, and it writes
+#: a decoded shard for every rung the campaign adopted rather than encoded --
+#: each one marked by a ``.render_origin.json`` record beside it in the row
+#: cache. The read set gained 3,216 renders in eighteen minutes (5.14 TB at
+#: 07:39Z, 5.20 TB at 07:57Z), and the brief's 4.75 TB estimate was taken
+#: earlier the same morning against fewer shards. Projected settled size once
+#: the remaining 97,302 shards exist: 5.20 TB + 97,302 x the 16.8 MB mean
+#: render = about 6.8 TB, which is where the upper bound below comes from.
 #: What the test pins is the shape -- one head phase and one phase per layer,
 #: a read set in the terabytes, dominated by captures, renders and wires --
 #: not a byte count of a tree that is still being written.
-TOTAL_BYTES_BAND = (4.5e12, 5.6e12)
+TOTAL_BYTES_BAND = (4.5e12, 7.5e12)
 EXPECTED_PHASES = 46
 
 
@@ -731,8 +736,8 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_46_phases(scratch):
     # The gap this read set exposes, stated as a number rather than as prose.
     # PrismaBuild's data manifest v1 refuses a manifest file over
     # DATA_MANIFEST_MAX_BYTES (64 MiB) and reads no compressed form, and this
-    # pass's byte list is 104 MB of compact JSON -- 368,518 entries whose
-    # paths average 233 characters. The producer fails closed on it rather
+    # pass's byte list is 105 MB of compact JSON -- 371,734 entries whose
+    # absolute shared-mount paths dominate it. The producer fails closed rather
     # than submitting a truncated read set. When PrismaBuild raises the
     # ceiling or accepts a compressed manifest, this assertion is what says so.
     encoded = json.dumps(manifest, separators=(",", ":")).encode() + b"\n"

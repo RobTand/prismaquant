@@ -13,6 +13,16 @@ Measured on the frozen GLM census at 07:57Z on 2026-09-13, from the dl380g10
 local pool: the `prepare` pass reads **5.20 TB** over 371,734 entries --
 2.08 TB of captures, 1.69 TB of renders, 0.80 TB of measured-rung wires,
 0.61 TB of source extents and 7.7 GB of head records -- against a 240 GiB ARC.
+That is a snapshot of a tree being written while it is read. A joint `prepare`
+has been running against this plan since 04:59Z, and it writes a decoded shard
+for every rung the campaign adopted rather than encoded, leaving a
+`.render_origin.json` record beside each one in the row cache. The read set
+gained 3,216 renders in the eighteen minutes between two builds: 5.14 TB at
+07:39Z, 5.20 TB at 07:57Z. Once that pass has synthesized the remaining 97,302
+shards the settled read set is projected near **6.8 TB** -- 5.20 TB plus
+97,302 times the 16.8 MB mean render -- so what the tests gate is the band and
+the composition, not a byte count. The brief's 4.75 TB estimate was taken
+earlier the same morning, against fewer shards.
 A whole-set warm is not available at that ratio, so the manifest carries the
 consumption order: a `head` phase, then one `layer-<L>` phase per transformer
 layer, and the prewarm loop windows on `annotations.phases`. The head is not
@@ -20,9 +30,15 @@ small on this census: 97,302 of its 197,990 measured cells are rungs the
 campaign adopted rather than encoded, and `load_measured_anchor_input`
 decodes a shard for each of them from its wire before the first layer
 installs, so 382.67 GB of wire bytes belong to the `head` phase and the phase
-is 390.78 GB. A loop that treats a phase as one unit does not fit that in a
-240 GiB ARC either; the entries are in read order and the running sum is per
-entry, so the window may stop inside a phase. One measured limit came with
+is 390.78 GB. That size is a property of this tree's state rather than of the
+pass: once every shard exists, `renders_absent` is zero and the head is back
+to its 7.7 GB of records. The rule is the durable part, and the synthetic
+fixture in the gate is what holds it. A loop that treats a phase as one unit
+does not fit 390 GB in a 240 GiB ARC either; the entries are in read order and
+the running sum is per entry, so the window may stop inside a phase. Order
+within the head is approximate: the synthesized wires are declared after the
+calibration, backend and compatibility records, which the pass opens after
+`load_measured_anchor_input` returns. One measured limit came with
 it: PrismaBuild's data manifest v1 refuses a manifest file over 64 MiB and
 reads no compressed form, and this read set is 105 MB of compact JSON, so the
 submit path fails closed on the size rather than submitting a truncated read
