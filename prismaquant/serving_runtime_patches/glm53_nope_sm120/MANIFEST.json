@@ -7,6 +7,7 @@
   "base_flashinfer_version": "0.6.18",
   "derived_image": null,
   "derived_image_local_id": "sha256:2e886e5c745e5a7bbf8f1c93c5a5a0ab69c2e9fe0346863531fc87786d85c1ee",
+  "derived_image_local_id_read_by": "docker inspect glm53-nope-sm121:w7 --format '{{.Id}} {{.RepoDigests}}' on sparklina, 2026-09-13: .Id matches and .RepoDigests is EMPTY, which is why derived_image is null.",
   "derived_image_local_tag": "glm53-nope-sm121:w7",
   "derived_image_built_on": "sparklina",
   "build": {
