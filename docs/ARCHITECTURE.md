@@ -51,9 +51,10 @@ profile targets, so `gfx1151` is covered before anything targets it, and a
 separate check asserts every Tessera profile's `target_platform` is a platform
 the pinned contract declares — a target the runtime never heard of prices
 against nothing. A non-null entry is permission to PRICE, never to ship: the
-eligibility gate reads cells, neither AMD platform has one, and
-`route_status_for` still answers `unattested` with source `:no_cell` for every
-family on both. Gates: `tests/test_tessera_lane_spec_platforms.py`.
+eligibility gate reads cells, the contract gives neither AMD platform one, and
+the live resolver — `tessera_render.tessera_attesting_cells`, reading the pinned
+table — returns no attesting cell for any family on either. Gates:
+`tests/test_tessera_lane_spec_platforms.py`.
 
 Re-stamped (2026-09-12, `pq/528-platform-aware-route`) for the **platform-aware
 Tessera serving route** (#528). `tessera_serving_route` takes an optional
