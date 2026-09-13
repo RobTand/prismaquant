@@ -33,6 +33,15 @@ What the document says, and what it does not
 * ``slo_axis``: the lower bound the table implies (fixed work plus every
   unit's fastest priced option) and that upper bound. Points below the lower
   bound are recorded as infeasible; they are not pruned.
+* ``fixed_resource_scope``: ``null`` when the table's fixed whole-engine charge
+  is admitted, and otherwise the scope the run read it under
+  (``--measured-runtime-fixed-scope shape-only``), carrying the admission
+  gate's refusal verbatim and naming every term this curve did not price. Under
+  a scope every point's ``device_memory_bytes`` is ``null``: the fixed device
+  terms are withheld, so a device number built from what is left would be a sum
+  with a charge missing from it. **Two scopes, never mixed** -- the operator sum
+  over the priced units is measured, the fixed whole-model charge is not
+  carried, and the document says which is which rather than adding them.
 
 The curve is a *proposal* under the table's sequential operator-sum model.
 Operator sums do not certify p95 TTFT (``measured_runtime_prices``); the
@@ -145,7 +154,7 @@ def nondominated_flags(points: Sequence[dict], *, loss_noise_floor: float) -> li
 
 def build_frontier_document(points: Sequence[dict], *, saturation: dict | None,
                             slo_axis: dict, loss_noise_floor: float,
-                            provenance: dict) -> dict:
+                            provenance: dict, fixed_resource_scope: dict | None = None) -> dict:
     """Assemble the v1 document from per-point records (pure; no solving)."""
     points = [dict(point) for point in points]
     flags = nondominated_flags(points, loss_noise_floor=loss_noise_floor)
@@ -176,6 +185,9 @@ def build_frontier_document(points: Sequence[dict], *, saturation: dict | None,
         "certifies_p95": False,
         "certifies_end_to_end_slo": False,
         "objective": "predicted_dloss",
+        "fixed_resources_admitted": fixed_resource_scope is None,
+        "fixed_resource_scope": None if fixed_resource_scope is None else dict(fixed_resource_scope),
+        "certifies_placement": False,
         "loss_noise_floor": float(loss_noise_floor),
         "slo_axis": dict(slo_axis),
         "saturation": saturation,
@@ -190,8 +202,16 @@ def build_frontier_document(points: Sequence[dict], *, saturation: dict | None,
     }
 
 
-def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict) -> dict:
-    """One grid point from the allocator's solve record; writes its assignment."""
+def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
+                  fixed_resource_scope: dict | None = None) -> dict:
+    """One grid point from the allocator's solve record; writes its assignment.
+
+    Under a fixed-resource scope the point must carry no device number. The
+    withholding happens where the number would be built
+    (``serve_constraints.evaluate_measured_assignment``); this refuses rather
+    than trusts it, because the whole content of the scope is that no device
+    term reaches a document.
+    """
     diag = record.get("diagnostics", {})
     point = {
         "slo_ms": float(record["slo_ms"]),
@@ -238,6 +258,11 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict)
     if point["attained_prefill_ms"] is None:
         raise PrefillFrontierError(
             f"SLO {record['slo_ms']}: feasible solve carries no operator_sum_prefill_ms")
+    if fixed_resource_scope is not None and point["device_memory_bytes"] is not None:
+        raise PrefillFrontierError(
+            f"SLO {record['slo_ms']}: the {fixed_resource_scope['scope']} fixed-resource scope "
+            f"withholds {', '.join(fixed_resource_scope['withheld_terms'])}, so this point may "
+            f"carry no device_memory_bytes; it carries {point['device_memory_bytes']}")
     return point
 
 
@@ -248,6 +273,7 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict)
 def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
               loss_noise_floor: float, allocator_argv: Sequence[str]) -> dict:
     """Drive ``ctx.solve`` over the grid and return the v1 document."""
+    scope = ctx.fixed_resource_scope
     fixed_prefill = float(ctx.fixed_resources["prefill_ms"])
     lower_bound = fixed_prefill + ctx.unit_min_prefill_sum_ms
     upper_bound = fixed_prefill + ctx.unit_max_prefill_sum_ms
@@ -261,7 +287,7 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
     # maximum, so this solve is what "no prefill SLO" would return, and its
     # attained prefill is the saturation SLO.
     top_record = ctx.solve(upper_bound, ctx.target_bits)
-    top = _point_record(top_record, assignments_dir, provenance_stub=provenance_stub)
+    top = _point_record(top_record, assignments_dir, provenance_stub=provenance_stub, fixed_resource_scope=scope)
     saturation = None
     if top["feasible"]:
         saturation = {"slo_ms": float(top["attained_prefill_ms"]),
@@ -289,11 +315,11 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
             # Nothing tighter can be feasible when the loosest budget is not.
             points.append({**_point_record({"slo_ms": slo_ms, "target_bits": ctx.target_bits,
                                             "feasible": False, "reason": top["refusal_reason"]},
-                                           assignments_dir, provenance_stub=provenance_stub),
+                                           assignments_dir, provenance_stub=provenance_stub, fixed_resource_scope=scope),
                            "refusal_reason": f"unconstrained_point_infeasible:{top['refusal_reason']}"})
             continue
         record = ctx.solve(slo_ms, ctx.target_bits)
-        points.append(_point_record(record, assignments_dir, provenance_stub=provenance_stub))
+        points.append(_point_record(record, assignments_dir, provenance_stub=provenance_stub, fixed_resource_scope=scope))
         point = points[-1]
         print(f"[prefill-frontier] slo={slo_ms:.6g} ms: "
               + (f"dloss={point['predicted_dloss']:.6g} prefill={point['attained_prefill_ms']:.6g} ms "
@@ -322,10 +348,14 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
     }
     slo_axis = {"lower_bound_ms": lower_bound, "upper_bound_ms": upper_bound,
                 "fixed_prefill_ms": fixed_prefill,
+                "fixed_prefill_ms_scope": ("admitted" if scope is None else
+                                           f"{scope['scope']}: read, and refused if nonzero, "
+                                           "because the report schema observes no timing term"),
                 "lower_bound_derivation": "fixed prefill + sum over units of the fastest priced option",
                 "upper_bound_derivation": "fixed prefill + sum over units of the slowest priced option"}
     return build_frontier_document(points, saturation=saturation, slo_axis=slo_axis,
-                                   loss_noise_floor=loss_noise_floor, provenance=provenance)
+                                   loss_noise_floor=loss_noise_floor, provenance=provenance,
+                                   fixed_resource_scope=scope)
 
 
 # --------------------------------------------------------------------------- #
@@ -347,7 +377,10 @@ def build_parser() -> argparse.ArgumentParser:
                      "through the allocator's measured-runtime path, and write the "
                      "prismaquant.prefill_frontier.v1 curve. Allocator arguments follow "
                      "'--' and must include --measured-runtime-table and "
-                     "--measured-runtime-context; the grid owns --slo-prefill-p95-ttft-ms."),
+                          "--measured-runtime-context; the grid owns --slo-prefill-p95-ttft-ms. "
+                     "A table whose fixed whole-engine charge no gate admits needs "
+                     "--measured-runtime-fixed-scope shape-only among those arguments; the "
+                     "curve then prices no fixed charge and no device budget, and says so."),
         epilog=("Example: python -m prismaquant.prefill_frontier --output frontier.json "
                 "--slo-grid auto -- --probe probe.pkl --costs joint.pkl --formats F1,F2 "
                 "--target-bits 4.75 --measured-runtime-table runtime.json "

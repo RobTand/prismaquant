@@ -803,6 +803,7 @@ def evaluate_measured_assignment(
     fixed_resources: Any,
     slos: ServeSLOs,
     table_identity: Mapping[str, Any],
+    fixed_resource_scope: str | None = None,
 ) -> ServeFeasibility:
     """Reprice the full expanded assignment using exact measured group rows.
 
@@ -812,6 +813,15 @@ def evaluate_measured_assignment(
     auxiliary assignment and immutable runtime work. Candidate scratch and
     activation buffers are sequential peaks, above those fixed allocations.
     This is an operator-sum proposal, never a p95 or end-to-end certificate.
+
+    ``fixed_resource_scope`` names a scope in which the caller reads none of
+    the fixed device terms, because no gate admits them
+    (``measured_runtime_prices.shape_only_fixed_resources``). Under one, this
+    refuses a device budget outright and **withholds** ``device_memory_bytes``:
+    the four fixed device terms are zero in ``fixed_resources``, so a sum built
+    from them would be a device number with a charge missing from it, and
+    reporting that as the device memory is the failure the scope exists to
+    avoid. The candidate-side components stay in ``coverage``, labelled.
     """
     if any(assignment.get(name) != fmt for name, fmt in fixed_assignment.items()):
         raise ServeConstraintError("measured runtime fixed auxiliary assignment changed")
@@ -853,7 +863,14 @@ def evaluate_measured_assignment(
     scratch = fixed_resources.peak_scratch_bytes + max(
         (row.peak_scratch_bytes for row in selected), default=0)
     kv = fixed_resources.kv_bytes + slos.kv_bytes
-    device = resident + activation + scratch + kv + slos.peak_scratch_bytes
+    if fixed_resource_scope is None:
+        device = resident + activation + scratch + kv + slos.peak_scratch_bytes
+    else:
+        if slos.device_budget_bytes is not None:
+            raise ServeConstraintError(
+                f"the {fixed_resource_scope} fixed-resource scope withholds the fixed device "
+                "terms, so it can evaluate no device budget")
+        device = None
     caveats = (
         "Sum of measured operator medians under the declared runtime/workload; "
         "this prediction cannot certify p95 TTFT, p95 ITL or an end-to-end SLO.",
@@ -894,7 +911,10 @@ def evaluate_measured_assignment(
                              "peak_scratch_bytes": scratch, "kv_bytes": kv,
                              "operator_scratch_reserve_bytes": slos.peak_scratch_bytes,
                              "serialized_bytes": fixed_resources.serialized_bytes
-                             + sum(row.serialized_bytes for row in selected)}},
+                             + sum(row.serialized_bytes for row in selected),
+                             "scope": ("whole_model" if fixed_resource_scope is None else
+                                       f"candidate_only: the fixed device terms are withheld "
+                                       f"under the {fixed_resource_scope} scope")}},
         provenance={"aggregation_model": "measured_whole_operator_sum",
                     "solver_contract": "exact_discrete_runtime_frontier_then_expanded_assignment_check",
                     "global_optimality_claimed": False,
@@ -903,6 +923,7 @@ def evaluate_measured_assignment(
                     "evidence_status": "research_operator_sum_proposal",
                     "certifies_end_to_end_slo": False,
                     "certifies_p95": False,
+                    "fixed_resource_scope": fixed_resource_scope,
                     "measured_runtime_table": dict(table_identity),
                     "slos": slos.as_dict(), "caveats": list(caveats)},
     )

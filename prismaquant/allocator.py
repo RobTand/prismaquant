@@ -1689,6 +1689,12 @@ class MeasuredRuntimeSweep:
     table_identity: dict
     runtime_context: dict
     fixed_resources: dict
+    #: ``None`` when the fixed charge is admitted, otherwise the stamp from
+    #: ``measured_runtime_prices.shape_only_fixed_resources``: which terms are
+    #: withheld, which are read, and the admission gate's refusal verbatim. The
+    #: sweep writes it onto its document, so a reader sees on the document's
+    #: face what the curve did not price.
+    fixed_resource_scope: dict | None
     unit_min_prefill_sum_ms: float
     unit_max_prefill_sum_ms: float
     n_units: int
@@ -1714,6 +1720,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         add_serving_scope_arguments, serving_target_from_args,
         context_by_unit_from_stats, scope_provenance,
     )
+    from .measured_runtime_prices import FIXED_RESOURCE_SCOPES, SHAPE_ONLY_SCOPE
     ap = argparse.ArgumentParser()
     add_serving_scope_arguments(ap)
     ap.add_argument("--probe", required=True, help="sensitivity_probe pickle")
@@ -2170,6 +2177,18 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     help="Operator-supplied peak scratch bytes for the "
                          "device memory constraint (not modelled by the "
                          "allocator).")
+    ap.add_argument("--measured-runtime-fixed-scope", default="admitted",
+                    choices=list(FIXED_RESOURCE_SCOPES),
+                    help="Which fixed whole-engine terms this run reads. "
+                         "'admitted' (default) reads them all and refuses a "
+                         "table whose fixed charge no gate admitted. "
+                         "'shape-only' reads none of the fixed device terms "
+                         "and refuses every consumer that would compare one to "
+                         "a budget, so a table whose fixed charge is refused "
+                         "can still answer a question that does not depend on "
+                         "it. It requires the prefill frontier sweep and no "
+                         "--serve-device-budget-bytes, and it certifies no "
+                         "placement.")
     args = ap.parse_args(argv)
 
     if args.measured_runtime_context and not args.measured_runtime_table:
@@ -2193,6 +2212,22 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         if args.slo_decode_p05_tps is not None:
             ap.error("measured operator sums cannot certify --slo-decode-p05-tps; "
                      "use --slo-decode-p95-itl-ms as a proposal budget")
+        if args.measured_runtime_fixed_scope == SHAPE_ONLY_SCOPE:
+            # The scope's whole content is that no fixed device term is read.
+            # Both refusals below are what makes that true, rather than
+            # something the document claims about itself: a lone run writes a
+            # layer config the export path consumes, and a device budget is
+            # the one input that makes the solver's byte axes bind
+            # (allocator_solver: every device filter is guarded on
+            # `max_device_bytes is not None`).
+            if measured_runtime_sweep is None:
+                ap.error(f"--measured-runtime-fixed-scope {SHAPE_ONLY_SCOPE} is available only "
+                         "to the prefill frontier sweep, whose assignments are research-only; "
+                         "a single solve writes a layer config and must price its fixed charge")
+            if args.serve_device_budget_bytes is not None:
+                ap.error(f"--measured-runtime-fixed-scope {SHAPE_ONLY_SCOPE} withholds the "
+                         "fixed device terms, so it cannot evaluate "
+                         "--serve-device-budget-bytes")
         for flag, value in (("--slo-prefill-p95-ttft-ms", args.slo_prefill_p95_ttft_ms),
                             ("--slo-decode-p95-itl-ms", args.slo_decode_p95_itl_ms),
                             ("--serve-device-budget-bytes", args.serve_device_budget_bytes)):
@@ -2200,6 +2235,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 ap.error(f"{flag} must be positive and finite")
         if args.serve_kv_bytes < 0 or args.serve_peak_scratch_bytes < 0:
             ap.error("measured runtime KV and scratch reserves must be nonnegative")
+    elif args.measured_runtime_fixed_scope != "admitted":
+        ap.error("--measured-runtime-fixed-scope requires --measured-runtime-table")
 
     effective_cb_source_scope = args.cb_codebook_source_scope
     if effective_cb_source_scope is None:
@@ -2264,6 +2301,41 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 expected_cost_sha256=expected_cost_sha256)
         except (ValueError, OSError) as exc:
             raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
+
+    # Which fixed whole-engine terms this run may read. Resolved once, here, so
+    # a scope a table cannot satisfy refuses on the command line rather than
+    # inside a solve. The default path is untouched: it still reads the fixed
+    # charge lazily through `admitted_fixed_resources`, at the three consumers
+    # that need it, and still refuses there.
+    fixed_resource_scope = (SHAPE_ONLY_SCOPE
+                            if measured_runtime_table is not None
+                            and args.measured_runtime_fixed_scope == SHAPE_ONLY_SCOPE else None)
+    fixed_resource_scope_stamp = None
+    scoped_fixed_resources = None
+    if fixed_resource_scope is not None:
+        from .measured_runtime_prices import shape_only_fixed_resources
+        try:
+            scoped_fixed_resources, fixed_resource_scope_stamp = shape_only_fixed_resources(
+                measured_runtime_table)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: measured runtime fixed scope: {exc}") from None
+        print(f"[alloc] measured runtime fixed-resource scope {SHAPE_ONLY_SCOPE}: withholding "
+              f"{', '.join(fixed_resource_scope_stamp['withheld_terms'])}; no device budget and "
+              "no placement is certified by this run.", flush=True)
+
+    def _measured_fixed_resources():
+        """The fixed whole-engine charge this run is allowed to read.
+
+        Under a scope it is the narrowed charge resolved above, whose device
+        terms are withheld and whose readers are refused. Otherwise it is the
+        admitted charge, read through the gate that attests it, exactly as
+        before.
+        """
+        if scoped_fixed_resources is not None:
+            return scoped_fixed_resources
+        from .measured_runtime_prices import admitted_fixed_resources
+        return admitted_fixed_resources(measured_runtime_table)
+
     try:
         serve_dispatch = (
             load_dispatch_table(args.serve_dispatch_table)
@@ -3671,8 +3743,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     measured_option_assignments = {}
     if measured_runtime_table is not None:
         from dataclasses import replace
-        from .measured_runtime_prices import (RuntimeBinding, admitted_fixed_resources,
-                                               build_runtime_resources)
+        from .measured_runtime_prices import RuntimeBinding, build_runtime_resources
         from .joint_aura import validate_joint_aura_entry
         try:
             if dict(measured_runtime_table.fixed_assignment) != fixed_format_assignment:
@@ -3763,9 +3834,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     option_assignments=measured_option_assignments,
                     resources=measured_runtime_resources,
                     fixed_assignment=fixed_format_assignment,
-                    fixed_resources=admitted_fixed_resources(measured_runtime_table),
+                    fixed_resources=_measured_fixed_resources(),
                     slos=serve_slos,
                     table_identity=measured_runtime_table.identity(),
+                    fixed_resource_scope=fixed_resource_scope,
                 )
             except ServeConstraintError as exc:
                 raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
@@ -3899,8 +3971,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         mutable_target_bits = requested_target
         if measured_runtime_table is not None:
             from .allocator_solver import RuntimeFrontierLimitError, solve_runtime_frontier
-            from .measured_runtime_prices import admitted_fixed_resources
-            fixed = admitted_fixed_resources(measured_runtime_table)
+            fixed = _measured_fixed_resources()
             fixed_device = (fixed.resident_bytes + fixed.activation_bytes
                             + fixed.peak_scratch_bytes + fixed.kv_bytes
                             + serve_slos.kv_bytes + serve_slos.peak_scratch_bytes)
@@ -4155,8 +4226,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # writes its own document and no layer config or Pareto CSV exists
         # for "the" solve, because there is no single one.
         from dataclasses import replace as _replace
-        from .measured_runtime_prices import admitted_fixed_resources
-        fixed = admitted_fixed_resources(measured_runtime_table)
+        fixed = _measured_fixed_resources()
         unit_min_prefill = 0.0
         unit_max_prefill = 0.0
         for unit, options in sorted(candidates.items()):
@@ -4202,6 +4272,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             table_identity=measured_runtime_table.identity(),
             runtime_context=measured_runtime_table.context.as_dict(),
             fixed_resources=fixed.as_dict(),
+            fixed_resource_scope=fixed_resource_scope_stamp,
             unit_min_prefill_sum_ms=float(unit_min_prefill),
             unit_max_prefill_sum_ms=float(unit_max_prefill),
             n_units=len(candidates),
