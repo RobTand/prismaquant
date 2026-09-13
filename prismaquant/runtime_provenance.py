@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .measured_runtime_prices import (
-    RuntimePriceError, _integer, _object,
+    OFF_STEP_FIELD, RuntimePriceError, _integer, _object,
     _sha, _string, identity_sha256,
 )
 
@@ -542,7 +542,7 @@ def admit_fixed_resources(table, relation):
 
     Refusals are collected and raised together so one call names all of them.
     There is no admission token and no return value: the v2 loader sets
-    ``producer_admitted`` only because this raised nothing.
+    ``fixed_resources_admitted`` only because this raised nothing.
     """
     reader = ArtifactReader(Path(table.source_path).parent)
     receipt_path, receipt = reader.json({"path": table.fixed_resources_receipt_path,
@@ -699,6 +699,21 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
                             "nothing the engine holds while no engine step is running")
         refusals.append("no placement obligation is recomputable, so this table's fixed "
                         "resources are admitted against no device extent")
+    # The off-step peak the table declares, against the one the report
+    # recomputes. The gate demanded the obligation and nothing carried it, so
+    # the DP pruned on the per-step composition alone; the table now declares
+    # the other half and it is checked here like every other fixed term.
+    declared_off_step = fixed.non_step_transient_peak_bytes
+    recomputed_off_step = verdict.recomputed_non_step_transient_peak_bytes
+    if declared_off_step is None:
+        refusals.append(f"this table declares no {OFF_STEP_FIELD}, so its fixed resources price "
+                        "nothing the engine holds while no engine step is running")
+    elif recomputed_off_step is None:
+        refusals.append(f"no off-step transient peak is recomputable, so this table's declared "
+                        f"{OFF_STEP_FIELD} ({declared_off_step}) has no evidence")
+    elif recomputed_off_step != declared_off_step:
+        refusals.append(f"this table declares {OFF_STEP_FIELD} {declared_off_step} where the "
+                        f"recomputed off-step transient peak is {recomputed_off_step}")
 
     resident = verdict.recomputed_terms["candidate_resident"]
     if resident is None:
@@ -731,7 +746,7 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
 def admit_native_rows(table, relation):
     """Reuse exact same-panel producer gates before accepting v2 table rows."""
     from .native_moe_panel import consume_moe_receipt
-    from .native_operator_panel import consume_native_receipt
+    from .native_operator_panel import consume_native_receipt, operator_route_identity
     reader = ArtifactReader(Path(table.source_path).parent)
     bindings = table.native_receipt_bindings
     if not isinstance(bindings, (list, tuple)):
@@ -772,7 +787,7 @@ def admit_native_rows(table, relation):
             expected_binding = {"member_formats": {panel["unit"]: panel["format"]},
                 "member_operator_identity_sha256": {panel["unit"]: panel["joint_operator_identity_sha256"]},
                 "member_shapes": {panel["unit"]: panel["shape"]},
-                "operator_route": panel["phases"]["prefill"]["expected_route"]["symbol"]}
+                "operator_route": operator_route_identity(panel["phases"]["prefill"]["expected_route"])}
         else:
             raise RuntimePriceError("unsupported native producer panel")
         for record in wire_records:
@@ -807,11 +822,28 @@ def admit_native_rows(table, relation):
 
 
 def admit_runtime_provenance(table):
-    """The v2 loader calls this after its ordinary raw-receipt hash checks."""
+    """The v2 loader calls this after its ordinary raw-receipt hash checks.
+
+    Two gates, two answers, and only one of them is fatal to the table. The
+    relation and the native rows attest the per-row prices the DP consumes: if
+    those do not hold, the table prices nothing and the load fails. The
+    fixed-resource gate attests a different object -- the whole-engine charge
+    added once outside the DP -- so its refusal is returned rather than raised,
+    and the consumer that reads `fixed_resources` spends it. Folding the two
+    into one raise discarded a native attestation that had passed.
+
+    Returns the fixed-resource refusal text, or ``None`` when that gate passed.
+    """
     try:
         relation = load_runtime_relation(table.runtime_provenance, context=table.context,
                                          root=Path(table.source_path).parent)
         admit_native_rows(table, relation)
-        admit_fixed_resources(table, relation)
     except (KeyError, TypeError, IndexError) as exc:
         raise RuntimePriceError(f"runtime producer evidence is missing or malformed: {exc}") from exc
+    try:
+        admit_fixed_resources(table, relation)
+    except (KeyError, TypeError, IndexError) as exc:
+        return f"runtime producer evidence is missing or malformed: {exc}"
+    except RuntimePriceError as exc:
+        return str(exc)
+    return None
