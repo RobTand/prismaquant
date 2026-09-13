@@ -552,8 +552,9 @@ comparable to §3 in everything except the units and the route class.
    disjoint intervals, about 1.04x. At decode fp4 is the slowest of the three
    (§8.4). Rob's expectation is not supported by this measurement.
 3. A 7-unit fp4 arm **cannot be built** on this evidence: 3 of the 7 layer-0
-   units are `timing_admissible`, 2 refuse the activation-side numeric gate, and
-   2 were never reached (§8.3).
+   units are `timing_admissible`, 2 refuse the activation-side numeric gate, 1
+   (`q_proj`) holds no receipt but the diagnostic probe shows it would refuse for
+   the same reason `v_proj` did, and 1 (`k_proj`) was never run (§8.3).
 4. Even the 3 admissible fp4 rows **cannot enter a v2 table or the curve**, for
    two structural reasons that have nothing to do with the numbers: a v2 table
    refuses to hold fp4 rows beside fp8/bf16 rows at all, and the fp4 rows have no
@@ -620,7 +621,7 @@ its bytes are named in every fp4 receipt's runtime record:
 sha256 7bfe7714dba8f16b03724772d2cad0449684f62082accb7c5c36a484156cc9d2
 ```
 
-### 8.3 The activation-side numeric gate — 3 admissible, 2 refused, 2 never reached
+### 8.3 The activation-side numeric gate — 3 admissible, 2 refused, 1 refused by the probe, 1 not run
 
 Both numeric gates run at one declared tolerance, `atol = rtol = 0.015625`
 (2^-6). Nothing below was relaxed, skipped or widened.
@@ -632,11 +633,15 @@ Both numeric gates run at one declared tolerance, `atol = rtol = 0.015625`
 | `mlp.up_proj` | `timing_admissible` | passed, 0.015625 | passed, **0.0** |
 | `self_attn.o_proj` | `numerical_refused` | passed, 0.0166015625 | **failed, 0.095703125** |
 | `self_attn.v_proj` | `numerical_refused` | passed, 0.013671875 | **failed, 0.1435546875** |
-| `self_attn.k_proj` | never reached | — | — |
-| `self_attn.q_proj` | never reached | — | — |
+| `self_attn.k_proj` | no receipt — not run | — | — |
+| `self_attn.q_proj` | no receipt — probe says it would refuse | — | (probe: 0.1435546875) |
 
-The driver exits on the first refusal, so `k_proj` and `q_proj` hold no receipt.
-They are absent, not passing.
+The driver exits on the first refusal, so `k_proj` and `q_proj` hold **no
+receipt**. They are absent, not passing. The two are not in the same position,
+though: the d4 diagnostic probe (below) *did* run `q_proj`, and it records the
+identical disagreement `v_proj` records — same input tensor, same `G`, same
+17 978 / 0.1435546875. `q_proj` would have refused the gate for the same reason.
+`k_proj` was never executed by anything and no claim is made about it.
 
 `measure_prepared_operator` takes **no** timing samples unless both gates pass,
 so a refused cell has no price at all, and `native_operator_panel.py:190`
@@ -676,6 +681,13 @@ process, one GPU, Tessera's `represented_native_input` against PrismaQuant's
   17 978 / 0.1435546875. `o_proj` takes a different input and records
   0.095703125. `gate_proj`, `up_proj` and `down_proj` are **bit-identical, 0
   differing elements, max 0.0**, at both phases. The fp8 control is 0.0.
+
+One field in `d4/report.json` must not be read as evidence:
+`e2m1_level.elements_differing` compares the two sides in their **own** storage
+orderings, which are not aligned, so it reports large counts (937 722 on
+`down_proj`) on cells whose actual `native_vs_reference` difference is exactly
+0. The aligned quantities are `native_vs_pq`, `native_vs_reference`,
+`block_scale` and `worst_element`; those are what is cited above.
 
 PrismaQuant's own oracle says where to look: the docstring at
 `prismaquant/nvfp4_activation_contract.py:1123-1125` records that installed
@@ -718,17 +730,22 @@ that fp4 would beat fp8 at prefill. It does not, here.
 bf16, all intervals disjoint. The §3.4 anti-monotone pattern still holds between
 `_scaled_mm` and `torch.mm`; fp4 does not sit on either end of it.
 
-**Finding 5 — the fp4 arm's prefill is its own decode.** Per unit, fp4 costs
-0.044368 ms at 512 tokens and 0.044160 ms at 1 token: a 0.5 % difference across
-a 512x change in M. fp8 moves 0.041392 → 0.037648 and bf16 moves 0.119088 →
-0.029904 over the same change. At 8 W of a 140 W envelope, the fp4 cell is
-bound by something that does not scale with M. `nvfp4_route.py`'s resident path
-pre-decodes the weight once but still calls `native_ops.native_fp4_quant` on the
-**activation on every apply**, which is an M-proportional amount of work that the
-fp8 path (whose per-token scale is derived inline) and the bf16 path (no
-activation quantization at all) do not pay in the same form. This record
-measures the timing and names the code path; it does not profile the kernel and
-does not claim the mechanism.
+**Finding 5 — the fp4 arm's prefill is its own decode.** Taking each arm's
+3-unit sum, prefill ÷ decode is **1.01x for fp4** (0.133104 / 0.131584), 1.13x
+for fp8 (0.127616 / 0.112608) and 3.31x for bf16 (0.293440 / 0.088704), across a
+512x change in M. Per cell the fp4 pattern is uniform, not an artifact of one
+unit: `up_proj` 0.044368 → 0.044384, `gate_proj` 0.043856 → 0.043072,
+`down_proj` 0.044880 → 0.044128. At 8 W of a 140 W envelope, the fp4 cell is
+bound by something that does not scale with M. Both `_scaled_mm` routes
+pre-decode the weight once and then quantize the **activation on every apply**:
+`nvfp4_route.py:226` calls `native_ops.native_fp4_quant(x2, gs)` and
+`fp8_route.py:444` calls `native_ops.native_fp8_quant(x2)`. So "fp4 quantizes
+the activation and fp8 does not" would be wrong — they both do. What differs is
+the shape of that work: fp8 produces one fp32 scale per token, fp4 produces
+group-16 UE4M3 block scales into a swizzled plane. bf16 (`torch.mm`) quantizes
+nothing and is the only arm whose prefill/decode ratio tracks M at all. This
+record measures the timing and names the code paths; it does not profile the
+kernels and does not claim the mechanism.
 
 **Labelling these numbers.** All nine f2 cells are `timing_admissible` — the
 three fp4 rows passed **both** numeric gates, with `qdq_numerics` at exactly 0.0.
@@ -893,17 +910,20 @@ the staged PrismaQuant tree and the cells plan.
 
 The `f2fp4` and `f2ctl` tables were emitted through symlink subsets at
 `$NR/views/`; the receipts themselves are the canonical
-`$NR/native-f2/cells/<unit>__<format>/` directories.
+`$NR/native-f2/cells/<unit>__<format>/` directories. No emitted table, curve or
+digest records a path under `$NR/views/` — the views are a re-derivable
+convenience for re-running the emitter, not evidence.
 
 | Object | sha256 |
 |---|---|
-| fp4 arm summary `$NR/stage/evidence/fp4-arm-summary.json` | `64f11c77c14be2c1f291ee8dc112edd42f5db05a0da200823017375a44f7646a` |
+| fp4 arm summary `$NR/stage/evidence/fp4-arm-summary.json` | `0f149eb81b9d4b31989b784924a088f4ea356f5766e7bafca000e8309a124d08` |
 | relation `relation-f2.json` (9 cells, incomplete) | `1df655837523a0f8865871122e7a81a74e83084c012a6223a5307ec0f08864fa` |
 | curve `prefill-accuracy-qwen3-0.6b-f2ctl.json` | `01425b9b3c395c2747ae684822fd9f2ec278f131e2e108579c1db59035eeeb54` |
 | calibration safetensors (copied from `$R/inputs/`) | `20b2cc8f717bdc4b9efdd49fb2567cbb64f019c2e2c9abdb4b47c7eb3e2928f7` |
 | cells plan `cells-fp4.json` (56 cells) | `f5c61432a23a4adb2c37b3d03f35df53b75bf0f0174e5e5b4dbfc354fbdb405f` |
 | nvfp4 JIT extension `tessera_nvfp4_84439e84….so` | `7bfe7714dba8f16b03724772d2cad0449684f62082accb7c5c36a484156cc9d2` |
 | driver manifest `$NR/stage/control/SHA256SUMS.txt` | `ec5838e2e566a2f331262824c7f5bcf97dd560a9e5995883cbba1d4d4752f31e` |
+| evidence manifest `$NR/stage/evidence/SHA256SUMS.txt` (39 entries, all verify) | `00ea5993e797ad91054c50374a43361ccc98fd0dd8547e39ae00fc6f485ac8c9` |
 
 **Method note.** A `fable-high` consultation was attempted on the framing of the
 activation-side disagreement in §8.3 and returned HTTP 429, "You've reached your
