@@ -219,6 +219,19 @@ PARALLEL_ROW = "row"
 PARALLEL_NONE = "none"
 _PARALLEL_KINDS = frozenset({PARALLEL_COLUMN, PARALLEL_ROW, PARALLEL_NONE})
 
+#: The cut direction, in Tessera's axis vocabulary.  A column-parallel Linear
+#: splits vLLM's output features, and those are this unit's ROWS, so
+#: ``PARALLEL_COLUMN`` asks about ``"row"``.  The mapping is written once and
+#: read by both TP legs (``tessera.layout.can_shard`` and the contract's
+#: ``loader_axes``): inverting it answers plausibly in both directions and
+#: gates exactly the wrong half of a model.
+_CUT_AXIS = {PARALLEL_COLUMN: "row", PARALLEL_ROW: "column"}
+
+
+def tp_cut_axis(parallel_kind: str) -> "str | None":
+    """Which axis a cut of this kind shards, or ``None`` when it shards none."""
+    return _CUT_AXIS.get(str(parallel_kind))
+
 #: Nothing here enumerates grids or arities. The base set is
 #: ``tessera_formats._HARDWARE_BASES`` -- the grids that materialise into a
 #: stock format at load, which is the same table
@@ -377,6 +390,80 @@ def fused_module_licence():
     """
     contract = tessera_runtime_contract()
     return None if contract is None else contract.fused_module
+
+
+def tessera_loader_axes() -> "Mapping[str, Mapping[str, str]] | None":
+    """What the pinned contract says this build's loader does with each axis.
+
+    ``family -> axis -> status`` from ``tensor_parallel.units[].loader_axes``,
+    or ``None`` when no contract is pinned.  Routed through
+    :func:`tessera_runtime_contract` -- this module's declared one read -- so
+    the axis fact and the route admission cannot come from two different
+    Tessera builds inside one run.
+
+    ``None`` is the absence of a table, not a permissive default, and the leg
+    that reads it subtracts on a published status rather than inventing a
+    refusal from silence: see :func:`tessera_tp_axis_legal`.
+    """
+    contract = tessera_runtime_contract()
+    return None if contract is None else contract.loader_axes
+
+
+def tessera_tp_axis_legal(
+    family: "str | TesseraFamily",
+    *,
+    tp_degree: int = 1,
+    parallel_kind: str = PARALLEL_NONE,
+    unit: "str | None" = None,
+    loader_axes: "Mapping[str, Mapping[str, str]] | None" = None,
+) -> tuple[bool, str]:
+    """Will the pinned runtime's LOADER cut this family on this axis?
+
+    The third leg of TP legality, and the cheapest: it needs no shape and no
+    ``tessera.layout`` call, because it reads a status the contract publishes
+    per unit and per axis (``tensor_parallel.units[].loader_axes``, which
+    Tessera validates equal to the ``ROUTE_TP_AXES`` its routes gate on).
+
+    It is a different question from both of the others.
+    :func:`tessera_tp_world_attested` asks whether a served receipt covers
+    this world size -- the ATTESTATION -- and ``tessera.layout.can_shard``
+    asks whether the rung's own period divides the shard.  This one asks
+    whether the loader accepts the cut at all, and a ``refused`` axis is
+    refused on EVERY rank, so no world size and no shape makes it legal.
+    That is why it does not wait for ``require_attested_world``: the research
+    menu prices unattested rungs on purpose, and a cut the loader will not
+    load is not an unattested rung, it is an unloadable one.
+
+    Two absences are pass-throughs, both deliberate. With no pinned contract
+    there is no loader fact to read, and refusing here would turn the TP gate
+    into a second route gate that empties the research menu. With a contract
+    that does not list the family, the closed world lives on
+    ``max_world_size`` and the attestation leg reads it; this leg reports a
+    published status and nothing else. It adds a refusal; it never invents
+    one.
+
+    ``unit`` names the Linear the caller is asking about, so the refusal can
+    say which one; it falls back to the contract's unit key.
+    """
+    spec = get_tessera_family(family)
+    tp = int(tp_degree)
+    axis = tp_cut_axis(parallel_kind)
+    if tp <= 1 or axis is None:
+        return True, ""
+    table = tessera_loader_axes() if loader_axes is None else loader_axes
+    if not table:
+        return True, ""
+    published = table.get(spec.name)
+    if not published:
+        return True, ""
+    from .tessera_runtime_contract import TP_LOADER_AXIS_REFUSED
+
+    status = published.get(axis)
+    if status != TP_LOADER_AXIS_REFUSED:
+        return True, ""
+    return False, (
+        f"tp_axis_refused:{spec.name}:{unit or spec.name}:{axis}"
+    )
 
 
 def tessera_tp_world_attested(
@@ -1097,10 +1184,11 @@ def tessera_tp_legal(
     tp_degree: int = 1,
     parallel_kind: str = PARALLEL_NONE,
     require_attested_world: bool = False,
+    unit: "str | None" = None,
 ) -> tuple[bool, str]:
     """Is this rung legal on every rank at ``tp_degree``?  ``(legal, reason)``.
 
-    Three questions when the menu is the attested one, two when it is not.
+    Four questions when the menu is the attested one, three when it is not.
     ``require_attested_world`` adds the first: does the pinned runtime contract
     say it serves this family at this world size at all
     (:func:`tessera_tp_world_attested`)?  That is a *different* question from
@@ -1110,8 +1198,17 @@ def tessera_tp_legal(
     unattested rungs deliberately and stamps every one of them, so a second
     attestation refusal there would only hide the pricing.
 
-    Then two questions, both asked of Tessera:
+    Then three questions, all asked of Tessera:
 
+    * **Will the loader cut this family on this axis at all?**
+      :func:`tessera_tp_axis_legal`, reading the contract's published
+      ``loader_axes`` status.  It is asked before the geometry leg because
+      it is the cheapest and the most informative: a refused axis is refused
+      on every rank, so no shape and no world size makes it legal, and the
+      reason says so rather than naming a granularity that is not the
+      obstacle.  This leg
+      does NOT depend on ``require_attested_world`` -- "has this been
+      measured" and "will this even load" are separate questions.
     * **Can the whole unit be cut this way at all?**
       ``tessera.layout.can_shard(unit, tp, axis)`` -- and the axis mapping is
       Tessera's, not a local convention: a *column-parallel* Linear (q/k/v,
@@ -1137,6 +1234,10 @@ def tessera_tp_legal(
         attested, why = tessera_tp_world_attested(spec, tp)
         if not attested:
             return False, why
+    loads, why = tessera_tp_axis_legal(
+        spec, tp_degree=tp, parallel_kind=parallel_kind, unit=unit)
+    if not loads:
+        return False, why
     try:
         sharded = shard_shape(shape, tp, parallel_kind)
     except TesseraMenuError as exc:
@@ -1144,7 +1245,7 @@ def tessera_tp_legal(
     if tp > 1 and parallel_kind != PARALLEL_NONE:
         from tessera.layout import can_shard as _tessera_can_shard
 
-        axis = "row" if parallel_kind == PARALLEL_COLUMN else "column"
+        axis = tp_cut_axis(parallel_kind)
         try:
             geometry = _shard_geometry(
                 spec.name, int(body_rate_q256), int(shape[-2]), int(shape[-1]),
