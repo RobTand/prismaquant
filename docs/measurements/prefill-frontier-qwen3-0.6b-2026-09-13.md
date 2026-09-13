@@ -211,6 +211,16 @@ recorded non-bit-exactness with its cause named. Neither was relaxed.
 `92b28f9e1127dcb777ef1d46aa89f7c08ad0f01cf7f2f61085711f550a6da21d`
 · schema `prismaquant.prefill_accuracy_curve.v1` · 7 points, 0 refused artifacts.
 
+**Who produced this, stated before the numbers.** Not `prismaquant.prefill_frontier`.
+The shipping consumer was run against this table, unmodified, and **refused**
+(§4) — it never reached a DP, so it proposed no allocation and emitted no
+frontier. The curve below is `experiments/pq_prefill_accuracy_curve.py` reading
+the 49 rows that `admit_native_rows` **did** admit, and summing them the way the
+table's own `composition` field says to (`sequential_operator_sum`, a sum of
+per-row medians). It is a measured prefill-price-versus-accuracy curve over real
+receipts; it is **not** the allocator's output, and no SLO-constrained frontier
+exists on this evidence. Read §4 before quoting §3.
+
 ### 3.1 Accuracy metric identity
 
 ```
