@@ -21,6 +21,7 @@ UNITS = tuple(f"model.layers.{i}.self_attn.o_proj" for i in range(3))
 
 POINT_KEYS = {"slo_ms", "target_bits", "feasible", "refusal_reason", "predicted_dloss",
               "achieved_bits", "payload_bytes", "attained_prefill_ms", "attained_decode_ms",
+              "attained_prefill_ms_bootstrap", "attained_decode_ms_bootstrap",
               "device_memory_bytes", "assignment_sha256", "assignment_path", "solver",
               "nondominated"}
 DOCUMENT_KEYS = {"schema", "status", "composition", "certifies_p95", "certifies_end_to_end_slo",
