@@ -13694,8 +13694,8 @@ flowchart LR
 
   subgraph HW["hardware"]
     H1["NVIDIA GB10 DGX Spark<br/>Blackwell sm_121, 128 GB unified memory<br/>~121 GB usable serving budget"]
-    H2["AMD Strix Halo<br/>RDNA3.5 gfx1151<br/>Tessera-16 WnA16 lane only (contract v23: E2M1/E4M3 executes null)<br/>emulation_only -- no cell, nobody here owns the hardware"]
-    H3["AMD RDNA4<br/>gfx1201<br/>same menu rule; the certification box<br/>emulation_only -- a receipt here proves the code path, never gfx1151"]
+    H2["AMD Strix Halo<br/>RDNA3.5 gfx1151<br/>no cell on any lane -- nobody here owns the hardware"]
+    H3["AMD RDNA4<br/>gfx1201<br/>the certification box -- a receipt here<br/>proves the code path, never gfx1151"]
   end
 
   A1 -->|"serving profile vllm_packed_moe"| R1
@@ -13710,8 +13710,8 @@ flowchart LR
 
   R3 -.->|"no qualified deployment"| H2
   R4 -.->|"no qualified deployment"| H2
-  R5 -.->|"backed by the contract, attested by nothing: no cell"| H2
-  R5 -.->|"backed by the contract, attested by nothing: no cell"| H3
+  R5 -.->|"contract v23 backs Tessera-16 WnA16 only here (E2M1/E4M3 executes null); emulation_only, no cell"| H2
+  R5 -.->|"same menu rule; emulation_only, no cell"| H3
 
   classDef proven stroke:#2d7a2d,stroke-width:2px
   classDef pending stroke:#c07800,stroke-width:2px,stroke-dasharray:4
