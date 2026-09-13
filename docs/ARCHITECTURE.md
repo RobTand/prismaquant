@@ -1,7 +1,57 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `claude/520-step-coverage-alignment`. Stamps
+As of: 2026-09-12 · `claude/519-launcher-safe-path`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `claude/519-launcher-safe-path`) for **the campaign
+container launcher importing the pinned tree it was given** (§4.10; #519).
+`tools/tessera_campaign_container.py` launched `python3 -u -m
+prismaquant.tessera_campaign` with the working directory set to the PB sealed
+checkout, which carries its own `prismaquant` package. `python -m` places the
+working directory at `sys.path[0]`, ahead of every `PYTHONPATH` entry, so the
+pinned mount named first in `PYTHONPATH` never won: 111 completed
+`extension-r1024-02` rows stamped the sealed checkout's package digest, and the
+16/32-reader prefetch path that exists only in the pinned tree never ran. The
+launcher now sets `PYTHONSAFEPATH=1` in the container environment, which drops
+that implicit entry, and refuses a spec that supplies the variable itself. The
+environment variable is used rather than `-P` because the launcher execs a
+caller-supplied command that need not be a CPython interpreter, and because the
+producer image's Python version is not established anywhere in this repository;
+both spellings require Python 3.11 or newer, and on an older interpreter the
+variable is ignored while `-P` would fail. So the guard alone is not the gate.
+Before exec, the launcher replays the interpreter's module search over the
+launched environment and working directory, mapping container paths back
+through `/workspace` and the declared mounts, and refuses when the package that
+would be imported is not the pinned mount's, byte for byte, under
+`tools/container_runtime_identity.prismaquant_source_sha256` — the same digest
+the row stamps as `prismaquant_source_sha256`. The refusal is narrow: it fires
+when a declared mount holds a PrismaQuant package and the import resolves
+elsewhere, which is #519 itself, and a `.` or `/workspace` entry written ahead
+of that mount is refused rather than launched, because safe-path mode removes
+the implicit working-directory entry and not a written one. When no declared
+mount holds a PrismaQuant package there is nothing to shadow, so the launch
+runs the sealed checkout and the receipt records `pinned_by_default` against
+the checkout's own root rather than staying silent; every container
+`PYTHONPATH` recorded in this repository has that shape, since the 2026-09-08
+census invocations name `/workspace` and then Tessera trees. The comparison
+applies only to a launch that can import PrismaQuant at all: when the guarded
+search reaches no package, the receipt records that nothing was pinned.
+The launcher's JSON line, schema `prismaquant.tessera_campaign_container.v1`,
+gains `pinned_source_entry`, `pinned_source_root`, `pinned_source_sha256`,
+`pinned_by_default`, `import_resolution_root`,
+`import_resolution_source_sha256`,
+`working_directory_source_sha256` and `safe_path_guard_is_load_bearing`;
+existing readers take named members and are unaffected. These digests are a
+prediction made on the host from the launched environment, not an observation
+of the executed process — the row's own stamped digest remains the observation,
+and the two agreeing is what closes the loop. The container environment is part
+of the PrismaBuild action key, so this changes the key of future campaign rows;
+it must not be applied to rows of a campaign already in flight. Host-interpreter
+rows carry the same shadow shape through PB's own `cwd` and are out of scope
+here. No cost currency, wire recipe, format menu, serving pin, allocator default
+or ship-gate change, and no GPU, served or quality measurement was run. Gates:
+`tests/test_campaign_launcher_pinned_import.py`,
+`tests/test_tessera_campaign_container.py`.
 
 Re-stamped (2026-09-12, `claude/520-step-coverage-alignment`) for
 **step-scoped ownership in the recomputed partition, and a placement
