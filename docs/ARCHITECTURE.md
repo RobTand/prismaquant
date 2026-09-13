@@ -1,7 +1,70 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/545-tessera-pin-v24`. Stamps
+As of: 2026-09-13 · `claude/553-joint-gate-ordering`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `claude/553-joint-gate-ordering`) for **capture-free
+identity gates before the head phase, and a qualification record that names its
+image** (#553). Measured: a joint `prepare` claimed a GB10 at 04:59Z on
+2026-09-13, read its measured anchor input for 5h51m, and was refused at 10:50Z
+by `prewarm_projection_backend` on one axis -- `compiler` -- that needed no
+capture, no render and no GPU to read. The whole difference was the C++ version
+string of the image it ran in (`13.3.0-6ubuntu2~24.04` when the binary was
+qualified, `~24.04.1` in the campaign image); nvcc, torch, the five ATen
+reduction headers and the GB10 device block were identical.
+
+Three changes, none of them to what is compared:
+
+* **Order.** `execute` runs `prewarm_projection_backend` -- runtime identity,
+  kernel source digest, build flags, binary SHA256 and the zero-operand
+  bit-exact warm -- before `load_measured_anchor_input`, so an unqualified
+  runtime is refused in seconds rather than after the head phase. The error
+  strings are unchanged.
+* **Plan preflight.** `_load_plan` runs `require_qualified_environment()` for a
+  fused selector, so the chain's Step 3a container dry-run refuses an
+  unqualified image before the plan is sealed. The joint plan carries no
+  container spec of its own -- Step 3a already loads it inside the campaign's
+  declared container -- so the identity read is the executing image's. The
+  `device` block is the one axis a `--cpu-only` preflight cannot read
+  (`torch.cuda.get_device_properties` needs a device); it is compared when CUDA
+  is present and otherwise left to the now-first gate in `execute`. The
+  standalone `synthesize` stage is exempt and says so
+  (`_load_plan(..., projection_runtime=False)`): it constructs no lease and
+  loads no backend, and its canonical CPU BF16 shard is measured identical
+  across x86/aarch64, so holding it to the projection runtime would refuse the
+  stage that exists to run off the qualified box.
+* **The record names its image.** The qualification carries
+  `image.{reference,content_sha256}` and `runtime.image`, and `_require_runtime`
+  says "qualified in image A, executing in image B". The executing identity is
+  read from `PRISMAQUANT_CONTAINER_CONTENT_SHA256`, which
+  `tools/tessera_campaign_container.py` computes with `image_content_sha256()`
+  from `docker image inspect` and forwards into the container; the launcher
+  refuses a spec that sets it. A locally built image such as the campaign's has
+  no registry `repository@sha256:` digest, so the content digest is the
+  authority and `reference` is the human name beside it. The record still names
+  exactly one runtime: its `evidence` actions ran under one, and a second
+  identity in the same file would be a transfer claim with no receipt
+  (principle 14) that also moves `qualification_sha256`, which every sealed
+  plan's arithmetic identity carries.
+
+The bound bytes did not change. `9305c183...` was compiled in the qualifying
+image and **re-verified**, not rebuilt, in
+`prismaquant-glm-derivative:causal-exp-v1-20260908` (content
+`d0256efb...`): the bench and geometry gates replay that exact binary there and
+remain bit-exact, so the record keeps `build.binary_sha256` and replaces
+`runtime` with the campaign image's identity, read by the geometry gate itself
+and carried in its receipt. Consequence, stated plainly: the packaged record no
+longer admits the spark-vllm image it was first qualified in. A record is
+retired and replaced per runtime, never extended.
+`experiments/joint_projection_reduce_run.sh` takes the image and run root as
+inputs (defaults unchanged) and `joint_projection_reduce_bench.py` takes
+`--binary/--binary-sha256` to replay a bound binary instead of building one.
+Gates: `tests/test_joint_projection_backend.py`
+(`test_identity_gate_refuses_before_the_head_phase_writes_any_render`,
+`test_plan_preflight_refuses_an_unqualified_image_without_a_device`,
+`test_the_synthesize_stage_is_not_held_to_the_projection_runtime`,
+`test_refusal_names_the_qualified_and_the_executing_image`,
+`test_an_unlaunched_process_cannot_claim_the_qualified_image`).
 
 Re-stamped (2026-09-13, `claude/545-tessera-pin-v24`) for the Tessera pin at
 **runtime contract v24** (#545, consuming Tessera #474 and its #475). The pin
@@ -1882,6 +1945,220 @@ copies, replacement identities receive full validation, and pickle restores
 ordinary dictionaries requiring fresh admission. No persisted cost schema,
 calibration, numerical objective, format, cache or serving gate changes.
 Gate: `tests/test_joint_aura_validation_reuse.py`.
+
+Re-stamped (2026-09-07, `fix/glm-streaming-campaign`) for the **opt-in
+completed-current-source release boundary**. The bounded workspace's
+`--release-completed-source` requires shared-input collection and the original
+source-prefix route. After all original forwards and hook removal, the
+collector drops its packed source views before invoking the optional
+`on_forwards_complete` callback. The existing `StreamingContext` unload and
+`LayerCache.discard(current)` then release only the exhausted layer, without
+pressure-trimming its resident successor. Next-layer cache/future ownership,
+hidden boundaries and the strict next-prefetch gate remain intact. No new
+cache, source reader or two-pass output drain is introduced.
+
+Callback failures clear capture owners and retain integer row observations.
+The diagnostic records actual group start/completion boundaries, completed
+qnames, the foreground refusal checkpoint and allocator state, plus source
+owner metadata before/after release. The normal campaign does not enable this
+release callback; its checked live projection views are dropped after identity
+validation. This option remains default-off pending a reviewed GPU fit result;
+the retained full-prefix-05 shared collector still refused at the original
+memory guard before this lifecycle change.
+
+Re-stamped (2026-09-07, `experiment/glm-shared-input-capture`) for the
+**default-off shared packed-input collector experiment**. The private
+`_collect_activations(..., shared_packed_inputs=True)` option groups only the
+same packed module, expert and derived input kind. It reuses the existing
+store/H/count/max owners, accumulates one batch-ordered FP32 Gram and fmax per
+unique input, and keeps a private bounded FP32 device prefix. Full-row H,
+counts and maxima remain uncapped. Each group drains to compact CPU storage
+before independent sibling CPU clones; per-transfer and per-clone callbacks
+retain the workspace's existing memory refusal. Returned qnames never alias.
+The normal campaign default remains the legacy collector; no new cache,
+source prefetch path, format, serving gate, calibration draw or wire changes.
+
+`experiments/glm_layer_workspace.py --shared-packed-inputs` explicitly selects
+that candidate for a later full fit measurement. Its separate
+`--qualify-shared-inputs --qualification-expert-ids ...` mode captures a bounded
+fixture of actual derived gate/up/down inputs during the original source-prefix
+traversal and replays those identical tensors through both real collectors in
+legacy/shared/shared/legacy order. It profiles cold, row-filled and CPU-return
+windows while reusing both-host bounded Netdata and the physical guard. This
+measures isolated collector cost, excluding source forwards and derivation;
+it does not publish a full calibration capture or establish a served result.
+The first legacy arm has no retained CPU reference; later arms report that
+reference footprint and provide matched contexts for memory comparisons.
+Gates: bytewise and serialized H/X/count/max equality, independent CPU storage,
+complete original batch order, CPU failure-lifetime checks, then reviewed GPU
+A/B and a separate full 512-sample candidate fit. Bounded real-input GPU replay
+passed exact-output checks; the full 512-sample candidate still refused during
+CPU output return at the unchanged memory guard. The option remains default-off.
+
+Re-stamped (2026-09-07, `fix/glm-streaming-campaign`) for the campaign
+collector's optional `resource_check(label)` output-materialization checkpoints.
+The bounded workspace diagnostic passes its existing memory guard before and
+after each scoring-row concatenation and Hessian CPU transfer, so a latched
+refusal stops before another unit is copied. A failed materialization clears
+owned row/Hessian/maxima tensors and temporaries before rethrowing, while
+retaining integer row observations for diagnostics. CUDA callers also attempt
+to return freed allocator blocks without masking the original failure. The
+collector default adds no checks; these checkpoints establish containment,
+not successful workspace admission or a new capture-fit allowance.
+
+Re-stamped (2026-09-07, `fix/glm-streaming-campaign`) for the shared source
+reader's opt-in `PRISMAQUANT_RELEASE_SOURCE_PAGES=1`. CUDA gathers can advise
+complete consumed regular-file tensor payload pages after each existing reader
+chunk finishes its copies, closes its context, and releases its host staging
+views. A completed chunk advises its pages without waiting for sibling readers;
+a failed chunk fences copies but never advises, and the whole gather still
+drains every reader and refuses partial installation. Header,
+unread-tensor and partial edge pages are excluded; CPU-backed outputs retain
+their mappings. Source identity is checked before advice. This is kernel
+advice through the existing reader, with no additional cache or page ledger;
+the reader default, resident source-cache/prefetch ownership and hard workspace
+admission bounds are unchanged. CPU byte/range and mocked CUDA lifecycle
+regressions are in `tests/test_streaming_source_pages.py`; successful GLM
+workspace admission and performance remain unqualified.
+
+Re-stamped (2026-09-07, `codex/joint-allocation-handoff`) for the opt-in
+completed joint-table allocation handoff (#351). `tessera_joint_allocation`
+authenticates the original plan, joint table, preparation and PWC metadata by
+content hash, validates their exact measured candidate roster and source,
+render, activation, calibration and original wire identities, and carries the
+original Hessian/static-scale and expert projection/population receipts into a
+new table. All joint prices, signed components, probe/operator identities and
+statistics remain unchanged; scalar anchor losses are never copied. The handoff
+uses the existing measured-anchor intake and expert projection validator. It
+neither re-encodes weights nor re-probes them, adds no cache, and does not certify
+current wire bytes or runtime coverage: those remain existing export/serving
+gates. The CLI requires bound input hashes and new output/receipt paths.
+Gate: `tests/test_tessera_joint_allocation.py`.
+
+Re-stamped (2026-09-07, `fix/pr348-orphan-cache-root`) for missing-manifest
+export-cache refusal. Existing `layer_*.pt` files without a manifest are
+discarded through the same refusal path as mismatched fingerprints before
+any layer can be replayed. A fresh empty cache retains its initialization
+behavior. Real streaming-export regressions check emitted bytes and absence
+of orphaned payload reads for both unchanged and changed source weights.
+
+Re-stamped (2026-09-07, `triage/340-export-resume-source-identity`) for the
+standalone compressed-tensors export resume cache's **source identity** (#340).
+`--export-cache-dir` replays `layer_NNN.pt` payloads whenever the manifest
+matches. The manifest bound the render levers and named no source, so the same
+cache dir reused against a different checkpoint replayed the first checkpoint's
+quantized bytes; the `assignment_hash` beside them compared nothing either,
+because `hashlib` was in scope nowhere inside `materialize_tensors_streaming`
+and the swallowed `NameError` stamped a null on every manifest ever written.
+`_export_resume_fingerprint()` now adds three fields the payloads silently bake
+in: `source_identity` (the sha256 of every safetensors shard the run consumes
+AND of the non-shard files it reads from the checkpoint root — `config.json`,
+which decides the skeleton the payloads were quantized against, and
+`model.safetensors.index.json`, which decides where each tensor is read from,
+and every root `*.py` (all of them, not only the ones `auto_map` names), which
+a `trust_remote_code` checkpoint is built through — via the
+shared `cost_streaming.build_source_checkpoint_identity()`),
+`requested_dtype`, and `declared_buffer_dtypes`, and it computes the recipe
+hash with no swallow. `_admit_export_resume_cache()` decides admission
+before any payload is read and fails closed: a manifest missing any of those
+keys — every pre-fix cache — is refused, not treated as a weaker match, and no
+field may degrade to `None`. Identity is CONTENT, not path: a relocated
+checkpoint still resumes, a same-size same-header value edit does not. The hash
+runs only when a cache dir was requested, and a `source_identity_cache.json`
+beside the manifest keys each digest to the shard's full stat fingerprint
+(`ctime_ns` included), so unchanged shards can reuse their recorded content
+digests. Resume still performs source discovery, metadata reads, digest-cache
+JSON handling, identity construction and manifest admission; primitive stat
+timings do not measure that full path. Gate:
+`tests/test_export_resume_source_identity.py`, which drives the real streaming
+exporter and asserts on whether a `layer_*.pt` was read at all. No served
+artifact gate is claimed.
+
+Re-stamped (2026-09-07, `fix/profile-dispatch-identity`) for declared
+scheme-dispatch identity rewrites. `ModelProfile.to_vllm_internal_name()` now
+honors a matched structure-spec rule even when the spelling stays unchanged.
+The existing `mtp.` identity/stop rule therefore remains authoritative when
+the body runtime's weight-loader map drops or renames MTP keys. Native-causal
+body identity rules are preserved for the same reason; unmatched names still
+use the existing runtime fallback. No profile, mapping declaration, format or
+serving lane is added. CPU regressions cover both drop and rename destinations,
+unchanged body names, completed rewrite chains and unmatched fallbacks.
+
+Re-stamped (2026-09-07, `fix/joint-source-transition-integration`) for the explicit
+`empty_joint_lease_v1` transition. Its sole approved source closure is the
+interrupted first-model joint run's exact producer package. A CPU preflight
+reverses only the reviewed empty-lease fix and exact transition API glue,
+then requires the complete reconstructed package hash. An independently bound,
+create-once receipt records the actual new Git/package/verifier hashes, original
+plan/preparation/cache/manifest identities and every preserved unit's envelope
+and payload hashes. Source or input drift fails before model/calibration CUDA
+work. The opaque factory-issued transition replaces only the two top-level
+checkpoint source fields for the strict original manifest comparison; all
+non-source fields must still match, and signed rows retain their original
+measurement identity. New unit state and final output separately record the
+actual execution source and receipt. A new PB snapshot binds its predecessor
+receipt and existing post-original unit hashes, preserving each unit's actual
+producer commit while requiring identical package/verifier bytes. Later resumes
+reject missing predecessor bindings and unbound new units.
+Original manifest, prepared cache and completed unit bytes are never rewritten.
+The complete-package source function remains truthful. This opt-in repair
+changes no arithmetic, calibration, format, allocator, cache or serving gate.
+Contract and negative attempt evidence:
+`docs/design/joint_resume_source_transition_2026-09-07.md`.
+
+Re-stamped (2026-09-07, `fix/joint-resume-empty-lease`) for streamed joint
+AURA resume: a fully checkpointed reverse layer skips projection-lease
+construction while still executing every probe's input/shared-state cotangent
+traversal. Earlier pending layers retain the same Fisher probe, signed terms,
+squaring and arithmetic identity. The existing source-identity checks remain
+strict; this fix does not authorize adoption across producer source versions.
+
+Re-stamped (2026-09-07, `review/pq325-buffer-precision`) for the compressed-tensors
+streaming export's persistent-buffer read policy (#311). The exporter passes
+the skeleton's declared buffer dtypes to the shared layer reader before
+passthrough emission. Its existing per-layer resume-cache fingerprint and
+shipcard render provenance now include `persistent_buffer_read_policy`.
+Caches without this policy stamp are invalidated through the existing manifest
+comparison, so replay cannot retain FP32 labels over values narrowed by an old
+reader. Parameter dtype and format policy are unchanged. CPU source-read,
+full streaming emission, serialized buffer-byte identity, and legacy-cache
+invalidation are covered by `tests/test_export_buffer_precision.py` and
+`tests/test_export_buffer_resume.py`; no served artifact gate is claimed.
+
+Re-stamped (2026-09-07, `codex/joint-fused-promotion-20260907`) for **explicit
+qualified joint-projection backends**. The joint anchor plan retains the native
+`torch` multiplication/sum reference by default. Its optional
+`execution.projection_backend` selects `fused_fp32_v1` only with an independently
+SHA256-bound prebuilt extension. The existing joint lease uses the selected
+backend at its weight, activation, and mixed product/reductions, preserving FP32
+leaf rounding, PyTorch's native reduction tree, GEMMs, invocation/format/probe
+order, QDQ and signed accumulation. No cache or activation residency owner is
+replaced; the backend retains code modules and device-prewarm markers only.
+
+`joint_projection_backend.py` verifies the packaged qualification before
+loading: exact Torch/version/git/CUDA, reduction header hashes, compiler identity,
+source/compiler flags, GB10 device geometry, and actual loaded binary SHA256.
+Production never JIT-builds an unqualified replacement. Prewarm launches a
+transient zero-matrix check before source/projection hot execution; a lease
+refuses a selector that has not been prewarmed, a different device, or an
+unqualified matrix shape. The six original-census shapes are explicitly
+qualified; ineligible alignment/layout/dtype retains the reference expression.
+Runtime/backend identity is sealed in prepared PWC metadata, completion,
+probe arithmetic and resumable operator identities. This changes prepared,
+probe, operator and joint-run schemas to **v2**: v1 prepared and signed artifacts
+require fresh preparation and recomputation, including when choosing `torch`.
+There is no legacy-cache adoption or checkpoint identity override.
+
+The exact-tree kernel's local actual-source evidence is 208 bit-exact individual
+reductions and four seven-rung signed/forward/backward comparisons; five
+additional original source/capture/rung geometry gates each add 52 exact
+reductions using explicitly seeded qualification cotangents. These cover all
+six matrix shapes in the first model's 2142-unit census. They do not establish
+full-model timing or served quality. The opt-in does not change a format,
+serving gate, allocator objective, calibration draw or pipeline default.
+Gates: `tests/test_joint_projection_backend.py`, `tests/test_joint_projection_reduce.py`,
+the retained-source production-lease replay and
+`docs/results/joint_projection_backend_promotion_2026-09-07.md`.
 
 Re-stamped (2026-09-07, `fix/glm-streaming-campaign`) for the **opt-in
 completed-current-source release boundary**. The bounded workspace's
