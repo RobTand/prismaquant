@@ -2,6 +2,7 @@
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -222,3 +223,95 @@ def test_repeated_row_admission_uses_prewarmed_metadata_without_file_io(monkeypa
     monkeypatch.setattr(Path, 'read_bytes', lambda _: pytest.fail('row admission reopened package metadata'))
     backend.validate_projection_backend_identity(identity)
     backend.validate_projection_backend_identity(deepcopy(identity))
+
+
+def _campaign_runtime(monkeypatch, **changed):
+    qualification, _ = backend._qualification()
+    actual = deepcopy(qualification['runtime'])
+    actual.update(changed)
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+    monkeypatch.setattr(torch.cuda, 'current_device', lambda: 0)
+    monkeypatch.setattr(backend, '_runtime_identity', lambda _: actual)
+    monkeypatch.setattr(backend.importlib.util, 'module_from_spec',
+                        lambda _: pytest.fail('unqualified runtime loaded code'))
+    return qualification, actual
+
+
+def test_identity_gate_refuses_before_the_head_phase_writes_any_render(tmp_path, monkeypatch):
+    """#553: the campaign paid 5h51m of head phase for a refusal it could make first."""
+    from prismaquant import tessera_joint_aura as bridge, gpu_guard
+    qualification, _ = _campaign_runtime(monkeypatch, compiler={
+        'nvcc_version': qualification_nvcc(),
+        # The measured difference between the qualifying and campaign images.
+        'cxx_version': 'c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\n'})
+    monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)
+    monkeypatch.setattr(bridge, 'load_measured_anchor_input',
+                        lambda *_args, **_kwargs: pytest.fail('the head phase ran before the identity gate'))
+    config = _plan(tmp_path)
+    config['execution']['projection_backend'] = selector()
+    with pytest.raises(RuntimeError, match='unqualified runtime identity: compiler'):
+        bridge.execute('prepare', config, plan_sha256='d' * 64)
+    written = sorted(path.relative_to(tmp_path).as_posix()
+                     for path in tmp_path.rglob('*') if path.is_file())
+    assert written == ['prepare/profile.pstats', 'prepare/profile.txt', 'prepare/results.json'], written
+    assert json.loads((tmp_path / 'prepare/results.json').read_text())['passed'] is False
+
+
+def qualification_nvcc():
+    return backend._qualification()[0]['runtime']['compiler']['nvcc_version']
+
+
+def test_plan_preflight_refuses_an_unqualified_image_without_a_device(tmp_path, monkeypatch):
+    """Step 3a loads the plan in the campaign's own container, before the GB10."""
+    from prismaquant.tessera_joint_aura import _load_plan, _sha
+    qualification, _ = backend._qualification()
+    environment = {key: value for key, value in qualification['runtime'].items() if key != 'device'}
+    config = _plan(tmp_path)
+    config['execution']['projection_backend'] = selector()
+    path = tmp_path / 'plan.json'
+    path.write_text(json.dumps(config))
+    # A CPU-only preflight container reads no device properties, so the device
+    # block is the one axis it cannot compare; every other axis it can.
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    monkeypatch.setattr(backend, '_environment_identity', lambda: deepcopy(environment))
+    assert _load_plan(path, _sha(path)) == config
+    unqualified = dict(environment, compiler={'nvcc_version': qualification_nvcc(),
+                                              'cxx_version': 'c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\n'})
+    monkeypatch.setattr(backend, '_environment_identity', lambda: deepcopy(unqualified))
+    with pytest.raises(RuntimeError, match='unqualified runtime identity: compiler'):
+        _load_plan(path, _sha(path))
+
+
+def test_the_synthesize_stage_is_not_held_to_the_projection_runtime(tmp_path, monkeypatch):
+    """#552's decode runs off the qualified box on purpose; it loads no backend."""
+    from prismaquant.tessera_joint_aura import _load_plan, _sha
+    config = _plan(tmp_path)
+    config['execution']['projection_backend'] = selector()
+    path = tmp_path / 'plan.json'
+    path.write_text(json.dumps(config))
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    monkeypatch.setattr(backend, '_environment_identity',
+                        lambda: pytest.fail('synthesize read the projection runtime identity'))
+    assert _load_plan(path, _sha(path), projection_runtime=False) == config
+
+
+def test_refusal_names_the_qualified_and_the_executing_image(monkeypatch):
+    qualification, _ = backend._qualification()
+    record = qualification['image']
+    assert qualification['runtime']['image'] == record['content_sha256']
+    monkeypatch.setenv(backend.CONTAINER_CONTENT_ENV, 'f' * 64)
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    monkeypatch.setattr(backend, '_environment_identity',
+                        lambda: dict({key: value for key, value in qualification['runtime'].items()
+                                      if key != 'device'}, image=backend.executing_image()))
+    with pytest.raises(RuntimeError, match='unqualified runtime identity: image; qualified in image '
+                       + re.escape(record['reference']) + r'.*executing in image content sha256 f{64}'):
+        backend.require_qualified_environment()
+
+
+def test_an_unlaunched_process_cannot_claim_the_qualified_image(monkeypatch):
+    monkeypatch.delenv(backend.CONTAINER_CONTENT_ENV, raising=False)
+    assert backend.executing_image() is None
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    with pytest.raises(RuntimeError, match='executing in image unidentified'):
+        backend.require_qualified_environment()

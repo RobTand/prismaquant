@@ -17,6 +17,7 @@ from safetensors import safe_open
 from experiments.qdq_constant_residency import ROOT, sha, tensor_sha
 from experiments.joint_projection_reduce_bench import Candidate
 from prismaquant import format_registry as fr
+from prismaquant import joint_projection_backend as projection
 from prismaquant.joint_aura import SignedJointProjectionLease, activation_identity, prefetch_joint_cache
 from prismaquant.kernels import joint_projection_reduce as kernel
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
@@ -91,7 +92,12 @@ def main():
                'cotangents': {'kind': 'seeded BF16 qualification operands; not source Fisher', 'seed': 7000,
                               'sha256': [tensor_sha(g) for g in gradients]},
                'candidate': candidate.identity,
-               'env': {'host': socket.gethostname(), 'started_epoch': time.time()}}
+               # The gate's own reading of the runtime it ran under, so the
+               # packaged qualification record's runtime block is copied from
+               # an attested receipt instead of typed in out of band.
+               'runtime': projection._runtime_identity(torch.device('cuda', torch.cuda.current_device())),
+               'env': {'host': socket.gethostname(), 'started_epoch': time.time(),
+                       'container_content_sha256': projection.executing_image()}}
     (args.output / 'before.py').write_text(candidate.before_source)
     (args.output / 'after.py').write_text(candidate.after_source)
     lease = SignedJointProjectionLease({name: layer}, specs, deltas, activation_max_abs=cache.activation_max_abs)

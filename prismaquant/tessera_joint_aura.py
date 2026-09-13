@@ -848,7 +848,7 @@ def _admit_candidate_phase(command, config, data, layer_bytes):
     return policy
 
 
-def _load_plan(path, digest):
+def _load_plan(path, digest, *, projection_runtime=True):
     path = _bound({"path": str(path), "sha256": digest}, "joint anchor plan")
     config = json.loads(path.read_text())
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
@@ -861,8 +861,18 @@ def _load_plan(path, digest):
     if normalize_verified_activation_load(config.get('capture_load_policy')) is not None:
         _require(config.get('qualification_window') is not None,
                  'verified capture loading requires explicit qualification windows')
-    from .joint_projection_backend import normalize_projection_backend
-    normalize_projection_backend(execution.get("projection_backend"))
+    from .joint_projection_backend import normalize_projection_backend, require_qualified_environment
+    selector = normalize_projection_backend(execution.get("projection_backend"))
+    if projection_runtime and selector["name"] != "torch":
+        # Step 3a loads this plan inside the campaign's own container spec, so
+        # the identity read here is the executing image's. Every capture-free
+        # axis is compared -- torch, cuda, machine, ATen headers, compiler and
+        # the image the launcher stamped. The ``device`` block needs
+        # ``torch.cuda.get_device_properties``, which a ``--cpu-only``
+        # preflight container does not have, so it is compared only when CUDA
+        # is present here and is otherwise refused by the first gate in
+        # ``execute`` -- seconds into the pass, before any render is written.
+        require_qualified_environment()
     from .cost_streaming import normalize_boundary_storage
     normalize_boundary_storage(execution.get("boundary_storage"))
     _operator_window_policy(config)
@@ -949,7 +959,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
     from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
     from .joint_aura import source_execution_identity, validate_joint_aura_entry
-    from .joint_projection_backend import prewarm_projection_backend
+    from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache
     from .gpu_guard import require_cuda_hot_path
@@ -968,6 +978,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                   "started_epoch": time.time(), "torch": str(torch.__version__),
                   "cuda": torch.version.cuda, "affinity": sorted(os.sched_getaffinity(0))},
               "phases": [], "passed": False}
+    result["env"]["container_content_sha256"] = executing_image()
     profile_tool = config.get("profile_tool", "cprofile")
     profiler = cProfile.Profile() if profile_tool == "cprofile" else None
     result["profile_tool"] = profile_tool
@@ -991,9 +1002,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         file_hash_workers = config.get("file_hash_workers", 1)
         _require(type(file_hash_workers) is int and 0 < file_hash_workers <= len(os.sched_getaffinity(0)),
                  "file_hash_workers exceeds PB-assigned CPU affinity")
-        # The reader is bound first: synthesizing an adopted rung's missing
-        # render decodes its wire, and that decode must come from the same
-        # bound consumer the qualification leg uses, not a second one.
+        # Every capture-free identity gate runs first: an unqualified runtime,
+        # kernel source digest, build flag or binary sha256 is refused in
+        # seconds rather than after hours of measured anchor input (#553).
+        projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
+        result["projection_backend"] = projection_backend.identity
+        # The reader is bound first of the input owners: synthesizing an
+        # adopted rung's missing render decodes its wire, and that decode must
+        # come from the same bound consumer the qualification leg uses, not a
+        # second one.
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         # The command holds a CUDA reservation (``require_cuda_hot_path``
@@ -1024,8 +1041,6 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
             _same(calibration["provenance"].get(name), original_draw.get(name), f"original full draw {name}")
         result["calibration_input"] = calibration
-        projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
-        result["projection_backend"] = projection_backend.identity
         source_prefetch = _source_prefetch(config)
         runner = build_streamed_causal_lm(config["model"], device=torch.device("cuda"),
             dtype=torch.bfloat16, offload_folder=str(root / "offload"),
@@ -1284,7 +1299,13 @@ def main(argv=None):
         parser.error("--source-transition and --source-transition-sha256 are required together")
     if bool(args.prepared) != bool(args.prepared_sha256):
         parser.error("--prepared and --prepared-sha256 are required together")
-    config = _load_plan(args.plan, args.plan_sha256)
+    # ``synthesize`` constructs no lease and loads no backend: it decodes wires
+    # and publishes the canonical CPU BF16 shard, whose bytes are measured
+    # identical across x86/aarch64 and CPU/CUDA. It is the one command that
+    # does not need the projection runtime, and refusing it here would refuse
+    # the stage that exists to run off the qualified box.
+    config = _load_plan(args.plan, args.plan_sha256,
+                        projection_runtime=args.command != "synthesize")
     if args.command == "synthesize":
         record = synthesize_renders(config, plan_sha256=args.plan_sha256, units=args.units,
                                     device=args.device, log_every=args.log_every,
