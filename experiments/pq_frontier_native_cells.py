@@ -354,7 +354,12 @@ def manifest(args):
         if absent:
             missing[cell.name] = absent
             continue
-        bindings.append({"unit": inputs["unit"], "format": inputs["format"], "run_id": args.run_id,
+        # One run per measured cell by default: the loaded-package identity and
+        # the post-run core audit are facts about the process that produced this
+        # receipt, and a shared run id would bind one process's evidence to
+        # receipts other processes produced.
+        bindings.append({"unit": inputs["unit"], "format": inputs["format"],
+                         "run_id": cell.name if args.run_id is None else args.run_id,
                          "panel": str(panel.resolve()), "receipt": str(receipt.resolve()),
                          "memory_trace": str(trace.resolve())})
     dump(Path(args.manifest), bindings)
@@ -389,7 +394,8 @@ def main(argv=None):
     f.set_defaults(func=freeze)
     m = sub.add_parser("manifest")
     m.add_argument("--out", required=True)
-    m.add_argument("--run-id", required=True)
+    m.add_argument("--run-id", default=None,
+                   help="one shared runtime run id; omit to name each cell's own run")
     m.add_argument("--manifest", required=True)
     m.set_defaults(func=manifest)
     args = parser.parse_args(argv)
