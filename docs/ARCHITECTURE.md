@@ -14009,8 +14009,15 @@ families the contract does not publish as `null` for that target, which today is
 **price**; a **cell** is permission to **ship**, and neither AMD platform has
 one, because a cell is a device receipt and nobody here owns a Strix Halo. So
 `tessera_render.tessera_attesting_cells` returns no cell for every family on
-both targets — including the backed one — and export fails closed without an
-explicit override (`tessera_menu.route_admission`). The lane-level
+both targets — including the backed one. Two different things then say so, and
+only one of them refuses: `tessera_menu.route_admission` *reports* the verdict
+(`unattested`, with the conjunct in `detail`) and never raises, while the
+refusal that actually stops bytes is
+`tessera_export_lane.require_assignment_scope`, which raises
+`TesseraExportLaneError` on any selected unit whose resolved route is not
+`backed`/`backed_with_serve_flag` with every regime `device_qualified` — and it
+takes no override on this lane. These two profiles declare no export lane at
+all, so the question never reaches it. The lane-level
 `ServingLaneSpec.route_status_for` reaches the same refusal by a shorter road:
 nothing hands it the pinned contract, so it answers `unattested` with source
 `serving_runtime_contract::absent` — see §9.4. A `gfx1201` receipt, when one exists, proves a code
