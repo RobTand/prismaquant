@@ -15,11 +15,14 @@ table that exists on disk without an admitted verdict is never mistaken for a
 price the allocator may read: ``build_runtime_resources`` refuses a v2 table
 the loader did not admit.
 
-Fixed resources are declared from PrismaQuant's own recomputation of the
-full-engine resource report (``full_engine_resource_report``). A term the
-report cannot express is declared ``0`` and recorded as unevidenced in the
-emission report; ``admit_fixed_resources`` then refuses it by name, which is
-the truthful state of the axis (PQ #237, #420) rather than a number.
+Fixed resources are declared by asking the admitting gate to recompute them:
+``runtime_provenance.recompute_fixed_resources`` owns the only reader of the
+full-engine resource report, so the numbers written here and the numbers
+``admit_fixed_resources`` checks them against come from one implementation and
+no second, drifting reader exists. A term the report cannot express is
+declared ``0`` and recorded as unevidenced in the emission report; the gate
+then refuses it by name, which is the truthful state of the axis (PQ #237,
+#420) rather than a number.
 """
 from __future__ import annotations
 
@@ -38,16 +41,12 @@ from .measured_runtime_prices import (
     RuntimePriceError, _object, _string, identity_sha256, load_measured_runtime_table,
     parse_runtime_context,
 )
-from .runtime_provenance import FIXED_TERM_FIELDS, SCHEMA as RELATION_SCHEMA
+from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
 
 EMISSION_SCHEMA = "prismaquant.native_receipt_table_emission.v1"
 DENSE_PANEL_SCHEMA = "tessera.native_dense_panel.v1"
 BINDING_FIELDS = ("unit", "format", "run_id", "panel", "receipt", "memory_trace")
 PHASES = ("prefill", "decode")
-#: Fields of the fixed charge this report schema carries no observation for at
-#: all. They are declared ``0`` and named as unevidenced; the gate refuses them.
-UNOBSERVED_FIXED_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes")
-
 
 def file_sha256(path: Path) -> str:
     with Path(path).open("rb") as stream:
@@ -232,27 +231,18 @@ def derive_context(panels: list[Mapping], *, relation: Mapping) -> dict:
 
 
 def derive_fixed_resources(report_path: Path, table_dir: Path) -> tuple[dict, dict, dict]:
-    """Declare the fixed charge from this consumer's own recomputation of the report."""
-    from .full_engine_resource_report import consume_full_engine_resource_report
+    """Declare the fixed charge the admitting gate recomputes from the report.
 
+    The recomputation does not happen here. This function contributes the
+    artifact reference -- the path the table spells and the sha256 of the bytes
+    behind it -- and hands it to ``runtime_provenance``, which owns the reader
+    of that partition and is the module whose numbers the admission checks.
+    """
     _, reference = _reference(report_path, table_dir, "full-engine resource report")
-    try:
-        verdict = consume_full_engine_resource_report({"path": str(report_path.resolve()), "sha256": reference["sha256"]},
-                                                      root=report_path.resolve().parent)
-    except RuntimePriceError as exc:
-        raise RuntimePriceError(f"full-engine resource report refused: {exc}") from exc
-    declared, evidence = {}, {}
-    for term, field in FIXED_TERM_FIELDS.items():
-        value = verdict.recomputed_terms.get(term)
-        if type(value) is int and value >= 0:
-            declared[field], evidence[field] = value, f"recomputed {term}"
-        else:
-            declared[field], evidence[field] = 0, f"no {term} is recomputable; declared 0 without evidence"
-    for field in UNOBSERVED_FIXED_FIELDS:
-        declared[field], evidence[field] = 0, "the report schema carries no observation for this field; declared 0 without evidence"
-    return declared, evidence, {"reference": reference, "refusals": list(verdict.refusals),
-                                "expressible_terms": list(verdict.expressible_terms),
-                                "open_domains": list(verdict.open_domains)}
+    declared, evidence, verdict = recompute_fixed_resources(
+        {"path": str(report_path.resolve()), "sha256": reference["sha256"]},
+        root=report_path.resolve().parent)
+    return declared, evidence, {"reference": reference, **verdict}
 
 
 def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation: Path,
@@ -359,7 +349,7 @@ def main(argv=None) -> int:
     parser.add_argument("--relation", type=Path, required=True,
                         help="prismaquant.runtime_provenance_relation.v1 document; its identity is the context's runtime_sha256")
     parser.add_argument("--full-engine-report", type=Path, required=True,
-                        help="tessera.full_engine_resource_report.v1 the fixed charge is recomputed from")
+                        help="the full-engine resource report the fixed charge is recomputed from")
     parser.add_argument("--receipts", type=Path, required=True,
                         help="JSON list of {unit, format, run_id, panel, receipt, memory_trace}; paths resolve against this file")
     parser.add_argument("--fixed-assignment", default="{}", help="JSON unit -> format mapping of the fixed members")

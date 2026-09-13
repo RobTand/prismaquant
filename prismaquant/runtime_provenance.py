@@ -468,6 +468,48 @@ FIXED_TERM_FIELDS = {"fixed_resident": "resident_bytes",
                      "fixed_scratch": "peak_scratch_bytes",
                      "fixed_kv": "kv_bytes"}
 
+#: Fields of the fixed charge this report schema carries no observation for at
+#: all -- not a term that failed to recompute, but an axis the capture does not
+#: observe. They are declared ``0`` and named as unevidenced, and the gate
+#: refuses them by name below.
+UNOBSERVED_FIXED_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes")
+
+
+def recompute_fixed_resources(reference, *, root):
+    """The fixed charge a table may declare, recomputed by the gate that admits it.
+
+    An emitter calls this to fill ``fixed_resources``; ``admit_fixed_resources``
+    then recomputes the same partition from the same report and refuses on any
+    disagreement. Both sides run one implementation on purpose. A producer that
+    recomputed the partition with a second reader of its own would be checked
+    against a copy of itself, and the two readers would drift apart silently --
+    which is the "``derived`` is a claim" failure one module further out. The
+    emitter supplies the artifact reference; every number below is this
+    consumer's own.
+
+    Returns ``(declared, evidence, verdict)``: the fields a table declares, one
+    evidence string per field naming the term it came from or why it has none,
+    and the consumer's refusals and domain state for the emission report.
+    """
+    from .full_engine_resource_report import consume_full_engine_resource_report
+
+    try:
+        verdict = consume_full_engine_resource_report(dict(reference), root=root)
+    except RuntimePriceError as exc:
+        raise RuntimePriceError(f"full-engine resource report refused: {exc}") from exc
+    declared, evidence = {}, {}
+    for term, field in FIXED_TERM_FIELDS.items():
+        value = verdict.recomputed_terms.get(term)
+        if type(value) is int and value >= 0:
+            declared[field], evidence[field] = value, f"recomputed {term}"
+        else:
+            declared[field], evidence[field] = 0, f"no {term} is recomputable; declared 0 without evidence"
+    for field in UNOBSERVED_FIXED_FIELDS:
+        declared[field], evidence[field] = 0, "the report schema carries no observation for this field; declared 0 without evidence"
+    return declared, evidence, {"refusals": list(verdict.refusals),
+                                "expressible_terms": list(verdict.expressible_terms),
+                                "open_domains": list(verdict.open_domains)}
+
 #: What each observation the report names but leaves null costs this
 #: admission. The absence is read from the report rather than assumed here, so
 #: a capture that does supply one drops its entry and the terms it feeds become

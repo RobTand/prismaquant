@@ -318,7 +318,7 @@ output.)
 
 ### 4.1 Cause A — the transient charge boundary is not versioned (design debt)
 
-`runtime_provenance.py:676-677` appends, **unconditionally**:
+`runtime_provenance.py:718-719` appends, **unconditionally**:
 
 > `the native-row and full-engine transient charge boundary is not versioned, so
 > no candidate activation or scratch term may be compared to a priced row`
@@ -393,8 +393,8 @@ gate says so directly, twice:
   'TESSERA_FP8') is not a row this table prices`
 
 Both of these are constraints on **`admit_fixed_resources` only**
-(`_fixed_resource_refusals`, `runtime_provenance.py:522-686`). They do **not**
-constrain `admit_native_rows` (`:689`), which is why a 49-row multi-format table
+(`_fixed_resource_refusals`, `runtime_provenance.py:564-728`). They do **not**
+constrain `admit_native_rows` (`:731`), which is why a 49-row multi-format table
 was admitted at §2.6. An earlier working note in this branch attributed them to
 `admit_native_rows`; that was wrong, and the empirical admission settles it.
 
