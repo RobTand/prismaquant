@@ -78,8 +78,8 @@ loaded". The number is right; the inference needed a caveat it did not carry.
 Netdata's `nvidia_smi.gpu_power_draw` collector on sparklina runs at
 `update_every = 10` (tier 0), so a 324-second action window holds about 32 real
 samples, almost all taken while the container was importing torch, installing
-the plugin, preparing 9 cells and writing evidence — 40 applies of about 44 us
-each is under 2 ms of GPU work inside 324 seconds of action. **8.15 W is the
+the plugin, preparing 9 cells and writing evidence — 720 applies across nine
+cells and two phases is about 30 ms of GPU work inside 324 seconds of action. **8.15 W is the
 action's mean, not the apply's.** Measured with an in-process sampler around a
 *sustained* apply loop, the same M = 512 applies on the same units and the same
 GPU draw 51.5 W (fp4) and 90.2 W (fp8). #563's structural finding stands; its
@@ -215,10 +215,9 @@ the independent wall-clock per apply inside the 5-second power loop — it agree
 with the event median throughout, which is the cross-check that the power window
 is measuring the same work. "profiler device ms" is the sum of every kernel's
 self device time in one apply. "dispatch gap" is the first minus the third: the
-part of the apply that is not a kernel. The two negative/large gaps at
-M = 131 072 are the profiler's own overhead at 90 ms applies, not a measurement
-of dispatch; the gap column is only meaningful while it is positive and small
-relative to the apply.
+part of the apply that is not a kernel. The two anomalous gaps at
+M = 131 072 (one negative, one 0.36 ms) are recorded and not explained; the gap
+column is only meaningful while it is positive and small relative to the apply.
 
 **The device is loaded.** Every point in this table is between **0.37 and 0.64**
 of the 140 W envelope. #563's arms sat at 0.058. The box-level Netdata view of
@@ -369,9 +368,10 @@ this pass and saves **424.5 us** on its GEMM against fp8. It cannot win.
 **What would remove it is a hypothesis, not a result.** Neither `scale_a` nor
 `scale_b` on the nvfp4 `_scaled_mm` call can absorb the scalar — both are
 quantized UE4M3 planes, and rounding a global into them is not the same
-arithmetic. Removing the pass therefore means either a kernel epilogue argument
-that `torch._scaled_mm` does not currently take, or fusing the multiply into
-whatever consumes `y`. **Neither was measured and neither is claimed.** What
+arithmetic. Removing the pass therefore means either an output-scale argument on
+`torch._scaled_mm` — its schema carries `scale_result`, but whether that applies
+to a bf16 output on the nvfp4 path was **not checked here** — or fusing the
+multiply into whatever consumes `y`. **Neither was measured and neither is claimed.** What
 *is* measured is the counterfactual's size: subtract the pass and the fp4 arm's
 device total at M = 8192 would be 1245.4 us against fp8's 1674.6 — but that
 subtraction is arithmetic on this table, not an experiment, and it is recorded

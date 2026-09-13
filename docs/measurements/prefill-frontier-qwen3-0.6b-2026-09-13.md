@@ -621,8 +621,8 @@ right and the sentence after it was too strong. Netdata's
 `nvidia_smi.gpu_power_draw` collector on sparklina runs at `update_every = 10`
 (tier 0), so the 324-second `28afcdc891db` window holds about 32 real samples,
 almost all taken while the container was importing torch, installing the plugin,
-preparing cells and writing evidence — 40 applies of about 44 us each is under
-2 ms of GPU work inside 324 seconds of action. **8.15 W is the action's mean,
+preparing cells and writing evidence — 720 applies across nine cells and two
+phases is about 30 ms of GPU work inside 324 seconds of action. **8.15 W is the action's mean,
 not the apply's.** Re-measured with an in-process `pynvml` sampler at 100 ms
 around a *sustained* apply loop, the same M = 512 applies on the same three units
 and the same GPU draw 51.5 W on the fp4 arm and 90.2 W on the fp8 arm — 0.368 and 0.644
