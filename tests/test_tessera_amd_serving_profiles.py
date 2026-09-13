@@ -100,11 +100,21 @@ def pinned_table(monkeypatch):
     """
     from prismaquant import lane_eligibility as lane
 
-    real = lane.load_eligibility_table
+    real_table = lane.load_eligibility_table
+    real_formats = lane.load_published_formats
     with as_file(tr.tessera_serving_contract_path()) as path:
-        table = real(_version(), contract_path=path)
+        table = real_table(_version(), contract_path=path)
+        formats = real_formats(_version(), contract_path=path)
     assert table.present, table.absent_reason
+    # Both loaders, from the same file. The rung vocabulary is the second half
+    # of the same absence: with no contract in hand `resolve_payload_rung`
+    # cannot name a family either, so it returns the raw format string, no cell
+    # matches it, and the resolver reports `no_cell` for sm_121 too -- the
+    # right answer to the wrong question. A test that patched only the table
+    # would read that as a platform fact. (`tessera_render` supplies the same
+    # pair from the same file for the live path.)
     monkeypatch.setattr(lane, "load_eligibility_table", lambda *a, **k: table)
+    monkeypatch.setattr(lane, "load_published_formats", lambda *a, **k: formats)
     sp._reset_eligibility_table_cache()
     yield table
     sp._reset_eligibility_table_cache()
