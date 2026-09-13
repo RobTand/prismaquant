@@ -264,7 +264,7 @@ def retain_production_wire(weight, rendered, blob, *, qname, fmt, activation_sou
         raise ValueError("retained wire does not decode to the production cache tensor")
     return {"blob_bytes": len(blob), "blob_sha256": record["blob_sha256"],
             "wire_record": record, "wire_path": str(path.relative_to(Path(wire_dir).parent)),
-            "wire_decoded_weight": decoded_identity}
+            "wire_decoded_weight": decoded_identity, "encoding_identity": input_identity}
 
 
 def compare_assignments(payload, candidates, assignments):
@@ -308,7 +308,14 @@ def compare_assignments(payload, candidates, assignments):
     return scores, pairs
 
 
-def _capture_and_render(model, calibration, plan, out, *, calibration_text):
+def _capture_and_render(model, calibration, plan, out, *, calibration_text=None, hessian_identity=None):
+    """Capture BF16 activations and render every planned cell through the production renderer.
+
+    ``hessian_identity`` names the calibration the Tessera Hessian is built from. When it
+    is None the identity is derived from ``calibration_text`` as the September 5 screen did;
+    a caller holding an exact ``prismaquant.calibration_input.v1`` draw passes its
+    provenance instead, so the wire records name the draw that was actually used.
+    """
     import torch
     from prismaquant import format_registry as fr
     from prismaquant.perturbed_x_cache import PerturbedActivationCache, activation_cache_filename
@@ -334,8 +341,11 @@ def _capture_and_render(model, calibration, plan, out, *, calibration_text):
         raise RuntimeError(f"activation capture coverage differs: {capture_receipt}")
     activations = {name: torch.load(out / "activations" / activation_cache_filename(name),
                                    weights_only=True)["inputs"].cuda() for name in plan}
-    levers = {"tessera_hessian_identity": calibration_identity(
-        calibration_text, [calibration], fit_tokens=calibration.numel())}
+    if hessian_identity is None:
+        if calibration_text is None:
+            raise ValueError("_capture_and_render needs calibration_text or an explicit hessian_identity")
+        hessian_identity = calibration_identity(calibration_text, [calibration], fit_tokens=calibration.numel())
+    levers = {"tessera_hessian_identity": dict(hessian_identity)}
     cache = ProductionWeightCache(weights={}, levers=levers,
                                   activation_max_abs={name: float(x.abs().max())
                                                       for name, x in activations.items()})
@@ -369,7 +379,7 @@ def _capture_and_render(model, calibration, plan, out, *, calibration_text):
                 with torch.no_grad():
                     rendered = render_production_weight(source, fmt, qname=name,
                                                         activations=activations, levers=levers)
-                if set(emitted) != {"blob_bytes", "blob_sha256", "wire_record", "wire_path", "wire_decoded_weight"}:
+                if set(emitted) != {"blob_bytes", "blob_sha256", "wire_record", "wire_path", "wire_decoded_weight", "encoding_identity"}:
                     raise RuntimeError("production renderer did not expose exactly one serialized blob")
                 cache.weights[name, fmt] = rendered
                 rows[name][fmt] = {**emitted, "rendered_weight": _cb_cache_tensor_identity(rendered),
