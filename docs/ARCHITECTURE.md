@@ -1,7 +1,49 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/549-gpu-render-synthesis`. Stamps
+As of: 2026-09-13 · `claude/545-tessera-pin-v24`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `claude/545-tessera-pin-v24`) for the Tessera pin at
+**runtime contract v24** (#545, consuming Tessera #474 and its #475). The pin
+moves to Tessera `7dbbacbd09`, contract digest `81014e9b…579554`. **The
+lane-eligibility schema does NOT move**: v24 is additive for a v10 reader,
+every field the new rows carry is one v10 already defines, and the ten
+`sm_121` cells are byte-identical. Two things move in the document, and they
+move together: `gfx1201` (RDNA4, RX 9070 XT) gains its first two cells —
+`TESSERA_BF16_K1` dense, decode and batch, at rung `q256 = 1792`, route status
+`backed_with_serve_flag`, `device_qualified`, executing `torch.mm` through the
+`torch_window` decoder — and that platform's `serve_image` stops being `null`,
+which v10 requires once one of its own cells attests an image.
+
+**This is the first pin move that admits a route off `sm_121`, and the first
+since v21 that admits a route at all.** Every pin move since v21 (Tessera
+#313, `b8b1cb38`, where the two `routed_moe` cells' `smoke.status` moved
+`repetitive` -> `recorded`) re-transcribed an answer that admitted what its
+predecessor admitted; this one does not. `cell_evidence_admits` is status-only
+and both new cells publish `smoke.status: recorded`, so accepting
+`TESSERA_DEV_PIN_ANSWER` flips `ServingLaneSpec.route_status_for` and
+`tessera_render.tessera_attesting_cells` for `TESSERA_BF16_K1_R1792` on
+`gfx1201` from `unattested`/`:no_cell` to `backed_with_serve_flag`. The
+Tessera-16 W16A16 lane is attested on one AMD device. `gfx1151` still ships no
+cell and still answers `:no_cell` for every family — backing is permission to
+price, a cell is permission to ship, and only one of the two AMD platforms
+crossed that line. Nothing ships on it: both AMD profiles are
+`emulation_only` with `export_lane: null`.
+
+**Two scope facts the receipts carry, and this pin inherits.** The grade is
+`kl_lower_bound` — a top-1024 teacher-student intersection bound, KL ≥ 0.004906
+over 4088 prefill positions for batch and ≥ 0.004804 over 256 M=1 positions for
+decode — and NOT `kl_full_vocab`, because no instrument in either repository
+produces a full-vocab KL; a producer-side gate that expected one would refuse
+an artifact for a measurement that does not exist. And the receipt's own scope
+line says gfx1201 under WSL2 proves the HIP code path: it says nothing about
+gfx1151 numerics and nothing about performance on any part. The serve image is
+a port-less private-registry digest reference, which is what
+`runtime_image._DIGEST_REFERENCE` accepts — a repository component may carry no
+colon — so any copy of it on this side inherits the same constraint. Gates:
+`tests/test_tessera_lane_v10.py`, `tests/test_tessera_pin_answer_cells.py`,
+`tests/test_tessera_amd_serving_profiles.py`,
+`tests/test_tessera_serving_pin.py`, `tests/test_tessera_lane_admission.py`.
 
 Re-stamped (2026-09-13, `claude/549-gpu-render-synthesis`) for a **standalone
 `synthesize` stage, and a decode that runs on the device its caller reserved**
@@ -201,8 +243,10 @@ tessera_strix_halo_gfx1151.json` (RDNA3.5) and `tessera_research_gfx1201.json`
 (RDNA4). Both are `emulation_only`, declare a `target_platform` the pinned
 contract declares, carry no `format_rules` and no export lane, and take their
 menu from the contract rather than from a list anyone typed: the families
-`platforms[target].executes` does not publish as `null`, which under contract
-v23 is `{TESSERA_BF16_K1}` plus passthrough `BF16`. Rob's ruling — the RDNA3.5
+`platforms[target].executes` does not publish as `null`, which at contract
+v24 is still `{TESSERA_BF16_K1}` plus passthrough `BF16` on both — the
+`executes` map did not move when `gfx1201` gained cells, because that map
+prices and a cell attests. Rob's ruling — the RDNA3.5
 lane is Tessera-16 WnA16 only — is the contract read back, not a rule added on
 top of it.
 
@@ -10890,7 +10934,8 @@ so the pin now names an exact commit and the digest of the contract that commit
 packages, and the dense rungs are ADMITTED under it. What is refused instead is
 any *other* Tessera: `require_pinned_tessera_runtime` hashes
 `tessera/serving/runtime_contract.json` as installed and refuses when it is not
-`bafe8a4e…0bb922a` (Tessera master `1c827abc…`, contract v23; `a688f8de…`
+`81014e9b…579554` (Tessera master `7dbbacbd…`, contract v24; `bafe8a4e…`
+carried v23 at `1c827abc…`, `a688f8de…`
 carried v22 at `387eda36…`, the release `e78959ed…` carried v20 at
 `374ce4a9…625dd4`, and the first pin, 2026-09-04, was `ba3a3c69…e055e6` at
 `5acc2a6f…`, contract v17). A stray
@@ -11905,7 +11950,7 @@ schema is not `tessera.serving.route_census/2`. Under
 `tessera.lane-eligibility.v4` and the producer's `tools/tessera_route_census.py`
 emitted `route_census/1`, so no scoped receipt could be filled or replayed and
 `route.census` on a scoped card stayed `UNFILLED` by the pin. At the pin this
-document is stamped for (`1c827abc`, contract v23) the packaged table is
+document is stamped for (`7dbbacbd`, contract v24) the packaged table is
 `tessera.lane-eligibility.v10` -- the schema the constant names -- and the
 producer at that commit emits `route_census/2`, so both refusals lift and the
 comparison below is the live gate on a scoped card. What has NOT changed: no
@@ -14009,8 +14054,8 @@ flowchart LR
 
   R3 -.->|"no qualified deployment"| H2
   R4 -.->|"no qualified deployment"| H2
-  R5 -.->|"contract v23 backs Tessera-16 WnA16 only here (E2M1/E4M3 executes null); emulation_only, no cell"| H2
-  R5 -.->|"same menu rule; emulation_only, no cell"| H3
+  R5 -.->|"contract v24 backs Tessera-16 WnA16 only here (E2M1/E4M3 executes null); emulation_only; gfx1201 has BF16 cells at 1792, gfx1151 has none"| H2
+  R5 -.->|"same menu rule; emulation_only; gfx1151 still has no cell"| H3
 
   classDef proven stroke:#2d7a2d,stroke-width:2px
   classDef pending stroke:#c07800,stroke-width:2px,stroke-dasharray:4
@@ -14274,9 +14319,13 @@ arch key that backend names (`compute_capability` | `gcn_arch`), a `serve_image`
 (null exactly when the platform has no cells) and an `executes` map from family
 to the activation contract that family runs there — **or `null`, meaning the
 pinned runtime measurably has no native route for those bytes on that device.**
-v23 declares three: `sm_121` (the ten cells, all three families backed) and
-`gfx1151` / `gfx1201`, where `TESSERA_BF16_K1` executes `bf16_unquantized` and
-`TESSERA_E4M3_K1` / `TESSERA_E2M1_K2` are `null`. Rob's ruling follows the
+The pinned v24 document declares three: `sm_121` (ten cells, all three
+families backed) and `gfx1151` / `gfx1201`, where `TESSERA_BF16_K1` executes
+`bf16_unquantized` and `TESSERA_E4M3_K1` / `TESSERA_E2M1_K2` are `null`. The
+`executes` maps are the same three v23 published; what v24 changed is beneath
+them, in the cells: `gfx1201` has two (`TESSERA_BF16_K1` dense, decode and
+batch, at `q256 = 1792`) and its `serve_image` is no longer `null`, while
+`gfx1151` still has none. Rob's ruling follows the
 table rather than leading it: **the RDNA3.5 lane is Tessera-16 WnA16 only.**
 
 Three consequences, each in code rather than here. `tessera_serving_route(...,
@@ -14311,20 +14360,28 @@ which is this case) — while the refusal that actually stops bytes is
 `backed`/`backed_with_serve_flag` with every regime `device_qualified` — and it
 takes no override on this lane. These two profiles declare no export lane at
 all, so the question never reaches it. The lane-level
-`ServingLaneSpec.route_status_for` reaches the same refusal by a shorter road:
-it resolves the pinned contract itself (#537) and no cell names either AMD
-platform, so it answers `unattested` with source
-`serving_runtime_contract:<v>:no_cell` — see §9.4. A `gfx1201` receipt, when one exists, proves a code
-path on gfx12 and never stands in for gfx1151 numerics or performance.
+`ServingLaneSpec.route_status_for` reaches the same answer by a shorter road:
+it resolves the pinned contract itself (#537), and at contract v24 the two AMD
+platforms part company there. `gfx1151` still has no cell, so every family on
+it answers `unattested` with source `serving_runtime_contract:<v>:no_cell`.
+`gfx1201` carries two `TESSERA_BF16_K1` dense cells at rung `q256 = 1792`
+(decode and batch) and answers `backed_with_serve_flag` for that family at that
+rung — `:no_cell` for the two quantized families, `:rung_not_listed` for any
+other BF16 rung — see §9.4. The `gfx1201` receipt proves a code
+path on gfx12 and never stands in for gfx1151 numerics or performance: its own
+scope line says gfx1201 under WSL2, and its grade is `kl_lower_bound`, a
+top-1024 intersection bound, because no instrument in either repository
+produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `1c827abc4affdd9bed9c6b25af0705480381bf3a` (master's tip at review
-time, the merge of Tessera #464; version `0.1.0`, contract v23, lane schema
-v10 — v22 was pinned at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
+Tessera `7dbbacbd0900f6b6f468690e2525cc018564382d` (master's tip at review
+time, after Tessera #474 and its #475; version `0.1.0`, contract v24, lane
+schema v10 — unchanged: v24 is additive for a v10 reader. v23 was pinned at
+`1c827abc…`, v22 at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
 in Tessera #313 and the release `e78959ed…` carried v20; first pinned
 2026-09-04 at `5acc2a6f…`, contract v17)
 and the SHA-256 of the `runtime_contract.json` it packages
-(`bafe8a4e…0bb922a`);
+(`81014e9b…579554`);
 `require_pinned_tessera_runtime` refuses unless the pin equals the reader's
 three constants AND the installed contract hashes to that digest, and
 `tessera_lane_attested` ANDs that in (§5.7), as does the container arm's
@@ -14514,20 +14571,28 @@ served quality gates could be completed, and the prototype sources and dispatch 
 deleted from the canonical Gridbook tree. PrismaQuant still contains no copy, and the
 Gridbook lane itself retired on 2026-09-02. None of that is a claim about Tessera on AMD.
 
-What is true now: Tessera contract v23 declares `gfx1151` and `gfx1201`, publishes
+What is true now: Tessera contract v24 declares `gfx1151` and `gfx1201`, publishes
 `TESSERA_BF16_K1` as executing `bf16_unquantized` on both, and publishes `null` for
 `TESSERA_E4M3_K1` and `TESSERA_E2M1_K2` — the pinned runtime has no native route for those
 bytes on those devices. Rob's ruling follows the contract: the RDNA3.5 lane is **Tessera-16
 WnA16 only**. `serving_profile_specs/tessera_strix_halo_gfx1151.json` and
 `tessera_research_gfx1201.json` allocate against that, `emulation_only: true`, no export lane.
 
-What is still absent is the thing that was absent before: a **cell**. Neither AMD platform has
-one, because a cell is a device receipt and nobody here owns a Strix Halo. So
-`tessera_render.tessera_attesting_cells`, asked with a `ServingContext` on either target, returns
-no cell for every family — including the backed one — and export fails closed in
-`tessera_export_lane.require_assignment_scope`, which takes no override on this lane (and these
-two profiles declare no export lane to reach it with).
-`ServingLaneSpec.route_status_for` says `:no_cell` here too. Until #537 (2026-09-13) it did so
+What separates the two platforms is the thing that was absent from both before: a **cell**.
+Contract v24 (Tessera #474, 2026-09-13) mints the first two, on `gfx1201`: `TESSERA_BF16_K1`
+dense, decode and batch, at rung `q256 = 1792`, graded `kl_lower_bound` from a top-1024
+intersection bound and smoke-clean, taken on an RX 9070 XT under WSL2 through a ROCm vLLM image
+the contract pins by port-less digest. So `tessera_render.tessera_attesting_cells` asked with a
+`ServingContext` on `gfx1201` — **under that platform's own image**, not the sm_121 default —
+returns those cells for `TESSERA_BF16_K1` at that rung, and
+`ServingLaneSpec.route_status_for` answers `backed_with_serve_flag`. It still answers
+`:no_cell` for the two quantized families there and `:rung_not_listed` for any other BF16 rung.
+
+`gfx1151` has no cell and nothing changed for it: nobody here owns a Strix Halo, so
+`tessera_attesting_cells` returns nothing for every family — including the backed one — export
+fails closed in `tessera_export_lane.require_assignment_scope`, which takes no override on this
+lane (and neither profile declares an export lane to reach it with), and
+`ServingLaneSpec.route_status_for` says `:no_cell`. Until #537 (2026-09-13) it did so
 only for a test that handed it a contract: in production it called `load_eligibility_table()` with
 no `contract_path`, which has had no default table since the Gridbook lane was retired
 (2026-09-02), so that resolver answered `unattested` with source `serving_runtime_contract::absent`
@@ -14535,9 +14600,12 @@ for every lane on every platform, sm_121 included — a refusal about this side'
 about the runtime. It now resolves the tracked serving pin and the contract that pin names, so both
 resolvers refuse because of something the contract says, and `absent` is reachable only when the pin
 file is missing.
-Backing is permission to PRICE; a cell is permission to ship. Promotion still requires the full
-served ladder, and a `gfx1201` receipt proves a code path on gfx12 and never stands in for
-gfx1151 numerics or performance.
+Backing is permission to PRICE; a cell is permission to ship, and at v24 exactly one of the two
+platforms has crossed that line. Promotion past the menu still requires the full served ladder:
+neither profile declares an export lane, the `gfx1201` grade is a `kl_lower_bound` rather than a
+full-vocab KL (no instrument in either repository produces one), and the receipt's own scope line
+says gfx1201 under WSL2 proves the HIP code path — it never stands in for gfx1151 numerics or for
+performance on any part.
 
 The remainder of this subsection is a **frozen historical measurement record**, not an active
 implementation description, support claim, or build plan. Paths named below belonged to the

@@ -40,32 +40,40 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `1c827abc4affdd9bed9c6b25af0705480381bf3a`,
-merged in Tessera #464 on 2026-09-12, closing its #456. Install that revision
-and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
-`experiments/` and are not wheel entry points.
+The current pin is Tessera `7dbbacbd0900f6b6f468690e2525cc018564382d`,
+master's tip on 2026-09-13 after Tessera #474 (merged at `27be1a602`) and its
+#475. Install that revision and point `TESSERA_REPO` at its complete checkout;
+the producer scripts live in `experiments/` and are not wheel entry points.
 
-It moves the contract to **v23, lane-eligibility schema v10**. The change is a
-platform axis: each `lane_eligibility.platforms` entry stops being a bare key
-and becomes an object carrying `backend` (`cuda | hip`), exactly one of
-`compute_capability` / `gcn_arch`, a `serve_image` that is a digest iff the
-platform has at least one cell and `null` otherwise, and `executes` — a map
-over every family in `formats[]` whose value is that family's own route
-contract or `null`. Two AMD platforms arrive with it, `gfx1151` (Strix Halo,
-RDNA3.5) and `gfx1201` (RDNA4), with `serve_image: null`, **no cells**,
-`TESSERA_BF16_K1` backed and `TESSERA_E4M3_K1` / `TESSERA_E2M1_K2` `null`.
+It moves the contract to **v24**, and the lane-eligibility schema stays at
+**v10**: v24 is additive for a v10 reader. Two things move. `gfx1201` (RDNA4,
+RX 9070 XT) gains its first two cells — `TESSERA_BF16_K1` dense, decode and
+batch, at rung `q256 = 1792`, `route_status: backed_with_serve_flag`,
+`qualification: device_qualified`, executing `torch.mm` through the
+`torch_window` decoder on a ROCm vLLM image — and that platform's
+`serve_image` stops being `null`, which v10 requires once one of its own cells
+attests an image.
 
 The ten `sm_121` cells are byte-identical and `versions.default_serve_image`
-is unchanged, so this pin admits exactly what its predecessor did. What it
-adds is grammar: `null` is a claim that somebody looked and there is no native
-route for those bytes on that device, which is the fact a producer needs
-before it can honestly price an AMD target. A schema bump is not additive by
-design — a v9-closed reader refuses a v10 document by name rather than reading
-a platform object as a key — so admitting it is a reviewed edit on this side
-too (PrismaQuant #527). Re-check the exact commit:
+is unchanged, so everything the previous pin admitted this one admits. What is
+NEW is a route: both cells publish `evidence.smoke.status: recorded`, and
+`cell_evidence_admits` is status-only, so accepting this pin flips
+`route_status_for("TESSERA_BF16_K1_R1792", platform="gfx1201")` from
+`unattested` / `:no_cell` to `backed_with_serve_flag`. The Tessera-16 W16A16
+lane is attested on one AMD device. `gfx1151` still ships no cell and still
+answers `:no_cell` for every family — backing is permission to price, a cell
+is permission to ship.
+
+Scope the receipts carry, and this pin inherits: the grade is
+`kl_lower_bound`, a top-1024 teacher-student intersection bound, not
+`kl_full_vocab` — no instrument in either repository produces a full-vocab KL.
+The receipt's own scope line says gfx1201 under WSL2 proves the HIP code path;
+it says nothing about gfx1151 numerics and nothing about performance.
+
+Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p 1c827abc4affdd9bed9c6b25af0705480381bf3a:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 7dbbacbd0900f6b6f468690e2525cc018564382d:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -160,13 +168,13 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-12:
+Verified against `RobTand/tessera` master on 2026-09-13:
 
 ```
-commit           1c827abc4affdd9bed9c6b25af0705480381bf3a
-contract_sha256  bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a
+commit           7dbbacbd0900f6b6f468690e2525cc018564382d
+contract_sha256  81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554
 versions.tessera 0.1.0
-contract_version 23
+contract_version 24
 lane schema      tessera.lane-eligibility.v10
 ```
 
