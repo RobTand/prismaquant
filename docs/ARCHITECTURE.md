@@ -1,7 +1,48 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `pq/530-amd-serving-profiles`. Stamps
+As of: 2026-09-12 · `pq/536-loader-axes`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `pq/536-loader-axes`) for the **loader-axis leg of
+tensor-parallel legality** (#536). The pinned contract's `tensor_parallel`
+unit rows publish two different facts and PrismaQuant read only one of them:
+`max_world_size` is the attestation bound, and `loader_axes` — per unit, per
+axis, `sharded` or `refused` — is what this build's LOADER does with a shard.
+Tessera validates that table equal to the `ROUTE_TP_AXES` its routes gate on
+at `create_weights`, so it is a status a gate may read (principle 14), and it
+refuses `TESSERA_E2M1_K2` on the `row` axis on **every** rank: a row shard
+begins mid-column and the span-2 decoders supply `state_{-1}` themselves.
+A column-parallel Linear splits vLLM's output features, which are this unit's
+rows, so every column-parallel K2 unit is unloadable at TP > 1 at any shape,
+and before this commit the allocator priced it as if it sharded.
+
+`tessera_runtime_contract` now parses the block into
+`TesseraContract.loader_axes` and refuses a malformed or missing axis
+vocabulary rather than reading absence as `sharded`; the statuses join
+`contract_answer`'s `families` projection, so the reviewed answer literal
+moved and that diff is the review. `tessera_menu.tessera_tp_axis_legal` is the
+third leg of `tessera_tp_legal`, asked before the geometry leg because it is
+the cheapest and the most informative, and asked independently of
+`require_attested_world`:
+"has this been measured" and "will this even load" are separate questions.
+It subtracts on a published status and never invents one — with no pinned
+contract, or a family the block does not list, it passes through and the
+closed world stays where it was, on `max_world_size`. Refusals read
+`tp_axis_refused:<family>:<unit>:<axis>`, and the allocator now passes the
+qname so `<unit>` names the Linear.
+
+`python -m prismaquant.tessera_tp_audit` is the read-only Step 5b check: it
+audits an existing `layer_config.json` at a world size with
+`require_attested_world=False` plus the loader-axis leg, asserts packed
+experts resolve to a `none` cut, emits per-unit JSON verdicts, and exits
+non-zero on any refusal. It never edits the assignment — the answer to a
+refusal is a re-run of the allocation with the offending rung excluded by
+that measured fact (principle 1). Two legs it does **not** audit, and the
+receipt says so in a field: shard geometry, because `layer_config.json` is a
+qname-to-format recipe carrying no shapes, and the attested world size, which
+is the other question. Gates:
+`tests/test_tessera_tp_loader_axes.py`, `tests/test_tessera_tp_audit.py`,
+plus `tests/test_docs_staleness.py` and `tests/test_architecture_doc.py`.
 
 Re-stamped (2026-09-12, `pq/530-amd-serving-profiles`) for the two **AMD
 Tessera serving profiles** (#530): `serving_profile_specs/
@@ -9032,13 +9073,26 @@ anchor** on all seven units, while `E4M3_K1_R1024` is an **interpolated**
 column of the rate surface on the five units that have one — so the attested
 menu's E4M3 leg rests on interpolation in the currency impeached above.
 
-**Tensor parallelism has two legs, and both bind.** The *attestation* leg is the
-contract's `tensor_parallel` block, whose semantics are `closed_world`: it lists
-both families at `max_world_size: 1`, so **no Tessera rung is attested at TP > 1
-at any shape**, and `tessera_tp_world_attested` refuses in the attested menu
-before geometry is consulted. The research menu passes that leg by construction
-(it prices unattested rungs deliberately and stamps every one). The *geometry*
-leg is below, and a refusal names which leg answered.
+**Tensor parallelism has three legs, and all three bind.** The *attestation*
+leg is the contract's `tensor_parallel` block, whose semantics are
+`closed_world`: it lists every family at `max_world_size: 1`, so **no Tessera
+rung is attested at TP > 1 at any shape**, and `tessera_tp_world_attested`
+refuses in the attested menu before geometry is consulted. The research menu
+passes that leg by construction (it prices unattested rungs deliberately and
+stamps every one). The *loader-axis* leg reads the second fact the same unit
+rows publish — `loader_axes`, `sharded` or `refused` per axis, validated by
+Tessera against the `ROUTE_TP_AXES` its routes gate on — and
+`tessera_menu.tessera_tp_axis_legal` asks it before the geometry leg, because
+a `refused` axis is refused on every rank: no world size and no shape makes it legal, so naming a
+granularity there would name the wrong obstacle. It does not depend on
+`require_attested_world`. Today it refuses `TESSERA_E2M1_K2` on `row`, which
+is the axis a **column**-parallel Linear cuts. The *geometry* leg is below,
+and a refusal names which leg answered:
+`tp{n}_unattested:…`, `tp_axis_refused:<family>:<unit>:<axis>`, or
+`tp{n}_{axis}_granularity: …`. `python -m prismaquant.tessera_tp_audit` asks
+the loader-axis leg of an assignment that already exists, at a world size, and
+exits non-zero on any refusal; it audits neither of the other two legs and its
+receipt says so.
 
 **Tensor parallelism is a per-unit legality input.** A Tessera rate is a schedule
 over the reduce dimension, so what a rank can encode is a function of *its* column
