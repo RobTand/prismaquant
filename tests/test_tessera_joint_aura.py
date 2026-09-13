@@ -773,6 +773,11 @@ def test_two_writers_of_one_cell_never_share_a_staging_path(tmp_path, monkeypatc
         suffixes.append(journal.unique_temp_suffix())
         _store_rendered_weight_entry(weights={}, cache_dir_path=tmp_path, qname="a.b",
                                      fmt="NVFP4", tensor=tensor, weight_dtype=torch.bfloat16)
+    # A fork carries the parent's module state into the child, so a suffix that
+    # were merely memoised would put the two processes back on one staging path.
+    before = journal.unique_temp_suffix()
+    monkeypatch.setattr(journal.os, "getpid", lambda: 303)
+    assert journal.unique_temp_suffix() != before, "a forked child kept its parent's staging path"
     monkeypatch.setattr(journal, "_TEMP_SUFFIX", None)
     assert len(set(suffixes)) == 3, "writers on one box or one name shared a suffix"
     assert len(set(staged)) == 3, "two writers staged the same cell at one path"

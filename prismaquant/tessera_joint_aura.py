@@ -267,7 +267,7 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
 
 def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True, reader=None,
                                synthesis_device="cpu", unit_scope=None,
-                               render_mirror_root=None, log_every=1000):
+                               render_mirror_root=None, log_every=100):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -299,7 +299,9 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
 
     ``log_every`` prints a cumulative count and rate every N synthesized
     shards. Silence is the defect this phase was reported for: it ran for
-    hours at 2.6 cells/s saying nothing.
+    hours at 2.6 cells/s saying nothing. The default is chosen against that
+    measured rate rather than rounded -- 100 shards is ~38 s there and ~16 s
+    on the GPU, inside the two minutes a silent phase is a defect after.
     """
     from .production_weight_cache import _cache_weight_filename
     from tools.dispatch_tessera_campaign import _require_receipts
@@ -1262,9 +1264,14 @@ def main(argv=None):
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--source-transition", type=Path)
     parser.add_argument("--source-transition-sha256")
-    parser.add_argument("--units", help="synthesize: lo:hi over the sorted census roster")
+    parser.add_argument("--units", help="synthesize: lo:hi over the sorted census roster. "
+                        "Rows carry disjoint ranges; submit each with "
+                        "--progress synthesize=SECONDS, because the stage reports its "
+                        "cumulative durable count under exactly that phase name and an "
+                        "undeclared phase grants no continuation")
     parser.add_argument("--device", default="cpu", help="synthesize: where the wire decode runs")
-    parser.add_argument("--log-every", type=int, default=100)
+    parser.add_argument("--log-every", type=int, default=100,
+                        help="synthesize: log a cumulative count and rate every N shards")
     parser.add_argument("--mirror-root", type=Path,
                         help="synthesize: publish into this mirror instead of the row caches")
     parser.add_argument("--compare", action="store_true",

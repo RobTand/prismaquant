@@ -59,7 +59,7 @@ def canonical_json_sha256(value: object, *, where: str) -> str:
     return hashlib.sha256(canonical_json_bytes(value, where=where)).hexdigest()
 
 
-_TEMP_SUFFIX: "str | None" = None
+_TEMP_SUFFIX: "tuple[int, str] | None" = None
 
 
 def unique_temp_suffix() -> str:
@@ -80,13 +80,18 @@ def unique_temp_suffix() -> str:
     -- or a hostname carrying a dot -- would silently change them.
     """
     global _TEMP_SUFFIX
-    if _TEMP_SUFFIX is None:
+    # Keyed by pid, not merely memoised: a forked child inherits the parent's
+    # module state, and a suffix carried across the fork would put the two
+    # writers back on one staging path -- this function's own defect, one
+    # level down.
+    pid = os.getpid()
+    if _TEMP_SUFFIX is None or _TEMP_SUFFIX[0] != pid:
         host = "".join(c for c in socket.gethostname() if c.isalnum())
-        suffix = f".tmp{host}{os.getpid()}"
+        suffix = f".tmp{host}{pid}"
         if suffix.count(".") != 1:
             raise ValueError("staging suffix must add exactly one extension")
-        _TEMP_SUFFIX = suffix
-    return _TEMP_SUFFIX
+        _TEMP_SUFFIX = (pid, suffix)
+    return _TEMP_SUFFIX[1]
 
 
 def atomic_write_bytes(path: Path, payload: bytes) -> None:

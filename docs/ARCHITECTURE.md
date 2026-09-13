@@ -39,12 +39,17 @@ names are unique per writer.** `_store_rendered_weight_entry` and
 function of the destination alone, so two writers of one cell shared an inode;
 `unique_temp_suffix()` adds `.tmp<host><pid>` and asserts it adds exactly one
 dot, because `torch.save` names the zip archive after the basename minus its
-last extension and a second dot would change the published bytes. **The loop
-says what it committed**: a cumulative count and rate every `--log-every`
-shards, the per-run count in `results.json` as `renders_synthesized_now`
+last extension and a second dot would change the published bytes. The suffix
+is keyed by pid rather than merely memoised, so a forked child does not
+inherit its parent's staging path. **The loop says what it committed**: a
+cumulative count and rate every `--log-every` shards (default 100, ~38 s at
+the measured 2.6 cells/s and inside the two minutes a silent phase is a defect
+after), the per-run count in `results.json` as `renders_synthesized_now`
 (never inside the per-origin census, which the prepare/run boundary compares
 exactly), and a PrismaBuild `progress-v1` report after each durable shard that
-is a no-op outside an admitted action. No format, default, wire, serving gate
+is a no-op outside an admitted action. The report names the phase
+`synthesize`, so a fanned-out row declares `--progress synthesize=<stall>`;
+an undeclared phase grants no continuation. No format, default, wire, serving gate
 or published byte changes. Gate: `tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-13, `claude/537-route-status-reads-the-pin`) because
