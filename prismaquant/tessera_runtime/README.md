@@ -40,23 +40,41 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `ba582d476a3b6db9057ebd1385dc52926f171451`,
-merged in Tessera #356 on 2026-09-05. It supplies the producer's
-`--priced-inputs` / `--priced-inputs-sha256` snapshot API used by PrismaQuant
-#231. Install that revision and point `TESSERA_REPO` at its complete checkout;
-the producer scripts live in `experiments/` and are not wheel entry points.
+The current pin is Tessera `1c827abc4affdd9bed9c6b25af0705480381bf3a`,
+merged in Tessera #464 on 2026-09-12, closing its #456. Install that revision
+and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
+`experiments/` and are not wheel entry points.
 
-The contract remains v22, lane schema v9, with the same SHA-256 and reviewed
-admission answer as the previous `8ed1d9a` pin (Tessera #332). That previous
-pin introduced the derived smoke records; this update adds no evidence or
-serving promotion. A producer API dependency can require a newer pin even
-when the runtime contract bytes do not change. Re-check the exact commit:
+It moves the contract to **v23, lane-eligibility schema v10**. The change is a
+platform axis: each `lane_eligibility.platforms` entry stops being a bare key
+and becomes an object carrying `backend` (`cuda | hip`), exactly one of
+`compute_capability` / `gcn_arch`, a `serve_image` that is a digest iff the
+platform has at least one cell and `null` otherwise, and `executes` — a map
+over every family in `formats[]` whose value is that family's own route
+contract or `null`. Two AMD platforms arrive with it, `gfx1151` (Strix Halo,
+RDNA3.5) and `gfx1201` (RDNA4), with `serve_image: null`, **no cells**,
+`TESSERA_BF16_K1` backed and `TESSERA_E4M3_K1` / `TESSERA_E2M1_K2` `null`.
+
+The ten `sm_121` cells are byte-identical and `versions.default_serve_image`
+is unchanged, so this pin admits exactly what its predecessor did. What it
+adds is grammar: `null` is a claim that somebody looked and there is no native
+route for those bytes on that device, which is the fact a producer needs
+before it can honestly price an AMD target. A schema bump is not additive by
+design — a v9-closed reader refuses a v10 document by name rather than reading
+a platform object as a key — so admitting it is a reviewed edit on this side
+too (PrismaQuant #527). Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p ba582d476a3b6db9057ebd1385dc52926f171451:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 1c827abc4affdd9bed9c6b25af0705480381bf3a:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
+
+History worth keeping: this paragraph named `ba582d47` (Tessera #356,
+2026-09-05, the `--priced-inputs` producer API) while the JSON beside it had
+already moved to `387eda36` (Tessera #441) — regenerated prose that was not
+regenerated. The commands below are the procedure; running them is what keeps
+this section true.
 
 **`version_is_release` is advisory.** Still required, still parsed, still
 recorded, and still unable to be `true` over a PENDING commit — so it keeps
@@ -142,14 +160,14 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-05:
+Verified against `RobTand/tessera` master on 2026-09-12:
 
 ```
-commit           8ed1d9a78b3f0c7036dcbe14d7df3a89f398812a
-contract_sha256  719daa02da1564b56a141ca2702ae29d4fda553460978efbb6510ddcd1824927
+commit           1c827abc4affdd9bed9c6b25af0705480381bf3a
+contract_sha256  bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a
 versions.tessera 0.1.0
-contract_version 22
-lane schema      tessera.lane-eligibility.v9
+contract_version 23
+lane schema      tessera.lane-eligibility.v10
 ```
 
 Five values, two files, one commit. Resolve the new commit, digest and version

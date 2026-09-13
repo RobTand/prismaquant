@@ -49,8 +49,10 @@ def down_convert_lane_table(payload: dict, schema: str) -> dict:
     launches -- so the test still exercises real cells. It is a FIXTURE and
     never an attestation: nothing derived from it is recorded anywhere.
 
-    ``schema`` is ``tessera.lane-eligibility.v8`` (drop the v9
-    ``smoke.record``), ``...v7`` (drop the v8 ``evidence.artifact`` as well),
+    ``schema`` is ``tessera.lane-eligibility.v9`` (reduce each v10
+    ``platforms`` entry back to a bare key set and drop the platforms that
+    exist only to say what they do NOT execute), ``...v8`` (drop the v9
+    ``smoke.record`` as well), ``...v7`` (drop the v8 ``evidence.artifact`` as well),
     ``...v6`` (drop v7's ``smoke.attribution`` and ``smoke.control`` too),
     ``...v5`` (drop the whole ``evidence`` block and the ``runtime`` version
     fields) or ``...v4`` (drop the per-cell ``runtime`` scope as well).
@@ -70,6 +72,18 @@ def down_convert_lane_table(payload: dict, schema: str) -> dict:
     lane = payload["lane_eligibility"]
     lane["schema"] = schema
     version = int(schema.rsplit(".v", 1)[1])
+    if version <= 9:
+        # v10 made a platform entry an OBJECT that states what the platform
+        # executes.  Under v9 the value was never read, and a platform with no
+        # cell said nothing at all -- so a v9 fixture keeps only the platforms
+        # that carry cells, with only the identity key v22 published.
+        attested = {cell["platform"] for cell in lane["cells"]}
+        lane["platforms"] = {
+            key: {k: v for k, v in entry.items()
+                  if k in ("compute_capability", "gcn_arch")}
+            for key, entry in lane["platforms"].items()
+            if key in attested
+        }
     for cell in lane["cells"]:
         if version <= 5:
             cell.pop("evidence", None)

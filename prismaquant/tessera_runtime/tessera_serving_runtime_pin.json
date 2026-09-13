@@ -1,10 +1,10 @@
 {
   "schema": "prismaquant.tessera_serving_runtime_pin.v2",
   "repository": "https://github.com/RobTand/tessera.git",
-  "commit": "387eda36fd410d6b2a4fb86b22285eab2a5e072c",
+  "commit": "1c827abc4affdd9bed9c6b25af0705480381bf3a",
   "version": "0.1.0",
   "version_is_release": false,
-  "contract_sha256": "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212",
+  "contract_sha256": "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a",
   "runtime_contract_schema": "tessera.runtime-contract.v1",
   "plugin_entry_point": "tessera = tessera.serving:register",
   "serving_residency_env": "TESSERA_SERVE_MODE",
