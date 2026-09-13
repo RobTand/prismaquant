@@ -345,9 +345,15 @@ def freeze(args):
 
 
 def manifest(args):
-    root = Path(args.out)
     bindings, missing = [], {}
-    for cell in sorted((root / "cells").iterdir()):
+    cells = [cell for root in args.out for cell in sorted((Path(root) / "cells").iterdir())]
+    seen = {}
+    for cell in cells:
+        # One measured cell is one table row, so two evidence roots holding the
+        # same cell name would silently put two prices on one (unit, format).
+        if cell.name in seen:
+            raise SystemExit(f"cell {cell.name} appears in both {seen[cell.name]} and {cell.parent.parent}")
+        seen[cell.name] = cell.parent.parent
         inputs = json.loads((cell / "inputs.json").read_text())
         receipt, trace, panel = cell / "receipt.json", cell / "receipt.json.memory.json", cell / "panel.json"
         absent = [p.name for p in (receipt, trace, panel) if not p.is_file()]
@@ -393,7 +399,8 @@ def main(argv=None):
     f.add_argument("--joint", required=True)
     f.set_defaults(func=freeze)
     m = sub.add_parser("manifest")
-    m.add_argument("--out", required=True)
+    m.add_argument("--out", required=True, nargs="+",
+                   help="one or more evidence roots; every cell across them becomes one binding")
     m.add_argument("--run-id", default=None,
                    help="one shared runtime run id; omit to name each cell's own run")
     m.add_argument("--manifest", required=True)

@@ -15,6 +15,15 @@ prefill price over the priced units is the sum of those units' measured
 
 The accuracy axis is not computed here. It is read from a column the caller
 supplies, with its own metric identity, and copied through unchanged.
+
+Each row's ``prefill_ms`` is the median of that operator's own CUDA-event
+samples, so the operator sum is a sum of medians. The spread between two
+artifacts is only a fact about the runtime if it is larger than what those
+samples resolve, so every point also carries a paired bootstrap interval over
+the rows' own samples -- resampling each row's samples with replacement,
+re-taking each median, re-summing. No threshold is applied and no verdict is
+declared: the intervals are published so a reader cannot mistake an unresolved
+ordering for a measured one.
 """
 from __future__ import annotations
 
@@ -22,6 +31,8 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import random
+import statistics
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -38,6 +49,25 @@ def sha256(path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def bootstrap_sum(samples_per_row, *, draws, seed):
+    """The distribution of the operator sum under each row's own samples.
+
+    Every row is resampled with replacement from its OWN measured samples and
+    re-reduced by the same median the table row was reduced by, so this
+    describes only the dispersion the measurement itself carries.
+    """
+    rng = random.Random(seed)
+    totals = []
+    for _ in range(draws):
+        totals.append(sum(statistics.median(rng.choices(samples, k=len(samples)))
+                          for samples in samples_per_row))
+    totals.sort()
+    return {"draws": draws, "seed": seed,
+            "p2.5": totals[int(0.025 * draws)], "p50": totals[draws // 2],
+            "p97.5": totals[min(draws - 1, int(0.975 * draws))],
+            "samples_per_row": [len(samples) for samples in samples_per_row]}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -48,6 +78,8 @@ def main(argv=None) -> int:
     parser.add_argument("--accuracy", type=Path, required=True,
                         help="JSON: {metric: {...}, artifacts: {artifact: {...}}}")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--bootstrap-draws", type=int, default=10000)
+    parser.add_argument("--bootstrap-seed", type=int, default=237)
     args = parser.parse_args(argv)
 
     payload = json.loads(args.table.read_text())
@@ -68,14 +100,21 @@ def main(argv=None) -> int:
                           "operator sum over the priced units alone"}
 
     prices = {(row.unit, row.fmt): row for row in table.rows}
+    # The parsed row keeps only the reduced price; the raw samples that
+    # reduction came from live on the table document itself.
+    payload_rows = {(row["unit"], row["format"]): row for row in payload["rows"]}
     priced_units = sorted({row.unit for row in table.rows})
     assignments = json.loads(args.assignments.read_text())
     accuracy = json.loads(args.accuracy.read_text())
 
     points, refused = [], {}
     for artifact, assignment in sorted(assignments.items()):
-        missing = [f"{unit}@{fmt}" for unit, fmt in sorted(assignment.items())
-                   if (unit, fmt) not in prices]
+        # Only the priced units are in scope. A unit this table does not price
+        # is recorded as out of scope, not as a refusal -- the refusal is a
+        # priced unit whose ASSIGNED format this table never measured, because
+        # then the sum would silently price the artifact at another rate.
+        missing = [f"{unit}@{assignment[unit]}" for unit in priced_units
+                   if unit in assignment and (unit, assignment[unit]) not in prices]
         outside = sorted(set(assignment) - set(priced_units))
         unpriced = sorted(set(priced_units) - set(assignment))
         measured = accuracy["artifacts"].get(artifact)
@@ -85,7 +124,10 @@ def main(argv=None) -> int:
                                  "accuracy": None if measured is None else "present"}
             continue
         rows = [prices[(unit, assignment[unit])] for unit in priced_units]
+        samples = [list(payload_rows[(row.unit, row.fmt)]["prefill"]["samples_ms"]) for row in rows]
         points.append({
+            "prefill_ms_operator_sum_bootstrap": bootstrap_sum(
+                samples, draws=args.bootstrap_draws, seed=args.bootstrap_seed),
             "artifact": artifact, "units": priced_units,
             "assignment": {unit: assignment[unit] for unit in priced_units},
             "prefill_ms_operator_sum": sum(row.resources.prefill_ms for row in rows),
@@ -116,7 +158,9 @@ def main(argv=None) -> int:
     print(json.dumps({"out": str(args.out), "points": len(points),
                       "refused": sorted(refused)}, indent=1, sort_keys=True), flush=True)
     for point in points:
-        print(f"  {point['artifact']:30s} prefill_sum_ms {point['prefill_ms_operator_sum']:.6f}  "
+        interval = point["prefill_ms_operator_sum_bootstrap"]
+        print(f"  {point['artifact']:30s} prefill_sum_ms {point['prefill_ms_operator_sum']:.6f} "
+              f"[{interval['p2.5']:.6f}, {interval['p97.5']:.6f}]  "
               f"accuracy {point['accuracy']}", flush=True)
     return 0 if points else 2
 
