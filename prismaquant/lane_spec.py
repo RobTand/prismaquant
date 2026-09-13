@@ -236,6 +236,21 @@ class LaneActivationContract:
     executes: frozenset[str]
     rationale: str
     selectors_must_be_unset: tuple[str, ...] = ()
+    #: What each PLATFORM the runtime declares executes, per family: the
+    #: family's own route contract, or ``None`` where the runtime has no
+    #: native route for those bytes on that device. Derived from the pinned
+    #: contract's ``lane_eligibility.platforms[*].executes`` and refused on
+    #: drift, exactly as :attr:`executes` is derived from ``formats[]``.
+    #:
+    #: The two are not redundant. ``executes`` answers "what does this family's
+    #: route run?", which is a statement about the FAMILY and is true wherever
+    #: the family is served. ``executes_by_platform`` answers "is it served
+    #: HERE?", which no amount of family-level truth implies -- and which a
+    #: producer targeting an AMD device needs before it prices a rung. Empty
+    #: under a contract with no platform axis, which is an absence and not a
+    #: claim that every platform backs everything.
+    executes_by_platform: Mapping[str, Mapping[str, "str | None"]] = field(
+        default_factory=dict)
 
     def matches(self, format_name: str) -> bool:
         """Does this lane execute ``format_name``'s activation quantization?"""
@@ -251,11 +266,23 @@ class LaneActivationContract:
                 "served_activation_quantization must state `executes` "
                 "explicitly; an absent list is not an empty list, and "
                 "guessing it is the bug this field exists to prevent")
+        by_platform = payload.get("executes_by_platform") or {}
+        if not isinstance(by_platform, Mapping):
+            raise ValueError(
+                "served_activation_quantization.executes_by_platform must be "
+                "an object keyed by platform id")
         return cls(
             executes=frozenset(str(f) for f in payload["executes"]),
             rationale=str(payload.get("rationale", "")),
             selectors_must_be_unset=tuple(
                 str(s) for s in payload.get("selectors_must_be_unset", ())),
+            executes_by_platform={
+                str(platform): {
+                    str(family): (None if contract is None else str(contract))
+                    for family, contract in (entry or {}).items()
+                }
+                for platform, entry in by_platform.items()
+            },
         )
 
 
