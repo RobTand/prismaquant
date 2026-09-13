@@ -92,6 +92,106 @@ re-reviews the answer by the rule the answer already carries. Gates:
 `tests/test_tessera_lane_v10.py`, `tests/test_tessera_serving_pin.py`,
 `tests/test_tessera_lane_admission.py`.
 
+Re-stamped (2026-09-12, `claude/519-launcher-safe-path`) for **the campaign
+container launcher importing the pinned tree it was given** (§4.10; #519).
+`tools/tessera_campaign_container.py` launched `python3 -u -m
+prismaquant.tessera_campaign` with the working directory set to the PB sealed
+checkout, which carries its own `prismaquant` package. `python -m` places the
+working directory at `sys.path[0]`, ahead of every `PYTHONPATH` entry, so the
+pinned mount named first in `PYTHONPATH` never won: 111 completed
+`extension-r1024-02` rows stamped the sealed checkout's package digest, and the
+16/32-reader prefetch path that exists only in the pinned tree never ran. The
+launcher now sets `PYTHONSAFEPATH=1` in the container environment, which drops
+that implicit entry, and refuses a spec that supplies the variable itself. The
+environment variable is used rather than `-P` because the launcher execs a
+caller-supplied command that need not be a CPython interpreter, and because the
+producer image's Python version is not established anywhere in this repository;
+both spellings require Python 3.11 or newer, and on an older interpreter the
+variable is ignored while `-P` would fail. So the guard alone is not the gate.
+Before exec, the launcher replays the interpreter's module search over the
+launched environment and working directory, mapping container paths back
+through `/workspace` and the declared mounts, and refuses when the package that
+would be imported is not the pinned mount's, byte for byte, under
+`tools/container_runtime_identity.prismaquant_source_sha256` — the same digest
+the row stamps as `prismaquant_source_sha256`. The refusal is narrow: it fires
+when a declared mount holds a PrismaQuant package and the import resolves
+elsewhere, which is #519 itself, and a `.` or `/workspace` entry written ahead
+of that mount is refused rather than launched, because safe-path mode removes
+the implicit working-directory entry and not a written one. When no declared
+mount holds a PrismaQuant package there is nothing to shadow, so the launch
+runs the sealed checkout and the receipt records `pinned_by_default` against
+the checkout's own root rather than staying silent; every container
+`PYTHONPATH` recorded in this repository has that shape, since the 2026-09-08
+census invocations name `/workspace` and then Tessera trees. The comparison
+applies only to a launch that can import PrismaQuant at all: when the guarded
+search reaches no package, the receipt records that nothing was pinned.
+The launcher's JSON line, schema `prismaquant.tessera_campaign_container.v1`,
+gains `pinned_source_entry`, `pinned_source_root`, `pinned_source_sha256`,
+`pinned_by_default`, `import_resolution_root`,
+`import_resolution_source_sha256`,
+`working_directory_source_sha256` and `safe_path_guard_is_load_bearing`;
+existing readers take named members and are unaffected. These digests are a
+prediction made on the host from the launched environment, not an observation
+of the executed process — the row's own stamped digest remains the observation,
+and the two agreeing is what closes the loop. The container environment is part
+of the PrismaBuild action key, so this changes the key of future campaign rows;
+it must not be applied to rows of a campaign already in flight. Host-interpreter
+rows carry the same shadow shape through PB's own `cwd` and are out of scope
+here. No cost currency, wire recipe, format menu, serving pin, allocator default
+or ship-gate change, and no GPU, served or quality measurement was run. Gates:
+`tests/test_campaign_launcher_pinned_import.py`,
+`tests/test_tessera_campaign_container.py`.
+
+Re-stamped (2026-09-12, `claude/520-step-coverage-alignment`) for
+**step-scoped ownership in the recomputed partition, and a placement
+obligation that is a maximum rather than one budget** (#520, producer
+tessera#451). The consumer now reads the two observations the producer added,
+`observations.step_intervals` (`{step_id, begin_index, end_index}`) and
+`observations.step_coverage` (`{state, declared, executed, reason}`, plus
+`scope` whenever a step was declared), and reproduces the producer's
+step-scoped rule instead of refusing every allocation that no unit interval
+contains: contained in exactly one declared step is scratch, overlapping a
+step without containment is a carried activation, and overlapping none is the
+new `non_step` lifetime class that no composition term charges. The whole
+classification is gated on `step_coverage.state == "complete"`; `partial` and
+`unobserved` leave the row unclassified, which nulls every term, because a row
+live during no *declared* step may still be live during an undeclared one. The
+coverage state is itself recomputed from the declared and executed counts. An
+interval that spans two steps refuses in either of the two ways one can: a
+declared step interval that spans another declared step's extent, and a unit
+invocation that overlaps a declared step without being contained in it, which
+is derived from an `inside_unit` allocation because the report carries no unit
+intervals.
+
+**The admitted extent is now
+`max(scalar_budget_bytes, non_step_transient_peak_bytes)`.** The seven
+composition terms price one engine step; off-step bytes are priced beside them
+by the same simultaneous sweep, and `admit_fixed_resources` refuses by name
+when either side is not recomputable rather than admitting against the half it
+has. At this producer schema version the budget side is never expressible --
+`fixed_resident` depends on `worker_startup`, which has no closing condition --
+so the obligation is null on every report the producer can emit today and the
+gate stays closed; what changed is that the refusal names the missing side.
+Nothing reads the report's `derived` block: both sides are recomputed and the
+producer's claims for them, including the frozen `derived.placement_obligation`
+formula string, are compared against the recomputation.
+
+Two corrections travel with this change. The consumer charged an allocation to
+the **innermost** scope on its stack; the producer charges the outermost, which
+is the interval it reads `unit_invocation` from and decides `lifetime_scope`
+against, so nested unit intervals both mis-bucketed rows and tripped the
+consumer's own invocation check. And the #520 issue text spells the interval
+fields `begin_trace_index`/`end_trace_index`; the producer emits
+`begin_index`/`end_index`, and the producer is what travels.
+
+No measured table, production setting, pin, serving lane, format menu or export
+gate changes, no allocator default moves, and no GPU, served, latency, quality
+or capacity measurement was run. The committed report fixtures are synthetic
+and exercise refusal paths only; no live capture of this report exists. Gates:
+`tests/test_full_engine_resource_report.py`,
+`tests/test_runtime_fixed_resource_admission.py`,
+`tests/test_runtime_provenance.py`.
+
 Re-stamped (2026-09-12, `claude/518-data-manifest-at-submit`) for the campaign
 submit path (#518). **`dispatch_tessera_campaign.py submit` now derives a
 PrismaBuild data manifest for every row and refuses a row whose read set it
