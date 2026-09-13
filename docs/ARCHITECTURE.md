@@ -2195,6 +2195,21 @@ unknown fixed/full-model resources. Operator observations alone cannot become
 a measured-runtime table, and no pin, format default or serving gate changes.
 Gate: `tests/test_native_operator_panel.py`.
 
+That boundary has now been exercised on a receipt a producer actually wrote on
+GPU, not only on synthetic fixtures:
+`experiments/pq267_native_receipt_qualification.py` consumes one
+`tessera.native_dense_operator_receipt.v1` receipt and reports both the
+observation and the obligations a `prismaquant.measured_runtime_prices.v2`
+native row still owes beyond it. On the 2026-09-13 LFM2.5-8B-A1B R1792 receipt
+the observation is admitted as `operator_evidence` with both phases measured
+and a complete per-phase scratch bound, and the row remains inadmissible for
+two reasons the driver names: the panel's `cost_sha256` is a producer fixture
+rather than a `prismaquant.joint_aura.operator.v1` row, and the table itself
+still has no recomputable `tessera.full_engine_resource_report.v1` with a
+timing partition (#420, #237). Nothing about the consumer changed.
+Gate: `tests/test_pq267_native_receipt_qualification.py`;
+see `docs/research/native_receipt_qualification_267_2026-09-13.md`.
+
 Re-stamped (2026-09-07, `codex/campaign-capture-reuse-20260907`) for
 **reusable campaign calibration** (§4.10; #305). With an existing full census,
 `--capture-calibration-out` captures once and exits before encoding. The shared
