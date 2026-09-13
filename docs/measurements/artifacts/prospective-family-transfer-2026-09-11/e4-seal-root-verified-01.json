@@ -1,0 +1,41 @@
+{
+  "verified_unix": 1789172405.3639872,
+  "action_key": "d138a631c049d469e86b0c4244969fbdf5420cde1b28c466db0c7e202afb400b",
+  "rc": 0,
+  "receipt_sha256": "a68082955e3e5801806cb318567d866f5799d0abc21b701c995528869f426ff2",
+  "result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "seal_file_sha256": "11a7b89319d7554ad2d4f62992c6431b1bb620be55479dfee1d68e75c0a8498c",
+  "seal_content_sha256": "4a44179d9ae4b794f0b0bed6e9fbb90238009853b09e2dd9953680adf76c71d6",
+  "protocol_file_sha256": "8a051fc9f2d0d2d3d7423a5a9dedf6c8f8dff7dd8d941a31ca1763cf638f31bf",
+  "preselection_sha256": "2504bd45047e14d534304c9d269896efa18942f3b27dbd6643ce40b2bcd41c1c",
+  "prediction_count": 257,
+  "forms": [
+    "affine_bf_from_paired_endpoints",
+    "rate_linear_delta_from_bf"
+  ],
+  "audit_rates": [
+    833,
+    1087
+  ],
+  "audits_measured_before_seal": false,
+  "inputs": {
+    "bf_source": {
+      "curve_sha256": "8c403d36f58c9f3351814c1eed56460edf960abe7148070587a5a85dd5f673ab",
+      "plan_sha256": "1bccd8aab9bf446840acef87563e4fdde6f10df5374655995d7006536ec5fc6f"
+    },
+    "e4_left": {
+      "curve_sha256": "ab381e4fd511185f2d038d13cc366791e7fffff6b733a85f2f52363cf057bb39",
+      "plan_sha256": "dc135ffe3d65515572808fd97d020414d1cb19524ecc5000ea8d461bcd8fa1e3"
+    },
+    "e4_right": {
+      "curve_sha256": "b572776059dac9f0eeba9b9d3b707978df37b61701281beda0d9db927909f080",
+      "plan_sha256": "262edbcdf641629123f42a6c9a44d3b9134b1c1fb5a42349586eba58fd186b99"
+    }
+  },
+  "fit": {
+    "alpha": 9.503680946998211e-07,
+    "beta": 0.996641682116494,
+    "left_rate": 832,
+    "right_rate": 1088
+  }
+}
