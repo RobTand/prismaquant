@@ -202,8 +202,9 @@ SPEC_NAMED_STUDY_PRODUCER = "d403cc5a3199a348cc7ee6262f4adbdab8138745"
 #: live.
 #:
 #: The key ``reader-pin-387eda36`` names the state the audit was *taken*
-#: through, not today's reader pin.  The reader pin moved to ``1c827abc``
-#: (contract v23 / lane schema v10), and ``export.py`` at ``1c827abc`` is
+#: through, not today's reader pin.  The reader pin moved to ``7dbbacbd``
+#: (contract v24 / lane schema v10, unchanged), and ``export.py`` at
+#: ``7dbbacbd`` is
 #: byte-identical to the frozen study producer ``d403cc5a`` -- so
 #: :func:`tessera_source_state` resolves an import at the current pin under the
 #: name ``study-producer-d403cc5a``, which is already in
@@ -358,18 +359,37 @@ def live_pins() -> DomainPins:
 #: table (#527), which no number here reads.  A pin move whose ``export.py`` or
 #: ``grammar.py`` digest were NEW would land here as a re-measurement, not as a
 #: re-transcription; this one is a re-transcription because the bytes say so.
+#:
+#: **Re-taken 2026-09-13 for the v24 pin, and it is a re-transcription for the
+#: same reason.**  The pin moved ``1c827abc`` -> ``7dbbacbd`` (contract v23 ->
+#: v24), and both deciding files were hashed at the new commit rather than
+#: assumed:
+#:
+#: * ``src/tessera/grammar.py`` is ``f2545274…`` at ``7dbbacbd`` -- unchanged,
+#:   so the rate-range and whole-unit-quota refusals that set the domain
+#:   endpoints have not moved.
+#: * ``src/tessera/export.py`` is ``b1b04f26…`` at ``7dbbacbd`` -- the same
+#:   bytes as at ``1c827abc`` and as the frozen study producer ``d403cc5a``,
+#:   so :func:`tessera_source_state` keeps naming an import at the current pin
+#:   ``study-producer-d403cc5a`` and no new entry belongs in
+#:   :data:`TESSERA_SOURCE_STATES`.
+#:
+#: What v24 changed is two cells on ``gfx1201`` and that platform's
+#: ``serve_image``, which no number here reads: the legal domain is a fact
+#: about the rate grammar and the wire recipe, not about which device serves
+#: them.  :data:`AUDITED_RATE_COUNTS` therefore does not need re-measuring.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="1c827abc4affdd9bed9c6b25af0705480381bf3a",
+    reader_dev_pin_commit="7dbbacbd0900f6b6f468690e2525cc018564382d",
     reader_dev_pin_contract_sha256=(
-        "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
+        "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
     ),
-    serving_runtime_pinned_commit="1c827abc4affdd9bed9c6b25af0705480381bf3a",
+    serving_runtime_pinned_commit="7dbbacbd0900f6b6f468690e2525cc018564382d",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
+        "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
     ),
     producer_installed_contract_sha256=(
-        "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
+        "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
     ),
 )
 

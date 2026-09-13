@@ -12,21 +12,29 @@ set of families the contract backs there.  A contract that later backs E4M3 on
 ``gfx1151`` widens the menu with no edit to either profile, and this test
 follows it.
 
-The second half is the part a reader is most likely to get wrong. The contract
-says ``gfx1151`` EXECUTES ``bf16_unquantized`` for ``TESSERA_BF16_K1``. That is
-not a receipt, and this side does not treat it as one: no cell names either AMD
-platform, so the resolver answers ``unattested`` with source
-``serving_runtime_contract:<v>:no_cell`` for every family including the backed
-one, and export fails closed without an explicit override. Backing is
-permission to PRICE; a cell is permission to ship.
+The second half is the part a reader is most likely to get wrong, and contract
+v24 is what makes it concrete. The contract says BOTH AMD platforms EXECUTE
+``bf16_unquantized`` for ``TESSERA_BF16_K1``. That was never a receipt, and
+this side does not treat it as one -- backing is permission to PRICE, a cell is
+permission to ship. At v24 exactly one of the two acquired cells:
 
-That answer is asserted twice, through both resolvers, because neither alone
+* ``gfx1201`` (RDNA4) ships two ``TESSERA_BF16_K1`` dense cells at rung
+  ``q256 = 1792``, decode and batch, whose smoke the runtime records as clean.
+  So the resolver answers ``backed_with_serve_flag`` for that family at that
+  rung, and ``unattested`` everywhere else on the platform -- ``:no_cell`` for
+  the two quantized families, ``:rung_not_listed`` for any other BF16 rung.
+* ``gfx1151`` (Strix Halo) still ships none, and still answers ``:no_cell``
+  for every family including the backed one. Nobody here owns the hardware;
+  ``docs/strix-halo-tester-protocol.md`` in the Tessera tree is what a receipt
+  must satisfy.
+
+Each answer is asserted twice, through both resolvers, because neither alone
 says it: ``ServingLaneSpec.route_status_for``, which speaks the ``no_cell``
 vocabulary, and ``tessera_render.tessera_attesting_cells``, the predicate
 behind ``tessera_menu.route_admission`` and therefore the path production runs.
 Since #537 both resolve the pinned contract themselves -- the tracked serving
 pin plus the ``runtime_contract.json`` it names -- so no fixture hands either
-one a table, and ``:no_cell`` below is the answer the pinned runtime gives.
+one a table, and the answers below are the ones the pinned runtime gives.
 Each has its own sm_121 control, so ``unattested`` here is never allowed to
 mean "nothing was read".
 """
@@ -62,6 +70,17 @@ def _families() -> tuple[str, ...]:
 def _backed_by_contract(platform: str) -> set[str]:
     entry = _packaged()["lane_eligibility"]["platforms"][platform]["executes"]
     return {family for family, contract in entry.items() if contract is not None}
+
+
+def _cells_on(platform: str) -> list[dict]:
+    """The packaged cells on one platform. Read, never typed.
+
+    A later contract that mints a ``gfx1151`` cell, or a second rung on
+    ``gfx1201``, moves these tests with it instead of leaving them asserting a
+    roster the runtime has left behind.
+    """
+    return [c for c in _packaged()["lane_eligibility"]["cells"]
+            if c["platform"] == platform]
 
 
 def _rung_name(family: str) -> str:
@@ -184,17 +203,67 @@ def test_bf16_passthrough_stays_on_the_menu():
 # ---------------------------------------------------------------------------
 # Export fails closed: backing is not a receipt
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("platform", sorted(set(AMD_PROFILES.values())))
-def test_every_family_resolves_unattested_no_cell_on_the_amd_targets(
-        platform, pinned_table):
+def test_every_family_resolves_unattested_no_cell_on_gfx1151(pinned_table):
+    """The platform with no receipt: backing prices, it does not ship."""
+    assert not _cells_on("gfx1151"), "gfx1151 has cells; this test moved"
     lane = _tessera_lane()
     for family in _families():
         status, flags, source = lane.route_status_for(
-            _rung_name(family), platform=platform)
+            _rung_name(family), platform="gfx1151")
         assert status == ROUTE_STATUS_UNATTESTED, (family, status, source)
         assert source == f"serving_runtime_contract:{_version()}:no_cell", (
             family, source)
         assert flags == ()
+
+
+def test_gfx1201_attests_bf16_at_its_rung_and_nothing_else(pinned_table):
+    """Contract v24: the first attested route on an AMD device.
+
+    The two cells are ``TESSERA_BF16_K1`` dense at ``q256 = 1792``, so the
+    resolver answers ``backed_with_serve_flag`` there -- and keeps answering
+    ``unattested`` for the two families the platform publishes ``executes:
+    null`` for. That pair is the whole point: a cell widens exactly one
+    (family, rung), never the platform.
+    """
+    cells = _cells_on("gfx1201")
+    assert cells, "gfx1201 has no cells; this test moved"
+    attested = {(c["family"], rung) for c in cells for rung in c["rungs_q256"]}
+    assert attested == {("TESSERA_BF16_K1", 1792)}, sorted(attested)
+    ids = {f"serving_runtime_contract:{_version()}:{c['id']}" for c in cells}
+
+    lane = _tessera_lane()
+    status, flags, source = lane.route_status_for(
+        _rung_name("TESSERA_BF16_K1"), platform="gfx1201")
+    assert status == "backed_with_serve_flag", (status, source)
+    assert source in ids, source
+    assert flags == ("TESSERA_SERVE_MODE=resident|streamed",), flags
+
+    for family in _families():
+        if family == "TESSERA_BF16_K1":
+            continue
+        status, flags, source = lane.route_status_for(
+            _rung_name(family), platform="gfx1201")
+        assert status == ROUTE_STATUS_UNATTESTED, (family, status, source)
+        assert source == f"serving_runtime_contract:{_version()}:no_cell", (
+            family, source)
+        assert flags == ()
+
+
+def test_an_unlisted_bf16_rung_on_gfx1201_is_still_unattested(pinned_table):
+    """A cell attests a rung, not a family on a device.
+
+    The control for the test above: with the platform now carrying cells, the
+    refusal that must still bite is ``rung_not_listed``, and it is a different
+    token from ``no_cell`` precisely so a reader can tell which fact was
+    absent.
+    """
+    lane = _tessera_lane()
+    status, flags, source = lane.route_status_for(
+        "TESSERA_BF16_K1_R1024", platform="gfx1201")
+    assert status == ROUTE_STATUS_UNATTESTED, (status, source)
+    assert source == (
+        f"serving_runtime_contract:{_version()}:rung_not_listed"), source
+    assert flags == ()
 
 
 def test_the_same_lane_still_attests_the_sm121_cells(pinned_table):
@@ -223,17 +292,16 @@ def test_the_resolver_reads_the_pin_with_nothing_supplied(pinned_table):
     assert "absent" not in source, source
 
 
-@pytest.mark.parametrize("platform", sorted(set(AMD_PROFILES.values())))
-def test_the_live_seam_finds_no_attesting_cell_on_the_amd_targets(platform):
+def test_the_live_seam_finds_no_attesting_cell_on_gfx1151():
     """The same fact through the path production actually runs.
 
     ``tessera_render.tessera_attesting_cells`` is the match predicate behind
     ``tessera_menu.route_admission`` -- the one seam that reads a serving
     contract on Tessera's behalf -- and it resolves the pinned table itself.
-    The contract gives neither AMD platform a ``serve_image``, so no serving
-    context can honestly be built for one; this test LENDS it the release's
-    default image and still gets nothing, which is the stronger statement:
-    the absence is the absence of a cell, not of an image.
+    The contract gives ``gfx1151`` no ``serve_image``, so no serving context
+    can honestly be built for it; this test LENDS it the release's default
+    image and still gets nothing, which is the stronger statement: the absence
+    is the absence of a cell, not of an image.
     """
     from prismaquant.lane_eligibility import ServingContext
 
@@ -242,16 +310,54 @@ def test_the_live_seam_finds_no_attesting_cell_on_the_amd_targets(platform):
     # ``lru_cache``d, so read it fresh rather than inherit what ran first.
     tr._pinned_serving_table.cache_clear()
     image = str(_packaged()["versions"]["default_serve_image"])
-    assert _packaged()["lane_eligibility"]["platforms"][platform][
+    assert _packaged()["lane_eligibility"]["platforms"]["gfx1151"][
         "serve_image"] is None
     for family in _families():
         for structure in ("dense", "routed_moe"):
             context = ServingContext(
-                platform=platform, structure=structure, residency="resident",
+                platform="gfx1151", structure=structure, residency="resident",
                 runtime_image=image, execution_mode="eager")
             assert tr.tessera_attesting_cells(
                 _rung_name(family), serving_context=context) == (), (
                     family, structure)
+
+
+def test_the_live_seam_attests_bf16_on_gfx1201_under_its_own_image():
+    """And the same seam now finds the gfx1201 cells -- on their OWN image.
+
+    The serving context is built from the platform's ``serve_image``, not the
+    release default: at v24 ``gfx1201`` publishes a ROCm digest of its own,
+    and a cell is scoped to the image its receipt was taken through. Lending
+    it the sm_121 image must find nothing, which is what separates "this route
+    is attested" from "this route is attested anywhere".
+    """
+    from prismaquant.lane_eligibility import ServingContext
+
+    tr._pinned_serving_table.cache_clear()
+    platforms = _packaged()["lane_eligibility"]["platforms"]
+    rocm = platforms["gfx1201"]["serve_image"]
+    assert isinstance(rocm, str) and rocm, rocm
+    # Port-less by grammar: a digest reference's repository may carry no colon.
+    assert ":" not in rocm.split("@", 1)[0], rocm
+
+    context = ServingContext(
+        platform="gfx1201", structure="dense", residency="resident",
+        runtime_image=rocm, execution_mode="eager")
+    assert tr.tessera_attesting_cells(
+        _rung_name("TESSERA_BF16_K1"), serving_context=context) != ()
+    # The quantized families have no cell there and still resolve to nothing.
+    for family in _families():
+        if family == "TESSERA_BF16_K1":
+            continue
+        assert tr.tessera_attesting_cells(
+            _rung_name(family), serving_context=context) == (), family
+    # A different image is a different claim.
+    wrong = ServingContext(
+        platform="gfx1201", structure="dense", residency="resident",
+        runtime_image=str(_packaged()["versions"]["default_serve_image"]),
+        execution_mode="eager")
+    assert tr.tessera_attesting_cells(
+        _rung_name("TESSERA_BF16_K1"), serving_context=wrong) == ()
 
 
 def test_the_live_seam_still_attests_a_sm121_rung():
@@ -267,10 +373,29 @@ def test_the_live_seam_still_attests_a_sm121_rung():
         _rung_name("TESSERA_BF16_K1"), serving_context=context) != ()
 
 
-@pytest.mark.parametrize("platform", sorted(set(AMD_PROFILES.values())))
-def test_the_contract_declares_the_platform_but_ships_no_cell(platform):
-    """Stated once, because both halves above depend on it."""
+def test_the_contract_declares_gfx1151_and_ships_no_cell_for_it():
+    """Stated once, because the gfx1151 halves above depend on it."""
     lane_block = _packaged()["lane_eligibility"]
-    assert platform in lane_block["platforms"]
-    assert not [c for c in lane_block["cells"] if c["platform"] == platform]
-    assert lane_block["platforms"][platform]["serve_image"] is None
+    assert "gfx1151" in lane_block["platforms"]
+    assert not _cells_on("gfx1151")
+    assert lane_block["platforms"]["gfx1151"]["serve_image"] is None
+
+
+def test_gfx1201_ships_cells_and_a_serve_image_one_of_them_attests():
+    """Stated once, because the gfx1201 halves above depend on it.
+
+    v10's rule: a platform's ``serve_image`` is a digest iff it has at least
+    one cell, and the image must be one its OWN cells attest. At v23 gfx1201
+    had no cell and ``null``; v24 gives it both halves at once, which is why
+    the two moved in the same contract bump.
+    """
+    lane_block = _packaged()["lane_eligibility"]
+    assert "gfx1201" in lane_block["platforms"]
+    cells = _cells_on("gfx1201")
+    assert len(cells) == 2, [c["id"] for c in cells]
+    serve_image = lane_block["platforms"]["gfx1201"]["serve_image"]
+    assert serve_image is not None
+    assert serve_image in {c["runtime"]["image"] for c in cells}
+    # The AMD lane is Tessera-16 only, and a cell does not change that: the
+    # platform's ``executes`` map is what prices, and it did not move at v24.
+    assert _backed_by_contract("gfx1201") == {"TESSERA_BF16_K1"}

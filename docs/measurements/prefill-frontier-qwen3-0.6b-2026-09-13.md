@@ -325,7 +325,7 @@ output.)
 
 Consequence, traced: `admit_fixed_resources` can never pass for *any* v2 table →
 `load_measured_runtime_table` always refuses → `producer_admitted` is never set →
-`build_runtime_resources` refuses at `measured_runtime_prices.py:476`. **A v2
+`build_runtime_resources` refuses at `measured_runtime_prices.py:477`. **A v2
 table structurally cannot reach the allocator today**, no matter what it
 contains. `FIXED_TERM_FIELDS`' own docstring records this as owed design work
 ("Set native/full-engine charge boundary").

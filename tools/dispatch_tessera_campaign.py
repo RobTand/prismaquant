@@ -136,6 +136,244 @@ class MergeRefused(RuntimeError):
     """The rows do not describe one campaign."""
 
 
+class RowClassRefused(RuntimeError):
+    """The spec asks for a row this fleet cannot place, or must not place."""
+
+
+# ---------------------------------------------------------------------------
+# Row classes
+# ---------------------------------------------------------------------------
+
+#: The class every subcommand builds today, and the one a spec that declares no
+#: ``classes`` block is entirely made of.  Naming it does not change a row: the
+#: default class resolves to exactly the spec-level ``python`` / ``env`` /
+#: ``tags`` / ``cpus`` / ``container`` a row has always been built from, so the
+#: row dict -- and therefore the action key a finished row is memoized under --
+#: is byte-identical to what the same spec produced before classes existed.
+DEFAULT_ROW_CLASS = "default"
+
+#: What a class may declare.  ``python``/``env``/``tags``/``cpus``/``container``
+#: override the spec-level value of the same name; ``env`` merges over the
+#: spec's rather than replacing it, so a class states only what differs.
+ROW_CLASS_FIELDS = frozenset({
+    "python", "env", "tags", "cpus", "container",
+    "wire_shared", "weights_only", "_why",
+})
+
+#: Where the placement facts live: ISA, container GPU runtime and the host
+#: interpreters actually observed running work under each tag, each with the
+#: PrismaBuild action key that ran it.
+FLEET_INTERPRETERS = Path(__file__).resolve().parent / "fleet_interpreters.json"
+FLEET_INTERPRETERS_SCHEMA = "prismaquant.fleet_interpreters.v1"
+
+#: Campaign flags that make a row's bytes depend on a Hessian.  A weights-only
+#: class may not carry one: the Hessian-aware wire is NOT bit-comparable across
+#: ISAs (RobTand/tessera#472 -- ``torch.linalg.cholesky`` diverges between
+#: cuSOLVER and rocSOLVER by one fp32 epsilon, ``ldl`` explains 53.78% of the
+#: differing rendered elements and the encoder's own consumption of it a
+#: further 15.28%), so such a row encoded off-ISA would not be this campaign's
+#: bytes.  ``--seed-checkpoint`` / ``--seed-wire-dir`` are here for the same
+#: reason: they adopt anchors another box measured under its own Hessian.
+HESSIAN_AWARE_FLAGS = (
+    "--calibration-census", "--calibration-cache", "--calibration-cache-sha256",
+    "--capture-calibration-out", "--seed-checkpoint", "--seed-wire-dir",
+)
+
+#: Modules a weights-only class may never run.  ``tessera_campaign`` is the
+#: whole campaign: its ``census`` row runs a calibration forward over the scope,
+#: its ``capture`` row writes the calibration cache and its pricing rows fit and
+#: consume a Hessian, so every one of its row kinds is either Hessian-aware or
+#: needs the census environment (a resident model, transformers, a PrismaQuant
+#: install).  Listing the module rather than trusting the flags is what makes
+#: the refusal hold for a row kind that has not been written yet.
+WEIGHTS_ONLY_FORBIDDEN_MODULES = frozenset({"prismaquant.tessera_campaign"})
+
+
+def load_fleet_interpreters(path=None) -> dict:
+    """The placement attestation table, checked for shape before it is trusted."""
+
+    source = Path(path) if path is not None else FLEET_INTERPRETERS
+    table = json.loads(source.read_text())
+    if not isinstance(table, dict) or table.get("schema") != FLEET_INTERPRETERS_SCHEMA:
+        raise RowClassRefused(
+            f"{source}: not a {FLEET_INTERPRETERS_SCHEMA} document")
+    tags = table.get("tags")
+    if not isinstance(tags, dict) or not tags:
+        raise RowClassRefused(f"{source}: declares no tags")
+    for tag, shape in tags.items():
+        if not isinstance(shape, dict):
+            raise RowClassRefused(f"{source}: tag {tag!r} is not an object")
+        for field in ("isa", "gpu_runtime"):
+            if not isinstance(shape.get(field), str) or not shape[field]:
+                raise RowClassRefused(f"{source}: tag {tag!r} declares no {field}")
+        interpreters = shape.get("interpreters")
+        if not isinstance(interpreters, dict):
+            raise RowClassRefused(
+                f"{source}: tag {tag!r} declares no interpreters mapping")
+        for interpreter, record in interpreters.items():
+            if not isinstance(record, dict) or not isinstance(
+                    record.get("attested_by"), str) or not record["attested_by"]:
+                raise RowClassRefused(
+                    f"{source}: interpreter {interpreter} on tag {tag!r} names no "
+                    "PrismaBuild action key that ran it")
+    return table
+
+
+def row_class(spec: dict, name: str = DEFAULT_ROW_CLASS) -> dict:
+    """Resolve one class against the spec-level values it inherits.
+
+    A spec with no ``classes`` block has exactly one class, the default, and it
+    IS the spec: same interpreter, same environment, same tags, same container.
+    That is the property the action key depends on, so it is stated here rather
+    than left to the caller.
+    """
+
+    base = {
+        "name": name,
+        "python": spec["python"],
+        "env": dict(spec["env"]),
+        "tags": list(spec.get("tags", ["gb10"])),
+        "cpus": int(spec.get("cpus", 4)),
+        "wire_shared": True,
+        "weights_only": False,
+    }
+    if "container" in spec:
+        base["container"] = spec["container"]
+    declared = spec.get("classes") or {}
+    if name not in declared:
+        if name != DEFAULT_ROW_CLASS:
+            raise RowClassRefused(
+                f"the spec declares no row class {name!r}; it has "
+                f"{sorted(declared) or [DEFAULT_ROW_CLASS]}")
+        return base
+    override = declared[name]
+    if not isinstance(override, dict):
+        raise RowClassRefused(f"row class {name!r} is not an object")
+    unknown = set(override) - ROW_CLASS_FIELDS
+    if unknown:
+        raise RowClassRefused(
+            f"row class {name!r} declares {sorted(unknown)}, which a class does "
+            f"not own; a class may set {sorted(ROW_CLASS_FIELDS - {'_why'})}")
+    resolved = {**base, **{k: v for k, v in override.items() if k != "_why"}}
+    if "env" in override:
+        if not isinstance(override["env"], dict):
+            raise RowClassRefused(f"row class {name!r} env is not an object")
+        resolved["env"] = {**spec["env"], **override["env"]}
+    resolved["tags"] = list(resolved["tags"])
+    resolved["cpus"] = int(resolved["cpus"])
+    for flag in ("wire_shared", "weights_only"):
+        if not isinstance(resolved[flag], bool):
+            raise RowClassRefused(f"row class {name!r} {flag} must be a boolean")
+    if not resolved["tags"]:
+        raise RowClassRefused(f"row class {name!r} names no placement tag")
+    return resolved
+
+
+def _class_isa(resolved: dict, fleet: dict) -> str:
+    """The one ISA this class's tags place it on, or a refusal naming why not."""
+
+    tags = fleet["tags"]
+    found = {}
+    for tag in resolved["tags"]:
+        shape = tags.get(tag)
+        if shape is None:
+            raise RowClassRefused(
+                f"row class {resolved['name']!r} names tag {tag!r}, which "
+                f"{FLEET_INTERPRETERS.name} does not attest; add the tag with "
+                "its ISA, its container GPU runtime and the interpreters "
+                "observed running there")
+        found.setdefault(shape["isa"], []).append(tag)
+    if len(found) != 1:
+        raise RowClassRefused(
+            f"row class {resolved['name']!r} spans {len(found)} instruction "
+            f"sets ({', '.join(sorted(found))}); a row is placed on one of its "
+            "tags and the wire it writes is not the same object on both")
+    return next(iter(found))
+
+
+def _attest_placement(resolved: dict, fleet: dict) -> None:
+    """Refuse a class this fleet cannot actually run where it is sent."""
+
+    tags = fleet["tags"]
+    container = resolved.get("container")
+    for tag in resolved["tags"]:
+        shape = tags[tag]
+        if container is not None:
+            declared = container.get("gpu_runtime", "nvidia")
+            if declared != shape["gpu_runtime"]:
+                raise RowClassRefused(
+                    f"row class {resolved['name']!r} declares container GPU "
+                    f"runtime {declared!r}, and tag {tag!r} attaches its GPU "
+                    f"with {shape['gpu_runtime']!r}; the container would start "
+                    "without the device it was admitted for")
+            continue
+        if resolved["python"] not in shape["interpreters"]:
+            attested = sorted(shape["interpreters"])
+            raise RowClassRefused(
+                f"row class {resolved['name']!r} runs {resolved['python']}, "
+                f"which is not attested on tag {tag!r}; that tag attests "
+                f"{attested or 'no host interpreter'}. Run it there once and "
+                f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
+                "action key, or give the class a container")
+
+
+def validate_row_classes(spec: dict, *, fleet=None, where="spec") -> list[dict]:
+    """Check every declared class against the fleet, and say what each one is.
+
+    A spec that declares no ``classes`` block is not checked: it is the shape
+    every campaign in flight already has, and refusing it here would refuse
+    specs this tool accepts today for a reason that has nothing to do with
+    them.  A spec that DOES declare classes is checked in full, because the
+    only reason to declare one is to place a row somewhere new.
+
+    Two refusals carry the measurement rather than a taste.  A class whose
+    bytes must equal the campaign's (``wire_shared``, the default) may not sit
+    on an ISA other than the default class's: the Hessian-aware wire is not
+    bit-comparable across ISAs, so such a row would merge foreign bytes into
+    one table.  And a class that declares it does NOT share the wire must
+    declare ``weights_only``, because weights-only is the only encode measured
+    byte-identical across the two.
+    """
+
+    declared = spec.get("classes")
+    if declared is None:
+        return []
+    if not isinstance(declared, dict) or not declared:
+        raise RowClassRefused(f"{where}: classes must be a non-empty object")
+    fleet = load_fleet_interpreters() if fleet is None else fleet
+    default = row_class(spec, DEFAULT_ROW_CLASS)
+    default_isa = _class_isa(default, fleet)
+    _attest_placement(default, fleet)
+    records = []
+    for name in sorted(declared):
+        resolved = default if name == DEFAULT_ROW_CLASS else row_class(spec, name)
+        isa = default_isa if name == DEFAULT_ROW_CLASS else _class_isa(resolved, fleet)
+        if name != DEFAULT_ROW_CLASS:
+            _attest_placement(resolved, fleet)
+        if resolved["wire_shared"]:
+            if isa != default_isa:
+                raise RowClassRefused(
+                    f"{where}: row class {name!r} is placed on {isa} while this "
+                    f"campaign's default class is on {default_isa}, and it "
+                    "declares its bytes are the campaign's. A Hessian-aware "
+                    "Tessera wire is not bit-comparable across those two "
+                    "(RobTand/tessera#472). Declare wire_shared false and "
+                    "weights_only true, or keep the class on one ISA")
+        elif not resolved["weights_only"]:
+            raise RowClassRefused(
+                f"{where}: row class {name!r} declares wire_shared false "
+                "without weights_only; the only encode measured byte-identical "
+                "across instruction sets is the weights-only one")
+        records.append({
+            "class": name, "isa": isa, "tags": list(resolved["tags"]),
+            "python": resolved["python"], "cpus": resolved["cpus"],
+            "wire_shared": resolved["wire_shared"],
+            "weights_only": resolved["weights_only"],
+            "containerized": "container" in resolved,
+        })
+    return records
+
+
 # ---------------------------------------------------------------------------
 # The run spec
 # ---------------------------------------------------------------------------
@@ -170,6 +408,12 @@ def load_spec(path: Path) -> dict:
             "takes its deadline from the fleet, not from inside the round loop")
     if "container" in spec:
         validate_container(spec)
+    for name in sorted(spec.get("classes") or {}):
+        resolved = row_class(spec, name)
+        if "container" in resolved:
+            validate_container({"container": resolved["container"],
+                                "env": resolved["env"]})
+    validate_row_classes(spec, where=str(path))
     _process_baseline_bytes(spec, where=str(path))
     return spec
 
@@ -567,8 +811,39 @@ CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 18
 
 def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
          progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
-         module: str = "prismaquant.tessera_campaign") -> dict:
-    env = dict(spec['env'])
+         module: str = "prismaquant.tessera_campaign",
+         row_class_name: str = DEFAULT_ROW_CLASS) -> dict:
+    """One PrismaBuild row, built for one class of the spec.
+
+    The class supplies the interpreter, the environment, the placement tags,
+    the CPU count and the container; the default class supplies exactly the
+    spec-level values, so a row built for it is byte-identical to the row this
+    function returned before classes existed.  Nothing about the class is
+    written INTO the row: ``submit`` re-run is the resume, a finished row is a
+    CAS hit on its action key, and a key that moved is a row that re-runs.
+    Nothing records the class either: every subcommand today builds the
+    ``default`` class, so there is no second class in any plan to record, and
+    the first row kind that is built for another one records it in its own
+    plan entry when it lands.
+    """
+    resolved = row_class(spec, row_class_name)
+    if resolved["weights_only"]:
+        if module in WEIGHTS_ONLY_FORBIDDEN_MODULES:
+            raise RowClassRefused(
+                f"row class {row_class_name!r} is weights-only and {module} is "
+                "not: its census row runs a calibration forward over the whole "
+                "scope, its capture row writes the calibration cache, and its "
+                "pricing rows fit and consume a Hessian, whose wire is not "
+                "bit-comparable across instruction sets (RobTand/tessera#472)")
+        named = [flag for flag in HESSIAN_AWARE_FLAGS
+                 if any(arg == flag or arg.startswith(flag + "=")
+                        for arg in argv)]
+        if named:
+            raise RowClassRefused(
+                f"row class {row_class_name!r} is weights-only and this row's "
+                f"argv names {named}; those bytes depend on a Hessian this "
+                "class may not have measured or adopted")
+    env = dict(resolved['env'])
     policy_flag = '--streaming-capture-policy'
     bounded = (policy_flag+'=shared-inputs-bounded-v1' in argv or
                (policy_flag in argv and
@@ -579,18 +854,18 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
         from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
         env = {**BOUNDED_CAPTURE_ENV, **env}
         require_bounded_capture_environment(env)
-    command = [spec["python"], "-u", "-m", module, *argv]
-    if "container" in spec:
-        validate_container(spec)
+    command = [resolved["python"], "-u", "-m", module, *argv]
+    if "container" in resolved:
+        container_spec = {"container": resolved["container"], "env": env}
+        validate_container(container_spec)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
-                   json.dumps({"container": spec["container"], "env": env},
-                              sort_keys=True), "--", *command]
+                   json.dumps(container_spec, sort_keys=True), "--", *command]
     row = {
         "argv": command,
         "cwd": spec["cwd"],
-        "demand": {"gpu": 1, "cpu": int(spec.get("cpus", 4)), "mem_gb": int(mem_gb)},
+        "demand": {"gpu": 1, "cpu": int(resolved["cpus"]), "mem_gb": int(mem_gb)},
         "env": env,
-        "tags": list(spec.get("tags", ["gb10"])),
+        "tags": list(resolved["tags"]),
         # A row is one memoized action and a retry re-runs the same argv over
         # the same checkpoint, which is exactly what the journal is for.  The
         # policy is sealed into the action key, so it is spelled even though

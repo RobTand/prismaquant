@@ -239,18 +239,56 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: is, and a v10 document read by a v9-closed reader is refused by name, which
 #: is the designed fail-closed rather than a compatibility break.
 #:
+#: What moved v23 -> v24 (Tessera #474, merged as 27be1a602, with its #475
+#: on top), and nothing else:
+#:   1. two NEW cells, ``tessera_bf16_k1_dense_gfx1201_decode`` and
+#:      ``..._batch`` -- ``TESSERA_BF16_K1`` dense on ``gfx1201`` (RDNA4,
+#:      RX 9070 XT) at rung q256 = 1792, ``route_status``
+#:      ``backed_with_serve_flag``, ``qualification`` ``device_qualified``,
+#:      executing ``[{torch.mm, torch_window}]`` on a ROCm vLLM image;
+#:   2. ``lane_eligibility.platforms.gfx1201.serve_image`` stops being
+#:      ``null`` -- v10 requires it to be an image one of that platform's OWN
+#:      cells attests, and at v23 it had none.
+#: The lane schema does NOT move: v24 is additive for a v10 reader, every
+#: field these cells carry is a field v10 already defines, and the ten
+#: ``sm_121`` cells are byte-identical -- the answer's drift is exactly the
+#: two NEW lines and no reviewed line changed.
+#:
+#: THIS ONE IS NOT A RE-TRANSCRIPTION.  The two bumps before it moved grammar
+#: or prose and admitted what the previous pin admitted; this one admits a
+#: route that did not exist on this side.  ``cell_evidence_admits`` is
+#: status-only and both cells publish ``smoke.status: recorded``, so accepting
+#: this answer flips ``ServingLaneSpec.route_status_for`` and
+#: ``tessera_render.tessera_attesting_cells`` for ``TESSERA_BF16_K1_R1792``
+#: on ``gfx1201`` from ``unattested``/``:no_cell`` to
+#: ``backed_with_serve_flag``.  That is the whole review: the Tessera-16
+#: W16A16 lane is now attested on one AMD device.  ``gfx1151`` still ships no
+#: cell and still answers ``:no_cell`` for every family -- backing is
+#: permission to price, a cell is permission to ship, and only one of the two
+#: AMD platforms crossed that line.
+#:
+#: Two scope facts the receipts carry, recorded because a claim inherits the
+#: scope of the artifact it was measured on (principle 14's corollary): the
+#: grade is ``kl_lower_bound`` (a top-1024 teacher-student intersection bound,
+#: KL >= 0.004906 over 4088 prefill positions for batch and >= 0.004804 over
+#: 256 M=1 positions for decode), NOT ``kl_full_vocab`` -- no instrument in
+#: either tree produces a full-vocab KL, so a producer-side gate that expected
+#: one would refuse an artifact for a measurement that does not exist.  And
+#: the receipt's own scope line says gfx1201 under WSL2 proves the HIP code
+#: path; it says nothing about gfx1151 numerics and nothing about performance.
+#:
 #: The resident-H integration uses the reviewed runtime tree from Tessera
 #: PR #441, which this pin supersedes without changing any priced byte: the
 #: producer source identity changes and existing priced bytes keep their seal.
 #: No release tag names this development commit.
-TESSERA_DEV_PIN_COMMIT = "1c827abc4affdd9bed9c6b25af0705480381bf3a"
+TESSERA_DEV_PIN_COMMIT = "7dbbacbd0900f6b6f468690e2525cc018564382d"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "bafe8a4e9eff8551b34bbd2d7be9c29bf2cfa7bd836724ac9a9ab2f4e0bb922a"
+    "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -275,6 +313,43 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: cells, which gained the record and whose ``attribution`` moved
 #: ``unattributed`` -> ``shared_with_reference`` because v9 DERIVES it from
 #: that record.  Read those three and nothing else changed.
+#:
+#: Against the v24 contract the review is the two NEW ``gfx1201`` rows and
+#: nothing else: the ten ``sm_121`` rows below are byte-identical to the ones
+#: the v23 pin carried, in the same order, and no other key in this literal
+#: moved.  See :data:`TESSERA_DEV_PIN_COMMIT` for what accepting them admits.
+#:
+#: **The ``cells`` rows are POSITIONAL tuples, and this is the column order.**
+#: They stay positional -- a per-row dict would triple the diff a reviewer
+#: reads for no fact -- so the order lives here, beside the values, and it is
+#: the order :func:`contract_answer` builds.  ``platform`` has been column 1
+#: since the v10 re-review, which is what keeps two rows that differ only in
+#: their device from publishing as rows a reader cannot tell apart; v24 is the
+#: first contract where that actually happens.  The columns are::
+#:
+#:      0  id                     10  requires_serve_flags (sorted)
+#:      1  platform               11  executes [[symbol, decoder], ...]
+#:      2  family                 12  residency_modes (sorted)
+#:      3  structure              13  runtime {image, execution_modes}
+#:      4  regime                 14  runtime vllm version
+#:      5  rungs_q256 (sorted)    15  runtime torch version
+#:      6  activation_contract    16  evidence (see below)
+#:      7  route_status
+#:      8  qualification
+#:      9  requires_plugin
+#:
+#: Columns 13-15 are present only while the contract requires a serving
+#: context, and column 16 only while the cell publishes evidence -- both are
+#: conditional in :func:`contract_answer` and both hold at this pin.  Column
+#: 16 is itself positional, ``CellEvidence.answer()``::
+#:
+#:      0  grade                  4  smoke.control
+#:      1  smoke.status           5  smoke.artifact
+#:      2  kl kinds (sorted)      6  smoke.record
+#:      3  smoke.attribution
+#:
+#: A column added on either tuple is a WIDENED projection, and the rule above
+#: applies to it: it re-stales this pin even when no published value moved.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
  'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
@@ -332,7 +407,115 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                   'max_world_size': 1,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}}},
- 'cells': [['tessera_bf16_k1_dense_sm121_batch',
+ 'cells': [['tessera_bf16_k1_dense_gfx1201_batch',
+            'gfx1201',
+            'TESSERA_BF16_K1',
+            'dense',
+            'batch',
+            [1792],
+            'bf16_unquantized',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident|streamed'],
+            [['torch.mm', 'torch_window']],
+            ['resident', 'streamed'],
+            {'image': '192.168.1.107/prismaquant/vllm-rocm@sha256:0461258dfe253a3e0baca9c62804a4b41a21ab445b2624b6fca0d51711e14000',
+             'execution_modes': ['compiled', 'eager']},
+            '0.30.0.dev0',
+            '2.11.0+rocm7.2.4.git5fbd98f3',
+            ['kl_lower_bound',
+             'recorded',
+             ['topk_intersection_lower_bound@1024'],
+             'unattributed',
+             None,
+             None,
+             ['experiments/moe_greedy_smoke.py',
+              'repetitive iff the completion ends in a cycle: some period p '
+              'with 2p <= L has a p-periodic suffix holding >= 2 full periods '
+              '(s >= 2p), whatever its share of the completion; not_recorded '
+              'iff the completion is empty (L = 0), which is no completion '
+              'for a verdict to be true of; recorded otherwise; tokens are '
+              "the artifact tokenizer's canonical encoding of the returned "
+              'text',
+              'bf16_source',
+              [['P0', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P1', 'campaign', 'raw_completion', 'recorded', 'repetitive'],
+               ['P2', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P3', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P4', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P5', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P6', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P0', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P1',
+                'pure_greedy',
+                'raw_completion',
+                'recorded',
+                'repetitive'],
+               ['P2', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P3', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P4', 'pure_greedy', 'chat_template', 'recorded', 'recorded'],
+               ['P5', 'pure_greedy', 'chat_template', 'recorded', 'recorded'],
+               ['P6',
+                'pure_greedy',
+                'chat_template',
+                'recorded',
+                'recorded']]]]],
+           ['tessera_bf16_k1_dense_gfx1201_decode',
+            'gfx1201',
+            'TESSERA_BF16_K1',
+            'dense',
+            'decode',
+            [1792],
+            'bf16_unquantized',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident|streamed'],
+            [['torch.mm', 'torch_window']],
+            ['resident', 'streamed'],
+            {'image': '192.168.1.107/prismaquant/vllm-rocm@sha256:0461258dfe253a3e0baca9c62804a4b41a21ab445b2624b6fca0d51711e14000',
+             'execution_modes': ['compiled', 'eager']},
+            '0.30.0.dev0',
+            '2.11.0+rocm7.2.4.git5fbd98f3',
+            ['kl_lower_bound',
+             'recorded',
+             ['topk_intersection_lower_bound@1024'],
+             'unattributed',
+             None,
+             None,
+             ['experiments/moe_greedy_smoke.py',
+              'repetitive iff the completion ends in a cycle: some period p '
+              'with 2p <= L has a p-periodic suffix holding >= 2 full periods '
+              '(s >= 2p), whatever its share of the completion; not_recorded '
+              'iff the completion is empty (L = 0), which is no completion '
+              'for a verdict to be true of; recorded otherwise; tokens are '
+              "the artifact tokenizer's canonical encoding of the returned "
+              'text',
+              'bf16_source',
+              [['P0', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P1', 'campaign', 'raw_completion', 'recorded', 'repetitive'],
+               ['P2', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P3', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P4', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P5', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P6', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P0', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P1',
+                'pure_greedy',
+                'raw_completion',
+                'recorded',
+                'repetitive'],
+               ['P2', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P3', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P4', 'pure_greedy', 'chat_template', 'recorded', 'recorded'],
+               ['P5', 'pure_greedy', 'chat_template', 'recorded', 'recorded'],
+               ['P6',
+                'pure_greedy',
+                'chat_template',
+                'recorded',
+                'recorded']]]]],
+           ['tessera_bf16_k1_dense_sm121_batch',
             'sm_121',
             'TESSERA_BF16_K1',
             'dense',

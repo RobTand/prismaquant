@@ -26,10 +26,31 @@ from prismaquant.prismabuild_progress import PATH_ENV, TOKEN_ENV
 SAFE_PATH_ENV = "PYTHONSAFEPATH"
 
 
+#: How a container reaches the GPU it was admitted for, per GPU runtime.
+#:
+#: ``--gpus all`` is the NVIDIA container runtime's flag and nothing else's. A
+#: WSL2 ROCm box has no amdgpu driver and no NVIDIA runtime: the device is the
+#: Windows GPU paravirtualization node ``/dev/dxg`` and the userspace half of
+#: the driver lives on the host under ``/usr/lib/wsl/lib``, so a container
+#: there needs both and is refused the device by the other flag. The mapping
+#: is per runtime rather than per image because it is a property of the box.
+GPU_RUNTIME_FLAGS = {
+    "nvidia": ("--gpus", "all"),
+    "rocm-wsl": ("--device", "/dev/dxg",
+                 "--mount", "type=bind,src=/usr/lib/wsl/lib,dst=/usr/lib/wsl/lib,readonly"),
+}
+DEFAULT_GPU_RUNTIME = "nvidia"
+
+
 def validate_container(spec: dict) -> None:
     container = spec.get("container")
-    if not isinstance(container, dict) or set(container) - {"image", "mounts", "content_sha256", "archive"}:
-        raise RuntimeError("container must declare image and optional mounts/content_sha256/archive only")
+    if not isinstance(container, dict) or set(container) - {"image", "mounts", "content_sha256", "archive", "gpu_runtime"}:
+        raise RuntimeError("container must declare image and optional mounts/content_sha256/archive/gpu_runtime only")
+    if "gpu_runtime" in container and container["gpu_runtime"] not in GPU_RUNTIME_FLAGS:
+        raise RuntimeError(
+            "container.gpu_runtime must be one of "
+            f"{sorted(GPU_RUNTIME_FLAGS)}; a runtime with no declared flags "
+            "would silently start the container without its device")
     image = container.get("image")
     if not isinstance(image, str) or not image or image.startswith("-"):
         raise RuntimeError("container.image must name a Docker image")
@@ -67,6 +88,15 @@ def validate_container(spec: dict) -> None:
         targets.add(str(target))
         if not isinstance(mount.get("readonly", False), bool):
             raise RuntimeError("container mount readonly must be boolean")
+    runtime = container.get("gpu_runtime", DEFAULT_GPU_RUNTIME)
+    for flag, value in zip(GPU_RUNTIME_FLAGS[runtime], GPU_RUNTIME_FLAGS[runtime][1:]):
+        if flag == "--mount":
+            target = value.split("dst=", 1)[1].split(",", 1)[0]
+            if target in targets:
+                raise RuntimeError(
+                    f"container mount target {target} is the one the "
+                    f"{runtime} GPU runtime supplies; declaring it twice is a "
+                    "duplicate bind Docker refuses at launch")
     env = spec.get("env", {})
     if not isinstance(env, dict) or any(
             not isinstance(k, str) or not k or "=" in k or "\x00" in k
@@ -299,7 +329,9 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
                    uid: int, gid: int, image_id: str, content_sha256=None,
                    with_gpu=True, environ=None) -> list[str]:
     validate_container(spec)
-    argv = ["docker", "run", "--rm", *(["--gpus", "all"] if with_gpu else []), "--ipc=host",
+    gpu_flags = GPU_RUNTIME_FLAGS[
+        spec["container"].get("gpu_runtime", DEFAULT_GPU_RUNTIME)]
+    argv = ["docker", "run", "--rm", *(gpu_flags if with_gpu else []), "--ipc=host",
             "--user", f"{uid}:{gid}", "--workdir", "/workspace",
             "--entrypoint", "", "--mount",
             f"type=bind,src={cwd},dst=/workspace,readonly"]

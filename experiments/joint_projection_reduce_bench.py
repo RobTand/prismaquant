@@ -5,6 +5,7 @@ import inspect
 import json
 from pathlib import Path
 import shutil
+import sys
 import textwrap
 
 import torch
@@ -85,10 +86,38 @@ class Candidate:
         return actual
 
 
+def bind_prebuilt_binary(path, expected_sha256):
+    """Replay an already qualified binary instead of building a new one.
+
+    The qualification record binds one set of bytes by SHA256, so re-running
+    the gates under a different image must load those bytes rather than
+    compile a second binary that would carry a different digest.
+    """
+    import hashlib
+    import importlib.util
+    path = Path(path).resolve(strict=True)
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != expected_sha256:
+        raise SystemExit(f'bound binary bytes differ: {actual} != {expected_sha256}')
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    kernel.load_backend = lambda: module
+    return module
+
+
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--output', type=Path, required=True)
-    args, _ = parser.parse_known_args()
+    parser.add_argument('--binary', type=Path)
+    parser.add_argument('--binary-sha256')
+    args, rest = parser.parse_known_args()
+    if (args.binary is None) != (args.binary_sha256 is None):
+        raise SystemExit('--binary and --binary-sha256 are bound together')
+    if args.binary is not None:
+        bind_prebuilt_binary(args.binary, args.binary_sha256)
+        # The replay parses the same argv strictly; the binding is consumed here.
+        sys.argv = [sys.argv[0], '--output', str(args.output), *rest]
     candidate = Candidate(args.output)
     try:
         replay(variant_controller=candidate)

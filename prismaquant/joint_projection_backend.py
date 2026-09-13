@@ -13,6 +13,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import json
+import os
 from pathlib import Path
 import platform
 import re
@@ -26,6 +27,12 @@ SCHEMA = 'prismaquant.joint_projection_backend.v1'
 FUSED_NAME = 'fused_fp32_v1'
 QUALIFICATION_PATH = Path(__file__).with_name('kernels') / 'joint_projection_reduce_qualification.json'
 REFERENCE_IDENTITY = {'schema': SCHEMA, 'name': 'torch', 'expression': '(left * right).sum()'}
+#: The executing image identity, stamped into the container by
+#: ``tools/tessera_campaign_container.py`` from ``docker image inspect`` of the
+#: image it launched. It is the only in-container source of that identity that
+#: is measured rather than asserted: the launcher refuses a spec that sets this
+#: variable itself, and a process cannot otherwise read the image it runs in.
+CONTAINER_CONTENT_ENV = 'PRISMAQUANT_CONTAINER_CONTENT_SHA256'
 _PREWARM_SEAL = object()
 # Code modules only: all resident input tensors remain owned by the caller.
 _LOADED_MODULES = {}
@@ -70,25 +77,97 @@ def normalize_projection_backend(config=None):
     return config
 
 
-def _runtime_identity(device):
-    """Read the runtime/compiler/header identity once, before any lease."""
-    props = torch.cuda.get_device_properties(device)
+def _header_digest(path):
+    """One ATen header digest, or a refusable marker when it is absent."""
+    try:
+        return _sha(path)
+    except OSError as error:
+        return 'unavailable: %s' % error
+
+
+def _tool_version(argv):
+    """One compiler version string, or a refusable marker when it is absent."""
+    try:
+        return subprocess.check_output(argv, text=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        # An absent toolchain is a different toolchain: it becomes an ordinary
+        # inequality on the compiler axis instead of a traceback, so the caller
+        # refuses with the same message every other changed axis produces.
+        return 'unavailable: %s: %s' % (argv[0], error)
+
+
+def executing_image():
+    """The image this process runs in, or None when no launcher stamped one."""
+    return os.environ.get(CONTAINER_CONTENT_ENV) or None
+
+
+def _environment_identity():
+    """Every qualified axis that needs no capture, no render and no GPU.
+
+    This is the half of the runtime identity a CPU-only container can read, so
+    a plan preflight can refuse an unqualified image before a joint pass claims
+    a GB10 for hours. The ``device`` block is the other half; it needs
+    ``torch.cuda.get_device_properties`` and is added by ``_runtime_identity``.
+    """
     include = Path(torch.__file__).parent / 'include'
     qualification, _ = _qualification()
     return {'torch': str(torch.__version__), 'torch_git': torch.version.git_version,
             'cuda': torch.version.cuda, 'machine': platform.machine(),
-            'device': {'name': props.name, 'major': props.major, 'minor': props.minor,
-                       'multi_processor_count': props.multi_processor_count},
-            'headers': {name: _sha(include / name) for name in qualification['runtime']['headers']},
+            'headers': {name: _header_digest(include / name) for name in qualification['runtime']['headers']},
             'compiler': {
-                'nvcc_version': subprocess.check_output(['/usr/local/cuda/bin/nvcc', '--version'], text=True),
-                'cxx_version': subprocess.check_output(['c++', '--version'], text=True)}}
+                'nvcc_version': _tool_version(['/usr/local/cuda/bin/nvcc', '--version']),
+                'cxx_version': _tool_version(['c++', '--version'])},
+            'image': executing_image()}
+
+
+def _device_identity(device):
+    props = torch.cuda.get_device_properties(device)
+    return {'name': props.name, 'major': props.major, 'minor': props.minor,
+            'multi_processor_count': props.multi_processor_count}
+
+
+def _runtime_identity(device):
+    """Read the runtime/compiler/header identity once, before any lease."""
+    return dict(_environment_identity(), device=_device_identity(device))
+
+
+def _image_label(value):
+    if value is None:
+        return 'unidentified (no container launcher identity)'
+    record = _qualification()[0].get('image') or {}
+    if record.get('content_sha256') == value and record.get('reference'):
+        return '%s (content sha256 %s)' % (record['reference'], value)
+    return 'content sha256 ' + value
 
 
 def _require_runtime(actual, expected):
     if actual != expected:
         changed = sorted(key for key in set(actual) | set(expected) if actual.get(key) != expected.get(key))
-        raise RuntimeError('joint projection unqualified runtime identity: ' + ', '.join(changed))
+        detail = ''
+        if actual.get('image') != expected.get('image'):
+            # The axis that names the whole difference rather than one symptom
+            # of it: a changed compiler, header or torch build is what a
+            # changed image looks like from inside the container.
+            detail = '; qualified in image %s, executing in image %s' % (
+                _image_label(expected.get('image')), _image_label(actual.get('image')))
+        raise RuntimeError('joint projection unqualified runtime identity: ' + ', '.join(changed) + detail)
+
+
+def require_qualified_environment():
+    """Refuse an unqualified runtime without a capture, a render or a device.
+
+    Compares every capture-free axis of the packaged qualification against this
+    process. The ``device`` block is compared only when CUDA is present, so the
+    same check is usable both in the CPU-only plan-preflight container and on
+    the GB10 that executes the pass.
+    """
+    qualification, _ = _qualification()
+    expected = {key: value for key, value in qualification['runtime'].items() if key != 'device'}
+    actual = _environment_identity()
+    if torch.cuda.is_available():
+        expected['device'] = qualification['runtime']['device']
+        actual['device'] = _device_identity(torch.device('cuda', torch.cuda.current_device()))
+    _require_runtime(actual, expected)
 
 
 def validate_projection_backend_identity(identity):
