@@ -48,6 +48,42 @@ DENSE_PANEL_SCHEMA = "tessera.native_dense_panel.v1"
 BINDING_FIELDS = ("unit", "format", "run_id", "panel", "receipt", "memory_trace")
 PHASES = ("prefill", "decode")
 
+#: The one field of an attested native runtime record that a bound panel may
+#: differ in, and the only one.
+#:
+#: Every other field is a *comparability* coordinate: the GPU and its driver,
+#: the torch/CUDA build, the arithmetic flags, the image, the installed Tessera
+#: package and runtime contract, the execution mode, the measurement collector.
+#: Two rows measured under different values of any of them are not on the same
+#: clock, and a table that priced them against each other would be comparing
+#: two boxes. That equality is untouched.
+#:
+#: ``native_libraries`` is not a coordinate of the box. It is the set of shared
+#: objects the row's own route actually dispatched to, and a route may load its
+#: own: the fp4 route JIT-builds and ``dlopen``s a ``tessera_nvfp4_<hash>.so``
+#: that no fp8 or bf16 route loads. Requiring the whole record to be equal
+#: therefore put a route's kernel inside the box's identity and made a
+#: mixed-route table -- the only kind a format menu spans -- impossible to
+#: emit, over nine same-session cells whose records were otherwise identical.
+#:
+#: Moving it loosens nothing, because the binding that matters is per row and
+#: already exists, twice over:
+#:
+#: * ``runtime_provenance.admit_native_rows`` requires each row's *whole*
+#:   runtime record, ``native_libraries`` included, to equal the raw record of
+#:   the run its own binding names (``runtime_provenance.py`` ``:756``), so a
+#:   row cannot claim a runtime it was not measured on.
+#: * ``runtime_provenance._load_runtime_relation`` requires every production
+#:   library any native run loaded to exist in the full-engine run at the same
+#:   digest (``:434``), so an extension one route loads is either shown to be
+#:   the bytes the engine serves or the table is refused by name.
+#:
+#: It is also the model the relation already applies across its own runs
+#: (``:415-418``): one box, one image, one package; library *sets* may differ
+#: between runs, but a path present in both must carry the same bytes. This
+#: emitter was the stricter of the two, and it was the one that refused.
+PER_ROUTE_RUNTIME_FIELD = "native_libraries"
+
 def file_sha256(path: Path) -> str:
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -195,14 +231,73 @@ def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: st
             "cost_row_identity_sha256": cost_row["joint_operator_identity_sha256"]}
 
 
+def _require_one_runtime(panels: list[Mapping]) -> None:
+    """Refuse panels that are not on one clock; allow one route its own kernels.
+
+    Three checks, and between them they are the whole-record equality this
+    replaced, partitioned rather than relaxed. Each comparison is over the same
+    canonical JSON digest the whole-record check used, so ``false`` and ``0``
+    stay different values here as they were before.
+
+    1. The runtime records must declare the same fields. A field one panel
+       carries and another does not is refused, not exempted, so a future
+       producer field cannot join :data:`PER_ROUTE_RUNTIME_FIELD` by accident.
+    2. Every field except :data:`PER_ROUTE_RUNTIME_FIELD` must be equal. This
+       is the comparability invariant and it is exactly as strong as it was.
+    3. A library path that more than one panel loaded must carry the same bytes
+       in each. One run may load *more* than another; it may never load a
+       different ``libtorch.so`` and call the timings comparable.
+    """
+    first = panels[0]["runtime"]
+    if not isinstance(first.get(PER_ROUTE_RUNTIME_FIELD), Mapping):
+        raise RuntimePriceError("native runtime record declares no loaded libraries")
+    for panel in panels[1:]:
+        runtime = panel["runtime"]
+        if set(runtime) != set(first):
+            raise RuntimePriceError("native receipts were produced on more than one runtime: "
+                                    "their runtime records declare different fields")
+        for field in sorted(set(first) - {PER_ROUTE_RUNTIME_FIELD}):
+            if identity_sha256(runtime[field]) != identity_sha256(first[field]):
+                raise RuntimePriceError("native receipts were produced on more than one runtime: "
+                                        f"{field} differs")
+        libraries = runtime[PER_ROUTE_RUNTIME_FIELD]
+        if not isinstance(libraries, Mapping):
+            raise RuntimePriceError("native runtime record declares no loaded libraries")
+        for path in sorted(set(libraries) & set(first[PER_ROUTE_RUNTIME_FIELD])):
+            if libraries[path] != first[PER_ROUTE_RUNTIME_FIELD][path]:
+                raise RuntimePriceError("native receipts were produced on more than one runtime: "
+                                        f"one loaded library carries different bytes: {path}")
+
+
+def unshared_native_libraries(panels: list[Mapping]) -> list[dict]:
+    """Per panel, the loaded libraries that not every bound panel loaded.
+
+    This is the emission report's answer to "which kernel did this row's own
+    route dispatch to". It is read off each panel's own attested
+    ``runtime.native_libraries`` and nothing else: no table here decides which
+    route owns which ``.so``, because a producer-side guess about that is
+    exactly the asserted runtime claim principle 14 refuses. On a table whose
+    rows all loaded the same libraries every entry is empty.
+    """
+    shared = set.intersection(*(set(panel["runtime"][PER_ROUTE_RUNTIME_FIELD]) for panel in panels))
+    return [{path: panel["runtime"][PER_ROUTE_RUNTIME_FIELD][path]
+             for path in sorted(set(panel["runtime"][PER_ROUTE_RUNTIME_FIELD]) - shared)}
+            for panel in panels]
+
+
 def derive_context(panels: list[Mapping], *, relation: Mapping) -> dict:
-    """The one workload/runtime context every bound panel was frozen under."""
+    """The one workload/runtime context every bound panel was frozen under.
+
+    "One runtime" means one box, one image, one package and one execution mode
+    -- not one set of loaded kernels. See :data:`PER_ROUTE_RUNTIME_FIELD` for
+    why those are two questions and where the second one is answered.
+    """
     if not panels:
         raise RuntimePriceError("no native receipts were bound; a table needs at least one row")
     first = panels[0]
+    _require_one_runtime(panels)
     for panel in panels[1:]:
-        for what, key in (("runtime", lambda p: identity_sha256(p["runtime"])),
-                          ("source model", lambda p: p["source_sha256"]),
+        for what, key in (("source model", lambda p: p["source_sha256"]),
                           ("calibration", lambda p: p["calibration_sha256"]),
                           ("prompt token count", lambda p: p["phases"]["prefill"]["m"])):
             if key(panel) != key(first):
@@ -314,6 +409,7 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
         "runtime_provenance": relation_ref, "context": context,
         "fixed_resources": {"declared": fixed, "evidence": fixed_evidence, "report": report_verdict},
         "rows": [{"unit": item["row"]["unit"], "format": item["row"]["format"], "run_id": item["binding"]["run_id"],
+                  "runtime_sha256": identity_sha256(item["panel"]["runtime"]), "unshared_native_libraries": unshared,
                   "prefill_ms": item["row"]["resources"]["prefill_ms"], "decode_ms": item["row"]["resources"]["decode_ms"],
                   "samples": {phase: len(item["row"][phase]["samples_ms"]) for phase in PHASES},
                   "peak_scratch_bytes": item["row"]["resources"]["peak_scratch_bytes"],
@@ -325,7 +421,7 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
                   "panel": item["binding"]["panel"], "receipt": item["binding"]["receipt"],
                   "memory_trace": item["binding"]["memory_trace"],
                   "unknown": list(item["observation"]["unknown"])}
-                 for item in bound],
+                 for item, unshared in zip(bound, unshared_native_libraries([item["panel"] for item in bound]))],
         "admission": admission,
     }
     out.with_name(out.stem + ".emission.json").write_text(json.dumps(emission, indent=1, sort_keys=True, allow_nan=False) + "\n")
