@@ -14,6 +14,7 @@ import json
 import os
 import pickle
 from pathlib import Path
+import socket
 
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
@@ -58,10 +59,40 @@ def canonical_json_sha256(value: object, *, where: str) -> str:
     return hashlib.sha256(canonical_json_bytes(value, where=where)).hexdigest()
 
 
+_TEMP_SUFFIX: "str | None" = None
+
+
+def unique_temp_suffix() -> str:
+    """The staging suffix one process appends to a file it is publishing.
+
+    A fixed ``.tmp`` makes the staging path a function of the destination
+    alone, so two processes publishing the same cell write the same inode and
+    each ``os.replace`` can publish the other's half-written bytes.  The
+    suffix below is unique per (host, pid), which is what a PB fan-out needs:
+    rows own disjoint units, and a row that is retried or overlaps another
+    stages somewhere nobody else writes.
+
+    It adds **exactly one** dot, and that is load-bearing rather than
+    cosmetic.  ``torch.save`` names the zip archive inside the file after the
+    basename minus its last extension, so staging ``<name>.pt`` at
+    ``<name>.pt.tmpsparky123`` keeps the archive name ``<name>.pt`` and the
+    published bytes identical to a direct save, while ``<name>.pt.tmp.123``
+    -- or a hostname carrying a dot -- would silently change them.
+    """
+    global _TEMP_SUFFIX
+    if _TEMP_SUFFIX is None:
+        host = "".join(c for c in socket.gethostname() if c.isalnum())
+        suffix = f".tmp{host}{os.getpid()}"
+        if suffix.count(".") != 1:
+            raise ValueError("staging suffix must add exactly one extension")
+        _TEMP_SUFFIX = suffix
+    return _TEMP_SUFFIX
+
+
 def atomic_write_bytes(path: Path, payload: bytes) -> None:
     """Publish bytes durably; a crash leaves either the old or new file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
+    temporary = path.with_name(path.name + unique_temp_suffix())
     with temporary.open("wb") as handle:
         handle.write(payload)
         handle.flush()

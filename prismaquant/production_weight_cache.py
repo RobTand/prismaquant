@@ -86,7 +86,7 @@ import torch.nn as nn
 
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
-from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
 from prismaquant.render_score import (
     gate_render_candidate,
     normalize_row_weights,
@@ -1581,7 +1581,11 @@ def _store_rendered_weight_entry(
     if cache_dir_path is not None:
         fname = _cache_weight_filename(qname, fmt)
         final_path = cache_dir_path / fname
-        tmp_path = cache_dir_path / (fname + ".tmp")
+        # Per-process staging: a fan-out that re-renders a cell another writer
+        # is publishing must not share its inode. The suffix adds exactly one
+        # dot so torch's archive name -- and the published bytes -- are the
+        # same as a direct save (``unique_temp_suffix``).
+        tmp_path = cache_dir_path / (fname + unique_temp_suffix())
         torch.save(stored, tmp_path)
         if durable:
             fd = os.open(tmp_path, os.O_RDONLY)

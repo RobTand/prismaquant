@@ -1,7 +1,51 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/537-route-status-reads-the-pin`. Stamps
+As of: 2026-09-13 · `claude/549-gpu-render-synthesis`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `claude/549-gpu-render-synthesis`) for a **standalone
+`synthesize` stage, and a decode that runs on the device its caller reserved**
+(#549). Synthesizing an adopted rung's missing PWC shard (the 2026-09-12 stamp
+below) was only ever done on the way past, inside the joint `prepare` pass.
+Measured on the GLM first export: 125,144 shards at **2.6 cells/s** on one CPU
+core -- 53 % of it -- writing 43 MB/s over NFS for 10.7 h, inside an action
+holding a GB10 at **5 W of a 140 W envelope**. That is principle 7's bug shape,
+not a cost: the phase is one decode per wire with no shared state, it needs no
+model, capture or GPU, and nothing after it starts until it ends.
+
+Three changes, none of which moves a published byte. **The decode takes a
+device.** `load_measured_anchor_input` → `_resolve_render_origin` →
+`_synthesize_render_from_wire` → `_decode_wire` now carry `synthesis_device`,
+defaulting to `cpu` so every existing caller is unchanged; `execute` passes
+`cuda`, which it has already required (`require_cuda_hot_path`). Tessera's
+decoder is device-parameterized and the shard published is the canonical CPU
+BF16 tensor either way, so the bytes are identical -- measured across
+x86/aarch64, torch 2.10/2.13, CPU/CUDA, fused/eager, and gated by
+`test_a_cuda_decode_publishes_the_same_shard_as_a_cpu_decode` on real
+E4M3_K1 / E2M1_K2 / BF16_K1 wires. **The stage is addressable on its own.**
+`python -m prismaquant.tessera_joint_aura synthesize --plan … --units lo:hi
+[--device cuda] [--mirror-root DIR --compare] [--i-am-authorized]` walks
+`sorted(census)[lo:hi]`, runs every roster, seal and fanout gate over the whole
+census, and synthesizes only its own cells. It is idempotent (an existing
+shard is skipped, the origin marker is published before the shard) and
+fannable through `pbcampaign` rows with disjoint ranges; PrismaBuild owns the
+distribution. A scoped read carries its scope, cannot also verify the complete
+payload, and is refused by `execute`, so a partial roster can never be read as
+the campaign's input. `--mirror-root` publishes into a mirror of the render
+paths and `--compare` byte-compares against the campaign's own shards, which
+is how the stage is measured without being able to replace them. **Staging
+names are unique per writer.** `_store_rendered_weight_entry` and
+`cost_stage_checkpoint.atomic_write_bytes` staged at a fixed `<name>.tmp`, a
+function of the destination alone, so two writers of one cell shared an inode;
+`unique_temp_suffix()` adds `.tmp<host><pid>` and asserts it adds exactly one
+dot, because `torch.save` names the zip archive after the basename minus its
+last extension and a second dot would change the published bytes. **The loop
+says what it committed**: a cumulative count and rate every `--log-every`
+shards, the per-run count in `results.json` as `renders_synthesized_now`
+(never inside the per-origin census, which the prepare/run boundary compares
+exactly), and a PrismaBuild `progress-v1` report after each durable shard that
+is a no-op outside an admitted action. No format, default, wire, serving gate
+or published byte changes. Gate: `tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-13, `claude/537-route-status-reads-the-pin`) because
 **`ServingLaneSpec.route_status_for` now reads the pinned Tessera runtime

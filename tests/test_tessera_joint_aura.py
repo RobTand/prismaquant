@@ -305,6 +305,7 @@ def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypat
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
         census={"model": "fixture", "attention_implementation": "eager"}, cells={},
+        unit_scope=None, render_mirror_root=None, synthesized_now=0,
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     # Called after the write, so it is where the live value can be read.
     during = {}
@@ -335,6 +336,7 @@ def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypat
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
         census={"model": "fixture", "attention_implementation": "eager"}, cells={},
+        unit_scope=None, render_mirror_root=None, synthesized_now=0,
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((1, 512), dtype=torch.int64), {"provenance": {**draw, "nsamples": 1}}))
@@ -371,10 +373,13 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
     draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     def intake(_inputs, **kwargs):
-        assert kwargs == {"reader": None,
+        # The command holds the CUDA reservation, so any shard it still has to
+        # synthesize decodes on that device rather than on one CPU core (#549).
+        assert kwargs == {"reader": None, "synthesis_device": "cuda",
                           **({"verify_payloads": False} if command == "prepare" else {})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
-            cells={}, payload={"provenance": {"hessian": {"calibration_identity": draw}}})
+            cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
+            payload={"provenance": {"hessian": {"calibration_identity": draw}}})
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((512, 512), dtype=torch.int64), {"provenance": draw}))
@@ -652,3 +657,254 @@ def test_render_census_counts_every_vocabulary_value_and_refuses_unknown_ones():
         render_origin_census(["adopted"])
     with pytest.raises(ValueError, match="carries no render_origin"):
         cell_render_census({("unit", "fmt"): {}})
+
+
+# --- #549: where the decode runs, what it stages, and saying so -------------
+
+
+#: The three rungs #549 measured its cpu/cuda byte agreement on.
+WIRE_RUNGS = ["TESSERA_E4M3_K1_R1024", "TESSERA_E2M1_K2_R896", "TESSERA_BF16_K1_R4096"]
+
+
+def _real_wire(fmt, shape=(64, 64), seed=549):
+    """A real Tessera wire for a small unit, encoded on the CPU.
+
+    Through ``encode_tessera_unit`` -- the one call PrismaQuant makes into
+    Tessera's byte path -- so the fixture is the wire the campaign writes for
+    this rung, not a second spelling of it. Real encoder, real bytes, real
+    bytes-only decoder; the surrounding campaign is still a fixture and
+    nothing here is a serving or GPU-qualification claim.
+    """
+    import torch
+    from prismaquant.tessera_render import encode_tessera_unit
+
+    weight = torch.randn(*shape, generator=torch.Generator().manual_seed(seed)).bfloat16()
+    _render, blob = encode_tessera_unit(weight, fmt, hessian_required=False, verify=False)
+    return weight, blob
+
+
+def _synthesis_kwargs(tmp_path, blob, fmt, shape):
+    wire = tmp_path / "wire" / f"{fmt}.tessera"
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    wire.write_bytes(blob)
+    return {"wire": wire, "record": {"blob_sha256": hashlib.sha256(blob).hexdigest()},
+            "name": "model.layers.0.mlp.down_proj", "fmt": fmt, "shape": list(shape),
+            "reader": None}
+
+
+@pytest.mark.parametrize("fmt", WIRE_RUNGS)
+def test_a_real_wire_synthesizes_the_same_shard_bytes_every_time(tmp_path, fmt):
+    """The shard is a function of (wire bytes, decoder) -- the property #549's
+    fan-out rests on. Two CPU decodes of one wire must publish one byte string."""
+    import torch
+    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.tessera_joint_aura import _synthesize_render_from_wire
+
+    weight, blob = _real_wire(fmt)
+    kwargs = _synthesis_kwargs(tmp_path, blob, fmt, weight.shape)
+    written = []
+    for run in ("a", "b"):
+        render = tmp_path / run / _cache_weight_filename(kwargs["name"], fmt)
+        assert _synthesize_render_from_wire(render, **kwargs) == "synthesized_from_wire"
+        written.append(render)
+    assert written[0].read_bytes() == written[1].read_bytes()
+    stored = torch.load(written[0], map_location="cpu", weights_only=True)
+    assert stored.dtype == torch.bfloat16 and stored.device.type == "cpu"
+    assert list(stored.shape) == list(weight.shape)
+
+
+@pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="CUDA device required")
+@pytest.mark.parametrize("fmt", WIRE_RUNGS)
+def test_a_cuda_decode_publishes_the_same_shard_as_a_cpu_decode(tmp_path, fmt):
+    """#549's whole premise: moving the decode onto the reserved GPU changes
+    where the work runs and nothing about the bytes it publishes."""
+    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.tessera_joint_aura import (
+        _render_origin_marker_path, _synthesize_render_from_wire)
+
+    weight, blob = _real_wire(fmt)
+    kwargs = _synthesis_kwargs(tmp_path, blob, fmt, weight.shape)
+    published = {}
+    for device in ("cpu", "cuda"):
+        render = tmp_path / device / _cache_weight_filename(kwargs["name"], fmt)
+        assert _synthesize_render_from_wire(render, device=device, **kwargs) == "synthesized_from_wire"
+        published[device] = (render.read_bytes(),
+                             _render_origin_marker_path(render).read_bytes())
+    assert published["cpu"] == published["cuda"]
+
+
+def test_the_decode_device_reaches_the_one_decode_seam(tmp_path, monkeypatch):
+    """The device is plumbed to the seam ``verify_anchor_render`` already uses,
+    and it defaults to the CPU so every existing caller keeps its behaviour."""
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    seen = _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    _unlink_render(tmp_path, names[0], fmt)
+    bridge.load_measured_anchor_input(config, verify_payloads=False)
+    assert [device for _blob, device in seen] == ["cpu"]
+    _unlink_render(tmp_path, names[0], fmt)
+    bridge.load_measured_anchor_input(config, verify_payloads=False, synthesis_device="cuda:3")
+    assert [device for _blob, device in seen] == ["cpu", "cuda:3"]
+
+
+def test_two_writers_of_one_cell_never_share_a_staging_path(tmp_path, monkeypatch):
+    """A fixed ``.tmp`` makes the staging path a function of the destination
+    alone, so a retried or overlapping writer can publish another's half file."""
+    import torch
+    from types import SimpleNamespace
+    from prismaquant import cost_stage_checkpoint as journal
+    from prismaquant.production_weight_cache import _store_rendered_weight_entry
+
+    tensor = torch.zeros((4, 4), dtype=torch.bfloat16)
+    real_save, staged = torch.save, []
+
+    def record(obj, path, *args, **kwargs):
+        staged.append(str(path))
+        return real_save(obj, path, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "save", record)
+    suffixes = []
+    for host, pid in (("dl380g10", 101), ("sparklina", 101), ("dl380g10", 202)):
+        monkeypatch.setattr(journal, "_TEMP_SUFFIX", None)
+        monkeypatch.setattr(journal, "socket", SimpleNamespace(gethostname=lambda host=host: host))
+        monkeypatch.setattr(journal.os, "getpid", lambda pid=pid: pid)
+        suffixes.append(journal.unique_temp_suffix())
+        _store_rendered_weight_entry(weights={}, cache_dir_path=tmp_path, qname="a.b",
+                                     fmt="NVFP4", tensor=tensor, weight_dtype=torch.bfloat16)
+    monkeypatch.setattr(journal, "_TEMP_SUFFIX", None)
+    assert len(set(suffixes)) == 3, "writers on one box or one name shared a suffix"
+    assert len(set(staged)) == 3, "two writers staged the same cell at one path"
+    assert all(s.count(".") == 1 and s.isascii() for s in suffixes)
+
+
+def test_the_staging_name_keeps_the_bytes_the_campaign_already_published(tmp_path, monkeypatch):
+    """``torch.save`` names the zip archive after the basename minus its LAST
+    extension, so ``<name>.pt.tmp`` and ``<name>.pt.tmpsparky7`` both publish
+    an archive named ``<name>.pt`` -- and a suffix carrying a second dot, or a
+    hostname carrying one, would silently publish different bytes for shards
+    the campaign has already written. The uniqueness is free; that is the
+    property it must not cost."""
+    import torch
+    from prismaquant import cost_stage_checkpoint as journal
+    from prismaquant.production_weight_cache import (
+        _cache_weight_filename, _store_rendered_weight_entry)
+
+    assert journal.unique_temp_suffix().count(".") == 1
+    tensor = torch.arange(16, dtype=torch.bfloat16).reshape(4, 4)
+    _store_rendered_weight_entry(weights={}, cache_dir_path=tmp_path, qname="a.b",
+                                 fmt="NVFP4", tensor=tensor, weight_dtype=torch.bfloat16)
+    published = tmp_path / _cache_weight_filename("a.b", "NVFP4")
+    legacy = tmp_path / "legacy" / published.name
+    legacy.parent.mkdir()
+    # Exactly what the pre-#549 writer did: one fixed ``.tmp``, then replace.
+    torch.save(tensor.contiguous(), legacy.with_name(legacy.name + ".tmp"))
+    legacy.with_name(legacy.name + ".tmp").replace(legacy)
+    assert published.read_bytes() == legacy.read_bytes()
+
+
+def test_a_scoped_read_walks_only_its_units_and_is_refused_as_a_campaign_input(tmp_path, monkeypatch):
+    """The fan-out unit: rows carry disjoint halves of ``sorted(names)``, and a
+    partial roster can never be mistaken for the campaign's own input."""
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    for name in names:
+        _unlink_render(tmp_path, name, fmt)
+    first = bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(0, 1))
+    assert set(first.formats_by_qname) == {sorted(names)[0]}
+    assert first.unit_scope == (0, 1) and first.synthesized_now == 1
+    second = bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(1, 2))
+    assert set(second.formats_by_qname) == {sorted(names)[1]}
+    assert second.synthesized_now == 1
+    whole = bridge.load_measured_anchor_input(config, verify_payloads=False)
+    assert set(whole.formats_by_qname) == set(names)
+    # Both halves were published by the scoped rows, so the complete read has
+    # nothing left to do -- the property the stage exists for.
+    assert whole.synthesized_now == 0 and whole.unit_scope is None
+    with pytest.raises(ValueError, match="cannot also verify the complete campaign payload"):
+        bridge.load_measured_anchor_input(config, unit_scope=(0, 1))
+    with pytest.raises(ValueError, match="outside the 2-unit census roster"):
+        bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(0, 5))
+
+
+@pytest.mark.parametrize("spec,expected", [("0:4", (0, 4)), (":4", (0, 4)), ("2:", (2, 7)),
+                                           (None, None)])
+def test_a_unit_range_is_read_off_the_sorted_census_roster(spec, expected):
+    from prismaquant.tessera_joint_aura import parse_unit_scope
+
+    assert parse_unit_scope(spec, 7) == expected
+    for bad in ("4:4", "5:2", "3", "1:2:3"):
+        with pytest.raises(ValueError):
+            parse_unit_scope(bad, 7)
+
+
+def test_the_standalone_stage_mirrors_its_shards_and_leaves_the_row_cache_alone(tmp_path, monkeypatch):
+    """Measuring mode publishes into a mirror and compares; it cannot replace
+    the campaign's bytes, and publishing into them needs explicit authority."""
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.production_weight_cache import _cache_weight_filename
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    plan = {"inputs": config}
+    mirror = tmp_path / "mirror"
+    with pytest.raises(ValueError, match="requires explicit authorization"):
+        bridge.synthesize_renders(plan, plan_sha256="0" * 64)
+    # The row cache holds both campaign shards; the mirror holds neither.
+    before = {n: (tmp_path / "campaign/rows/row-0000/cache"
+                  / _cache_weight_filename(n, fmt)).read_bytes() for n in names}
+    record = bridge.synthesize_renders(plan, plan_sha256="0" * 64, units="0:1",
+                                       mirror_root=mirror, compare=True,
+                                       receipt=tmp_path / "synth.json")
+    assert record["renders_synthesized_now"] == 1 and record["cells"] == 1
+    assert record["comparison"]["compared"] == 1 and record["comparison"]["differs"] == 1
+    assert record["unit_scope"] == (0, 1) and record["decoder_source"]["kind"] == "installed"
+    assert json.loads((tmp_path / "synth.json").read_text())["schema"] == bridge.SYNTHESIS_SCHEMA
+    assert all((tmp_path / "campaign/rows/row-0000/cache"
+                / _cache_weight_filename(n, fmt)).read_bytes() == before[n] for n in names)
+    # Idempotent: a second row over the same range writes nothing further.
+    again = bridge.synthesize_renders(plan, plan_sha256="0" * 64, units="0:1",
+                                      mirror_root=mirror, compare=True)
+    assert again["renders_synthesized_now"] == 0
+
+
+def test_the_synthesis_loop_reports_what_it_has_committed(tmp_path, monkeypatch, capsys):
+    """Closed-loop observability: the phase ran for hours saying nothing (#549)."""
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    for name in names:
+        _unlink_render(tmp_path, name, fmt)
+    reports = []
+    monkeypatch.setattr(bridge, "_pb_commit",
+                        lambda units, phase, unit=None: reports.append((units, phase, unit)))
+    data = bridge.load_measured_anchor_input(config, verify_payloads=False, log_every=1)
+    lines = [line for line in capsys.readouterr().out.splitlines() if "synthesized" in line]
+    assert len(lines) == 3 and "cells/s" in lines[-1]
+    assert data.synthesized_now == 2
+    assert [count for count, _, _ in reports] == [1, 2]
+    assert {phase for _, phase, _ in reports} == {"synthesize"}
+
+
+def test_progress_is_reported_only_into_an_admitted_action(tmp_path, monkeypatch):
+    """The reporting channel is the worker's; outside one it is a no-op, which
+    is why the call sites do not test how they were launched."""
+    from prismaquant.tessera_joint_aura import _pb_commit
+
+    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_PATH", raising=False)
+    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", raising=False)
+    assert _pb_commit(7, "synthesize") is False
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(tmp_path / "progress.json"))
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "t0ken")
+    assert _pb_commit(7, "synthesize", unit="a@b") is True
+    record = json.loads((tmp_path / "progress.json").read_text())
+    assert record == {"schema": "prismabuild.action_progress.v1", "token": "t0ken",
+                      "phase": "synthesize", "units_completed": 7, "unit": "a@b",
+                      "reported_unix": record["reported_unix"]}
