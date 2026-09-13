@@ -1,0 +1,31 @@
+{
+  "schema": "prismaquant.serving_profile.v1",
+  "id": "tessera_strix_halo_gfx1151",
+  "runtime": "vllm+tessera_plugin",
+  "target_platform": "gfx1151",
+  "emulation_only": true,
+  "_emulation_only_rationale": "EMULATION-ONLY, and it stays that way until a gfx1151 device receipt exists. It declares no export_lane and makes no serving claim. The pinned Tessera contract (v23, lane schema v10) DECLARES gfx1151 and publishes TESSERA_BF16_K1 as executing bf16_unquantized there -- but it ships NO CELL for the platform, because a cell is a device receipt and nobody here owns the hardware. So route_status_for answers `unattested` with source serving_runtime_contract:<v>:no_cell for every family on this target, and export fails closed without an explicit override. Backing is not a receipt: the contract says the build would dispatch these bytes natively, and nothing says a serve on this device has ever loaded, generated or been KL-measured. A Tessera rung selected under this profile is a REPORT about where the allocator would spend bytes on a Strix Halo, not an artifact. What turns the entry into cells is a Strix Halo tester's receipt, at which point emulation_only comes off in a reviewed commit and not before.",
+  "description": "RESEARCH-ONLY allocation profile for Tessera's WnA16 family on AMD Strix Halo (RDNA3.5, gfx1151), at the continuous 1/256-bpp rate axis. Tessera-16 (TESSERA_BF16_K1) plus BF16 passthrough is the whole menu, because that is what the pinned runtime publishes as executing there.",
+  "_no_format_rules_rationale": "Deliberately declares NO format_rules, and the menu is DERIVED rather than declared. Rob's ruling is that the RDNA3.5 lane is Tessera-16 WnA16 only, and the reason E2M1 and E4M3 are off this profile's menu is the pinned contract's own executes: null for gfx1151 -- a measured platform fact (principle 1's carve-out via principle 9: the runtime has no native route for those bytes on that device), not a profile opinion. Writing the ban here would be exactly the hardcoded format ban principle 1 vetoes, and it would go stale the day the runtime backs one more family. The menu is bounded on the Tessera side by tessera_menu.expand_tessera_menu -- family buildability, wire serialisability, shape legality, the TP shard, W(n<=A) and the route admission, which since PrismaQuant #528 asks the contract per platform -- and on the scalar side by FORMATS plus check_format_applicability. tests/test_tessera_amd_serving_profiles.py asserts the menu equals the set of families whose executes entry is non-null for this target, so a contract that backs more families widens the menu with no edit here.",
+  "tensor_parallel": {
+    "world_size": 1,
+    "_world_size_rationale": "1 is the honest default and also the pinned runtime's own ceiling: the tensor_parallel table in Tessera's packaged runtime_contract.json (axis vllm_tensor_parallel_world_size, semantics closed_world) pins every Tessera family at max_world_size 1. Strix Halo is a single-socket APU with one GPU, so the degree is also what the hardware offers; the rules below are declared at world_size 1 so the vocabulary is reviewed before the degree is.",
+    "rules": [
+      {
+        "id": "column_parallel_attention_and_mlp_in",
+        "when": {
+          "regex": "\\.(q_proj|k_proj|v_proj|qkv_proj|gate_proj|up_proj|gate_up_proj)$"
+        },
+        "kind": "column"
+      },
+      {
+        "id": "row_parallel_attention_and_mlp_out",
+        "when": {
+          "regex": "\\.(o_proj|down_proj)$"
+        },
+        "kind": "row"
+      }
+    ],
+    "_rules_rationale": "ENUMERATED, not inferred. `fused implies column-parallel` is wrong for units PrismaQuant already allocates -- MLA's q_a_proj and kv_a_proj_with_mqa are replicated, a router gate is replicated, and Qwen3.5's fused DeltaNet in_proj_qkvz is not head-sharded -- so the mapping is a declaration and an unmatched qname resolves to `none`, which makes the gate a no-op rather than a guess. Packed experts are `none` by construction in check_shape: expert parallelism cuts the stack and leaves each expert's 2-D unit whole."
+  }
+}

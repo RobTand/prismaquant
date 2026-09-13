@@ -1,7 +1,31 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `pq/529-lane-spec-per-platform`. Stamps
+As of: 2026-09-12 · `pq/530-amd-serving-profiles`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `pq/530-amd-serving-profiles`) for the two **AMD
+Tessera serving profiles** (#530): `serving_profile_specs/
+tessera_strix_halo_gfx1151.json` (RDNA3.5) and `tessera_research_gfx1201.json`
+(RDNA4). Both are `emulation_only`, declare a `target_platform` the pinned
+contract declares, carry no `format_rules` and no export lane, and take their
+menu from the contract rather than from a list anyone typed: the families
+`platforms[target].executes` does not publish as `null`, which under contract
+v23 is `{TESSERA_BF16_K1}` plus passthrough `BF16`. Rob's ruling — the RDNA3.5
+lane is Tessera-16 WnA16 only — is the contract read back, not a rule added on
+top of it.
+
+**Nothing here is shippable, and the profile says so in a field a gate reads.**
+Backing is permission to PRICE; a cell is permission to SHIP. Neither AMD
+platform has a cell, because a cell is a device receipt and nobody here owns a
+Strix Halo, so `serving_profiles.route_status_for` answers `unattested` with
+source `serving_runtime_contract:<v>:no_cell` for EVERY family on both targets
+— the backed one included — and export fails closed without an explicit
+override. §9's diagram and §9.4 are updated in this commit: the 2026-07-31
+"Strix Halo CANCELED / UNSUPPORTED" node was a statement about a **Gridbook**
+prototype and about lost hardware access, and it had been standing in for a
+claim about Tessera on AMD that nobody measured. Gates:
+`tests/test_tessera_amd_serving_profiles.py`, plus
+`tests/test_docs_staleness.py` and `tests/test_architecture_doc.py`.
 
 Re-stamped (2026-09-12, `pq/529-lane-spec-per-platform`) for the Tessera lane
 spec's **per-platform executed-contract derivation** (#529).
@@ -13570,7 +13594,8 @@ flowchart LR
 
   subgraph HW["hardware"]
     H1["NVIDIA GB10 DGX Spark<br/>Blackwell sm_121, 128 GB unified memory<br/>~121 GB usable serving budget"]
-    H2["Strix Halo<br/>CANCELED / UNSUPPORTED<br/>prototype removed after hardware access was lost;<br/>no qualified backend"]
+    H2["AMD Strix Halo<br/>RDNA3.5 gfx1151<br/>Tessera-16 WnA16 lane only (contract v23: E2M1/E4M3 executes null)<br/>emulation_only -- no cell, nobody here owns the hardware"]
+    H3["AMD RDNA4<br/>gfx1201<br/>same menu rule; the certification box<br/>emulation_only -- a receipt here proves the code path, never gfx1151"]
   end
 
   A1 -->|"serving profile vllm_packed_moe"| R1
@@ -13585,13 +13610,14 @@ flowchart LR
 
   R3 -.->|"no qualified deployment"| H2
   R4 -.->|"no qualified deployment"| H2
+  R5 -.->|"backed by the contract, attested by nothing: no cell"| H2
+  R5 -.->|"backed by the contract, attested by nothing: no cell"| H3
 
   classDef proven stroke:#2d7a2d,stroke-width:2px
   classDef pending stroke:#c07800,stroke-width:2px,stroke-dasharray:4
   classDef unsupported stroke:#c0392b,stroke-width:2px,stroke-dasharray:4
   class H1 proven
-  class A4,R5 pending
-  class H2 unsupported
+  class A4,R5,H2,H3 pending
 ```
 
 PrismaQuant paths below are repo-root-relative.
@@ -13792,9 +13818,9 @@ are NAMED by the lane spec, never vendored.
 (`prismaquant.tessera_serving_runtime_pin.v2`), read by
 `tessera_serving_runtime_pin.py`; and the contract the plugin packages,
 `tessera/serving/runtime_contract.json` (`tessera.runtime-contract.v1`, lane
-table `tessera.lane-eligibility.v8` as installed, with the consumer also
-reading the v7, v6, v5, v4 and legacy v3 grammars, each at its own member
-set), read through
+table `tessera.lane-eligibility.v10` as installed, with the consumer also
+reading the v9, v8, v7, v6, v5, v4 and legacy v3 grammars, each at its own
+member set), read through
 `importlib.resources`. PrismaQuant never vendors or imports the serving half.
 Unlike the Gridbook serving pin this one binds no wheel digest — Tessera
 publishes no wheel and is installed from a source checkout — but since
@@ -13841,6 +13867,44 @@ correctly. v21 retired that control from the cells. The published
 per vLLM module against a shared rate schedule, so a sharded form needs
 per-rank wires rather than a byte range. `expert_parallel.units` is empty.
 Both residency modes are receipted and both must be exercised.
+
+**The platform axis: which device, answered by the contract.** Lane schema v10
+(contract v23, Tessera #464) adds `platforms[key]`, and it is the axis the
+producer had been faking. Each entry carries a `backend` (`cuda` | `hip`), the
+arch key that backend names (`compute_capability` | `gcn_arch`), a `serve_image`
+(null exactly when the platform has no cells) and an `executes` map from family
+to the activation contract that family runs there — **or `null`, meaning the
+pinned runtime measurably has no native route for those bytes on that device.**
+v23 declares three: `sm_121` (the ten cells, all three families backed) and
+`gfx1151` / `gfx1201`, where `TESSERA_BF16_K1` executes `bf16_unquantized` and
+`TESSERA_E4M3_K1` / `TESSERA_E2M1_K2` are `null`. Rob's ruling follows the
+table rather than leading it: **the RDNA3.5 lane is Tessera-16 WnA16 only.**
+
+Three consequences, each in code rather than here. `tessera_serving_route(...,
+target_platform=...)` answers `unbacked` for a family whose entry is `null` and
+is byte-identical to the blind route otherwise, and `platform_backs` replaced a
+`min_capability_sm` regex that parsed a capability out of the *string*
+`"sm_121"` — an assertion about a runtime, which principle 14 does not allow
+(`tessera_formats.py`, `tessera_allocator.py::_capability_gate`). A platform the
+contract does not mention is a third state, `unstated`, and fails closed
+separately from `null`: silence is not permission. And the lane spec's
+`served_activation_quantization.executes_by_platform` is derived from
+`platforms[*].executes` and refused on drift, the per-platform half of the
+`executes` preflight (`tessera_export_lane.py`).
+
+**The AMD profiles are emulation-only, and a cell is why.** `serving_profile_
+specs/tessera_strix_halo_gfx1151.json` and `tessera_research_gfx1201.json`
+declare `target_platform` and `emulation_only: true`, carry no `format_rules`
+and no export lane, and their menu is not a list anyone typed: it is the set of
+families the contract does not publish as `null` for that target, which today is
+`{TESSERA_BF16_K1}` (plus passthrough `BF16`). Backing is permission to
+**price**; a **cell** is permission to **ship**, and neither AMD platform has
+one, because a cell is a device receipt and nobody here owns a Strix Halo. So
+`route_status_for` answers `unattested` with source
+`serving_runtime_contract:<v>:no_cell` for every family on both targets —
+including the backed one — and export fails closed without an explicit override
+(`serving_profiles.py`). A `gfx1201` receipt, when one exists, proves a code
+path on gfx12 and never stands in for gfx1151 numerics or performance.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
 Tessera `1c827abc4affdd9bed9c6b25af0705480381bf3a` (master's tip at review
@@ -14032,12 +14096,27 @@ launching, build → measure → delete before the next arm. **Never write to `/
 cleared it in 2026-04 and took the MiniMax artifacts with it. Set `TMPDIR` explicitly for any
 tool reaching for `mkdtemp()`.
 
-**Strix Halo / ROCm — CANCELED 2026-07-31; no supported backend.** Access to the only gfx1151
-machine was lost before build ABI, dispatch, fallback, graph, wheel-install, vLLM, or served
-quality gates could be completed. The prototype sources and dispatch hook were deleted from the
-canonical Gridbook tree; PrismaQuant contains no copy. ROCm is therefore unsupported and must
-fail through the ordinary absence of a qualified backend. Reintroduction requires new hardware,
-hard architecture attestation, installed-wheel tests, and the full served promotion ladder.
+**Strix Halo / ROCm — the 2026-07-31 cancellation was of a GRIDBOOK prototype, and is
+superseded for the Tessera lane as of 2026-09-12.** What was cancelled: access to the only
+gfx1151 machine was lost before build ABI, dispatch, fallback, graph, wheel-install, vLLM or
+served quality gates could be completed, and the prototype sources and dispatch hook were
+deleted from the canonical Gridbook tree. PrismaQuant still contains no copy, and the
+Gridbook lane itself retired on 2026-09-02. None of that is a claim about Tessera on AMD.
+
+What is true now: Tessera contract v23 declares `gfx1151` and `gfx1201`, publishes
+`TESSERA_BF16_K1` as executing `bf16_unquantized` on both, and publishes `null` for
+`TESSERA_E4M3_K1` and `TESSERA_E2M1_K2` — the pinned runtime has no native route for those
+bytes on those devices. Rob's ruling follows the contract: the RDNA3.5 lane is **Tessera-16
+WnA16 only**. `serving_profile_specs/tessera_strix_halo_gfx1151.json` and
+`tessera_research_gfx1201.json` allocate against that, `emulation_only: true`, no export lane.
+
+What is still absent is the thing that was absent before: a **cell**. Neither AMD platform has
+one, because a cell is a device receipt and nobody here owns a Strix Halo. So `route_status_for`
+answers `unattested` with source `serving_runtime_contract:<v>:no_cell` for every family on both
+targets — including the backed one — and export fails closed without an explicit override.
+Backing is permission to PRICE; a cell is permission to ship. Promotion still requires the full
+served ladder, and a `gfx1201` receipt proves a code path on gfx12 and never stands in for
+gfx1151 numerics or performance.
 
 The remainder of this subsection is a **frozen historical measurement record**, not an active
 implementation description, support claim, or build plan. Paths named below belonged to the
