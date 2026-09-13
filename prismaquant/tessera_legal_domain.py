@@ -200,6 +200,18 @@ SPEC_NAMED_STUDY_PRODUCER = "d403cc5a3199a348cc7ee6262f4adbdab8138745"
 #: refusals that set the domain endpoints have not moved at all.  ``export.py``
 #: separates them, and it is where ``_window_bits_for`` and ``wire_recipe``
 #: live.
+#:
+#: The key ``reader-pin-387eda36`` names the state the audit was *taken*
+#: through, not today's reader pin.  The reader pin moved to ``1c827abc``
+#: (contract v23 / lane schema v10), and ``export.py`` at ``1c827abc`` is
+#: byte-identical to the frozen study producer ``d403cc5a`` -- so
+#: :func:`tessera_source_state` resolves an import at the current pin under the
+#: name ``study-producer-d403cc5a``, which is already in
+#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES`.  The ``reader-pin-387eda36`` entry
+#: is kept because it is a real state with distinct bytes, and because
+#: re-labelling it would erase which bytes the audit actually read.  A future
+#: pin whose ``export.py`` digest is NEW belongs here as a new entry, and the
+#: numbers derived through it are a re-measurement, not a re-transcription.
 TESSERA_SOURCE_STATES = {
     "reader-pin-387eda36": {
         "commit": "387eda36fd410d6b2a4fb86b22285eab2a5e072c",
