@@ -1509,7 +1509,7 @@ class TrellisAdaptiveRateProposal:
     def as_dict(self) -> dict[str, object]:
         body: dict[str, object] = {
             "schema": TESSERA_ADAPTIVE_RATE_PROPOSAL_SCHEMA,
-            "surface": self.surface.as_dict(),
+            "surface": json.loads(self.surface.identity()),
             "alpha_loss_per_byte": self.alpha_loss_per_byte,
             "ranked_brackets": [
                 _deep_thaw(row) for row in self.ranked_brackets
