@@ -1,0 +1,1318 @@
+{
+  "audit_role": "e4_interior",
+  "currency": "output_mse_under_route_activation_contract",
+  "family": "e4",
+  "fit": {
+    "alpha": 9.503680946998211e-07,
+    "beta": 0.996641682116494,
+    "left_rate": 832,
+    "right_rate": 1088
+  },
+  "inputs": {
+    "bf_source": {
+      "curve_sha256": "8c403d36f58c9f3351814c1eed56460edf960abe7148070587a5a85dd5f673ab",
+      "plan_sha256": "1bccd8aab9bf446840acef87563e4fdde6f10df5374655995d7006536ec5fc6f"
+    },
+    "e4_left": {
+      "curve_sha256": "ab381e4fd511185f2d038d13cc366791e7fffff6b733a85f2f52363cf057bb39",
+      "plan_sha256": "dc135ffe3d65515572808fd97d020414d1cb19524ecc5000ea8d461bcd8fa1e3"
+    },
+    "e4_right": {
+      "curve_sha256": "b572776059dac9f0eeba9b9d3b707978df37b61701281beda0d9db927909f080",
+      "plan_sha256": "262edbcdf641629123f42a6c9a44d3b9134b1c1fb5a42349586eba58fd186b99"
+    }
+  },
+  "measured_prediction_distinction": "all values in predictions are pre-measurement predictions",
+  "predictions": [
+    {
+      "affine_bf_from_paired_endpoints": 1.4394205209100619e-05,
+      "rate": 832,
+      "rate_linear_delta_from_bf": 1.4394205209100619e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.425224215046332e-05,
+      "rate": 833,
+      "rate_linear_delta_from_bf": 1.4251892374694819e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.4385897683481201e-05,
+      "rate": 834,
+      "rate_linear_delta_from_bf": 1.4386126865773008e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.4238068143031694e-05,
+      "rate": 835,
+      "rate_linear_delta_from_bf": 1.4237927781657334e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.4140109136627924e-05,
+      "rate": 836,
+      "rate_linear_delta_from_bf": 1.4139767277043802e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.410555925703057e-05,
+      "rate": 837,
+      "rate_linear_delta_from_bf": 1.4105229564798094e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.4242976517415671e-05,
+      "rate": 838,
+      "rate_linear_delta_from_bf": 1.424323845888864e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3984670936053005e-05,
+      "rate": 839,
+      "rate_linear_delta_from_bf": 1.3984191070015584e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.388376327925753e-05,
+      "rate": 840,
+      "rate_linear_delta_from_bf": 1.3883071979137185e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.4089084704042796e-05,
+      "rate": 841,
+      "rate_linear_delta_from_bf": 1.4089213849821647e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.385115499484586e-05,
+      "rate": 842,
+      "rate_linear_delta_from_bf": 1.3850610992349743e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3994325432001988e-05,
+      "rate": 843,
+      "rate_linear_delta_from_bf": 1.3994392449312443e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.36904340600309e-05,
+      "rate": 844,
+      "rate_linear_delta_from_bf": 1.3689605662392523e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3897579242759022e-05,
+      "rate": 845,
+      "rate_linear_delta_from_bf": 1.3897577436416952e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3814065269445383e-05,
+      "rate": 846,
+      "rate_linear_delta_from_bf": 1.3813910639370874e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3281940380481498e-05,
+      "rate": 847,
+      "rate_linear_delta_from_bf": 1.3280121271996848e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3726572023085454e-05,
+      "rate": 848,
+      "rate_linear_delta_from_bf": 1.3726379748391082e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3591099983647354e-05,
+      "rate": 849,
+      "rate_linear_delta_from_bf": 1.3590579805544678e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3368032270092095e-05,
+      "rate": 850,
+      "rate_linear_delta_from_bf": 1.3366889023203044e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3485091787118058e-05,
+      "rate": 851,
+      "rate_linear_delta_from_bf": 1.3484471575786472e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3540242336082846e-05,
+      "rate": 852,
+      "rate_linear_delta_from_bf": 1.3539936549733511e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3406315777406458e-05,
+      "rate": 853,
+      "rate_linear_delta_from_bf": 1.340568729535363e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3266140219098837e-05,
+      "rate": 854,
+      "rate_linear_delta_from_bf": 1.3265167984499726e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3142166375239822e-05,
+      "rate": 855,
+      "rate_linear_delta_from_bf": 1.3140904981945312e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3378163553654369e-05,
+      "rate": 856,
+      "rate_linear_delta_from_bf": 1.3377825972327173e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3091451038807037e-05,
+      "rate": 857,
+      "rate_linear_delta_from_bf": 1.3090275928995254e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3212188890689912e-05,
+      "rate": 858,
+      "rate_linear_delta_from_bf": 1.3211549211078477e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3095009723540462e-05,
+      "rate": 859,
+      "rate_linear_delta_from_bf": 1.3094103780808553e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.3149397956188182e-05,
+      "rate": 860,
+      "rate_linear_delta_from_bf": 1.31488038697114e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2748105945056267e-05,
+      "rate": 861,
+      "rate_linear_delta_from_bf": 1.2746288239107173e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.285276173261402e-05,
+      "rate": 862,
+      "rate_linear_delta_from_bf": 1.285142526619154e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2907278679788524e-05,
+      "rate": 863,
+      "rate_linear_delta_from_bf": 1.290625450334204e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2924762100862974e-05,
+      "rate": 864,
+      "rate_linear_delta_from_bf": 1.2923925424956906e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2669189437093603e-05,
+      "rate": 865,
+      "rate_linear_delta_from_bf": 1.2667620162609694e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2986116327442524e-05,
+      "rate": 866,
+      "rate_linear_delta_from_bf": 1.2985743568449948e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.264834221595656e-05,
+      "rate": 867,
+      "rate_linear_delta_from_bf": 1.2646959869577756e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2382491425291542e-05,
+      "rate": 868,
+      "rate_linear_delta_from_bf": 1.2380341846807141e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2685222553640931e-05,
+      "rate": 869,
+      "rate_linear_delta_from_bf": 1.268422165612293e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2570996569084833e-05,
+      "rate": 870,
+      "rate_linear_delta_from_bf": 1.2569739359591381e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2597927817713153e-05,
+      "rate": 871,
+      "rate_linear_delta_from_bf": 1.2596889944482825e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2912898609831119e-05,
+      "rate": 872,
+      "rate_linear_delta_from_bf": 1.2913050660756653e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2420846541391932e-05,
+      "rate": 873,
+      "rate_linear_delta_from_bf": 1.2419469144653306e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.213575564829399e-05,
+      "rate": 874,
+      "rate_linear_delta_from_bf": 1.2133546187342859e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.233210331381769e-05,
+      "rate": 875,
+      "rate_linear_delta_from_bf": 1.2330684060479769e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2591503875098333e-05,
+      "rate": 876,
+      "rate_linear_delta_from_bf": 1.2591087294566705e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2230380767166039e-05,
+      "rate": 877,
+      "rate_linear_delta_from_bf": 1.2228875921671545e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1842938257827805e-05,
+      "rate": 878,
+      "rate_linear_delta_from_bf": 1.1840256460615706e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2427201594541714e-05,
+      "rate": 879,
+      "rate_linear_delta_from_bf": 1.242661713884985e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.2181147460671907e-05,
+      "rate": 880,
+      "rate_linear_delta_from_bf": 1.2179862480365955e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.184104923618123e-05,
+      "rate": 881,
+      "rate_linear_delta_from_bf": 1.1838746837078418e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1918745675460452e-05,
+      "rate": 882,
+      "rate_linear_delta_from_bf": 1.1916833672742655e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.214754571765916e-05,
+      "rate": 883,
+      "rate_linear_delta_from_bf": 1.214653327519244e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.196375859578066e-05,
+      "rate": 884,
+      "rate_linear_delta_from_bf": 1.1962255445752135e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1757809914287413e-05,
+      "rate": 885,
+      "rate_linear_delta_from_bf": 1.1755741380348184e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1788567247546345e-05,
+      "rate": 886,
+      "rate_linear_delta_from_bf": 1.1786730942375812e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1842158719144477e-05,
+      "rate": 887,
+      "rate_linear_delta_from_bf": 1.1840631585435801e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1790152611682556e-05,
+      "rate": 888,
+      "rate_linear_delta_from_bf": 1.178857882422335e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1294755778427694e-05,
+      "rate": 889,
+      "rate_linear_delta_from_bf": 1.129164127267046e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1633293112671057e-05,
+      "rate": 890,
+      "rate_linear_delta_from_bf": 1.1631447941695683e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.122221607818272e-05,
+      "rate": 891,
+      "rate_linear_delta_from_bf": 1.1219114315785816e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1277774525295759e-05,
+      "rate": 892,
+      "rate_linear_delta_from_bf": 1.1274988562348653e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.140730122261299e-05,
+      "rate": 893,
+      "rate_linear_delta_from_bf": 1.1405080305060267e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1472000214008215e-05,
+      "rate": 894,
+      "rate_linear_delta_from_bf": 1.1470125896195782e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.107468656948226e-05,
+      "rate": 895,
+      "rate_linear_delta_from_bf": 1.1071602037837636e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1668520103194513e-05,
+      "rate": 896,
+      "rate_linear_delta_from_bf": 1.1667565161133098e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.165810601024945e-05,
+      "rate": 897,
+      "rate_linear_delta_from_bf": 1.1657244564311497e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1270471335561373e-05,
+      "rate": 898,
+      "rate_linear_delta_from_bf": 1.1268432290378882e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1336307909570058e-05,
+      "rate": 899,
+      "rate_linear_delta_from_bf": 1.1334619297365123e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1465590774438668e-05,
+      "rate": 900,
+      "rate_linear_delta_from_bf": 1.1464466386001959e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1488326110781958e-05,
+      "rate": 901,
+      "rate_linear_delta_from_bf": 1.1487406919918897e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1092445548416864e-05,
+      "rate": 902,
+      "rate_linear_delta_from_bf": 1.1090320972684253e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.1440230386901287e-05,
+      "rate": 903,
+      "rate_linear_delta_from_bf": 1.1439406306656963e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0949473621692886e-05,
+      "rate": 904,
+      "rate_linear_delta_from_bf": 1.0947124458482449e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.089963843882e-05,
+      "rate": 905,
+      "rate_linear_delta_from_bf": 1.0897249937080744e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.096257802953576e-05,
+      "rate": 906,
+      "rate_linear_delta_from_bf": 1.0960530199000118e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0974758774682922e-05,
+      "rate": 907,
+      "rate_linear_delta_from_bf": 1.0972880576609612e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0753434145881199e-05,
+      "rate": 908,
+      "rate_linear_delta_from_bf": 1.0750938752579486e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0557362038217652e-05,
+      "rate": 909,
+      "rate_linear_delta_from_bf": 1.0554334541446053e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0809320724393501e-05,
+      "rate": 910,
+      "rate_linear_delta_from_bf": 1.0807270824031434e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0879622423465062e-05,
+      "rate": 911,
+      "rate_linear_delta_from_bf": 1.0877938001918608e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.049323229134932e-05,
+      "rate": 912,
+      "rate_linear_delta_from_bf": 1.0490374464211527e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0286126991995695e-05,
+      "rate": 913,
+      "rate_linear_delta_from_bf": 1.0282699883568114e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0847806367901332e-05,
+      "rate": 914,
+      "rate_linear_delta_from_bf": 1.0846400501307585e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.05177524087013e-05,
+      "rate": 915,
+      "rate_linear_delta_from_bf": 1.0515362968810393e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0102603644253067e-05,
+      "rate": 916,
+      "rate_linear_delta_from_bf": 1.0098943892700163e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0412751267378026e-05,
+      "rate": 917,
+      "rate_linear_delta_from_bf": 1.0410265187665857e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.06344375658712e-05,
+      "rate": 918,
+      "rate_linear_delta_from_bf": 1.0632827075696127e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0334175580979234e-05,
+      "rate": 919,
+      "rate_linear_delta_from_bf": 1.0331681905562107e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.861166917421485e-06,
+      "rate": 920,
+      "rate_linear_delta_from_bf": 9.857207963648307e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0148734205499488e-05,
+      "rate": 921,
+      "rate_linear_delta_from_bf": 1.0145872836098135e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0176641690362625e-05,
+      "rate": 922,
+      "rate_linear_delta_from_bf": 1.017400294678339e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0040555990821486e-05,
+      "rate": 923,
+      "rate_linear_delta_from_bf": 1.0037587276023885e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.035270865995519e-05,
+      "rate": 924,
+      "rate_linear_delta_from_bf": 1.03509203732699e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.007340629480112e-05,
+      "rate": 925,
+      "rate_linear_delta_from_bf": 1.0070805449124975e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.763899524989085e-06,
+      "rate": 926,
+      "rate_linear_delta_from_bf": 9.760384342527573e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0040934882879197e-05,
+      "rate": 927,
+      "rate_linear_delta_from_bf": 1.0038481796037502e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.001289505772796e-05,
+      "rate": 928,
+      "rate_linear_delta_from_bf": 1.0010476074739927e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.835340619554767e-06,
+      "rate": 929,
+      "rate_linear_delta_from_bf": 9.832451930869013e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.875029109379779e-06,
+      "rate": 930,
+      "rate_linear_delta_from_bf": 9.87240274419321e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 1.0005659851018282e-05,
+      "rate": 931,
+      "rate_linear_delta_from_bf": 1.0003602251451582e-05
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.611587637110443e-06,
+      "rate": 932,
+      "rate_linear_delta_from_bf": 9.608330746146976e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.611406349044553e-06,
+      "rate": 933,
+      "rate_linear_delta_from_bf": 9.60827743501369e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.519755260893432e-06,
+      "rate": 934,
+      "rate_linear_delta_from_bf": 9.516446104029797e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.641790228887751e-06,
+      "rate": 935,
+      "rate_linear_delta_from_bf": 9.639020873031257e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.384948548657149e-06,
+      "rate": 936,
+      "rate_linear_delta_from_bf": 9.381442318101563e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.609189195998716e-06,
+      "rate": 937,
+      "rate_linear_delta_from_bf": 9.60656716220143e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.468101758719667e-06,
+      "rate": 938,
+      "rate_linear_delta_from_bf": 9.465132899677542e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.33886421586753e-06,
+      "rate": 939,
+      "rate_linear_delta_from_bf": 9.335588461389932e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.207265395957172e-06,
+      "rate": 940,
+      "rate_linear_delta_from_bf": 9.203674789404204e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.218197066330352e-06,
+      "rate": 941,
+      "rate_linear_delta_from_bf": 9.214771883314654e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.360450185873075e-06,
+      "rate": 942,
+      "rate_linear_delta_from_bf": 9.35763293163916e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.135917664745424e-06,
+      "rate": 943,
+      "rate_linear_delta_from_bf": 9.13247240585946e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.987135455509665e-06,
+      "rate": 944,
+      "rate_linear_delta_from_bf": 8.983317442812222e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.445215046841357e-06,
+      "rate": 945,
+      "rate_linear_delta_from_bf": 9.44306918260196e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.940289712843307e-06,
+      "rate": 946,
+      "rate_linear_delta_from_bf": 8.936571022744033e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.851882774631291e-06,
+      "rate": 947,
+      "rate_linear_delta_from_bf": 8.847994773297785e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 9.059075092256544e-06,
+      "rate": 948,
+      "rate_linear_delta_from_bf": 9.056013841046706e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.720488810235391e-06,
+      "rate": 949,
+      "rate_linear_delta_from_bf": 8.716415234921726e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.850204953581479e-06,
+      "rate": 950,
+      "rate_linear_delta_from_bf": 8.84669706202601e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.622809893893422e-06,
+      "rate": 951,
+      "rate_linear_delta_from_bf": 8.618664351978111e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.876556080398948e-06,
+      "rate": 952,
+      "rate_linear_delta_from_bf": 8.873394158115389e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.7683579240337e-06,
+      "rate": 953,
+      "rate_linear_delta_from_bf": 8.76496000135063e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.496641557996806e-06,
+      "rate": 954,
+      "rate_linear_delta_from_bf": 8.492456638364843e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.607514619774265e-06,
+      "rate": 955,
+      "rate_linear_delta_from_bf": 8.60383188960867e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.612500041586246e-06,
+      "rate": 956,
+      "rate_linear_delta_from_bf": 8.60896269827549e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.461579539613311e-06,
+      "rate": 957,
+      "rate_linear_delta_from_bf": 8.45766223722677e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.333634580670973e-06,
+      "rate": 958,
+      "rate_linear_delta_from_bf": 8.329414738383889e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.465044407772636e-06,
+      "rate": 959,
+      "rate_linear_delta_from_bf": 8.461395956338436e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.368492196760174e-06,
+      "rate": 960,
+      "rate_linear_delta_from_bf": 8.364646987502056e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.375765020743525e-06,
+      "rate": 961,
+      "rate_linear_delta_from_bf": 8.3720729060488e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.553277762661563e-06,
+      "rate": 962,
+      "rate_linear_delta_from_bf": 8.55031238877757e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.50126485689717e-06,
+      "rate": 963,
+      "rate_linear_delta_from_bf": 8.498252806354856e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.304118617443223e-06,
+      "rate": 964,
+      "rate_linear_delta_from_bf": 8.300570843999822e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.105191675962069e-06,
+      "rate": 965,
+      "rate_linear_delta_from_bf": 8.101102179303155e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.229386691261469e-06,
+      "rate": 966,
+      "rate_linear_delta_from_bf": 8.22584427417894e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.054707481813294e-06,
+      "rate": 967,
+      "rate_linear_delta_from_bf": 8.05070504750205e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.850528171843136e-06,
+      "rate": 968,
+      "rate_linear_delta_from_bf": 7.845966315755959e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 8.275101196396672e-06,
+      "rate": 969,
+      "rate_linear_delta_from_bf": 8.27209858389466e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.54282431184638e-06,
+      "rate": 970,
+      "rate_linear_delta_from_bf": 7.5374827819274515e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.758080322642429e-06,
+      "rate": 971,
+      "rate_linear_delta_from_bf": 7.753592714543345e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.626093546271067e-06,
+      "rate": 972,
+      "rate_linear_delta_from_bf": 7.621289778825258e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.672522326385877e-06,
+      "rate": 973,
+      "rate_linear_delta_from_bf": 7.668003594751838e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.70053677120789e-06,
+      "rate": 974,
+      "rate_linear_delta_from_bf": 7.6962410258119e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.655260076751812e-06,
+      "rate": 975,
+      "rate_linear_delta_from_bf": 7.650940353265412e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.672396331180084e-06,
+      "rate": 976,
+      "rate_linear_delta_from_bf": 7.668262938409498e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.606508543292784e-06,
+      "rate": 977,
+      "rate_linear_delta_from_bf": 7.6022817205867455e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.445149474485892e-06,
+      "rate": 978,
+      "rate_linear_delta_from_bf": 7.440507518552408e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.415648467523579e-06,
+      "rate": 979,
+      "rate_linear_delta_from_bf": 7.4110356917955755e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.331534883932008e-06,
+      "rate": 980,
+      "rate_linear_delta_from_bf": 7.326767264004275e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.213346848695879e-06,
+      "rate": 981,
+      "rate_linear_delta_from_bf": 7.208309566131277e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.307158890592411e-06,
+      "rate": 982,
+      "rate_linear_delta_from_bf": 7.302566308098335e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.616205641937251e-06,
+      "rate": 983,
+      "rate_linear_delta_from_bf": 7.612783021748726e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.114417044699266e-06,
+      "rate": 984,
+      "rate_linear_delta_from_bf": 7.1094321683062844e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.230921820243605e-06,
+      "rate": 985,
+      "rate_linear_delta_from_bf": 7.226458110132228e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.368992624106241e-06,
+      "rate": 986,
+      "rate_linear_delta_from_bf": 7.365122749902753e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.966828617377394e-06,
+      "rate": 987,
+      "rate_linear_delta_from_bf": 6.9617321853954195e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.9465696760141635e-06,
+      "rate": 988,
+      "rate_linear_delta_from_bf": 6.9415335666178635e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.9471815232365434e-06,
+      "rate": 989,
+      "rate_linear_delta_from_bf": 6.942276063348629e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.0759925859136735e-06,
+      "rate": 990,
+      "rate_linear_delta_from_bf": 7.071649759993193e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.890029100804163e-06,
+      "rate": 991,
+      "rate_linear_delta_from_bf": 6.885188233773931e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.943214487134701e-06,
+      "rate": 992,
+      "rate_linear_delta_from_bf": 6.938681423207527e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 7.180333385456944e-06,
+      "rate": 993,
+      "rate_linear_delta_from_bf": 7.176727913282832e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.834591210254939e-06,
+      "rate": 994,
+      "rate_linear_delta_from_bf": 6.829949301234706e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.8845591866360905e-06,
+      "rate": 995,
+      "rate_linear_delta_from_bf": 6.880214239224358e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.6313981073632236e-06,
+      "rate": 996,
+      "rate_linear_delta_from_bf": 6.626328687531213e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.4502233465142035e-06,
+      "rate": 997,
+      "rate_linear_delta_from_bf": 6.444672021821418e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.499161606681099e-06,
+      "rate": 998,
+      "rate_linear_delta_from_bf": 6.493903773829857e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.486861211410448e-06,
+      "rate": 999,
+      "rate_linear_delta_from_bf": 6.481690518533867e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.680167769628841e-06,
+      "rate": 1000,
+      "rate_linear_delta_from_bf": 6.675777036946329e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.302199827834194e-06,
+      "rate": 1001,
+      "rate_linear_delta_from_bf": 6.296664069260771e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.472215855007508e-06,
+      "rate": 1002,
+      "rate_linear_delta_from_bf": 6.4673815760585285e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.330575035907329e-06,
+      "rate": 1003,
+      "rate_linear_delta_from_bf": 6.325392067019209e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.361696304958535e-06,
+      "rate": 1004,
+      "rate_linear_delta_from_bf": 6.3567467911695985e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.306966344306612e-06,
+      "rate": 1005,
+      "rate_linear_delta_from_bf": 6.30196099837832e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.084275709928406e-06,
+      "rate": 1006,
+      "rate_linear_delta_from_bf": 6.078648565832623e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.1381028560121955e-06,
+      "rate": 1007,
+      "rate_linear_delta_from_bf": 6.1327856775150735e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.0770332516960926e-06,
+      "rate": 1008,
+      "rate_linear_delta_from_bf": 6.071638878779595e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 6.087007267861207e-06,
+      "rate": 1009,
+      "rate_linear_delta_from_bf": 6.081775091537622e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.9752558654045096e-06,
+      "rate": 1010,
+      "rate_linear_delta_from_bf": 5.969775715541914e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.963000338930167e-06,
+      "rate": 1011,
+      "rate_linear_delta_from_bf": 5.957607480233662e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.866604942094699e-06,
+      "rate": 1012,
+      "rate_linear_delta_from_bf": 5.861015853980689e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.950516842712968e-06,
+      "rate": 1013,
+      "rate_linear_delta_from_bf": 5.945339094814983e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.857206515538786e-06,
+      "rate": 1014,
+      "rate_linear_delta_from_bf": 5.851842933779494e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.733742997585253e-06,
+      "rate": 1015,
+      "rate_linear_delta_from_bf": 5.728091976742178e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.728434883015987e-06,
+      "rate": 1016,
+      "rate_linear_delta_from_bf": 5.7228945635756645e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.692858912965695e-06,
+      "rate": 1017,
+      "rate_linear_delta_from_bf": 5.6873273033275495e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.606613381719255e-06,
+      "rate": 1018,
+      "rate_linear_delta_from_bf": 5.600919743997679e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.620340060848296e-06,
+      "rate": 1019,
+      "rate_linear_delta_from_bf": 5.614821264821046e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.5725031256816835e-06,
+      "rate": 1020,
+      "rate_linear_delta_from_bf": 5.5669517244893996e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.52618810382822e-06,
+      "rate": 1021,
+      "rate_linear_delta_from_bf": 5.52060922576203e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.494776773871589e-06,
+      "rate": 1022,
+      "rate_linear_delta_from_bf": 5.489220638921211e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.4563029140880405e-06,
+      "rate": 1023,
+      "rate_linear_delta_from_bf": 5.450745724111528e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.3983804705957915e-06,
+      "rate": 1024,
+      "rate_linear_delta_from_bf": 5.392756690980605e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.393267693917523e-06,
+      "rate": 1025,
+      "rate_linear_delta_from_bf": 5.387755273922323e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.386904936024942e-06,
+      "rate": 1026,
+      "rate_linear_delta_from_bf": 5.381499663670297e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.369745114148105e-06,
+      "rate": 1027,
+      "rate_linear_delta_from_bf": 5.364410607278103e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.364903816348507e-06,
+      "rate": 1028,
+      "rate_linear_delta_from_bf": 5.3596815838830025e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.338260815744954e-06,
+      "rate": 1029,
+      "rate_linear_delta_from_bf": 5.33307739392086e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.33932316381107e-06,
+      "rate": 1030,
+      "rate_linear_delta_from_bf": 5.3342719095184066e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.329519558427893e-06,
+      "rate": 1031,
+      "rate_linear_delta_from_bf": 5.32456385737845e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.329255331071858e-06,
+      "rate": 1032,
+      "rate_linear_delta_from_bf": 5.3244273274799525e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.319290832530203e-06,
+      "rate": 1033,
+      "rate_linear_delta_from_bf": 5.314557840030432e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.282654327294452e-06,
+      "rate": 1034,
+      "rate_linear_delta_from_bf": 5.277926470981242e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.2493385662056446e-06,
+      "rate": 1035,
+      "rate_linear_delta_from_bf": 5.244627035771998e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.276456541541831e-06,
+      "rate": 1036,
+      "rate_linear_delta_from_bf": 5.271964976572008e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.249919141236658e-06,
+      "rate": 1037,
+      "rate_linear_delta_from_bf": 5.245466742742622e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.2487824650635265e-06,
+      "rate": 1038,
+      "rate_linear_delta_from_bf": 5.244454824193667e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.2146957764745216e-06,
+      "rate": 1039,
+      "rate_linear_delta_from_bf": 5.210381863740565e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.203011760627897e-06,
+      "rate": 1040,
+      "rate_linear_delta_from_bf": 5.198787064841781e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.184020929285569e-06,
+      "rate": 1041,
+      "rate_linear_delta_from_bf": 5.179860829152005e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.212009087338029e-06,
+      "rate": 1042,
+      "rate_linear_delta_from_bf": 5.208071884865717e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.164216567747559e-06,
+      "rate": 1043,
+      "rate_linear_delta_from_bf": 5.1602469097744574e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.145230721827043e-06,
+      "rate": 1044,
+      "rate_linear_delta_from_bf": 5.1413256763055415e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.138605549459086e-06,
+      "rate": 1045,
+      "rate_linear_delta_from_bf": 5.134806767337352e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.110500460604128e-06,
+      "rate": 1046,
+      "rate_linear_delta_from_bf": 5.10673556242125e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.1618620889918106e-06,
+      "rate": 1047,
+      "rate_linear_delta_from_bf": 5.158398848514878e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.025290084213921e-06,
+      "rate": 1048,
+      "rate_linear_delta_from_bf": 5.0214952338478724e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.099919582638446e-06,
+      "rate": 1049,
+      "rate_linear_delta_from_bf": 5.096504794188661e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.112764748547096e-06,
+      "rate": 1050,
+      "rate_linear_delta_from_bf": 5.109521831414554e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.112570770316593e-06,
+      "rate": 1051,
+      "rate_linear_delta_from_bf": 5.109455787355444e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.078574272540369e-06,
+      "rate": 1052,
+      "rate_linear_delta_from_bf": 5.075473321625168e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.998466248764642e-06,
+      "rate": 1053,
+      "rate_linear_delta_from_bf": 4.995223950921002e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.018563843749229e-06,
+      "rate": 1054,
+      "rate_linear_delta_from_bf": 5.01551785525578e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.888960099003995e-06,
+      "rate": 1055,
+      "rate_linear_delta_from_bf": 4.885605981108654e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.043997652953296e-06,
+      "rate": 1056,
+      "rate_linear_delta_from_bf": 5.041294542706964e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 5.0035695078194505e-06,
+      "rate": 1057,
+      "rate_linear_delta_from_bf": 5.000858757320259e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.959871832417276e-06,
+      "rate": 1058,
+      "rate_linear_delta_from_bf": 4.9571424245442586e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.984060645828842e-06,
+      "rate": 1059,
+      "rate_linear_delta_from_bf": 4.981541333215489e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.9912210712113394e-06,
+      "rate": 1060,
+      "rate_linear_delta_from_bf": 4.988854474419213e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.979255152422257e-06,
+      "rate": 1061,
+      "rate_linear_delta_from_bf": 4.976976822668178e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.841013937777684e-06,
+      "rate": 1062,
+      "rate_linear_delta_from_bf": 4.838398373507857e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.8970011311665545e-06,
+      "rate": 1063,
+      "rate_linear_delta_from_bf": 4.894702811064633e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.951078454781273e-06,
+      "rate": 1064,
+      "rate_linear_delta_from_bf": 4.949090943284773e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.763857736934813e-06,
+      "rate": 1065,
+      "rate_linear_delta_from_bf": 4.761367947914152e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.8959442217424144e-06,
+      "rate": 1066,
+      "rate_linear_delta_from_bf": 4.8940281036635724e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.922856435123815e-06,
+      "rate": 1067,
+      "rate_linear_delta_from_bf": 4.92115958916628e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.885045183221096e-06,
+      "rate": 1068,
+      "rate_linear_delta_from_bf": 4.883349514983593e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.865776981137956e-06,
+      "rate": 1069,
+      "rate_linear_delta_from_bf": 4.864144973915074e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.8724157501108545e-06,
+      "rate": 1070,
+      "rate_linear_delta_from_bf": 4.870934700917928e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.807050525073484e-06,
+      "rate": 1071,
+      "rate_linear_delta_from_bf": 4.805477806790748e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.7457796910042424e-06,
+      "rate": 1072,
+      "rate_linear_delta_from_bf": 4.744129100231476e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.798526813435491e-06,
+      "rate": 1073,
+      "rate_linear_delta_from_bf": 4.797182548976764e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.7833099464048325e-06,
+      "rate": 1074,
+      "rate_linear_delta_from_bf": 4.78204299447782e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.793962433156541e-06,
+      "rate": 1075,
+      "rate_linear_delta_from_bf": 4.792859964020124e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.813469935486656e-06,
+      "rate": 1076,
+      "rate_linear_delta_from_bf": 4.812561787304048e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.774141302472435e-06,
+      "rate": 1077,
+      "rate_linear_delta_from_bf": 4.773229218990593e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.828295673515156e-06,
+      "rate": 1078,
+      "rate_linear_delta_from_bf": 4.827694658260384e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.594488001716397e-06,
+      "rate": 1079,
+      "rate_linear_delta_from_bf": 4.593227727944793e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.764907848056482e-06,
+      "rate": 1080,
+      "rate_linear_delta_from_bf": 4.76435041463219e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.69749973312661e-06,
+      "rate": 1081,
+      "rate_linear_delta_from_bf": 4.696843746820889e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.6404717196294474e-06,
+      "rate": 1082,
+      "rate_linear_delta_from_bf": 4.6397521575869405e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.679197116604418e-06,
+      "rate": 1083,
+      "rate_linear_delta_from_bf": 4.678736632790503e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.6240758003402555e-06,
+      "rate": 1084,
+      "rate_linear_delta_from_bf": 4.623558165661734e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.576166576557369e-06,
+      "rate": 1085,
+      "rate_linear_delta_from_bf": 4.575616093127621e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.53212989247198e-06,
+      "rate": 1086,
+      "rate_linear_delta_from_bf": 4.531559609333158e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.604657808992673e-06,
+      "rate": 1087,
+      "rate_linear_delta_from_bf": 4.604460506207886e-06
+    },
+    {
+      "affine_bf_from_paired_endpoints": 4.625050223694416e-06,
+      "rate": 1088,
+      "rate_linear_delta_from_bf": 4.625050223694416e-06
+    }
+  ],
+  "protocol_sha256": "e6b2abbccf253439c03090d10e90a47e2c8722c104b71c1fbedde57c566ad8a6",
+  "qualification": "research audit only; no broad qualification or time-savings claim",
+  "research_only": true,
+  "schema": "prismaquant.prospective_paired_family_transfer_seal.v1",
+  "seal_sha256": "4a44179d9ae4b794f0b0bed6e9fbb90238009853b09e2dd9953680adf76c71d6"
+}

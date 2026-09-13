@@ -1,0 +1,28 @@
+{
+  "schema": "prismaquant.study_completion_root_verification.v1",
+  "verified_unix": 1789175141.6367986,
+  "manifest_sha256": "dbff06bce5f5897cfeae0fabc5929c5131ee4fda1e59ebf1fbb759fd263f40a6",
+  "curve_count": 8,
+  "unique_family_rate_points": 579,
+  "verified_actions": [
+    "2b88c0760773043ddb4691921030860b6bed9b47c4c2c3e6ac96edaa394b9eba",
+    "ad7cff841c168989030e92da50e11cf73a218e263913f6917ae316e9401ac4eb",
+    "2ba110537d2ec1c9ea1330512204d14bd6df22855e8680c4ad903274f22e6d60",
+    "fbeebdc66606fbf0f4dda3bf2c5c9318446563492fd51dc1f8da30a93342e787",
+    "54af7a7409cf5489a60601bdc5e74f661796266a739c4a75955d899989a07385",
+    "c0985ad926974fa54b08281aa5542a68e86279a60943e6615fb48463fe117913",
+    "d9b371d1ae8313502f756a690ff31d1589d6a7448e26f5eb3c4c5383c6668cfb",
+    "d15421cab3baddabd0371097f99d79b841ecd44bb4ec927682c37e5ce3ee8a17",
+    "4bd3e07c44f786c91f718cf289a0b13cc6d4ec46216f0685dfc2eccf975bc5d5",
+    "c16395c6276fa5f3b2eb5e748de525f47b03235c669f3737741c9a7e08c0f4d5",
+    "0eb5ff1625a9fb1bb2d4edb89a8eae1bba6a5ba05250db9bf2e650a538190293",
+    "21ceeb26e9114ed90b86d25ec34c8365f3bd1731467875c5d1955d8ecffb4ce9",
+    "8e5c87ddba0e1bd1d8ba4fb73d82b0fa2693a725ee6cd5c47ab63abc8c387ca5",
+    "e2529e98b766afb6996e54fb2c3f41ae40fe2f75eb66b9d6bcacb0dd021ffb18",
+    "505a95f6a7478ec01b8d71adb1feec8792edea87c04198f8ebcab9171602091c",
+    "7d84d6c6e451ae2b367bcd52f3f67829ed8938e1e90230fa8de2f6733d3f2e3e"
+  ],
+  "prediction_seals_verified_before_both_target_publications": true,
+  "canonical_receipts_and_payloads_verified": true,
+  "all_curve_plan_and_point_receipt_hashes_verified": true
+}
