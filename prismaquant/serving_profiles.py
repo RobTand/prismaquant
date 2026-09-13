@@ -34,21 +34,116 @@ _LANE_STATUS_RANK = {
     "backed": 3,
 }
 
-_ELIGIBILITY_TABLE: Any = None
+#: Source token when no serving pin is on disk at all. This is the ONLY way
+#: ``route_status_for`` reaches ``absent``: on a normal checkout the pin is a
+#: tracked file, so "nobody handed me a table" is not a reachable answer.
+#: Every other refusal names what was read and why it did not attest.
+ROUTE_STATUS_SOURCE_NO_PIN = (
+    "serving_runtime_contract::absent(serving_runtime_pin_missing)"
+)
+
+_PINNED_LANE_TABLES: Any = None
 
 
-def _cached_eligibility_table(loader):
+def _load_pinned_lane_tables() -> tuple[Any, Any, str]:
+    """``(table, formats, refusal)`` from the PINNED Tessera serving runtime.
+
+    Principle 14's consumption half, for the lane resolver. Until #537 this
+    function did not exist and ``route_status_for`` called
+    ``load_eligibility_table()`` with no ``contract_path``. That loader has had
+    no default table since the Gridbook lane retired (2026-09-02), so the
+    answer in production was ``unattested`` with source
+    ``serving_runtime_contract::absent`` for every lane on every platform,
+    sm_121 included -- a structured ``route_status`` whose value meant "nobody
+    handed me a table", which is not a fact about any runtime.
+
+    What is read, in order, and what each miss is called:
+
+    * ``tessera_runtime/tessera_serving_runtime_pin.json``. Its absence is the
+      one ``absent`` (:data:`ROUTE_STATUS_SOURCE_NO_PIN`): with no pin there is
+      no runtime whose claims could be read. Its ``version`` labels the table,
+      so the source names the pinned RELEASE rather than whatever a contract
+      says about itself.
+    * The ``runtime_contract.json`` the importable ``tessera.serving`` packages
+      (``tessera_runtime_contract.contract_path`` -- the one resolver every
+      producer reader on this side shares). No importable runtime is
+      ``:runtime_not_importable``, not ``absent``: "the pin names a runtime
+      that is not installed here" and "no runtime is pinned" are different
+      facts and must not share a token.
+    * The pin's ``contract_sha256`` against the loaded contract's digest. A
+      different table is not the pinned table, and reading route status off it
+      would make the field attest a runtime nobody pinned
+      (``:installed_contract_not_pinned``).
+
+    Both loaders come off the SAME file. Handing over only the eligibility
+    table would leave ``resolve_payload_rung`` with no published formats, so
+    every Tessera name would resolve to a family the table does not carry and
+    the lane would report ``no_cell`` -- the right answer to the wrong
+    question.
+
+    This is deliberately NOT ``tessera_lane_admission``: that predicate adds
+    the cell-evidence, lane and installed-release conjuncts and answers "may
+    this rung ship". This answers the narrower question the field is for --
+    what the pinned runtime's own table says about this lane's route.
+    """
+    from .lane_eligibility import (
+        load_eligibility_table, load_published_formats,
+    )
+    from .tessera_serving_runtime_pin import (
+        TesseraServingRuntimePinError,
+        load_tessera_serving_runtime_pin,
+        tessera_serving_runtime_pin_path,
+    )
+
+    pin_path = tessera_serving_runtime_pin_path()
+    if not pin_path.exists():
+        return None, None, ROUTE_STATUS_SOURCE_NO_PIN
+    try:
+        pin = load_tessera_serving_runtime_pin()
+    except TesseraServingRuntimePinError:
+        # A malformed pin is a defect to fix, not an absence to report; it
+        # must not read as "no runtime is pinned".
+        return None, None, "serving_runtime_contract::pin_unreadable"
+    version = pin.version
+
+    from importlib.resources import as_file
+
+    try:
+        from .tessera_runtime_contract import contract_path
+        with as_file(contract_path()) as path:
+            table = load_eligibility_table(version, contract_path=path)
+            formats = load_published_formats(version, contract_path=path)
+    except Exception:  # ModuleNotFoundError, OSError, FileNotFoundError...
+        return None, None, (
+            f"serving_runtime_contract:{version}:runtime_not_importable")
+
+    if not table.present:
+        return None, None, (
+            f"serving_runtime_contract:{version}:contract_publishes_no_table")
+    if (pin.contract_sha256_is_resolved
+            and table.contract_sha256 != pin.contract_sha256):
+        return None, None, (
+            f"serving_runtime_contract:{version}:installed_contract_not_pinned")
+    return table, formats, ""
+
+
+def _cached_pinned_lane_tables():
     """One read of the pinned contract per process (it is immutable)."""
-    global _ELIGIBILITY_TABLE
-    if _ELIGIBILITY_TABLE is None:
-        _ELIGIBILITY_TABLE = loader()
-    return _ELIGIBILITY_TABLE
+    global _PINNED_LANE_TABLES
+    if _PINNED_LANE_TABLES is None:
+        _PINNED_LANE_TABLES = _load_pinned_lane_tables()
+    return _PINNED_LANE_TABLES
 
 
 def _reset_eligibility_table_cache() -> None:
-    """Test seam: the pinned contract is immutable, monkeypatched ones are not."""
-    global _ELIGIBILITY_TABLE
-    _ELIGIBILITY_TABLE = None
+    """Test seam: the pinned contract is immutable, a substituted one is not.
+
+    It clears the per-process memo only. It cannot substitute a verdict, and
+    since #537 there is nothing for a test to substitute a table THROUGH: the
+    resolver reads the pin and the packaged contract itself.
+    """
+    global _PINNED_LANE_TABLES
+    _PINNED_LANE_TABLES = None
 
 
 @dataclass(frozen=True)
@@ -576,7 +671,11 @@ class ServingLaneSpec:
 
         Resolved, never declared. The spec names which structural classes of
         the runtime's eligibility table this lane consults; the verdict comes
-        from the table the PINNED SERVING release packages.
+        from the table the PINNED SERVING release packages, read here through
+        :func:`_load_pinned_lane_tables` -- the tracked serving pin plus the
+        ``runtime_contract.json`` it names. ``absent`` is reachable only when
+        that pin file is missing (#537); every other miss carries its own
+        token, so an ``unattested`` verdict always says WHICH fact was absent.
 
         Under lane-eligibility v3 a cell is scoped to one platform, one payload
         family and an explicit rung list, so this lane-level answer is narrower
@@ -587,18 +686,13 @@ class ServingLaneSpec:
         """
         from .lane_eligibility import (
             ROUTE_STATUS_UNATTESTED,
-            load_eligibility_table,
             resolve_payload_rung,
         )
 
-        table = _cached_eligibility_table(load_eligibility_table)
+        table, formats, refusal = _cached_pinned_lane_tables()
+        if refusal:
+            return (ROUTE_STATUS_UNATTESTED, (), refusal)
         version = table.runtime_version
-        if not table.present:
-            return (
-                ROUTE_STATUS_UNATTESTED,
-                (),
-                f"serving_runtime_contract:{version}:absent",
-            )
         if not self.route_status_structures:
             # A lane that names no attestation has none. Fail-closed.
             return (
@@ -615,7 +709,10 @@ class ServingLaneSpec:
                 f"serving_runtime_contract:{version}:no_target_platform",
             )
         canonical = fr.canonical_format_name(fmt)
-        family, k, rate_q256 = resolve_payload_rung(canonical)
+        # The published formats come off the SAME pinned file as the table; a
+        # name resolved without them names a family no cell carries, and the
+        # lane would report ``no_cell`` for the wrong reason.
+        family, k, rate_q256 = resolve_payload_rung(canonical, formats)
         cells = [
             cell for cell in table.cells
             if cell.structure in self.route_status_structures
