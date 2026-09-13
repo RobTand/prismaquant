@@ -239,18 +239,31 @@ def test_the_check_bites_when_OUR_tie_break_moves(monkeypatch):
 
 
 def test_the_check_bites_when_OUR_scale_saturation_moves(monkeypatch):
-    """The other half. Drop the 448 clamp from the stored-scale derivation and
+    """The other half. Move the UE4M3 ceiling in the stored-scale derivation and
     the ``block_scale_overflow`` probe, whose group maximum implies 512, must
-    refuse."""
+    refuse.
+
+    The mutation moves the ceiling rather than removing the clamp, and that is
+    deliberate.  ``.to(torch.float8_e4m3fn)`` does not agree across torch builds
+    about what happens to a value above the format's largest finite number:
+    some saturate to 448, some do not.  A "drop the clamp" mutation therefore
+    tests the installed torch, not this module -- it bit on the dl380g10 CPU
+    lane and did NOT bite on the hosted runner, from the same source.  Moving
+    the ceiling is a different rounding RULE on every build, which is what the
+    attestation is supposed to catch.  (The driver's own explicit
+    ``clamp(max=FP8_E4M3_MAX)`` is why that divergence changes nothing about
+    what PrismaQuant computes: it never relies on the cast to saturate.)
+    """
     from prismaquant import nvfp4_activation_contract as nac
 
     _attest()
 
-    def unclamped(grouped, g):
+    def half_ceiling(grouped, g):
         amax = grouped.abs().amax(dim=-1, keepdim=True)
-        return (amax / nac.FP4_E2M1_MAX * g).to(torch.float8_e4m3fn)
+        return (amax / nac.FP4_E2M1_MAX * g).clamp(
+            max=nac.FP8_E4M3_MAX / 2).to(torch.float8_e4m3fn)
 
-    monkeypatch.setattr(nac, "nvfp4_group_stored_scale", unclamped)
+    monkeypatch.setattr(nac, "nvfp4_group_stored_scale", half_ceiling)
     with pytest.raises(trc.TesseraContractError) as raised:
         _attest()
     assert "block_scale_overflow" in str(raised.value)
