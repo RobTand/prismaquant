@@ -58,7 +58,7 @@ def _bind_to_relation(cell, relation_fixture):
     return inputs, preflight, joint, raw
 
 
-def _write_cell(root, name, cell, raw, cost_sha256):
+def _write_cell(root, name, cell, raw, cost_sha256, run_id="native"):
     inputs, preflight, joint = cell
     panel, receipt, trace = receipt_fixture((inputs, preflight, joint), complete=True, cost_sha256=cost_sha256)
     trace["capture"]["collector_library_sha256"] = raw["resource_collector"]["library_sha256"]
@@ -68,7 +68,7 @@ def _write_cell(root, name, cell, raw, cost_sha256):
         path = root / f"{name}.{kind}.json"
         path.write_text(json.dumps(value, sort_keys=True))
         paths[kind] = str(path)
-    return {"unit": inputs["unit"], "format": inputs["format"], "run_id": "native", **paths}, panel
+    return {"unit": inputs["unit"], "format": inputs["format"], "run_id": run_id, **paths}, panel
 
 
 @pytest.fixture
@@ -200,22 +200,74 @@ def test_refuses_a_missing_artifact_by_name(emitted):
         emitter.main(_argv(emitted))
 
 
-def test_refuses_receipts_from_more_than_one_runtime(emitted, joined):
+def _pair(emitted, joined, other_raw, run_id="native"):
+    """Write a second cell, on a second unit, measured under ``other_raw``.
+
+    The caller decides what ``other_raw`` is: a comparable runtime that loaded
+    one more kernel, or a different box. Both cells are rewritten because both
+    panels freeze against the cost bytes, which gain the second unit's row.
+    """
     inputs, preflight, joint = _cell(joined, unit="fixture.dense2")
-    inputs["runtime_image"] = emitted.raw["image"]
+    inputs["runtime_image"] = other_raw["image"]
     inputs["wire"]["record"]["identity"] = dict(emitted.cell[0]["wire"]["record"]["identity"])
     preflight["operator"]["wire_record_sha256"] = identity_sha256(inputs["wire"]["record"])
-    other_raw = copy.deepcopy(emitted.raw)
-    other_raw["gpu"] = dict(other_raw["gpu"], uuid="another-gpu")
     preflight["runtime"], preflight["runtime_sha256"] = other_raw, identity_sha256(other_raw)
     emitted.cost["costs"][inputs["unit"]] = {inputs["format"]: joint}
     emitted.cost_path.write_bytes(pickle.dumps(emitted.cost))
     cost_sha256 = hashlib.sha256(emitted.cost_path.read_bytes()).hexdigest()
     first, _ = _write_cell(emitted.root, "cell", emitted.cell, emitted.raw, cost_sha256)
-    second, _ = _write_cell(emitted.root, "cell2", (inputs, preflight, joint), other_raw, cost_sha256)
+    second, _ = _write_cell(emitted.root, "cell2", (inputs, preflight, joint), other_raw, cost_sha256, run_id=run_id)
     emitted.manifest.write_text(json.dumps([first, second]))
+    return cost_sha256
+
+
+#: Every mutation is applied to the *second* panel's runtime record, which is
+#: otherwise a byte-for-byte copy of the first: the driver is mutated, never the
+#: fixture, so each case proves this particular check bites and not some other.
+#: ``tf32_zero`` is the one that is not about a box at all -- it replaces
+#: ``false`` with ``0``, which ``!=`` considers equal in Python. The whole-record
+#: SHA-256 this check replaced told them apart, and so must its partition.
+RUNTIME_MUTATIONS = {
+    "gpu_uuid": lambda raw: raw.update(gpu=dict(raw["gpu"], uuid="another-gpu")),
+    "gpu_capability": lambda raw: raw.update(gpu=dict(raw["gpu"], capability=[10, 0])),
+    "torch_build": lambda raw: raw.update(versions=dict(raw["versions"], torch="synthetic-other")),
+    "arithmetic": lambda raw: raw.update(arithmetic=dict(raw["arithmetic"], tf32=True)),
+    "tf32_zero": lambda raw: raw.update(arithmetic=dict(raw["arithmetic"], tf32=0)),
+    "image": lambda raw: raw.update(image=raw["image"][:-1] + ("0" if raw["image"][-1] != "0" else "1")),
+    "package_source": lambda raw: raw.update(source=dict(raw["source"], tessera_package_sha256="9" * 64)),
+    "collector": lambda raw: raw.update(resource_collector=dict(raw["resource_collector"], library_sha256="9" * 64)),
+    "shared_library_bytes": lambda raw: raw["native_libraries"].update({"/usr/lib/libtorch.so": "9" * 64}),
+    "unknown_field": lambda raw: raw.update(unclassified_producer_field="present"),
+    "missing_field": lambda raw: raw.pop("arithmetic"),
+}
+
+
+@pytest.mark.parametrize("mutation", sorted(RUNTIME_MUTATIONS))
+def test_refuses_receipts_from_more_than_one_runtime(emitted, joined, mutation):
+    other_raw = copy.deepcopy(emitted.raw)
+    RUNTIME_MUTATIONS[mutation](other_raw)
+    # Not `!=`: on ``tf32_zero`` Python considers the two records equal, which
+    # is the whole reason that case exists. The digest is what must differ.
+    assert identity_sha256(other_raw) != identity_sha256(emitted.raw)
+    _pair(emitted, joined, other_raw)
     with pytest.raises(RuntimePriceError, match="native receipts were produced on more than one runtime"):
         emitter.main(_argv(emitted))
+
+
+def test_a_route_that_loads_its_own_kernel_extension_still_needs_its_own_run(emitted, joined):
+    """The relaxation moves the refusal onto the binding; it does not remove one.
+
+    A second panel that loaded one more library is now comparable, so the table
+    is emitted -- and ``admit_native_rows`` then refuses it, because the row
+    names a run whose attested runtime record is not the one it was measured
+    under. The loosened check was the one that named nothing.
+    """
+    other_raw = copy.deepcopy(emitted.raw)
+    other_raw["native_libraries"]["/out/cache/extensions/route-kernel.so"] = "7" * 64
+    _pair(emitted, joined, other_raw)
+    emitter.main(_argv(emitted))
+    emission = json.loads((emitted.root / "table.emission.json").read_text())
+    assert "original native panel runtime" in emission["admission"]["refusal"]
 
 
 def test_refuses_a_duplicate_binding(emitted):
@@ -230,6 +282,72 @@ def test_refuses_an_empty_manifest(emitted):
         emitter.main(_argv(emitted))
 
 
+def _second_native_run(emitted, extension, digest):
+    """Clone the relation's native run into one that loaded a second kernel.
+
+    The full-engine run is given the same bytes at the same path and the
+    dependency relation names them, because that is what the relation already
+    demands of every production library a native run loads. This is exactly the
+    relation shape the fp4 receipts do **not** have: their full-engine run
+    served an fp8 artifact and never loaded the fp4 extension (PQ #570).
+    """
+    evidence, relation, _ = emitted.relation_fixture
+    raw = copy.deepcopy(emitted.raw)
+    raw["native_libraries"][extension] = digest
+    run = copy.deepcopy(relation["runs"]["native"])
+    run["runtime"] = evidence.put("native2-runtime.json", raw)
+    relation["runs"]["native2"] = run
+    engine = evidence.get(relation["runs"]["engine"]["runtime"])
+    engine["base"]["native_libraries"][extension] = digest
+    evidence.replace(relation["runs"]["engine"]["runtime"], engine)
+    relation["production_dependencies"] += [
+        {"native_run_id": "native2", "native_path": path, "full_engine_path": path, "sha256": sha}
+        for path, sha in (("/usr/lib/libtorch.so", "5" * 64), (extension, digest))]
+    return raw
+
+
+def test_two_routes_that_load_different_kernels_admit_into_one_table(emitted, joined):
+    """The mixed-route table #559 could not emit at all, emitted and admitted.
+
+    Two rows, one box, two loaded-library sets: the second row's route loaded a
+    kernel extension the first row's did not. Nothing about comparability is
+    waived -- every other runtime field is equal, the shared libraries carry the
+    same bytes, and each row still binds to the run it was measured on.
+    """
+    extension, digest = "/out/cache/extensions/route-kernel.so", "7" * 64
+    other_raw = _second_native_run(emitted, extension, digest)
+    cost_sha256 = _pair(emitted, joined, other_raw, run_id="native2")
+    relation_load(emitted.relation_fixture)      # rewrite relation.json with both native runs
+    emitter.main(_argv(emitted))
+    payload = json.loads(emitted.out.read_text())
+    table = parse_measured_runtime_table(payload, expected_context=parse_runtime_context(payload["context"]),
+                                         expected_cost_sha256=cost_sha256, now=NOW, source_path=str(emitted.out))
+    admit_native_rows(table, relation_load(emitted.relation_fixture))
+    assert [row.unit for row in table.rows] == ["fixture.dense", "fixture.dense2"]
+    # Past the relation and past the native rows: the only refusal left is D37's.
+    emission = json.loads((emitted.root / "table.emission.json").read_text())
+    assert emission["admission"]["refusal"].startswith(FIXED_PREFIX), emission["admission"]["refusal"]
+    # The kernel that varies is named per row, read off each panel's own record.
+    assert {row["unit"]: row["unshared_native_libraries"] for row in emission["rows"]} == {
+        "fixture.dense": {}, "fixture.dense2": {extension: digest}}
+    assert len({row["runtime_sha256"] for row in emission["rows"]}) == 2
+
+
+def test_a_second_native_run_on_another_box_is_still_refused(emitted, joined):
+    """The relation has two native runs and they are still not comparable.
+
+    Same construction as the admitted case, one field changed: the second run
+    reports another GPU. A per-row binding to a real run does not make two
+    boxes one clock, and the emitter must refuse before a table exists.
+    """
+    extension, digest = "/out/cache/extensions/route-kernel.so", "7" * 64
+    other_raw = _second_native_run(emitted, extension, digest)
+    other_raw["gpu"] = dict(other_raw["gpu"], uuid="another-gpu")
+    emitted.evidence.replace(emitted.relation_fixture[1]["runs"]["native2"]["runtime"], other_raw)
+    _pair(emitted, joined, other_raw, run_id="native2")
+    with pytest.raises(RuntimePriceError, match="native receipts were produced on more than one runtime: gpu differs"):
+        emitter.main(_argv(emitted))
+    assert not emitted.out.exists()
 def test_the_emitter_never_reports_an_admission_it_does_not_have(emitted, capsys):
     """A null refusal and exit 0 mean both gates passed, and nothing else does.
 
