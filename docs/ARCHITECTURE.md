@@ -1,7 +1,35 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `pq/528-platform-aware-route`. Stamps
+As of: 2026-09-12 · `pq/529-lane-spec-per-platform`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-12, `pq/529-lane-spec-per-platform`) for the Tessera lane
+spec's **per-platform executed-contract derivation** (#529).
+`lane_specs/tessera.json`'s `served_activation_quantization` gains
+`executes_by_platform`, derived from the pinned contract's
+`lane_eligibility.platforms[*].executes` and refused on drift by
+`tessera_export_lane.require_platform_executes_derived_from_contract`, which
+`require_executes_derived_from_contract` now calls — so the existing preflight
+covers it with no new call site in `run-pipeline.sh`.
+
+**Why it is not redundant with the flat list.** `executes` is derived from
+`formats[]` and answers *what does this family's route run?* — a property of
+the family, true wherever the family is served. It is therefore silent about
+*is it served HERE?*, which is the first question a producer targeting an AMD
+device has to answer, and which nothing about the family implies. Contract v23
+is the first grammar that can state it: before v10 a `platforms` entry was a
+bare key, so the only way to say anything about a device was to have served on
+it, and a cell is a receipt. The flat list and the sm_121 derivation are
+byte-identical to what they were.
+
+The gate iterates the platforms the CONTRACT declares rather than the ones some
+profile targets, so `gfx1151` is covered before anything targets it, and a
+separate check asserts every Tessera profile's `target_platform` is a platform
+the pinned contract declares — a target the runtime never heard of prices
+against nothing. A non-null entry is permission to PRICE, never to ship: the
+eligibility gate reads cells, neither AMD platform has one, and
+`route_status_for` still answers `unattested` with source `:no_cell` for every
+family on both. Gates: `tests/test_tessera_lane_spec_platforms.py`.
 
 Re-stamped (2026-09-12, `pq/528-platform-aware-route`) for the **platform-aware
 Tessera serving route** (#528). `tessera_serving_route` takes an optional
