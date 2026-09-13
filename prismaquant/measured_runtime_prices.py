@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 import re
 import statistics
 from dataclasses import dataclass, replace
@@ -317,6 +318,35 @@ class OperatorMeasurement:
                 "receipt_sha256": self.receipt_sha256}
 
 
+def bootstrap_sum(samples_per_row, *, draws: int, seed: int, offset_ms: float = 0.0) -> dict:
+    """The distribution of an operator sum under each row's own samples.
+
+    Every row is resampled with replacement from its OWN measured samples and
+    re-reduced by the same median :meth:`OperatorMeasurement.median_ms` reduced
+    the priced row by, so this describes only the dispersion the measurement
+    itself carries -- not run-to-run serving variance, and not a model.
+
+    ``offset_ms`` is a constant the caller adds to every draw (the fixed
+    whole-engine ``prefill_ms``, when a caller carries one). It shifts the
+    distribution and contributes no width: the report schema observes no
+    samples for the fixed term, so there is no dispersion to draw from and
+    inventing one would be a number with no measurement under it.
+    """
+    if draws < 1:
+        raise RuntimePriceError("bootstrap draws must be at least 1")
+    rng = random.Random(seed)
+    totals = []
+    for _ in range(draws):
+        totals.append(offset_ms + sum(statistics.median(rng.choices(samples, k=len(samples)))
+                                      for samples in samples_per_row))
+    totals.sort()
+    return {"draws": draws, "seed": seed,
+            "p2.5": totals[int(0.025 * draws)], "p50": totals[draws // 2],
+            "p97.5": totals[min(draws - 1, int(0.975 * draws))],
+            "offset_ms": float(offset_ms),
+            "samples_per_row": [len(samples) for samples in samples_per_row]}
+
+
 @dataclass(frozen=True)
 class MeasuredRuntimeRow:
     unit: str
@@ -520,6 +550,89 @@ def admitted_fixed_resources(table: MeasuredRuntimeTable) -> RuntimeResources:
             "v2 fixed runtime resources require full-engine producer admission: "
             + (table.fixed_resources_refusal or "the loader performed no admission"))
     return table.fixed_resources
+
+
+#: The one scope under which a table whose fixed charge is refused may still be
+#: read, and the only value ``--measured-runtime-fixed-scope`` accepts besides
+#: the default. It is asked for by name on the command line and stamped on the
+#: document it produces. A scope that switched itself on when the gate refused
+#: would be the silent default policy S1 forbids, so this one never does.
+SHAPE_ONLY_SCOPE = "shape-only"
+
+#: The fixed-resource scopes ``--measured-runtime-fixed-scope`` accepts.
+FIXED_RESOURCE_SCOPES = ("admitted", SHAPE_ONLY_SCOPE)
+
+
+def shape_only_fixed_resources(table: MeasuredRuntimeTable) -> tuple[RuntimeResources, dict]:
+    """The fixed charge for a consumer that reads none of the refused terms.
+
+    ``admit_fixed_resources`` refuses every v2 table at the producer's current
+    schema version, and the refusal names its own subject: *"the native-row and
+    full-engine transient charge boundary is not versioned, so no candidate
+    activation or scratch term may be compared to a priced row"* (PQ debt D37).
+    That is about the four device terms in
+    ``runtime_provenance.FIXED_TERM_FIELDS`` and about the off-step transient
+    peak. It is not about ``runtime_provenance.UNOBSERVED_FIXED_FIELDS`` -- the
+    three fields the report schema carries no observation for at all, which the
+    same gate refuses only when a table declares one nonzero.
+
+    So this splits the table's declared charge along the gate's own line:
+
+    * the four device terms and the off-step peak are **withheld**. They are
+      zeroed in the returned object and named in the stamp, and the caller has
+      already refused every path that could compare one to a budget. Nothing
+      may publish a device number built from them:
+      ``serve_constraints.evaluate_measured_assignment`` withholds
+      ``device_memory_bytes`` under this scope rather than publish a sum with a
+      term missing from it.
+    * ``UNOBSERVED_FIXED_FIELDS`` are **checked, not trusted**. This re-runs the
+      gate's own ``if value:`` rule here, because a prefill sweep does read
+      ``prefill_ms`` as the offset of its SLO axis.
+
+    Nothing here relaxes a gate. ``admit_fixed_resources`` still refuses, this
+    table is still not admitted, ``fixed_resources_admitted`` stays ``False``
+    everywhere it is read, and three refusals are *added* on paths that would
+    otherwise read what the gate refused.
+
+    Returns ``(resources, stamp)``. The stamp carries the gate's refusal
+    verbatim and is written onto whatever document the caller emits.
+    """
+    from .runtime_provenance import FIXED_TERM_FIELDS, UNOBSERVED_FIXED_FIELDS
+
+    if table.runtime_provenance is None:
+        raise RuntimePriceError(
+            f"the {SHAPE_ONLY_SCOPE} fixed-resource scope narrows a refusal this table never "
+            "received: a v1 table carries no runtime provenance and calls no admission gate")
+    if table.fixed_resources_admitted:
+        raise RuntimePriceError(
+            f"the {SHAPE_ONLY_SCOPE} fixed-resource scope withholds terms this table has "
+            "evidence for: its fixed resources are admitted, so read them")
+    fixed = table.fixed_resources
+    for field in UNOBSERVED_FIXED_FIELDS:
+        value = getattr(fixed, field)
+        if value:
+            raise RuntimePriceError(
+                f"the {SHAPE_ONLY_SCOPE} fixed-resource scope reads {field}, and the report "
+                f"carries no timing or serialized partition, so this table's fixed {field} "
+                f"({value}) has no evidence")
+    withheld = sorted([*FIXED_TERM_FIELDS.values(), OFF_STEP_FIELD])
+    stamp = {
+        "scope": SHAPE_ONLY_SCOPE,
+        "fixed_resources_admitted": False,
+        "fixed_resources_refusal": table.fixed_resources_refusal,
+        "withheld_terms": withheld,
+        "withheld_reason": ("the charge boundary between a native row and the full-engine "
+                            "partition is not versioned, so these terms have no admitted "
+                            "value; every consumer that would compare one to a budget is "
+                            "refused instead of being handed a number"),
+        "read_terms": {field: getattr(fixed, field) for field in UNOBSERVED_FIXED_FIELDS},
+        "read_terms_reason": ("the report schema carries no observation for these fields at "
+                              "all; the gate refuses them only when a table declares one "
+                              "nonzero, and that check is re-run here"),
+        "certifies_placement": False,
+    }
+    return replace(fixed, **{field: 0 for field in FIXED_TERM_FIELDS.values()},
+                   **{OFF_STEP_FIELD: None}), stamp
 
 
 def build_runtime_resources(table: MeasuredRuntimeTable, candidates: Mapping[str, list], *,
