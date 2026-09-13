@@ -394,6 +394,34 @@ def test_the_gate_names_what_the_producer_still_owes(tmp_path):
         assert reason in reasons
 
 
+def test_the_gate_names_the_placement_obligation_it_cannot_recompute(tmp_path):
+    """A placement has to satisfy `max(scalar_budget_bytes,
+    non_step_transient_peak_bytes)`. At this schema version `fixed_resident`
+    depends on `worker_startup`, which never closes, so the budget side is null
+    on every report the producer can emit and the obligation is null with it.
+    The gate says so rather than admitting against the half it does have."""
+    assert ("no placement obligation is recomputable, so this table's fixed resources are "
+            "admitted against no device extent") in refusals(tmp_path)
+
+
+def test_an_unpriceable_off_step_peak_adds_its_own_refusal(tmp_path):
+    """The off-step side needs the same join a scratch term needs. When it goes
+    null the gate names that side, not only the obligation built over it, so a
+    reader can tell which half is missing."""
+    baseline = refusals(tmp_path)
+    assert not [reason for reason in baseline if "off-step transient peak" in reason]
+
+    def mutate(report):
+        # `external_closure` stops closing, which is what an off-step price
+        # depends on: a peak over rows whose external bytes were never closed
+        # is a floor wearing a total's name.
+        report["observations"]["external_native_peak_bytes"] = None
+        report["partition"]["domains"]["external_closure"] = {
+            "state": "open", "evidence": [], "reason": "no disjoint observed charge"}
+    assert ("no off-step transient peak is recomputable, so this report prices nothing the "
+            "engine holds while no engine step is running") in added(tmp_path, mutate)
+
+
 def test_the_absent_timing_partition_leaves_the_prefill_charge_unevidenced(tmp_path):
     """The prefill axis the measured table exists to serve. `evaluate_measured_
     assignment` sums `fixed_resources.prefill_ms` into the operator-sum budget

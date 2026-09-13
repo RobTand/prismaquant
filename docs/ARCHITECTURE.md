@@ -53,6 +53,56 @@ or ship-gate change, and no GPU, served or quality measurement was run. Gates:
 `tests/test_campaign_launcher_pinned_import.py`,
 `tests/test_tessera_campaign_container.py`.
 
+Re-stamped (2026-09-12, `claude/520-step-coverage-alignment`) for
+**step-scoped ownership in the recomputed partition, and a placement
+obligation that is a maximum rather than one budget** (#520, producer
+tessera#451). The consumer now reads the two observations the producer added,
+`observations.step_intervals` (`{step_id, begin_index, end_index}`) and
+`observations.step_coverage` (`{state, declared, executed, reason}`, plus
+`scope` whenever a step was declared), and reproduces the producer's
+step-scoped rule instead of refusing every allocation that no unit interval
+contains: contained in exactly one declared step is scratch, overlapping a
+step without containment is a carried activation, and overlapping none is the
+new `non_step` lifetime class that no composition term charges. The whole
+classification is gated on `step_coverage.state == "complete"`; `partial` and
+`unobserved` leave the row unclassified, which nulls every term, because a row
+live during no *declared* step may still be live during an undeclared one. The
+coverage state is itself recomputed from the declared and executed counts. An
+interval that spans two steps refuses in either of the two ways one can: a
+declared step interval that spans another declared step's extent, and a unit
+invocation that overlaps a declared step without being contained in it, which
+is derived from an `inside_unit` allocation because the report carries no unit
+intervals.
+
+**The admitted extent is now
+`max(scalar_budget_bytes, non_step_transient_peak_bytes)`.** The seven
+composition terms price one engine step; off-step bytes are priced beside them
+by the same simultaneous sweep, and `admit_fixed_resources` refuses by name
+when either side is not recomputable rather than admitting against the half it
+has. At this producer schema version the budget side is never expressible --
+`fixed_resident` depends on `worker_startup`, which has no closing condition --
+so the obligation is null on every report the producer can emit today and the
+gate stays closed; what changed is that the refusal names the missing side.
+Nothing reads the report's `derived` block: both sides are recomputed and the
+producer's claims for them, including the frozen `derived.placement_obligation`
+formula string, are compared against the recomputation.
+
+Two corrections travel with this change. The consumer charged an allocation to
+the **innermost** scope on its stack; the producer charges the outermost, which
+is the interval it reads `unit_invocation` from and decides `lifetime_scope`
+against, so nested unit intervals both mis-bucketed rows and tripped the
+consumer's own invocation check. And the #520 issue text spells the interval
+fields `begin_trace_index`/`end_trace_index`; the producer emits
+`begin_index`/`end_index`, and the producer is what travels.
+
+No measured table, production setting, pin, serving lane, format menu or export
+gate changes, no allocator default moves, and no GPU, served, latency, quality
+or capacity measurement was run. The committed report fixtures are synthetic
+and exercise refusal paths only; no live capture of this report exists. Gates:
+`tests/test_full_engine_resource_report.py`,
+`tests/test_runtime_fixed_resource_admission.py`,
+`tests/test_runtime_provenance.py`.
+
 Re-stamped (2026-09-12, `claude/518-data-manifest-at-submit`) for the campaign
 submit path (#518). **`dispatch_tessera_campaign.py submit` now derives a
 PrismaBuild data manifest for every row and refuses a row whose read set it

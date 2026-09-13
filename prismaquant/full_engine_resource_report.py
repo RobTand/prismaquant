@@ -13,11 +13,17 @@ own partition is the failure this consumer exists to catch, so no branch here
 reads a number out of ``derived`` and uses it (AGENTS.md principle 14: a claim
 about another runtime is attested, never asserted).
 
-This module admits nothing. ``runtime_provenance.admit_fixed_resources`` does
-not call it and keeps its unconditional refusal. Wiring a gate to a recomputed
-partition is the separate "Integrate allocator admission" prerequisite in
-``docs/design/runtime_fixed_resource_admission.md``; #420 and the producer's
-own issue both stay open until that row is built on qualified measurements.
+``runtime_provenance.admit_fixed_resources`` calls this module and admits only
+when it returns no refusal. This module still admits nothing itself: it reports
+what it recomputed and every reason the report is not usable, and the gate
+decides. Nothing here reads a number out of ``derived`` and uses it.
+
+The producer prices a row that is live during no declared engine step
+separately, as ``non_step_transient_peak_bytes``, because the seven composition
+terms price one engine step and those bytes are live during none of them. The
+obligation a placement has to satisfy is therefore
+``max(scalar_budget_bytes, non_step_transient_peak_bytes)``, and this consumer
+recomputes both sides of that maximum.
 """
 from __future__ import annotations
 
@@ -94,7 +100,28 @@ OWNER_CLASSES = ("fixed", "candidate", "kv")
 #: one is unclassified and named, never bucketed.
 UNSUPPORTED_OWNER_LABELS = ("shared", "unknown")
 LIFETIME_SCOPES = ("outside_units", "inside_unit", "escapes_unit")
-LIFETIME_CLASSES = ("resident", "activation", "scratch")
+#: ``non_step`` is the class no composition term charges. A row proven live
+#: during no declared engine step is not a term the composition forgot; it is
+#: priced beside the composition, because an engine still has to fit its
+#: startup peak on a box where no step ever reaches it.
+LIFETIME_CLASSES = ("resident", "activation", "scratch", "non_step")
+
+#: The domains an off-step price depends on. A peak over rows the history join
+#: may have missed, or whose external bytes were never closed, is a floor
+#: wearing a total's name.
+NON_STEP_PEAK_DOMAINS = ("history_join", "external_closure")
+
+#: The states a capture may declare about its own step coverage. Only
+#: ``complete`` licenses the off-step classification: under ``partial`` an
+#: allocation live during no *declared* step may still be live during an
+#: undeclared one, so "off-step" stops being a proof and becomes a guess, and
+#: ``unobserved`` declares no step at all.
+STEP_COVERAGE_STATES = ("complete", "partial", "unobserved")
+ADMITTED_STEP_COVERAGE = "complete"
+
+#: The placement obligation, spelled exactly as the producer freezes it. This
+#: is a contract string a gate reads, not prose, so it is compared verbatim.
+PLACEMENT_OBLIGATION = "max(scalar_budget_bytes, non_step_transient_peak_bytes)"
 
 #: How the partition came by its domain states. The producer derives them from
 #: the ledger, and it also accepts a caller handing them in so its own
@@ -127,8 +154,19 @@ _OBSERVATION_FIELDS = ("artifacts", "capture_sha256", "checkpoints", "cuda_argum
                        "external_native_peak_bytes", "issues", "kv_observations",
                        "observer_qualification", "owner_views", "runtime_provenance_relation",
                        "timing_captures", "torch_allocations",
+                       "step_coverage", "step_intervals",
                        "torch_observed_live_peak_bytes", "torch_observed_live_peak_scope",
                        "unattributed_external_records", "worker_startup_records")
+#: A declared step, named and bounded by history index. The issue text spells
+#: these ``begin_trace_index``/``end_trace_index``; the producer emits
+#: ``begin_index``/``end_index`` and the producer is what travels.
+_STEP_INTERVAL_FIELDS = ("begin_index", "end_index", "step_id")
+#: Two shapes, one field apart. A capture that declared steps says what its
+#: coverage claim is scoped to; a capture that declared none carries no scope
+#: because there is nothing for one to be about. ``_object`` demands an exact
+#: field set, so the shape is selected by the state rather than unioned.
+_STEP_COVERAGE_FIELDS = ("declared", "executed", "reason", "scope", "state")
+_UNOBSERVED_COVERAGE_FIELDS = ("declared", "executed", "reason", "state")
 _ARGUMENT_DOMAIN_FIELDS = ("handled_api_keys", "host_allocations", "host_mappings", "issues",
                            "null_device_frees", "scope", "status")
 _ALLOCATION_FIELDS = ("address", "allocate_index", "allocation_id",
@@ -141,8 +179,9 @@ _CHECKPOINT_FIELDS = ("label", "owner_count", "pinned_host_storages", "storages"
                       "unique_pinned_host_backing_bytes", "unmatched_storage_observations")
 _STORAGE_FIELDS = ("address", "allocation_id", "bytes", "category", "owner_categories", "owners")
 _PARTITION_FIELDS = ("capture_sha256", "domains", "domains_source", "identity", "membership",
-                     "schema", "scope", "terms", "uncharged_allocations",
-                     "unclassified_allocations", "units")
+                     "non_step_allocations", "non_step_transient_peak_bytes",
+                     "non_step_transient_peak_scope", "schema", "scope", "terms",
+                     "uncharged_allocations", "unclassified_allocations", "units")
 _MEMBERSHIP_FIELDS = ("allocate_index", "allocation_id", "bytes", "free_completed_index",
                       "lifetime_class", "owner_class", "unit")
 _UNCLASSIFIED_FIELDS = ("allocation_id", "bytes", "lifetime_scope", "observed_categories", "reason")
@@ -150,8 +189,10 @@ _UNCLASSIFIED_FIELDS = ("allocation_id", "bytes", "lifetime_scope", "observed_ca
 #: its unit, which is what the consumer recomputes, plus the producer's prose
 #: reason, which no check reads.
 _UNCHARGED_FIELDS = ("allocation_id", "bytes", "lifetime_class", "owner_class", "reason", "unit")
-_DERIVED_FIELDS = ("scalar_budget_bytes", "scope", "terms")
-_SCOPE_FIELDS = ("allocation_scope", "expressible", "invariance", "topology",
+_DERIVED_FIELDS = ("non_step_transient_peak_bytes", "non_step_transient_peak_scope",
+                   "placement_obligation", "scalar_budget_bytes", "scope", "terms")
+_SCOPE_FIELDS = ("allocation_scope", "expressible", "invariance",
+                 "non_step_allocation_count", "step_coverage", "topology",
                  "unavailable_terms", "uncharged_allocation_count",
                  "unclassified_allocation_count")
 _DOMAIN_FIELDS = ("evidence", "reason", "state")
@@ -251,10 +292,87 @@ def _scope(value: Any, where: str) -> Mapping:
     _bool(scope["expressible"], where + " expressible")
     _index(scope["unclassified_allocation_count"], where + " unclassified allocation count")
     _index(scope["uncharged_allocation_count"], where + " uncharged allocation count")
+    _index(scope["non_step_allocation_count"], where + " non-step allocation count")
+    _enum(scope["step_coverage"], STEP_COVERAGE_STATES, where + " step coverage")
     for name in _string_list(scope["unavailable_terms"], where + " unavailable terms"):
         if name not in TERMS:
             raise RuntimePriceError(f"{where}: unknown term {name!r}")
     return scope
+
+
+def _step_coverage(value: Any, where: str) -> Mapping:
+    """The capture's coverage claim over its own engine steps.
+
+    The state selects the field set, because a capture that declared no step
+    carries no ``scope`` for a claim it never made. Reading the state first is
+    not a relaxation: an object whose state is unknown, or which carries no
+    state at all, refuses before either shape is tried.
+    """
+    if not isinstance(value, Mapping) or "state" not in value:
+        raise RuntimePriceError(f"{where}: expected a step coverage claim naming its state")
+    state = _enum(value["state"], STEP_COVERAGE_STATES, where + " state")
+    fields = _UNOBSERVED_COVERAGE_FIELDS if state == "unobserved" else _STEP_COVERAGE_FIELDS
+    coverage = _object(value, fields, where)
+    _optional_index(coverage["declared"], where + " declared")
+    _optional_index(coverage["executed"], where + " executed")
+    _optional_string(coverage["reason"], where + " reason")
+    if state != "unobserved":
+        _string(coverage["scope"], where + " scope")
+    elif coverage["declared"] is not None or coverage["executed"] is not None:
+        raise RuntimePriceError(
+            f"{where}: an unobserved coverage claim counts declared or executed steps")
+    # A reason is owed exactly when the coverage does not license the off-step
+    # classification, mirroring the rule every domain record already follows.
+    if (coverage["reason"] is None) != (state == ADMITTED_STEP_COVERAGE):
+        raise RuntimePriceError(
+            f"{where}: a reason is required exactly when step coverage is not "
+            f"{ADMITTED_STEP_COVERAGE!r}")
+    return coverage
+
+
+def _step_intervals(value: Any, where: str):
+    """The declared engine steps, or null when the capture declared none.
+
+    Ordering and separation are checked here rather than assumed. Two declared
+    steps that overlap contradict each other about which step an allocation was
+    live during, so a declared interval spanning another step's extent refuses
+    instead of being classified against either one.
+    """
+    if value is None:
+        return None
+    rows, seen = [], set()
+    for item in _list(value, where):
+        row = _object(item, _STEP_INTERVAL_FIELDS, where + " row")
+        step_id = _string(row["step_id"], where + " step id")
+        begin = _index(row["begin_index"], where + " begin index")
+        end = _index(row["end_index"], where + " end index")
+        if step_id in seen:
+            raise RuntimePriceError(f"{where}: duplicate step {step_id!r}")
+        seen.add(step_id)
+        if begin >= end:
+            raise RuntimePriceError(f"{where}: step {step_id!r} is reversed or unclosed")
+        rows.append((begin, end, step_id))
+    for (first_begin, first_end, first_id), (second_begin, _, second_id) in zip(rows, rows[1:]):
+        if second_begin < first_begin:
+            raise RuntimePriceError(f"{where}: step {second_id!r} is declared out of order")
+        if second_begin < first_end:
+            raise RuntimePriceError(
+                f"{where}: step {first_id!r} spans the extent of step {second_id!r}, so an "
+                "allocation live in one is live in the other and neither bounds it")
+    return rows
+
+
+def _recomputed_coverage_state(intervals, executed: Any) -> str:
+    """The coverage state the declared counts support.
+
+    ``complete`` is a claim like any other: it is true when the capture said
+    how many steps it executed and declared an interval for every one of them,
+    and a report that asserts it on other counts is asserting the very license
+    the classification runs on.
+    """
+    if intervals and executed is not None and executed == len(intervals):
+        return ADMITTED_STEP_COVERAGE
+    return "partial"
 
 
 def _run_identity(value: Any, where: str) -> Mapping:
@@ -345,6 +463,22 @@ def _observations(value: Any, where: str) -> Mapping:
         raise RuntimePriceError(f"{where}: a pointer generation is reused by two allocations")
     for item in _list(observations["checkpoints"], where + " checkpoints"):
         _checkpoint(item, where + " checkpoint")
+    coverage = _step_coverage(observations["step_coverage"], where + " step coverage")
+    intervals = _step_intervals(observations["step_intervals"], where + " step intervals")
+    if (intervals is None) != (coverage["state"] == "unobserved"):
+        raise RuntimePriceError(
+            f"{where}: step intervals are carried exactly when the coverage state is not "
+            "'unobserved'")
+    if intervals is not None:
+        if coverage["declared"] != len(intervals):
+            raise RuntimePriceError(
+                f"{where}: step coverage declares {coverage['declared']!r} steps where the "
+                f"report carries {len(intervals)}")
+        recomputed = _recomputed_coverage_state(intervals, coverage["executed"])
+        if coverage["state"] != recomputed:
+            raise RuntimePriceError(
+                f"{where}: step coverage claims {coverage['state']!r} where its own declared "
+                f"and executed counts support {recomputed!r}")
     for name in OWED_OBSERVATIONS:
         if observations[name] is not None:
             raise RuntimePriceError(
@@ -405,7 +539,21 @@ def _partition(value: Any, where: str) -> Mapping:
         _string_list(row["observed_categories"], where + " unclassified observed categories")
         _string(row["reason"], where + " unclassified reason")
         unclassified.append(row)
-    identities = [row["allocation_id"] for row in rows + unclassified]
+    non_step = []
+    for item in _list(partition["non_step_allocations"], where + " non-step allocations"):
+        row = _object(item, _MEMBERSHIP_FIELDS, where + " non-step row")
+        _string(row["allocation_id"], where + " non-step allocation id")
+        _index(row["bytes"], where + " non-step bytes")
+        _index(row["allocate_index"], where + " non-step allocate index")
+        _optional_index(row["free_completed_index"], where + " non-step free completed index")
+        _enum(row["owner_class"], OWNER_CLASSES, where + " non-step owner class")
+        _equal(row["lifetime_class"], "non_step", where + " non-step lifetime class")
+        _optional_string(row["unit"], where + " non-step unit")
+        non_step.append(row)
+    _optional_index(partition["non_step_transient_peak_bytes"],
+                    where + " non-step transient peak bytes")
+    _string(partition["non_step_transient_peak_scope"], where + " non-step transient peak scope")
+    identities = [row["allocation_id"] for row in rows + unclassified + non_step]
     if len(set(identities)) != len(identities):
         raise RuntimePriceError(f"{where}: an allocation is partitioned more than once")
     # Uncharged rows are classified rows the seven terms do not reach, so each
@@ -467,6 +615,11 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
     _terms(derived["terms"], "report derived terms")
     _scope(derived["scope"], "report derived scope")
     _optional_index(derived["scalar_budget_bytes"], "report derived scalar budget bytes")
+    _optional_index(derived["non_step_transient_peak_bytes"],
+                    "report derived non-step transient peak bytes")
+    _string(derived["non_step_transient_peak_scope"],
+            "report derived non-step transient peak scope")
+    _string(derived["placement_obligation"], "report derived placement obligation")
     return report
 
 
@@ -474,7 +627,50 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
 # Independent recomputation. Nothing below reads `derived`.
 # --------------------------------------------------------------------------
 
-def _classify(allocation: Mapping) -> tuple:
+def _declared_steps(observations: Mapping):
+    """The engine steps this classification may rely on, or ``None``.
+
+    Index pairs come back only when the capture declared an interval for every
+    step it executed. Partial coverage is not a smaller set of steps: an
+    allocation from an undeclared step is live during a step nobody declared,
+    so "live during no declared step" stops being a proof. Partial and
+    unobserved therefore behave identically, which is how this consumer behaved
+    before any step could be declared at all.
+    """
+    coverage = observations["step_coverage"]
+    if coverage["state"] != ADMITTED_STEP_COVERAGE:
+        return None
+    return [(row["begin_index"], row["end_index"]) for row in observations["step_intervals"]]
+
+
+def _allocations_whose_unit_crosses_a_step(observations: Mapping) -> list:
+    """Allocation ids proving a unit invocation crossed a declared step boundary.
+
+    A unit runs inside one engine step, so the producer refuses a unit interval
+    that overlaps a declared step without being contained in it. The report
+    carries no unit intervals, so that refusal cannot be re-read directly. It
+    can still be derived: an ``inside_unit`` allocation is allocated and freed
+    within its own unit interval, so one that overlaps a declared step without
+    being contained in one proves that its unit overlapped that step without
+    being contained in it either. Naming the allocation is the closest this
+    consumer can come to naming the interval.
+    """
+    steps = _declared_steps(observations)
+    if steps is None:
+        return []
+    crossing = []
+    for allocation in observations["torch_allocations"]:
+        begin, end = allocation["allocate_index"], allocation["free_completed_index"]
+        if allocation["lifetime_scope"] != "inside_unit" or end is None:
+            continue
+        if (any(step_begin < end and begin < step_end for step_begin, step_end in steps)
+                and not any(step_begin <= begin and end <= step_end
+                            for step_begin, step_end in steps)):
+            crossing.append(allocation["allocation_id"])
+    return crossing
+
+
+def _classify(allocation: Mapping, steps) -> tuple:
     """Return ``(owner_class, lifetime_class, unit)`` or ``(None, None, reason)``.
 
     Ownership and lifetime are separate questions and a row needs a supported
@@ -496,17 +692,43 @@ def _classify(allocation: Mapping) -> tuple:
         lifetime = "scratch"
     elif scope == "escapes_unit":
         lifetime = "activation"
-    else:
+    elif steps is None:
         # Freed with no unit interval containing either end. Charging it as
         # fixed scratch assumes once per step and treating it as startup
-        # assumes never again; both are fills, and the capture emits no
-        # declared step boundary to decide between them.
-        return None, None, "freed outside every unit interval with no declared step boundary"
-    # The unit an allocation is charged to is the innermost scope it was made
-    # in. `unit_invocation` names the same unit from the other side, so a row
-    # where the two disagree is not a row this consumer can charge anywhere.
+        # assumes never again; both are fills, and this capture declares no
+        # complete step boundary to decide between them.
+        return None, None, ("freed outside every unit interval, and no complete declared step "
+                            "boundary covers this capture, so charging it would assume either "
+                            "once per step or never again")
+    else:
+        # With a complete boundary the question is answered by liveness, not by
+        # the allocation index alone. A buffer allocated before a step and freed
+        # inside it is live during that step and has to be charged; a buffer
+        # whose whole lifetime sits between steps is live during none of them.
+        begin, end = allocation["allocate_index"], allocation["free_completed_index"]
+        if any(step_begin <= begin and end <= step_end for step_begin, step_end in steps):
+            lifetime = "scratch"
+        elif any(step_begin < end and begin < step_end for step_begin, step_end in steps):
+            # Live across a step boundary: carried, exactly as a row that
+            # outlives its unit is carried. `fixed_activation` and
+            # `fixed_scratch` are separate additive terms, so this neither
+            # double-counts the bytes nor drops them.
+            lifetime = "activation"
+        else:
+            lifetime = "non_step"
+    # The unit an allocation is charged to is the **outermost** scope it was
+    # made in, not the innermost. The producer reads `unit_invocation` from the
+    # outermost containing interval and decides `lifetime_scope` against that
+    # same interval, so charging the innermost would split a row's lifetime
+    # basis from its charge. Unit intervals may nest, and only crossing ones
+    # refuse, so the innermost pick also puts simultaneously live rows into two
+    # per-unit buckets the composition then takes a maximum between. Outermost
+    # intervals cannot overlap, so a maximum over them is a maximum over
+    # genuine alternatives. `unit_invocation` names the same unit from the
+    # other side, so a row where the two disagree is not a row this consumer
+    # can charge anywhere.
     stack = allocation["scope_stack"]
-    unit = stack[-1] if stack else None
+    unit = stack[0] if stack else None
     invocation = allocation["unit_invocation"]
     if invocation is not None and invocation.rsplit(":", 1)[0] != (unit or ""):
         return None, None, "the scope stack and the unit invocation name different units"
@@ -553,20 +775,29 @@ def _recompute_domains(observations: Mapping) -> dict[str, bool]:
     return closed
 
 
-def _recompute_membership(observations: Mapping) -> tuple[list[dict], list[dict]]:
-    membership, unclassified = [], []
+def _recompute_membership(observations: Mapping) -> tuple[list[dict], list[dict], list[dict]]:
+    """Split the observed allocations into charged, unclassified and off-step.
+
+    The third list is classified and deliberately outside the composition: each
+    row is proven, from the capture's own declared step intervals, to be live
+    during no engine step, and the seven terms compose one step. Those rows are
+    named and priced separately rather than nulling every term.
+    """
+    steps = _declared_steps(observations)
+    membership, unclassified, non_step = [], [], []
     for allocation in observations["torch_allocations"]:
-        owner, lifetime, detail = _classify(allocation)
+        owner, lifetime, detail = _classify(allocation, steps)
         if owner is None:
             unclassified.append({"allocation_id": allocation["allocation_id"],
                                  "bytes": allocation["bytes"], "reason": detail})
             continue
-        membership.append({"allocation_id": allocation["allocation_id"],
-                           "allocate_index": allocation["allocate_index"],
-                           "bytes": allocation["bytes"],
-                           "free_completed_index": allocation["free_completed_index"],
-                           "owner_class": owner, "lifetime_class": lifetime, "unit": detail})
-    return membership, unclassified
+        entry = {"allocation_id": allocation["allocation_id"],
+                 "allocate_index": allocation["allocate_index"],
+                 "bytes": allocation["bytes"],
+                 "free_completed_index": allocation["free_completed_index"],
+                 "owner_class": owner, "lifetime_class": lifetime, "unit": detail}
+        (non_step if lifetime == "non_step" else membership).append(entry)
+    return membership, unclassified, non_step
 
 
 def _charged(row: Mapping) -> bool:
@@ -678,6 +909,35 @@ def _compose(terms: Mapping[str, Any]):
             + terms["fixed_kv"])
 
 
+def _non_step_peak(non_step: Sequence[Mapping], *, closed: Mapping[str, bool],
+                   unclassified: int, uncharged: int):
+    """The off-step transient peak, or nothing at all.
+
+    An off-step price needs the same join a scratch term needs. It is a peak
+    over rows the history join may have missed and whose external bytes may
+    never have been closed, and an unclassified or uncharged row could itself
+    be off-step, so the price goes null while the count stays readable.
+    """
+    if unclassified or uncharged or not all(closed[name] for name in NON_STEP_PEAK_DOMAINS):
+        return None
+    return _simultaneous_peak(non_step)
+
+
+def _placement_obligation(budget: Any, non_step_peak: Any):
+    """``max(scalar_budget_bytes, non_step_transient_peak_bytes)``, or nothing.
+
+    Both sides are obligations on the same box. The seven terms price one
+    engine step; the off-step peak prices what the engine still holds when no
+    step is running. A placement that satisfies only one of them satisfies the
+    smaller of two numbers. Neither side is defaulted to zero: an absent side
+    is an absence of evidence, and a maximum taken against it would read as
+    the other side having been checked.
+    """
+    if budget is None or non_step_peak is None:
+        return None
+    return max(budget, non_step_peak)
+
+
 @dataclass(frozen=True)
 class ReportVerdict:
     """What the consumer recomputed, and why nothing is admissible.
@@ -692,6 +952,8 @@ class ReportVerdict:
     fixture_provenance: Any
     recomputed_terms: Mapping[str, Any]
     recomputed_scalar_budget_bytes: Any
+    recomputed_non_step_transient_peak_bytes: Any
+    recomputed_placement_obligation_bytes: Any
     open_domains: tuple
     unclassified_allocations: tuple
     disagreements: tuple = ()
@@ -803,8 +1065,16 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
             and observations["cuda_argument_domains"]["handled_api_keys"]):
         disagree("allocation APIs are handled by an argument domain that declares itself unavailable")
 
+    # A unit interval that crosses a declared step boundary contradicts both
+    # declarations, and the producer refuses to emit one. The report carries no
+    # unit intervals, so the contradiction is derived from the allocations that
+    # ran inside them.
+    for allocation_id in _allocations_whose_unit_crosses_a_step(observations):
+        disagree(f"allocation {allocation_id} ran inside a unit invocation that spans a declared "
+                 "step boundary, which no capture may declare")
+
     # The partition, recomputed from the observations it claims to derive from.
-    membership, unclassified = _recompute_membership(observations)
+    membership, unclassified, non_step = _recompute_membership(observations)
     by_id = {row["allocation_id"]: row for row in membership}
     claimed_membership = {row["allocation_id"]: row for row in partition["membership"]}
     if set(by_id) != set(claimed_membership):
@@ -820,6 +1090,19 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
         claimed = claimed_unclassified.get(row["allocation_id"])
         if claimed is not None and claimed["bytes"] != row["bytes"]:
             disagree(f"unclassified allocation {row['allocation_id']} restates its extent")
+    # The off-step rows are recomputed from the same observations and compared
+    # cell by cell, exactly as the charged rows are. A producer that moved one
+    # row into this list moved it out of every term that charges it.
+    by_non_step = {row["allocation_id"]: row for row in non_step}
+    claimed_non_step = {row["allocation_id"]: row for row in partition["non_step_allocations"]}
+    if set(by_non_step) != set(claimed_non_step):
+        disagree("the partition's off-step allocations are not the ones this consumer finds "
+                 "live during no declared engine step")
+    for allocation_id, row in by_non_step.items():
+        claimed = claimed_non_step.get(allocation_id)
+        if claimed is not None and any(claimed[key] != row[key] for key in _MEMBERSHIP_FIELDS):
+            disagree(f"off-step allocation {allocation_id} is partitioned differently than it "
+                     "recomputes")
     units = {row["unit"] for row in membership if row["unit"] is not None}
     if units != set(partition["units"]):
         disagree("the partition's units are not the units this consumer recomputes")
@@ -865,7 +1148,27 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
     if derived["scalar_budget_bytes"] != budget or type(derived["scalar_budget_bytes"]) is not type(budget):
         disagree(f"derived scalar budget is {derived['scalar_budget_bytes']!r} where this consumer "
                  f"recomputes {budget!r}")
+    # The off-step price, recomputed. It is carried in two places -- the
+    # partition and `derived` -- and both are the producer's claim, so both are
+    # compared to this consumer's own sweep and to each other.
+    non_step_peak = _non_step_peak(non_step, closed=closed, unclassified=len(unclassified),
+                                   uncharged=len(uncharged))
+    for member, claimed in (("derived", derived["non_step_transient_peak_bytes"]),
+                            ("partition", partition["non_step_transient_peak_bytes"])):
+        if claimed != non_step_peak or type(claimed) is not type(non_step_peak):
+            disagree(f"{member} non_step_transient_peak_bytes is {claimed!r} where this consumer "
+                     f"recomputes {non_step_peak!r}")
+    # The scope sentence is prose and no check reads it, but two copies of one
+    # claim invite drift, so the two copies must at least be one claim.
+    if derived["non_step_transient_peak_scope"] != partition["non_step_transient_peak_scope"]:
+        disagree("the derived and partition off-step peak scopes are two different claims")
+    # A frozen contract spelling a gate reads, not prose: compared verbatim.
+    if derived["placement_obligation"] != PLACEMENT_OBLIGATION:
+        disagree(f"derived placement_obligation is {derived['placement_obligation']!r} where this "
+                 f"consumer applies {PLACEMENT_OBLIGATION!r}")
+
     unavailable = tuple(sorted(name for name in TERMS if terms[name] is None))
+    coverage_state = observations["step_coverage"]["state"]
     for member, scope in (("derived", derived["scope"]), ("partition", partition["scope"])):
         if tuple(sorted(scope["unavailable_terms"])) != unavailable:
             disagree(f"the {member} scope names other unavailable terms than this consumer recomputes")
@@ -875,11 +1178,28 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
             disagree(f"the {member} scope claims another unclassified allocation count")
         if scope["uncharged_allocation_count"] != len(uncharged):
             disagree(f"the {member} scope claims another uncharged allocation count")
+        if scope["non_step_allocation_count"] != len(non_step):
+            disagree(f"the {member} scope claims another off-step allocation count")
+        if scope["step_coverage"] != coverage_state:
+            disagree(f"the {member} scope claims step coverage {scope['step_coverage']!r} where "
+                     f"the observations declare {coverage_state!r}")
     if budget is None:
         blocking.append("no scalar device budget is expressible from this report")
+    # The whole classification runs on this licence, so it is named as a
+    # refusal in its own right rather than left to be inferred from the
+    # unclassified rows a missing licence produces.
+    if coverage_state != ADMITTED_STEP_COVERAGE:
+        blocking.append(f"step coverage is {coverage_state!r}, so an allocation live during no "
+                        "declared engine step may still be live during an undeclared one and "
+                        "the off-step classification is not licensed")
+    obligation = _placement_obligation(budget, non_step_peak)
+    if obligation is None:
+        blocking.append("no placement obligation is recomputable from this report")
 
     return ReportVerdict(schema=REPORT_SCHEMA, fixture_provenance=identity["fixture_provenance"],
                          recomputed_terms=terms, recomputed_scalar_budget_bytes=budget,
+                         recomputed_non_step_transient_peak_bytes=non_step_peak,
+                         recomputed_placement_obligation_bytes=obligation,
                          open_domains=open_domains,
                          unclassified_allocations=tuple(row["allocation_id"] for row in unclassified),
                          disagreements=tuple(disagreements), blocking=tuple(blocking))
