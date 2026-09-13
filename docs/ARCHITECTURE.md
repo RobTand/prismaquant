@@ -1,7 +1,29 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `pq/536-loader-axes`. Stamps
+As of: 2026-09-13 · `pq/prefill-frontier-sweep`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `pq/prefill-frontier-sweep`) for the **prefill-vs-
+accuracy frontier sweep** (#540, the sweep half of #237):
+`python -m prismaquant.prefill_frontier` drives the measured-runtime
+allocator over a grid of prefill p95-TTFT budgets and writes one
+`prismaquant.prefill_frontier.v1` document -- per point the objective, exact
+payload bytes, attained operator-sum prefill (and decode when priced), the
+assignment digest and file, feasibility or the solver's refusal reason;
+nondominance under `select_validated_frontier`'s envelope rule; and a
+**measured** saturation point (the attained prefill of the solve at the
+table's upper bound), verified against every looser point. Every point is
+the ordinary single solve: `allocator.main(argv, measured_runtime_sweep=...)`
+is the one new seam, prices the table once and hands the sweep a
+`MeasuredRuntimeSweep.solve(slo_ms, target_bits)` that runs the unchanged
+`_solve_for_target` / `solve_runtime_frontier` path; the DP is not
+re-implemented and the default path is byte-identical (§4.5). The grid is
+explicit, the solver's own breakpoints (`prefill_slo_breakpoints_ms`, now in
+every measured-runtime solve's diagnostics), or N linear points; no default.
+No real v2 table exists, so the curve is exercised on synthetic CPU tables
+only; what the producer side owes is stated, gate by gate, in
+`docs/design/joint_aura_runtime_allocation.md` §Frontier sweep. Gates:
+`tests/test_prefill_frontier.py`, `tests/test_allocator_measured_runtime_cli.py`.
 
 Re-stamped (2026-09-12, `pq/536-loader-axes`) for the **loader-axis leg of
 tensor-parallel legality** (#536). The pinned contract's `tensor_parallel`
@@ -8029,6 +8051,24 @@ role-split checkpoint is unloadable. Default off.
 
 Candidate legality, passthrough integrity, cost-source precedence and fused-sibling aggregation
 also live in `allocator_candidates.py`; the invariants they enforce are §6.4's.
+
+**Measured-runtime frontier sweep (2026-09-13, #540).** The opt-in measured-runtime path
+(`--measured-runtime-table` + `--measured-runtime-context` + `--slo-prefill-p95-ttft-ms`,
+`allocator_solver.solve_runtime_frontier`) answers one prefill budget per run.
+`prismaquant/prefill_frontier.py` sweeps that budget: `allocator.main(argv,
+measured_runtime_sweep=...)` loads, checks and prices the table once and hands the sweep a
+`MeasuredRuntimeSweep` whose `solve(slo_ms, target_bits)` is the unchanged single solve at
+that budget. The output, `prismaquant.prefill_frontier.v1`, carries the whole curve -- per
+point `slo_ms`, `predicted_dloss`, `payload_bytes`, `achieved_bits`, `attained_prefill_ms`
+(fixed work included), `attained_decode_ms`, `device_memory_bytes`, `assignment_sha256` and
+`assignment_path`, `refusal_reason`, `nondominated` -- plus `saturation` (measured at the
+table's upper bound and verified), `slo_axis` (table-derived bounds), `monotone_loss`, and
+provenance (table identity, context, cost digest, git commit, allocator argv). The grid is
+`--slo-ms`, `--slo-grid auto` (the solve's own `prefill_slo_breakpoints_ms`) or `--slo-grid N`;
+there is no default and no knee. An exact-search bound refusal inside a sweep is that point's
+`refusal_reason`; a single solve still exits. Loader refusals (stale cost digest, bad rows,
+context drift) surface unchanged. Synthetic CPU coverage only until a real v2 table exists
+(`docs/design/joint_aura_runtime_allocation.md` §Frontier sweep names what Tessera owes).
 
 ### 4.6 Selection
 

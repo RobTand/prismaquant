@@ -151,6 +151,81 @@ auxiliary choices against the same measured resource contract. The sum of
 operator medians is a proposal estimate, not an end-to-end p95 TTFT or decode
 measurement. Existing serving and publication gates remain authoritative.
 
+## Frontier sweep
+
+`python -m prismaquant.prefill_frontier` (#540) turns the single-budget
+question above into the curve Rob asked for: one measured-runtime solve per
+prefill p95-TTFT budget, written as a `prismaquant.prefill_frontier.v1`
+document. The grid is explicit (`--slo-ms a,b,c`), the solver's own
+breakpoints (`--slo-grid auto`: the prefill values at which the lowest-loss
+proposal changes, from `prefill_slo_breakpoints_ms` in the solve
+diagnostics), or `N` linearly spaced budgets from the table's lower bound to
+the saturation point (`--slo-grid N`). Nothing is defaulted.
+
+Every point is the ordinary solve. `allocator.main(argv,
+measured_runtime_sweep=...)` loads, checks and prices the table exactly once,
+then hands the sweep a `MeasuredRuntimeSweep` whose `solve(slo_ms,
+target_bits)` runs the same `_solve_for_target` path, the same
+`solve_runtime_frontier` search and the same exact payload and serving checks
+one `--slo-prefill-p95-ttft-ms` run takes
+(`tests/test_prefill_frontier.py::test_sweep_point_equals_the_single_solve_at_that_slo`).
+The DP is not re-implemented, and the sweep's presence changes nothing on the
+default path (`test_default_allocator_path_is_untouched_by_the_hook`).
+
+The document records per point the SLO, `predicted_dloss`, exact payload
+bytes, the attained operator-sum prefill (fixed work included), decode when
+priced, device bytes, the assignment digest and the file it was written to,
+and either feasibility or the solver's refusal reason (including an
+exact-search bound refusal, which inside a sweep ends that point, not the
+sweep). It flags nondominance under `select_validated_frontier`'s
+lower-envelope rule on (attained prefill, `predicted_dloss`), with a noise
+floor that defaults to zero because the objective is deterministic. The
+saturation point is measured, not chosen: the attained prefill of the solve
+at the table's upper bound (fixed prefill plus every unit's slowest priced
+option), and the document checks that every point at or above it returned
+the same assignment. The whole curve is the answer; no knee is reported.
+
+**What the Tessera side must deliver for a real table.** The sweep consumes
+a `prismaquant.measured_runtime_prices.v2` table and nothing else; today none
+exists, and the consumer's own gates say exactly what is owed:
+
+- Native rows: one `native_receipt_bindings` entry per priced `(unit,
+  format)` -- `panel`, `receipt` and `memory_trace` artifacts -- admitted by
+  `runtime_provenance.admit_native_rows` (`runtime_provenance.py:622-697`)
+  through the same `consume_native_receipt` / `consume_moe_receipt`
+  consumers as #267. Each row needs **both** measured phases (`prefill` and
+  `decode`; a null decode refuses as "lacks a complete measured phase"), a
+  non-null per-phase `peak_scratch_bytes`, the panel's prefill `m` equal to
+  the context's `prompt_tokens`, batch size one, and the panel's runtime,
+  cost, source and calibration digests equal to the table's.
+- Fixed resources: `fixed_resources_receipt_path` must carry
+  `full_model_resources: {path, sha256}` naming a
+  `tessera.full_engine_resource_report.v1` report that
+  `full_engine_resource_report.consume_full_engine_resource_report`
+  recomputes from `observations` and `partition`
+  (`runtime_provenance.admit_fixed_resources`, `:418-453`). At report v1 the
+  owed observations (`OWED_OBSERVATIONS`: `kv_observations`,
+  `observer_qualification`, `owner_views`, `runtime_provenance_relation`,
+  `timing_captures`, `worker_startup_records`) are named and null, **and the
+  report has no timing partition at all**: a table declaring a nonzero fixed
+  `prefill_ms` or `decode_ms` is refused by name
+  (`_fixed_resource_refusals`, `:614-618`). A fixed `prefill_ms` of zero is
+  admissible only if the engine truly does no non-candidate prefill work,
+  which no capture has shown. Opening the prefill axis for real therefore
+  needs a report version that observes and partitions fixed timing, plus the
+  versioned native/full-engine transient charge boundary the same function
+  still refuses (`:609-610`); that is #420's producer half, tracked with
+  #237.
+- The context: a `prismaquant.measured_runtime_context.v2` with the
+  provenance-relation identity (`runtime_provenance_relation.md`), the same
+  `source_sha256` and `calibration_sha256` the joint AURA cost rows carry,
+  and an operator route per `(unit, format)`.
+
+Until that table exists the sweep is exercised only on synthetic CPU tables
+(`tests/test_prefill_frontier.py`, extending the fixture in
+`tests/test_allocator_measured_runtime_cli.py`); a curve it produces is a
+proposal under the sequential operator-sum model and certifies no p95.
+
 ## Validation and promotion plan
 
 The baseline is weight-only AURA over exactly the same production renders,
