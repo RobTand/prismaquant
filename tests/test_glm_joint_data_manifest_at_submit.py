@@ -667,7 +667,11 @@ REAL_PLAN_TEMPLATE = BASE / "first-proof-joint-preparation-03" / "dryrun" / "pla
 #: ``prepare`` has been running against this plan since 04:59Z, and it writes
 #: a decoded shard for every rung the campaign adopted rather than encoded --
 #: each one marked by a ``.render_origin.json`` record beside it in the row
-#: cache. The read set gained 3,216 renders in eighteen minutes (5.14 TB at
+#: cache. Those records are written from one place only -- the head's
+#: ``_resolve_render_origin`` -- and the running pass was still writing them
+#: at 08:12Z, three hours after it started, so the head placement below is
+#: measured rather than inferred. The read set gained 3,216 renders in
+#: eighteen minutes (5.14 TB at
 #: 07:39Z, 5.20 TB at 07:57Z), and the brief's 4.75 TB estimate was taken
 #: earlier the same morning against fewer shards. Projected settled size once
 #: the remaining 97,302 shards exist: 5.20 TB + 97,302 x the 16.8 MB mean

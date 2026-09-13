@@ -30,7 +30,12 @@ small on this census: 97,302 of its 197,990 measured cells are rungs the
 campaign adopted rather than encoded, and `load_measured_anchor_input`
 decodes a shard for each of them from its wire before the first layer
 installs, so 382.67 GB of wire bytes belong to the `head` phase and the phase
-is 390.78 GB. That size is a property of this tree's state rather than of the
+is 390.78 GB. `_resolve_render_origin` has exactly one caller, and the running
+pass shows it: it started at 04:58Z and was still writing
+`.render_origin.json` records -- 10,064 of them in the preceding hour, 30,401
+so far -- at 08:12Z, more than three hours into a head that has roughly
+97,000 shards left to decode at 2.8 per second. That is the read this
+manifest exists to window. That size is a property of this tree's state rather than of the
 pass: once every shard exists, `renders_absent` is zero and the head is back
 to its 7.7 GB of records. The rule is the durable part, and the synthetic
 fixture in the gate is what holds it. A loop that treats a phase as one unit
