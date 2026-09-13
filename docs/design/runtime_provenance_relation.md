@@ -30,7 +30,7 @@ nonfinite numbers. The relation contains:
 | `schema` | `prismaquant.runtime_provenance_relation.v1` |
 | `configuration` | Exact selected serving configuration file. Image, engine arguments, environment and launcher selection bind it. |
 | `image_manifest` | Exact Docker v2 or OCI platform manifest bytes whose digest is the pinned image reference. Its `config.digest` explicitly relates Docker hosts reporting a config ID to hosts reporting the manifest ID. Original local IDs remain in each run. Unrelated IDs refuse. |
-| `package_source` | Original source `archive` reference, relative package `prefix`, and explicit `excluded_files` roster. Installed files must match the remaining archive entries by name, byte length and SHA-256. The source-tree and installed-subset source seals are separately recomputed. |
+| `package_source` | Original source `archive` reference, relative package `prefix`, and explicit `excluded_files` roster. Installed files must match the remaining archive entries by name, byte length and SHA-256. The source-tree and installed-subset source seals are separately recomputed, and so is the installer's own source-tree identity (see *Two installer bindings*). |
 | `runs` | Named observations, each with `scope`, `runtime`, `runtime_field`, `installation`, `post_core`, `post_package`, and `instrumentation`. |
 | `full_engine_run_id` | Exactly one run has `scope=full_engine`; every other run has `scope=native_operator`. |
 | `production_dependencies` | Every native production library gets exactly one `{native_run_id, native_path, full_engine_path, sha256}` relation to bytes actually mapped by the engine. Same-path mismatches refuse. A different path still needs exact byte equality. |
@@ -110,6 +110,38 @@ The producer source-tree seal `57809bff...` and installed-subset seal
 The original packaging diagnostic lists these files at
 `native-moe-original-r1024/package-identity-diagnostic.json`. The relation checks
 archive bytes and recomputes both roles instead of equating the two seals.
+
+## Two installer bindings, and reading the gated image
+
+An installation declares its plugin source exactly one of two ways, and the
+relation refuses an installation that declares both or neither.
+
+* An **archive install** records `plugin_archive_sha256`, equated with the
+  declared archive's bytes.
+* A **source-tree install** (`experiments/full_engine_plugin_install.py`)
+  records no archive digest at all. It seals the tree as a SHA-256 over the
+  compact JSON map `{archive member: sha256}` of the build metadata plus every
+  file under `src/`, and records the map's size as `plugin_source_members`.
+  `_source_tree_identity` recomputes that seal from the declared archive's own
+  bytes and equates both, the way `_source_digest` already recomputes Tessera's
+  source-byte seal. The archive therefore carries the build metadata beside the
+  package prefix, so one artifact answers all three identities.
+
+`common` carries both fields, so two runs installed different ways never read
+as the same runtime.
+
+The image the relation checks is the record's `required` field.
+`serving/runtime_image.resolve` sets `required` to the contract pin only when
+the requested repository is the pinned repository (`reason` `pinned`), and to
+the explicitly requested digest otherwise (`reason` `explicit_digest`); `pinned`
+keeps naming Tessera's packaged default either way. Only those two `reason`
+values are admitted, and `pinned` must equal the image only under `pinned`.
+
+`selection.configuration_sha256` is the native launcher's stamp
+(`_pb_native_moe_measure/launch.py`), and it is the only configuration binding a
+native operator record has, so it is required there. A full-engine record binds
+its own `configuration_sha256`; `selection` is optional for that scope and is
+still checked when a launcher stamped one.
 
 The proposed, intentionally unadmitted relation and its panel-03 context are
 retained in `runtime-provenance-323/relation-prepare05-engine-r4.json` and

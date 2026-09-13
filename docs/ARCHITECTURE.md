@@ -1,7 +1,46 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/537-route-status-reads-the-pin`. Stamps
+As of: 2026-09-13 · `claude/first-prefill-frontier-qwen3-0.6b`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `claude/first-prefill-frontier-qwen3-0.6b`) because
+**the runtime provenance relation now reads the three fields a real Tessera
+run actually publishes** (#237). `runtime_provenance._observe_run` was written
+against a shape no capture on disk has, so it refused the first real
+full-engine report outright, and the refusal was in the consumer rather than in
+the evidence. Three reads change, each one derived from the producer's own
+source rather than relaxed:
+
+* **The gated image is `required`, not `pinned`.** Tessera's
+  `serving/runtime_image.resolve` sets `required` to the contract pin only when
+  the requested repository IS the pinned repository (`reason` `pinned`), and to
+  the explicitly requested digest otherwise (`reason` `explicit_digest`),
+  leaving `pinned` naming Tessera's own packaged default. Reading `pinned`
+  demanded that every artifact serve out of `vllm/vllm-openai`, which no lane
+  image does. `reason` is now checked against the two gated values and `pinned`
+  is required to equal the image only when the resolver says it is the pin.
+* **`selection` is the native launcher's stamp.** A native operator record
+  carries no configuration of its own, so `_pb_native_moe_measure/launch.py`
+  stamps `selection.configuration_sha256` and that stamp is its only binding.
+  The full-engine record binds its own `configuration_sha256`, which this
+  loader already checks, and its capture stamps no `selection`. It is now
+  required for `native_operator`, optional for `full_engine`, and still checked
+  wherever it is present.
+* **A source-tree install declares no archive digest.**
+  `experiments/full_engine_plugin_install.py` seals a tree as a SHA-256 over
+  the compact JSON map `{member: sha256}` of the build metadata plus every file
+  under `src/`, recorded as `plugin_source_sha256` / `plugin_source_members`.
+  Requiring `plugin_archive_sha256` refused every source-tree install.
+  `_source_tree_identity` recomputes that seal from the declared archive's own
+  bytes — the way `_source_digest` already recomputes Tessera's source-byte
+  seal — and an installation must declare exactly one of the two bindings.
+
+The relation's `common` coordinates now carry both plugin bindings, so two runs
+installed different ways can never read as the same runtime. No gate is
+weakened: every refusal these reads replaced is still reachable, under its own
+name, with a test. Contract:
+[runtime provenance relation](design/runtime_provenance_relation.md).
+Gates: `tests/test_runtime_provenance.py`.
 
 Re-stamped (2026-09-13, `claude/537-route-status-reads-the-pin`) because
 **`ServingLaneSpec.route_status_for` now reads the pinned Tessera runtime
