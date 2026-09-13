@@ -15,10 +15,19 @@ follows it.
 The second half is the part a reader is most likely to get wrong. The contract
 says ``gfx1151`` EXECUTES ``bf16_unquantized`` for ``TESSERA_BF16_K1``. That is
 not a receipt, and this side does not treat it as one: no cell names either AMD
-platform, so ``route_status_for`` answers ``unattested`` with source
+platform, so the resolver answers ``unattested`` with source
 ``serving_runtime_contract:<v>:no_cell`` for every family including the backed
 one, and export fails closed without an explicit override. Backing is
 permission to PRICE; a cell is permission to ship.
+
+That answer is asserted twice, through both resolvers, because neither alone
+says it: ``ServingLaneSpec.route_status_for`` speaks the ``no_cell`` vocabulary
+but reads no default table (absence, by design, since the Gridbook lane
+retired), so it is handed the pinned contract through the module's declared
+test seam -- and ``tessera_render.tessera_attesting_cells``, the predicate
+behind ``tessera_menu.route_admission`` and therefore the path production runs,
+resolves the pinned table itself and finds no cell. Each has its own sm_121
+control, so ``unattested`` here is never allowed to mean "nothing was read".
 """
 from __future__ import annotations
 
@@ -52,6 +61,63 @@ def _families() -> tuple[str, ...]:
 def _backed_by_contract(platform: str) -> set[str]:
     entry = _packaged()["lane_eligibility"]["platforms"][platform]["executes"]
     return {family for family, contract in entry.items() if contract is not None}
+
+
+def _rung_name(family: str) -> str:
+    """The family's own attested rung, spelled the contract's way.
+
+    Read rather than typed: ``name_pattern`` and ``attested_rungs_q256`` both
+    come off the pinned file, so a release that moves a rung moves this test
+    with it instead of leaving a stale literal that resolves to ``rate=None``
+    and fails for the wrong reason.
+    """
+    row = next(r for r in _packaged()["formats"] if r["family"] == family)
+    return str(row["name_pattern"]).replace(
+        "{k}", str(int(row["attested_rungs_q256"][0])))
+
+
+def _version() -> str:
+    return str(_packaged()["versions"]["tessera"])
+
+
+@pytest.fixture
+def pinned_table(monkeypatch):
+    """Hand ``route_status_for`` the pinned contract through its own seam.
+
+    ``load_eligibility_table()`` with no ``contract_path`` is an honest
+    ABSENCE, by design since the Gridbook lane retired: there is no default
+    table any more (``lane_eligibility.py`` docstring), and every live caller
+    passes the pinned runtime's own file --
+    ``tessera_render._pinned_serving_table`` is the one that does it for
+    Tessera. ``ServingLaneSpec.route_status_for`` is the resolver that speaks
+    the ``serving_runtime_contract:<v>:no_cell`` vocabulary, and it reads the
+    table through a per-process cache with no argument, so asking it about a
+    real platform means supplying the real table first. That is what this
+    fixture does, through the module's declared test seam
+    (``_reset_eligibility_table_cache``). It substitutes the CONTRACT, never
+    the verdict: the table below is parsed from Tessera's own packaged
+    ``runtime_contract.json`` by the same parser the export gate uses.
+    """
+    from prismaquant import lane_eligibility as lane
+
+    real = lane.load_eligibility_table
+    with as_file(tr.tessera_serving_contract_path()) as path:
+        table = real(_version(), contract_path=path)
+    assert table.present, table.absent_reason
+    monkeypatch.setattr(lane, "load_eligibility_table", lambda *a, **k: table)
+    sp._reset_eligibility_table_cache()
+    yield table
+    sp._reset_eligibility_table_cache()
+
+
+def _tessera_lane() -> "sp.ServingLaneSpec":
+    return sp.ServingLaneSpec(
+        id="tessera",
+        formats=tuple(_families()),
+        activation_contract="W16A16",
+        fallback_route="none",
+        route_status_structures=("dense", "routed_moe"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -131,36 +197,83 @@ def test_bf16_passthrough_stays_on_the_menu():
 # Export fails closed: backing is not a receipt
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("platform", sorted(set(AMD_PROFILES.values())))
-def test_every_family_resolves_unattested_no_cell_on_the_amd_targets(platform):
-    lane = sp.ServingLaneSpec(
-        id="tessera",
-        formats=tuple(_families()),
-        activation_contract="W16A16",
-        fallback_route="none",
-        route_status_structures=("dense", "routed_moe"),
-    )
-    version = _packaged()["versions"]["tessera"]
+def test_every_family_resolves_unattested_no_cell_on_the_amd_targets(
+        platform, pinned_table):
+    lane = _tessera_lane()
     for family in _families():
-        name = f"{family}_R1792" if family == "TESSERA_BF16_K1" else f"{family}_R896"
-        status, flags, source = lane.route_status_for(name, platform=platform)
+        status, flags, source = lane.route_status_for(
+            _rung_name(family), platform=platform)
         assert status == ROUTE_STATUS_UNATTESTED, (family, status, source)
-        assert source == f"serving_runtime_contract:{version}:no_cell", source
+        assert source == f"serving_runtime_contract:{_version()}:no_cell", (
+            family, source)
         assert flags == ()
 
 
-def test_the_same_lane_still_attests_the_sm121_cells():
+def test_the_same_lane_still_attests_the_sm121_cells(pinned_table):
     """The control: `no_cell` above is about the platform, not a dead lane."""
-    lane = sp.ServingLaneSpec(
-        id="tessera",
-        formats=tuple(_families()),
-        activation_contract="W16A16",
-        fallback_route="none",
-        route_status_structures=("dense", "routed_moe"),
-    )
+    lane = _tessera_lane()
     status, _flags, source = lane.route_status_for(
-        "TESSERA_BF16_K1_R1792", platform="sm_121")
+        _rung_name("TESSERA_BF16_K1"), platform="sm_121")
     assert status != ROUTE_STATUS_UNATTESTED, (status, source)
     assert "no_cell" not in source, source
+
+
+def test_the_resolver_says_absent_when_nobody_supplies_a_contract():
+    """Why the fixture above exists, asserted rather than asserted-in-prose.
+
+    With no contract in hand this resolver answers ``unattested`` with source
+    ``...:absent`` for EVERY platform, sm_121 included. That is the designed
+    fail-closed default and it is also the reason the two tests above are not
+    evidence without the fixture: an ``unattested`` that means "nobody handed
+    me a table" must never be read as "the runtime has no cell here".
+    """
+    sp._reset_eligibility_table_cache()
+    try:
+        status, _flags, source = _tessera_lane().route_status_for(
+            _rung_name("TESSERA_BF16_K1"), platform="sm_121")
+    finally:
+        sp._reset_eligibility_table_cache()
+    assert status == ROUTE_STATUS_UNATTESTED
+    assert source.endswith(":absent"), source
+
+
+@pytest.mark.parametrize("platform", sorted(set(AMD_PROFILES.values())))
+def test_the_live_seam_finds_no_attesting_cell_on_the_amd_targets(platform):
+    """The same fact through the path production actually runs.
+
+    ``tessera_render.tessera_attesting_cells`` is the match predicate behind
+    ``tessera_menu.route_admission`` -- the one seam that reads a serving
+    contract on Tessera's behalf -- and it resolves the pinned table itself.
+    The contract gives neither AMD platform a ``serve_image``, so no serving
+    context can honestly be built for one; this test LENDS it the release's
+    default image and still gets nothing, which is the stronger statement:
+    the absence is the absence of a cell, not of an image.
+    """
+    from prismaquant.lane_eligibility import ServingContext
+
+    image = str(_packaged()["versions"]["default_serve_image"])
+    assert _packaged()["lane_eligibility"]["platforms"][platform][
+        "serve_image"] is None
+    for family in _families():
+        for structure in ("dense", "routed_moe"):
+            context = ServingContext(
+                platform=platform, structure=structure, residency="resident",
+                runtime_image=image, execution_mode="eager")
+            assert tr.tessera_attesting_cells(
+                _rung_name(family), serving_context=context) == (), (
+                    family, structure)
+
+
+def test_the_live_seam_still_attests_a_sm121_rung():
+    """The control for the live seam, so `()` above is about the platform."""
+    from prismaquant.lane_eligibility import ServingContext
+
+    context = ServingContext(
+        platform="sm_121", structure="dense", residency="resident",
+        runtime_image=str(_packaged()["versions"]["default_serve_image"]),
+        execution_mode="eager")
+    assert tr.tessera_attesting_cells(
+        _rung_name("TESSERA_BF16_K1"), serving_context=context) != ()
 
 
 @pytest.mark.parametrize("platform", sorted(set(AMD_PROFILES.values())))
