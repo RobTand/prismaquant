@@ -1,0 +1,681 @@
+{
+  "activation_contract": "e2m1_group16_ue4m3_static",
+  "audit_regions": {},
+  "calibration_identity": {
+    "attention_implementation": "eager",
+    "capture_manifest": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+    "capture_manifest_sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c",
+    "census": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-r1024-02/workspace/census.json",
+    "census_sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+    "hessian": "require",
+    "max_act_rows": 512,
+    "nsamples": 512,
+    "seed": 0,
+    "seqlen": 512,
+    "streaming": "selected-tensors-v1",
+    "tp_degree": 1
+  },
+  "currency": "output_mse_under_route_activation_contract",
+  "curve_id": "l20_shared_down_e2m1_window_hidden_interior",
+  "family": "TESSERA_E2M1_K2",
+  "legal_rates": [
+    833,
+    834,
+    835,
+    836,
+    837,
+    838,
+    839,
+    840,
+    841,
+    842,
+    843,
+    844,
+    845,
+    846,
+    847,
+    848,
+    849,
+    850,
+    851,
+    852,
+    853,
+    854,
+    855,
+    856,
+    857,
+    858,
+    859,
+    860,
+    861,
+    862,
+    863,
+    864,
+    865,
+    866,
+    867,
+    868,
+    869,
+    870,
+    871,
+    872,
+    873,
+    874,
+    875,
+    876,
+    877,
+    878,
+    879,
+    880,
+    881,
+    882,
+    883,
+    884,
+    885,
+    886,
+    887,
+    888,
+    889,
+    890,
+    891,
+    892,
+    893,
+    894
+  ],
+  "measurement_kind": "measured",
+  "measurement_plan": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.measurement-plan.json",
+    "sha256": "767ed16d708b480f521afdd6cf6e6d76ef7dc10583e1933c17a45d844d76ac2b"
+  },
+  "qname": "model.language_model.layers.20.mlp.shared_experts.down_proj",
+  "rates": [
+    833,
+    834,
+    835,
+    836,
+    837,
+    838,
+    839,
+    840,
+    841,
+    842,
+    843,
+    844,
+    845,
+    846,
+    847,
+    848,
+    849,
+    850,
+    851,
+    852,
+    853,
+    854,
+    855,
+    856,
+    857,
+    858,
+    859,
+    860,
+    861,
+    862,
+    863,
+    864,
+    865,
+    866,
+    867,
+    868,
+    869,
+    870,
+    871,
+    872,
+    873,
+    874,
+    875,
+    876,
+    877,
+    878,
+    879,
+    880,
+    881,
+    882,
+    883,
+    884,
+    885,
+    886,
+    887,
+    888,
+    889,
+    890,
+    891,
+    892,
+    893,
+    894
+  ],
+  "receipts": [
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-833.json",
+      "rate": 833,
+      "sha256": "724bd07213c3d81af5614a885f6f8731abcc0fd39e837dddd3c9273ba4b23973",
+      "value": 2.0805098756682128e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-834.json",
+      "rate": 834,
+      "sha256": "8d44655498b2aec721801852fa7dceec5139f84f233c6ddf931c986236587ac5",
+      "value": 2.0910794773953967e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-835.json",
+      "rate": 835,
+      "sha256": "4f7fbad4374878ce99a304bd1f5aa57e4ef99c2c988ffa085c96270c3e5c013f",
+      "value": 2.072771530947648e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-836.json",
+      "rate": 836,
+      "sha256": "be2874d6bc83f47f457e874ee0295eff5f42c0536781710a90bddb078a9db449",
+      "value": 2.0688028598669916e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-837.json",
+      "rate": 837,
+      "sha256": "7e26926e3fd333eacf6a558c47f890f3a297fd7337dcf1d9bb80d59319058c0f",
+      "value": 2.0644429241656326e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-838.json",
+      "rate": 838,
+      "sha256": "46b5f1bd60a3b742707221595198e85076e18aaabecce6f3d63212cd44077594",
+      "value": 2.0573845176841132e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-839.json",
+      "rate": 839,
+      "sha256": "c8e361ad98c84c3989169a57e2ba22c6ced6540ea56951bb960a240178231ed2",
+      "value": 2.0610832507372834e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-840.json",
+      "rate": 840,
+      "sha256": "435243f1ffdd978615042ac6aaff53818a0e976867b85810872455cbbdd4522c",
+      "value": 2.050439070444554e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-841.json",
+      "rate": 841,
+      "sha256": "1e07b1dd1158f88ed9342c42504fbc5600263c39177c55c7dcdaeee1c5ffea3a",
+      "value": 2.056784796877764e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-842.json",
+      "rate": 842,
+      "sha256": "59816d2a75d9e7649ba584f8d6f8f42a5c2ef92fe053386b933efff55e631112",
+      "value": 2.0296120055718347e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-843.json",
+      "rate": 843,
+      "sha256": "bfddcb51f8362873d58090009e688ff0bb0486225312ca8b61e98e557e52e76d",
+      "value": 2.0492676412686706e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-844.json",
+      "rate": 844,
+      "sha256": "49527b31e089bc358c9cc06c27b7b64657d4dfd437317ba4f8455a221db1bd86",
+      "value": 2.0250015950296074e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-845.json",
+      "rate": 845,
+      "sha256": "679948790a14296dd147008b10e1f56ae84a708b7745bd15fb5970e2bd993ba6",
+      "value": 2.0285129721742123e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-846.json",
+      "rate": 846,
+      "sha256": "e40edfd5a6f556e0ec1bf5b594ea161773352e8783556f1c59becc4e535868eb",
+      "value": 2.032354495895561e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-847.json",
+      "rate": 847,
+      "sha256": "1c7505b340c241dde0f03d45142ce2c9f574c2694ec7ff71979152d6261499e7",
+      "value": 2.014371784753166e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-848.json",
+      "rate": 848,
+      "sha256": "0ba5a062ed04169136ea1b6ce281c8176621412d8c27702f206efe77b6d6fcbb",
+      "value": 2.0243327526259236e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-849.json",
+      "rate": 849,
+      "sha256": "d12ead7d914f33d50fb6f42eb530a3a58674e0d6da85ed307c6e37a4d512ce44",
+      "value": 2.01257316803094e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-850.json",
+      "rate": 850,
+      "sha256": "0643eba6710c990c6efb332b6ccea1d4c57be9ef86bac1519e9af46d073b5c46",
+      "value": 2.003741974476725e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-851.json",
+      "rate": 851,
+      "sha256": "ec7f68b08e9845741987cde4abefa51edf02a13c876531ce0fd7221e945ea263",
+      "value": 2.004917769227177e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-852.json",
+      "rate": 852,
+      "sha256": "116164321485f52e6fdd1a118ca9dffb249ddc863f2a85efc08a1f47ae9707df",
+      "value": 1.9935665477532893e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-853.json",
+      "rate": 853,
+      "sha256": "6b0415f6d58a0f2c642243a071c12a22004288a397f2c5b014b9addff08572e9",
+      "value": 1.9930233975173905e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-854.json",
+      "rate": 854,
+      "sha256": "dcd02e4c1c8c5c3a5d30730945f88e4acb9a0e41bfb52be9cf1f5d72d795e9eb",
+      "value": 1.9886500012944452e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-855.json",
+      "rate": 855,
+      "sha256": "f7021d877a749304e32010c0ab1f21d94368c3b4ced3824ce0ee66ca2ee49fa4",
+      "value": 1.9884417270077392e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-856.json",
+      "rate": 856,
+      "sha256": "d4fa984c2077e55198f63eadd762b36d946bca73797f55308b823123042c5261",
+      "value": 1.9756749679800123e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-857.json",
+      "rate": 857,
+      "sha256": "054156c11ed37223cf9dac55432b6b178002bbdec198d00267527bdeacf32db1",
+      "value": 1.9728235201910138e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-858.json",
+      "rate": 858,
+      "sha256": "f3f29f75ca99c3390c6208b2177e56b9b74879a23ff36fc3221942ed41ae94cd",
+      "value": 1.9747156329685822e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-859.json",
+      "rate": 859,
+      "sha256": "6de14be7bb72942af67d538085cc4548ecb5b60908ecc1978aceb623dfa2a2ee",
+      "value": 1.965051342267543e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-860.json",
+      "rate": 860,
+      "sha256": "1eae58839238f2df99b44aabc28edeff7e1b5d1c1b3c697edaa717938cc07473",
+      "value": 1.9666171283461154e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-861.json",
+      "rate": 861,
+      "sha256": "2721a1ef6eb07631cb962155eb5cb8890cf1b101bd8427e2a32d694ec83cefa8",
+      "value": 1.9484070435282774e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-862.json",
+      "rate": 862,
+      "sha256": "26d3d4383c0229d1079aecf5075aaf16b14c48445e355850c92aec49a1a5f42a",
+      "value": 1.955434709088877e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-863.json",
+      "rate": 863,
+      "sha256": "463499d1bfcbc807471d96e105c6eb8b4b9625cf24b1b676a64ab37991100e34",
+      "value": 1.939798858074937e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-864.json",
+      "rate": 864,
+      "sha256": "a71675d9cb68b47a4d5ca10fd6695dbd4137a40b88806b0fc899f6e8708867e9",
+      "value": 1.9512861399562098e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-865.json",
+      "rate": 865,
+      "sha256": "223416c7bd05d464119bff9816c3925b987d463b919720241dafb9d59c8c9c24",
+      "value": 1.9526905816746876e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-866.json",
+      "rate": 866,
+      "sha256": "b117861010d9db983c78d5a0134ff131851f3757d9c4eaa1b9c07d8285de3708",
+      "value": 1.941443042596802e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-867.json",
+      "rate": 867,
+      "sha256": "012201e12967c0b29d5c8379ca6a51e946e23e94c3d706716dbdab4ec73cc661",
+      "value": 1.9363651517778635e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-868.json",
+      "rate": 868,
+      "sha256": "1c7eea23a3efd2f54d6a6d9532792a5460d582e88993c71429011bc50bda00ab",
+      "value": 1.9230334146413952e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-869.json",
+      "rate": 869,
+      "sha256": "0ede7790d948bc82a412c7e401fed43ca7c4602761c994c0bc724398bd758c6b",
+      "value": 1.9095687093795277e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-870.json",
+      "rate": 870,
+      "sha256": "8b5776e1f024e2ab6f32b1bb0a0d4ff45e14ead34d5fdd0a8d49c40ec550e137",
+      "value": 1.9098877601209097e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-871.json",
+      "rate": 871,
+      "sha256": "c277537a2d47e0ea1003c8978c09021365b145e2bfec27b60df7c663c554eaf2",
+      "value": 1.911798790388275e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-872.json",
+      "rate": 872,
+      "sha256": "b8f0b04423a47402cfa612d1b17167943c73006c7230483a6d6d033ad933ba56",
+      "value": 1.9151757442159578e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-873.json",
+      "rate": 873,
+      "sha256": "b1752ed54c28d482f6ae9a03b13e20c671e76797b324fbc87e4e0bb6ac20c8fc",
+      "value": 1.8983475456479937e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-874.json",
+      "rate": 874,
+      "sha256": "8ab86b7055894db0e13dbd69cc0e2ef37b11dec8f293cc885ce883986414b5ec",
+      "value": 1.8961402020067908e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-875.json",
+      "rate": 875,
+      "sha256": "4dc050643eb7811ab74c5e863ce148e5afbb452074723287c2752d5057f45c10",
+      "value": 1.891213469207287e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-876.json",
+      "rate": 876,
+      "sha256": "b4eb3b92f7e59ea6c8343cb9682e82a2247da3da51c3c66bea1a25c468e62a7d",
+      "value": 1.8839569747797213e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-877.json",
+      "rate": 877,
+      "sha256": "1e076e517f8722a5a897948229a4faa67a9c3800df59e7aeca3aab7bcd66c4a3",
+      "value": 1.8954433471662924e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-878.json",
+      "rate": 878,
+      "sha256": "8fbf93adce053d08972870bcd1d62b38da99e41be903b44422c17743d0db429c",
+      "value": 1.8775919670588337e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-879.json",
+      "rate": 879,
+      "sha256": "6c56fa106f0d503304a7783e632937550f52d2fc1afa6060a189b010e6b51422",
+      "value": 1.8823033315129578e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-880.json",
+      "rate": 880,
+      "sha256": "4bc1c55723f4f0878b5d77111f087ceed2f6446f59f0493d46eb2a1229f43cce",
+      "value": 1.8755979908746667e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-881.json",
+      "rate": 881,
+      "sha256": "87d201c95d458c625dccc0421d4686d670aedb105ddee043a285e7613c85783f",
+      "value": 1.875352973002009e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-882.json",
+      "rate": 882,
+      "sha256": "9319ff1ea25dd37662a8a6fdfcdaaf61a46ffa04f905fb96be1252c875f4353e",
+      "value": 1.8605940567795187e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-883.json",
+      "rate": 883,
+      "sha256": "0011bf0c501a1e70dbc8afd0ecfd7d620e6e884d5941dee663c290ff0ad242ee",
+      "value": 1.8571548935142346e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-884.json",
+      "rate": 884,
+      "sha256": "2fc13b18681383bc9d44413517f689c011853574880865c873df5538acd5a62f",
+      "value": 1.86223114724271e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-885.json",
+      "rate": 885,
+      "sha256": "876d65e90c51cd14545a22d4a3cc1213b05ae85e9f7c26292a95cb76d3f2cfe9",
+      "value": 1.8479440768714994e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-886.json",
+      "rate": 886,
+      "sha256": "55e2a2e7aa3c0b08ed20746bc00229fae18ac677c86764b31a6604357e179dbd",
+      "value": 1.8538845324655995e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-887.json",
+      "rate": 887,
+      "sha256": "22ad423c404e04bb68d4bc7deb754c8b4a14b38d9ca0927bdd961f860d5c9410",
+      "value": 1.8344642739975825e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-888.json",
+      "rate": 888,
+      "sha256": "e9853985a4f6ddf3d968f68ead4d93735acdab349d3b2c1aeff1abf0d36ad8ab",
+      "value": 1.8347351215197705e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-889.json",
+      "rate": 889,
+      "sha256": "ca569e04a0eed6902d9fdf2519afac657f3bb1ffa00c6aa56e6de17a79a33c67",
+      "value": 1.8296579582965933e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-890.json",
+      "rate": 890,
+      "sha256": "ddbab145429adfe94a7ecafca9d59a5e2c919a21df87d00495f80a912945b6d0",
+      "value": 1.826068364607636e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-891.json",
+      "rate": 891,
+      "sha256": "2f7c5f40edec8d5732dbbad01417a0d5917b22f2ba7338baab563f4d67ad027f",
+      "value": 1.8287952116224915e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-892.json",
+      "rate": 892,
+      "sha256": "614fe5a82bd930f5c4ddd0cf336f368770ff3b402f7e6ad1dbdfab2fb4ed5713",
+      "value": 1.8236863979836926e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-893.json",
+      "rate": 893,
+      "sha256": "84990aaf1294ab40d1cad5b23a94a79ad30b7bb055f3efbee49aacb613f4b0fe",
+      "value": 1.817351221689023e-05
+    },
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.curve.rate-894.json",
+      "rate": 894,
+      "sha256": "8e0c3043f791cacaa493d1c71edac3552bb12c19f02c3b1460da579b20e52250",
+      "value": 1.8086762793245725e-05
+    }
+  ],
+  "recipe_identity": {
+    "activation_contract": "e2m1_group16_ue4m3_static",
+    "body": "window",
+    "grid": "E2M1",
+    "scale_plane": "lut16",
+    "terminal": false
+  },
+  "schema": "prismaquant.complete_rate_curve.v1",
+  "source_identity": {
+    "campaign_source": {
+      "base_commit": "352d0fda21",
+      "campaign_module_sha256": "93785e0915ecd7e7e5fdb053f23c3c0182c71566700043b19d1a729790a57266"
+    },
+    "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+    "producer": {
+      "commit": "d403cc5a3199a348cc7ee6262f4adbdab8138745",
+      "pin": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/identity-reseal-20260911/rollout-inputs/pins-059ee574f8-d403cc5a31.json",
+      "pin_sha256": "4513ee7cf77a258868dce29ae3149b5ee94630852820f86417498cb7c34ed753",
+      "source_sha256": "0833671bbddbc3fb7186bdbed0a905ef248c23ffdf1aeee0c083322680d20f6b"
+    },
+    "weight_identity": {
+      "schema": "prismaquant.streaming_initialization.v1",
+      "source_map_sha256": "ad7900d15f9a45dc52407ee1e983562e5c067198c13d81595ef642090cc94669",
+      "state_sha256": "e0f48d644e8d72e9935bb130b135a12740f3d0a59dd2a52ff78769b5d97f0cf5"
+    }
+  },
+  "values": [
+    2.0805098756682128e-05,
+    2.0910794773953967e-05,
+    2.072771530947648e-05,
+    2.0688028598669916e-05,
+    2.0644429241656326e-05,
+    2.0573845176841132e-05,
+    2.0610832507372834e-05,
+    2.050439070444554e-05,
+    2.056784796877764e-05,
+    2.0296120055718347e-05,
+    2.0492676412686706e-05,
+    2.0250015950296074e-05,
+    2.0285129721742123e-05,
+    2.032354495895561e-05,
+    2.014371784753166e-05,
+    2.0243327526259236e-05,
+    2.01257316803094e-05,
+    2.003741974476725e-05,
+    2.004917769227177e-05,
+    1.9935665477532893e-05,
+    1.9930233975173905e-05,
+    1.9886500012944452e-05,
+    1.9884417270077392e-05,
+    1.9756749679800123e-05,
+    1.9728235201910138e-05,
+    1.9747156329685822e-05,
+    1.965051342267543e-05,
+    1.9666171283461154e-05,
+    1.9484070435282774e-05,
+    1.955434709088877e-05,
+    1.939798858074937e-05,
+    1.9512861399562098e-05,
+    1.9526905816746876e-05,
+    1.941443042596802e-05,
+    1.9363651517778635e-05,
+    1.9230334146413952e-05,
+    1.9095687093795277e-05,
+    1.9098877601209097e-05,
+    1.911798790388275e-05,
+    1.9151757442159578e-05,
+    1.8983475456479937e-05,
+    1.8961402020067908e-05,
+    1.891213469207287e-05,
+    1.8839569747797213e-05,
+    1.8954433471662924e-05,
+    1.8775919670588337e-05,
+    1.8823033315129578e-05,
+    1.8755979908746667e-05,
+    1.875352973002009e-05,
+    1.8605940567795187e-05,
+    1.8571548935142346e-05,
+    1.86223114724271e-05,
+    1.8479440768714994e-05,
+    1.8538845324655995e-05,
+    1.8344642739975825e-05,
+    1.8347351215197705e-05,
+    1.8296579582965933e-05,
+    1.826068364607636e-05,
+    1.8287952116224915e-05,
+    1.8236863979836926e-05,
+    1.817351221689023e-05,
+    1.8086762793245725e-05
+  ]
+}
