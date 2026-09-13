@@ -267,9 +267,16 @@ class Campaign:
             self._units_cache[row_id] = sorted(names)
         return self._units_cache[row_id]
 
-    def capture_files(self, row_id: str) -> list[tuple[str, int]]:
+    def capture_files_for(self, names) -> list[tuple[str, int]]:
+        """The capture files these units name, in the order given.
+
+        Name-keyed rather than row-keyed because the joint pass consumes the
+        same captures a unit at a time, grouped by transformer layer rather
+        than by campaign row. ``capture_files`` is this function over a row's
+        members, so both read sets come from one expansion.
+        """
         out = []
-        for name in self.members(row_id):
+        for name in names:
             rec = self.entries.get(name)
             if rec is None:
                 continue
@@ -280,6 +287,9 @@ class Campaign:
                 size = 0
             out.append((path, size))
         return out
+
+    def capture_files(self, row_id: str) -> list[tuple[str, int]]:
+        return self.capture_files_for(self.members(row_id))
 
     # -- weights ---------------------------------------------------------
 
@@ -319,9 +329,19 @@ class Campaign:
         (2026-09-11, rows 0085 and 0086). A length is a claim about the file,
         so it is clamped to the file.
         """
+        return self.weight_extents_for(self.members(row_id))
+
+    def weight_extents_for(self, names) -> list[tuple[str, int, int]]:
+        """``weight_extents`` over an arbitrary unit set.
+
+        The joint pass streams a *layer's* units, not a row's, so the extent
+        expansion is keyed by unit name and ``weight_extents`` calls it with a
+        row's members. The coalescing, record rounding and end-of-file clamp
+        described above are this function's, and there is one copy of them.
+        """
         wm = self.weight_map
         by_shard: dict[str, list[tuple[int, int]]] = {}
-        for name in self.members(row_id):
+        for name in names:
             key = name + ".weight"
             shard = wm.get(key)
             if shard is None:

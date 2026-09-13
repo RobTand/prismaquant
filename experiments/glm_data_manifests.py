@@ -49,13 +49,15 @@ import argparse
 import hashlib
 import json
 import os
+import pickle
+import re
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from glm_arc_prewarm import (  # noqa: E402
-    CAMPAIGN_BASE, Campaign, SEED_WIRE_DIR_FLAG, UNITS_RE, argv_value)
+    CAMPAIGN_BASE, Campaign, SEED_WIRE_DIR_FLAG, UNITS_RE, argv_value, to_pool)
 
 SCHEMA = "prismaquant.prismabuild.data_manifest.v1"
 SHARED_MOUNT = "/mnt/shared"
@@ -178,12 +180,12 @@ class CachedSizeCampaign(Campaign):
         super().__init__(workspace)
         self._sizes = sizes
 
-    def capture_files(self, row_id):
+    def capture_files_for(self, names):
         if self._sizes is None:
-            return super().capture_files(row_id)
+            return super().capture_files_for(names)
         out = []
         missing = []
-        for name in self.members(row_id):
+        for name in names:
             rec = self.entries.get(name)
             if rec is None:
                 continue
@@ -195,8 +197,8 @@ class CachedSizeCampaign(Campaign):
             out.append((path, size))
         if missing:
             raise SystemExit(
-                f"{row_id}: {len(missing)} capture files absent from the size "
-                f"cache, first {missing[0]}; rerun with --stat")
+                f"{len(missing)} capture files absent from the size cache, "
+                f"first {missing[0]}; rerun with --stat")
         return out
 
 
@@ -335,6 +337,795 @@ def deterministic_provenance(workspace: str, campaign: Campaign,
         "workspace": workspace,
         "capture_manifest": campaign.capture_manifest_path,
         "size_source": size_source,
+    }
+
+
+# ---------------------------------------------------------------------------
+# The post-campaign GPU passes
+# ---------------------------------------------------------------------------
+#
+# A campaign row is not the only GPU work that reads the shared mount. After
+# the rows merge, three more passes run: the joint AURA preparation and cost
+# passes (``prismaquant.tessera_joint_aura prepare`` / ``run``), the allocation
+# handoff (``prismaquant.tessera_joint_allocation``) and the serving export.
+# The joint pass reads about 4.75 TB against dl380g10's 240 GiB ARC, so its
+# manifest has to name a *consumption order* the prewarm loop can window on:
+# warming the whole read set is not possible, and warming an arbitrary 240 GiB
+# of it warms the wrong bytes. The per-layer phase boundaries below are that
+# order, taken from the code that reads them rather than from prose.
+#
+# These builders are deliberately torch-free and import nothing from the
+# ``prismaquant`` package: they run in the same CPU environment the campaign
+# manifests are built in, and importing ``prismaquant`` pulls in
+# ``format_registry`` and therefore torch. The few constants and filename
+# rules they need are restated with the module and line that owns each.
+
+#: ``prismaquant.tessera_joint_aura.SCHEMA``.
+JOINT_PLAN_SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
+#: ``prismaquant.tessera_joint_aura.PREPARED_SCHEMA``.
+JOINT_PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
+#: ``prismaquant.cost_stage_checkpoint.MANIFEST_SCHEMA`` / ``UNIT_SCHEMA``.
+CHECKPOINT_MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
+CHECKPOINT_UNIT_SCHEMA = "prismaquant.cost_stage_checkpoint.unit.v1"
+#: ``prismaquant.layer_config.LAYER_CONFIG_META_KEY``: the one reserved
+#: non-qname key an assignment file may carry.
+LAYER_CONFIG_META_KEY = "__prismaquant__"
+
+JOINT_ENTRY_POINT = "prismaquant.tessera_joint_aura"
+ALLOCATION_ENTRY_POINT = "prismaquant.tessera_joint_allocation"
+EXPORT_ENTRY_POINT = "tessera.experiments.export_tessera_serving"
+
+#: ``prismaquant.cost_streaming.layer_index_for_qname`` without the runner:
+#: the runner asks its profile for the layers prefix and matches the index
+#: that follows it. A roster that does not resolve to exactly one prefix is
+#: refused rather than grouped by a guess.
+LAYER_QNAME_RE = re.compile(r"^(?P<prefix>.*\.layers\.)(?P<index>\d+)(?:\.|$)")
+
+#: The reason ``sha256`` is null on every entry of a post-campaign manifest.
+SHA256_ABSENT_REASON = (
+    "hashing the pass's read set costs more than the prewarm saves; the "
+    "manifest file itself is content-addressed in the CAS, which is what "
+    "binds it to the action key")
+
+
+def _cache_weight_filename(qname: str, fmt: str) -> str:
+    """``prismaquant.production_weight_cache._cache_weight_filename``.
+
+    Restated because importing the package pulls in torch, and the joint
+    manifest has to name the render file a cell will open. It is a pure string
+    rule; ``tests/test_glm_joint_data_manifest_at_submit.py`` holds it against
+    a real render filename from the frozen campaign.
+    """
+    safe = qname.replace("/", "__").replace(".", "_")
+    return f"{safe}__{fmt}.pt"
+
+
+def _read_json(path: str, label: str) -> dict:
+    try:
+        with open(path) as handle:
+            return json.load(handle)
+    except OSError as exc:
+        raise SystemExit(f"{label}: unreadable {path}: {exc}") from exc
+    except ValueError as exc:
+        raise SystemExit(f"{label}: {path} is not JSON: {exc}") from exc
+
+
+def _bound(record, label: str) -> str:
+    """The path of a ``{"path", "sha256"}`` binding, or a refusal."""
+    if not isinstance(record, dict) or "path" not in record:
+        raise SystemExit(f"{label}: a bound path is required, got {record!r}")
+    return str(record["path"])
+
+
+def _dir_sizes(directory: str) -> dict:
+    """``{basename: bytes}`` for one named directory, not a tree.
+
+    One ``scandir`` of a directory the plan names, never a walk of the mount:
+    a recursive scan of ``/mnt/shared`` is the RPC storm that stalls the
+    fleet's GPU clients. The reply already carries the attributes, so a
+    36,423-entry directory costs one round of directory reads rather than one
+    ``stat`` per file.
+    """
+    local = to_pool(directory)
+    out = {}
+    try:
+        with os.scandir(local) as scan:
+            for item in scan:
+                try:
+                    if not item.is_file(follow_symlinks=False):
+                        continue
+                    out[item.name] = item.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+    except OSError:
+        return {}
+    return out
+
+
+def _file_size(path: str) -> int:
+    try:
+        return os.stat(to_pool(path)).st_size
+    except OSError:
+        return 0
+
+
+def _required_size(path: str, label: str) -> int:
+    """The size of a file the pass will open, or a refusal naming it.
+
+    A post-campaign pass runs behind a chain of earlier steps, and the ordinary
+    way for one of its inputs to be missing is that the step that writes it has
+    not finished. Saying which file and which step is the difference between a
+    submission refused in a second and an admitted action that dies twenty
+    seconds in with no retry.
+    """
+    size = _file_size(path)
+    if size <= 0:
+        raise SystemExit(
+            f"{label}: {path} is absent or empty, so the pass's read set "
+            "cannot be derived; the step that writes it has not finished")
+    return size
+
+
+def _unit_state(path: str, size_hint: int = 0) -> dict:
+    """The ``{anchors, wire_records}`` state inside a checkpoint unit shard.
+
+    ``prismaquant.cost_stage_checkpoint._load_unit`` restated without the
+    identity comparison it makes against a live run: this reads the envelope,
+    checks the schema and the payload digest, and decodes the inner pickle.
+    Both pickles are plain JSON-shaped data -- the shards carry no class
+    references at all -- so this stays torch-free.
+    """
+    try:
+        with open(to_pool(path), "rb") as handle:
+            envelope = pickle.load(handle)
+    except OSError as exc:
+        raise SystemExit(f"checkpoint unit shard is unreadable: {path}: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 - a corrupt shard is a refusal
+        raise SystemExit(f"checkpoint unit shard is corrupt: {path}: {exc}") from exc
+    if not isinstance(envelope, dict) or envelope.get("schema") != CHECKPOINT_UNIT_SCHEMA:
+        raise SystemExit(f"{path}: not a {CHECKPOINT_UNIT_SCHEMA} envelope")
+    payload = envelope.get("payload")
+    if not isinstance(payload, bytes):
+        raise SystemExit(f"{path}: checkpoint unit shard has no byte payload")
+    if hashlib.sha256(payload).hexdigest() != envelope.get("payload_sha256"):
+        raise SystemExit(f"{path}: checkpoint unit payload_sha256 differs")
+    state = pickle.loads(payload)
+    if not isinstance(state, dict) or "anchors" not in state or "wire_records" not in state:
+        raise SystemExit(f"{path}: incomplete measured anchor journal")
+    del size_hint
+    return state
+
+
+def _layer_index_of(names) -> dict:
+    """``{qname: layer}`` for a whole roster, or a refusal.
+
+    ``prepare_cache`` walks ``range(runner.num_layers)`` and groups the units
+    by ``runner.layer_index_for_qname``; the phase boundaries are that
+    grouping. A roster whose names do not all sit under one ``.layers.``
+    prefix has no such grouping, and a manifest that guessed one would declare
+    a warm order the pass does not follow.
+    """
+    prefixes, index = set(), {}
+    for name in names:
+        match = LAYER_QNAME_RE.match(str(name))
+        if match is None:
+            raise SystemExit(
+                f"{name} names no transformer layer, so the joint pass's "
+                "per-layer read order cannot be derived for it")
+        prefixes.add(match.group("prefix"))
+        index[name] = int(match.group("index"))
+    if len(prefixes) != 1:
+        raise SystemExit(
+            "the campaign roster spans more than one layers prefix "
+            f"({sorted(prefixes)}); refusing to group its read set by layer")
+    return index
+
+
+class _Phases:
+    """Entries plus the running byte sum PrismaBuild's prewarm loop windows on.
+
+    Every file lands in the phase that reads it *first*: the contract refuses a
+    repeated ``(path, offset)``, so a byte range that is read again later is
+    counted in ``annotations.reread_bytes_by_phase`` instead of appearing
+    twice. A phase object itself stays exactly ``{name, bytes,
+    cumulative_bytes}``, which is what the loop reads.
+    """
+
+    def __init__(self) -> None:
+        self.entries = []
+        self.phases = []
+        self.counts = {}
+        self.bytes = {}
+        self.reread = {}
+        self._seen = set()
+        self._total = 0
+        self._phase_bytes = 0
+        self._phase = None
+
+    def begin(self, name: str) -> None:
+        self.end()
+        self._phase = name
+        self._phase_bytes = 0
+
+    def end(self) -> None:
+        if self._phase is None:
+            return
+        self.phases.append({"name": self._phase, "bytes": self._phase_bytes,
+                            "cumulative_bytes": self._total})
+        self._phase = None
+
+    def add(self, path: str, offset: int, size: int, kind: str) -> None:
+        if self._phase is None:
+            raise SystemExit("internal: an entry was added outside a phase")
+        offset, size = int(offset), int(size)
+        if size <= 0:
+            raise SystemExit(f"zero-length {kind} entry: {path}")
+        key = (path, offset)
+        if key in self._seen:
+            # Read again in a later phase. The contract carries it once; the
+            # second read is accounted for where a consumer can see it.
+            self.reread[self._phase] = self.reread.get(self._phase, 0) + size
+            return
+        self._seen.add(key)
+        self.entries.append({"path": path, "offset": offset, "bytes": size,
+                             "sha256": None})
+        self._phase_bytes += size
+        self._total += size
+        self.counts[kind] = self.counts.get(kind, 0) + 1
+        self.bytes[kind] = self.bytes.get(kind, 0) + size
+
+    @property
+    def total_bytes(self) -> int:
+        return self._total
+
+
+
+def _campaign_with_cached_capture_sizes(workspace: str):
+    """A ``Campaign`` whose capture sizes came from directory reads, not stats.
+
+    The joint pass touches every one of the campaign's capture files, and
+    stating them one at a time is 36,423 NFS round trips for a number the
+    directory reply already carried. The capture manifest names the
+    directories, so each is read once with ``scandir``; nothing walks the
+    mount.
+    """
+    campaign = Campaign(workspace)
+    directories = {os.path.dirname(os.path.join(campaign.capture_root, record["path"]))
+                   for record in campaign.entries.values()}
+    sizes = {}
+    for directory in sorted(directories):
+        sizes.update(_dir_sizes(directory))
+    return CachedSizeCampaign(workspace, sizes or None)
+
+
+def _add_capture(track: "_Phases", found: list) -> None:
+    for path, size in found:
+        track.add(path, 0, size, "captures")
+
+
+def _add_render(track: "_Phases", owner: str, render_sizes: dict, name: str,
+                fmt: str, absent: list) -> None:
+    """Declare a cell's render, or record that the campaign wrote none.
+
+    A rung whose PWC shard was never decoded is synthesized from its wire in
+    the head (``_resolve_render_origin``), so the file the layer phase would
+    open does not exist. Declaring it would name bytes that are not there --
+    the defect that made every #524 warm finish ``partial`` -- so it is left
+    out and counted where a reader can see it.
+    """
+    filename = _cache_weight_filename(name, fmt)
+    size = render_sizes.get(owner, {}).get(filename, 0)
+    path = os.path.join(owner, "cache", filename)
+    if not size:
+        absent.append(path)
+        return
+    track.add(path, 0, size, "renders")
+
+def _checkpoint_unit_shards(track: "_Phases", checkpoint: str, roster) -> dict:
+    """Declare one shard of the merged checkpoint per unit, or refuse.
+
+    The roster comes from the campaign plan's own members rather than from the
+    checkpoint manifest: that manifest is the campaign's whole identity record
+    -- 7.2 GB of JSON on the GLM census -- and the only thing this needs from
+    it is which shard belongs to which unit. That mapping is not a guess.
+    ``cost_stage_checkpoint.unit_path`` names a shard by the SHA-256 of the
+    unit qname, and ``load_measured_anchor_input`` refuses a manifest whose
+    ``file`` differs from it, so the canonical path *is* the contract. The
+    manifest is still required to be present, because the merge publishes it
+    last and a pass cannot be submitted before it exists.
+    """
+    parts = checkpoint + ".parts"
+    unit_sizes = _dir_sizes(os.path.join(parts, "units"))
+    if not unit_sizes:
+        # Step 2's merge publishes the shards and then the manifest that names
+        # them. A joint pass submitted before that has no read set at all, and
+        # a manifest built from a half-written merge would warm the wrong
+        # bytes, so this fails closed on the directory it looked in.
+        raise SystemExit(
+            f"the merged checkpoint's unit shards are absent: {parts}/units; "
+            "the joint pass cannot be submitted before the campaign merge "
+            "publishes them")
+    states = {}
+    for qname in roster:
+        filename = hashlib.sha256(str(qname).encode("utf-8")).hexdigest() + ".pkl"
+        size = unit_sizes.get(filename)
+        if not size:
+            raise SystemExit(
+                "the merged checkpoint's shard for "
+                f"{qname} is absent: {os.path.join(parts, 'units', filename)}; "
+                "the joint pass cannot be submitted before the campaign merge "
+                "publishes it")
+        path = os.path.join(parts, "units", filename)
+        track.add(path, 0, size, "checkpoint_units")
+        states[qname] = path
+    return states
+
+
+def _campaign_roster(campaign_plan_path: str) -> list:
+    """Every unit the campaign priced, in the order the head reads them.
+
+    ``load_measured_anchor_input`` walks ``sorted(names)``; the names are the
+    union of the plan rows' members, which it also checks against the census.
+    """
+    plan = _read_json(campaign_plan_path, "campaign plan")
+    names = [name for row in plan["rows"] for name in row["members"]]
+    if len(set(names)) != len(names):
+        raise SystemExit(f"{campaign_plan_path}: a unit belongs to two rows")
+    return sorted(names)
+
+
+def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
+                prepared: str | None):
+    """The head phase: everything read before the first layer installs.
+
+    Order is ``tessera_joint_aura.main`` and ``load_measured_anchor_input``:
+    the census, the campaign plan and its receipts, the merged cost payload,
+    the merged checkpoint manifest and every one of its unit shards, then the
+    calibration input, the capture compatibility record, the projection
+    backend and the canonical capture manifest. ``run`` additionally binds the
+    prepared completion and the production cache it names.
+    """
+    inputs = plan["inputs"]
+    track.add(plan_path, 0, _required_size(plan_path, "joint plan"), "plan")
+    for key in ("census", "campaign_plan", "campaign_receipts", "merged_cost",
+                "merged_checkpoint"):
+        path = _bound(inputs[key], f"plan inputs.{key}")
+        track.add(path, 0, _required_size(path, f"plan inputs.{key}"), "head")
+
+    checkpoint = _bound(inputs["merged_checkpoint"], "plan inputs.merged_checkpoint")
+    parts = checkpoint + ".parts"
+    states = _checkpoint_unit_shards(track, checkpoint, roster)
+    for key in ("calibration_input", "source_capture_compatibility", "canonical_capture"):
+        record = plan.get(key)
+        if record is None:
+            continue
+        path = _bound(record, f"plan {key}")
+        track.add(path, 0, _required_size(path, f"plan {key}"), "head")
+    backend = ((plan.get("execution") or {}).get("projection_backend") or {}).get("binary")
+    if backend is not None:
+        path = _bound(backend, "plan execution.projection_backend.binary")
+        track.add(path, 0, _required_size(
+            path, "plan execution.projection_backend.binary"), "head")
+    prepared_cache = None
+    if prepared is not None:
+        track.add(prepared, 0, _required_size(prepared, "prepared completion"), "head")
+        completion = _read_json(prepared, "prepared completion")
+        if completion.get("schema") != JOINT_PREPARED_SCHEMA:
+            raise SystemExit(
+                f"{prepared}: schema is {completion.get('schema')!r}, expected "
+                f"{JOINT_PREPARED_SCHEMA}")
+        prepared_cache = _bound(completion["production_cache"], "prepared production_cache")
+        track.add(prepared_cache, 0,
+                  _required_size(prepared_cache, "prepared production_cache"), "head")
+    return parts, states, prepared_cache
+
+
+def _joint_cells(states: dict, wire_dir: str):
+    """``{qname: [(fmt, wire path, wire bytes)]}`` for the measured rungs only.
+
+    A unit's journal carries one anchor and one wire record per rung the
+    campaign *measured*. The menu it was drawn from is larger: the row caches
+    hold wire blobs for rungs no anchor priced, and the joint pass never opens
+    them. Declaring them would warm bytes the pass does not read, at the
+    expense of bytes it does.
+    """
+    cells = {}
+    for qname, path in states.items():
+        state = _unit_state(path)
+        records = state["wire_records"]
+        measured = sorted(anchor["format_name"] for anchor in state["anchors"])
+        if set(measured) != set(records):
+            raise SystemExit(
+                f"{qname}: measured anchors and wire records differ in "
+                f"{path}; refusing to declare a read set from it")
+        out = []
+        for fmt in measured:
+            record = records[fmt]
+            filename = record["file"]
+            if os.path.basename(filename) != filename:
+                raise SystemExit(f"{qname}@{fmt}: escaping wire filename {filename!r}")
+            out.append((fmt, os.path.join(wire_dir, filename), int(record["blob_bytes"])))
+        cells[qname] = out
+    return cells
+
+
+def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
+                              prepared=None):
+    """The joint AURA pass's read set, in the order the pass consumes it.
+
+    ``command`` is ``prepare`` or ``run``.
+
+    The head phase is everything read before the first layer installs. Then
+    one ``layer-<L>`` phase per transformer layer, in ascending layer order,
+    because ``prepare_cache`` walks ``range(runner.num_layers)`` and installs
+    one layer's source weights at a time. Within a layer the order is the
+    runner's: the layer's source byte extents first (the streaming context
+    prefetches them on ``install``), then, for each of the layer's units in
+    sorted name order, that unit's capture file and then each measured rung's
+    render and wire. A plan that declares no ``qualification_window`` runs the
+    older whole-layer window instead -- all of the layer's captures, then its
+    renders and wires -- and the order here follows the plan.
+
+    ``run`` hashes every cell's wire and render up front
+    (``load_measured_anchor_input`` with ``verify_payloads=True``), so it
+    carries a ``hash`` phase between the head and the layers, in the hashing
+    order: cells in sorted unit name then sorted format, wire before render.
+    Those files are then read again during the streaming pass; the contract
+    refuses a repeated ``(path, offset)``, so each is declared once, in the
+    phase that reads it first, and the re-read bytes are recorded under
+    ``annotations.reread_bytes_by_phase``.
+
+    ``sha256`` is null for the same reason it is null on a campaign row: the
+    manifest is a residency hint whose own bytes are content-addressed, not an
+    integrity claim about 4.75 TB of payload.
+    """
+    command = str(command)
+    if command not in ("prepare", "run"):
+        raise SystemExit(f"joint pass command must be prepare or run, not {command!r}")
+    plan_path = os.path.abspath(plan_path)
+    plan = _read_json(plan_path, "joint plan")
+    if plan.get("schema") != JOINT_PLAN_SCHEMA:
+        raise SystemExit(
+            f"{plan_path}: schema is {plan.get('schema')!r}, expected "
+            f"{JOINT_PLAN_SCHEMA}")
+    if command == "run" and prepared is None:
+        raise SystemExit(
+            "the run command consumes a prepared completion; pass its path so "
+            "its bytes and the production cache it names are declared")
+
+    inputs = plan["inputs"]
+    campaign_plan_path = _bound(inputs["campaign_plan"], "plan inputs.campaign_plan")
+    roster = _campaign_roster(campaign_plan_path)
+
+    track = _Phases()
+    track.begin("head")
+    _parts, states, _prepared_cache = _joint_head(
+        track, plan_path, plan, roster=roster,
+        prepared=None if command == "prepare" else prepared)
+
+    merged_cost = _bound(inputs["merged_cost"], "plan inputs.merged_cost")
+    try:
+        with open(to_pool(merged_cost), "rb") as handle:
+            payload = pickle.load(handle)
+    except OSError as exc:
+        raise SystemExit(f"merged cost payload is unreadable: {merged_cost}: {exc}") from exc
+    wire_dir = str(payload["provenance"]["wire_dir"])
+    # The merged payload is the campaign's whole cost table, several GB once
+    # unpickled, and the only field this needs is the wire directory the
+    # journals' filenames are relative to. Drop it before the entry list is
+    # built rather than holding both.
+    del payload
+    cells = _joint_cells(states, wire_dir)
+
+    workspace = os.path.dirname(campaign_plan_path)
+    campaign = _campaign_with_cached_capture_sizes(workspace)
+    owners = {}
+    for row in campaign.plan["rows"]:
+        for name in row["members"]:
+            owners[name] = row["dir"]
+    layer_of = _layer_index_of(roster)
+    by_layer = {}
+    for name in roster:
+        by_layer.setdefault(layer_of[name], []).append(name)
+    layers = sorted(by_layer)
+    render_sizes = {owner: _dir_sizes(os.path.join(owner, "cache"))
+                    for owner in sorted(set(owners.values()))}
+
+    absent = []
+    if command == "run":
+        track.begin("hash")
+        for name in roster:
+            for fmt, wire, wire_bytes in cells[name]:
+                track.add(wire, 0, wire_bytes, "wires")
+                _add_render(track, owners[name], render_sizes, name, fmt, absent)
+
+    # A plan that declares a qualification window runs one unit per capture
+    # window; without one the whole layer's captures are loaded together.
+    per_unit_window = plan.get("qualification_window") is not None
+    for layer in layers:
+        names = sorted(by_layer[layer])
+        track.begin(f"layer-{layer}")
+        for path, offset, length in campaign.weight_extents_for(names):
+            track.add(path, offset, length, "source_extents")
+        if command == "run":
+            # The streaming cost pass re-reads the layer's renders through the
+            # production cache; it takes no captures and no wire bytes.
+            for name in names:
+                for fmt, _wire, _bytes in cells[name]:
+                    _add_render(track, owners[name], render_sizes, name, fmt, absent)
+            continue
+        captures = {name: campaign.capture_files_for([name]) for name in names}
+        if not per_unit_window:
+            for name in names:
+                _add_capture(track, captures[name])
+        for name in names:
+            if per_unit_window:
+                _add_capture(track, captures[name])
+            for fmt, wire, wire_bytes in cells[name]:
+                _add_render(track, owners[name], render_sizes, name, fmt, absent)
+                track.add(wire, 0, wire_bytes, "wires")
+    track.end()
+    if not track.counts.get("renders"):
+        # The row caches hold one render per measured rung and the pass opens
+        # every one of them. A read set with none of them in it is the same
+        # silent zero #524 refused for a row's seed wire: broken, not empty.
+        raise SystemExit(
+            "no render file of the merged roster was found under the campaign "
+            f"row caches (first looked for {absent[0] if absent else '?'}); "
+            "refusing to declare a read set that omits every render")
+
+    annotations = {
+        "entry_point": f"{JOINT_ENTRY_POINT}:{command}",
+        "plan": plan_path,
+        "plan_sha256": sha256_file(plan_path),
+        "layers": layers,
+        "units": len(roster),
+        "measured_cells": sum(len(value) for value in cells.values()),
+        "wire_dir": wire_dir,
+        "capture_window": "per_unit" if per_unit_window else "per_layer",
+        "renders_absent": len(absent),
+        "renders_absent_first": absent[0] if absent else None,
+        "sha256_present": False,
+        "sha256_absent_reason": SHA256_ABSENT_REASON,
+        "counts": track.counts,
+        "bytes": track.bytes,
+        "reread_bytes_by_phase": track.reread,
+        "phases": track.phases,
+        "argv": None if argv is None else [str(item) for item in argv],
+    }
+    return _finish(track, produced_by, annotations,
+                   where=f"{JOINT_ENTRY_POINT}:{command}")
+
+
+def _finish(track: _Phases, produced_by: dict, annotations: dict, *, where: str) -> dict:
+    for entry in track.entries:
+        if not entry["path"].startswith(SHARED_MOUNT + "/"):
+            raise SystemExit(f"{where}: entry outside the shared mount: {entry['path']}")
+    manifest = {
+        "schema": SCHEMA,
+        "produced_by": produced_by,
+        "mount_prefix": SHARED_MOUNT,
+        "annotations": annotations,
+        "entry_count": len(track.entries),
+        "total_bytes": track.total_bytes,
+        "entries": track.entries,
+    }
+    return check_manifest(manifest, where=where)
+
+
+def build_allocation_manifest(joint_cost, plan, *, produced_by, argv=None):
+    """The allocation handoff's read set.
+
+    ``prismaquant.tessera_joint_allocation.handoff`` reads, in this order: the
+    joint cost payload and the joint plan (both whole files, both hashed), the
+    prepared completion the payload's own record names, the production cache
+    that completion names, and then the head set of
+    ``load_measured_anchor_input`` with ``verify_payloads=False`` -- the same
+    head the joint pass reads, without any cell payload. It takes no capture,
+    render, wire or source byte, so it has two phases and no layer phases.
+    """
+    joint_cost = os.path.abspath(joint_cost)
+    plan_path = os.path.abspath(plan)
+    payload = _read_pickle(joint_cost, "joint cost")
+    evidence = (payload.get("provenance") or {}).get("tessera_joint_anchors")
+    if not isinstance(evidence, dict) or "prepared" not in evidence:
+        raise SystemExit(
+            f"{joint_cost}: no tessera_joint_anchors record, so the prepared "
+            "completion this handoff reads cannot be named")
+    prepared = _bound(evidence["prepared"], "joint cost prepared binding")
+    plan_payload = _read_json(plan_path, "joint plan")
+    if plan_payload.get("schema") != JOINT_PLAN_SCHEMA:
+        raise SystemExit(
+            f"{plan_path}: schema is {plan_payload.get('schema')!r}, expected "
+            f"{JOINT_PLAN_SCHEMA}")
+
+    track = _Phases()
+    track.begin("handoff")
+    track.add(joint_cost, 0, _required_size(joint_cost, "joint cost"), "handoff")
+    track.add(plan_path, 0, _required_size(plan_path, "joint plan"), "handoff")
+    track.add(prepared, 0, _required_size(prepared, "prepared completion"), "handoff")
+    completion = _read_json(prepared, "prepared completion")
+    cache = _bound(completion["production_cache"], "prepared production_cache")
+    track.add(cache, 0, _required_size(cache, "prepared production_cache"), "handoff")
+
+    track.begin("head")
+    _joint_head(track, plan_path, plan_payload,
+                roster=_campaign_roster(_bound(
+                    plan_payload["inputs"]["campaign_plan"],
+                    "plan inputs.campaign_plan")),
+                prepared=None)
+    track.end()
+
+    annotations = {
+        "entry_point": ALLOCATION_ENTRY_POINT,
+        "plan": plan_path,
+        "plan_sha256": sha256_file(plan_path),
+        "joint_cost": joint_cost,
+        "prepared": prepared,
+        "layers": [],
+        "sha256_present": False,
+        "sha256_absent_reason": SHA256_ABSENT_REASON,
+        "counts": track.counts,
+        "bytes": track.bytes,
+        "reread_bytes_by_phase": track.reread,
+        "phases": track.phases,
+        "argv": None if argv is None else [str(item) for item in argv],
+    }
+    return _finish(track, produced_by, annotations, where=ALLOCATION_ENTRY_POINT)
+
+
+def _read_pickle(path: str, label: str):
+    try:
+        with open(to_pool(path), "rb") as handle:
+            return pickle.load(handle)
+    except OSError as exc:
+        raise SystemExit(f"{label}: unreadable {path}: {exc}") from exc
+
+
+def read_assignment(path: str) -> dict:
+    """``{qname: format}`` from a ``layer_config.json``.
+
+    ``prismaquant.layer_config`` is the production parser and it is not
+    importable here (it imports torch through ``schemas``), so this reads only
+    the shape the export lane's own assignment file uses: a flat mapping of
+    module qname to a format name, plus the reserved ``__prismaquant__``
+    metadata key. A value that is not a plain format name is refused rather
+    than interpreted, because interpreting it is the parser's job.
+    """
+    payload = _read_json(path, "assignment")
+    out = {}
+    for name, value in payload.items():
+        if name == LAYER_CONFIG_META_KEY:
+            continue
+        if not isinstance(value, str):
+            raise SystemExit(
+                f"{path}: {name} carries a {type(value).__name__} recipe; this "
+                "reader accepts only a format name, and the production parser "
+                "in prismaquant.layer_config owns the richer shapes")
+        out[str(name)] = value
+    if not out:
+        raise SystemExit(f"{path}: the assignment names no unit")
+    return out
+
+
+def build_export_manifest(plan, *, assignment, allocation_cost, produced_by,
+                          argv=None):
+    """The serving export's read set, for the units the assignment selects.
+
+    Scope, stated because it is narrower than the export command: the export
+    runs Tessera's own ``experiments/export_tessera_serving.py``, which is not
+    in this repository, so its internal read *order* is not attested here.
+    What is declared is the set of shared-mount bytes the export must read to
+    write the artifact, in the order the artifact is written -- by ascending
+    layer: for a unit the assignment gives a Tessera rung, that rung's wire
+    blob; for a unit it leaves on the source precision, that unit's source byte
+    extents. The allocation payload, the assignment and the joint plan's head
+    records come first. Tensors outside the campaign roster -- embeddings,
+    norms, the LM head -- are read by the exporter and are *not* declared here,
+    because nothing in this repository names them; ``annotations`` says so.
+    """
+    plan_path = os.path.abspath(plan)
+    assignment_path = os.path.abspath(assignment)
+    allocation_cost = os.path.abspath(allocation_cost)
+    plan_payload = _read_json(plan_path, "joint plan")
+    if plan_payload.get("schema") != JOINT_PLAN_SCHEMA:
+        raise SystemExit(
+            f"{plan_path}: schema is {plan_payload.get('schema')!r}, expected "
+            f"{JOINT_PLAN_SCHEMA}")
+    selected = read_assignment(assignment_path)
+
+    inputs = plan_payload["inputs"]
+    checkpoint = _bound(inputs["merged_checkpoint"], "plan inputs.merged_checkpoint")
+    _required_size(checkpoint, "plan inputs.merged_checkpoint")
+    campaign_plan_path = _bound(inputs["campaign_plan"], "plan inputs.campaign_plan")
+    roster = _campaign_roster(campaign_plan_path)
+    unused = _Phases()
+    unused.begin("roster")
+    states = _checkpoint_unit_shards(unused, checkpoint, roster)
+    merged_cost = _bound(inputs["merged_cost"], "plan inputs.merged_cost")
+    payload = _read_pickle(merged_cost, "merged cost")
+    wire_dir = str(payload["provenance"]["wire_dir"])
+    del payload
+    cells = _joint_cells(states, wire_dir)
+
+    campaign = Campaign(os.path.dirname(campaign_plan_path))
+
+    track = _Phases()
+    track.begin("head")
+    track.add(allocation_cost, 0, _required_size(allocation_cost, "allocation cost"), "head")
+    track.add(assignment_path, 0, _required_size(assignment_path, "assignment"), "head")
+    track.add(plan_path, 0, _required_size(plan_path, "joint plan"), "head")
+
+    named = sorted(set(selected) & set(states))
+    if not named:
+        raise SystemExit(
+            f"{assignment_path}: no assigned unit is in the campaign roster, "
+            "so the export's selected read set would be empty")
+    layer_of = _layer_index_of(named)
+    by_layer = {}
+    for name in named:
+        by_layer.setdefault(layer_of[name], []).append(name)
+    passthrough = []
+    for layer in sorted(by_layer):
+        track.begin(f"layer-{layer}")
+        wired = []
+        for name in sorted(by_layer[layer]):
+            fmt = selected[name]
+            match = [cell for cell in cells[name] if cell[0] == fmt]
+            if match:
+                wired.append(name)
+                track.add(match[0][1], 0, match[0][2], "wires")
+            else:
+                passthrough.append(name)
+        for path, offset, length in campaign.weight_extents_for(
+                sorted(set(by_layer[layer]) - set(wired))):
+            track.add(path, offset, length, "source_extents")
+    track.end()
+
+    annotations = {
+        "entry_point": EXPORT_ENTRY_POINT,
+        "plan": plan_path,
+        "plan_sha256": sha256_file(plan_path),
+        "assignment": assignment_path,
+        "allocation_cost": allocation_cost,
+        "layers": sorted(by_layer),
+        "units": len(named),
+        "passthrough_units": len(passthrough),
+        "sha256_present": False,
+        "sha256_absent_reason": SHA256_ABSENT_REASON,
+        "read_order_attested": False,
+        "read_order_reason": (
+            "the exporter is Tessera's experiments/export_tessera_serving.py, "
+            "outside this repository; the declared order is the artifact's "
+            "layer order, and tensors outside the campaign roster -- "
+            "embeddings, norms, the LM head -- are read by the exporter and "
+            "are not declared here"),
+        "counts": track.counts,
+        "bytes": track.bytes,
+        "reread_bytes_by_phase": track.reread,
+        "phases": track.phases,
+        "argv": None if argv is None else [str(item) for item in argv],
+    }
+    return _finish(track, produced_by, annotations, where=EXPORT_ENTRY_POINT)
+
+
+def deterministic_entry_provenance(entry_point: str, *, plan: str,
+                                   plan_sha256: str, workspace: str) -> dict:
+    """``produced_by`` for a post-campaign pass, with nothing run-specific in it.
+
+    ``pbrun`` ingests the manifest as a content-addressed input and seals its
+    digest into the action key, so a hostname or a clock reading here would
+    give the same pass a new key on every submit and turn a finished action
+    into a re-run. Every field is a property of the tree, the plan and the
+    campaign.
+    """
+    return {
+        "tool": "prismaquant/experiments/glm_data_manifests.py",
+        "commit": git_commit(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "entry_point": entry_point,
+        "plan": plan,
+        "plan_sha256": plan_sha256,
+        "workspace": workspace,
     }
 
 

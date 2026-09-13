@@ -80,10 +80,12 @@ edit them.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import pickle
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -1267,6 +1269,249 @@ def cmd_submit(args) -> int:
                        receipts=workspace / "receipts.json")
 
 
+
+# ---------------------------------------------------------------------------
+# post-campaign GPU submissions
+# ---------------------------------------------------------------------------
+
+#: The published PrismaBuild client. ``pbrun`` snapshots the checkout and
+#: places the action; it is not vendored here so a stale copy cannot become a
+#: stale submission.
+PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
+
+JOINT_ENTRY_POINT = "prismaquant.tessera_joint_aura"
+ALLOCATION_ENTRY_POINT = "prismaquant.tessera_joint_allocation"
+EXPORT_ENTRY_POINT = "tessera.experiments.export_tessera_serving"
+
+
+def _sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
+    """The file's digest, checked against what the caller declared.
+
+    The entry point binds every input by digest, so a submission that names a
+    different one fails twenty seconds into an admitted action rather than
+    here. Computing it costs one read of a file the submitter already has.
+    """
+    actual = _sha256_of(path)
+    if declared is not None and declared != actual:
+        raise RuntimeError(
+            f"{label}: {path} hashes to {actual}, not the declared {declared}")
+    return actual
+
+
+def _pbrun_argv(args, *, manifest: Path, inner: list[str]) -> list[str]:
+    """The submission command, with ``--data-manifest`` before ``--detach``.
+
+    Everything after ``--`` is the action; ``--data-manifest`` is an option of
+    ``pbrun`` itself, so it has to precede the separator. ``pbrun`` validates
+    the manifest, ingests it as a second content-addressed input and seals its
+    summary into the action, which is also why ``produced_by`` carries nothing
+    run-specific: the manifest's digest is part of the action key.
+    """
+    spec = Path(args.spec).read_text()
+    argv = ["python3", str(args.pbrun), "--demand", args.demand]
+    if args.cpus is not None:
+        argv += ["--cpus", str(args.cpus)]
+    if args.tag:
+        argv += ["--tag", args.tag]
+    argv += ["--priority", str(args.priority)]
+    if args.timeout_s is not None:
+        argv += ["--timeout-s", str(args.timeout_s)]
+    argv += ["--data-manifest", str(manifest), "--detach", "--",
+             "python3", "-m", "tools.tessera_campaign_container"]
+    argv += list(args.container_arg or [])
+    argv += ["--spec", spec, "--", *inner]
+    return argv
+
+
+def _manifest_path(args, plan: dict, *, entry_point: str, command: str) -> Path:
+    """Where the manifest is written.
+
+    The brief's ``<output-root>/data-manifests`` is the default, but a plan's
+    output root can be a frozen campaign directory this tool may not write to,
+    so ``--manifest-dir`` names somewhere else. A dry run never writes, and
+    names the path it would have used.
+    """
+    if args.manifest_dir:
+        directory = Path(args.manifest_dir)
+    else:
+        root = plan.get("output_root")
+        if not root:
+            raise RuntimeError(
+                "the plan declares no 'output_root'; pass --manifest-dir")
+        directory = Path(root) / DATA_MANIFEST_DIR
+    return directory / f"{entry_point}.{command}.json"
+
+
+def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str],
+                       plan: dict, build) -> int:
+    """Build the read set, write it, and run the chain-style pbrun command.
+
+    Order matters for a dry run: the command shape is printed before the
+    manifest is built, so a plan whose inputs are not on disk yet still shows
+    what would be submitted.
+    """
+    manifest_path = _manifest_path(args, plan, entry_point=entry_point,
+                                   command=command)
+    argv = _pbrun_argv(args, manifest=manifest_path, inner=inner)
+    if args.dry_run:
+        print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
+    manifest = build()
+    # Compact JSON, unlike the row manifests' indented form: a row's read set
+    # is a couple of MB and reads better indented, while a joint pass declares
+    # hundreds of thousands of entries against PrismaBuild's 64 MiB ceiling,
+    # and the indentation is the difference between fitting and not.
+    blob = json.dumps(manifest, separators=(",", ":"), sort_keys=False).encode() + b"\n"
+    summary = {
+        "entry_point": f"{entry_point}:{command}",
+        "data_manifest": str(manifest_path),
+        "manifest_bytes": len(blob),
+        "manifest_sha256": hashlib.sha256(blob).hexdigest(),
+        "entry_count": manifest["entry_count"],
+        "total_bytes": manifest["total_bytes"],
+        "counts": manifest["annotations"]["counts"],
+        "bytes": manifest["annotations"]["bytes"],
+        "phases": manifest["annotations"]["phases"],
+    }
+    if args.dry_run:
+        print(json.dumps(summary, indent=1))
+        # Checked after the summary is printed, so a read set the fleet would
+        # refuse still reports the size and the phase boundaries that make the
+        # refusal readable.
+        _manifest_producer().check_manifest_bytes(
+            blob, where=f"{entry_point}:{command}")
+        return 0
+    _manifest_producer().check_manifest_bytes(blob, where=f"{entry_point}:{command}")
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = manifest_path.with_name(manifest_path.name + ".tmp")
+    temporary.write_bytes(blob)
+    os.replace(temporary, manifest_path)
+    print(json.dumps(summary, indent=1))
+    print("[submit] " + " ".join(shlex.quote(item) for item in argv))
+    return subprocess.run(argv, check=False).returncode
+
+
+def cmd_submit_joint(args) -> int:
+    producer = _manifest_producer()
+    plan_path = Path(args.plan).resolve()
+    plan = json.loads(plan_path.read_text())
+    plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    inner = ["python3", "-u", "-m", JOINT_ENTRY_POINT, args.command,
+             "--plan", str(plan_path), "--plan-sha256", plan_sha256]
+    prepared = None
+    if args.command == "run":
+        if not args.prepared:
+            raise RuntimeError("the run command requires --prepared")
+        prepared_path = Path(args.prepared).resolve()
+        prepared_sha256 = _bound_sha256(prepared_path, args.prepared_sha256,
+                                        label="prepared completion")
+        inner += ["--prepared", str(prepared_path),
+                  "--prepared-sha256", prepared_sha256]
+        prepared = str(prepared_path)
+    if args.resume:
+        inner += ["--resume"]
+    provenance = producer.deterministic_entry_provenance(
+        f"{JOINT_ENTRY_POINT}:{args.command}", plan=str(plan_path),
+        plan_sha256=plan_sha256,
+        workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
+    return _submit_gpu_action(
+        args, entry_point=JOINT_ENTRY_POINT, command=args.command, inner=inner,
+        plan=plan,
+        build=lambda: producer.build_joint_pass_manifest(
+            str(plan_path), command=args.command, produced_by=provenance,
+            argv=inner, prepared=prepared))
+
+
+def cmd_submit_allocation(args) -> int:
+    producer = _manifest_producer()
+    plan_path = Path(args.plan).resolve()
+    plan = json.loads(plan_path.read_text())
+    plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    joint_cost = Path(args.joint_cost).resolve()
+    joint_sha256 = _bound_sha256(joint_cost, args.joint_cost_sha256,
+                                 label="joint cost")
+    inner = ["python3", "-u", "-m", ALLOCATION_ENTRY_POINT,
+             "--joint-cost", str(joint_cost), "--joint-cost-sha256", joint_sha256,
+             "--plan", str(plan_path), "--plan-sha256", plan_sha256,
+             "--output", str(Path(args.output).resolve())]
+    provenance = producer.deterministic_entry_provenance(
+        ALLOCATION_ENTRY_POINT, plan=str(plan_path), plan_sha256=plan_sha256,
+        workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
+    return _submit_gpu_action(
+        args, entry_point=ALLOCATION_ENTRY_POINT, command="handoff", inner=inner,
+        plan=plan,
+        build=lambda: producer.build_allocation_manifest(
+            str(joint_cost), str(plan_path), produced_by=provenance, argv=inner))
+
+
+def cmd_submit_export(args) -> int:
+    producer = _manifest_producer()
+    plan_path = Path(args.plan).resolve()
+    plan = json.loads(plan_path.read_text())
+    plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    inner = list(args.inner or [])
+    if inner and inner[0] == "--":
+        inner = inner[1:]
+    if not inner:
+        raise RuntimeError(
+            "the export entry point lives in the Tessera tree, so its command "
+            "is not derived here; pass it after --")
+    provenance = producer.deterministic_entry_provenance(
+        EXPORT_ENTRY_POINT, plan=str(plan_path), plan_sha256=plan_sha256,
+        workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
+    return _submit_gpu_action(
+        args, entry_point=EXPORT_ENTRY_POINT, command="export", inner=inner,
+        plan=plan,
+        build=lambda: producer.build_export_manifest(
+            str(plan_path), assignment=str(Path(args.assignment).resolve()),
+            allocation_cost=str(Path(args.allocation_cost).resolve()),
+            produced_by=provenance, argv=inner))
+
+
+def _add_submission_arguments(parser) -> None:
+    """The demand and placement every post-campaign submission declares.
+
+    None of these carries a default demand. A demand copied from habit is what
+    #522 and the fleet note `pb_demand_must_be_measured_not_habitual` are
+    about: the numbers belong to the pass being submitted, and the caller
+    measures them.
+    """
+    parser.add_argument("--spec", required=True,
+                        help="container spec JSON; its text is passed to "
+                             "tools.tessera_campaign_container --spec")
+    parser.add_argument("--pbrun", default=str(PBRUN),
+                        help="the published pbrun client")
+    parser.add_argument("--demand", required=True,
+                        help="pbrun --demand for this pass, measured from what "
+                             "it holds (for example gpu=1,mem_gb=104)")
+    parser.add_argument("--cpus", type=int, default=None,
+                        help="cores the action reserves")
+    parser.add_argument("--tag", default=None,
+                        help="placement tag; the joint pass needs a GB10 box")
+    parser.add_argument("--priority", type=int, default=-10,
+                        help="queue band; agent and post-campaign work runs at "
+                             "-10 so it never displaces campaign rows")
+    parser.add_argument("--timeout-s", type=int, default=None,
+                        help="hard wall-clock cap for the action")
+    parser.add_argument("--container-arg", action="append", default=None,
+                        help="extra argument for tools.tessera_campaign_container, "
+                             "repeatable (for example --container-arg --cpu-only)")
+    parser.add_argument("--manifest-dir", default=None,
+                        help="where the data manifest is written; the plan's "
+                             "output_root/data-manifests by default. A frozen "
+                             "output root needs this.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print the command and the manifest summary; "
+                             "write nothing and submit nothing")
+
+
 # ---------------------------------------------------------------------------
 # merge
 # ---------------------------------------------------------------------------
@@ -2104,6 +2349,51 @@ def main(argv=None) -> int:
                        help="what a GPU box in the fleet declares, in GiB; "
                             "defaults to the spec's 'box_memory_gb'.")
     submit.set_defaults(func=cmd_submit)
+
+    joint = sub.add_parser(
+        "submit-joint",
+        help="submit a joint AURA pass with the read set it will consume")
+    joint.add_argument("command", choices=("prepare", "run"))
+    joint.add_argument("--plan", required=True,
+                       help="the resolved joint plan the pass runs from")
+    joint.add_argument("--plan-sha256", default=None,
+                       help="the digest the pass binds the plan by; computed "
+                            "when omitted and checked when given")
+    joint.add_argument("--prepared", default=None,
+                       help="the prepared completion the run command consumes")
+    joint.add_argument("--prepared-sha256", default=None)
+    joint.add_argument("--resume", action="store_true",
+                       help="forwarded to the pass, which resumes from its "
+                            "identity-bound checkpoints")
+    _add_submission_arguments(joint)
+    joint.set_defaults(func=cmd_submit_joint)
+
+    allocation = sub.add_parser(
+        "submit-allocation",
+        help="submit the allocation handoff with the read set it will consume")
+    allocation.add_argument("--plan", required=True)
+    allocation.add_argument("--plan-sha256", default=None)
+    allocation.add_argument("--joint-cost", required=True)
+    allocation.add_argument("--joint-cost-sha256", default=None)
+    allocation.add_argument("--output", required=True,
+                            help="where the handoff writes its own table")
+    _add_submission_arguments(allocation)
+    allocation.set_defaults(func=cmd_submit_allocation)
+
+    export = sub.add_parser(
+        "submit-export",
+        help="submit the serving export with the read set it will consume")
+    export.add_argument("--plan", required=True)
+    export.add_argument("--plan-sha256", default=None)
+    export.add_argument("--assignment", required=True,
+                        help="the layer_config.json the export ships")
+    export.add_argument("--allocation-cost", required=True,
+                        help="the allocation handoff's table")
+    _add_submission_arguments(export)
+    export.add_argument("inner", nargs=argparse.REMAINDER,
+                        help="the export command itself, after --; it lives "
+                             "in the Tessera tree and is not derived here")
+    export.set_defaults(func=cmd_submit_export)
 
     merge = sub.add_parser("merge", help="one cost.pkl and journal from the rows")
     merge.add_argument("--workspace", required=True)

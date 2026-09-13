@@ -1,7 +1,26 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-12 · `pq/530-amd-serving-profiles`. Stamps
+As of: 2026-09-13 · `claude/joint-pass-data-manifest`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `claude/joint-pass-data-manifest`) for the
+post-campaign GPU submissions. **The joint AURA pass, the allocation handoff
+and the serving export now derive the shared-mount bytes they will read, in
+the order they read them, and submit that read set with the action.** #524
+gave every campaign row a data manifest; work submitted outside the row
+dispatcher carried none, and the joint pass is where that costs the most.
+Measured on the frozen GLM census at 05:5xZ on 2026-09-13, from the dl380g10
+local pool: the `prepare` pass reads **5.15 TB** over 368,518 entries --
+2.08 TB of captures, 1.64 TB of renders, 0.80 TB of measured-rung wires,
+0.61 TB of source extents and 7.7 GB of head records -- against a 240 GiB ARC.
+A whole-set warm is not available at that ratio, so the manifest carries the
+consumption order: a `head` phase, then one `layer-<L>` phase per transformer
+layer, and the prewarm loop windows on `annotations.phases`. One measured
+limit came with it: PrismaBuild's data manifest v1 refuses a manifest file
+over 64 MiB and reads no compressed form, and this read set is 104 MB of
+compact JSON, so the submit path fails closed on the size rather than
+submitting a truncated read set. Gates:
+`tests/test_glm_joint_data_manifest_at_submit.py`.
 
 Re-stamped (2026-09-12, `pq/530-amd-serving-profiles`) for the two **AMD
 Tessera serving profiles** (#530): `serving_profile_specs/
@@ -9455,7 +9474,53 @@ that name it under `WORKSPACE/manifest.submitted.json`, so `plan`'s
 the resume -- a finished row is a CAS hit and a running row is re-attached --
 so nothing here decides what to skip, and a row may not carry
 `--deadline-seconds`, which stops a run mid-round and would price a different
-anchor set than one run would have. `merge` unions the rows' disjoint Hessian
+anchor set than one run would have.
+
+The passes that run *after* the rows merge are submitted through the same
+producer. `submit-joint`, `submit-allocation` and `submit-export` build the
+read set with `experiments/glm_data_manifests.py`
+(`build_joint_pass_manifest`, `build_allocation_manifest`,
+`build_export_manifest`), write it under `<output-root>/data-manifests/` --
+or under `--manifest-dir`, which a frozen output root needs -- and run the
+chain-style `pbrun` command with `--data-manifest` **before** `--detach`,
+since a `pbrun` option after the separator is an argument of the action
+instead. `--dry-run` prints the command and the manifest summary and submits
+nothing. Demand is an argument on every one of them, never a constant: the
+numbers belong to the pass being submitted.
+
+The phase contract is what makes the joint manifest worth building. Each
+phase is `{name, bytes, cumulative_bytes}`, a running byte sum over `entries`
+in the consumer's own order, and a file is declared in the phase that reads it
+**first** -- the contract refuses a repeated `(path, offset)`, so `run`, which
+hashes every cell before it streams, declares its wires and renders in the
+`hash` phase and records the streaming re-read under
+`annotations.reread_bytes_by_phase` rather than declaring the bytes twice.
+The order is taken from the code that reads it: the head is everything
+`load_measured_anchor_input` opens before the first layer installs, including
+one shard of the merged checkpoint per unit; a layer phase is the layer's
+coalesced source extents, then, per unit in sorted name order, that unit's
+capture and each measured rung's render and wire. Only measured rungs
+contribute: a row cache holds the whole menu, and the wire of a rung no anchor
+priced sits in the same directory as the measured ones without ever being
+opened, so declaring it would warm bytes at the expense of bytes the pass does
+read. A pass submitted
+before the campaign merge published the checkpoint's unit shards is refused
+with the directory named. The roster comes from the campaign plan's own
+members and each shard is addressed by `cost_stage_checkpoint.unit_path`'s
+rule, because the merged checkpoint manifest is 7.2 GB of JSON on this census
+and nothing in the read set needs it parsed.
+
+The allocation handoff has two phases, `handoff` and `head`, and no layer
+phases: it joins recorded identities and opens no capture, render, wire or
+source byte. The export manifest is narrower than the export command and says
+so in its own `annotations`: the exporter is Tessera's
+`experiments/export_tessera_serving.py`, outside this repository, so what is
+declared is the selected cells' wires and the source extents of the units the
+assignment leaves on the source precision, in the artifact's layer order, with
+`read_order_attested: false` and tensors outside the campaign roster --
+embeddings, norms, the LM head -- named as not declared.
+
+`merge` unions the rows' disjoint Hessian
 captures into the object a whole-scope run writes (same `counts`, same
 provenance), **recomputes** its digest, re-stamps every row's
 `capture_sha256`, rebuilds the population block over the scope, and writes one
