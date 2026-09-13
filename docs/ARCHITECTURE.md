@@ -11,7 +11,9 @@ once present, the allocation multiplier prioritizes interior refinement. Every
 legal rate remains on the research domain. Missing prices stay unknown, and no
 extrapolated objective, complete-grid measurement requirement, serving approval,
 or allocator payload is introduced. Atomic serving-group acquisition and exact
-selected-rate scoring remain caller obligations. The opt-in adapter changes no
+selected-rate scoring remain caller obligations. `full_domain_measured` is
+coverage only; `adaptive_converged: null` makes explicit that this adapter
+defines no stopping rule and demands no full-grid measurement. The opt-in adapter changes no
 pipeline default or shipping gate.
 
 Re-stamped (2026-09-13, `claude/scoped-prefill-sweep`) because **the prefill

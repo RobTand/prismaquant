@@ -48,7 +48,8 @@ def test_recipe_boundaries_do_not_require_every_interior_grid_measurement():
     assert result['proposed_q256'] == [1024]
     assert result['legal_rate_count'] == 1793
     assert result['missing_legal_rate_count'] == 1788
-    assert result['acquisition_complete'] is False
+    assert result['adaptive_converged'] is None
+    assert 'acquisition_complete' not in result
 
 
 @pytest.mark.parametrize('measured', [(True,), (256, 256), (128,)])
@@ -63,7 +64,8 @@ def test_missing_refiner_is_explicit_and_zero_cap_does_not_claim_done():
     assert result['next_dependency'] == 'decision_refiner'
     result = propose_full_domain_acquisition(domain, (), max_new_points=0)
     assert result['proposed_q256'] == []
-    assert result['acquisition_complete'] is False
+    assert result['adaptive_converged'] is None
+    assert 'acquisition_complete' not in result
     assert result['next_dependency'] == 'measurement_budget'
 
 

@@ -84,7 +84,7 @@ def propose_full_domain_acquisition(
         'max_new_points': max_new_points,
         'next_dependency': dependency,
         'full_domain_measured': not remaining,
-        'acquisition_complete': not remaining,
+        'adaptive_converged': None,
         'full_grid_measurement_required_for_proposal': False,
         'prices': None,
         'interpolation_error_bound': None,

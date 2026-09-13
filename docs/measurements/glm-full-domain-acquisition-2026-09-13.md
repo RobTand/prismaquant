@@ -8,7 +8,11 @@ and BF16 K1 R256–4096 (3,841 rates). The adapter uses the existing legal-domai
 resolver and adaptive RD-hull refiner. Missing endpoints and the two BF16
 table-width transitions become bounded next-measurement requests. After those
 witnesses exist, the allocation multiplier can prioritize interior refinement.
-No extrapolated price is produced, and a full-grid measurement is not required
+The current adapter reports `adaptive_converged: null`; full-grid coverage
+is not an adaptive stopping criterion. The original request-04 artifact
+predates that naming clarification and its `acquisition_complete` field meant
+only full-grid measurement coverage. It is historical evidence, not a controller
+completion gate. No extrapolated price is produced, and a full-grid measurement is not required
 before proposing candidates. Exact selected-rate scoring and downstream
 held-out validation remain necessary.
 
