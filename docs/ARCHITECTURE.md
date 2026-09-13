@@ -1,7 +1,27 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/pin-glm53-mla-patch-set`. Stamps
+As of: 2026-09-13 · `claude/560-fixed-resource-admission-consumer`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `claude/560-fixed-resource-admission-consumer`)
+because **the v2 table emitter reports two admission verdicts and three exit
+codes, where it reported one of each** (RobTand/prismaquant#565). Splitting
+`producer_admitted` into `native_rows_admitted` and `fixed_resources_admitted`
+(the stamp below) stopped `admit_runtime_provenance` raising on the
+fixed-resource refusal and made it *return* the text instead --- and
+`native_receipt_table.main`, which reads only the exception, therefore printed
+`{"status": "admitted", "refusal": null}` and exited 0 for a table whose fixed
+charge is refused. The emitter certified an admission it did not have.
+`native_receipt_table.admission_report` now reads both flags and the refusal,
+and the report's `admission` block carries `native_rows`, `fixed_resources`
+and a `status` of `admitted` / `native_rows_only` / `refused` whose top-level
+`refusal` is `null` only in the first case. The CLI exits `0` when both gates
+admit, `3` when the rows are admitted and the fixed charge is refused, and `2`
+when the loader refused the table outright: nonzero for both refusals because
+an emitter must never certify an admission it does not have, and
+distinguishable because 49 priced rows are not the same answer as no priced
+row. While D37 stands, `0` is unreachable and `3` is the real path. No
+default, stage, format, lane or ship gate changed.
 
 Re-stamped (2026-09-13, `claude/pin-glm53-mla-patch-set`) because **the GLM-5.3
 MLA fix moved out of an image tag and into the repository**. GLM-5.3-Flash does

@@ -10,10 +10,31 @@ producer summary, and nothing is defaulted where the evidence is absent.
 What this module does not do: it does not admit anything. The written table
 is handed to ``measured_runtime_prices.load_measured_runtime_table``, whose
 producer admission (``runtime_provenance.admit_runtime_provenance``) decides.
-The emission report next to the table records that verdict verbatim, so a
-table that exists on disk without an admitted verdict is never mistaken for a
-price the allocator may read: ``build_runtime_resources`` refuses a v2 table
-the loader did not admit.
+There are **two** admitting gates and they answer about different objects, so
+the emission report carries two verdicts and never one collapsed answer:
+``admit_native_rows`` attests the per-row prices ``build_runtime_resources``
+hands the DP, and ``admit_fixed_resources`` attests the whole-engine charge
+the allocator adds once outside it. The loader raises on the first and
+*returns* the second, so a caller that reads only the exception sees an
+admitted table whose fixed charge is refused -- which is an admission the
+emitter does not have. ``admission_report`` reads both flags and the refusal
+text, and the CLI's exit code says which of the three answers it got:
+
+=====  ================================================================
+exit   what the table is
+=====  ================================================================
+``0``  both gates admitted. Unreachable while debt D37 stands, because
+       ``admit_fixed_resources`` cannot pass for any v2 table.
+``3``  the rows are admitted and priced; the fixed charge is refused,
+       and ``admission.refusal`` is the gate's reason for it verbatim.
+``2``  the loader refused the table outright, so no row is priced and
+       the fixed-resource gate was never reached.
+=====  ================================================================
+
+Nonzero in both refusing cases, because an emitter must never certify an
+admission it does not have; distinguishable, because a caller that can use
+49 priced rows should not have to read "refused" the same way it reads
+"this table prices nothing".
 
 Fixed resources are declared by asking the admitting gate to recompute them:
 ``runtime_provenance.recompute_fixed_resources`` owns the only reader of the
@@ -44,6 +65,12 @@ from .measured_runtime_prices import (
 from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
 
 EMISSION_SCHEMA = "prismaquant.native_receipt_table_emission.v1"
+#: The CLI's three answers; see the module docstring for what each one means.
+EXIT_ADMITTED = 0
+EXIT_REFUSED = 2
+EXIT_NATIVE_ROWS_ONLY = 3
+EXIT_CODES = {"admitted": EXIT_ADMITTED, "refused": EXIT_REFUSED,
+              "native_rows_only": EXIT_NATIVE_ROWS_ONLY}
 DENSE_PANEL_SCHEMA = "tessera.native_dense_panel.v1"
 BINDING_FIELDS = ("unit", "format", "run_id", "panel", "receipt", "memory_trace")
 PHASES = ("prefill", "decode")
@@ -245,13 +272,46 @@ def derive_fixed_resources(report_path: Path, table_dir: Path) -> tuple[dict, di
     return declared, evidence, {"reference": reference, **verdict}
 
 
+def admission_report(path: Path, *, expected_context, expected_cost_sha256: str,
+                     now: datetime) -> dict:
+    """Both admitting gates' verdicts, and the one status that follows from them.
+
+    ``native_rows`` is ``refused`` whenever the loader raised, because then no
+    row of the table is admitted for pricing -- whether it was the parse, the
+    relation or ``admit_native_rows`` that said so -- and the fixed-resource
+    gate is ``unreached`` rather than pretending to an answer it never gave.
+    ``status`` is ``admitted`` only when both gates admitted, and the top-level
+    ``refusal`` is ``None`` only then; otherwise it is the refusal that stands
+    between this table and a full admission, verbatim from the gate that wrote
+    it.
+    """
+    try:
+        table = load_measured_runtime_table(path, expected_context=expected_context,
+                                            expected_cost_sha256=expected_cost_sha256, now=now)
+    except RuntimePriceError as exc:
+        return {"status": "refused", "refusal": str(exc),
+                "native_rows": {"status": "refused", "refusal": str(exc)},
+                "fixed_resources": {"status": "unreached", "refusal": None}}
+    native = {"status": "admitted" if table.native_rows_admitted else "refused",
+              "refusal": None if table.native_rows_admitted else "the loader performed no producer admission"}
+    fixed = {"status": "admitted" if table.fixed_resources_admitted else "refused",
+             "refusal": table.fixed_resources_refusal}
+    if native["status"] == "refused":
+        return {"status": "refused", "refusal": native["refusal"],
+                "native_rows": native, "fixed_resources": fixed}
+    if fixed["status"] == "admitted":
+        return {"status": "admitted", "refusal": None, "native_rows": native, "fixed_resources": fixed}
+    return {"status": "native_rows_only", "refusal": fixed["refusal"],
+            "native_rows": native, "fixed_resources": fixed}
+
+
 def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation: Path,
                               full_engine_report: Path, receipts: list[Mapping], manifest_dir: Path,
                               fixed_assignment: Mapping[str, str], valid_hours: float,
                               now: datetime | None = None) -> dict:
     """Write the table, its fixed-resource receipt and the emission report.
 
-    Returns the emission report. The loader's verdict is inside it under
+    Returns the emission report. Both loader verdicts are inside it under
     ``admission``; a refused table stays on disk only because nothing reads a
     v2 table except through the loader that refused it.
     """
@@ -302,12 +362,8 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
         "native_receipt_bindings": [item["binding"] for item in sorted(bound, key=lambda i: (i["row"]["unit"], i["row"]["format"]))],
     }
     out.write_text(json.dumps(table, indent=1, sort_keys=True, allow_nan=False) + "\n")
-    try:
-        load_measured_runtime_table(out, expected_context=parse_runtime_context(context),
-                                    expected_cost_sha256=cost_sha256, now=current)
-        admission = {"status": "admitted", "refusal": None}
-    except RuntimePriceError as exc:
-        admission = {"status": "refused", "refusal": str(exc)}
+    admission = admission_report(out, expected_context=parse_runtime_context(context),
+                                 expected_cost_sha256=cost_sha256, now=current)
     emission = {
         "schema": EMISSION_SCHEMA, "table_path": str(out), "table_sha256": file_sha256(out),
         "table_id": table["table_id"], "cost_path": str(_resolve(costs, manifest_dir)), "cost_sha256": cost_sha256,
@@ -371,7 +427,7 @@ def main(argv=None) -> int:
     admission = emission["admission"]
     print(json.dumps({"table": emission["table_path"], "table_sha256": emission["table_sha256"],
                       "rows": len(emission["rows"]), "admission": admission}, sort_keys=True), flush=True)
-    return 0 if admission["status"] == "admitted" else 2
+    return EXIT_CODES[admission["status"]]
 
 
 if __name__ == "__main__":
