@@ -304,7 +304,11 @@ def test_reference_preserves_external_weights_without_renormalizing(monkeypatch)
 def receipt_fixture(joined, complete=True):
     inputs, preflight, _ = joined
     panel = freeze_moe_panel(*joined, cost_sha256="4" * 64)
-    error = {"status": "passed", "finite": True, "max_normalized_error": .25, **panel["numerics"]}
+    # ``max_abs_error`` is what the activation gate decides on since #574, and
+    # the receipt harness has always emitted it (bench_native_operator's
+    # compare_tensors); an agreeing runtime reports exactly zero.
+    error = {"status": "passed", "finite": True, "max_normalized_error": .25,
+             "max_abs_error": 0.0, **panel["numerics"]}
     phases = {phase: {**inputs["phases"][phase], "numerics": dict(error), "qdq_numerics": dict(error),
         "route": {**preflight["operator"]["declared_route"], "state": "served", "reason": None, "shape": "M2:N6:K4"},
         "measurement": {"method": "cuda_events", "sample_unit": "single_apply", "samples_ms": [3., 1., 2.],
@@ -504,3 +508,32 @@ def test_subset_joint_panel_retains_both_calibration_scopes(joined):
     inputs["probe_scope"]["sample_indices"] = [1]
     with pytest.raises(ValueError, match="first-sequence screen"):
         freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
+
+
+def test_a_routed_activation_that_differs_at_all_is_refused(joined, tmp_path):
+    """The measured fp4 value that USED to pass, on the routed panel.
+
+    0.0078125 sat inside the old 0.015625 tolerance and was recorded as
+    "passed" (#567). With a bit-identical stored scale it is at least one code
+    flipped, so there is no tolerance that separates it from the 0.0957 and
+    0.1436 that failed -- the activation gate has none.
+    """
+    panel, receipt, trace = receipt_fixture(joined)
+    receipt["phases"]["prefill"]["qdq_numerics"]["max_abs_error"] = 0.0078125
+    path, trace_path = tmp_path / "receipt.json", tmp_path / "trace.json"
+    digest = write(path, receipt)
+    write(trace_path, trace)
+    with pytest.raises(ValueError, match="E2M1 code flipped"):
+        consume_moe_receipt(path, expected_sha256=digest, expected_panel=panel,
+                            memory_trace_path=trace_path)
+
+
+def test_a_routed_gemm_output_keeps_its_tolerance(joined, tmp_path):
+    """The OTHER gate is unchanged: it compares an accumulation, not a lookup."""
+    panel, receipt, trace = receipt_fixture(joined)
+    receipt["phases"]["prefill"]["numerics"]["max_abs_error"] = 0.0078125
+    path, trace_path = tmp_path / "receipt.json", tmp_path / "trace.json"
+    digest = write(path, receipt)
+    write(trace_path, trace)
+    consume_moe_receipt(path, expected_sha256=digest, expected_panel=panel,
+                        memory_trace_path=trace_path)

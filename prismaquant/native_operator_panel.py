@@ -67,15 +67,153 @@ def _bytes(value, name):
     return value
 
 
+#: bf16's unit roundoff and fp32's.  The only constants in the derived bound,
+#: and both come from the numerical precision of a dtype, which is the one
+#: source principle 2 admits.
+_U_BF16 = 2.0 ** -8
+_U_FP32 = 2.0 ** -24
+
+
+def derive_gemm_numerics(magnitude: float, *, k: int) -> tuple[dict, dict]:
+    """The GEMM-output tolerance, derived from the dtypes and the operands.
+
+    Both sides compute the same dot products and differ only in how they round
+    on the way.  The reference rounds the dequantised activation and the
+    rendered weight to bf16, accumulates in fp32 and rounds the result to
+    bf16; the native kernel consumes the codes and scales and does the same
+    accumulation in a different order.  Per output element ``j``::
+
+        |native - ref|  <=  (4 u_bf16 + 2 K u_fp32) * sum_i |qx_i| |w_ij|
+
+    -- ``2 u_bf16`` for the two operand roundings, ``u_bf16`` for each side's
+    final rounding, ``gamma_K ~ K u_fp32`` per side for the fp32 accumulation
+    (the per-block scale products fold into that term), and terms of order
+    ``u^2`` dropped.
+
+    Two properties worth naming.  First, ``4 u_bf16`` is ``2^-6`` -- exactly
+    the constant this replaces.  The old default had the right MAGNITUDE and
+    the wrong QUANTITY: it multiplied ``|expected|`` instead of
+    ``sum_i |qx_i||w_ij|``, which are the same thing only when nothing cancels,
+    and they differ by however much the dot product cancels -- which is
+    per unit, and per row count.  That is the whole mechanism by which one
+    unit passed and another failed on a constant neither of them derived.
+    Second, this is the SCALAR projection of a per-element bound, because the
+    receipt harness reads one ``atol``/``rtol`` pair: taking the maximum over
+    ``j`` makes it correct and loose, loosest where the worst row cancels
+    hardest.  A per-element receipt would tighten it and is filed rather than
+    approximated here.
+
+    ``rtol`` is zero: the whole bound is carried by ``atol``, because the
+    quantity it is proportional to is not ``|expected|``.
+    """
+    _number(magnitude, "operand magnitude")
+    if type(k) is not int or k < 1:
+        raise ValueError("derived GEMM tolerance needs the contraction length")
+    coefficient = 4.0 * _U_BF16 + 2.0 * k * _U_FP32
+    atol = coefficient * float(magnitude)
+    if not math.isfinite(atol) or atol < 0:
+        raise ValueError("derived GEMM tolerance is not a finite bound")
+    return ({"atol": atol, "rtol": 0.0}, {
+        "schema": "prismaquant.native_gemm_tolerance.v1",
+        "bound": "(4*u_bf16 + 2*K*u_fp32) * max_j sum_i |qx_i||w_ij|",
+        "u_bf16": _U_BF16, "u_fp32": _U_FP32, "k": int(k),
+        "coefficient": coefficient, "operand_magnitude": float(magnitude),
+        "rtol_is_zero_because": "the bound is proportional to the operand "
+                                "magnitude sum, not to |expected|",
+        "scope": "gemm_output_only",
+    })
+
+
+def native_platform(device=None) -> str:
+    """The platform key a published attestation is addressed by.
+
+    ``sm_<major><minor>``, the same spelling
+    ``native_receipt_table`` and ``tessera_route_receipt`` already build a
+    serving context from, so an attestation is looked up under the name the
+    route receipt is priced under. No CUDA device is no platform: this is
+    called on the producer's GPU path and a host with no device has no
+    activation to price.
+    """
+    import torch
+
+    if not torch.cuda.is_available():
+        raise ValueError(
+            "native panel: no CUDA device, so there is no platform to look a "
+            "quantiser attestation up under")
+    major, minor = torch.cuda.get_device_capability(device)
+    return f"sm_{major}{minor}"
+
+
+def require_attested_activation_oracle(activation, *, platform, table=None):
+    """Refuse to freeze a ``reference_qdq`` this producer cannot attest.
+
+    ``reference_qdq`` is not a runtime artifact: it is PrismaQuant's own
+    re-implementation of the runtime's activation quantiser, and a panel that
+    freezes it is about to price an activation residual against a rounding
+    rule nobody published.  Principle 14 reads that as refused, so the
+    attestation is taken BEFORE the reference exists, at the one place the
+    reference is made.
+
+    A unit whose format does not quantise its input has no such rule and
+    freezes nothing to attest; it returns ``None`` and is unaffected.
+    """
+    if not activation.get("quantizes_input"):
+        return None
+    if not platform:
+        raise ValueError(
+            "native panel: an activation attestation is addressed by platform "
+            "and none was supplied; a table taken on another device attests "
+            "another kernel")
+    contract = (activation.get("static_contract") or {}).get("execution")
+    if not contract:
+        # A quantiser whose scale is DERIVED FROM x: both sides compute the
+        # same function of the same tensor, which is why every fp8 cell
+        # measured on 2026-09-13 agreed at exactly 0.0.  That is evidence the
+        # oracle is right, not an attestation that it is the same function,
+        # and the difference is recorded here rather than left to be inferred
+        # from the stamp's absence.  Its table is a different shape -- there is
+        # no G to publish against -- so inventing one here would be the guess
+        # this mechanism exists to refuse; filed instead.  The exact gate in
+        # validate_native_numerics still applies, and still bites.
+        return {
+            "schema": "prismaquant.activation_quantizer_attestation.v1",
+            "activation_contract": None,
+            "quantizer": activation.get("quantizer"),
+            "status": "unattested_dynamic_scale",
+            "attests": None,
+            "does_not_attest": ["activation_to_code_rounding"],
+            "why": "the scale is derived from x, so no static table addresses "
+                   "it; see RobTand/prismaquant#567",
+        }
+    from .tessera_runtime_contract import require_activation_quantizer_attested
+
+    return require_activation_quantizer_attested(
+        contract, platform=platform, table=table)
+
+
 def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format_name,
                           calibration_receipt, wire_blob, wire_record, encoding_identity,
-                          numerics, prefill_rows, decode_rows, max_resident_bytes):
+                          prefill_rows, decode_rows, max_resident_bytes,
+                          activation_quantizers=None):
     """Prepare independent references from existing resident PWC/activation data.
 
     ``encoding_identity`` must be derived by the producer from the actual
     source/Hessian/calibration settings, not copied from the wire record. The
     caller pins that preparation input artifact before executing this function.
     Artifact transport and tensor hashing occur outside any timed native apply.
+
+    **The numerical tolerance is derived here, not passed in.**  It used to be
+    an argument whose only value in practice was a CLI default of ``0.015625``
+    -- 2^-6, a dtype-shaped number wearing a derivation it did not have
+    (principle 2), applied to ``|expected|`` and a flat floor rather than to
+    the quantity the error is actually proportional to.  That is why one
+    unit's verdict came out a function of its calibrated ``max_abs`` and of how
+    many rows were sampled.  See :func:`derive_gemm_numerics` for what replaces
+    it and :func:`validate_native_numerics` for the activation gate, which is
+    now exact and has no tolerance at all.
+
+    ``activation_quantizers`` is a seam for tests only: left ``None``, the
+    attestation is read from the installed runtime's packaged contract.
     """
     import torch
     from tessera.cached_unit import verify_cached_unit
@@ -97,10 +235,6 @@ def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format
     for rows in (prefill_rows, decode_rows):
         if type(rows) is not int or rows < 1 or rows > activation_rows.shape[0]:
             raise ValueError("native panel phase rows exceed retained calibration activations")
-    if set(numerics) != {"atol", "rtol"}:
-        raise ValueError("native panel requires explicit predeclared atol and rtol")
-    for key, value in numerics.items():
-        _number(value, key)
     if calibration_receipt.get("schema") != "prismaquant.calibration_input.v1":
         raise ValueError("native panel requires an exact calibration input receipt")
     _sha(calibration_receipt["calibration_sha256"], "calibration")
@@ -117,25 +251,39 @@ def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format
     activation = activation_identity(spec, cache.activation_max_abs or {}, unit)
     if activation["clip_enabled"]:
         raise ValueError("native operator does not implement PQ's optional activation preclip")
+    attestation = require_attested_activation_oracle(
+        activation, platform=native_platform(source_weight.device),
+        table=activation_quantizers)
     tensors = {"source_weight": source_weight, "rendered_weight": rendered}
     phases = {}
+    magnitude = 0.0
     with torch.inference_mode():
         for phase, count in (("prefill", prefill_rows), ("decode", decode_rows)):
             x = activation_rows[:count].contiguous()
             qx = (_activation_qdq(x, spec, cache.activation_max_abs or {}, unit)
                   if spec.act_quant_changes_input else x)
             output = torch.nn.functional.linear(qx, rendered)
+            # The bound below is proportional to sum_i |qx_i||w_ij|, so it is
+            # read off the operands of the apply it bounds, once per phase, and
+            # the looser of the two covers both -- the panel carries one
+            # tolerance and the harness applies it to both phases.
+            magnitude = max(magnitude, float(torch.nn.functional.linear(
+                qx.abs().float(), rendered.abs().float()).max()))
             for name, value in (("input", x), ("reference_qdq", qx), ("reference_output", output)):
                 tensors[f"{phase}.{name}"] = value
             phases[phase] = {"m": count, **{name: _cb_cache_tensor_identity(tensors[f"{phase}.{name}"])
                 for name in ("input", "reference_qdq", "reference_output")}}
+    numerics, derivation = derive_gemm_numerics(magnitude, k=source_weight.shape[1])
     return {
         "schema": INPUT_SCHEMA, "unit": unit, "format": format_name,
         "shape": list(source_weight.shape), "source_weight": _cb_cache_tensor_identity(source_weight),
         "rendered_weight": _cb_cache_tensor_identity(rendered), "activation": activation,
         "calibration": calibration_receipt, "activation_rows": _cb_cache_tensor_identity(activation_rows),
         "wire": {"blob_sha256": hashlib.sha256(wire_blob).hexdigest(), "blob_bytes": len(wire_blob),
-                 "record": wire_record}, "numerics": dict(numerics), "execution": dict(EXECUTION),
+                 "record": wire_record}, "numerics": dict(numerics),
+        "numerics_derivation": derivation,
+        "activation_quantizer_attestation": attestation,
+        "execution": dict(EXECUTION),
         "phases": phases, "prefetch": prefetch,
     }, tensors
 
@@ -194,6 +342,8 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
         "joint_operator_identity": joint, "wire": inputs["wire"], "execution": dict(EXECUTION),
         "runtime": preflight["runtime"], "native_tensors_sha256": preflight["native_tensors_sha256"],
         "scheme_sha256": preflight["scheme_sha256"], "numerics": inputs["numerics"],
+        "numerics_derivation": inputs["numerics_derivation"],
+        "activation_quantizer_attestation": inputs["activation_quantizer_attestation"],
         "phases": {phase: {**inputs["phases"][phase], "expected_route": route} for phase in PHASES},
     }
     return json.loads(json.dumps(panel, allow_nan=False))
@@ -234,6 +384,9 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
         _equal(identity_sha256(trace), resources["trace_sha256"], "memory trace")
         _equal(trace["capture"]["collector_library_sha256"],
                expected_panel["runtime"]["resource_collector"]["library_sha256"], "resource collector")
+    quantizes_input = bool(
+        expected_panel["joint_operator_identity"]["activation"]["quantizes_input"])
+    require_panel_activation_attestation(expected_panel, quantizes_input)
     observations = {}
     for phase in PHASES:
         observed, expected = receipt["phases"][phase], expected_panel["phases"][phase]
@@ -244,8 +397,11 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
         if (route.get("state") != "served" or route.get("reason") is not None
                 or route.get("shape") != f"M{expected['m']}:N{expected_panel['shape'][0]}:K{expected_panel['shape'][1]}"):
             raise ValueError(f"{phase}: native route state/shape differs")
-        for kind in ("numerics", "qdq_numerics"):
-            validate_native_numerics(observed[kind], expected_panel["numerics"], phase=phase, kind=kind)
+        validate_native_numerics(observed["numerics"], expected_panel["numerics"],
+                                 phase=phase, kind="numerics")
+        validate_native_numerics(observed["qdq_numerics"], expected_panel["numerics"],
+                                 phase=phase, kind="qdq_numerics",
+                                 exact=quantizes_input)
         measurement = native_operator_measurement(observed["measurement"], path=path, expected_sha256=expected_sha256)
         bound = resources["phases"][phase].get("bound")
         scratch = None
@@ -265,13 +421,66 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
             "unknown": ["fixed_and_full_model_resources"] + ([] if complete else ["native_operator_scratch"])}
 
 
-def validate_native_numerics(error, numerics, *, phase, kind):
-    """The shared frozen numerical gate for dense and whole routed operators."""
+def require_panel_activation_attestation(panel, quantizes_input):
+    """A panel that priced an activation residual carries what attested it.
+
+    The freeze-time refusal and this one are the same mechanism at the two
+    points an unattested oracle could get in: a panel produced before the
+    attestation existed carries ``None`` here and is refused rather than
+    admitted on the strength of having been frozen earlier.
+    """
+    stamp = panel.get("activation_quantizer_attestation")
+    if not quantizes_input:
+        if stamp is not None:
+            raise ValueError(
+                "native panel: a format that does not quantise its input "
+                "carries a quantiser attestation; the panel and the cost row "
+                "disagree about what was priced")
+        return
+    if not isinstance(stamp, dict) or stamp.get(
+            "schema") != "prismaquant.activation_quantizer_attestation.v1":
+        raise ValueError(
+            "native panel: this panel priced an activation residual through "
+            "PrismaQuant's own activation quantiser and carries no attestation "
+            "that the runtime executes the same rounding rule. Re-freeze it "
+            "against a Tessera contract that publishes activation_quantizers "
+            "(RobTand/prismaquant#567); an unattested oracle is refused, not "
+            "assumed (principle 14).")
+
+
+def validate_native_numerics(error, numerics, *, phase, kind, exact=False):
+    """The shared frozen numerical gate for dense and whole routed operators.
+
+    ``exact`` is the activation representation's gate and it has no tolerance.
+    Given the same ``x``, the same ``G`` and a bit-identical stored scale, the
+    two sides compute the same integer code; the honest per-element bound is
+    zero.  The comparison is reported on dequantised bf16, but with a fixed
+    scale the dequantisation is injective over the sixteen codes -- adjacent
+    E2M1 magnitudes differ by at least 33% relative and bf16's spacing is
+    2^-7, so distinct codes stay distinct through the cast -- which makes
+    exact value agreement exact CODE agreement, up to the two zero codes that
+    dequantise to the same number and that no GEMM can tell apart.
+
+    So a nonzero ``max_abs_error`` here is a wrong activation, not a rounding
+    epsilon, and there is no value of ``atol`` that separates the two.  On
+    2026-09-13 the tolerance let ``v_proj`` decode through at 0.0078125 while
+    ``o_proj`` (0.0957) and ``v_proj`` prefill (0.1436) failed -- three code
+    flips, one verdict apart, decided by a constant derived from nothing.
+    """
     if error.get("status") != "passed" or error.get("finite") is not True:
         raise ValueError(f"{phase}: refused native {kind} comparison")
     _equal({key: error[key] for key in ("atol", "rtol")}, numerics, f"{phase} tolerance")
     if _number(error["max_normalized_error"], "normalized numerical error") > 1:
         raise ValueError(f"{phase}: numerical error exceeds frozen tolerance")
+    if exact and _number(error.get("max_abs_error"), f"{kind} absolute error") != 0.0:
+        raise ValueError(
+            f"{phase}: the runtime's {kind} differs from PrismaQuant's by "
+            f"{error['max_abs_error']!r}. With a bit-identical stored scale "
+            "that is at least one E2M1 code flipped, not a rounding "
+            "difference: the priced activation residual and the executed one "
+            "are different objects (RobTand/prismaquant#567, principle 8). "
+            "Fix the oracle against the runtime's published quantiser table; "
+            "widening a tolerance here admits a wrong activation.")
 
 
 def native_operator_measurement(timing, *, path, expected_sha256):

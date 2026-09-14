@@ -42,7 +42,13 @@ def joined():
     inputs = {"schema": INPUT_SCHEMA, "unit": unit, "format": fmt, "shape": [4, 4],
               "source_weight": weight, "rendered_weight": weight, "activation": activation,
               "calibration": {"calibration_sha256": "1" * 64, "shape": [1, 4], "dtype": "torch.int64"},
-              "wire": wire, "numerics": {"atol": .015625, "rtol": .015625},
+              "wire": wire,
+              # Derived per panel since #574; a BF16 unit quantises no
+              # activation, so it attests none and carries None.
+              "numerics": {"atol": .015625, "rtol": 0.0},
+              "numerics_derivation": {"schema": "prismaquant.native_gemm_tolerance.v1",
+                                      "scope": "gemm_output_only", "k": 4},
+              "activation_quantizer_attestation": None,
               "runtime_image": "fixture/image@sha256:" + "9" * 64,
               "probe_request": {**{key: probe[key] for key in ("n_probes", "seed_base", "token_scope",
                                   "temperature", "distribution", "normalization")},
