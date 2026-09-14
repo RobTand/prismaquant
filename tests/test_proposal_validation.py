@@ -77,7 +77,7 @@ def test_token_weighted_paired_difference_and_pass_report():
     assert report.mean_paired_loss_difference == pytest.approx(0.011)
     assert report.bootstrap_interval is not None
     assert report.bootstrap_interval.approximate is True
-    assert report.bootstrap_interval.method == "paired_manifest_cluster_bootstrap_token_weighted"
+    assert report.bootstrap_interval.method == "paired_manifest_cluster_bootstrap_token_weighted_sha256_counter_v1"
     assert report.coverage["complete_pair_count"] == 3
     assert report.coverage["resampling_cluster_count"] == 3
     assert report.verdict in {"pass", "inconclusive", "regression"}
