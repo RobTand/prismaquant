@@ -107,6 +107,64 @@ def test_uniform_control_refuses_an_unmeasured_cell(tmp_path):
         uniform_assignment(cost, FMT)
 
 
+def _build_tool():
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / "tools" / "build_tessera_census_cache.py"
+    spec = importlib.util.spec_from_file_location("build_tessera_census_cache", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _tool_argv(tmp_path, config, cost, roster, shapes):
+    import hashlib
+    import pickle
+    inputs = {
+        "costs": ("cost.pkl", pickle.dumps(cost)),
+        "census": ("census.json", json.dumps({"unit_shapes": shapes}).encode()),
+        "roster": ("roster.json", json.dumps(roster).encode()),
+        "layer-config": ("layer_config.json", json.dumps(config).encode()),
+    }
+    argv = []
+    for flag, (name, raw) in inputs.items():
+        (tmp_path / name).write_bytes(raw)
+        argv += [f"--{flag}", str(tmp_path / name),
+                 f"--{flag}-sha256", hashlib.sha256(raw).hexdigest()]
+    return argv + ["--checkpoint-parts", str(tmp_path / "parts"), "--workers", "2"]
+
+
+@pytest.mark.parametrize("visual", ["BF16", FMT])
+def test_plan_layer_config_out_drops_the_outside_bf16_rows_after_the_refusal(tmp_path, visual):
+    # The Tessera planner refuses a name its body projection does not carry, so
+    # the visual BF16 rows the allocator writes on purpose must not reach it.
+    names, _experts, _records, cost, roster, shapes, assignment, _metadata = _control(tmp_path)
+    config = census_layer_config(
+        cost, assignment, target_profile="glm_packed_research_sm121",
+        entry_for=lambda fmt: {"data_type": "tessera", "tessera_format": fmt})
+    outside = "model.visual.blocks.0.attn.proj"
+    config[outside] = ({"bits": 16, "data_type": "float"} if visual == "BF16"
+                       else {"data_type": "tessera", "tessera_format": visual})
+    plan = tmp_path / "plan" / "layer_config.plan.json"
+    out = tmp_path / "out"
+    argv = _tool_argv(tmp_path, config, cost, roster, shapes) + [
+        "--out-dir", str(out), "--plan-layer-config-out", str(plan)]
+    tool = _build_tool()
+    if visual != "BF16":
+        with pytest.raises(CensusCacheError, match="outside the census roster are not BF16"):
+            tool.main(argv)
+        assert not plan.exists()
+        return
+    assert tool.main(argv) == 0
+    projected = json.loads(plan.read_text())
+    assert set(projected) == set(names) | {LAYER_CONFIG_META_KEY}
+    assert projected[LAYER_CONFIG_META_KEY] == config[LAYER_CONFIG_META_KEY]
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["plan_layer_config_dropped"] == [outside]
+    assert summary["plan_layer_config_dropped"] == summary["outside_census_bf16_passthrough"]
+    import hashlib
+    assert summary["plan_layer_config_sha256"] == hashlib.sha256(plan.read_bytes()).hexdigest()
+
+
 def test_allocator_sidecar_outside_the_census_passes_through_at_bf16(tmp_path):
     # A real allocator layer config also names the Linears it kept outside the
     # priced population; GLM-5.3 Flash's carries 124 visual-tower BF16 rows.
