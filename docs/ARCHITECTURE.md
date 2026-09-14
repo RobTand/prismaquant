@@ -20,6 +20,14 @@ single-quantum `resident_window` contract remain unchanged. CPU gates are in
 `tests/test_pwc_resident_windows.py`; this is a memory-lifetime contract, not
 a speed or fit measurement.
 
+The retained lifetime advises each selected regular file after its last
+prefetch quantum, before loading later quanta. This limits avoidable page-cache
+co-residency, but advice alone does not prove physical reclaim. An optional
+main-thread `before_load_quantum` callback receives current PWC resident bytes,
+remaining incoming archive storage bytes, and the next quantum's serialized
+file bytes; a host memory guard can refuse the next load before entering the
+prefetch pool. A refusal releases all selected disk-backed tensor owners.
+
 Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
 **bounded, recoverable Tessera joint-anchor qualification** (#590). The
 complete source proof from #588 still gates the streamed model and capture.

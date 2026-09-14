@@ -588,7 +588,7 @@ class ProductionWeightCache:
         # Preflight every selected file before the first load. The persistent
         # charge is its complete archive storage, while the serialized file
         # buffer is charged only within the quantum that reads it.
-        files, file_keys = {}, []
+        files, file_costs = {}, {}
         persistent_bytes = baseline
         incoming_lru_bytes = 0
         quanta, quantum = [], []
@@ -599,7 +599,7 @@ class ProductionWeightCache:
             if not isinstance(value, torch.Tensor):
                 path, observed, file_bytes, storage_bytes = self._window_file(key)
                 files[str(path)] = (observed, file_bytes, storage_bytes)
-                file_keys.append(key)
+                file_costs[key] = (str(path), file_bytes, storage_bytes)
                 persistent_bytes += storage_bytes
                 incoming_lru_bytes += storage_bytes
                 if file_bytes > buffer_cap:
@@ -619,7 +619,8 @@ class ProductionWeightCache:
         if (self._lru_order is not None and self._lru_max_bytes > 0
                 and self._lru_bytes + incoming_lru_bytes > self._lru_max_bytes):
             raise RuntimeError('PWC retained window exceeds available LRU budget')
-        return keys, tuple(quanta), files, frozenset(file_keys), peak_buffer_bytes, buffer_cap
+        return (keys, tuple(quanta), files, file_costs, peak_buffer_bytes,
+                buffer_cap)
 
     def plan_retained_window(self, keys, *, max_resident_bytes: int,
                              max_workers: int, max_load_buffer_bytes: int | None = None):
@@ -656,7 +657,8 @@ class ProductionWeightCache:
     @contextmanager
     def retained_window(self, keys, *, max_resident_bytes: int, max_workers: int,
                         max_load_buffer_bytes: int | None = None,
-                        release_file_pages: bool = False):
+                        release_file_pages: bool = False,
+                        before_load_quantum=None):
         """Keep many selected renders resident across repeated consumer passes.
 
         Only PWC owns the tensors. The existing prefetch pool loads bounded
@@ -664,27 +666,56 @@ class ProductionWeightCache:
         cap covers all PWC backing storages; serialized buffers have a
         separate concurrent-quantum cap. The consumer must release borrowed
         references before context exit. Selected disk-backed entries are
-        restored to paths on success or failure.
+        restored to paths on success or failure. When requested, checked file
+        page advice runs after each completed quantum. It is not a guarantee
+        of physical reclaim; ``before_load_quantum`` may enforce a live host
+        guard before the next load, on this thread, using current resident
+        bytes, all remaining incoming storage and the next serialized buffer.
         """
         if getattr(self, '_resident_window_files', None) is not None:
             raise RuntimeError('PWC resident windows cannot be nested')
         if type(release_file_pages) is not bool:
             raise ValueError('PWC window page release must be boolean')
-        (keys, quanta, files, file_keys, peak_buffer_bytes, buffer_cap) = (
+        if before_load_quantum is not None and not callable(before_load_quantum):
+            raise TypeError('PWC before_load_quantum must be callable')
+        (keys, quanta, files, file_costs, peak_buffer_bytes, buffer_cap) = (
             self._retained_window_preflight(
                 keys, max_resident_bytes=max_resident_bytes,
                 max_workers=max_workers,
                 max_load_buffer_bytes=max_load_buffer_bytes))
         self._resident_window_files = files
-        self._resident_window_receipt_keys = file_keys
+        self._resident_window_receipt_keys = frozenset(file_costs)
         try:
             loaded = 0
+            remaining_incoming_bytes = sum(cost[2] for cost in file_costs.values())
+            remaining_path_uses = {}
+            for path, _, _ in file_costs.values():
+                remaining_path_uses[path] = remaining_path_uses.get(path, 0) + 1
+            advised_paths = set()
             for quantum in quanta:
+                if before_load_quantum is not None:
+                    before_load_quantum({
+                        'resident_bytes': sum(self._window_resident_storages().values()),
+                        'remaining_incoming_storage_bytes': remaining_incoming_bytes,
+                        'next_serialized_bytes': sum(
+                            file_costs[key][1] for key in quantum if key in file_costs),
+                    })
                 loaded += self.prefetch(quantum, max_workers=max_workers)
                 for key in quantum:
                     self.get_resident(*key)
                 if sum(self._window_resident_storages().values()) > max_resident_bytes:
                     raise RuntimeError('PWC actual backing storage exceeds retained window budget')
+                for key in quantum:
+                    if key not in file_costs:
+                        continue
+                    path, _, storage_bytes = file_costs[key]
+                    remaining_incoming_bytes -= storage_bytes
+                    remaining_path_uses[path] -= 1
+                    if release_file_pages and remaining_path_uses[path] == 0:
+                        from .perturbed_x_cache import release_activation_cache_file_pages
+                        release_activation_cache_file_pages(
+                            path, expected_stat=files[path][0])
+                        advised_paths.add(path)
             # Catch selected source drift between early and late quanta before
             # exposing any partial window to the consumer.
             for key in keys:
@@ -692,20 +723,18 @@ class ProductionWeightCache:
             actual = sum(self._window_resident_storages().values())
             if actual > max_resident_bytes:
                 raise RuntimeError('PWC actual backing storage exceeds retained window budget')
-            if release_file_pages:
-                from .perturbed_x_cache import release_activation_cache_file_pages
-                for path, (observed, _, _) in files.items():
-                    release_activation_cache_file_pages(path, expected_stat=observed)
             yield {'keys': keys, 'loaded': loaded, 'resident_bytes': actual,
                    'budget_bytes': max_resident_bytes,
                    'load_buffer_capacity_bytes': peak_buffer_bytes,
                    'load_buffer_budget_bytes': buffer_cap,
-                   'file_pages_advised': len(files) if release_file_pages else 0,
+                   'file_pages_advised': len(advised_paths),
                    'load_quanta': quanta}
         finally:
-            self.release_resident_tensors(keys)
-            self._resident_window_files = None
-            self._resident_window_receipt_keys = frozenset()
+            try:
+                self.release_resident_tensors(keys)
+            finally:
+                self._resident_window_files = None
+                self._resident_window_receipt_keys = frozenset()
 
     @contextmanager
     def resident_window(self, keys, *, max_resident_bytes: int, max_workers: int,
