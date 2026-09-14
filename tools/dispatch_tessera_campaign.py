@@ -1085,10 +1085,9 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
     ``sizes`` chooses what the PPS draw is proportional to.  ``probe`` is the
     per-expert Fisher vector and is the default, so a plan written without the
     flag is byte-identical to every plan written before it.  ``counts`` draws
-    on the census's per-expert routed-row counts instead, which is the only
-    per-expert size that exists when a model has no probe with
-    ``h_trace_per_expert`` -- the case the sampling path was written for and
-    could not run on (RobTand/prismaquant#495 part 1).  A ``counts`` draw
+    on the census's per-expert routed-row counts instead, but still requires
+    the original packed probe with ``h_trace_per_expert`` to construct and
+    validate the full-frame sampling record.  A ``counts`` draw
     declares itself: ``design`` gains a ``_counts`` suffix and the record
     carries the size vector and its digest, so nothing has to infer from an
     inclusion probability which vector produced it.
@@ -1845,6 +1844,10 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
             raise MergeRefused(f"{row_id}: not a {SCHEMA} payload")
 
     provenances = {row: payload["provenance"] for row, payload in row_payloads.items()}
+    for row_id, provenance in provenances.items():
+        if provenance.get("research_exact_member_scope") is not None:
+            raise MergeRefused(
+                f"{row_id}: research exact-member scalar cannot be merged as a full group or stack estimate")
     family_policies, restricted_structures = {}, {}
     for row_id, prov in provenances.items():
         restriction = prov.get("family_restriction")
