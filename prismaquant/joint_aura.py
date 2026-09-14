@@ -549,6 +549,8 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         self._results = {}
         self._pending_backwards = 0
         self._observation_inputs = {}
+        self._observed_tokens = {name: 0 for name in self.modules}
+        self._observed_calls = {name: 0 for name in self.modules}
         self._phase = 'new'
         self.telemetry.update(statistics_capacity_bytes=self.statistics_capacity_bytes,
                               peak_statistics_bytes=0, projected_candidates=0,
@@ -628,6 +630,11 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
                     raise RuntimeError(f"joint statistics Linear geometry/shape mismatch for {name}")
                 x2 = x.reshape(-1, x.shape[-1]).float()
                 g2 = selected.reshape(-1, selected.shape[-1]).float()
+                # Count actual backward observations, including an invoked
+                # expert whose exact contribution is zero. An uninvoked
+                # expert remains count=0 and has UNKNOWN pilot cost.
+                self._observed_tokens[name] += int(x2.shape[0])
+                self._observed_calls[name] += 1
                 self._accumulate((name, None), g2.T @ x2)
                 self.telemetry['operator_gemms'] += 1
                 for index, (spec, _) in enumerate(self.groups[name]):
@@ -713,6 +720,8 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
                         raise RuntimeError(f'joint statistics nonfinite column diagnostic for {name}')
                 del squared
             result[name] = row
+            row['observed_tokens'] = self._observed_tokens[name]
+            row['observed_calls'] = self._observed_calls[name]
         return result
 
     @torch.no_grad()
