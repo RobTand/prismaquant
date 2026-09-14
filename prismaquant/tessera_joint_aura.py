@@ -309,7 +309,8 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
                                         fmt=fmt, shape=shape, reader=reader, device=device)
 
 
-def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True, reader=None,
+def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True,
+                               defer_render_hashes=False, reader=None,
                                synthesis_device="cpu", unit_scope=None,
                                render_mirror_root=None, log_every=100,
                                require_existing_renders=False):
@@ -320,6 +321,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     roster gates still run here. Tensor/source/encoder verification occurs in
     ``prepare_cache`` using actual source weights and the original capture.
     Interpolated menu rows are deliberately excluded rather than converted.
+
+    A prepared COST run can defer only render hashes to the PWC's verified
+    consumption, after binding its prepared SHA roster. Every wire is still
+    hashed here; a missing render or incomplete roster still refuses.
 
     A rung this campaign adopted has its wire but no decoded PWC shard. The
     shard is synthesized from that wire here and every cell carries the
@@ -356,6 +361,13 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     from tools.dispatch_tessera_campaign import _require_receipts
 
     _require(type(verify_payloads) is bool, "verify_payloads must be an explicit boolean")
+    _require(type(defer_render_hashes) is bool, "defer_render_hashes must be boolean")
+    _require(not defer_render_hashes or verify_payloads,
+             "deferred render hashes require complete wire verification")
+    _require(not defer_render_hashes or require_existing_renders,
+             "deferred render hashes require existing prepared renders")
+    _require(not defer_render_hashes or unit_scope is None,
+             "deferred render hashes require the complete candidate roster")
     _require(type(file_hash_workers) is int and file_hash_workers > 0,
              "positive file_hash_workers required")
     _require(type(log_every) is int and log_every >= 0, "non-negative log_every required")
@@ -525,7 +537,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
         before = [signature(p) for p in (wire, render)]
         _same(_sha(wire), cell["record"]["blob_sha256"], f"{pair}: wire checksum")
-        digest = _sha(render)
+        digest = None if defer_render_hashes else _sha(render)
         after = [signature(p) for p in (wire, render)]
         _same(after, before, f"{pair}: input files changed while hashing")
         return pair, digest
@@ -533,12 +545,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     if file_hash_workers == 1:
         verified_files = map(verify_files, cells.items())
         for pair, digest in verified_files:
-            cells[pair]["render_file_sha256"] = digest
+            if digest is not None:
+                cells[pair]["render_file_sha256"] = digest
     else:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=file_hash_workers, thread_name_prefix="anchor-file-hash") as workers:
             for pair, digest in workers.map(verify_files, cells.items()):
-                cells[pair]["render_file_sha256"] = digest
+                if digest is not None:
+                    cells[pair]["render_file_sha256"] = digest
     return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
                                formats, **scoped)
 
@@ -786,7 +800,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                   qualification_window=None, capture_load_policy=None,
                   source_capture_compatibility=None, source_authentication=None,
                   qualification_guard=None, qualification_journal=None,
-                  qualification_resume=False, qualification_identity=None):
+                  qualification_resume=False, qualification_identity=None,
+                  prewarm_phase_starts=None):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
@@ -863,6 +878,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             replayed = _qualification_replay(data, manifest, completed)
         else:
             replayed = {}
+    _require(prewarm_phase_starts is None or journal is not None,
+             "ARC read-frontier progress requires a durable qualification journal")
     capture_load_execution = cc._load_execution(capture_load_policy, expected)
     if capture_load_policy is not None:
         cc.preflight_verified_capture_entries(capture_path.parent, manifest['entries'],
@@ -880,6 +897,9 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     max_wire_read_bytes = _prepare_wire_read_bound(data)
     cache.enable_file_load_receipts(max_file_bytes=max_file_bytes)
     targets = _live_targets(runner, data.formats_by_qname)
+    if prewarm_phase_starts is not None:
+        _same(set(prewarm_phase_starts), set(targets),
+              "sealed prewarm phase/qualification roster")
     layers = defaultdict(list)
     for name in targets:
         layers[runner.layer_index_for_qname(name)].append(name)
@@ -889,10 +909,23 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                for name, fmts in data.formats_by_qname.items()}
     verified, telemetry = replayed if completed else {}, []
     committed_units = len(completed)
+    current_prewarm_phase = "head"
+    if prewarm_phase_starts is not None:
+        first = next((sorted(layers[layer])[0] for layer in range(runner.num_layers)
+                      if layers.get(layer)), None)
+        _require(first is not None, "sealed prewarm plan has no qualification units")
+        current_prewarm_phase = prewarm_phase_starts[first]
+        _pb_commit(committed_units, current_prewarm_phase, unit=first)
     for depth in range(min(runner.num_layers, runner.prefetch_lookahead + 1)):
         runner.context.schedule_prefetch(depth)
     for layer in range(runner.num_layers):
         names = sorted(layers.get(layer, ()))
+        if prewarm_phase_starts is not None and names:
+            phase = prewarm_phase_starts.get(names[0])
+            _require(phase is not None, f"{names[0]} has no sealed prewarm phase")
+            if phase != current_prewarm_phase:
+                _pb_commit(committed_units, phase, unit=names[0])
+                current_prewarm_phase = phase
         runner.context.install(layer, require_prefetched=runner.require_prefetched_residency)
         runner.context.schedule_prefetch(layer + runner.prefetch_lookahead)
         members = [targets[name] for name in names if isinstance(targets[name], PackedExpertProjection)]
@@ -906,6 +939,15 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             capture_windows = [names] if policy is None else [(name,) for name in names]
             layer_stats = []
             for unit_names in capture_windows:
+                if prewarm_phase_starts is not None:
+                    phase = prewarm_phase_starts.get(unit_names[0])
+                    _require(phase is not None, f"{unit_names[0]} has no sealed prewarm phase")
+                    if phase != current_prewarm_phase:
+                        # The previous unit has already been journaled. This
+                        # phase names bytes we are ABOUT to read; PB releases
+                        # only the preceding manifest prefix.
+                        _pb_commit(committed_units, phase, unit=unit_names[0])
+                        current_prewarm_phase = phase
                 if len(unit_names) == 1 and unit_names[0] in completed:
                     name = unit_names[0]
                     layer_stats.extend(completed[name]['prefetch'])
@@ -1016,7 +1058,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                **({'capture_load_execution': unit_load_execution}
                                   if capture_load_execution is not None else {})})
                     committed_units += 1
-                    _pb_commit(committed_units, 'qualification', unit=name)
+                    _pb_commit(committed_units, current_prewarm_phase if
+                               prewarm_phase_starts is not None else 'qualification', unit=name)
             stats = layer_stats[0] if policy is None else {'windows': layer_stats}
             telemetry.append({"layer": layer, **stats})
             print(json.dumps({"qualified_layer": layer, "qualified_cells": len(verified),
@@ -1202,6 +1245,26 @@ def _seed_source_identity_cache(config, root):
     return destination
 
 
+def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
+                           reader_identity, projection_backend):
+    """Refuse a stale small completion before hashing the live wire roster.
+
+    Runtime/source/model and exact cell checks still run after input intake;
+    this early gate checks only fields already independently known at startup.
+    """
+    _require(prepared is not None, "cost execution requires independently bound prepared inputs")
+    completion = json.loads(_bound(prepared, "prepared anchors").read_text())
+    _same(completion.get("schema"), PREPARED_SCHEMA,
+          "prepared v3 schema required; legacy preparation requires fresh prepare and recompute")
+    _same(completion.get("status"), "complete", "prepared completion")
+    for key, value in (("plan_sha256", plan_sha256),
+                       ("implementation_sha256", implementation_sha256),
+                       ("reader_identity", reader_identity),
+                       ("projection_backend", projection_backend)):
+        _same(completion.get(key), value, f"prepared {key}")
+    return completion
+
+
 def _restores_activation_scale_env(function):
     """Scope ``execute``'s activation-scale write to the call that makes it.
 
@@ -1236,7 +1299,8 @@ def _restores_activation_scale_env(function):
 
 
 @_restores_activation_scale_env
-def execute(command, config, *, plan_sha256, prepared=None, resume=False, source_transition=None):
+def execute(command, config, *, plan_sha256, prepared=None, resume=False,
+            source_transition=None, prewarm_manifest=None):
     """Execute one admitted preparation or one dependent cost action."""
     if source_transition is not None:
         from .joint_aura_source_transition import load_transition
@@ -1269,6 +1333,13 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
     execution = config["execution"]
     root = Path(config["output_root"]) / command
     root.mkdir(parents=True, exist_ok=True)
+    prewarm_phase_starts = None
+    if prewarm_manifest is not None:
+        _require(command == "prepare" and config.get("qualification_window") is not None,
+                 "sealed prewarm phases require windowed preparation")
+        from .joint_prewarm_phases import load_prepare_frontier
+        prewarm_phase_starts = load_prepare_frontier(
+            prewarm_manifest["path"], prewarm_manifest["sha256"], plan_sha256)
     identity_cache_path = _seed_source_identity_cache(config, root)
     result = {"schema": "prismaquant.tessera_joint_aura.execution.v1", "command": command,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
@@ -1310,6 +1381,12 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         # second one.
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
+        implementation = (_aura_source_sha256() if source_transition is None
+                          else source_transition.measurement_source_sha256)
+        if command == "run":
+            _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
+                implementation_sha256=implementation, reader_identity=reader_identity,
+                projection_backend=projection_backend.identity)
         # The command holds a CUDA reservation (``require_cuda_hot_path``
         # above), so any shard it still has to synthesize decodes on that
         # device rather than on one CPU core beside an idle GPU. The standalone
@@ -1317,7 +1394,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         data = load_measured_anchor_input(config["inputs"], reader=reader,
             synthesis_device="cuda",
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
-            **({"verify_payloads": False} if command == "prepare" else {}))
+            **({"verify_payloads": False} if command == "prepare" else
+               {"defer_render_hashes": True, "require_existing_renders": True}))
         _require(data.unit_scope is None and data.render_mirror_root is None,
                  "joint execution requires the complete campaign roster in its own caches")
         result["file_hash_workers"] = file_hash_workers
@@ -1371,8 +1449,6 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         result.update(source_model_identity=source, source_execution=source_execution,
                       units=len(data.formats_by_qname), measured_cells=len(data.cells),
                       layer_render_bytes=layer_bytes)
-        implementation = (_aura_source_sha256() if source_transition is None
-                          else source_transition.measurement_source_sha256)
         if source_transition is not None:
             result["source_transition"] = source_transition.execution_provenance
         if command == "prepare":
@@ -1388,6 +1464,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                                   qualification_journal=(root / 'qualification' if
                                                          config.get('qualification_window') is not None else None),
                                   qualification_resume=resume,
+                                  prewarm_phase_starts=prewarm_phase_starts,
                                   qualification_identity={
                                       'plan_sha256': plan_sha256,
                                       'source_model_identity': source,
@@ -1444,10 +1521,16 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             for pair, cell in data.cells.items():
                 _same(cache.metadata["verified_cells"][pair]["render_origin"], cell["render_origin"],
                       f"{pair}: qualified render origin changed")
-                _same(cache.metadata["verified_cells"][pair]["render_file_sha256"], cell["render_file_sha256"],
-                      f"{pair}: qualified render changed")
                 _same(cache.metadata["verified_cells"][pair]["wire_sha256"], cell["record"]["blob_sha256"],
                       f"{pair}: qualified wire changed")
+            expected_renders = {pair: cache.metadata["verified_cells"][pair]["render_file_sha256"]
+                                for pair in data.cells}
+            # The prepared receipt bound the original serialized shard on
+            # PREPARE's necessary load. COST verifies it on its own necessary
+            # PWC read, before a changed tensor can reach AURA.
+            cache.require_file_load_sha256(expected_renders,
+                max_file_bytes=_prepare_file_read_bound(data,
+                    max_render_bytes=config["max_render_bytes"]))
             _live_targets(runner, data.formats_by_qname)
             formats = list(dict.fromkeys(fmt for values in data.formats_by_qname.values() for fmt in values))
             payload = compute_aura_cost_streamed(runner, ids.to(runner.device), formats,
@@ -1609,6 +1692,8 @@ def main(argv=None):
     parser.add_argument("--prepared", type=Path)
     parser.add_argument("--prepared-sha256")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--prewarm-manifest", type=Path)
+    parser.add_argument("--prewarm-manifest-sha256")
     parser.add_argument("--source-transition", type=Path)
     parser.add_argument("--source-transition-sha256")
     parser.add_argument("--units", help="synthesize: lo:hi over the sorted census roster. "
@@ -1631,6 +1716,8 @@ def main(argv=None):
         parser.error("--source-transition and --source-transition-sha256 are required together")
     if bool(args.prepared) != bool(args.prepared_sha256):
         parser.error("--prepared and --prepared-sha256 are required together")
+    if bool(args.prewarm_manifest) != bool(args.prewarm_manifest_sha256):
+        parser.error("--prewarm-manifest and --prewarm-manifest-sha256 are required together")
     # ``synthesize`` constructs no lease and loads no backend: it decodes wires
     # and publishes the canonical CPU BF16 shard, whose bytes are measured
     # identical across x86/aarch64 and CPU/CUDA. It is the one command that
@@ -1649,6 +1736,9 @@ def main(argv=None):
     result = execute(args.command, config, plan_sha256=args.plan_sha256,
         prepared=None if args.prepared is None else {"path": str(args.prepared), "sha256": args.prepared_sha256},
         resume=args.resume,
+        **({"prewarm_manifest": {"path": str(args.prewarm_manifest),
+                                   "sha256": args.prewarm_manifest_sha256}}
+           if args.prewarm_manifest is not None else {}),
         **({"source_transition": {"path": str(args.source_transition),
                                   "sha256": args.source_transition_sha256}}
            if args.source_transition is not None else {}))

@@ -1,7 +1,59 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `integrate/pq591-release-20260913`. Stamps
+As of: 2026-09-13 · `integrate/pq603-release-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/arc-prewarm-prepare-final-20260913`) for the
+**joint prepare ARC frontier**. The post-campaign manifest keeps its exact
+ordered entries and divides windowed qualification at complete-unit
+boundaries, targeting at most 32 GiB of newly declared bytes per phase.
+`submit-joint prepare` seals these names as PB progress phases only for a
+fresh journal and a reusable, verified source identity proof. The container
+checks the manifest's sealed digest and plan identity before running; it
+enters each phase before its first unit read and increments the cumulative
+counter only after that unit's journal write. PB's storage role can then
+release the consumed prefix and warm the next entry-aligned ARC window.
+The source read set now includes the head's actual materialized tensor
+extents and every indexed tensor in each installed layer, including norms
+and named buffers. Streaming installs whole layers even when only a subset
+of their Linears is qualified, so declaring only the quantizable unit
+extents would leave those source reads cold. The prepare phases place a
+source layer at its earliest declared prefetch phase, up to the plan's
+lookahead, rather than waiting for its later install phase. A windowed
+prepare read frontier is admitted only when the source layers are contiguous
+and `max_cache_slots=prefetch_lookahead+1`, so the runner's settle step has
+finished those prefetched reads before the phase can release their bytes.
+The backbone depth comes from `text_config.num_hidden_layers`. GLM's index
+also names layer 45, but the config has 45 backbone layers (0–44) and treats
+layer 45 as MTP passthrough; the streaming runner does not install it.
+Fresh whole-source authentication may read that shard in its completion
+phase, while a valid full-source proof removes that read entirely.
+Resumed replay reads committed units before the layer walk and therefore
+does not claim this phase mapping; its submission keeps conservative
+unphased warming until a replay-order contract exists.
+
+Re-stamped (2026-09-13, `codex/cost-render-proof-integrated-20260913`) for
+**COST's prepared-render integrity on consumption**. PREPARE binds each
+decoded PWC shard's serialized-file SHA-256 to its bounded load receipt and
+verifies its wire/decoder/source contract. COST still checks the complete
+campaign roster, hashes every live wire against its journal, and refuses
+missing renders. It compares the prepared render SHA roster with each shard
+on COST's necessary bounded PWC load before admitting that tensor to joint
+AURA. Every resident read is fenced to the matching unmodified tensor and
+donor-file stat; eviction requires another verified read. The avoided read
+is exactly one pass over all serialized `.pt` bytes, the sum of their file
+sizes; COST still reads every wire once for its independent hash and each
+consumed render for PWC deserialization (window preflight may read the archive
+again). A changed same-size render refuses on first load; a resume that never
+uses a particular render has no claim that its current bytes were checked.
+Before COST's live-wire scan, it now checks the already bound plan SHA,
+implementation/source-package digest, prepared v3 status, reader and backend
+against the small completion; the full source/model/cell replays still run at
+their original boundary. A stale prepared input therefore refuses before a
+whole-roster wire read instead of spending that I/O on a doomed run.
+No full campaign speedup or I/O delta is claimed without a paired profiler
+and both-box load series. Gates: `tests/test_pwc_file_load_receipts.py`,
+`tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
 **bounded, recoverable Tessera joint-anchor qualification** (#590). The
@@ -718,8 +770,9 @@ shards the settled read set is projected near **6.8 TB** -- 5.20 TB plus
 the composition, not a byte count. The brief's 4.75 TB estimate was taken
 earlier the same morning, against fewer shards.
 A whole-set warm is not available at that ratio, so the manifest carries the
-consumption order: a `head` phase, then one `layer-<L>` phase per transformer
-layer, and the prewarm loop windows on `annotations.phases`. The head is not
+consumption order: a `head` phase, then bounded `layer-<L>-part-<P>` phases
+for windowed preparation, and the prewarm loop windows on
+`annotations.phases`. Each part starts at a complete unit. The head is not
 small on this census: 97,302 of its 197,990 measured cells are rungs the
 campaign adopted rather than encoded, and `load_measured_anchor_input`
 decodes a shard for each of them from its wire before the first layer
@@ -3005,7 +3058,11 @@ never persist as another cache. Preparation uses this load receipt instead of gl
 post-prefetch render scans; the existing verifier reads each original wire,
 checks its recorded SHA/source/H/settings, and compares decoded values exactly.
 Prepared completion remains withheld until every measured cell qualifies.
-The strict intake API default and cost/resume payload scans remain unchanged.
+The strict intake API default remains a full payload scan. COST keeps its full
+wire hash and complete roster gates, but verifies prepared render bytes on the
+actual PWC load against the SHA-256 PREPARE recorded. It no longer rereads
+every render at intake. Its resumed reads use the same PWC guard before tensor
+consumption. This saves one render-file scan, not the wire scan or PWC load.
 Gate: `tests/test_pwc_file_load_receipts.py`, `tests/test_tessera_joint_aura.py`,
 and equal-work original fourteen-cell qualification with reader/identity held fixed.
 
