@@ -1,7 +1,24 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `codex/prepare-throughput-20260913`. Stamps
+As of: 2026-09-13 · `codex/pwc-retained-window-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/pwc-retained-window-20260913`) for
+opt-in retained PWC candidate windows. `retained_key_costs` inspects only
+selected concrete keys and reports incoming uncompressed Torch archive storage
+and serialized file bytes without loading tensors. `plan_retained_window`
+preflights the complete selected roster, including unrelated resident backing
+storages and the LRU cap, then returns key-only prefetch quanta bounded by CPU
+workers and the concurrent serialized-buffer budget. `retained_window` repeats
+preflight, uses the existing PWC prefetch pool for each quantum, and holds all
+selected tensors in the same cache for repeated probes. The total persistent
+storage cap applies throughout; actual loaded storages are checked after each
+quantum and before consumer entry. Existing file-read stat/SHA receipts,
+resident-only lookups, CB identity checks, checked page advice and selected
+disk-owner cleanup apply through the entire lifetime. Defaults and the earlier
+single-quantum `resident_window` contract remain unchanged. CPU gates are in
+`tests/test_pwc_resident_windows.py`; this is a memory-lifetime contract, not
+a speed or fit measurement.
 
 Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
 **bounded, recoverable Tessera joint-anchor qualification** (#590). The
