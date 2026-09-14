@@ -121,6 +121,7 @@ from .allocator_candidates import (
     _is_passthrough_format,
     _passthrough_source_ok,
     _scan_source_dtype_manifest,
+    source_kinds_in_row_namespace,
     aggregate_fused_siblings,
     aggregate_packed_serving_groups,
     build_candidates,
@@ -3007,6 +3008,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             print(f"[alloc] source-dtype manifest: {summary} "
                   f"(gates {gated} per source)",
                   flush=True)
+            # The scan is recipe-keyed; probe rows may be live-keyed
+            # (glm5_next). Resolve each row through its recipe unit.
+            source_manifest = source_kinds_in_row_namespace(
+                source_manifest, stats, model_profile)
 
     # A requested production CB rung needs a measured row everywhere it is
     # otherwise legal. `build_candidates` historically skipped absent/error

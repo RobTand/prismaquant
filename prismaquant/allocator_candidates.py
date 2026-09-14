@@ -4131,3 +4131,40 @@ def _scan_source_dtype_manifest(
             if manifest.get(live_qname) in (None, "unknown"):
                 manifest[live_qname] = "fp8"
     return manifest
+
+
+def source_kinds_in_row_namespace(manifest, row_names, profile) -> dict[str, str]:
+    """Key the recipe-keyed source-dtype manifest by the rows the allocator prices.
+
+    ``_scan_source_dtype_manifest`` keys every kind by the recipe unit. Probe
+    and cost rows are keyed by the live module the probe staged, and the two
+    spellings differ where a profile collapses a wrapper infix: glm5_next
+    probes through the multimodal wrapper, so its rows read
+    ``model.language_model.layers.N.*`` while the scan reads
+    ``model.layers.N.*``. ``NameProjection.recipe_unit`` is the declared join
+    from a probe row to its recipe unit, so each row whose recipe unit is
+    spelled differently receives that unit's kind under the row's own name.
+
+    Nothing is admitted without evidence: a row whose recipe unit the scan
+    never classified stays absent, and the source-rate gate in
+    ``build_candidates`` refuses it by name. A row already present under a
+    different kind than its recipe unit is refused here.
+    """
+    from .model_profiles import DefaultProfile
+
+    proj = NameProjection(profile if profile is not None else DefaultProfile())
+    out = dict(manifest)
+    for name in row_names:
+        name = str(name)
+        recipe = proj.recipe_unit(name)
+        if recipe == name or recipe not in manifest:
+            continue
+        kind = manifest[recipe]
+        prior = out.get(name)
+        if prior is not None and prior != kind:
+            raise ValueError(
+                f"{name}: source kind {prior!r} under the row spelling differs "
+                f"from {kind!r} under its recipe unit {recipe!r}; refusing to "
+                "choose one")
+        out[name] = kind
+    return out
