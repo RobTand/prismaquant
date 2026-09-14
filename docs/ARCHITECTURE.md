@@ -1,7 +1,69 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `integrate/pq588-release-20260913`. Stamps
+As of: 2026-09-13 · `campaign/glm-budget-full-range-20260914`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/cost-render-proof-integrated-20260913`) for
+**COST's prepared-render integrity on consumption**. PREPARE binds each
+decoded PWC shard's serialized-file SHA-256 to its bounded load receipt and
+verifies its wire/decoder/source contract. COST still checks the complete
+campaign roster, hashes every live wire against its journal, and refuses
+missing renders. It compares the prepared render SHA roster with each shard
+on COST's necessary bounded PWC load before admitting that tensor to joint
+AURA. Every resident read is fenced to the matching unmodified tensor and
+donor-file stat; eviction requires another verified read. The avoided read
+is exactly one pass over all serialized `.pt` bytes, the sum of their file
+sizes; COST still reads every wire once for its independent hash and each
+consumed render for PWC deserialization (window preflight may read the archive
+again). A changed same-size render refuses on first load; a resume that never
+uses a particular render has no claim that its current bytes were checked.
+Before COST's live-wire scan, it now checks the already bound plan SHA,
+implementation/source-package digest, prepared v3 status, reader and backend
+against the small completion; the full source/model/cell replays still run at
+their original boundary. A stale prepared input therefore refuses before a
+whole-roster wire read instead of spending that I/O on a doomed run.
+No full campaign speedup or I/O delta is claimed without a paired profiler
+and both-box load series. Gates: `tests/test_pwc_file_load_receipts.py`,
+`tests/test_tessera_joint_aura.py`.
+
+Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
+**bounded, recoverable Tessera joint-anchor qualification** (#590). The
+complete source proof from #588 still gates the streamed model and capture.
+With explicit qualification windows, `ProductionWeightCache` now builds one
+resident-key index and updates it across its public dict mutations; each
+window recomputes backing-storage identities only for live tensors, counting
+shared views once and detecting rebound storage. File bounds, serialized
+buffers, LRU limits and the actual post-prefetch storage cap stay intact.
+The capture owner validates and seals the complete manifest once, then reuses
+its immutable metadata and load-execution digest behind a same-file stat
+fence; individual X/H payload bytes are still verified on their actual load.
+Inside each PWC window a single worker reads the next receipt-sized Tessera
+wire while the GPU verifies the current cell. The current and pending blobs
+both count against the guard reserve; each read fences its regular file by
+path and descriptor stats, hashes the exact bytes, and hands those same bytes
+to the unchanged encoder-identity verifier and decoder. The future is joined
+before its window releases resident renders, including on failure.
+
+Preparation now writes an identity-bound qualification journal under
+`prepare/qualification` after each complete unit. Its identity binds the plan,
+source, capture/H, campaign checkpoint, decoder, backend, settings, policy and
+complete cell roster. `prepare --resume` first replays the journal and checks
+each skipped unit's canonical X/H, wire and render bytes before continuing;
+unfinished units enter the ordinary verified capture loader. Only the
+complete exact verified-cell roster
+can publish `production.pkl` and `prepared.json`; an interrupted action's log
+count is not a checkpoint. PrismaBuild `qualification` progress counts only
+durably written units. The previous `--resume` refusal changes for bounded
+preparation; legacy unwindowed preparation retains its prior path. No wire,
+numerical render comparison, provenance origin, format or serving gate changes.
+The journal stores one streaming SHA-256 and count over every sorted cell's
+anchor, wire receipt, resolved donor paths and origin; it recomputes the same
+digest on resume instead of copying the entire 197,990-cell record mapping
+into a second manifest. The original checkpoint and cost/census inputs remain
+independently SHA-bound, and any changed cell field still refuses reuse.
+The bounded, phase-matched 18-cell before/after rate and both-box resource
+evidence are in `docs/measurements/glm-joint-prep-bounded-ab-2026-09-13.md`;
+full-campaign throughput and work-per-joule remain unmeasured.
 
 Re-stamped (2026-09-13, `integrate/pq588-release-20260913`) to classify GLM's
 MTP index using `text_config.num_hidden_layers` (or the top-level backbone
@@ -57,8 +119,8 @@ The full joint manifest exceeds the old 64 MiB plain-JSON limit;
 `submit-joint` now writes one deterministic `.json.gz` member. The deployed PB
 reader admits up to 64 MiB stored / 512 MiB expanded and seals those
 compressed bytes in the action key.
-The active 2026-09-13 b59 request retains its original seal and behavior; a
-future request must rebuild its manifest from these source bytes. Gates:
+The withdrawn 2026-09-13 b59 request retains its original seal and evidence; a
+new request must rebuild its manifest from these source bytes. Gates:
 `tests/test_selected_source_authentication.py`,
 `tests/test_glm_joint_data_manifest_at_submit.py`, and the joint prepare tests.
 
@@ -2950,7 +3012,11 @@ never persist as another cache. Preparation uses this load receipt instead of gl
 post-prefetch render scans; the existing verifier reads each original wire,
 checks its recorded SHA/source/H/settings, and compares decoded values exactly.
 Prepared completion remains withheld until every measured cell qualifies.
-The strict intake API default and cost/resume payload scans remain unchanged.
+The strict intake API default remains a full payload scan. COST keeps its full
+wire hash and complete roster gates, but verifies prepared render bytes on the
+actual PWC load against the SHA-256 PREPARE recorded. It no longer rereads
+every render at intake. Its resumed reads use the same PWC guard before tensor
+consumption. This saves one render-file scan, not the wire scan or PWC load.
 Gate: `tests/test_pwc_file_load_receipts.py`, `tests/test_tessera_joint_aura.py`,
 and equal-work original fourteen-cell qualification with reader/identity held fixed.
 
