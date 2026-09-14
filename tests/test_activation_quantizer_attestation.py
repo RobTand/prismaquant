@@ -114,13 +114,23 @@ def test_an_unknown_grammar_is_refused_rather_than_read_with_this_one():
 
 
 @pytest.mark.parametrize("field,value", [
+    ("op", "torch.ops._C.another_fp4_quant"),
     ("unit", "tensor"), ("grid", "E3M0"), ("block_scale", "E8M0"),
+    ("global_scale", "dynamic_per_token"),
     ("unit_length", 32)])
 def test_another_vocabulary_attests_a_different_quantizer(field, value):
     payload = _payload()
     _contract_block(payload)[field] = value
     with pytest.raises(trc.TesseraContractError, match="another vocabulary|unit_length"):
         _attest(payload)
+
+
+@pytest.mark.parametrize("length", ["16", 16.5, True])
+def test_unit_length_does_not_coerce_an_invalid_contract(length):
+    payload = _payload()
+    _contract_block(payload)["unit_length"] = length
+    with pytest.raises(trc.TesseraContractError, match="positive integer"):
+        _table(payload)
 
 
 def test_an_unknown_member_is_a_review_not_a_skip():

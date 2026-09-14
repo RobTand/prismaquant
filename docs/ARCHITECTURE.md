@@ -260,7 +260,9 @@ stage, format or gate changed; §12 gains one row.
 
 Re-stamped (2026-09-13, `integrate/pq579-20260913`) to bind the installed
 quantiser table to the exact reviewed Tessera serving pin before any fp4
-panel can use it. An installed v25 table cannot promote fp4 pricing while
+panel can use it. The table's operation and scale vocabulary must also match
+the oracle's operation and static scale; malformed group lengths refuse.
+An installed v25 table cannot promote fp4 pricing while
 this repository still pins contract v24; the corresponding test drives the
 production reader through the v25 fixture and expects a pin refusal.
 
