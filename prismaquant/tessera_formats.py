@@ -45,8 +45,9 @@ the realisable set at superblock scale.**  Verified exhaustively: ~9500 rungs
 across ten families spanning 1.00 to 8.00 bpp, zero unrealisable
 (``tessera/tests/test_grid_space_continuity.py``).
 
-Realisability is not quality.  This module says which rungs can be *encoded*;
-which are worth encoding is a measurement, and only four of them have one.
+Realisability is not quality. This module says which rungs can be *encoded*;
+the bound measurement table and its qualified interpolation contract establish
+which have usable quality prices. Unmeasured rates remain unknown.
 """
 from __future__ import annotations
 
