@@ -107,3 +107,26 @@ def test_historical_price_cannot_be_rebound_to_another_producer_recipe(schema):
                                              encoder_source_sha256='b' * 64)
     with pytest.raises(ValueError, match='missing'):
         require_measured_recipe_binding('u', (256, 256), row, {}, encoder_source_sha256='b' * 64)
+
+
+def test_explicit_boundary_deferral_keeps_full_domain_and_refines_measured_support():
+    domain = RateDomain('f', (256, 512, 768, 1024), ())
+    result = propose_full_domain_acquisition(domain, (512, 1024), max_new_points=1,
+        boundary_policy='defer', refine=lambda cap: (768,))
+    assert result['proposed_q256'] == [768]
+    assert result['deferred_boundary_q256'] == [256]
+    assert result['legal_q256'] == [256, 512, 768, 1024]
+    assert result['prices'] is None
+    assert result['adaptive_converged'] is None
+
+
+def test_deferring_expensive_bookends_cannot_claim_the_unknown_domain_converged():
+    domain = RateDomain('f', (256, 512, 768), ())
+    result = propose_full_domain_acquisition(domain, (512,), max_new_points=2,
+        boundary_policy='defer', refine=lambda cap: ())
+    assert result['proposed_q256'] == []
+    assert result['deferred_boundary_q256'] == [256, 768]
+    assert result['next_dependency'] == 'decision_bound_for_deferred_boundary'
+    assert result['full_domain_measured'] is False
+    with pytest.raises(ValueError, match='boundary_policy'):
+        propose_full_domain_acquisition(domain, (512,), max_new_points=1, boundary_policy='guess')

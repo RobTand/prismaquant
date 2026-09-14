@@ -7,7 +7,10 @@ Research acquisition bridge (2026-09-13, `codex/glm-full-domain-price-bridge-202
 `tessera_full_domain_acquisition` joins the grammar-derived complete rate domain
 with the existing `adaptive_trellis_rate_surface` refiner. Missing outer
 endpoints and BF16 table-width boundaries become bounded measurement requests;
-once present, the allocation multiplier prioritizes interior refinement. Every
+once present, the allocation multiplier prioritizes interior refinement. An
+explicit `boundary_policy=defer` postpones those measurements and lets the
+existing refiner use measured support; it preserves every unknown boundary
+and asserts no invented loss bound or dominance. Every
 legal rate remains on the research domain. Missing prices stay unknown, and no
 extrapolated objective, complete-grid measurement requirement, serving approval,
 or allocator payload is introduced. Atomic serving-group acquisition and exact

@@ -36,6 +36,8 @@ def main(argv=None):
     parser.add_argument('--family', action='append', required=True)
     parser.add_argument('--max-new-points', type=int, required=True)
     parser.add_argument('--alpha-loss-per-byte', type=float)
+    parser.add_argument('--boundary-policy', choices=('seed', 'defer'), default='seed',
+                        help='Defer unknown boundary work while retaining the full legal domain.')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args(argv)
     if len(set(args.unit)) != len(args.unit) or len(set(args.family)) != len(args.family):
@@ -108,7 +110,7 @@ def main(argv=None):
                 parser.error(f'no measured anchor for {unit}/{family}')
             report = adaptive_acquisition_from_records(
                 family, measured, max_new_points=args.max_new_points,
-                alpha_loss_per_byte=args.alpha_loss_per_byte,
+                alpha_loss_per_byte=args.alpha_loss_per_byte, boundary_policy=args.boundary_policy,
             )
             report['measured_wire_record_sha256'] = wire_bindings
             report['currency'] = 'output_mse_under_route_activation_contract'

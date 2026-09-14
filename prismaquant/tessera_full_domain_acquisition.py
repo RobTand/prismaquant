@@ -20,6 +20,7 @@ def propose_full_domain_acquisition(
     measured_q256: Sequence[int],
     *,
     max_new_points: int,
+    boundary_policy: str = "seed",
     refine: Callable[[int], Sequence[int]] | None = None,
 ) -> dict:
     """Publish a bounded next-step roster while retaining every legal rate.
@@ -29,11 +30,16 @@ def propose_full_domain_acquisition(
     supplies decision-focused interior requests after those dependencies. It
     may return fewer points than its cap; no work is manufactured to fill it.
     The full remaining domain is always retained, including off-hull points.
+    ``boundary_policy="defer"`` postpones unknown boundary measurements and
+    allows the existing refiner to work from measured support. It asserts no
+    dominance or price bound; the caller supplies this acquisition policy.
     """
     if not isinstance(domain, RateDomain):
         raise ValueError('domain must be the existing RateDomain contract')
     if type(max_new_points) is not int or max_new_points < 0:
         raise ValueError('max_new_points must be a nonnegative integer')
+    if boundary_policy not in ('seed', 'defer'):
+        raise ValueError('boundary_policy must be seed or defer')
     measured = tuple(measured_q256)
     if any(type(q) is not int for q in measured) or len(set(measured)) != len(measured):
         raise ValueError('measured rates must be distinct integers')
@@ -44,10 +50,11 @@ def propose_full_domain_acquisition(
     endpoints = (domain.rates[0], domain.rates[-1])
     boundary_queue = list(dict.fromkeys((*endpoints, *domain.transition_rates)))
     missing_boundaries = [q for q in boundary_queue if q not in observed]
-    chosen = missing_boundaries[:max_new_points]
+    pending_boundaries = missing_boundaries if boundary_policy == 'seed' else []
+    chosen = pending_boundaries[:max_new_points]
     reasons = {str(q): ('missing_domain_endpoint' if q in endpoints else 'missing_recipe_boundary')
                for q in chosen}
-    if not missing_boundaries and refine is not None and max_new_points:
+    if not pending_boundaries and refine is not None and max_new_points:
         refined = tuple(refine(max_new_points))
         if len(refined) > max_new_points or len(set(refined)) != len(refined):
             raise ValueError('decision refiner exceeded cap or repeated work')
@@ -64,6 +71,8 @@ def propose_full_domain_acquisition(
         dependency = None
     elif max_new_points == 0:
         dependency = 'measurement_budget'
+    elif boundary_policy == 'defer' and missing_boundaries and refine is not None:
+        dependency = 'decision_bound_for_deferred_boundary'
     elif refine is None:
         dependency = 'decision_refiner'
     else:
@@ -79,6 +88,8 @@ def propose_full_domain_acquisition(
         'missing_legal_rate_count': remaining,
         'required_boundary_q256': boundary_queue,
         'missing_boundary_q256': missing_boundaries,
+        'boundary_policy': boundary_policy,
+        'deferred_boundary_q256': missing_boundaries if boundary_policy == 'defer' else [],
         'proposed_q256': chosen,
         'proposal_reasons': reasons,
         'max_new_points': max_new_points,
@@ -100,6 +111,7 @@ def adaptive_acquisition_from_records(
     *,
     max_new_points: int,
     alpha_loss_per_byte: float | None = None,
+    boundary_policy: str = "seed",
 ) -> dict:
     """Join the grammar-derived domain to the existing adaptive allocator.
 
@@ -140,7 +152,7 @@ def adaptive_acquisition_from_records(
 
     result = propose_full_domain_acquisition(
         domain, tuple(r.body_rate_q256 for r in records),
-        max_new_points=max_new_points, refine=refine,
+        max_new_points=max_new_points, refine=refine, boundary_policy=boundary_policy,
     )
     result.update({
         'unit_name': records[0].unit_name,
