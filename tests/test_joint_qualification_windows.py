@@ -47,10 +47,11 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None):
             path = tmp_path / (name + fmt + '.pt')
             torch.save(modules[name].weight.detach(), path)
             wire = tmp_path / (name + fmt + '.wire')
-            wire.write_bytes((name + fmt).encode())
+            blob = (name + fmt).encode()
+            wire.write_bytes(blob)
             cells[name, fmt] = dict(render=str(path), render_origin='encoded',
-                                    wire=str(wire),
-                                    record={'blob_sha256': hashlib.sha256(wire.read_bytes()).hexdigest()},
+                                    wire=str(wire), record={'blob_bytes': len(blob),
+                                    'blob_sha256': hashlib.sha256(blob).hexdigest()},
                                     anchor={'qname': name, 'format_name': fmt})
     capture_path = tmp_path / 'capture.json'
     capture_path.write_text('{}')
@@ -165,6 +166,20 @@ def test_smaller_serialized_budget_plans_more_windows(tmp_path, monkeypatch):
         file_load_workers=2, qualification_window=config)
     windows = cache.metadata['prefetch'][0]['windows']
     assert len(windows) == 4 and all(len(window['keys']) == 1 for window in windows)
+
+
+def test_wire_read_ahead_reserves_current_and_pending_blobs(tmp_path, monkeypatch):
+    runner, data, capture, _events, _live, _observed = fixture(tmp_path, monkeypatch)
+    reserved = []
+    guard = SimpleNamespace(check=lambda where, reserve_bytes=0:
+                            reserved.append((where, reserve_bytes)), snapshot=lambda: {})
+    bridge.prepare_cache(runner, data, capture=capture, max_render_bytes=10000,
+        file_load_workers=1, qualification_window=policy(), qualification_guard=guard)
+    maximum = max(cell['record']['blob_bytes'] for cell in data.cells.values())
+    units = [amount for where, amount in reserved
+             if where.startswith('before_joint_qualification_unit:')]
+    assert len(units) == 2
+    assert units == [2 * 128 + 10000 + 10000 + 10000 + 2 * maximum] * 2
 
 
 def test_prepared_metadata_counts_a_synthesized_rung_apart(tmp_path, monkeypatch):

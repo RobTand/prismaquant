@@ -57,6 +57,48 @@ def _sha(path):
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
+def _stat_signature(value):
+    """The identity fence for a wire byte read, including its file type."""
+    return (value.st_mode, value.st_dev, value.st_ino, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns)
+
+
+def _read_verified_wire_blob(cell):
+    """Read one receipt-sized regular wire and bind the bytes actually read.
+
+    This is deliberately an ephemeral one-cell buffer, rather than a cache.
+    The caller may overlap its read with qualification of the preceding cell,
+    but must pass these exact bytes to ``verify_cached_unit`` and the decoder.
+    """
+    record, wire = cell["record"], Path(cell["wire"])
+    size = record.get("blob_bytes")
+    _require(type(size) is int and size > 0,
+             f"{wire}: wire receipt needs positive blob_bytes")
+    before = wire.lstat()
+    _require(stat.S_ISREG(before.st_mode), f"{wire}: wire must be a regular file, not a symlink")
+    _same(before.st_size, size, f"{wire}: wire size differs from measured receipt")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(wire, flags)
+    try:
+        with os.fdopen(fd, "rb", closefd=True) as handle:
+            fd = None
+            _same(_stat_signature(os.fstat(handle.fileno())), _stat_signature(before),
+                  f"{wire}: wire changed before its content read")
+            blob = handle.read(size + 1)
+            after_open = os.fstat(handle.fileno())
+    finally:
+        if fd is not None:
+            os.close(fd)
+    _require(len(blob) == size, f"{wire}: wire changed during its content read")
+    _same(_stat_signature(after_open), _stat_signature(before),
+          f"{wire}: wire changed during its content read")
+    _same(_stat_signature(wire.lstat()), _stat_signature(before),
+          f"{wire}: wire changed during its content read")
+    digest = hashlib.sha256(blob).hexdigest()
+    _same(digest, record.get("blob_sha256"), f"{wire}: wire checksum")
+    return blob, digest
+
+
 def _bound(record, label):
     _require(isinstance(record, dict) and set(record) == {"path", "sha256"},
              f"{label}: independently bound path/SHA256 required")
@@ -518,7 +560,7 @@ def calibrated_maxima(data, profile):
 
 def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_source,
                          projected_unit, static_scales, bound_unit=None, reader=None,
-                         release_file_pages=False):
+                         release_file_pages=False, wire_blob=None, wire_sha256=None):
     """Re-derive encoder inputs from actual source/H and compare decoded bytes.
 
     Two legs, and they do not establish the same thing. ``verify_cached_unit``
@@ -555,7 +597,19 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         **({} if bound_unit is None else {"bound_unit": bound_unit}))
     wire_path = Path(cell["wire"])
     wire_stat = wire_path.stat() if release_file_pages else None
-    blob = wire_path.read_bytes()
+    if wire_blob is None:
+        blob, actual_wire_sha256 = _read_verified_wire_blob(cell)
+    else:
+        _require(isinstance(wire_blob, bytes), f"{name}@{fmt}: wire reader returned non-bytes")
+        _same(len(wire_blob), cell["record"].get("blob_bytes"),
+              f"{name}@{fmt}: read-ahead wire size differs from receipt")
+        blob = wire_blob
+        actual_wire_sha256 = hashlib.sha256(blob).hexdigest()
+        if wire_sha256 is not None:
+            _same(wire_sha256, actual_wire_sha256,
+                  f"{name}@{fmt}: read-ahead wire digest changed")
+        _same(actual_wire_sha256, cell["record"].get("blob_sha256"),
+              f"{name}@{fmt}: read-ahead wire checksum")
     verifier = tc._checkpoint_identity_api() if reader is None else reader
     verifier.verify_cached_unit(blob, cell["record"], expected)
     decoded = _decode_wire(blob, reader=reader,
@@ -575,7 +629,7 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
                               if source_receipt is None else source_receipt),
             "rendered_weight": _cb_cache_tensor_identity(rendered_weight),
             "encoding_identity_sha256": canonical_json_sha256(expected, where="joint anchor encoding"),
-            "wire_sha256": hashlib.sha256(blob).hexdigest(),
+            "wire_sha256": actual_wire_sha256,
             "render_file_sha256": cell["render_file_sha256"],
             "render_origin": render_origin, "render_comparison": render_comparison}
 
@@ -597,6 +651,14 @@ def _prepare_file_read_bound(data, *, max_render_bytes):
     _require(0 < maximum <= max_render_bytes,
              "original render shard exceeds the declared PWC read buffer budget")
     return maximum
+
+
+def _prepare_wire_read_bound(data):
+    """Reserve the one bounded, receipt-sized wire buffer used by qualification."""
+    sizes = [cell["record"].get("blob_bytes") for cell in data.cells.values()]
+    _require(bool(sizes) and all(type(size) is int and size > 0 for size in sizes),
+             "measured wire receipts need positive blob_bytes")
+    return max(sizes)
 
 
 QUALIFICATION_WINDOW_SCHEMA = "prismaquant.joint_anchor_qualification.v1"
@@ -794,6 +856,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     cache.enable_lru(max_render_bytes)
     max_file_bytes = _prepare_file_read_bound(data, max_render_bytes=(max_render_bytes
         if policy is None else min(max_render_bytes, policy["max_load_buffer_bytes"])))
+    max_wire_read_bytes = _prepare_wire_read_bound(data)
     cache.enable_file_load_receipts(max_file_bytes=max_file_bytes)
     targets = _live_targets(runner, data.formats_by_qname)
     layers = defaultdict(list)
@@ -838,7 +901,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                     if guard is not None:
                         guard.check('before_joint_qualification_unit:' + unit_names[0], reserve_bytes=
                             2 * capture_sizes[unit_names[0]] + max_render_bytes +
-                            policy['max_load_buffer_bytes'] + policy['workspace_reserve_bytes'] +
+                            policy['max_load_buffer_bytes'] + 2 * max_wire_read_bytes +
+                            policy['workspace_reserve_bytes'] +
                             (0 if capture_load_policy is None else 2 * capture_load_policy['max_buffer_bytes'] +
                              capture_load_policy['max_scratch_bytes']))
                     (acts, hessians, _counts, _maxima), _receipt = cc.prefetch_capture(capture_path,
@@ -873,25 +937,48 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                 with owner as window_receipt:
                                     if window_receipt is not None:
                                         layer_stats.append(dict(unit=name, **window_receipt))
-                                    for _, fmt in window:
-                                        cell = data.cells[name, fmt]
-                                        resident = (cache.get(name, fmt) if policy is None else cache.get_resident(name, fmt))
-                                        receipt = cache.file_load_receipt((name, fmt), resident)
-                                        if "render_file_sha256" in cell:
-                                            _same(receipt["sha256"], cell["render_file_sha256"], f"{name}: original render file changed")
-                                        cell["render_file_sha256"] = receipt["sha256"]
-                                        rendered = resident.to(runner.device)
-                                        record = verify_anchor_render(cell, source_weight, rendered,
-                                            calibration_source=calibration_source,
-                                            projected_unit=projected.get(name), static_scales=scales,
-                                            bound_unit=bound_unit, reader=reader,
-                                            **({'release_file_pages': True} if policy is not None else {}))
-                                        activation = activation_identity(fr.get_format(fmt), cache.activation_max_abs, name)
-                                        _same(activation["input_global_scale"], cell["anchor"].get("input_global_scale"),
-                                              f"{name}@{fmt}: joint/campaign static scale")
-                                        record["activation"] = activation
-                                        verified[name, fmt] = record
-                                        resident = rendered = None
+                                    # One ephemeral wire blob is read ahead while the GPU
+                                    # verifies its predecessor.  Keep its worker inside the
+                                    # resident window so an exception waits for/cancels it
+                                    # before PWC releases the tensors it could overlap.
+                                    from concurrent.futures import ThreadPoolExecutor
+                                    wire_reader = ThreadPoolExecutor(max_workers=1,
+                                                                     thread_name_prefix="joint-wire-read")
+                                    pending = None
+                                    try:
+                                        for index, (_, fmt) in enumerate(window):
+                                            cell = data.cells[name, fmt]
+                                            if pending is None:
+                                                pending = wire_reader.submit(_read_verified_wire_blob, cell)
+                                            # Consume before borrowing the resident tensor: a
+                                            # failed wire never leaves a background read after
+                                            # this window's PWC entries have been released.
+                                            blob, wire_sha256 = pending.result()
+                                            pending = (None if index + 1 == len(window) else
+                                                       wire_reader.submit(_read_verified_wire_blob,
+                                                                          data.cells[name, window[index + 1][1]]))
+                                            resident = (cache.get(name, fmt) if policy is None else cache.get_resident(name, fmt))
+                                            receipt = cache.file_load_receipt((name, fmt), resident)
+                                            if "render_file_sha256" in cell:
+                                                _same(receipt["sha256"], cell["render_file_sha256"], f"{name}: original render file changed")
+                                            cell["render_file_sha256"] = receipt["sha256"]
+                                            rendered = resident.to(runner.device)
+                                            record = verify_anchor_render(cell, source_weight, rendered,
+                                                calibration_source=calibration_source,
+                                                projected_unit=projected.get(name), static_scales=scales,
+                                                bound_unit=bound_unit, reader=reader, wire_blob=blob,
+                                                wire_sha256=wire_sha256,
+                                                **({'release_file_pages': True} if policy is not None else {}))
+                                            activation = activation_identity(fr.get_format(fmt), cache.activation_max_abs, name)
+                                            _same(activation["input_global_scale"], cell["anchor"].get("input_global_scale"),
+                                                  f"{name}@{fmt}: joint/campaign static scale")
+                                            record["activation"] = activation
+                                            verified[name, fmt] = record
+                                            resident = rendered = blob = None
+                                    finally:
+                                        if pending is not None:
+                                            pending.cancel()
+                                        wire_reader.shutdown(wait=True, cancel_futures=True)
                                     if guard is not None:
                                         guard.check('after_joint_qualification_window:' + name)
                 finally:

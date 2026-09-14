@@ -14,6 +14,12 @@ buffers, LRU limits and the actual post-prefetch storage cap stay intact.
 The capture owner validates and seals the complete manifest once, then reuses
 its immutable metadata and load-execution digest behind a same-file stat
 fence; individual X/H payload bytes are still verified on their actual load.
+Inside each PWC window a single worker reads the next receipt-sized Tessera
+wire while the GPU verifies the current cell. The current and pending blobs
+both count against the guard reserve; each read fences its regular file by
+path and descriptor stats, hashes the exact bytes, and hands those same bytes
+to the unchanged encoder-identity verifier and decoder. The future is joined
+before its window releases resident renders, including on failure.
 
 Preparation now writes an identity-bound qualification journal under
 `prepare/qualification` after each complete unit. Its identity binds the plan,
