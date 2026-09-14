@@ -1,10 +1,6 @@
 # PrismaQuant Architecture
 
-<<<<<<< HEAD
 As of: 2026-09-13 · `campaign/glm-budget-full-range-20260914`. Stamps
-=======
-As of: 2026-09-13 · `codex/sampled-stack-proposal-20260913`. Stamps
->>>>>>> c4a78ea15b
 follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-13, `codex/sampled-stack-proposal-20260913`) for an
@@ -26,7 +22,7 @@ uncertainty, not sequence uncertainty or a full-domain optimum. An explicit
 research-menu argument keeps measured writable candidate prices separate from
 the serving target's later qualification; it does not rewrite the original
 joint operator identity. The GLM source campaign has no serving-target scope,
-so a distinct target must be named before reading the large pilot for an
+so a distinct target must be named before reading the large pilot for a
 validation config, and that target's equivalence remains pending the separate
 Tessera research-byte exporter's source/cache/reader/runtime and plan/export
 route gates. The selected-cache bridge authenticates current measured wires
