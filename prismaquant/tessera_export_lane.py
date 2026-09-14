@@ -75,6 +75,7 @@ which is the failure mode principle 14 exists to prevent.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import struct
 import sys
@@ -739,6 +740,112 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
 #: The bundle's name inside the campaign's wire directory.  One name: the
 #: driver reads the path back from the build anchor rather than guessing it.
 CACHED_EXPERT_UNITS_FILENAME = "cached_expert_units.json"
+
+
+def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapping[str, Any],
+                                   handoff: Mapping[str, Any], data: Any, *, schema: str) -> dict:
+    """Close the exact measured dense and expert wires selected by an allocation.
+
+    This is metadata publication, never an encoder. The joint preparation has
+    already checked original source/H against each measured wire. The producer's
+    ``CachedUnitBundle`` and ``verify_cached_unit`` recheck current checkpoint,
+    H, settings, encoder and wire bytes at export intake. A selected interpolated
+    rate has no original wire and is refused here, not silently re-encoded.
+    """
+    from .tessera_expert_projection import (
+        EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY, WIRE_DIR_KEY,
+        ExpertProjectionError, cached_units_manifest, carried_units,
+        expand_stack_decision_assignment, verify_expert_wire_record,
+    )
+    from .tessera_formats import parse_tessera_format_name
+    from tessera.cached_unit import ENCODING_INPUT_SCHEMA, INPUT_SCHEMA
+
+    provenance = handoff.get("provenance", {})
+    if provenance.get("tessera_joint_allocation", {}).get("status") != "research_metadata_handoff":
+        raise TesseraExportLaneError("selected cache requires the completed joint allocation handoff")
+    if data.unit_scope is not None or set(data.census["unit_shapes"]) != set(handoff.get("costs", {})):
+        raise TesseraExportLaneError("selected cache requires the complete joint campaign roster")
+    carried = provenance.get(PROJECTION_KEY)
+    if carried is None or metadata.get(PROJECTION_KEY) != carried:
+        raise TesseraExportLaneError("selected cache needs the exact carried producer projection")
+    if data.payload.get("provenance", {}).get(PROJECTION_KEY) != carried:
+        raise TesseraExportLaneError("selected cache producer projection differs from the measured campaign")
+    try:
+        source, units, stack_of = carried_units(carried)
+        selected, _owners = expand_stack_decision_assignment(
+            assignment, metadata.get(POPULATION_KEY), units=units, stack_of=stack_of,
+            costs=handoff.get("costs"))
+    except ExpertProjectionError as exc:
+        raise TesseraExportLaneError(f"selected cache projection: {exc}") from exc
+    if set(selected) != set(data.census["unit_shapes"]):
+        raise TesseraExportLaneError("selected cache assignment does not cover the full source roster")
+    wire_dir = Path(provenance["wire_dir"]).resolve()
+    if (metadata.get(WIRE_DIR_KEY) != str(wire_dir) or
+            data.payload.get("provenance", {}).get("wire_dir") != str(wire_dir)):
+        raise TesseraExportLaneError("selected cache wire directory differs from the joint handoff")
+    selected_expert_receipts = metadata.get(EXPERT_WIRES_KEY, {})
+    if not isinstance(selected_expert_receipts, Mapping):
+        raise TesseraExportLaneError("selected cache expert receipts are missing")
+    records = {}
+    for name, fmt in sorted(selected.items()):
+        if fmt == "BF16":
+            continue
+        parsed = parse_tessera_format_name(fmt)
+        if parsed is None:
+            raise TesseraExportLaneError(f"{name}: selected {fmt} is not a Tessera cached wire")
+        family, q256 = parsed
+        row = handoff["costs"][name].get(fmt)
+        measured_row = data.payload["costs"][name].get(fmt)
+        cell = data.cells.get((name, fmt))
+        if (not isinstance(row, Mapping) or not isinstance(measured_row, Mapping)
+                or cell is None or measured_row.get("output_mse_measured") is not True):
+            raise TesseraExportLaneError(
+                f"{name}@{fmt}: selected rung has no exact measured joint wire; "
+                "acquire and qualify that wire before export")
+        record = cell["record"]
+        sealed_unit = data.manifest["identity"]["units"][name]
+        if record["identity"].get("source") != sealed_unit["weight"]:
+            raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
+        if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
+            raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")
+        expected_hessian = (sealed_unit.get("hessian") if
+                            measured_row.get("hessian_identity", {}).get("applied") is True else None)
+        if (record["identity"].get("calibration") or {}).get("hessian") != expected_hessian:
+            raise TesseraExportLaneError(f"{name}@{fmt}: selected wire Hessian differs from checkpoint seal")
+        expected_schema = INPUT_SCHEMA if name in units else ENCODING_INPUT_SCHEMA
+        if record["identity"].get("schema") != expected_schema:
+            raise TesseraExportLaneError(f"{name}@{fmt}: cached identity schema differs from unit kind")
+        if row.get("joint_operator_identity", {}).get("source_weight", {}).get("shape") != list(
+                data.census["unit_shapes"][name]):
+            raise TesseraExportLaneError(f"{name}@{fmt}: joint source geometry differs from campaign")
+        if name in units:
+            if selected_expert_receipts.get(name) != record:
+                raise TesseraExportLaneError(f"{name}@{fmt}: selected expert receipt differs from measured wire")
+            try:
+                record = verify_expert_wire_record(
+                    record, name=name, unit=units[name], q256=int(q256),
+                    grid=family.payload_grid().name, wire_dir=wire_dir)
+            except ExpertProjectionError as exc:
+                raise TesseraExportLaneError(f"{name}@{fmt}: {exc}") from exc
+        else:
+            recipe = record["identity"].get("recipe", {})
+            if (record["identity"].get("unit") != name or
+                    recipe.get("grid") != family.payload_grid().name or
+                    recipe.get("q256") != int(q256)):
+                raise TesseraExportLaneError(f"{name}@{fmt}: dense wire identity differs from selected rung")
+            path = wire_dir / record["file"]
+            if path.is_symlink() or path.resolve().parent != wire_dir or not path.is_file():
+                raise TesseraExportLaneError(f"{name}@{fmt}: dense wire escapes the campaign directory")
+            blob = path.read_bytes()
+            if len(blob) != record["blob_bytes"] or hashlib.sha256(blob).hexdigest() != record["blob_sha256"]:
+                raise TesseraExportLaneError(f"{name}@{fmt}: dense wire differs from measured receipt")
+        records[name] = record
+    if not records:
+        raise TesseraExportLaneError("selected cache has no selected Tessera wires")
+    try:
+        return cached_units_manifest(source, records, schema=schema)
+    except ExpertProjectionError as exc:
+        raise TesseraExportLaneError(f"selected cache: {exc}") from exc
 
 
 def write_cached_expert_units(projection: Mapping[str, Any]) -> Path:
