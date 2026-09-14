@@ -997,6 +997,32 @@ def test_the_band_places_two_anchors_at_its_ends_not_across_the_range():
                            snap=snap) == []
 
 
+def test_an_explicit_exhaustive_band_uses_each_legal_rung_only_in_that_band():
+    from prismaquant.tessera_campaign import round_one_rates
+
+    allowed = [832, 833, 835, 896, 1024]
+
+    def snap(rate, allowed):
+        return min(allowed, key=lambda rung: (abs(int(rung) - int(rate)), int(rung)))
+
+    assert round_one_rates(allowed, band=(832, 896), anchors=2, snap=snap,
+                           exhaustive_band=True) == [832, 833, 835, 896]
+    with pytest.raises(RuntimeError, match="requires --rate-band"):
+        round_one_rates(allowed, band=None, anchors=2, snap=snap,
+                        exhaustive_band=True)
+
+
+def test_exhaustive_grid_requires_the_research_menu():
+    from prismaquant.tessera_campaign import require_exhaustive_rate_research_mode
+    from prismaquant.tessera_menu import MENU_ATTESTED, MENU_READABLE, MENU_RESEARCH
+
+    for mode in (MENU_ATTESTED, MENU_READABLE):
+        with pytest.raises(RuntimeError, match="requires --menu-mode research"):
+            require_exhaustive_rate_research_mode(True, mode)
+        require_exhaustive_rate_research_mode(False, mode)
+    require_exhaustive_rate_research_mode(True, MENU_RESEARCH)
+
+
 def test_the_audit_anchor_lands_inside_the_bracket_or_nowhere():
     from prismaquant.tessera_campaign import audit_extra_rate
 

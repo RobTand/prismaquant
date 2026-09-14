@@ -150,6 +150,17 @@ NVFP4_STAGE_CALIBRATION_SOURCES = {
 
 _E2M1_POSITIVE = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
 
+#: The seven ties of the positive E2M1 grid, in normalised units
+#: (``t = |x| * G / stored_scale``).  Every one of them is a point where the
+#: rounding RULE decides -- not the arithmetic -- so a quantiser attestation
+#: that omits one attests nothing about the thing that is actually in dispute.
+#: :func:`prismaquant.tessera_runtime_contract.require_activation_quantizer_attested`
+#: refuses a published table that does not cover all seven.
+E2M1_MIDPOINTS = tuple(
+    (_E2M1_POSITIVE[i] + _E2M1_POSITIVE[i + 1]) / 2.0
+    for i in range(len(_E2M1_POSITIVE) - 1)
+)
+
 
 # Compatibility fallback for profiles that cannot expose serving fusion
 # metadata.  This catalog lives here because activation calibration, legacy
@@ -1139,9 +1150,7 @@ def nvfp4_activation_qdq_served(
     original_dtype = x.dtype
     grouped = x.reshape(-1, x.shape[-1] // FP4_GROUP_SIZE,
                         FP4_GROUP_SIZE).float()
-    amax = grouped.abs().amax(dim=-1, keepdim=True)
-    stored_scale = (amax / FP4_E2M1_MAX * g).clamp(max=FP8_E4M3_MAX)
-    stored_scale = stored_scale.to(torch.float8_e4m3fn).float()
+    stored_scale = nvfp4_group_stored_scale(grouped, g).float()
     used_scale = stored_scale / g
 
     nonzero_scale = stored_scale != 0
@@ -1150,18 +1159,76 @@ def nvfp4_activation_qdq_served(
         used_scale,
         torch.ones_like(used_scale),
     )
-    normalized = (grouped / safe_scale).clamp(
-        -FP4_E2M1_MAX,
-        FP4_E2M1_MAX,
-    )
-    # The registry already owns device-resident format constants. Its sorted
-    # E2M1 table ends with these eight positive encodings, including +0. Reuse
-    # that view instead of copying a Python tuple to CUDA on every QDQ call.
+    normalized = nvfp4_e2m1_normalize(grouped, safe_scale)
+    index = nvfp4_e2m1_magnitude_index(normalized)
+    rounded = _e2m1_positive_table(
+        normalized.device)[index].copysign(normalized)
+    output = rounded * used_scale
+    output = torch.where(nonzero_scale, output, torch.zeros_like(output))
+    return output.reshape(original_shape).to(original_dtype)
+
+
+def nvfp4_group_stored_scale(grouped: torch.Tensor, g) -> torch.Tensor:
+    """The UE4M3 scale byte the runtime stores for each group, as ``e4m3``.
+
+    The first half of the quantiser, split out so the attestation preflight
+    drives the arithmetic the priced path runs rather than a second copy of
+    it.  Returned in ``float8_e4m3fn`` rather than ``float32`` so a caller can
+    read the stored BYTE -- which is what the runtime publishes -- with
+    ``.view(torch.uint8)``; the oracle takes ``.float()`` of it as before.
+
+    ``g`` may be a float or a broadcastable tensor: the preflight drives one
+    group at a time at a published global scale, the oracle a whole tensor at
+    the unit's.
+    """
+    amax = grouped.abs().amax(dim=-1, keepdim=True)
+    return (amax / FP4_E2M1_MAX * g).clamp(max=FP8_E4M3_MAX).to(
+        torch.float8_e4m3fn)
+
+
+def _e2m1_positive_table(device) -> torch.Tensor:
+    """The eight positive E2M1 magnitudes, device-resident.
+
+    The registry already owns device-resident format constants; its sorted
+    E2M1 table ends with these eight positive encodings, including ``+0``.
+    Reuse that view instead of copying a Python tuple to CUDA on every call.
+    """
     from .format_registry import _CODEBOOKS, _codebook_on_device
 
-    positive = _codebook_on_device(
-        _CODEBOOKS["fp4_e2m1"], device=normalized.device, dtype=torch.float32,
+    return _codebook_on_device(
+        _CODEBOOKS["fp4_e2m1"], device=device, dtype=torch.float32,
     )[-len(_E2M1_POSITIVE):]
+
+
+def nvfp4_e2m1_normalize(
+    values: torch.Tensor,
+    used_scale: torch.Tensor,
+) -> torch.Tensor:
+    """``values / used_scale``, clamped to the grid, in the served order.
+
+    Split out of :func:`nvfp4_activation_qdq_served` so the attestation
+    preflight drives the ARITHMETIC this oracle actually runs rather than a
+    float64 idealisation of it.  The division order and the single-precision
+    intermediate are part of what is under test: a preflight that recomputed
+    the normalisation its own way would attest its own rounding, not PQ's.
+    """
+    return (values / used_scale).clamp(-FP4_E2M1_MAX, FP4_E2M1_MAX)
+
+
+def nvfp4_e2m1_magnitude_index(normalized: torch.Tensor) -> torch.Tensor:
+    """The positive-E2M1 index 0..7 a normalised value rounds to.
+
+    THE tie-break, in one place.  Positive E2M1 encodings are indices 0..7; on
+    an exact midpoint round-to-nearest-even selects the candidate whose encoded
+    index has an even least-significant bit, rather than always selecting the
+    lower magnitude -- which is what makes this rule, and not merely this
+    arithmetic, the thing a runtime attestation has to confirm.  Both
+    :func:`nvfp4_activation_qdq_served` and
+    :func:`prismaquant.tessera_runtime_contract.require_activation_quantizer_attested`
+    call it, so an attested rule and a priced rule cannot be two objects
+    (principle 8).
+    """
+    positive = _e2m1_positive_table(normalized.device)
     magnitude = normalized.abs().contiguous()
     upper_index = torch.bucketize(magnitude, positive).clamp_max(
         positive.numel() - 1
@@ -1172,16 +1239,34 @@ def nvfp4_activation_qdq_served(
     lower_distance = (magnitude - lower).abs()
     upper_distance = (upper - magnitude).abs()
     tie = upper_distance == lower_distance
-    # Positive E2M1 encodings are indices 0..7.  On an exact midpoint RNE
-    # selects the candidate whose encoded index has an even least-significant
-    # bit, rather than always selecting the lower magnitude.
     choose_upper = (upper_distance < lower_distance) | (
         tie & ((upper_index & 1) == 0)
     )
-    rounded = torch.where(choose_upper, upper, lower).copysign(normalized)
-    output = rounded * used_scale
-    output = torch.where(nonzero_scale, output, torch.zeros_like(output))
-    return output.reshape(original_shape).to(original_dtype)
+    return torch.where(choose_upper, upper_index, lower_index)
+
+
+#: How a published code decomposes: bit 3 is the sign (1 = negative) and bits
+#: 0..2 index :data:`_E2M1_POSITIVE`.  That is the order the runtime's own
+#: ``E2M1_VALUES`` table is indexed in -- Tessera's
+#: ``represented_native_input`` reads ``levels[codes]`` with exactly these
+#: nibbles -- and what pins it in a published attestation is that table's
+#: ``grid`` field, which
+#: :func:`prismaquant.tessera_runtime_contract.require_activation_quantizer_attested`
+#: compares rather than assumes.  A table under another grid is refused, not
+#: read with this decomposition.
+E2M1_CODE_LAYOUT = "sign_bit_3_magnitude_index_bits_0_2"
+
+
+def nvfp4_e2m1_code(normalized: torch.Tensor) -> torch.Tensor:
+    """The 4-bit code under :data:`E2M1_CODE_LAYOUT`.
+
+    ``torch.signbit`` rather than a comparison against zero, so a negative
+    value that rounds to the zero magnitude emits the negative zero code the
+    grid actually has.  The two zero codes dequantise to the same number, so
+    this distinction is inert for the GEMM and visible only here.
+    """
+    index = nvfp4_e2m1_magnitude_index(normalized)
+    return index | (torch.signbit(normalized).to(index.dtype) << 3)
 
 
 class ActivationScaleContractError(RuntimeError):

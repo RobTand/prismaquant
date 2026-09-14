@@ -710,8 +710,15 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
         shape = f"M{expected['m']}:N{2 * geometry['intermediate_size']}:K{geometry['hidden_size']}"
         if route.get("state") != "served" or route.get("reason") is not None or route.get("shape") != shape:
             raise ValueError(f"{phase}: native MoE route state/shape differs")
-        for kind in ("numerics", "qdq_numerics"):
-            validate_native_numerics(observed[kind], expected_panel["numerics"], phase=phase, kind=kind)
+        validate_native_numerics(observed["numerics"], expected_panel["numerics"],
+                                 phase=phase, kind="numerics")
+        # Exact unconditionally: this panel's reference_qdq is _activation_qdq
+        # of the member spec, which is the identity for a spec that does not
+        # quantise and the shared oracle for one that does, so zero is
+        # reachable either way.  One mechanism, not a weaker copy of it -- the
+        # dense panel reaches the same gate through its own single member.
+        validate_native_numerics(observed["qdq_numerics"], expected_panel["numerics"],
+                                 phase=phase, kind="qdq_numerics", exact=True)
         measurement = native_operator_measurement(observed["measurement"], path=path, expected_sha256=expected_sha256)
         bound = resources["phases"][phase].get("bound")
         scratch = native_operator_scratch(bound, phase=phase) if complete else None

@@ -16,7 +16,8 @@ from pathlib import Path
 
 from .anchored_shape import (
     AnchoredShapeError, LogShapeObservation, audit_anchored,
-    fit_anchor_correction, fit_centered_log_shape, predict_anchored,
+    fit_anchor_correction, fit_centered_log_shape, fit_endpoint_curvature,
+    predict_anchored,
 )
 from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, canonical_json_sha256, unit_path,
@@ -186,9 +187,28 @@ def replay_measurements(measurements, plan, *, input_identity, groups=None):
         descriptor = segment["descriptor"]
         _require(isinstance(descriptor.get("role"), str) and bool(descriptor["role"]),
                  "segment needs an explicit profile role declaration")
-        features = segment["features_by_key"]
+        endpoint_curvature = "shape_model" in segment
+        shape_model = segment.get("shape_model")
+        if endpoint_curvature:
+            _require(isinstance(shape_model, Mapping)
+                     and set(shape_model) == {"kind", "mode", "degree"}
+                     and shape_model.get("kind") == "endpoint_curvature"
+                     and shape_model.get("mode") in {"value", "log2"}
+                     and type(shape_model.get("degree")) is int
+                     and shape_model["degree"] in {1, 2},
+                     "invalid endpoint-curvature shape model")
+            _require("features_by_key" not in segment,
+                     "endpoint-curvature shape model owns intrinsic features")
+            features = None
+        else:
+            _require("features_by_key" in segment
+                     and isinstance(segment["features_by_key"], Mapping),
+                     "centered-log shape model requires features_by_key")
+            features = segment["features_by_key"]
         coordinates = segment["coordinates"]
-        _require(set(features) == set(coordinates) and len(coordinates) >= 3, "invalid segment domain")
+        _require((len(coordinates) >= 3
+                  and (endpoint_curvature or set(features) == set(coordinates))),
+                 "invalid segment domain")
         _require(all(type(v) is int and v > 0 for v in coordinates.values())
                  and len(set(coordinates.values())) == len(coordinates), "invalid rate coordinates")
         domain = sorted(coordinates, key=lambda key: (coordinates[key], key))
@@ -202,6 +222,8 @@ def replay_measurements(measurements, plan, *, input_identity, groups=None):
         _require(type(threshold) in (int, float) and math.isfinite(threshold) and threshold >= 0,
                  "invalid audit threshold")
         _require(type(segment.get("refit_after_audit", False)) is bool, "invalid refit policy")
+        _require(not endpoint_curvature or not segment.get("refit_after_audit", False),
+                 "endpoint-curvature replay does not support refit_after_audit")
 
         def read(unit, key):
             _require(key in coordinates, "requested rung outside declared domain")
@@ -225,6 +247,7 @@ def replay_measurements(measurements, plan, *, input_identity, groups=None):
                     pilot_missing.append((unit, key))
                 else:
                     observations.append(LogShapeObservation(unit, key, value))
+        pilot_keys = {key for keys in pilots.values() for key in keys}
         pilot_coordinates = [coordinates[key] for keys in pilots.values() for key in keys]
         _require(min(pilot_coordinates) == min(coordinates.values())
                  and max(pilot_coordinates) == max(coordinates.values()),
@@ -233,7 +256,10 @@ def replay_measurements(measurements, plan, *, input_identity, groups=None):
         shape = None
         if not pilot_missing:
             try:
-                shape = fit_centered_log_shape(observations, features)
+                shape = (fit_endpoint_curvature(
+                    observations, coordinates, mode=shape_model["mode"],
+                    degree=shape_model["degree"])
+                    if endpoint_curvature else fit_centered_log_shape(observations, features))
             except AnchoredShapeError as exc:
                 fit_reason = str(exc)
         else:
@@ -242,8 +268,12 @@ def replay_measurements(measurements, plan, *, input_identity, groups=None):
         units_report = {}
         for unit, split in sorted(heldout.items()):
             anchor_keys, audit_keys = split["anchors"], split["audit"]
-            _require(1 <= len(anchor_keys) <= 2 and len(set(anchor_keys)) == len(anchor_keys),
-                     "held-out unit needs one or two distinct anchors")
+            _require(((len(anchor_keys) == 2 and set(anchor_keys) == {
+                        min(coordinates, key=coordinates.get), max(coordinates, key=coordinates.get)})
+                      if endpoint_curvature else 1 <= len(anchor_keys) <= 2)
+                     and len(set(anchor_keys)) == len(anchor_keys),
+                     ("endpoint-curvature held-out unit needs exact domain endpoints"
+                      if endpoint_curvature else "held-out unit needs one or two distinct anchors"))
             _require(bool(audit_keys) and len(set(audit_keys)) == len(audit_keys)
                      and not set(anchor_keys) & set(audit_keys), "audit must be disjoint from anchors")
             needed = {key: read(unit, key) for key in anchor_keys + audit_keys}
@@ -281,17 +311,28 @@ def replay_measurements(measurements, plan, *, input_identity, groups=None):
                 requests.update((label, unit, key) for key in domain)
             else:
                 try:
-                    anchors = {key: needed[key] for key in anchor_keys}
-                    correction = fit_anchor_correction(shape, anchors, coordinates)
-                    audit = audit_anchored(correction, {key: needed[key] for key in audit_keys})
-                    result["audit"] = [dict(key=row.key, predicted=row.predicted, measured=row.measured,
-                                            absolute_log10_error=row.absolute_log10_error,
-                                            held_out_axes=(["unit", "rung"] if row.key not in
-                                                           {key for keys in pilots.values() for key in keys}
-                                                           else ["unit"]))
-                                       for row in audit.rows]
-                    passed = audit.max_absolute_log10_error <= threshold
-                    predictions = {key: predict_anchored(correction, key) for key in domain}
+                    if endpoint_curvature:
+                        left, right = sorted(anchor_keys, key=coordinates.get)
+                        curve = shape.bind(needed[left], needed[right])
+                        predictions = {key: curve.predict(coordinates[key]) for key in domain}
+                        result["audit"] = [dict(
+                            key=key, predicted=predictions[key], measured=needed[key],
+                            absolute_log10_error=abs(math.log10(predictions[key]) - math.log10(needed[key])),
+                            held_out_axes=(['unit', 'rung'] if key not in pilot_keys else ['unit']),
+                        ) for key in audit_keys]
+                        passed = max(row["absolute_log10_error"] for row in result["audit"]) <= threshold
+                    else:
+                        anchors = {key: needed[key] for key in anchor_keys}
+                        correction = fit_anchor_correction(shape, anchors, coordinates)
+                        audit = audit_anchored(correction, {key: needed[key] for key in audit_keys})
+                        result["audit"] = [dict(key=row.key, predicted=row.predicted, measured=row.measured,
+                                                absolute_log10_error=row.absolute_log10_error,
+                                                held_out_axes=(["unit", "rung"] if row.key not in
+                                                               {key for keys in pilots.values() for key in keys}
+                                                               else ["unit"]))
+                                           for row in audit.rows]
+                        passed = audit.max_absolute_log10_error <= threshold
+                        predictions = {key: predict_anchored(correction, key) for key in domain}
                     passed = passed and all(predictions[b] <= predictions[a]
                                             for a, b in zip(domain, domain[1:]))
                     if passed and segment.get("refit_after_audit", False):
@@ -321,13 +362,19 @@ def replay_measurements(measurements, plan, *, input_identity, groups=None):
                     result["reason"] = str(exc)
                     requests.update((label, unit, key) for key in domain)
             units_report[unit] = result
+        pilot_fit = None
+        if shape is not None:
+            if endpoint_curvature:
+                pilot_fit = {"kind": "endpoint_curvature", "mode": shape.mode,
+                             "degree": shape.degree, "rate_lo": shape.rate_lo,
+                             "rate_hi": shape.rate_hi, "means": list(shape.means),
+                             "scales": list(shape.scales), "coefficients": list(shape.coefficients)}
+            else:
+                pilot_fit = {"coefficients_log10": list(shape.coefficients),
+                             "reference_key": shape.reference_key, "design_rank": shape.design_rank,
+                             "n_units": shape.n_units, "n_observations": shape.n_observations}
         reports.append({"id": label, "descriptor": descriptor, "units": units_report,
-                        "pilot_fit_error": fit_reason,
-                        "pilot_fit": (None if shape is None else {
-                            "coefficients_log10": list(shape.coefficients),
-                            "reference_key": shape.reference_key, "design_rank": shape.design_rank,
-                            "n_units": shape.n_units, "n_observations": shape.n_observations,
-                        })})
+                        "pilot_fit_error": fit_reason, "pilot_fit": pilot_fit})
     # Existing campaign group placement is retained even when only one sibling fails.
     for label, unit, key in sorted(requests.copy()):
         for members in (groups or {}).values():
