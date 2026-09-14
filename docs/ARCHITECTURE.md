@@ -1,7 +1,33 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `codex/joint-eval-panel-20260913`. Stamps
+As of: 2026-09-13 · `codex/sampled-stack-proposal-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/sampled-stack-proposal-20260913`) for an
+**opt-in diagnostic whole-stack proposal adapter** (#597). The scoped
+`sampled_joint_panel` binding authenticates pilot token rows against the
+original calibration and retains the original H512 preparation, source,
+render, encoder and wire identities. Ordinary currency admission and handoff
+continue refusing the pilot. A projected routed expert is never an independent
+zero-price option: every profile serving group must equal an entire producer
+stack and every option uses one common measured exact rung. Missing groups,
+partial menus, unobserved dense units and wholly unobserved stacks refuse.
+The existing candidate builder, atomic packed/fused aggregation, promotion
+solver and serialized payload owner produce research proposals and exact byte
+checks; an uninvoked member's full-population price is null, while its
+contribution to the observed panel is zero only inside its whole stack. The
+producer grammar's full E4M3/BF16 rate ranges remain explicit, with only
+measured pilot rungs priced; the four probe samples give conditional probe
+uncertainty, not sequence uncertainty or a full-domain optimum. An explicit
+research-validation route can supply the exact expanded assignment and
+proposal hash to the selected-cache bridge and Tessera preflight. Both retain
+their source/H/encoder/current-wire and runtime integrity gates; neither
+claims production authority. The independent selected-assignment validation
+is pending, and the retained teacher panel cannot be called held-out until
+the fit-overlap audit verifies disjointness. Gates:
+`tests/test_tessera_sampled_stack_proposal.py`,
+`tests/test_tessera_joint_allocation.py`,
+`tests/test_tessera_joint_eval_panel.py`.
 
 Re-stamped (2026-09-13, `codex/joint-eval-panel-20260913`) for an **opt-in
 diagnostic joint evaluation panel**. A sealed joint plan may carry
