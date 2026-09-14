@@ -50,7 +50,8 @@ def test_unrouted_diagnostics_are_explicit_zero_and_columns_are_optional():
             lease.operator_diagnostics(collect_col_energy=False)
         lease.begin_probe()
         lease.finish_observations()
-        assert lease.operator_diagnostics(collect_col_energy=False) == {'u': {'g_trace': 0.0}}
+        assert lease.operator_diagnostics(collect_col_energy=False) == {
+            'u': {'g_trace': 0.0, 'observed_tokens': 0, 'observed_calls': 0}}
         result = lease.operator_diagnostics(collect_col_energy=True)
         assert torch.equal(result['u']['col_energy'], torch.zeros(3))
     with pytest.raises(RuntimeError, match='ready'):
