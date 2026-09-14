@@ -18,7 +18,7 @@ import pickle
 from .cluster_campaign import _atomic_write_new_bytes as atomic_write_bytes
 from .cost_stage_checkpoint import canonical_json_sha256
 from .tessera_joint_aura import (
-    PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA, _require, _same,
+    HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA, _require, _same,
     cell_render_census, render_origin_census,
 )
 
@@ -185,7 +185,7 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
         'plan_sha256': plan_sha256, 'prepared': prepared_binding,
         'units': len(roster), 'measured_cells': len(data.cells),
         'cost_fields': 'all_original_joint_fields_unchanged',
-        'wire_validation': 'historical_prepared_identity; current_bytes_require_export_gate',
+        'wire_validation': HISTORICAL_WIRE_VALIDATION,
         **render_census,
     }, 'joint provenance')
     _same(currency_gate(result), currency, 'unchanged joint currency')
