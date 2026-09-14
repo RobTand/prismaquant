@@ -229,3 +229,53 @@ def test_failed_snapshot_configuration_preserves_source_maps(monkeypatch):
     context.configure_selected_snapshot(['layers.0.a'], profile)
     assert context._snapshot_source_keys == ('layers.0.a.weight',)
     assert context.estimated_layer_bytes == 4
+
+
+def test_selected_snapshot_walks_an_uncapped_layer_cache(tmp_path, monkeypatch):
+    """A byte-bounded cache declares no slot cap, and the walk must still run.
+
+    `LayerCache(max_entries=None)` is what an autoscaled run builds -- the cache
+    is bounded by bytes, `max_cache_slots` is None, and every other reader says
+    so explicitly. `snapshot_selected_weights` subtracted from it instead, so a
+    selected-source walk over more than one layer died on `None - 1` before it
+    read anything (PB 2ae0b4e8aa7f on GB10, cost_streaming.py:485).
+    """
+    from prismaquant import layer_streaming as ls, streaming_model as sm
+    from prismaquant.cost_streaming import StreamedCausalLM
+
+    model = torch.nn.Module()
+    model.model = torch.nn.Module()
+    model.model.layers = torch.nn.ModuleList([torch.nn.Module() for _ in range(3)])
+    source = {}
+    for index, layer in enumerate(model.model.layers):
+        layer.proj = torch.nn.Linear(4, 3, bias=False, device="meta")
+        source[f"model.layers.{index}.proj.weight"] = torch.full((3, 4), float(index + 1))
+    path = tmp_path / "weights.safetensors"
+    save_file(source, path)
+    profile = SimpleNamespace(per_expert_moe_regex=lambda: None,
+                              concat_merge_groups=lambda: ())
+    from prismaquant import routed_experts
+    monkeypatch.setattr(routed_experts, "profile_declared_packed_expert_projections", lambda *_: [])
+    monkeypatch.setattr(routed_experts, "refresh_packed_expert_projections", lambda *_: [])
+    pool = ThreadPoolExecutor(max_workers=1)
+    context = sm.StreamingContext(
+        model=model, base_model=model.model, layers=model.model.layers,
+        layers_prefix="model.layers.", num_layers=3,
+        install_resolvers=[ls._build_install_resolver(model, f"model.layers.{i}") for i in range(3)],
+        weight_shard={name: str(path) for name in source},
+        weight_ckpt={name: name for name in source},
+        layer_cache=sm.LayerCache(max_bytes=1024 ** 2, max_entries=None),
+        prefetch_pool=pool, device=torch.device("cpu"), dtype=torch.float32,
+        offload_folder=str(tmp_path / "offload"), estimated_layer_bytes=48,
+    )
+    assert context.max_cache_slots is None
+    runner = StreamedCausalLM(context, profile, prefetch_lookahead=2,
+                              require_prefetched_residency=True)
+    names = [f"model.layers.{i}.proj" for i in range(3)]
+    try:
+        weights, receipt = runner.snapshot_selected_weights(names, max_resident_bytes=1 << 20)
+        assert sorted(weights) == names
+        assert receipt["units"] == names
+        assert all(torch.equal(weights[name], source[name + ".weight"]) for name in names)
+    finally:
+        runner.shutdown()

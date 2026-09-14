@@ -40,6 +40,7 @@ from prismaquant.measured_runtime_prices import (
     RuntimeBinding, RuntimeResources, OperatorMeasurement, MeasuredRuntimeRow,
     build_runtime_resources, parse_measured_runtime_table,
 )
+from prismaquant.native_operator_panel import operator_route_identity
 from test_native_operator_panel import joined, receipt_fixture
 from test_measured_runtime_prices import payload
 
@@ -117,7 +118,8 @@ def relation_fixture(tmp_path):
                            "runtime_contract_sha256": package_files["serving/runtime_contract.json"]["sha256"],
                            "harness_sha256": harness["sha256"]},
                 "image_declaration": {"record": {"refused": False, "present": True, "gated": True,
-                    "pinned": image, "resolved_reference": image, "requested": image,
+                    "pinned": image, "required": image, "reason": "pinned",
+                    "resolved_reference": image, "requested": image,
                     "repo_digests": [image], "local_id": image_id, "selection": {"configuration_sha256": config["sha256"]}}},
                 "native_libraries": {"/usr/lib/libtorch.so": "5" * 64, loaded_path: binary["sha256"]}}
         observer = {"library_sha256": binary["sha256"], "loaded_path": loaded_path, "analysis_source_sha256": analysis["sha256"]}
@@ -291,19 +293,20 @@ def native_intake(relation_fixture, joined):
     preflight["runtime"] = raw
     preflight["runtime_sha256"] = identity_sha256(raw)
     panel, receipt, trace = receipt_fixture(joined, complete=True)
+    route_identity = operator_route_identity(panel["phases"]["prefill"]["expected_route"])
     trace["capture"]["collector_library_sha256"] = raw["resource_collector"]["library_sha256"]
     receipt["resources"]["trace_sha256"] = identity_sha256(trace)
     context.update(prompt_tokens=1, source_sha256=panel["source_sha256"],
                    calibration_sha256=panel["calibration_sha256"],
                    runtime_sha256=identity_sha256(relation),
-                   operator_routes={panel["unit"]: {panel["format"]: "torch.mm"}})
+                   operator_routes={panel["unit"]: {panel["format"]: route_identity}})
     panel_ref, receipt_ref, trace_ref = (evidence.put(name, value) for name, value in (
         ("panel.json", panel), ("receipt.json", receipt), ("trace.json", trace)))
     measurement = OperatorMeasurement.from_dict({"method": "cuda_events", "samples_ms": [3., 1., 2.],
         "warmup_iterations": 4, "receipt_path": receipt_ref["path"], "receipt_sha256": receipt_ref["sha256"]})
     binding = RuntimeBinding.from_dict({"member_formats": {panel["unit"]: panel["format"]},
         "member_operator_identity_sha256": {panel["unit"]: panel["joint_operator_identity_sha256"]},
-        "member_shapes": {panel["unit"]: panel["shape"]}, "operator_route": "torch.mm"})
+        "member_shapes": {panel["unit"]: panel["shape"]}, "operator_route": route_identity})
     row = MeasuredRuntimeRow(panel["unit"], panel["format"], binding,
         RuntimeResources(prefill_ms=2., decode_ms=2., serialized_bytes=42, resident_bytes=64,
                          peak_scratch_bytes=128, activation_bytes=8, kv_bytes=0), measurement, measurement)
@@ -454,4 +457,162 @@ def test_relation_checks_device_and_execution_against_context(relation_fixture, 
     else:
         context["graph_mode"] = "full"
     with pytest.raises(RuntimePriceError, match="actual GPU platform|actual graph mode"):
+        relation_load(relation_fixture)
+
+
+# --------------------------------------------------------------------------- #
+# The three shapes a real Tessera run has and the synthetic fixture did not.
+# Each is the producer's own spelling, read off the #399 Qwen3-0.6B full-engine
+# capture and the frozen d403cc5a31 producer tree; the loader refused all three.
+# --------------------------------------------------------------------------- #
+
+def _records(evidence, relation):
+    """Every run's image-declaration record, with a writer back to evidence."""
+    for run in relation["runs"].values():
+        raw = evidence.get(run["runtime"])
+        base = raw if run["scope"] == "native_operator" else raw["base"]
+        yield run, raw, base["image_declaration"]["record"]
+
+
+def test_relation_reads_the_gated_reference_not_tesseras_packaged_pin(relation_fixture):
+    """A lane image is `required`; `pinned` names Tessera's packaged default.
+
+    `serving/runtime_image.resolve` sets `required = requested` and
+    `reason = "explicit_digest"` whenever the requested repository is not the
+    pinned one, which is every artifact served out of a lane image. The
+    #399 capture records exactly that, and reading `pinned` refused it.
+    """
+    evidence, relation, _ = relation_fixture
+    image = None
+    for run, raw, record in _records(evidence, relation):
+        image = record["requested"]
+        record["pinned"] = "vllm/vllm-openai@sha256:" + "9" * 64
+        record["reason"] = "explicit_digest"
+        evidence.replace(run["runtime"], raw)
+    admitted = relation_load(relation_fixture)
+    assert set(admitted["runs"]) == {"native", "engine"}
+    assert admitted["runs"]["engine"]["base"]["image_declaration"]["record"]["required"] == image
+
+
+@pytest.mark.parametrize("mutation", ["ungated_reason", "foreign_required", "pinned_reason_other_pin"])
+def test_relation_still_refuses_an_unproved_image_declaration(relation_fixture, mutation):
+    evidence, relation, _ = relation_fixture
+    for run, raw, record in _records(evidence, relation):
+        if mutation == "ungated_reason":
+            record["reason"] = "not_pinned_repository"
+        elif mutation == "foreign_required":
+            record["required"] = "example.invalid/other@sha256:" + "9" * 64
+        else:
+            record["pinned"] = "vllm/vllm-openai@sha256:" + "9" * 64
+        evidence.replace(run["runtime"], raw)
+    with pytest.raises(RuntimePriceError):
+        relation_load(relation_fixture)
+
+
+def test_full_engine_binds_its_configuration_without_a_launcher_selection(relation_fixture):
+    """The full-engine record carries `configuration_sha256`; its capture
+    stamps no `selection`, and the #399 report has none."""
+    evidence, relation, _ = relation_fixture
+    run = relation["runs"]["engine"]
+    raw = evidence.get(run["runtime"])
+    del raw["base"]["image_declaration"]["record"]["selection"]
+    evidence.replace(run["runtime"], raw)
+    assert relation_load(relation_fixture)["full_engine_run_id"] == "engine"
+
+
+@pytest.mark.parametrize("run_id,field,value", [
+    ("native", None, None),
+    ("engine", "configuration_sha256", "7" * 64),
+])
+def test_a_run_without_its_own_configuration_still_needs_the_launcher_selection(
+        relation_fixture, run_id, field, value):
+    """Dropping `selection` is admissible only where another binding exists.
+
+    The native record has no configuration of its own, so its launcher stamp
+    is the only one; the full-engine record keeps its own binding and a
+    disagreeing one is still refused.
+    """
+    evidence, relation, _ = relation_fixture
+    run = relation["runs"][run_id]
+    raw = evidence.get(run["runtime"])
+    base = raw if run["scope"] == "native_operator" else raw["base"]
+    if field is None:
+        del base["image_declaration"]["record"]["selection"]
+    else:
+        raw[field] = value
+    evidence.replace(run["runtime"], raw)
+    with pytest.raises(RuntimePriceError):
+        relation_load(relation_fixture)
+
+
+def _as_source_tree_install(evidence, relation, *, members=None, identity=None):
+    """Restate the installation the way the source-tree installer records it."""
+    from prismaquant.runtime_provenance import _source_tree_identity
+    _, archive = ArtifactReader(evidence.root).bytes(
+        relation["package_source"]["archive"], "fixture archive")
+    tree = {}
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as source:
+        for member in source:
+            if member.isfile():
+                tree[member.name] = source.extractfile(member).read()
+    computed, count = _source_tree_identity(tree)
+    for run in relation["runs"].values():
+        install = evidence.get(run["installation"])
+        install.pop("plugin_archive_sha256", None)
+        install["plugin_source_sha256"] = computed if identity is None else identity
+        install["plugin_source_members"] = count if members is None else members
+        evidence.replace(run["installation"], install)
+        package = evidence.get(run["post_package"])
+        package["installer_evidence_sha256"] = run["installation"]["sha256"]
+        evidence.replace(run["post_package"], package)
+    _refresh_embedded_package(evidence, relation)
+    return computed, count
+
+
+def _refresh_embedded_package(evidence, relation):
+    """The full-engine record embeds the loaded package; keep the copies equal."""
+    run = relation["runs"]["engine"]
+    raw = evidence.get(run["runtime"])
+    raw["loaded_package"] = evidence.get(run["post_package"])
+    evidence.replace(run["runtime"], raw)
+
+
+def test_a_source_tree_install_binds_through_its_recomputed_source_identity(relation_fixture):
+    """`full_engine_plugin_install.py` declares no archive digest.
+
+    It seals the tree as a SHA-256 over `{member: sha256}` for the build
+    metadata plus every file under `src/`, and records the count. Requiring
+    `plugin_archive_sha256` refused every source-tree install, which is how
+    the #399 capture and every native run beside it are installed.
+    """
+    evidence, relation, _ = relation_fixture
+    computed, count = _as_source_tree_install(evidence, relation)
+    admitted = relation_load(relation_fixture)
+    assert admitted["runs"]["native"]["common"]["plugin_source_sha256"] == computed
+    assert admitted["runs"]["native"]["common"]["plugin_archive_sha256"] is None
+    assert count == len(evidence.get(relation["runs"]["native"]["post_package"])["package_files"]) + 1
+
+
+@pytest.mark.parametrize("mutation", ["foreign_identity", "wrong_member_count", "both_bindings", "neither_binding"])
+def test_a_declared_plugin_source_is_recomputed_not_accepted(relation_fixture, mutation):
+    evidence, relation, _ = relation_fixture
+    if mutation == "foreign_identity":
+        _as_source_tree_install(evidence, relation, identity="7" * 64)
+    elif mutation == "wrong_member_count":
+        _as_source_tree_install(evidence, relation, members=9999)
+    else:
+        _as_source_tree_install(evidence, relation)
+        # Both runs share one installation artifact; mutate its bytes once.
+        install = evidence.get(relation["runs"]["native"]["installation"])
+        if mutation == "both_bindings":
+            install["plugin_archive_sha256"] = relation["package_source"]["archive"]["sha256"]
+        else:
+            install.pop("plugin_source_sha256", None)
+        for run in relation["runs"].values():
+            evidence.replace(run["installation"], install)
+            package = evidence.get(run["post_package"])
+            package["installer_evidence_sha256"] = run["installation"]["sha256"]
+            evidence.replace(run["post_package"], package)
+        _refresh_embedded_package(evidence, relation)
+    with pytest.raises(RuntimePriceError):
         relation_load(relation_fixture)

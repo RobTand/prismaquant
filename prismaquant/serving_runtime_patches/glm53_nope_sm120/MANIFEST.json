@@ -1,0 +1,83 @@
+{
+  "schema": "prismaquant.serving_runtime_patch_set.v1",
+  "name": "glm53_nope_sm120",
+  "purpose": "Make GLM-5.3 NoPE sparse MLA (qk_rope_head_dim=0) serve on the FLASHINFER_MLA_SPARSE_SM120 backend on GB10 / sm121.",
+  "base_image": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+  "base_vllm_version": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+  "base_flashinfer_version": "0.6.18",
+  "derived_image": null,
+  "derived_image_local_id": "sha256:2e886e5c745e5a7bbf8f1c93c5a5a0ab69c2e9fe0346863531fc87786d85c1ee",
+  "derived_image_local_id_read_by": "docker inspect glm53-nope-sm121:w7 --format '{{.Id}} {{.RepoDigests}}' on sparklina, 2026-09-13: .Id matches and .RepoDigests is EMPTY, which is why derived_image is null.",
+  "derived_image_local_tag": "glm53-nope-sm121:w7",
+  "derived_image_built_on": "sparklina",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "command": "docker build -t glm53-nope-sm121:w7 prismaquant/serving_runtime_patches/glm53_nope_sm120/",
+    "contents": "Python source patches only; no compile, no new wheels, no vendored serving runtime.",
+    "self_check": "The Dockerfile's final RUN re-imports the patched module and asserts every edit landed; the build fails if the base image moves under it."
+  },
+  "patches": [
+    {
+      "script": "patch_glm53_nope_sm120.py",
+      "sha256": "9a68fb9f398a8363653fd0454f32e9d08135b90918140751f92abf47336722c4",
+      "target_file": "vllm/v1/attention/backends/mla/flashinfer_mla_sparse_sm120.py",
+      "edits": [
+        {"tag": "init_is_nope_mla", "what": "self.is_nope_mla = self.qk_rope_head_dim == 0"},
+        {"tag": "forward_valid_counts", "what": "NoPE only: return_valid_counts=True, sparse_topk_capacity = topk_indices_physical.shape[1], empty rows pointed at slot 0, sparse_mla_top_k_lens passed"},
+        {"tag": "forward_seq_lens", "what": "seq_lens=None, max_seq_len=topk_tokens -> seq_lens=seq_lens_arg, max_seq_len=sparse_topk_capacity"},
+        {"tag": "forward_top_k", "what": "sparse_mla_top_k=attn_metadata.topk_tokens -> = sparse_topk_capacity"},
+        {"tag": "do_kv_cache_update", "what": "THE BLOCKER: NoPE override replacing k_pe with kv_c_normed.new_zeros((T, 1, 64)), because concat_and_cache_mla hardcodes pe_dim == 64 for the packed 656 B record"}
+      ]
+    },
+    {
+      "script": "patch_gb10_hardening.py",
+      "sha256": "ba085f41650fb08db9cc37a90e81491c7271be1dc17193fb80369ac8620b34b7",
+      "target_files": [
+        "vllm/model_executor/warmup/kernel_warmup.py",
+        "vllm/platforms/cuda.py"
+      ],
+      "edits": [
+        {"tag": "skip_flashinfer_autotune", "what": "FlashInfer sparse-MLA autotune warmup and fused_moe gemm autotune wedge rank 0 on SM121; skip both"},
+        {"tag": "pdl_gate_9_10", "what": "PDL lowering races the KDA state kernels on SM12x; gate PDL to major in (9, 10)"}
+      ]
+    }
+  ],
+  "not_the_fix": {
+    "claim": "The MiaAI-Lab 576-pad overlay is NOT this fix and porting it verbatim would be wrong for this base.",
+    "why": "This base's flashinfer already resolves d_qk=512 + arbitrary_fp32 to the native _MODEL_TYPE_GLM53_NOPE at topk 2176; the overlay's trim-to-2047 surgery would force 2048 where this kernel wants 2176. A dry run matched 11 of 14 of the overlay's string targets, which is the trap, not the endorsement.",
+    "measured": "2026-09-13, sparklina"
+  },
+  "qualification": {
+    "status": "measured_on_a_4_layer_stub",
+    "model": "/mnt/shared/models/GLM-5.3-Flash-4layer",
+    "model_layers": 4,
+    "full_model_layers": 45,
+    "dtype": "BF16",
+    "tensor_parallel": 1,
+    "modes_ready": ["eager", "cuda_graph"],
+    "checks_passed": [
+      "HTTP 200 and 32 greedy tokens",
+      "all logprobs finite",
+      "bit-identical on repeat within an arm",
+      "a 3649-token prompt (longer than index_topk=2048) also completed"
+    ],
+    "not_qualified": [
+      "The 45-layer body has NEVER been served with these patches. Four layers READY is not a served model.",
+      "Eager and CUDA-graph mode do not agree numerically: logprobs differ by up to 0.67 nats on the short prompt and the text differs on the 3649-token prompt. Cause not established (--enforce-eager also disables torch.compile, so capture is confounded, and the stub's logits are nearly flat). Principle 10 wants bit-exactness with capture off. Re-measure on a real body before any KL number is taken from this lane.",
+      "No numerical fidelity check against a BF16 reference exists for this stub, and none was attempted.",
+      "No executed-activation-contract table has been re-derived against the derived image. Under principle 14 a patched runtime's contract is NOT the pinned runtime's, and this manifest asserts nothing about what the derived image executes.",
+      "The derived image exists only as a local docker image on sparklina. derived_image is null because no registry manifest digest exists; derived_image_local_id is a docker config digest and cannot be docker-pulled."
+    ],
+    "serve_sizing": "The 4-layer stub's weights alone are 45.35 GiB, so --gpu-memory-utilization 0.55 was used. The full body needs its own sizing rule; 0.30 does not fit GLM.",
+    "measured_on": "sparklina (GB10, sm121)",
+    "measured_at": "2026-09-13"
+  },
+  "receipts": {
+    "report": "/home/rob/tmp/agents/goal2/w7-glm-overlay/REPORT.md",
+    "shared_copy": "/mnt/shared/glm53-competitor/miaai-gh/REPRO-2026-09-13.md",
+    "serve_logs": "/home/rob/tmp/agents/goal2/w7-glm-overlay/receipts/",
+    "issue": "https://github.com/RobTand/prismaquant/issues/543"
+  },
+  "attested": false,
+  "attested_note": "This patch set is RECORDED, not attested. Nothing here is derived from a machine-readable table the serving runtime publishes, so no gate may read it as a route claim (principle 14). It records what was built and what was measured, with the scope on its face."
+}

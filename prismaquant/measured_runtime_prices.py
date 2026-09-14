@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 import re
 import statistics
 from dataclasses import dataclass, replace
@@ -30,6 +31,18 @@ PROVENANCE_TABLE_SCHEMA = "prismaquant.measured_runtime_prices.v2"
 PROVENANCE_IDENTITY_KIND = "prismaquant.runtime_provenance_relation.v1"
 RESOURCE_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes", "resident_bytes",
                    "peak_scratch_bytes", "activation_bytes", "kv_bytes")
+#: The off-step half of the placement obligation
+#: `max(scalar_budget_bytes, non_step_transient_peak_bytes)`, the producer's
+#: frozen `PLACEMENT_OBLIGATION` contract string. The seven fields above
+#: price one engine step; this prices what the engine still holds while no step
+#: is running. The admission gate demands the obligation be recomputable and
+#: nothing consumed it, so the DP pruned against the smaller of two numbers
+#: whenever the off-step peak was the larger. Absent means "not priced", never
+#: zero: a maximum taken against a default would read as the other side having
+#: been checked. Optional on the wire so every table emitted before this field
+#: existed keeps its digest.
+OFF_STEP_FIELD = "non_step_transient_peak_bytes"
+RESOURCE_FIELDS_WITH_OFF_STEP = RESOURCE_FIELDS + (OFF_STEP_FIELD,)
 
 
 class RuntimePriceError(DispatchTableError):
@@ -200,6 +213,7 @@ class RuntimeResources:
     peak_scratch_bytes: int
     activation_bytes: int
     kv_bytes: int = 0
+    non_step_transient_peak_bytes: int | None = None
 
     def __post_init__(self):
         _number(self.prefill_ms, "prefill_ms")
@@ -207,13 +221,23 @@ class RuntimeResources:
             _number(self.decode_ms, "decode_ms")
         for name in RESOURCE_FIELDS[2:]:
             _integer(getattr(self, name), name)
+        if self.non_step_transient_peak_bytes is not None:
+            _integer(self.non_step_transient_peak_bytes, OFF_STEP_FIELD)
 
     def as_dict(self) -> dict:
-        return {field: getattr(self, field) for field in RESOURCE_FIELDS}
+        # The off-step field appears only when priced, so a table emitted
+        # before it existed re-emits byte-identically and keeps its digest.
+        payload = {field: getattr(self, field) for field in RESOURCE_FIELDS}
+        if self.non_step_transient_peak_bytes is not None:
+            payload[OFF_STEP_FIELD] = self.non_step_transient_peak_bytes
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping) -> RuntimeResources:
-        return cls(**_object(payload, RESOURCE_FIELDS, "resources"))
+        fields = (RESOURCE_FIELDS_WITH_OFF_STEP
+                  if isinstance(payload, Mapping) and OFF_STEP_FIELD in payload
+                  else RESOURCE_FIELDS)
+        return cls(**_object(payload, fields, "resources"))
 
 
 @dataclass(frozen=True)
@@ -294,6 +318,35 @@ class OperatorMeasurement:
                 "receipt_sha256": self.receipt_sha256}
 
 
+def bootstrap_sum(samples_per_row, *, draws: int, seed: int, offset_ms: float = 0.0) -> dict:
+    """The distribution of an operator sum under each row's own samples.
+
+    Every row is resampled with replacement from its OWN measured samples and
+    re-reduced by the same median :meth:`OperatorMeasurement.median_ms` reduced
+    the priced row by, so this describes only the dispersion the measurement
+    itself carries -- not run-to-run serving variance, and not a model.
+
+    ``offset_ms`` is a constant the caller adds to every draw (the fixed
+    whole-engine ``prefill_ms``, when a caller carries one). It shifts the
+    distribution and contributes no width: the report schema observes no
+    samples for the fixed term, so there is no dispersion to draw from and
+    inventing one would be a number with no measurement under it.
+    """
+    if draws < 1:
+        raise RuntimePriceError("bootstrap draws must be at least 1")
+    rng = random.Random(seed)
+    totals = []
+    for _ in range(draws):
+        totals.append(offset_ms + sum(statistics.median(rng.choices(samples, k=len(samples)))
+                                      for samples in samples_per_row))
+    totals.sort()
+    return {"draws": draws, "seed": seed,
+            "p2.5": totals[int(0.025 * draws)], "p50": totals[draws // 2],
+            "p97.5": totals[min(draws - 1, int(0.975 * draws))],
+            "offset_ms": float(offset_ms),
+            "samples_per_row": [len(samples) for samples in samples_per_row]}
+
+
 @dataclass(frozen=True)
 class MeasuredRuntimeRow:
     unit: str
@@ -328,7 +381,16 @@ class MeasuredRuntimeTable:
     source_path: str = ""
     runtime_provenance: Mapping | None = None
     native_receipt_bindings: tuple[Mapping, ...] = ()
-    producer_admitted: bool = False
+    #: Two gates answer two questions, so they get two answers. `admit_native_rows`
+    #: attests the per-row prices `build_runtime_resources` hands the DP;
+    #: `admit_fixed_resources` attests the whole-engine `fixed_resources` the
+    #: allocator adds once. A refusal on the second says nothing about the first,
+    #: and folding them into one flag threw a passing native attestation away.
+    native_rows_admitted: bool = False
+    fixed_resources_admitted: bool = False
+    #: Why `fixed_resources` is not admitted, verbatim from the gate, so the
+    #: consumer that needs it can say what is owed rather than that something is.
+    fixed_resources_refusal: str | None = None
 
     def as_dict(self) -> dict:
         return {"schema": PROVENANCE_TABLE_SCHEMA if self.runtime_provenance is not None else SCHEMA,
@@ -416,6 +478,9 @@ def parse_measured_runtime_table(payload: Mapping, *, expected_context: RuntimeC
             raise RuntimePriceError(f"{key}: resource times must equal medians of measured operator samples")
         if resources.kv_bytes:
             raise RuntimePriceError("KV belongs to fixed_resources, not per-unit rows")
+        if resources.non_step_transient_peak_bytes is not None:
+            raise RuntimePriceError("the off-step transient peak is one whole-engine obligation, "
+                                    "not a per-unit row price")
         rows.append(MeasuredRuntimeRow(unit, fmt, binding, resources, prefill, decode))
     provenance, receipt_bindings = None, ()
     if is_provenance:
@@ -465,16 +530,122 @@ def load_measured_runtime_table(path: str | Path, *, expected_context: RuntimeCo
             raise RuntimePriceError(f"measurement receipt SHA-256 mismatch: {receipt_path}")
     if table.runtime_provenance is not None:
         from .runtime_provenance import admit_runtime_provenance
-        admit_runtime_provenance(table)
-        table = replace(table, producer_admitted=True)
+        refusal = admit_runtime_provenance(table)
+        table = replace(table, native_rows_admitted=True,
+                        fixed_resources_admitted=refusal is None,
+                        fixed_resources_refusal=refusal)
     return table
+
+
+def admitted_fixed_resources(table: MeasuredRuntimeTable) -> RuntimeResources:
+    """The whole-engine fixed resources, or the reason they have no evidence.
+
+    The per-row prices and the fixed charge are attested by different gates.
+    Anything that adds `fixed_resources` to a device budget reads it through
+    here, so a fixed-resource refusal is spent where the fixed resources are
+    used rather than where the priced rows are.
+    """
+    if table.runtime_provenance is not None and not table.fixed_resources_admitted:
+        raise RuntimePriceError(
+            "v2 fixed runtime resources require full-engine producer admission: "
+            + (table.fixed_resources_refusal or "the loader performed no admission"))
+    return table.fixed_resources
+
+
+#: The one scope under which a table whose fixed charge is refused may still be
+#: read, and the only value ``--measured-runtime-fixed-scope`` accepts besides
+#: the default. It is asked for by name on the command line and stamped on the
+#: document it produces. A scope that switched itself on when the gate refused
+#: would be the silent default policy S1 forbids, so this one never does.
+SHAPE_ONLY_SCOPE = "shape-only"
+
+#: The fixed-resource scopes ``--measured-runtime-fixed-scope`` accepts.
+FIXED_RESOURCE_SCOPES = ("admitted", SHAPE_ONLY_SCOPE)
+
+
+def shape_only_fixed_resources(table: MeasuredRuntimeTable) -> tuple[RuntimeResources, dict]:
+    """The fixed charge for a consumer that reads none of the refused terms.
+
+    ``admit_fixed_resources`` refuses every v2 table at the producer's current
+    schema version, and the refusal names its own subject: *"the native-row and
+    full-engine transient charge boundary is not versioned, so no candidate
+    activation or scratch term may be compared to a priced row"* (PQ debt D37).
+    That is about the four device terms in
+    ``runtime_provenance.FIXED_TERM_FIELDS`` and about the off-step transient
+    peak. It is not about ``runtime_provenance.UNOBSERVED_FIXED_FIELDS`` -- the
+    three fields the report schema carries no observation for at all, which the
+    same gate refuses only when a table declares one nonzero.
+
+    So this splits the table's declared charge along the gate's own line:
+
+    * the four device terms and the off-step peak are **withheld**. They are
+      zeroed in the returned object and named in the stamp, and the caller has
+      already refused every path that could compare one to a budget. Nothing
+      may publish a device number built from them:
+      ``serve_constraints.evaluate_measured_assignment`` withholds
+      ``device_memory_bytes`` under this scope rather than publish a sum with a
+      term missing from it.
+    * ``UNOBSERVED_FIXED_FIELDS`` are **checked, not trusted**. This re-runs the
+      gate's own ``if value:`` rule here, because a prefill sweep does read
+      ``prefill_ms`` as the offset of its SLO axis.
+
+    Nothing here relaxes a gate. ``admit_fixed_resources`` still refuses, this
+    table is still not admitted, ``fixed_resources_admitted`` stays ``False``
+    everywhere it is read, and three refusals are *added* on paths that would
+    otherwise read what the gate refused.
+
+    Returns ``(resources, stamp)``. The stamp carries the gate's refusal
+    verbatim and is written onto whatever document the caller emits.
+    """
+    from .runtime_provenance import FIXED_TERM_FIELDS, UNOBSERVED_FIXED_FIELDS
+
+    if table.runtime_provenance is None:
+        raise RuntimePriceError(
+            f"the {SHAPE_ONLY_SCOPE} fixed-resource scope narrows a refusal this table never "
+            "received: a v1 table carries no runtime provenance and calls no admission gate")
+    if table.fixed_resources_admitted:
+        raise RuntimePriceError(
+            f"the {SHAPE_ONLY_SCOPE} fixed-resource scope withholds terms this table has "
+            "evidence for: its fixed resources are admitted, so read them")
+    fixed = table.fixed_resources
+    for field in UNOBSERVED_FIXED_FIELDS:
+        value = getattr(fixed, field)
+        if value:
+            raise RuntimePriceError(
+                f"the {SHAPE_ONLY_SCOPE} fixed-resource scope reads {field}, and the report "
+                f"carries no timing or serialized partition, so this table's fixed {field} "
+                f"({value}) has no evidence")
+    withheld = sorted([*FIXED_TERM_FIELDS.values(), OFF_STEP_FIELD])
+    stamp = {
+        "scope": SHAPE_ONLY_SCOPE,
+        "fixed_resources_admitted": False,
+        "fixed_resources_refusal": table.fixed_resources_refusal,
+        "withheld_terms": withheld,
+        "withheld_reason": ("the charge boundary between a native row and the full-engine "
+                            "partition is not versioned, so these terms have no admitted "
+                            "value; every consumer that would compare one to a budget is "
+                            "refused instead of being handed a number"),
+        "read_terms": {field: getattr(fixed, field) for field in UNOBSERVED_FIXED_FIELDS},
+        "read_terms_reason": ("the report schema carries no observation for these fields at "
+                              "all; the gate refuses them only when a table declares one "
+                              "nonzero, and that check is re-run here"),
+        "certifies_placement": False,
+    }
+    return replace(fixed, **{field: 0 for field in FIXED_TERM_FIELDS.values()},
+                   **{OFF_STEP_FIELD: None}), stamp
 
 
 def build_runtime_resources(table: MeasuredRuntimeTable, candidates: Mapping[str, list], *,
                             expected_bindings: Mapping[tuple[str, str], RuntimeBinding]) -> dict[tuple[str, str], RuntimeResources]:
     """Price every candidate exactly; no family fallback or unmeasured group sums."""
-    if table.runtime_provenance is not None and not table.producer_admitted:
-        raise RuntimePriceError("v2 runtime prices require producer admission through the loader")
+    # The native-row gate, not the fixed-resource one: this function reads
+    # `row.resources` for priced candidates and never touches
+    # `table.fixed_resources`, and `admit_native_rows` is what attests those
+    # rows against their receipts. The fixed charge is gated at its own
+    # consumer, `admitted_fixed_resources`.
+    if table.runtime_provenance is not None and not table.native_rows_admitted:
+        raise RuntimePriceError(
+            "v2 runtime prices require native-row producer admission through the loader")
     rows = {row.key: row for row in table.rows}
     result = {}
     for unit, options in sorted(candidates.items()):
