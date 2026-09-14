@@ -130,6 +130,7 @@ from .allocator_candidates import (
     expand_fused_sibling_assignment,
     expand_packed_group_assignment,
     packed_role_split_profile,
+    packed_serving_group_members,
     selection_serving_lane_provenance,
     serialized_candidate_payload,
     summarize_applicability_masks,
@@ -3152,6 +3153,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
 
     candidate_mask_records: list[dict] = []
     tessera_menu_report: dict = {}
+    # Packed-group members are intersected by format NAME before the DP sees
+    # them, so their menus must reach aggregation whole: a rung dominated for
+    # one member can still be on the group's own frontier. The
+    # post-aggregation reduction below reduces the super items exactly.
+    packed_members_deferred = (
+        packed_serving_group_members(stats, model_profile)
+        if not args.no_packed_aggregation else frozenset()
+    )
     candidates = build_candidates(
         stats, costs, specs_sorted, calibrated_gains,
         source_manifest=source_manifest,
@@ -3164,9 +3173,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         bit_precision=float(args.bit_precision),
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
+        defer_menu_reduction=packed_members_deferred,
         **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}),
     )
-    print(f"[alloc] candidates built for {len(candidates)} Linears")
+    print(f"[alloc] candidates built for {len(candidates)} Linears"
+          + (f" ({len(packed_members_deferred)} packed-group members keep "
+             "whole menus until aggregation)" if packed_members_deferred else ""))
 
     fixed_format_assignment: dict[str, str] = {}
     fixed_stats: dict[str, dict] = {}

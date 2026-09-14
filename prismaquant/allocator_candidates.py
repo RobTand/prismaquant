@@ -6,7 +6,7 @@ import math
 import operator
 import os
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -1951,8 +1951,14 @@ def reduce_continuous_menu(
     bit_precision: float | None = None,
     report: dict | None = None,
     preserve_runtime_frontier: bool = False,
+    defer_reduction: Collection[str] | None = None,
 ) -> dict[str, list[Candidate]]:
     """Shrink a continuous per-unit menu without changing the DP's answer.
+
+    ``defer_reduction`` names units whose menus pass through whole because a
+    later aggregation intersects them with other units' menus (see
+    :func:`packed_serving_group_members`). Dominance is exact only for a unit
+    the DP chooses independently.
 
     A Tessera family addresses a rate axis at a 1/256-bpp quantum, so one unit
     can carry thousands of legal rungs where a stock menu carries five. Two
@@ -1999,7 +2005,11 @@ def reduce_continuous_menu(
         for name in candidates
     )
     out: dict[str, list[Candidate]] = {}
+    deferred = frozenset(defer_reduction or ())
     for name, cands in candidates.items():
+        if name in deferred:
+            out[name] = cands
+            continue
         tessera = [c for c in cands if format_promotion_class(c.fmt) != c.fmt]
         if not tessera:
             out[name] = cands
@@ -2114,6 +2124,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      tessera_menu_report: dict | None = None,
                      context_by_unit: Mapping[str, ServingContext] | None = None,
                      preserve_runtime_frontier: bool = False,
+                     defer_menu_reduction: Collection[str] | None = None,
                      ) -> dict[str, list[Candidate]]:
     """Build runtime-legal format candidates for every measured Linear.
 
@@ -2425,6 +2436,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
         bit_precision=bit_precision,
         report=tessera_menu_report,
         preserve_runtime_frontier=preserve_runtime_frontier,
+        defer_reduction=defer_menu_reduction,
     )
     return out
 
@@ -3619,6 +3631,51 @@ def expand_fused_sibling_assignment(assignment: dict[str, str],
 _PACKED_GROUP_MARKER = ".__packed_serving__."
 
 
+def _packed_serving_groups(names, group_fn) -> tuple[dict[str, list[str]], list[str]]:
+    """Split ``names`` into packed groups of two or more members and the rest."""
+    grouped: dict[str, list[str]] = {}
+    ungrouped: list[str] = []
+    for name in names:
+        if _FUSED_SIBLING_MARKER in name or _PACKED_GROUP_MARKER in name:
+            ungrouped.append(name)
+            continue
+        try:
+            key = group_fn(name)
+        except PackedExpertRoleUnknown:
+            # An explicit "the profile cannot describe this unit" verdict must
+            # not be swallowed into "this row has no group" (see
+            # PackedExpertRoleUnknown).
+            raise
+        except Exception:
+            key = None
+        if key is None:
+            ungrouped.append(name)
+            continue
+        grouped.setdefault(key, []).append(name)
+
+    for key in list(grouped.keys()):
+        if len(grouped[key]) < 2:
+            ungrouped.extend(grouped.pop(key))
+    return grouped, ungrouped
+
+
+def packed_serving_group_members(names, profile) -> frozenset[str]:
+    """Names that ``aggregate_packed_serving_groups`` will fold into a group.
+
+    Their menus must not be reduced one member at a time. The aggregation
+    offers a group only the format names legal for EVERY member, so a rung
+    that is byte/loss-dominated for one member but on the group's summed
+    frontier would vanish from the intersection before the group is priced.
+    The allocator reduces the aggregated super items instead, which is exact.
+    """
+    group_fn = getattr(profile, "packed_expert_format_group", None) \
+        if profile is not None else None
+    if not callable(group_fn):
+        return frozenset()
+    grouped, _ = _packed_serving_groups(names, group_fn)
+    return frozenset(m for members in grouped.values() for m in members)
+
+
 def aggregate_packed_serving_groups(
     stats: dict,
     costs: dict,
@@ -3674,29 +3731,7 @@ def aggregate_packed_serving_groups(
 
     gains = calibrated_gains or {}
     ucb_z = _cost_ucb_z()
-    grouped: dict[str, list[str]] = {}
-    ungrouped: list[str] = []
-    for name in candidates:
-        if _FUSED_SIBLING_MARKER in name or _PACKED_GROUP_MARKER in name:
-            ungrouped.append(name)
-            continue
-        try:
-            key = group_fn(name)
-        except PackedExpertRoleUnknown:
-            # An explicit "the profile cannot describe this unit" verdict must
-            # not be swallowed into "this row has no group" (see
-            # PackedExpertRoleUnknown).
-            raise
-        except Exception:
-            key = None
-        if key is None:
-            ungrouped.append(name)
-            continue
-        grouped.setdefault(key, []).append(name)
-
-    for key in list(grouped.keys()):
-        if len(grouped[key]) < 2:
-            ungrouped.extend(grouped.pop(key))
+    grouped, ungrouped = _packed_serving_groups(candidates, group_fn)
 
     if not grouped:
         return stats, costs, candidates
