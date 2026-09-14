@@ -143,6 +143,9 @@ after memo warming. The wire read-ahead effect has not been isolated against
 the other changes. Candidate journal setup is for these selected 241 cells;
 full production journal setup and source-authentication startup remain
 unmeasured.
+Every sampled expert improved in every role. The first gate unit still took
+2.638→2.027 seconds, slower than most later gates near 1.6→1.0 seconds,
+so memo warming did not remove every first-unit charge.
 
 Phase-aligned one-second Netdata on both boxes recorded Sparky power at
 12.735 W mean over 43 baseline samples and 13.848 W over 27 candidate
@@ -169,11 +172,14 @@ The sealed merged cost declares routed populations: gate 12,096 units/
 65,552 measured cells, up the same, and down 12,096/65,664. Weighting each
 role's observed per-cell *steady* rate by those counts yields a diagnostic
 34,833→22,078 seconds of pure routed qualification, a modeled 12,754-second
-(3.54-hour) difference. It excludes the remaining dense units, changing
+(3.54-hour) difference. Leaving any one of the nine sampled experts out moves
+that modeled difference between 12,585 and 12,866 seconds; this is sensitivity
+to the selected experts, not a statistical confidence interval. It excludes
+the remaining dense units, changing
 per-layer H/content and cache state, full journal identity setup, source
 installs, startup, failures/retries and the later COST stage; it is not a
 full-preparation ETA or a shipping throughput guarantee. The complete local
-steady report and raw files are under
+`STEADY_EXPERT_REPORT.md` and raw files are under
 `/home/rob/dq-runs/glm-campaign-takeover-20260913/prepare-rewrite/steady-{baseline,candidate}/`.
 The submitted commands used the fixed benchmark checkout's wrapper:
 `python3 /home/rob/dq-runs/glm-campaign-takeover-20260913/prepare-rewrite/benchmark-code/tools/submit_bounded_ab.py baseline --expert-steady --label steady-baseline`
