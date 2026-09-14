@@ -77,7 +77,7 @@ def test_token_weighted_paired_difference_and_pass_report():
     assert report.mean_paired_loss_difference == pytest.approx(0.011)
     assert report.bootstrap_interval is not None
     assert report.bootstrap_interval.approximate is True
-    assert report.bootstrap_interval.method == "paired_manifest_cluster_bootstrap_token_weighted"
+    assert report.bootstrap_interval.method == "paired_manifest_cluster_bootstrap_token_weighted_sha256_counter_v1"
     assert report.coverage["complete_pair_count"] == 3
     assert report.coverage["resampling_cluster_count"] == 3
     assert report.verdict in {"pass", "inconclusive", "regression"}
@@ -98,6 +98,24 @@ def test_bootstrap_is_deterministic_for_the_explicit_seed():
 
     assert first.input_sha256 == second.input_sha256
     assert first.bootstrap_interval == second.bootstrap_interval
+
+
+@pytest.mark.parametrize("cluster_count", (2, 4))
+def test_power_of_two_clusters_can_repeat_within_a_bootstrap_replicate(cluster_count):
+    candidate = tuple(
+        SequenceLoss(str(index), 10, "complete",
+                     mean_loss=2.0 if index < cluster_count // 2 else 0.0)
+        for index in range(cluster_count)
+    )
+    incumbent = tuple(
+        SequenceLoss(str(index), 10, "complete", mean_loss=1.0)
+        for index in range(cluster_count)
+    )
+    report = validate_sampled_proposal(
+        candidate, incumbent, binding=_binding(), bootstrap=_config()
+    )
+    assert report.bootstrap_interval is not None
+    assert report.bootstrap_interval.lower < 0 < report.bootstrap_interval.upper
 
 
 def test_pairing_and_scored_token_mismatches_refuse():

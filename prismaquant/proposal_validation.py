@@ -9,6 +9,7 @@ an approximation and is deliberately not a Hessian/probe error estimate.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 import math
 from typing import Literal, Sequence
 
@@ -16,10 +17,10 @@ from .cost_stage_checkpoint import canonical_json_sha256
 
 
 SAMPLED_PROPOSAL_VALIDATION_SCHEMA = "prismaquant.sampled_proposal_validation.v1"
+BOOTSTRAP_SAMPLER = "sha256_counter_rejection_v1"
 SequenceStatus = Literal["complete", "failed", "timed_out"]
 ValidationVerdict = Literal["pass", "inconclusive", "regression"]
 _STATUSES = frozenset({"complete", "failed", "timed_out"})
-_MASK64 = (1 << 64) - 1
 
 
 @dataclass(frozen=True)
@@ -188,7 +189,7 @@ class BootstrapInterval:
     upper: float
     confidence: float
     approximate: bool = True
-    method: str = "paired_manifest_cluster_bootstrap_token_weighted"
+    method: str = "paired_manifest_cluster_bootstrap_token_weighted_sha256_counter_v1"
 
 
 @dataclass(frozen=True)
@@ -268,6 +269,7 @@ def validate_sampled_proposal(
     input_sha256 = canonical_json_sha256(
         {
             "schema": SAMPLED_PROPOSAL_VALIDATION_SCHEMA,
+            "bootstrap_sampler": BOOTSTRAP_SAMPLER,
             "binding": asdict(binding),
             "bootstrap": asdict(bootstrap),
             "candidate_rows": [asdict(candidates[key]) for key in ordered_ids],
@@ -485,15 +487,27 @@ def _bootstrap_differences(
     clusters: Sequence[Sequence[tuple[SequenceLoss, SequenceLoss]]],
     config: PairedBootstrapConfig,
 ) -> tuple[float, ...]:
-    """Use a fixed local LCG so bootstrap sampling is replayable everywhere."""
-    state = int(config.seed) & _MASK64
+    """Hash each draw independently for replayable, unbiased cluster choices.
+
+    Low bits of an LCG alternate for two clusters, making every two-draw
+    replicate contain both clusters and falsely collapsing its interval.
+    """
+    seed = str(config.seed).encode("ascii")
     count = len(clusters)
+    limit = (1 << 256) - ((1 << 256) % count)
     draws: list[float] = []
-    for _ in range(config.bootstrap_replicates):
+    for replicate in range(config.bootstrap_replicates):
         sampled: list[tuple[SequenceLoss, SequenceLoss]] = []
-        for _ in range(count):
-            state = (state * 6364136223846793005 + 1442695040888963407) & _MASK64
-            sampled.extend(clusters[state % count])
+        for draw in range(count):
+            digest = hashlib.sha256(
+                seed + b":" + str(replicate).encode("ascii") + b":" +
+                str(draw).encode("ascii")
+            ).digest()
+            value = int.from_bytes(digest, "big")
+            while value >= limit:
+                digest = hashlib.sha256(digest).digest()
+                value = int.from_bytes(digest, "big")
+            sampled.extend(clusters[value % count])
         draws.append(_token_weighted_difference(sampled))
     return tuple(draws)
 
