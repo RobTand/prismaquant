@@ -3163,24 +3163,7 @@ def aggregate_fused_siblings(
     # used to assert in a docstring (#132).
     from .tessera_menu import fused_module_licence as _fused_module_licence
     fused_licence = _fused_module_licence()
-    grouped: dict[str, list[str]] = {}
-    ungrouped: list[str] = []
-    for name in candidates:
-        if _FUSED_SIBLING_MARKER in name or _PACKED_GROUP_MARKER in name:
-            ungrouped.append(name)
-            continue
-        try:
-            key = profile.fused_sibling_group(name)
-        except Exception:
-            key = None
-        if key is None:
-            ungrouped.append(name)
-            continue
-        grouped.setdefault(key, []).append(name)
-
-    for key in list(grouped.keys()):
-        if len(grouped[key]) < 2:
-            ungrouped.extend(grouped.pop(key))
+    grouped, ungrouped = _fused_sibling_groups(candidates, profile)
 
     if not grouped:
         return stats, costs, candidates
@@ -3674,6 +3657,48 @@ def packed_serving_group_members(names, profile) -> frozenset[str]:
     if not callable(group_fn):
         return frozenset()
     grouped, _ = _packed_serving_groups(names, group_fn)
+    return frozenset(m for members in grouped.values() for m in members)
+
+
+def _fused_sibling_groups(names, profile) -> tuple[dict[str, list[str]], list[str]]:
+    """Group ``names`` the way ``aggregate_fused_siblings`` folds them.
+
+    A name already carrying a fused or packed-group marker is an aggregated
+    item and stays ungrouped, and a key with one member is not a group.
+    """
+    grouped: dict[str, list[str]] = {}
+    ungrouped: list[str] = []
+    for name in names:
+        if _FUSED_SIBLING_MARKER in name or _PACKED_GROUP_MARKER in name:
+            ungrouped.append(name)
+            continue
+        try:
+            key = profile.fused_sibling_group(name)
+        except Exception:
+            key = None
+        if key is None:
+            ungrouped.append(name)
+            continue
+        grouped.setdefault(key, []).append(name)
+
+    for key in list(grouped.keys()):
+        if len(grouped[key]) < 2:
+            ungrouped.extend(grouped.pop(key))
+    return grouped, ungrouped
+
+
+def fused_sibling_group_members(names, profile) -> frozenset[str]:
+    """Names that ``aggregate_fused_siblings`` will fold into a group.
+
+    The hazard :func:`packed_serving_group_members` describes applies here
+    too. The fold offers a group the format names every member carries, plus
+    per-member composites only where the pinned contract frees the rate per
+    member, so a rung reduced away for one member before the fold never reaches
+    the group's own frontier.
+    """
+    if profile is None:
+        return frozenset()
+    grouped, _ = _fused_sibling_groups(names, profile)
     return frozenset(m for members in grouped.values() for m in members)
 
 

@@ -46,19 +46,19 @@ def _profile():
     return SimpleNamespace(packed_expert_format_group=group)
 
 
-def _inputs():
+def _inputs(losses=_LOSS):
     stats = {
         name: {"n_params": _N_PARAMS, "h_trace": 1.0,
                "in_features": 20, "out_features": 40}
-        for name in _LOSS
+        for name in losses
     }
     costs = {name: {fmt: {"predicted_dloss": loss}
                     for fmt, loss in row.items()}
-             for name, row in _LOSS.items()}
+             for name, row in losses.items()}
     candidates = {
         name: [Candidate(fmt, 8.0 * _BYTES[fmt] / _N_PARAMS, _BYTES[fmt], loss)
                for fmt, loss in row.items()]
-        for name, row in _LOSS.items()
+        for name, row in losses.items()
     }
     specs = [fr.get_format(fmt) for fmt in (_LOW, _MID, _HIGH)]
     return stats, costs, candidates, specs
@@ -109,6 +109,68 @@ def test_singletons_and_ungrouped_rows_are_not_deferred():
     profile = SimpleNamespace(packed_expert_format_group=group)
     assert ac.packed_serving_group_members(lone, profile) == frozenset()
     assert ac.packed_serving_group_members(lone, None) == frozenset()
+
+
+# Fused siblings share the hazard: aggregate_fused_siblings intersects member
+# menus by NAME, and with no runtime contract pinned there are no per-member
+# composites to recover a rung pruned from one member.
+_SIBLINGS = ("layer.mlp.gate_proj", "layer.mlp.up_proj")
+_FUSED_LOSS = {
+    _SIBLINGS[0]: _LOSS[_MEMBERS[0]],
+    _SIBLINGS[1]: _LOSS[_MEMBERS[1]],
+    _DENSE: _LOSS[_DENSE],
+}
+
+
+def _fused_profile():
+    def group(name):
+        return "layer.mlp.gate_up_proj" if name in _SIBLINGS else None
+    return SimpleNamespace(fused_sibling_group=group)
+
+
+def _fused_menu(candidates):
+    (unit,) = [n for n in candidates if ac._FUSED_SIBLING_MARKER in n]
+    return {c.fmt for c in candidates[unit]}
+
+
+def _unpinned(monkeypatch):
+    import prismaquant.tessera_menu as tm
+    monkeypatch.setattr(tm, "fused_module_licence", lambda: None)
+
+
+def test_per_member_pruning_empties_the_fused_group_intersection(monkeypatch):
+    _unpinned(monkeypatch)
+    stats, costs, candidates, specs = _inputs(_FUSED_LOSS)
+    reduced = ac.reduce_continuous_menu(candidates, stats)
+    _, _, grouped = ac.aggregate_fused_siblings(
+        stats, costs, specs, reduced, _fused_profile())
+    assert _fused_menu(grouped) == {_LOW}
+
+
+def test_deferred_fused_siblings_keep_the_group_frontier(monkeypatch):
+    _unpinned(monkeypatch)
+    stats, costs, candidates, specs = _inputs(_FUSED_LOSS)
+    deferred = ac.fused_sibling_group_members(candidates, _fused_profile())
+    assert deferred == frozenset(_SIBLINGS)
+    reduced = ac.reduce_continuous_menu(
+        candidates, stats, defer_reduction=deferred)
+    for member in _SIBLINGS:
+        assert reduced[member] == candidates[member]
+    grouped_stats, _, grouped = ac.aggregate_fused_siblings(
+        stats, costs, specs, reduced, _fused_profile())
+    final = ac.reduce_continuous_menu(grouped, grouped_stats)
+    assert _fused_menu(final) == {_LOW, _MID, _HIGH}
+    (unit,) = [n for n in final if ac._FUSED_SIBLING_MARKER in n]
+    priced = {c.fmt: (c.memory_bytes, c.predicted_dloss) for c in final[unit]}
+    assert priced == {_LOW: (1664, 20.0), _MID: (2048, 11.0),
+                      _HIGH: (2176, 3.0)}
+
+
+def test_fused_singletons_and_markers_are_not_deferred():
+    names = {"layer.mlp.gate_proj": [], _DENSE: [],
+             f"layer.mlp{ac._FUSED_SIBLING_MARKER}x": []}
+    assert ac.fused_sibling_group_members(names, _fused_profile()) == frozenset()
+    assert ac.fused_sibling_group_members(names, None) == frozenset()
 
 
 def test_build_candidates_forwards_the_deferral(monkeypatch):
