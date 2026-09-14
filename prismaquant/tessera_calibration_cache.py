@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import stat
 import threading
+from types import MappingProxyType
 
 from .cost_stage_checkpoint import atomic_write_bytes, prepare_journal, write_unit
 
@@ -852,6 +853,16 @@ def _capture_manifest_stat(path):
     return _source_stat(observed)
 
 
+def _freeze_capture_metadata(value):
+    """Make the owner snapshot non-mutable without copying it per consumer."""
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_capture_metadata(item)
+                                 for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_capture_metadata(item) for item in value)
+    return value
+
+
 class CaptureMetadataOwner:
     """One hash-bound, bounded capture-manifest snapshot for selected rows.
 
@@ -888,7 +899,11 @@ class CaptureMetadataOwner:
         if identity != expected:
             raise RuntimeError('calibration capture identity, completeness or scope mismatch')
         self._stat = after
-        self._manifest = manifest
+        # No warm reader may alter an entry path, checksum, identity or unit
+        # geometry in the retained object.  The conversion happens once at
+        # ownership, rather than copying/serializing the large manifest per
+        # selected singleton.
+        self._manifest = _freeze_capture_metadata(manifest)
         self._identity_json = identity
         self._execution_digests = {}
 

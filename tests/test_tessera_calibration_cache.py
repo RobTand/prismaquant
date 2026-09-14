@@ -98,6 +98,17 @@ def test_capture_metadata_owner_refuses_manifest_or_identity_mutation(capture, m
         cc.open_capture_metadata(record['path'], expected_identity=changed,
                                  expected_sha256=record['sha256'])
 
+    sealed = owner.open(record['path'])
+    with pytest.raises(TypeError):
+        sealed['entries']['a']['sha256'] = '0'*64
+    with pytest.raises(TypeError):
+        sealed['identity']['units']['a'][0] = 999
+    # The failed in-memory writes leave the warm path bound to the original
+    # artifact identity rather than an altered cached entry record.
+    values, _ = cc.prefetch_capture(record['path'], census=census, names=['a'],
+        device='cpu', metadata_owner=owner, verified_load_policy=_verified_policy())
+    assert torch.equal(values[0]['a'], _acts['a'])
+
     manifest = Path(record['path'])
     manifest.write_bytes(manifest.read_bytes() + b' ')
     monkeypatch.setattr(cc, '_verified_capture_entry',
