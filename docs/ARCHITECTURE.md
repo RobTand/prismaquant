@@ -1,7 +1,19 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-14 · `claude/a4-merge-declared-coverage`. Stamps
+As of: 2026-09-14 · `claude/a4-union-census-tables`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-14, `claude/a4-union-census-tables`) for **the census
+table union** (#623). `tools/union_tessera_census_tables.py` writes one
+merged-table directory from two merged tables that priced disjoint cells of
+one sealed census — the same weights, Hessians, calibration draw, encoder and
+projection — so every downstream reader sees one campaign. Nothing is
+re-encoded, re-priced or interpolated: every sealed input except the menu
+must be equal per unit, a cell priced twice must agree on price and wire
+bytes (only the clock and anchor-batch-width fields may differ), wires are
+hardlinked never copied, and every check runs before the first byte is
+written (`--dry-run`). No pipeline default, stage or gate changes. Gate:
+`tests/test_union_tessera_census_tables.py`.
 
 Re-stamped (2026-09-14, `claude/a4-merge-declared-coverage`) for **the campaign
 merge expecting a declared partial coverage** (#621). `merge` still requires
@@ -10931,6 +10943,39 @@ whole-scope claim is `False`) and `provenance.coverage` records
 `excluded_rows` and the `reason`; a whole-scope merge writes no block. The
 population block is still rebuilt over the scope, so the unpriced units are
 counted there as before. Gate: `tests/test_tessera_campaign_merge_declared_coverage.py`.
+
+**Two merged tables over one census union into one table** (2026-09-14,
+#623). A census extension — a new rate band, a new family — is a second
+campaign over the same sealed census, pricing cells the first did not, and it
+merges into its own table directory. `tools/union_tessera_census_tables.py
+--table NAME=DIR --table NAME=DIR --out DIR` writes one directory of the same
+shape (`cost.pkl`, the sealed `cost.anchors.json` streamed byte-for-byte in
+the dispatcher's layout, the per-unit journal envelopes re-sealed under the
+union digest, hardlinked wires, one Hessian reference handoff, one
+`input_scales.safetensors`) that the allocator, `tessera_census_cache` and
+the reseal tool accept as one campaign. It refuses by name whatever is not
+equal: per-unit sealed inputs other than the menu, every top-level identity
+key but `settings` and `family_restriction` (the differing settings keys
+move under `identity.union.tables[<name>]`, inside the seal), the cost-table
+provenance keys without a merge rule, and a (unit, format) cell priced by
+both tables unless the rows agree after the capture-digest restamp, ignoring
+only the wall-clock fields and the anchor batch width they were divided by
+(`encode_seconds`, `encode_seconds_accounting`, an anchor's `seconds`,
+`encoding_batch_size` — the three the campaign derives from the batch at
+`tessera_campaign.py:1777-1780`). Two tables pricing different rungs of one
+family refuse, because their rate surfaces were fitted to different anchors
+and the tool does not refit. The Hessian handoff is not byte-identical across
+tables (its `capture_sha256` is computed over each campaign's unit set), so
+the union requires one table's descriptor to cover every unit, hardlinks it,
+and restamps every row to its digest — the restamp `merge_payloads` applies
+— before `assert_uniform_hessian_identity` runs on the planned table. A
+partial B table is read through `unit_selection.selected` and
+`provenance.coverage` (the block #621 writes). Nothing is copied: a failed
+`os.link` refuses. `--dry-run` runs every check and writes nothing;
+`--resume` continues into an `--out` whose files verify against the plan.
+Serial by design after profiling: the per-unit envelope load is
+`pickle.loads` plus checks under the GIL. Gate:
+`tests/test_union_tessera_census_tables.py`.
 
 **Row classes: placement is a property of the class, not of the spec**
 (2026-09-13, #542). A spec may declare a `classes` block, and a class owns the
