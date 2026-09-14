@@ -1,7 +1,52 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/553-joint-gate-ordering`. Stamps
+As of: 2026-09-13 · `fix/joint-prepare-source-auth-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `fix/joint-prepare-source-auth-20260913`) for
+**complete-capture source authentication at first streamed use in joint
+preparation**. The prior prepare called `capture_identity` without a source
+owner after model construction; that rehashed all 120 GLM source shards
+(642.65 GB) serially before qualifying its first cell, even though the
+streamed-model identity had already reused a matching full-shard digest cache.
+The canonical complete-capture SHA proof remains required. Prepare now binds
+the existing `CaptureSourceAuthentication` descriptor owner to the hash-bound
+capture before constructing the streamed model, and hands that owner to the
+streaming loader and `capture_identity`. If the existing
+`prepare/source-identity.json` validates against the complete checkpoint,
+semantic config and all six-field shard fingerprints, the owner compares each
+recorded full-file SHA to the canonical capture and adopts it for the same held
+source descriptor. Stat fences run before and after tensor reads and again at
+close; a changed source or an invalid present cache refuses rather than
+falling back to undeclared reads. With no cache, the owner fresh-hashes a shard
+on first use. Before publishing the prepared cache and completion, it
+authenticates any still untouched files and records which proof was cached or
+fresh, then closes after the runner shuts down. This changes read order and
+startup latency, not source bytes, calibration draw, rendered weights or
+numerical qualification rule. It makes no claim yet about full-run time or
+GPU saturation.
+
+The joint prepare data manifest now declares the existing identity cache as a
+head input when its recorded shard SHA values match the canonical capture and
+its fingerprints match the live source; in that case no fresh whole-shard SHA
+read is declared or performed. With no cache, it declares each whole-shard
+authentication read at first use: head/visual shards in `head`, body shards
+before their first layer's source extents, and unused auxiliary shards in
+`source-complete`. The checkpoint index determines placement; source metadata
+is declared in `head`. The later per-layer extents remain separately declared
+because the loader reads tensors after authenticating their shard.
+An optional plan binding `source_identity_cache: {path, sha256}` seeds the
+existing per-pass `source-identity.json` slot in a new output root, with an
+exact checksum and conflict refusal; it does not create a weight or activation
+cache. A cache proven on another host's NFS mount is not portable merely
+because the paths and SHA rows match: the current six-field fingerprint includes
+the host-local `st_dev`. Manifest construction and owner adoption therefore
+refuse it on a different mount device. A reuse request has a real host-local
+dependency until a separately qualified cross-host source proof exists.
+The active 2026-09-13 b59 request retains its original seal and behavior; a
+future request must rebuild its manifest from these source bytes. Gates:
+`tests/test_selected_source_authentication.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`, and the joint prepare tests.
 
 Re-stamped (2026-09-13, `claude/553-joint-gate-ordering`) for **capture-free
 identity gates before the head phase, and a qualification record that names its

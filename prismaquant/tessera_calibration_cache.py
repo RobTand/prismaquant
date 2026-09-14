@@ -199,7 +199,8 @@ class CaptureSourceAuthentication:
                     before = os.fstat(fd)
                     if not stat.S_ISREG(before.st_mode):
                         raise RuntimeError('authenticated source must be a regular file')
-                    state = dict(fd=fd, before=before, sha256=None, payload_reads=0,
+                    state = dict(fd=fd, before=before, sha256=None, sha256_source=None,
+                                 payload_reads=0,
                                  lock=threading.Lock())
                     self._check_file(name, state)
                     self._files[name] = state
@@ -233,6 +234,73 @@ class CaptureSourceAuthentication:
                 if digest != self._expected[name]:
                     raise RuntimeError(f'calibration source content differs from sealed capture: {name}')
                 state['sha256'] = digest
+                state['sha256_source'] = 'fresh_descriptor_sha256'
+
+    def adopt_streamed_identity_cache(self, cache_path):
+        """Reuse the existing full-checkpoint SHA proof for held source objects.
+
+        The existing cache validator checks the identity's content seal. We
+        also check its complete index map, every six-field fingerprint, and
+        each full-file SHA against the hash-bound canonical capture, then
+        open and hold those exact objects through all future reads. The live
+        runner's ``build_streamed_model_identity`` still checks its semantic
+        config and executable weight map before qualification. A changed file
+        (including a same-size edit with restored mtime) refuses; it is never
+        silently rehashed under a manifest that omitted the source read.
+        """
+        from .cost_streaming import (_local_checkpoint_shards,
+                                     _read_streamed_model_identity_cache)
+
+        path = Path(cache_path)
+        before = path.stat()
+        raw = path.read_bytes()
+        cached = json.loads(raw)
+        after = path.stat()
+        if _source_stat(before) != _source_stat(after):
+            raise RuntimeError('streamed source identity cache changed while reading')
+        checked_cache, identity = _read_streamed_model_identity_cache(
+            path, source_model=str(self.root))
+        if cached != checked_cache:
+            raise RuntimeError('streamed source identity cache changed while validating')
+        checkpoint_map, indexed_shards = _local_checkpoint_shards(self.root)
+        if (indexed_shards is None or checkpoint_map is None or
+                identity.get('checkpoint_weight_map') != checkpoint_map):
+            raise RuntimeError('streamed source proof differs from complete checkpoint index')
+        fingerprints = cached.get('fingerprints')
+        if not isinstance(fingerprints, list):
+            raise RuntimeError('streamed source identity cache has no shard fingerprints')
+        fp_by_path = {str(row.get('path')): row for row in fingerprints
+                      if isinstance(row, dict)}
+        shards = identity.get('shards')
+        if (not isinstance(shards, list) or set(fp_by_path) != {
+                str(row.get('path')) for row in shards} or
+                set(fp_by_path) != {str(item.resolve()) for item in indexed_shards}):
+            raise RuntimeError('streamed source identity cache shard coverage differs')
+        expected_shards = {name for name in self._source_files if name.endswith('.safetensors')}
+        candidate = []
+        for row in shards:
+            source_path = Path(str(row['path']))
+            name = source_path.name
+            if (source_path.resolve() != (self.root / name).resolve()
+                    or name not in expected_shards or row.get('sha256') != self._expected[name]):
+                raise RuntimeError(f'{name}: streamed source SHA differs from canonical capture')
+            fingerprint = fp_by_path[str(source_path)]
+            _, state = self._file(self.root / name)
+            observed = state['before']
+            if any(fingerprint.get(key) != getattr(observed, attribute)
+                   for key, attribute in (('device', 'st_dev'), ('inode', 'st_ino'),
+                                          ('size', 'st_size'), ('mtime_ns', 'st_mtime_ns'),
+                                          ('ctime_ns', 'st_ctime_ns'))):
+                raise RuntimeError(f'{name}: streamed source proof names another object')
+            candidate.append((name, state, row['sha256']))
+        if {name for name, _, _ in candidate} != expected_shards:
+            raise RuntimeError('streamed source proof omits canonical capture shards')
+        self.require_unchanged()
+        for _name, state, digest in candidate:
+            state['sha256'] = digest
+            state['sha256_source'] = 'verified_streamed_identity_cache'
+        self._adopted_cache_sha256 = hashlib.sha256(raw).hexdigest()
+        return len(candidate)
 
     def source_files(self, root, census_digest, names, producer_digests):
         canonical = json.loads(self._identity_json)
@@ -282,18 +350,45 @@ class CaptureSourceAuthentication:
 
     def receipt(self):
         self.require_unchanged()
+        adopted = getattr(self, '_adopted_cache_sha256', None) is not None
         verified = [{"name": name, "sha256": state['sha256'],
-            "bytes_hashed": state['before'].st_size, "payload_reads": state['payload_reads']}
+            "bytes_hashed": (state['before'].st_size if state['sha256_source'] ==
+                             'fresh_descriptor_sha256' else 0),
+            **({'proof_source': state['sha256_source']} if adopted else {}),
+            "payload_reads": state['payload_reads']}
             for name, state in sorted(self._files.items()) if state['sha256'] is not None]
         return dict(schema='prismaquant.selected_source_authentication.v1',
             capture_manifest_sha256=self.manifest_sha256,
             census_sha256=json.loads(self._identity_json)['census_sha256'],
-            authentication='fresh SHA256 through held read-only source descriptors',
+            authentication=('cached full-file SHA256 bound to held source descriptors'
+                            if adopted else
+                            'fresh SHA256 through held read-only source descriptors'),
+            **({'streamed_identity_cache_sha256': self._adopted_cache_sha256}
+               if adopted else {}),
             verified_files=verified,
             payload_bytes_hashed=sum(row['bytes_hashed'] for row in verified
                                      if row['name'].endswith('.safetensors')),
             metadata_only_shards=sorted(name for name, state in self._files.items()
                 if name.endswith('.safetensors') and state['sha256'] is None))
+
+    def authenticate_complete_source(self):
+        """Finish a complete-capture consumer's full source-byte proof.
+
+        Selected consumers need only authenticate payload shards they read.
+        A joint preparation promises the complete canonical capture identity,
+        including auxiliary or MTP shards its streamed model never installs.
+        Its first-use readers have already authenticated their shards through
+        this owner; finish only the untouched files before publishing a
+        prepared artifact. Every hash uses the same held descriptor and stat
+        fences as a selected read, so a replaced or changed source refuses.
+        """
+        for name in sorted(self._expected):
+            _, state = self._file(self.root / name)
+            self._authenticate(name, state)
+        receipt = self.receipt()
+        if {row['name'] for row in receipt['verified_files']} != set(self._expected):
+            raise RuntimeError('complete capture source authentication omitted a file')
+        return receipt
 
     def close(self):
         with self._lock:

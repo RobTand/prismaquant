@@ -677,6 +677,117 @@ def _campaign_roster(campaign_plan_path: str) -> list:
     return sorted(names)
 
 
+def _joint_source_authentication_schedule(model_path: str, roster: list):
+    """Full-shard SHA at the first streamed source read, by actual layer.
+
+    Joint preparation owns a complete canonical capture descriptor owner.
+    The streaming loader hashes a shard through that owner before its first
+    head, visual or body tensor read; completion authenticates only shards no
+    streamed tensor needed. The index is the source map the loader consumes,
+    so no filename or arbitrary shard-number heuristic decides the phase.
+    """
+    model = os.path.abspath(model_path)
+    index = _read_json(os.path.join(model, "model.safetensors.index.json"),
+                       "joint source checkpoint index")
+    weight_map = index.get("weight_map")
+    if not isinstance(weight_map, dict) or not weight_map:
+        raise SystemExit("joint source checkpoint index has no weight_map")
+    layer_of = _layer_index_of(roster)
+    layers = set(layer_of.values())
+    prefix = LAYER_QNAME_RE.match(roster[0]).group("prefix")
+    base = prefix.removesuffix("layers.")
+    head_prefixes = (base + "embed_tokens.", base + "norm.",
+                     base + "rotary_emb.", "lm_head.", "model.visual.")
+    first_use = {}
+    for tensor, filename in weight_map.items():
+        if (not isinstance(tensor, str) or not isinstance(filename, str)
+                or os.path.basename(filename) != filename):
+            raise SystemExit("joint source checkpoint index has an unsafe tensor or shard")
+        match = LAYER_QNAME_RE.match(tensor)
+        if match is not None and match.group("prefix") == prefix:
+            layer = int(match.group("index"))
+            if layer not in layers:
+                raise SystemExit(f"joint source checkpoint names unplanned layer {layer}")
+            phase = layer
+        elif tensor.startswith(head_prefixes):
+            phase = -1  # head/visual are materialized before layer 0
+        else:
+            phase = None  # e.g. an auxiliary tower the runner never installs
+        prior = first_use.get(filename)
+        if prior is None or phase == -1 or (phase is not None and phase < prior):
+            first_use[filename] = phase
+        elif filename not in first_use:
+            first_use[filename] = None
+    sizes = _dir_sizes(model)
+    schedule = {"metadata": [], "head": [],
+                "layers": {layer: [] for layer in layers}, "completion": []}
+    for filename, size in sorted(sizes.items()):
+        if filename.endswith((".json", ".model", ".txt", ".jinja", ".py")):
+            schedule["metadata"].append((os.path.join(model, filename), size))
+    for filename, phase in sorted(first_use.items()):
+        size = sizes.get(filename)
+        if not size:
+            raise SystemExit(f"joint source shard is absent: {model}/{filename}")
+        row = (os.path.join(model, filename), size)
+        if phase == -1:
+            schedule["head"].append(row)
+        elif phase is None:
+            schedule["completion"].append(row)
+        else:
+            schedule["layers"][phase].append(row)
+    return schedule
+
+
+def _joint_source_identity_cache_for_manifest(plan: dict, schedule: dict):
+    """Declare a verified existing cache instead of a conditional 643 GB read.
+
+    This is only the torch-free submission gate: execution replays the full
+    streamed-model validator, including semantic config and the complete
+    checkpoint map, before it adopts a proof. A changed cache or source file
+    therefore refuses rather than falling back to reads the manifest omitted.
+    """
+    binding = plan.get("source_identity_cache")
+    cache = (_bound(binding, "source identity cache") if binding is not None else
+             os.path.join(plan["output_root"], "prepare", "source-identity.json"))
+    if not os.path.isfile(to_pool(cache)):
+        return None
+    if binding is not None and sha256_file(to_pool(cache)) != binding["sha256"]:
+        raise SystemExit("bound joint source identity cache checksum changed")
+    record = _read_json(to_pool(cache), "joint source identity cache")
+    if (record.get("schema") != "prismaquant.streamed_model.identity_cache.v1"
+            or record.get("source") != plan["model"]):
+        raise SystemExit("joint source identity cache is foreign or malformed")
+    identity = record.get("identity")
+    fingerprints = record.get("fingerprints")
+    if not isinstance(identity, dict) or not isinstance(fingerprints, list):
+        raise SystemExit("joint source identity cache has no full-shard proof")
+    by_path = {row.get("path"): row for row in fingerprints if isinstance(row, dict)}
+    shards = identity.get("shards")
+    expected = {path for path, _size in (
+        schedule["head"] + schedule["completion"] +
+        [row for rows in schedule["layers"].values() for row in rows])}
+    if (not isinstance(shards, list) or len(by_path) != len(fingerprints)
+            or {row.get("path") for row in shards} != expected
+            or set(by_path) != expected):
+        raise SystemExit("joint source identity cache lacks exact shard coverage")
+    capture = _read_json(_bound(plan["canonical_capture"], "canonical capture"),
+                         "canonical capture")
+    source_files = (capture.get("identity") or {}).get("source_files")
+    if not isinstance(source_files, dict):
+        raise SystemExit("canonical capture has no source-file SHA roster")
+    for row in shards:
+        path = row["path"]
+        fingerprint = by_path[path]
+        stat = os.stat(to_pool(path))
+        if (row.get("sha256") != source_files.get(os.path.basename(path))
+                or any(fingerprint.get(key) != getattr(stat, attribute)
+                       for key, attribute in (('device', 'st_dev'), ('inode', 'st_ino'),
+                                              ('size', 'st_size'), ('mtime_ns', 'st_mtime_ns'),
+                                              ('ctime_ns', 'st_ctime_ns')))):
+            raise SystemExit(f"joint source identity cache no longer proves {path}")
+    return cache
+
+
 def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
                 prepared: str | None):
     """The head phase: everything read before the first layer installs.
@@ -775,6 +886,13 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     that reason, not in the layer that later verifies them; the shard itself
     is left out, because it does not exist when the manifest is built.
 
+    Preparation authenticates each whole source shard by SHA256 through a
+    held descriptor on its first streamed tensor read. Head and visual shards
+    go in the head; body shards go before the first layer that loads one of
+    their tensors; shards the runner never installs go in a final phase. The
+    index supplies this exact tensor-to-shard map. The later source extents
+    are separate reads, not a substitute for the whole-shard authentication.
+
     ``run`` hashes every cell's wire and render up front
     (``load_measured_anchor_input`` with ``verify_payloads=True``), so it
     carries a ``hash`` phase between the head and the layers, in the hashing
@@ -855,7 +973,28 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             synthesized_wire_bytes += wire_bytes
             track.add(wire, 0, wire_bytes, "wires")
 
+    source_schedule = None
+    source_cache = None
+    if command == "prepare":
+        source_schedule = _joint_source_authentication_schedule(plan["model"], roster)
+        source_cache = _joint_source_identity_cache_for_manifest(plan, source_schedule)
+        for path, size in source_schedule["metadata"]:
+            track.add(path, 0, size, "source_metadata")
+        if source_cache is not None:
+            track.add(source_cache, 0, _required_size(source_cache,
+                "joint source identity cache"), "source_identity_cache")
+        else:
+            for path, size in source_schedule["head"]:
+                track.add(path, 0, size, "source_authentication")
+
     if command == "run":
+        binding = plan.get("source_identity_cache")
+        if binding is not None:
+            cache_path = _bound(binding, "source identity cache")
+            if sha256_file(to_pool(cache_path)) != binding["sha256"]:
+                raise SystemExit("bound joint source identity cache checksum changed")
+            track.add(cache_path, 0, _required_size(cache_path,
+                "source identity cache"), "source_identity_cache")
         track.begin("hash")
         for name in roster:
             for fmt, wire, wire_bytes in cells[name]:
@@ -868,6 +1007,9 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     for layer in layers:
         names = sorted(by_layer[layer])
         track.begin(f"layer-{layer}")
+        if source_schedule is not None and source_cache is None:
+            for path, size in source_schedule["layers"][layer]:
+                track.add(path, 0, size, "source_authentication")
         for path, offset, length in campaign.weight_extents_for(names):
             track.add(path, offset, length, "source_extents")
         if command == "run":
@@ -888,6 +1030,11 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
                 _add_render(track, owners[name], render_sizes, name, fmt)
                 track.add(wire, 0, wire_bytes, "wires")
     track.end()
+    if source_schedule is not None and source_cache is None and source_schedule["completion"]:
+        track.begin("source-complete")
+        for path, size in source_schedule["completion"]:
+            track.add(path, 0, size, "source_authentication")
+        track.end()
     if not track.counts.get("renders"):
         # The row caches hold one render per measured rung and the pass opens
         # every one of them. A read set with none of them in it is the same
@@ -909,6 +1056,9 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         "renders_absent": len(absent),
         "renders_absent_first": absent[0] if absent else None,
         "synthesized_render_wire_bytes": synthesized_wire_bytes,
+        "source_authentication_mode": ("not_applicable" if command == "run" else
+            "verified_streamed_identity_cache" if source_cache is not None else
+            "fresh_descriptor_sha256"),
         "sha256_present": False,
         "sha256_absent_reason": SHA256_ABSENT_REASON,
         "counts": track.counts,

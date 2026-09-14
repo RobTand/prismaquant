@@ -321,6 +321,101 @@ def test_a_layer_phase_reads_source_then_capture_then_render_then_wire(
     assert manifest["annotations"]["capture_window"] == "per_unit"
 
 
+def test_prepare_manifest_traces_full_source_sha_at_first_use_and_completion(
+    scratch, shared_mount,
+):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+
+    def add_shard(filename, tensor):
+        header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                      "data_offsets": [0, 2]}}).encode()
+        path = model / filename
+        path.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+        index["weight_map"][tensor] = filename
+        return path
+
+    head = add_shard("head.safetensors", "lm_head.weight")
+    untouched = add_shard("mtp.safetensors", "model.mtp.weight")
+    index_path.write_text(json.dumps(index))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    phases = manifest["annotations"]["phases"]
+    assert [phase["name"] for phase in phases] == [
+        "head", "layer-0", "layer-1", "source-complete"]
+
+    def entries(phase):
+        start = next((phases[i - 1]["cumulative_bytes"]
+                      for i, item in enumerate(phases) if item["name"] == phase and i), 0)
+        end = next(item["cumulative_bytes"] for item in phases if item["name"] == phase)
+        seen = 0
+        selected = []
+        for entry in manifest["entries"]:
+            if start <= seen < end:
+                selected.append(entry)
+            seen += entry["bytes"]
+        return selected
+
+    def whole_shard(phase, path):
+        return any(row["path"] == str(path) and row["offset"] == 0
+                   and row["bytes"] == path.stat().st_size for row in entries(phase))
+
+    assert whole_shard("head", head)
+    assert whole_shard("layer-0", fixture["shard"])
+    assert not whole_shard("layer-1", fixture["shard"])
+    assert whole_shard("source-complete", untouched)
+    assert str(index_path) in _paths(manifest, "head")
+    assert manifest["annotations"]["counts"]["source_authentication"] == 3
+
+
+def test_prepare_manifest_uses_exact_cached_source_sha_and_refuses_mutation(
+    scratch, shared_mount,
+):
+    fixture = _workspace(scratch)
+    source = fixture["shard"]
+    stat = source.stat()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    capture_manifest = fixture["captures"] / "capture_manifest.json"
+    capture = json.loads(capture_manifest.read_text())
+    capture["identity"] = {"source_files": {source.name: digest}}
+    capture_manifest.write_text(json.dumps(capture))
+    cache = scratch / "source-identity.json"
+    cache.write_text(json.dumps({
+        "schema": "prismaquant.streamed_model.identity_cache.v1",
+        "source": str(fixture["model"]),
+        "identity": {"shards": [{"path": str(source), "sha256": digest}]},
+        "fingerprints": [{"path": str(source), "device": stat.st_dev,
+                          "inode": stat.st_ino, "size": stat.st_size,
+                          "mtime_ns": stat.st_mtime_ns,
+                          "ctime_ns": stat.st_ctime_ns}],
+    }))
+    plan = json.loads(fixture["plan"].read_text())
+    plan["source_identity_cache"] = {"path": str(cache),
+                                      "sha256": hashlib.sha256(cache.read_bytes()).hexdigest()}
+    fixture["plan"].write_text(json.dumps(plan))
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert manifest["annotations"]["source_authentication_mode"] == (
+        "verified_streamed_identity_cache")
+    assert manifest["annotations"]["counts"]["source_identity_cache"] == 1
+    assert manifest["annotations"]["counts"].get("source_authentication", 0) == 0
+    assert str(cache) in _paths(manifest, "head")
+
+    before = source.stat()
+    with source.open("r+b") as handle:
+        handle.seek(-1, 2)
+        last = handle.read(1)
+        handle.seek(-1, 2)
+        handle.write(bytes([last[0] ^ 1]))
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    with pytest.raises(SystemExit, match="no longer proves"):
+        glm_data_manifests.build_joint_pass_manifest(
+            str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+
+
 def test_a_rung_the_campaign_never_measured_contributes_no_wire(
     scratch, shared_mount,
 ):
@@ -711,6 +806,13 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_46_phases(scratch):
         pytest.skip(
             "the campaign merge has not published the checkpoint unit shards "
             f"yet: {parts}")
+    source_cache = Path(payload["output_root"]) / "prepare/source-identity.json"
+    if source_cache.is_file():
+        cached = json.loads(source_cache.read_text())
+        first = cached["fingerprints"][0]
+        if first["device"] != Path(first["path"]).stat().st_dev:
+            pytest.skip("the full-source SHA cache is local to another mount "
+                        "device; this host cannot submit its reuse request")
 
     manifest = glm_data_manifests.build_joint_pass_manifest(
         str(plan), command="prepare",
