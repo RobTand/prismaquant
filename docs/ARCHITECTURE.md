@@ -1,9 +1,9 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `codex/arc-prewarm-prepare-20260913`. Stamps
+As of: 2026-09-13 · `codex/arc-prewarm-prepare-final-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
 
-Re-stamped (2026-09-13, `codex/arc-prewarm-prepare-20260913`) for the
+Re-stamped (2026-09-13, `codex/arc-prewarm-prepare-final-20260913`) for the
 **joint prepare ARC frontier**. The post-campaign manifest keeps its exact
 ordered entries and divides windowed qualification at complete-unit
 boundaries, targeting at most 32 GiB of newly declared bytes per phase.
