@@ -100,6 +100,24 @@ def test_bootstrap_is_deterministic_for_the_explicit_seed():
     assert first.bootstrap_interval == second.bootstrap_interval
 
 
+@pytest.mark.parametrize("cluster_count", (2, 4))
+def test_power_of_two_clusters_can_repeat_within_a_bootstrap_replicate(cluster_count):
+    candidate = tuple(
+        SequenceLoss(str(index), 10, "complete",
+                     mean_loss=2.0 if index < cluster_count // 2 else 0.0)
+        for index in range(cluster_count)
+    )
+    incumbent = tuple(
+        SequenceLoss(str(index), 10, "complete", mean_loss=1.0)
+        for index in range(cluster_count)
+    )
+    report = validate_sampled_proposal(
+        candidate, incumbent, binding=_binding(), bootstrap=_config()
+    )
+    assert report.bootstrap_interval is not None
+    assert report.bootstrap_interval.lower < 0 < report.bootstrap_interval.upper
+
+
 def test_pairing_and_scored_token_mismatches_refuse():
     candidate, incumbent = _rows()
     with pytest.raises(ValueError, match="identical sequence IDs"):
