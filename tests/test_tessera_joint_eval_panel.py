@@ -54,10 +54,42 @@ def test_pilot_handoff_and_allocator_refuse_even_observed_zero():
     assert observation_status({'tokens': 0, 'calls': 0}) == 'unknown_unobserved'
     assert observation_status({'tokens': 0, 'calls': 1}) == 'unknown_unobserved'
     assert observation_status({'tokens': 3, 'calls': 1}) == 'observed'
-    with pytest.raises(CostCurrencyError, match='UNKNOWN'):
+    with pytest.raises(CostCurrencyError, match='separate sampled-proposal path'):
         require_run_currency(joint)
-    with pytest.raises(ValueError, match='UNKNOWN'):
+    with pytest.raises(ValueError, match='separate sampled-proposal path'):
         bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
+
+
+@pytest.mark.parametrize('alias', ['dotdot', 'symlink'])
+def test_plan_generator_refuses_alias_of_original_output_root(tmp_path, monkeypatch, alias):
+    import json
+    from prismaquant import tessera_joint_eval_panel as panel
+
+    baseline = tmp_path / 'original-output'
+    baseline.mkdir()
+    base_plan = tmp_path / 'base-plan.json'
+    base_plan.write_text(json.dumps({
+        'schema': 'prismaquant.tessera_joint_aura.plan.v1',
+        'output_root': str(baseline),
+        'execution': {'n_calib_samples': 4, 'calib_seqlen': 2,
+                      'boundary_storage': {'directory': str(baseline / 'exact-boundaries')}},
+        'calibration_input': {'path': '/fixture/tokens.safetensors', 'sha256': 'a'*64},
+    }))
+    monkeypatch.setattr(panel, 'load_calibration_input', lambda *_args, **_kwargs:
+                        (torch.arange(8, dtype=torch.int64).reshape(4, 2),
+                         {'artifact_sha256': 'a'*64}))
+    if alias == 'dotdot':
+        requested = baseline / '..' / baseline.name
+    else:
+        requested = tmp_path / 'alias'
+        requested.symlink_to(baseline, target_is_directory=True)
+    assert str(requested) != str(baseline)
+    assert requested.resolve() == baseline.resolve()
+    output = tmp_path / 'pilot-plan.json'
+    with pytest.raises(ValueError, match='distinct output root'):
+        panel.main(['--base-plan', str(base_plan), '--output', str(output),
+                    '--output-root', str(requested), '--seed', '7', '--size', '2'])
+    assert not output.exists()
 
 
 def test_observer_distinguishes_invoked_exact_zero_from_unobserved():

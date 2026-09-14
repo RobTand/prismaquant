@@ -45,7 +45,7 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
 
     _require('joint_eval' not in joint.get('provenance', {}).get('tessera_joint_anchors', {})
              and 'joint_eval' not in joint.get('provenance', {}),
-             'diagnostic joint evaluation has UNKNOWN unobserved units; allocation/export requires validated promotion')
+             'diagnostic joint evaluation requires a separate sampled-proposal path or validated promotion; ordinary allocation/export remains closed')
 
     validate_cost_payload(joint)
     validate_probe_payload(joint)
@@ -189,7 +189,7 @@ def handoff(*, joint_binding, plan_binding, output_path):
     plan = json.loads(_read_bound(plan_binding, 'joint plan'))
     _same(plan.get('schema'), SCHEMA, 'joint plan schema')
     _require('joint_eval' not in plan,
-             'diagnostic joint evaluation has UNKNOWN unobserved units; allocation/export requires validated promotion')
+             'diagnostic joint evaluation requires a separate sampled-proposal path or validated promotion; ordinary allocation/export remains closed')
     evidence = joint['provenance']['tessera_joint_anchors']
     _same(evidence['plan_sha256'], plan_binding['sha256'], 'joint plan binding')
     _same(evidence['inputs'], plan['inputs'], 'joint plan original inputs')

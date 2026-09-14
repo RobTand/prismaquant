@@ -102,7 +102,8 @@ def main(argv=None):
                                     seed=args.seed, size=args.size)
     # The old output root is sealed to its 512-window plan: a caller must
     # provide a new destination before publishing a pilot plan.
-    if not args.output_root or args.output_root == plan['output_root']:
+    if (not args.output_root or Path(args.output_root).resolve() ==
+            Path(plan['output_root']).resolve()):
         raise ValueError('diagnostic joint evaluation requires a distinct output root')
     plan['output_root'] = args.output_root
     storage = execution.get('boundary_storage')

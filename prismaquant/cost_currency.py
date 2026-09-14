@@ -178,8 +178,8 @@ def _require_joint_run_currency(cost_data, costs):
             or any(isinstance(entry, Mapping) and 'joint_eval_status' in entry
                    for rows in costs.values() if isinstance(rows, Mapping)
                    for entry in rows.values())):
-        raise CostCurrencyError('diagnostic joint evaluation has UNKNOWN unobserved units; '
-                                'ordinary allocation/export requires validated promotion')
+        raise CostCurrencyError('diagnostic joint evaluation requires a separate sampled-proposal '
+                                'path or validated promotion; ordinary allocation/export remains closed')
     rows = [(unit, fmt, entry) for unit, per_unit in costs.items()
             if isinstance(per_unit, Mapping)
             for fmt, entry in per_unit.items()
