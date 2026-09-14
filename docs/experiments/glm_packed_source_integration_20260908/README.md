@@ -1,8 +1,9 @@
 # Packed GLM profile and frozen producer source — 2026-09-08
 
-The opt-in `glm_packed_research_sm121` profile restricts routed GLM logical
-experts and aggregate stacks to legal Tessera E4M3 K1 rungs or plain BF16,
-while retaining the inherited dense menu and the existing candidate gates.
+The opt-in `glm_packed_research_sm121` profile preserves the full routed GLM
+research allocation menu: legal Tessera E4M3 K1, BF16 K1 and E2M1 K2 rungs,
+plus plain BF16. It retains the inherited dense menu and candidate gates. This
+does not qualify routed E2M1 or per-expert mixed-rate serving.
 The shared family filter and its CPU evidence are described in
 [the profile report](../glm_packed_research_profile_20260908.md).
 

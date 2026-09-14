@@ -1117,6 +1117,9 @@ def _operator_window_policy(config):
                  'operator-window campaign requires explicit exact boundary storage')
         _require(policy['max_render_resident_bytes'] <= config['max_render_bytes'],
                  'operator-window PWC cap exceeds campaign render admission')
+    from .joint_retained_window_plan import normalize_retained_execution
+    normalize_retained_execution(config['execution'].get('retained_operator_windows'),
+        operator_windows=policy, boundary_storage=config['execution'].get('boundary_storage'))
     return policy
 
 
@@ -1313,7 +1316,7 @@ def _restores_activation_scale_env(function):
 
 @_restores_activation_scale_env
 def execute(command, config, *, plan_sha256, prepared=None, resume=False,
-            source_transition=None, prewarm_manifest=None):
+            source_transition=None, prewarm_manifest=None, cost_read_manifest=None, plan_path=None):
     """Execute one admitted preparation or one dependent cost action."""
     if source_transition is not None:
         from .joint_aura_source_transition import load_transition
@@ -1353,6 +1356,23 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         from .joint_prewarm_phases import load_prepare_frontier
         prewarm_phase_starts = load_prepare_frontier(
             prewarm_manifest["path"], prewarm_manifest["sha256"], plan_sha256)
+    cost_schedule = None
+    if cost_read_manifest is not None:
+        _require(command == 'run' and execution.get('retained_operator_windows') is not None
+                 and prepared is not None and plan_path is not None,
+                 'COST read schedule requires a retained run and exact plan/prepared paths')
+        from .joint_cost_read_schedule import load_joint_cost_read_schedule
+        from .joint_retained_window_plan import RetainedWindowBudget
+        retained = execution['retained_operator_windows']
+        cost_schedule = load_joint_cost_read_schedule(
+            manifest_path=cost_read_manifest['path'], manifest_sha256=cost_read_manifest['sha256'],
+            manifest_bytes=cost_read_manifest['bytes'], plan_path=str(plan_path), plan_sha256=plan_sha256,
+            prepared_path=prepared['path'], prepared_sha256=prepared['sha256'],
+            retained_budget=RetainedWindowBudget.from_dict(retained['budget']),
+            source_owner_cap_bytes=retained['source_reserve_bytes'],
+            n_probes=execution['n_probes'],
+            progress_callback=lambda phase, units: _pb_commit(units, phase))
+        cost_schedule.enter_phase('cost_setup', 0)
     identity_cache_path = _seed_source_identity_cache(config, root)
     result = {"schema": "prismaquant.tessera_joint_aura.execution.v1", "command": command,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
@@ -1444,6 +1464,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 config, data, resource_check=(None if qualification_guard is None
                                               else qualification_guard.check))
         source_prefetch = _source_prefetch(config)
+        if cost_schedule is not None:
+            cost_schedule.enter_phase('cost_head', 0)
         runner = build_streamed_causal_lm(config["model"], device=torch.device("cuda"),
             dtype=torch.bfloat16, offload_folder=str(root / "offload"),
             profile=detect_profile(config["model"]), attn_implementation="eager",
@@ -1555,6 +1577,9 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 n_probes=execution["n_probes"], probe_microbatch=execution["probe_microbatch"],
                 seed_base=execution["seed_base"], token_scope="all", temperature=1.0,
                 production_cache=cache, require_production_cache=True, joint_activation=True,
+                cost_read_schedule=cost_schedule,
+                prepared_render_identities={pair: cache.metadata["verified_cells"][pair]["rendered_weight"]
+                                            for pair in data.cells},
                 joint_projection_backend=projection_backend,
                 boundary_storage=execution.get("boundary_storage"),
                 **({"operator_windows": operator_policy} if operator_policy is not None else {}),
@@ -1563,6 +1588,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 min_free_gib=config["min_free_gib"], formats_by_qname=data.formats_by_qname,
                 checkpoint_dir=Path(config["output_root"]) / "checkpoints", resume=resume,
                 model_identity=source, profile=runner.profile,
+                **({'retained_operator_windows': execution['retained_operator_windows']}
+                   if execution.get('retained_operator_windows') is not None else {}),
                 checkpoint_identity_extra={"tessera_joint_anchor_plan_sha256": plan_sha256,
                     "prepared_anchor_sha256": prepared["sha256"], "calibration_input": calibration,
                     **({'joint_eval': eval_panel} if eval_panel is not None else {}),
@@ -1718,6 +1745,9 @@ def main(argv=None):
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--prewarm-manifest", type=Path)
     parser.add_argument("--prewarm-manifest-sha256")
+    parser.add_argument("--cost-read-manifest", type=Path)
+    parser.add_argument("--cost-read-manifest-sha256")
+    parser.add_argument("--cost-read-manifest-bytes", type=int)
     parser.add_argument("--source-transition", type=Path)
     parser.add_argument("--source-transition-sha256")
     parser.add_argument("--units", help="synthesize: lo:hi over the sorted census roster. "
@@ -1740,6 +1770,11 @@ def main(argv=None):
         parser.error("--source-transition and --source-transition-sha256 are required together")
     if bool(args.prepared) != bool(args.prepared_sha256):
         parser.error("--prepared and --prepared-sha256 are required together")
+    cost_descriptor = (args.cost_read_manifest, args.cost_read_manifest_sha256, args.cost_read_manifest_bytes)
+    if any(value is not None for value in cost_descriptor) and not all(value is not None for value in cost_descriptor):
+        parser.error('all three --cost-read-manifest descriptor fields are required together')
+    if args.cost_read_manifest is not None and args.command != 'run':
+        parser.error('--cost-read-manifest applies only to run')
     if bool(args.prewarm_manifest) != bool(args.prewarm_manifest_sha256):
         parser.error("--prewarm-manifest and --prewarm-manifest-sha256 are required together")
     # ``synthesize`` constructs no lease and loads no backend: it decodes wires
@@ -1758,6 +1793,9 @@ def main(argv=None):
             "units_read", "cells", "renders_synthesized_now", "seconds", "render_origins")}))
         return 0
     result = execute(args.command, config, plan_sha256=args.plan_sha256,
+        **({'cost_read_manifest': {'path': str(args.cost_read_manifest),
+             'sha256': args.cost_read_manifest_sha256, 'bytes': args.cost_read_manifest_bytes},
+             'plan_path': str(args.plan)} if args.cost_read_manifest is not None else {}),
         prepared=None if args.prepared is None else {"path": str(args.prepared), "sha256": args.prepared_sha256},
         resume=args.resume,
         **({"prewarm_manifest": {"path": str(args.prewarm_manifest),

@@ -10,6 +10,84 @@ Re-stamped (2026-09-14, `claude/glm-first-artifact-census-wires`) for
 post-aggregation pass reduces the group item instead (§ "Reducing the menu for
 the DP"). Gate: `tests/test_allocator_packed_group_menu_reduction.py`.
 
+Re-stamped (2026-09-13, `codex/joint-retained-window-plan-20260914`) for
+**combined retained-render COST admission** (#602). The opt-in scalar planner
+charges full metadata/runtime allowances, actual source owners, one operator
+statistics plane, retained PWC archive storage, bounded serialized/read-page
+buffers, exact-boundary/auxiliary state, workspace and the guard safety margin.
+A logical BF16 geometry forecast is not an archive-storage admission receipt.
+Oversized targets, unexpected live baselines and excessive replay-window counts
+refuse; the existing probe-major mode remains unchanged. PWC remains the sole
+render owner, with bounded loader quanta and checked release between quanta.
+
+Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
+`glm_packed_research_sm121` routed allocation menu. It now preserves the
+complete legal research families `TESSERA_E4M3_K1`, `TESSERA_BF16_K1`, and
+`TESSERA_E2M1_K2`, alongside plain BF16 source passthrough, so an allocator
+does not silently replace or discard a selected research format before the
+later route gate sees it. The profile is still emulation-only and has no export
+lane: this change does not promote a production format, attest a TP world size,
+or qualify routed E2M1/per-expert mixed-rate execution. The research-selected
+route's E4M3/BF16 semantics and its separate source/cache/geometry/runtime
+checks remain required. Gate: `tests/test_glm_packed_research_profile.py`.
+
+Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
+GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer has always
+forced eager execution and already carries the selected stock MP topology,
+including `moe_backend`; it now accepts the explicit stock-vLLM `CUSTOM`
+attention backend and a JSON-object kernel configuration, then records both in
+`runtime_binding.engine_kwargs`. The one-window hook qualification and the
+25-window replay compare that complete binding, so a hook qualified under one
+attention/backend/kernel selection cannot authorize another. This is a
+measurement-tool contract only: `CUSTOM` remains an installed-plugin choice,
+the NoPE environment/configuration and actual worker backend still have to be
+observed at runtime, and no serving default, format menu, cache, export route
+or ship gate changes.
+
+The sealed benchmark is 25 context-2048 windows from four document clusters;
+fit overlap and document membership remain unverified, so it is not described
+as held out. No full 45-layer TP2 load, generation, quality, speed, or runtime
+qualification is established by this opt-in wiring. Gate:
+`tests/test_glm_tr3_full_vocab.py`.
+
+Re-stamped (2026-09-14, `codex/cost-historical-wire-592`) for
+**COST consuming prepared renders with historical wire provenance**. PREPARE
+still authenticates each wire against its actual source/H/settings, compares
+its decode with the BF16 PWC render, and records both identities. COST binds
+the completed preparation, exact campaign roster, source/model/calibration,
+reader and projection backend. It consumes only source/calibration and the
+prepared rendered weights: each serialized render is SHA-256 checked against
+PREPARE on its necessary bounded PWC load before its tensor reaches AURA.
+Resident reads retain their tensor/file guard; eviction requires a verified
+reload. Missing renders refuse, with no synthesis into the prepared campaign.
+
+COST no longer rereads wire bodies merely to authenticate files it does not
+consume. Its result and joint-anchor provenance explicitly say
+`historical_prepared_identity; current_bytes_require_export_gate`, matching
+the existing allocation handoff. Wire changes do not change COST's measured
+rendered operator. The original recorded wire SHA, prepared receipt and
+all numerical fields remain bound and unmodified. This does not attest current
+wire bytes: the selected-cache builder checks selected dense/expert wire
+bytes against those original records, and Tessera's exporter independently
+rederives source/H/settings and calls `verify_cached_unit` on consumed wires,
+including its research selected MoE path. A changed selected wire refuses;
+production format and serving qualification gates remain in force.
+
+The PB run data manifest consequently has no whole-roster hash phase or wire
+body entries; renders remain listed by layer. This inherited ordering is
+coverage, not a complete temporal COST schedule: forward capture, reverse
+probe/window execution and repeated source extents require the COST planner's
+phase handoff. The current manifest deduplicates repeated `(path, offset)`
+entries and only annotates reread bytes; removing unused wire reads does not
+resolve that scheduling limitation. The strict general
+intake default still verifies all payloads. This avoids the declared full-wire
+intake pass and the already removed render intake pass, not actual PWC loads
+or export verification. No full-campaign elapsed-time or energy improvement
+is claimed without paired profiles and both-box Netdata. Gates:
+`tests/test_tessera_joint_aura.py`, `tests/test_pwc_file_load_receipts.py`,
+`tests/test_tessera_selected_cache.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`.
+
 Re-stamped (2026-09-13, `codex/sampled-stack-proposal-20260913`) for an
 **opt-in diagnostic whole-stack proposal adapter** (#597). The scoped
 `sampled_joint_panel` binding authenticates pilot token rows against the
@@ -29,7 +107,7 @@ uncertainty, not sequence uncertainty or a full-domain optimum. An explicit
 research-menu argument keeps measured writable candidate prices separate from
 the serving target's later qualification; it does not rewrite the original
 joint operator identity. The GLM source campaign has no serving-target scope,
-so a distinct target must be named before reading the large pilot for an
+so a distinct target must be named before reading the large pilot for a
 validation config, and that target's equivalence remains pending the separate
 Tessera research-byte exporter's source/cache/reader/runtime and plan/export
 route gates. The selected-cache bridge authenticates current measured wires
@@ -73,47 +151,36 @@ identity and must reevaluate the entire selected union: old scalar prices are
 not additive blocks. The panel changes no format, default, serving lane, or ship gate.
 Gates: `tests/test_tessera_joint_eval_panel.py`
 and the existing joint-window/allocation suites.
-Re-stamped (2026-09-14, `codex/cost-historical-wire-592`) for
-**COST consuming prepared renders with historical wire provenance**. PREPARE
-still authenticates each wire against its actual source/H/settings, compares
-its decode with the BF16 PWC render, and records both identities. COST binds
-the completed preparation, exact campaign roster, source/model/calibration,
-reader and projection backend. It consumes only source/calibration and the
-prepared rendered weights: each serialized render is SHA-256 checked against
-PREPARE on its necessary bounded PWC load before its tensor reaches AURA.
-Resident reads retain their tensor/file guard; eviction requires a verified
-reload. Missing renders refuse, with no synthesis into the prepared campaign.
 
-COST no longer rereads wire bodies merely to authenticate files it does not
-consume. Its result and joint-anchor provenance explicitly say
-`historical_prepared_identity; current_bytes_require_export_gate`, matching
-the existing allocation handoff. Wire changes do not change COST's measured
-rendered operator. The original recorded wire SHA, prepared receipt and
-all numerical fields remain bound and unmodified. This does not attest current
-wire bytes: the selected-cache builder checks selected dense/expert wire
-bytes against those original records, and Tessera's exporter independently
-rederives source/H/settings and calls `verify_cached_unit` on consumed wires,
-including its research selected MoE path. A changed selected wire refuses;
-production format and serving qualification gates remain in force.
+Re-stamped (2026-09-13, `codex/pwc-retained-window-20260913`) for
+opt-in retained PWC candidate windows. `retained_key_costs` inspects only
+selected concrete keys and reports incoming uncompressed Torch archive storage
+and serialized file bytes without loading tensors. `plan_retained_window`
+preflights the complete selected roster, including unrelated resident backing
+storages and the LRU cap, then returns key-only prefetch quanta bounded by CPU
+workers and the concurrent serialized-buffer budget. `retained_window` repeats
+preflight, uses the existing PWC prefetch pool for each quantum, and holds all
+selected tensors in the same cache for repeated probes. The total persistent
+storage cap applies throughout; actual loaded storages are checked after each
+quantum and before consumer entry. Existing file-read stat/SHA receipts,
+resident-only lookups, CB identity checks, checked page advice and selected
+disk-owner cleanup apply through the entire lifetime. Defaults and the earlier
+single-quantum `resident_window` contract remain unchanged. CPU gates are in
+`tests/test_pwc_resident_windows.py`; this is a memory-lifetime contract, not
+a speed or fit measurement.
 
-The PB run data manifest consequently has no whole-roster hash phase or wire
-body entries; renders remain listed by layer. This inherited ordering is
-coverage, not a complete temporal COST schedule: forward capture, reverse
-probe/window execution and repeated source extents require the COST planner's
-phase handoff. The current manifest deduplicates repeated `(path, offset)`
-entries and only annotates reread bytes; removing unused wire reads does not
-resolve that scheduling limitation. The strict general
-intake default still verifies all payloads. This avoids the declared full-wire
-intake pass and the already removed render intake pass, not actual PWC loads
-or export verification. No full-campaign elapsed-time or energy improvement
-is claimed without paired profiles and both-box Netdata. Gates:
-`tests/test_tessera_joint_aura.py`, `tests/test_pwc_file_load_receipts.py`,
-`tests/test_tessera_selected_cache.py`,
-`tests/test_glm_joint_data_manifest_at_submit.py`.
+The retained lifetime advises each selected regular file after its last
+prefetch quantum, before loading later quanta. This limits avoidable page-cache
+co-residency, but advice alone does not prove physical reclaim. An optional
+main-thread `before_load_quantum` callback receives current PWC resident bytes,
+remaining incoming archive storage bytes, and the next quantum's serialized
+file bytes; a host memory guard can refuse the next load before entering the
+prefetch pool. A refusal releases all selected disk-backed tensor owners.
 Re-stamped (2026-09-13, `codex/arc-prewarm-prepare-final-20260913`) for the
 **joint prepare ARC frontier**. The post-campaign manifest keeps its exact
 ordered entries and divides windowed qualification at complete-unit
-boundaries, targeting at most 32 GiB of newly declared bytes per phase.
+boundaries, targeting 32 GiB of newly declared bytes per phase; the last
+complete unit may exceed that target.
 `submit-joint prepare` seals these names as PB progress phases only for a
 fresh journal and a reusable, verified source identity proof. The container
 checks the manifest's sealed digest and plan identity before running; it
@@ -252,8 +319,8 @@ The full joint manifest exceeds the old 64 MiB plain-JSON limit;
 `submit-joint` now writes one deterministic `.json.gz` member. The deployed PB
 reader admits up to 64 MiB stored / 512 MiB expanded and seals those
 compressed bytes in the action key.
-The active 2026-09-13 b59 request retains its original seal and behavior; a
-future request must rebuild its manifest from these source bytes. Gates:
+The withdrawn 2026-09-13 b59 request retains its original seal and evidence; a
+new request must rebuild its manifest from these source bytes. Gates:
 `tests/test_selected_source_authentication.py`,
 `tests/test_glm_joint_data_manifest_at_submit.py`, and the joint prepare tests.
 
@@ -15995,3 +16062,24 @@ research questions rather than debt: deriving the GPTQ damp constant from the we
 XLAYER Q4 LFM2.5 routing-channel measurement. The remaining ~34 — mostly PrismaSCOUT-era items
 that died with their subsystem — are enumerated with verdicts in
 `scratch/doc-consolidation-2026-07-30/census_handovers.md` §POSSIBLY-STILL-OPEN.
+
+The retained COST path can consume PREPARE's already measured `rendered_weight`
+identity together with its required serialized-file SHA. It validates exact
+roster, shape, dtype and byte length before checkpoint admission; the existing
+PWC file reader authenticates actual bytes, and the operator checks the resident
+tensor against that identity before projection. This avoids a separate identity
+read of every render. Callers without those prepared proofs retain the explicit
+legacy identity scan.
+
+An optional sealed PB V2 read manifest records unique input extents and ordered
+references for setup/head, forward source capture, tail, and reverse source and
+retained windows. COST's boundaries are produced online, so PREPARE activation
+capture payloads are absent. Exact boundary artifact readback remains owned by
+`StreamedBoundaryArtifacts`; generated outputs are outside the static PB input
+read plan. The manifest descriptor is SHA/length-bound in the submitted command,
+separate from the persistent measurement plan. Before capture, runtime validates
+its full target roster and independently validated completed checkpoint set.
+Partial resume preserves every original window ID and only filters completed
+members. Each retained window publishes the existing per-unit checkpoints after
+all probes, then reports durable progress; source/window phase entry precedes
+its necessary reads. No application prewarmer or dispatcher is introduced.

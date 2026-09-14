@@ -998,12 +998,14 @@ class StreamingContext:
                 raise RuntimeError(f'capture successor {index} has no resident prefetch')
         return settled
 
-    def source_residency_snapshot(self, layer_indices):
+    def source_residency_snapshot(self, layer_indices, *, include_head=False):
         """Describe existing layer owners without retaining any tensor views.
 
         Pending prefetches remain pending; inspection never waits, claims a
         future, refreshes LRU state or loads a missing source layer.
         """
+        if type(include_head) is not bool:
+            raise ValueError('source residency include_head must be boolean')
         owners, all_storages = [], {}
 
         def describe(layer, owner, tensors, **extra):
@@ -1022,6 +1024,18 @@ class StreamingContext:
                 storages=[dict(device=device, pointer=pointer, bytes=size)
                           for (device, pointer), size in sorted(storages.items())], **extra))
 
+        if include_head:
+            base_prefix = self.layers_prefix.removesuffix('.layers.')
+            if self.layers_prefix == 'layers.':
+                base_prefix = ''
+            prefixes = _head_prefixes(self.model, base_prefix)
+            tensors = [tensor for name, tensor in
+                       [*self.model.named_parameters(remove_duplicate=False),
+                        *self.model.named_buffers(remove_duplicate=False)]
+                       if any(name.startswith(prefix) for prefix in prefixes)]
+            if not tensors or any(tensor.is_meta for tensor in tensors):
+                raise RuntimeError('source residency head owner is missing or remains on meta')
+            describe(None, 'always_resident_head', tensors)
         for layer in layer_indices:
             if type(layer) is not int or not 0 <= layer < self.num_layers:
                 raise ValueError('source residency layer is outside the model')

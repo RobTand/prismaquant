@@ -2,10 +2,11 @@
 
 Explicit selection of `glm_packed_research_sm121` restricts GLM routed logical
 expert units and aggregate stack names matching `(^|\.)mlp\.experts(\.|$)` to
-legal `TESSERA_E4M3_K1` rungs and plain `BF16`. Tessera E2M1, Tessera BF16-body
-and unrelated scalar formats are removed by the actual candidate filter before
-allocation or stack grouping. Dense and shared-expert names retain the inherited
-`tessera_research_sm121` policy.
+the complete research menu: legal `TESSERA_E4M3_K1`, `TESSERA_BF16_K1`, and
+`TESSERA_E2M1_K2` rungs plus plain `BF16`. The candidate filter preserves that
+allocation domain before stack grouping. Dense and shared-expert names retain
+the inherited `tessera_research_sm121` policy. This does not qualify routed
+E2M1 or per-expert mixed-rate serving; those remain separately gated.
 
 The shared `ServingFormatRule.allow_tessera_families` field unions with exact
 `allow_formats`; explicit denials still win. Family declarations must be
