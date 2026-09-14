@@ -239,6 +239,67 @@ def is_packed_expert_param_qname(qname: str) -> bool:
     return bool(_PACKED_EXPERT_PARAM_RE.search(str(qname)))
 
 
+class _WindowTrackedWeights(dict):
+    """Index resident owners while retaining the public cache's dict API.
+
+    The large disk-backed roster needs one initial walk. Later window checks
+    inspect only live tensor keys, including values directly assigned by a
+    caller. Storage identities themselves are recomputed at every boundary so
+    views, aliases and changed tensor backing cannot undercount memory.
+    """
+
+    def __init__(self, values=()):
+        super().__init__(values)
+        self.tensor_keys = {key for key, value in self.items()
+                            if isinstance(value, torch.Tensor)}
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        if isinstance(value, torch.Tensor):
+            self.tensor_keys.add(key)
+        else:
+            self.tensor_keys.discard(key)
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self.tensor_keys.discard(key)
+
+    def update(self, *args, **kwargs):
+        for key, value in dict(*args, **kwargs).items():
+            self[key] = value
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def pop(self, key, *default):
+        value = super().pop(key, *default)
+        self.tensor_keys.discard(key)
+        return value
+
+    def popitem(self):
+        key, value = super().popitem()
+        self.tensor_keys.discard(key)
+        return key, value
+
+    def clear(self):
+        super().clear()
+        self.tensor_keys.clear()
+
+    @classmethod
+    def fromkeys(cls, keys, value=None):
+        return cls(dict.fromkeys(keys, value))
+
+    def __reduce__(self):
+        # The index is process-local bookkeeping, regenerated on demand.
+        return dict, (dict(self),)
+
+
 @dataclass
 class ProductionWeightCache:
     """Dict-like cache of production-faithful dequantized weights.
@@ -287,6 +348,7 @@ class ProductionWeightCache:
     _cb_verified_keys: set[tuple[str, str]] | None = None
     _file_load_max_bytes: int = 0
     _file_load_receipts: dict | None = None
+    _expected_file_sha256: dict[tuple[str, str], str] | None = None
 
     def __post_init__(self) -> None:
         # Normalize to ``activation_max_abs`` if a caller used the legacy
@@ -425,11 +487,12 @@ class ProductionWeightCache:
         return (tensor.device, storage.data_ptr()), storage.nbytes()
 
     def _window_resident_storages(self):
+        if not isinstance(self.weights, _WindowTrackedWeights):
+            self.weights = _WindowTrackedWeights(self.weights)
         storages = {}
-        for value in self.weights.values():
-            if isinstance(value, torch.Tensor):
-                identity, nbytes = self._window_storage(value)
-                storages[identity] = max(storages.get(identity, 0), nbytes)
+        for key in self.weights.tensor_keys:
+            identity, nbytes = self._window_storage(self.weights[key])
+            storages[identity] = max(storages.get(identity, 0), nbytes)
         return storages
 
     @staticmethod
@@ -932,10 +995,40 @@ class ProductionWeightCache:
             raise RuntimeError("PWC file receipt capture requires unloaded entries")
         self._file_load_max_bytes = max_file_bytes
         self._file_load_receipts = {}
+        self._expected_file_sha256 = None
+
+    def require_file_load_sha256(
+        self, expected: Mapping[tuple[str, str], str], *, max_file_bytes: int,
+    ) -> None:
+        """Bind all prepared renders to the bytes this cache actually loads.
+
+        The existing bounded loader hashes its serialized read before the
+        tensor enters the LRU. A resident hit also checks the file/tensor
+        receipt so an already loaded tensor cannot escape its lifetime fence.
+        """
+        if not isinstance(expected, Mapping) or set(expected) != set(self.weights):
+            raise ValueError("expected SHA256 must cover the complete PWC render roster")
+        if any(not isinstance(value, str) for value in self.weights.values()):
+            raise RuntimeError("prepared PWC render proof requires disk-backed entries")
+        if any(not isinstance(digest, str) or len(digest) != 64 or
+               any(c not in "0123456789abcdef" for c in digest)
+               for digest in expected.values()):
+            raise ValueError("prepared PWC render proof requires SHA256 digests")
+        self.enable_file_load_receipts(max_file_bytes=max_file_bytes)
+        self._expected_file_sha256 = dict(expected)
+
+    def _check_expected_file_sha256(self, key, observed) -> None:
+        expected = getattr(self, "_expected_file_sha256", None)
+        if expected is None:
+            return
+        receipt = observed[0] if observed is not None else None
+        if receipt is None or receipt["sha256"] != expected[key]:
+            raise RuntimeError(f"{key[0]}@{key[1]}: prepared PWC render checksum changed")
 
     def disable_file_load_receipts(self) -> None:
         self._file_load_max_bytes = 0
         self._file_load_receipts = None
+        self._expected_file_sha256 = None
 
     @staticmethod
     def _file_signature(value):
@@ -1053,10 +1146,13 @@ class ProductionWeightCache:
                 key, original_value, tensor, receipt = item
                 if isinstance(self.weights.get(key), torch.Tensor):
                     continue
+                self._check_expected_file_sha256(key, receipt)
                 self._validate_loaded_cb_pair_tensor(key, tensor)
                 self.weights[key] = tensor
                 self._record_lru_load(key, original_value, tensor)
                 self._record_file_load(key, tensor, receipt)
+                if getattr(self, "_expected_file_sha256", None) is not None:
+                    self.file_load_receipt(key, tensor)
                 loaded_count += 1
         return loaded_count
 
@@ -1072,6 +1168,8 @@ class ProductionWeightCache:
             return None
         if isinstance(v, torch.Tensor):
             self._validate_loaded_cb_pair_tensor(key, v)
+            if getattr(self, "_expected_file_sha256", None) is not None:
+                self._check_expected_file_sha256(key, (self.file_load_receipt(key, v),))
             if resident_only and (getattr(self, '_file_load_max_bytes', 0)
                                   or key in (self._file_load_receipts or {})
                                   or key in getattr(self, '_resident_window_receipt_keys', ())):
@@ -1084,10 +1182,13 @@ class ProductionWeightCache:
             return v
         # Treat anything non-tensor as a filename / path.
         loaded, receipt = self._load_file_tensor(v)
+        self._check_expected_file_sha256(key, receipt)
         self._validate_loaded_cb_pair_tensor(key, loaded)
         self.weights[key] = loaded
         self._record_lru_load(key, v, loaded)
         self._record_file_load(key, loaded, receipt)
+        if getattr(self, "_expected_file_sha256", None) is not None:
+            self.file_load_receipt(key, loaded)
         return loaded
 
     def get(self, name: str, fmt: str, *, resident_only=False) -> torch.Tensor | None:
