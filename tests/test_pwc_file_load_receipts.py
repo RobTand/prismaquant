@@ -59,6 +59,53 @@ def test_receipt_hashes_exact_single_read_and_tensor(tmp_path, monkeypatch):
     assert cache.file_load_receipt(key, tensor)['sha256'] == hashlib.sha256(blob).hexdigest()
 
 
+def test_expected_digest_refuses_changed_shard_before_prefetch_or_get(tmp_path):
+    cache, paths, _ = make_cache(tmp_path)
+    key, path = next(iter(paths.items()))
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    cache.require_file_load_sha256({key: expected}, max_file_bytes=path.stat().st_size)
+    torch.save(torch.ones((4, 4), dtype=torch.bfloat16), path)
+    with pytest.raises(RuntimeError, match='prepared PWC render checksum'):
+        cache.prefetch([key], max_workers=1)
+    assert isinstance(cache.weights[key], str)
+    with pytest.raises(RuntimeError, match='prepared PWC render checksum'):
+        cache.get(*key)
+
+
+def test_expected_digest_guards_the_resident_tensor_on_every_access(tmp_path):
+    cache, paths, _ = make_cache(tmp_path)
+    key, path = next(iter(paths.items()))
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    cache.require_file_load_sha256({key: expected}, max_file_bytes=path.stat().st_size + 20)
+    assert cache.get(*key) is not None
+    cache.get(*key)[0, 0] += 1
+    with pytest.raises(RuntimeError, match='PWC file receipt tensor or source file changed'):
+        cache.get(*key)
+
+
+def test_expected_digest_is_rechecked_after_lru_eviction(tmp_path):
+    cache, paths, _ = make_cache(tmp_path, 2, budget=32)
+    expected = {key: hashlib.sha256(path.read_bytes()).hexdigest()
+                for key, path in paths.items()}
+    cache.require_file_load_sha256(expected,
+                                   max_file_bytes=max(path.stat().st_size for path in paths.values()))
+    first, second = paths
+    cache.get(*first)
+    cache.get(*second)
+    assert isinstance(cache.weights[first], str)
+    torch.save(torch.ones((4, 4), dtype=torch.bfloat16), paths[first])
+    with pytest.raises(RuntimeError, match='prepared PWC render checksum'):
+        cache.get(*first)
+
+
+def test_expected_digest_refuses_incomplete_roster(tmp_path):
+    cache, paths, _ = make_cache(tmp_path, 2)
+    key, path = next(iter(paths.items()))
+    with pytest.raises(ValueError, match='complete PWC render roster'):
+        cache.require_file_load_sha256({key: hashlib.sha256(path.read_bytes()).hexdigest()},
+                                       max_file_bytes=path.stat().st_size)
+
+
 @pytest.mark.parametrize('mutation', ['tensor', 'replacement', 'file'])
 def test_receipt_refuses_drift_after_load(tmp_path, mutation):
     cache, paths, _ = make_cache(tmp_path)

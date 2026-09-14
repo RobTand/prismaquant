@@ -309,7 +309,8 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
                                         fmt=fmt, shape=shape, reader=reader, device=device)
 
 
-def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True, reader=None,
+def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True,
+                               defer_render_hashes=False, reader=None,
                                synthesis_device="cpu", unit_scope=None,
                                render_mirror_root=None, log_every=100,
                                require_existing_renders=False):
@@ -320,6 +321,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     roster gates still run here. Tensor/source/encoder verification occurs in
     ``prepare_cache`` using actual source weights and the original capture.
     Interpolated menu rows are deliberately excluded rather than converted.
+
+    A prepared COST run can defer only render hashes to the PWC's verified
+    consumption, after binding its prepared SHA roster. Every wire is still
+    hashed here; a missing render or incomplete roster still refuses.
 
     A rung this campaign adopted has its wire but no decoded PWC shard. The
     shard is synthesized from that wire here and every cell carries the
@@ -356,6 +361,13 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     from tools.dispatch_tessera_campaign import _require_receipts
 
     _require(type(verify_payloads) is bool, "verify_payloads must be an explicit boolean")
+    _require(type(defer_render_hashes) is bool, "defer_render_hashes must be boolean")
+    _require(not defer_render_hashes or verify_payloads,
+             "deferred render hashes require complete wire verification")
+    _require(not defer_render_hashes or require_existing_renders,
+             "deferred render hashes require existing prepared renders")
+    _require(not defer_render_hashes or unit_scope is None,
+             "deferred render hashes require the complete candidate roster")
     _require(type(file_hash_workers) is int and file_hash_workers > 0,
              "positive file_hash_workers required")
     _require(type(log_every) is int and log_every >= 0, "non-negative log_every required")
@@ -525,7 +537,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
         before = [signature(p) for p in (wire, render)]
         _same(_sha(wire), cell["record"]["blob_sha256"], f"{pair}: wire checksum")
-        digest = _sha(render)
+        digest = None if defer_render_hashes else _sha(render)
         after = [signature(p) for p in (wire, render)]
         _same(after, before, f"{pair}: input files changed while hashing")
         return pair, digest
@@ -533,12 +545,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     if file_hash_workers == 1:
         verified_files = map(verify_files, cells.items())
         for pair, digest in verified_files:
-            cells[pair]["render_file_sha256"] = digest
+            if digest is not None:
+                cells[pair]["render_file_sha256"] = digest
     else:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=file_hash_workers, thread_name_prefix="anchor-file-hash") as workers:
             for pair, digest in workers.map(verify_files, cells.items()):
-                cells[pair]["render_file_sha256"] = digest
+                if digest is not None:
+                    cells[pair]["render_file_sha256"] = digest
     return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
                                formats, **scoped)
 
@@ -1296,7 +1310,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         data = load_measured_anchor_input(config["inputs"], reader=reader,
             synthesis_device="cuda",
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
-            **({"verify_payloads": False} if command == "prepare" else {}))
+            **({"verify_payloads": False} if command == "prepare" else
+               {"defer_render_hashes": True, "require_existing_renders": True}))
         _require(data.unit_scope is None and data.render_mirror_root is None,
                  "joint execution requires the complete campaign roster in its own caches")
         result["file_hash_workers"] = file_hash_workers
@@ -1423,10 +1438,16 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             for pair, cell in data.cells.items():
                 _same(cache.metadata["verified_cells"][pair]["render_origin"], cell["render_origin"],
                       f"{pair}: qualified render origin changed")
-                _same(cache.metadata["verified_cells"][pair]["render_file_sha256"], cell["render_file_sha256"],
-                      f"{pair}: qualified render changed")
                 _same(cache.metadata["verified_cells"][pair]["wire_sha256"], cell["record"]["blob_sha256"],
                       f"{pair}: qualified wire changed")
+            expected_renders = {pair: cache.metadata["verified_cells"][pair]["render_file_sha256"]
+                                for pair in data.cells}
+            # The prepared receipt bound the original serialized shard on
+            # PREPARE's necessary load. COST verifies it on its own necessary
+            # PWC read, before a changed tensor can reach AURA.
+            cache.require_file_load_sha256(expected_renders,
+                max_file_bytes=_prepare_file_read_bound(data,
+                    max_render_bytes=config["max_render_bytes"]))
             _live_targets(runner, data.formats_by_qname)
             formats = list(dict.fromkeys(fmt for values in data.formats_by_qname.values() for fmt in values))
             payload = compute_aura_cost_streamed(runner, ids.to(runner.device), formats,
