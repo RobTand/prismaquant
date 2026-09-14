@@ -1085,10 +1085,9 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
     ``sizes`` chooses what the PPS draw is proportional to.  ``probe`` is the
     per-expert Fisher vector and is the default, so a plan written without the
     flag is byte-identical to every plan written before it.  ``counts`` draws
-    on the census's per-expert routed-row counts instead, which is the only
-    per-expert size that exists when a model has no probe with
-    ``h_trace_per_expert`` -- the case the sampling path was written for and
-    could not run on (RobTand/prismaquant#495 part 1).  A ``counts`` draw
+    on the census's per-expert routed-row counts instead, but still requires
+    the original packed probe with ``h_trace_per_expert`` to construct and
+    validate the full-frame sampling record.  A ``counts`` draw
     declares itself: ``design`` gains a ``_counts`` suffix and the record
     carries the size vector and its digest, so nothing has to infer from an
     inclusion probability which vector produced it.
@@ -1582,7 +1581,8 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
     return actual
 
 
-def _pbrun_argv(args, *, manifest: Path, inner: list[str]) -> list[str]:
+def _pbrun_argv(args, *, manifest: Path, inner: list[str],
+                progress_phases=()) -> list[str]:
     """The submission command, with ``--data-manifest`` before ``--detach``.
 
     Everything after ``--`` is the action; ``--data-manifest`` is an option of
@@ -1600,6 +1600,10 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str]) -> list[str]:
     argv += ["--priority", str(args.priority)]
     if args.timeout_s is not None:
         argv += ["--timeout-s", str(args.timeout_s)]
+    for name in progress_phases:
+        # The allowance bounds an uncommitted unit, not an arbitrary number of
+        # logging lines. The first allowance also covers model construction.
+        argv += ["--progress-phase", f"{name}={1800 if name == 'head' else 900}"]
     argv += ["--data-manifest", str(manifest), "--detach", "--",
              "python3", "-m", "tools.tessera_campaign_container"]
     argv += list(args.container_arg or [])
@@ -1637,9 +1641,6 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     """
     manifest_path = _manifest_path(args, plan, entry_point=entry_point,
                                    command=command)
-    argv = _pbrun_argv(args, manifest=manifest_path, inner=inner)
-    if args.dry_run:
-        print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
     manifest = build()
     cache_host = manifest["annotations"].get("source_identity_cache_host")
     if cache_host is not None and args.tag != cache_host:
@@ -1652,6 +1653,18 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     decoded = json.dumps(manifest, separators=(",", ":"), sort_keys=False).encode() + b"\n"
     blob = (gzip.compress(decoded, mtime=0) if manifest_path.suffix == ".gz"
             else decoded)
+    phase_names = ()
+    if entry_point == JOINT_ENTRY_POINT and command == "prepare":
+        if (not args.resume and manifest["annotations"].get("phase_start_units")
+                and manifest["annotations"].get("source_authentication_mode") ==
+                    "verified_streamed_identity_cache"):
+            phase_names = tuple(row["name"] for row in manifest["annotations"]["phases"])
+            if len(phase_names) > 2048:
+                raise RuntimeError("joint prepare read plan exceeds 2048 sealed PB phases")
+            inner = [*inner, "--prewarm-manifest", str(manifest_path),
+                     "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
+    argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
+                       progress_phases=phase_names)
     summary = {
         "entry_point": f"{entry_point}:{command}",
         "data_manifest": str(manifest_path),
@@ -1671,6 +1684,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         "phases": manifest["annotations"]["phases"],
     }
     if args.dry_run:
+        print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
         print(json.dumps(summary, indent=1))
         # Checked after the summary is printed, so a read set the fleet would
         # refuse still reports the size and the phase boundaries that make the
@@ -1845,6 +1859,10 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
             raise MergeRefused(f"{row_id}: not a {SCHEMA} payload")
 
     provenances = {row: payload["provenance"] for row, payload in row_payloads.items()}
+    for row_id, provenance in provenances.items():
+        if provenance.get("research_exact_member_scope") is not None:
+            raise MergeRefused(
+                f"{row_id}: research exact-member scalar cannot be merged as a full group or stack estimate")
     family_policies, restricted_structures = {}, {}
     for row_id, prov in provenances.items():
         restriction = prov.get("family_restriction")

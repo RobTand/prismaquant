@@ -102,6 +102,22 @@ def test_window_accounting_tracks_direct_mutations_and_rebound_weights():
         cache.plan_resident_windows([key], max_resident_bytes=399, max_workers=1)
 
 
+def test_window_accounting_rechecks_rebound_view_storage_and_pickle():
+    key = ('resident', 'FP8')
+    tensor = torch.zeros(4)
+    cache = ProductionWeightCache({key: tensor}, {})
+    assert cache.plan_resident_windows([key], max_resident_bytes=16, max_workers=1)
+    tensor.set_(torch.zeros(100)[:1])
+    with pytest.raises(RuntimeError, match='budget'):
+        cache.plan_resident_windows([key], max_resident_bytes=399, max_workers=1)
+    # Resident indexing is local bookkeeping; a saved cache has plain weights
+    # and builds a fresh index from its actual restored storage when needed.
+    clone = pickle.loads(pickle.dumps(cache))
+    assert type(clone.weights) is dict
+    with pytest.raises(RuntimeError, match='budget'):
+        clone.plan_resident_windows([key], max_resident_bytes=399, max_workers=1)
+
+
 def test_invalid_roster_or_oversize_refuses_before_loading(tmp_path, monkeypatch):
     cache, paths, _ = make_cache(tmp_path)
     key, path = next(iter(paths.items()))

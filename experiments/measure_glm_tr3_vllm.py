@@ -371,6 +371,24 @@ def require_native_qualification(qualification, runtime_binding):
                          "first differing paths (up to 8): " + "; ".join(differences))
 
 
+def scorer_engine_kwargs(args, *, model, topology):
+    """Build the recorded native-engine request before model construction."""
+    kwargs = {"model": str(model), "trust_remote_code": True, "dtype": "bfloat16",
+              "language_model_only": True, "kv_cache_dtype": args.kv_cache_dtype,
+              "enforce_eager": True, "enable_prefix_caching": False, "enable_chunked_prefill": False,
+              "max_model_len": CONTEXT_LENGTH + 1, "max_num_batched_tokens": CONTEXT_LENGTH + 1,
+              "max_num_seqs": 1, "max_logprobs": 1, "disable_log_stats": True,
+              "logprobs_mode": "raw_logprobs",
+              "gpu_memory_utilization": args.gpu_memory_utilization, **topology}
+    if args.attention_backend is not None:
+        kwargs["attention_backend"] = args.attention_backend
+    if args.kernel_config is not None:
+        kwargs["kernel_config"] = json.loads(args.kernel_config)
+    if args.quantization:
+        kwargs["quantization"] = args.quantization
+    return kwargs
+
+
 def measure(args):
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
@@ -383,15 +401,7 @@ def measure(args):
     candidate_identity = cached_checkpoint_identity(model, args.candidate_digest_cache)
     producer = producer_identity()
     topology = gold_engine_kwargs(args)
-    kwargs = {"model": str(model), "trust_remote_code": True, "dtype": "bfloat16",
-              "language_model_only": True, "kv_cache_dtype": args.kv_cache_dtype,
-              "enforce_eager": True, "enable_prefix_caching": False, "enable_chunked_prefill": False,
-              "max_model_len": CONTEXT_LENGTH + 1, "max_num_batched_tokens": CONTEXT_LENGTH + 1,
-              "max_num_seqs": 1, "max_logprobs": 1, "disable_log_stats": True,
-              "logprobs_mode": "raw_logprobs",
-              "gpu_memory_utilization": args.gpu_memory_utilization, **topology}
-    if args.quantization:
-        kwargs["quantization"] = args.quantization
+    kwargs = scorer_engine_kwargs(args, model=model, topology=topology)
     if not args.qualify_hook and (args.qualification is None or args.qualification_sha256 is None):
         raise ValueError("whole panel requires the matching native one-window hook qualification")
     qualification = (bound_json(args.qualification, args.qualification_sha256)
@@ -497,6 +507,10 @@ def main():
     p.add_argument("--kv-cache-dtype", choices=("auto", "bfloat16", "fp8_ds_mla"), required=True)
     p.add_argument("--expected-kv-cache-dtype", choices=("auto", "bfloat16", "fp8_ds_mla"), required=True,
                    help="observed native cache dtype; an automatic promotion must be declared explicitly")
+    p.add_argument("--attention-backend", choices=("CUSTOM",), default=None,
+                   help="explicit stock-vLLM attention backend; CUSTOM selects a registered plugin backend")
+    p.add_argument("--kernel-config", default=None,
+                   help="JSON object forwarded to vLLM (GLM53 NoPE requires enable_flashinfer_autotune=false)")
     p.add_argument("--require-exl3-diag", action="store_true")
     p.add_argument("--gpu-memory-utilization", type=float, default=.9)
     p.add_argument("--tile-rows", type=int, default=32)
@@ -509,6 +523,13 @@ def main():
     args = p.parse_args()
     if args.tile_rows <= 0 or args.tile_rows > 64:
         p.error("tile rows must be 1..64")
+    if args.kernel_config is not None:
+        try:
+            kernel_config = json.loads(args.kernel_config)
+        except json.JSONDecodeError as exc:
+            p.error(f"kernel config must be JSON: {exc.msg}")
+        if not isinstance(kernel_config, dict):
+            p.error("kernel config must be a JSON object")
     if "@sha256:" not in args.serve_image:
         p.error("serve image must be immutable digest-qualified")
     measure(args)

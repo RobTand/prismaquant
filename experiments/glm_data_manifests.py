@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import pickle
@@ -58,10 +59,20 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from glm_arc_prewarm import (  # noqa: E402
-    CAMPAIGN_BASE, Campaign, SEED_WIRE_DIR_FLAG, UNITS_RE, argv_value, to_pool)
+    CAMPAIGN_BASE, Campaign, RECORD_SIZE, SEED_WIRE_DIR_FLAG, UNITS_RE,
+    argv_value, to_pool)
 
 SCHEMA = "prismaquant.prismabuild.data_manifest.v1"
 SHARED_MOUNT = "/mnt/shared"
+
+# Load this torch-free module without importing prismaquant.__init__, whose
+# registry import requires the GPU image during a CPU-only manifest build.
+_phase_spec = importlib.util.spec_from_file_location(
+    "joint_prewarm_phases",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "prismaquant",
+                 "joint_prewarm_phases.py"))
+_phase_module = importlib.util.module_from_spec(_phase_spec)
+_phase_spec.loader.exec_module(_phase_module)
 
 #: ``prismabuild.core._DATA_MANIFEST_KEYS`` and ``_DATA_MANIFEST_ENTRY_KEYS``,
 #: restated because PrismaBuild is not importable from the environments that
@@ -522,6 +533,32 @@ def _layer_index_of(names) -> dict:
     return index
 
 
+def _backbone_layer_count(model_path: str) -> int:
+    """The actual streamed backbone depth, excluding GLM's MTP passthrough."""
+    config = _read_json(os.path.join(to_pool(model_path), "config.json"),
+                        "source model config")
+    text = config.get("text_config")
+    source = text if isinstance(text, dict) else config
+    count = source.get("num_hidden_layers")
+    if type(count) is not int or count <= 0:
+        raise SystemExit("source config has no positive backbone num_hidden_layers")
+    return count
+
+
+def _source_layer_indices(weight_map: dict, prefix: str, count: int) -> list[int]:
+    """Backbone layers actually installed by the streaming runner."""
+    layers = set()
+    for tensor in weight_map:
+        match = LAYER_QNAME_RE.match(tensor)
+        if (match is not None and match.group("prefix") == prefix
+                and int(match.group("index")) < count):
+            layers.add(int(match.group("index")))
+    ordered = sorted(layers)
+    if ordered != list(range(count)):
+        raise SystemExit("source checkpoint has noncontiguous or absent layers")
+    return ordered
+
+
 class _Phases:
     """Entries plus the running byte sum PrismaBuild's prewarm loop windows on.
 
@@ -693,9 +730,9 @@ def _joint_source_authentication_schedule(model_path: str, roster: list):
     weight_map = index.get("weight_map")
     if not isinstance(weight_map, dict) or not weight_map:
         raise SystemExit("joint source checkpoint index has no weight_map")
-    layer_of = _layer_index_of(roster)
-    layers = set(layer_of.values())
     prefix = LAYER_QNAME_RE.match(roster[0]).group("prefix")
+    layers = _source_layer_indices(weight_map, prefix,
+                                   _backbone_layer_count(model))
     base = prefix.removesuffix("layers.")
     head_prefixes = (base + "embed_tokens.", base + "norm.",
                      base + "rotary_emb.", "lm_head.", "model.visual.")
@@ -707,9 +744,7 @@ def _joint_source_authentication_schedule(model_path: str, roster: list):
         match = LAYER_QNAME_RE.match(tensor)
         if match is not None and match.group("prefix") == prefix:
             layer = int(match.group("index"))
-            if layer not in layers:
-                raise SystemExit(f"joint source checkpoint names unplanned layer {layer}")
-            phase = layer
+            phase = layer if layer in layers else None  # MTP passthrough is not installed
         elif tensor.startswith(head_prefixes):
             phase = -1  # head/visual are materialized before layer 0
         else:
@@ -737,6 +772,55 @@ def _joint_source_authentication_schedule(model_path: str, roster: list):
         else:
             schedule["layers"][phase].append(row)
     return schedule
+
+
+def _source_tensor_extents(campaign: Campaign, prefixes, *, required=True
+                           ) -> list[tuple[str, int, int]]:
+    """Every indexed tensor matching the streaming loader's installed prefixes.
+
+    ``Campaign.weight_extents_for`` owns record rounding/coalescing for the
+    campaign's quantizable ``.weight`` units. The joint runner installs the
+    complete source layer, including norms and GLM's named buffers. Use that
+    same header cache and 1 MiB record geometry for the complete prefix.
+    """
+    by_shard = {}
+    for tensor, shard in campaign.weight_map.items():
+        if not tensor.startswith(tuple(prefixes)):
+            continue
+        header = campaign._header(shard)
+        meta = header.get(tensor)
+        if not isinstance(meta, dict) or "data_offsets" not in meta:
+            raise SystemExit(f"{tensor}: source index has no safetensors extent")
+        lo, hi = meta["data_offsets"]
+        start = header["__data_start__"]
+        by_shard.setdefault(shard, []).append((start + lo, start + hi))
+    if not by_shard and required:
+        raise SystemExit(f"source checkpoint has no tensors for {prefixes}")
+    out = []
+    for shard, spans in sorted(by_shard.items()):
+        path = os.path.join(campaign.model_dir, shard)
+        eof = _required_size(path, "source layer shard")
+        # safe_open reads a shard header even when its first tensor lies much
+        # later in the file. Declare its ZFS record at this shard's first use.
+        spans.append((0, campaign._header(shard)["__data_start__"]))
+        merged = []
+        for lo, hi in sorted((a - a % RECORD_SIZE,
+                              min(eof, b + (-b) % RECORD_SIZE))
+                             for a, b in spans):
+            if hi <= lo:
+                continue
+            if merged and lo <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], hi)
+            else:
+                merged.append([lo, hi])
+        out.extend((path, lo, hi - lo) for lo, hi in merged)
+    return out
+
+
+def _full_source_layer_extents(campaign: Campaign, layer: int,
+                               prefix: str) -> list[tuple[str, int, int]]:
+    """All streamed source tensors installed for this layer."""
+    return _source_tensor_extents(campaign, (f"{prefix}{layer}.",))
 
 
 def _joint_source_identity_cache_for_manifest(plan: dict, schedule: dict):
@@ -871,9 +955,10 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     ``command`` is ``prepare`` or ``run``.
 
     The head phase is everything read before the first layer installs. Then
-    one ``layer-<L>`` phase per transformer layer, in ascending layer order,
-    because ``prepare_cache`` walks ``range(runner.num_layers)`` and installs
-    one layer's source weights at a time. Within a layer the order is the
+    bounded complete-unit ``layer-<L>-part-<P>`` phases for windowed prepare,
+    in ascending layer order, because ``prepare_cache`` walks
+    ``range(runner.num_layers)`` and journals each completed unit. Run keeps
+    one ``layer-<L>`` phase per layer. Within a layer the order is the
     runner's: the layer's source byte extents first (the streaming context
     prefetches them on ``install``), then, for each of the layer's units in
     sorted name order, that unit's capture file and then each measured rung's
@@ -889,19 +974,22 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
 
     Preparation authenticates each whole source shard by SHA256 through a
     held descriptor on its first streamed tensor read. Head and visual shards
-    go in the head; body shards go before the first layer that loads one of
-    their tensors; shards the runner never installs go in a final phase. The
-    index supplies this exact tensor-to-shard map. The later source extents
-    are separate reads, not a substitute for the whole-shard authentication.
+    go in the head; body shards go before the earliest declared prefetch of
+    one of their tensors; shards the runner never installs go in a final
+    phase. The index supplies this exact tensor-to-shard map. The later
+    source extents are separate reads, not a substitute for whole-shard
+    authentication. A windowed prepare must have a bounded prefetch window
+    that the runner settles before the next phase; otherwise this linear ARC
+    prefix cannot represent an in-flight future-layer read safely.
 
-    ``run`` hashes every cell's wire and render up front
-    (``load_measured_anchor_input`` with ``verify_payloads=True``), so it
-    carries a ``hash`` phase between the head and the layers, in the hashing
-    order: cells in sorted unit name then sorted format, wire before render.
-    Those files are then read again during the streaming pass; the contract
-    refuses a repeated ``(path, offset)``, so each is declared once, in the
-    phase that reads it first, and the re-read bytes are recorded under
-    ``annotations.reread_bytes_by_phase``.
+    ``run`` consumes prepared renders through PWC's verified load, so their
+    first reads belong to their layers. It consumes no wire bodies and does
+    not synthesize missing renders. Wire identities in its metadata are the
+    historical preparation evidence; selected export authenticates current
+    wire bytes. There is no whole-roster payload hash phase.
+    The inherited layer ordering covers these reads; it does not yet express
+    COST's forward/reverse execution or rewarm repeated source extents. The
+    global (path, offset) deduplication records rereads only as annotations.
 
     ``sha256`` is null for the same reason it is null on a campaign row: the
     manifest is a residency hint whose own bytes are content-addressed, not an
@@ -970,6 +1058,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             path, size = _render_file(owners[name], render_sizes, name, fmt)
             if size:
                 continue
+            if command == "run":
+                raise SystemExit(f"prepared render is missing; COST will not synthesize it: {path}")
             absent.append(path)
             synthesized_wire_bytes += wire_bytes
             track.add(wire, 0, wire_bytes, "wires")
@@ -988,6 +1078,16 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             for path, size in source_schedule["head"]:
                 track.add(path, 0, size, "source_authentication")
 
+    prefix = LAYER_QNAME_RE.match(roster[0]).group("prefix")
+    all_source_layers = (_source_layer_indices(campaign.weight_map, prefix,
+                                               _backbone_layer_count(campaign.model_dir))
+                         if source_schedule is None else sorted(source_schedule["layers"]))
+    base = prefix.removesuffix("layers.")
+    for path, offset, length in _source_tensor_extents(campaign, (
+            base + "embed_tokens.", base + "norm.", base + "rotary_emb.",
+            "lm_head."), required=False):
+        track.add(path, offset, length, "source_head")
+
     if command == "run":
         binding = plan.get("source_identity_cache")
         if binding is not None:
@@ -996,23 +1096,41 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
                 raise SystemExit("bound joint source identity cache checksum changed")
             track.add(cache_path, 0, _required_size(cache_path,
                 "source identity cache"), "source_identity_cache")
-        track.begin("hash")
-        for name in roster:
-            for fmt, wire, wire_bytes in cells[name]:
-                track.add(wire, 0, wire_bytes, "wires")
-                _add_render(track, owners[name], render_sizes, name, fmt)
 
     # A plan that declares a qualification window runs one unit per capture
     # window; without one the whole layer's captures are loaded together.
     per_unit_window = plan.get("qualification_window") is not None
+    source_lookahead = 0
+    if command == "prepare" and per_unit_window:
+        prefetch = plan.get("source_prefetch") or {}
+        source_lookahead = prefetch.get("prefetch_lookahead")
+        slots = prefetch.get("max_cache_slots")
+        if (type(source_lookahead) is not int or source_lookahead < 1
+                or type(slots) is not int or slots != source_lookahead + 1
+                or layers != list(range(layers[-1] + 1))
+                or any(max(0, target - source_lookahead) not in by_layer
+                       for target in all_source_layers)):
+            raise SystemExit(
+                "joint prepare read-frontier requires contiguous source layers "
+                "and max_cache_slots=prefetch_lookahead+1; otherwise source "
+                "prefetch can outlive the phase that releases its bytes")
+    phase_start_units = {}
     for layer in layers:
         names = sorted(by_layer[layer])
-        track.begin(f"layer-{layer}")
-        if source_schedule is not None and source_cache is None:
-            for path, size in source_schedule["layers"][layer]:
-                track.add(path, 0, size, "source_authentication")
-        for path, offset, length in campaign.weight_extents_for(names):
-            track.add(path, offset, length, "source_extents")
+        part = 0
+        track.begin(_phase_module.phase_name(layer, part) if command == "prepare" and per_unit_window
+                    else f"layer-{layer}")
+        source_layers = ([layer] if not (command == "prepare" and per_unit_window)
+                         else [target for target in all_source_layers
+                               if max(0, target - source_lookahead) == layer])
+        for source_layer in source_layers:
+            if source_schedule is not None and source_cache is None:
+                for path, size in source_schedule["layers"][source_layer]:
+                    track.add(path, 0, size, "source_authentication")
+            for path, offset, length in _full_source_layer_extents(
+                    campaign, source_layer,
+                    LAYER_QNAME_RE.match(names[0]).group("prefix")):
+                track.add(path, offset, length, "source_extents")
         if command == "run":
             # The streaming cost pass re-reads the layer's renders through the
             # production cache; it takes no captures and no wire bytes.
@@ -1025,12 +1143,32 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             for name in names:
                 _add_capture(track, captures[name])
         for name in names:
+            if command == "prepare" and per_unit_window:
+                # Only a complete unit is a durable progress boundary. Keep a
+                # first unit whose source extents make the phase oversized;
+                # the PB reader can still warm an entry-aligned prefix.
+                if track._phase_bytes >= _phase_module.MAX_PHASE_BYTES:
+                    part += 1
+                    track.begin(_phase_module.phase_name(layer, part))
+                phase_start_units[name] = track._phase
             if per_unit_window:
                 _add_capture(track, captures[name])
             for fmt, wire, wire_bytes in cells[name]:
                 _add_render(track, owners[name], render_sizes, name, fmt)
                 track.add(wire, 0, wire_bytes, "wires")
     track.end()
+    if not (command == "prepare" and per_unit_window):
+        tail = [layer for layer in all_source_layers if layer not in by_layer]
+        if tail:
+            track.begin("source-tail")
+            for layer in tail:
+                if source_schedule is not None and source_cache is None:
+                    for path, size in source_schedule["layers"][layer]:
+                        track.add(path, 0, size, "source_authentication")
+                for path, offset, length in _full_source_layer_extents(
+                        campaign, layer, prefix):
+                    track.add(path, offset, length, "source_extents")
+            track.end()
     if source_schedule is not None and source_cache is None and source_schedule["completion"]:
         track.begin("source-complete")
         for path, size in source_schedule["completion"]:
@@ -1054,6 +1192,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         "measured_cells": sum(len(value) for value in cells.values()),
         "wire_dir": wire_dir,
         "capture_window": "per_unit" if per_unit_window else "per_layer",
+        **({"source_prefetch_lookahead_layers": source_lookahead}
+           if command == "prepare" and per_unit_window else {}),
         "renders_absent": len(absent),
         "renders_absent_first": absent[0] if absent else None,
         "synthesized_render_wire_bytes": synthesized_wire_bytes,
@@ -1068,6 +1208,9 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         "bytes": track.bytes,
         "reread_bytes_by_phase": track.reread,
         "phases": track.phases,
+        **({"phase_start_units": phase_start_units,
+            "phase_target_bytes": _phase_module.MAX_PHASE_BYTES}
+           if command == "prepare" and per_unit_window else {}),
         "argv": None if argv is None else [str(item) for item in argv],
     }
     return _finish(track, produced_by, annotations,

@@ -1712,6 +1712,13 @@ class MeasuredRuntimeSweep:
     probe_path: str
 
 
+def require_no_research_exact_member_scalar(cost_data: dict) -> None:
+    """An exact-member endpoint is a scalar observation, not an allocation table."""
+    if cost_data.get("provenance", {}).get("research_exact_member_scope") is not None:
+        raise SystemExit(
+            "[alloc] ERROR: research exact-member scalar has no allocator or stack-estimate licence")
+
+
 def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     """Allocator CLI. ``argv`` defaults to ``sys.argv[1:]``.
 
@@ -2481,6 +2488,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             cost_data = pickle.load(f)
     validate_probe_payload(probe, args.probe)
     validate_cost_payload(cost_data, args.costs)
+    require_no_research_exact_member_scalar(cost_data)
     from .joint_aura import prepare_joint_aura_identities
     prepare_joint_aura_identities(cost_data)
     # One DP prices in one currency: a cost table carrying Tessera-currency

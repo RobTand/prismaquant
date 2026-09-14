@@ -45,8 +45,9 @@ the realisable set at superblock scale.**  Verified exhaustively: ~9500 rungs
 across ten families spanning 1.00 to 8.00 bpp, zero unrealisable
 (``tessera/tests/test_grid_space_continuity.py``).
 
-Realisability is not quality.  This module says which rungs can be *encoded*;
-which are worth encoding is a measurement, and only four of them have one.
+Realisability is not quality. This module says which rungs can be *encoded*;
+the bound measurement table and its qualified interpolation contract establish
+which have usable quality prices. Unmeasured rates remain unknown.
 """
 from __future__ import annotations
 
@@ -1469,8 +1470,9 @@ def tessera_serving_route(
         # Tessera's ``wire_recipe`` says the BF16 grid's "decoded tile is a
         # plain BF16 tensor (W16A16)", so the A side is unquantised and there
         # is no registry row whose activation RTN models it.  Whether any
-        # runtime ROUTES these bytes is ``route_admission``'s question, and
-        # today the answer is no -- Tessera issue #9.
+        # runtime ROUTES these bytes is ``route_admission``'s question, resolved
+        # against the pinned runtime contract for the exact rate and context;
+        # the platform axis is attached to the layout route below.
         return _at(TesseraServingRoute(
             contract="w16a16-bf16-channel",
             terminal_format=terminal,

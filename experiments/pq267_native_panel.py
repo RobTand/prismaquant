@@ -106,7 +106,7 @@ def prepare(args):
     record = cached_unit.make_unit_record(blob, encoding, filename="weight.tessera")
     inputs, tensors = prepare_native_inputs(cache, weight, rows, unit=unit, format_name=fmt,
         calibration_receipt=calibration, wire_blob=blob, wire_record=record, encoding_identity=encoding,
-        numerics=plan["numerics"], prefill_rows=plan["prefill_rows"], decode_rows=plan["decode_rows"],
+        prefill_rows=plan["prefill_rows"], decode_rows=plan["decode_rows"],
         max_resident_bytes=plan["max_resident_bytes"])
     (args.out / "weight.tessera").write_bytes(blob)
     dump(args.out / "wire-record.json", record)
