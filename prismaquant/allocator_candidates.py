@@ -1147,9 +1147,10 @@ MIXED_COST_SOURCE = "mixed"
 #: refuses to extrapolate past them. What the two share is the property this
 #: module's predicates actually key on -- an output-space number that is a
 #: holdout-gated PREDICTION rather than an observation -- so it joins the same
-#: branch (see ``cost_entry_is_band_interpolated``) and inherits the same
-#: guard, ``drop_interpolated_candidates_dominated_by_measured``, which is
-#: what stops an unmeasured rung displacing a measured one on noise.
+#: branch (see ``cost_entry_is_band_interpolated``). Its own guard,
+#: ``drop_census_interpolated_within_loo``, is what stops an unmeasured rung
+#: displacing a measured one on noise: it reads the campaign's measured
+#: leave-one-anchor-out error per (unit, family) as the band.
 TESSERA_INTERPOLATED_COST_SOURCE = "tessera_campaign_interpolated"
 
 
@@ -1223,6 +1224,190 @@ def drop_interpolated_candidates_dominated_by_measured(
             kept.append(cand)
         out[name] = kept or cands
     return out, dropped
+
+
+class CensusLooBandError(ValueError):
+    """An interpolated census cell reached the menu without a measured band."""
+
+
+def _census_cell_family(row: Mapping, fmt: str) -> str | None:
+    family = row.get("tessera_family")
+    if isinstance(family, str) and family:
+        return family
+    from .tessera_formats import parse_tessera_format_name
+    if parse_tessera_format_name(fmt) is None:
+        return None
+    return fmt.rsplit("_R", 1)[0]
+
+
+def _census_loo_band(loo: Mapping, name: str, family: str | None) -> float | None:
+    by_family = loo.get(name)
+    record = by_family.get(family) if isinstance(by_family, Mapping) else None
+    if not isinstance(record, Mapping):
+        return None
+    try:
+        band = float(record["max_abs_log2_error"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return band if math.isfinite(band) and band >= 0.0 else None
+
+
+def _within_log2_band(other: float, cand: float, band: float) -> bool:
+    other, cand = float(other), float(cand)
+    if not (math.isfinite(other) and math.isfinite(cand)):
+        return False
+    if other == cand:
+        return True
+    if other <= 0.0 or cand <= 0.0:
+        return False
+    return abs(math.log2(other / cand)) <= band
+
+
+def drop_census_interpolated_within_loo(
+    candidates: dict[str, list[Candidate]],
+    costs: dict,
+    loo: Mapping | None,
+    *,
+    fused_groups: Mapping[object, Collection[str]] | None = None,
+    report: dict | None = None,
+) -> dict[str, list[Candidate]]:
+    """Drop census-interpolated rungs a measured rung matches within the fit's own error.
+
+    A ``tessera_campaign_interpolated`` row is a prediction through one
+    family's measured anchors on one unit. The campaign measured how wrong that
+    prediction is: ``leave_one_anchor_out[unit][family]["max_abs_log2_error"]``
+    is the worst error when an interior anchor was held out and re-predicted.
+    A Δloss gap smaller than that error is not evidence, so an interpolated
+    candidate is dropped when a candidate on the same unit that is NOT
+    interpolated, in any family, is
+
+      * no larger in ``memory_bytes``, and
+      * within that band in log2 Δloss:
+        ``|log2(other.predicted_dloss / cand.predicted_dloss)| <= band``.
+
+    A genuine trade survives: a rung materially cheaper in bytes or materially
+    better in Δloss stays on the menu.
+
+    The band is the measured error, which is stricter than the campaign's
+    ``--loo-gate`` wherever a surface stopped on its anchor budget instead of
+    on the gate.
+
+    ``fused_groups`` names units a later aggregation intersects by format
+    name (fused siblings, packed serving groups). Dropping a rung from one
+    member removes it from the group, so a rung is dropped from a group only
+    when EVERY member is dominated within band at that rung.
+
+    Fails closed when an interpolated cell on the menu has no usable LOO
+    record, or when ``loo`` is absent and any row in ``costs`` is
+    interpolated. CB-ladder interpolation (``band_interpolated``/``mixed``)
+    is not this function's subject; see
+    :func:`drop_interpolated_candidates_dominated_by_measured`.
+    """
+    if loo is None:
+        interpolated_rows = sum(
+            1 for rows in costs.values() if isinstance(rows, Mapping)
+            for row in rows.values()
+            if isinstance(row, Mapping)
+            and row.get("cost_source") == TESSERA_INTERPOLATED_COST_SOURCE
+        )
+        if interpolated_rows:
+            raise CensusLooBandError(
+                f"{interpolated_rows} {TESSERA_INTERPOLATED_COST_SOURCE} cost "
+                "row(s) but the cost payload carries no leave_one_anchor_out "
+                "table: the interpolation error that bounds these predictions "
+                "is unknown, so they cannot be told apart from measured rungs. "
+                "Use the campaign merge's cost.pkl, which writes the table.")
+        return candidates
+    if not isinstance(loo, Mapping):
+        raise CensusLooBandError(
+            f"leave_one_anchor_out must be a mapping, got {type(loo).__name__}")
+
+    interpolated = 0
+    missing: list[str] = []
+    dominated: dict[str, set[str]] = {}
+    for name, cands in candidates.items():
+        rows = costs.get(name, {})
+        measured = [
+            c for c in cands
+            if not cost_entry_is_band_interpolated(rows.get(c.fmt, {}))
+        ]
+        for cand in cands:
+            row = rows.get(cand.fmt, {})
+            if row.get("cost_source") != TESSERA_INTERPOLATED_COST_SOURCE:
+                continue
+            interpolated += 1
+            family = _census_cell_family(row, cand.fmt)
+            band = _census_loo_band(loo, name, family)
+            if band is None:
+                missing.append(f"{name}@{cand.fmt} (family {family})")
+                continue
+            if any(
+                other.memory_bytes <= cand.memory_bytes
+                and _within_log2_band(other.predicted_dloss,
+                                      cand.predicted_dloss, band)
+                for other in measured
+            ):
+                dominated.setdefault(name, set()).add(cand.fmt)
+    if missing:
+        raise CensusLooBandError(
+            f"{len(missing)} {TESSERA_INTERPOLATED_COST_SOURCE} candidate(s) "
+            "have no finite leave_one_anchor_out max_abs_log2_error for their "
+            f"(unit, family) (first: {missing[0]}). Without the measured "
+            "interpolation error a prediction cannot be told apart from a "
+            "measured rung; refusing rather than letting it compete on noise.")
+
+    group_of: dict[str, tuple[str, ...]] = {}
+    for members in (fused_groups or {}).values():
+        present = tuple(m for m in members if m in candidates)
+        if len(present) >= 2:
+            for member in present:
+                group_of[member] = present
+    drop: dict[str, set[str]] = {}
+    kept_by_group = 0
+    for name, fmts in dominated.items():
+        members = group_of.get(name)
+        if members is None:
+            drop[name] = set(fmts)
+            continue
+        shared = {f for f in fmts
+                  if all(f in dominated.get(m, ()) for m in members)}
+        kept_by_group += len(fmts) - len(shared)
+        drop[name] = shared
+
+    out: dict[str, list[Candidate]] = {}
+    per_unit: dict[str, int] = {}
+    for name, cands in candidates.items():
+        gone = drop.get(name)
+        if not gone:
+            out[name] = cands
+            continue
+        out[name] = [c for c in cands if c.fmt not in gone]
+        per_unit[name] = len(cands) - len(out[name])
+        if not out[name]:
+            raise AssertionError(
+                f"{name}: census LOO band guard emptied the menu; a dominated "
+                "candidate always has a measured dominator, so this is a bug")
+    dropped = sum(per_unit.values())
+    if interpolated:
+        print(
+            f"[alloc] census LOO band guard: dropped {dropped} of "
+            f"{interpolated} interpolated Tessera candidate(s) on "
+            f"{len(per_unit)} unit(s) ({kept_by_group} kept because a group "
+            "sibling is not dominated at that rung); band = each (unit, "
+            "family)'s measured leave_one_anchor_out max_abs_log2_error, "
+            "stricter than --loo-gate where a surface stopped on anchor budget",
+            flush=True,
+        )
+    if report is not None:
+        report["census_loo_band_dropped"] = dropped
+        report["census_loo_band"] = {
+            "dropped": dropped,
+            "interpolated_candidates": interpolated,
+            "kept_by_group_conjunction": kept_by_group,
+            "band": "leave_one_anchor_out[unit][family].max_abs_log2_error",
+            "per_unit": per_unit,
+        }
+    return out
 
 
 def cost_entry_is_exact_by_construction(
@@ -2126,6 +2311,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      preserve_runtime_frontier: bool = False,
                      defer_menu_reduction: Collection[str] | None = None,
                      tessera_menu_mode: str | None = None,
+                     census_loo: Mapping | None = None,
+                     census_loo_groups: Mapping[object, Collection[str]] | None = None,
                      ) -> dict[str, list[Candidate]]:
     """Build runtime-legal format candidates for every measured Linear.
 
@@ -2429,6 +2616,18 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             "activation path is the identity (BF16, FP8_SOURCE, NVFP4A16, "
             "MXFP8A16) in the format menu."
         )
+    # A census-interpolated rung that a measured rung matches within the
+    # interpolator's own measured leave-one-anchor-out error is noise, not a
+    # trade. Runs on every unit, deferred group members included: the group
+    # conjunction is what keeps a member's drop from shrinking the group's
+    # name intersection.
+    out = drop_census_interpolated_within_loo(
+        out,
+        costs,
+        census_loo,
+        fused_groups=census_loo_groups,
+        report=tessera_menu_report,
+    )
     # Continuous Tessera rungs, reduced to what this DP can distinguish. A
     # no-op on a menu with no Tessera rung in it (see reduce_continuous_menu).
     out = reduce_continuous_menu(
@@ -3658,6 +3857,32 @@ def packed_serving_group_members(names, profile) -> frozenset[str]:
         return frozenset()
     grouped, _ = _packed_serving_groups(names, group_fn)
     return frozenset(m for members in grouped.values() for m in members)
+
+
+def serving_groups_by_key(names, profile, *, packed: bool = True,
+                          fused: bool = True) -> dict[tuple, tuple[str, ...]]:
+    """The groups the two aggregations will intersect by format name, keyed.
+
+    Packed serving groups fold first; a packed member then carries a group
+    marker and never joins a fused group, so fused groups are formed over the
+    remaining names -- the order ``allocator.py`` aggregates in.
+    """
+    if profile is None:
+        return {}
+    groups: dict[tuple, tuple[str, ...]] = {}
+    packed_members: set[str] = set()
+    group_fn = getattr(profile, "packed_expert_format_group", None)
+    if packed and callable(group_fn):
+        grouped, _ = _packed_serving_groups(names, group_fn)
+        for key, members in grouped.items():
+            groups[("packed", key)] = tuple(members)
+            packed_members.update(members)
+    if fused:
+        grouped, _ = _fused_sibling_groups(
+            [name for name in names if name not in packed_members], profile)
+        for key, members in grouped.items():
+            groups[("fused", key)] = tuple(members)
+    return groups
 
 
 def _fused_sibling_groups(names, profile) -> tuple[dict[str, list[str]], list[str]]:

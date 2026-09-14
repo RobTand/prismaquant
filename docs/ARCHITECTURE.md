@@ -1,7 +1,18 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-14 · `claude/glm-first-artifact-census-wires`. Stamps
+As of: 2026-09-14 · `claude/census-loo-guard-plan-projection`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-14, `claude/census-loo-guard-plan-projection`) for **the
+census interpolated-rung guard having a call site** (#615).
+`drop_census_interpolated_within_loo` drops a `tessera_campaign_interpolated`
+candidate that a measured candidate on the same unit matches within that
+(unit, family)'s measured leave-one-anchor-out error at no more bytes. The
+drop is conjunctive across fused and packed group members, and the guard fails
+closed on a missing LOO record. The two sentences that said the uncalled
+CB-ladder guard covered these rows are corrected (§ "Reducing the menu for the
+DP" and the sampled-stack section). Gate:
+`tests/test_interpolated_output_mse_pricing.py`.
 
 Re-stamped (2026-09-14, `claude/glm-first-artifact-census-wires`) for
 **fused-sibling members keeping whole menus until the group is priced**.
@@ -11253,8 +11264,10 @@ Two properties make the numbers comparable with the rest of the menu:
   that rung covers exactly it, in which case it is predicted rather than
   refused (below). Interpolation inside the measured bracket goes through the
   same `TesseraRateSurface`, on the stack's own HT anchors, and inherits
-  `cost_source: tessera_campaign_interpolated` so the existing
-  `drop_interpolated_candidates_dominated_by_measured` guard applies unchanged.
+  `cost_source: tessera_campaign_interpolated`, so the census interpolated-rung
+  guard applies to it unchanged: wired 2026-09-14 as
+  `drop_census_interpolated_within_loo`; the CB-ladder guard
+  (`drop_interpolated_candidates_dominated_by_measured`) remains uncalled.
 
   **The two-tier schedule and the transfer law (#495 parts 2-3).** A
   `StackExpertSample` may name `transfer_law_experts`: a strict subset of the
@@ -11380,8 +11393,22 @@ Rows are written in the codebase's own currency: `output_mse` and **no**
 both fields — which the first version of this stage did — prices a Tessera rung
 `h_trace/2` times low against every other format on the menu; a test now pins it.
 Interpolated rows join `cost_entry_is_band_interpolated`'s branch, so they are
-priced from their own output-space fit and inherit
-`drop_interpolated_candidates_dominated_by_measured`.
+priced from their own output-space fit. Their interpolated-rung guard was
+wired 2026-09-14 as `drop_census_interpolated_within_loo`; the CB-ladder guard
+remains uncalled. It runs in `build_candidates` immediately before
+`reduce_continuous_menu`, on every unit, deferred group members included. An
+interpolated candidate is dropped when a non-interpolated candidate on the same
+unit, in any family, costs no more bytes and sits within
+`|log2(dloss_other / dloss_cand)| <= leave_one_anchor_out[unit][family].max_abs_log2_error`.
+The band is the measured error, which is stricter than the campaign's
+`--loo-gate` wherever a surface stopped on its anchor budget. Across a fused or
+packed group a rung drops only when every member is dominated at it, because
+aggregation intersects member menus by name. The guard fails closed when an
+interpolated cell has no finite LOO record, or when the payload has
+interpolated rows and no `leave_one_anchor_out` table. It prints its own
+`[alloc] census LOO band guard:` line and records
+`census_loo_band_dropped` and `census_loo_band.per_unit` in the per-Linear
+menu report. Gate: `tests/test_interpolated_output_mse_pricing.py`.
 
 **Reducing the menu for the DP, and reporting which reduction did it**
 (`allocator_candidates.reduce_continuous_menu`). Two reductions, kept separate
