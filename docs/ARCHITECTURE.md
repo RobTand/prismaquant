@@ -1,7 +1,34 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `fix/joint-prepare-source-auth-20260913`. Stamps
+As of: 2026-09-13 · `codex/joint-eval-panel-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/joint-eval-panel-20260913`) for an **opt-in
+diagnostic joint evaluation panel**. A sealed joint plan may carry
+`joint_eval` v1, a deterministic Python random-permutation prefix and exact
+indices, shape, int64 token hash, and parent artifact SHA. It selects 16 of the
+original 512 calibration windows for the four joint probes in the GLM pilot;
+the ordinary plan continues using all 512. Preparation still loads and verifies
+the original calibration against the historical Hessian identity and uses the
+same original H, canonical activation capture, source model, static scales,
+and ProductionWeightCache. The subset is used only for the joint cotangent,
+statistics and costs; its distinct probe identity follows the actual selected
+int64 bytes. Operator-window backward observers record per-unit actual calls
+and token rows **per probe**. Totals are explicitly `summed_over_probes` and do
+not claim distinct token coverage; a separate route census would be required
+to make that claim. An invoked exact-zero unit with positive token rows is observed;
+an uninvoked routed unit or empty invocation is `unknown_unobserved`, even if its internal numerical buffer is
+zero. Pilot results remain `diagnostic_pilot`; the cost-currency admission and
+handoff refuse ordinary allocation/export until a separately validated
+promotion contract exists. Neither historical output-MSE costs nor Hessians
+are rescaled or renamed into panel prices. The current measured candidate
+roster is a subset of the experiment's full legal grammar; no full-domain
+pricing claim follows from this pilot. Larger nested prefixes preserve row
+inclusion, but a changed panel has a different full-token normalizer and probe
+identity and must reevaluate the entire selected union: old scalar prices are
+not additive blocks. The panel changes no format, default, serving lane, or ship gate.
+Gates: `tests/test_tessera_joint_eval_panel.py`
+and the existing joint-window/allocation suites.
 
 Re-stamped (2026-09-13, `fix/joint-prepare-source-auth-20260913`) for
 **complete-capture source authentication at first streamed use in joint

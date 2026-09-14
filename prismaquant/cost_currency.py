@@ -172,6 +172,14 @@ def _require_joint_run_currency(cost_data, costs):
     """
     provenance = cost_data.get("provenance")
     provenance = provenance if isinstance(provenance, Mapping) else {}
+    anchors = provenance.get('tessera_joint_anchors')
+    if ('joint_eval' in provenance
+            or isinstance(anchors, Mapping) and 'joint_eval' in anchors
+            or any(isinstance(entry, Mapping) and 'joint_eval_status' in entry
+                   for rows in costs.values() if isinstance(rows, Mapping)
+                   for entry in rows.values())):
+        raise CostCurrencyError('diagnostic joint evaluation has UNKNOWN unobserved units; '
+                                'ordinary allocation/export requires validated promotion')
     rows = [(unit, fmt, entry) for unit, per_unit in costs.items()
             if isinstance(per_unit, Mapping)
             for fmt, entry in per_unit.items()

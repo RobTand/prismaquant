@@ -890,6 +890,16 @@ def _load_plan(path, digest, *, projection_runtime=True):
     from .cost_streaming import normalize_boundary_storage
     normalize_boundary_storage(execution.get("boundary_storage"))
     _operator_window_policy(config)
+    if config.get('joint_eval') is not None:
+        from .tessera_joint_eval_panel import validate_panel_descriptor
+        validate_panel_descriptor(config['joint_eval'],
+            n_samples=execution['n_calib_samples'], seqlen=execution['calib_seqlen'],
+            artifact_sha256=config['calibration_input']['sha256'])
+        _require(config['execution'].get('operator_windows') is not None,
+                 'diagnostic joint evaluation requires operator observation windows')
+        _require(Path(execution['boundary_storage']['directory']).resolve().is_relative_to(
+                 Path(config['output_root']).resolve()),
+                 'diagnostic joint boundaries must be owned by pilot output root')
     _require(type(config.get("file_hash_workers", 1)) is int and config.get("file_hash_workers", 1) > 0,
              "positive file_hash_workers required")
     for name, minimum in (("n_calib_samples", 1), ("calib_seqlen", 1),
@@ -1112,6 +1122,10 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
             _same(calibration["provenance"].get(name), original_draw.get(name), f"original full draw {name}")
         result["calibration_input"] = calibration
+        from .tessera_joint_eval_panel import select_panel
+        eval_ids, eval_panel = select_panel(ids, calibration, config.get('joint_eval'))
+        if eval_panel is not None:
+            result['joint_eval'] = eval_panel
         if command == "prepare":
             if config.get("qualification_window") is not None:
                 from .autoscale import require_bounded_capture_environment
@@ -1213,7 +1227,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                       f"{pair}: qualified wire changed")
             _live_targets(runner, data.formats_by_qname)
             formats = list(dict.fromkeys(fmt for values in data.formats_by_qname.values() for fmt in values))
-            payload = compute_aura_cost_streamed(runner, ids.to(runner.device), formats,
+            payload = compute_aura_cost_streamed(runner, eval_ids.to(runner.device), formats,
                 n_probes=execution["n_probes"], probe_microbatch=execution["probe_microbatch"],
                 seed_base=execution["seed_base"], token_scope="all", temperature=1.0,
                 production_cache=cache, require_production_cache=True, joint_activation=True,
@@ -1227,6 +1241,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                 model_identity=source, profile=runner.profile,
                 checkpoint_identity_extra={"tessera_joint_anchor_plan_sha256": plan_sha256,
                     "prepared_anchor_sha256": prepared["sha256"], "calibration_input": calibration,
+                    **({'joint_eval': eval_panel} if eval_panel is not None else {}),
                     "reader_identity": reader_identity})
             _same(set(payload["costs"]), set(data.formats_by_qname), "complete joint output roster")
             for name, rows in payload["costs"].items():
@@ -1236,7 +1251,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             payload["provenance"]["tessera_joint_anchors"] = {
                 "plan_sha256": plan_sha256, "prepared": prepared, "inputs": data.inputs,
                 "calibration_input": calibration, "measured_cells": len(data.cells),
+                **({'joint_eval': eval_panel} if eval_panel is not None else {}),
                 **render_census}
+            if eval_panel is not None:
+                _same(payload['provenance'].get('joint_eval'), eval_panel,
+                      'pilot observation status and evaluation identity')
             output = root / "joint-cost.pkl"
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
