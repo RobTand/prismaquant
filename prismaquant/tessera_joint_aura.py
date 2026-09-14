@@ -18,6 +18,7 @@ from pathlib import Path
 import pickle
 import os
 import socket
+import stat
 import time
 from types import SimpleNamespace
 
@@ -631,15 +632,25 @@ def _qualification_capture_sizes(data, identity, policy):
 
 
 def _qualification_file_sha(path):
-    """Hash live upstream bytes, refusing a file replaced during the read."""
+    """Hash one held regular file; reject symlinks and path/descriptor drift."""
     path = Path(path)
-    def signature():
-        stat = path.stat()
-        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
-                stat.st_ctime_ns)
-    before = signature()
-    digest = _sha(path)
-    _same(signature(), before, f"qualification input changed while hashing: {path}")
+    def signature(value):
+        return (value.st_dev, value.st_ino, value.st_mode, value.st_size,
+                value.st_mtime_ns, value.st_ctime_ns)
+    before = path.lstat()
+    _require(stat.S_ISREG(before.st_mode), f'qualification input is not a regular file: {path}')
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise RuntimeError(f'qualification input changed before its read: {path}') from error
+    with os.fdopen(fd, 'rb') as handle:
+        _same(signature(os.fstat(handle.fileno())), signature(before),
+              f'qualification input changed before its read: {path}')
+        digest = hashlib.file_digest(handle, 'sha256').hexdigest()
+        _same(signature(os.fstat(handle.fileno())), signature(before),
+              f'qualification input changed while hashing: {path}')
+    _same(signature(path.lstat()), signature(before),
+          f'qualification input changed while hashing: {path}')
     return digest
 
 

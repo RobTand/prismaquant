@@ -221,7 +221,8 @@ def test_qualification_journal_restarts_from_durable_unit(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize('changed', ['plan', 'source', 'reader', 'implementation',
-                                     'capture', 'wire', 'render'])
+                                     'capture', 'wire', 'render', 'symlink_wire',
+                                     'symlink_render'])
 def test_qualification_replay_refuses_changed_upstream(tmp_path, monkeypatch, changed):
     runner, data, capture, events, _live, _observed = fixture(
         tmp_path, monkeypatch, fail_unit='model.layers.0.b')
@@ -238,8 +239,14 @@ def test_qualification_replay_refuses_changed_upstream(tmp_path, monkeypatch, ch
     elif changed == 'capture':
         from prismaquant.perturbed_x_cache import activation_cache_filename
         (tmp_path / 'inputs' / activation_cache_filename('model.layers.0.a')).write_bytes(b'changed H')
+    elif changed.startswith('symlink_'):
+        key = (data.formats_by_qname['model.layers.0.a'][0])
+        original = Path(data.cells['model.layers.0.a', key][changed.removeprefix('symlink_')])
+        target = original.with_name(original.name + '.saved')
+        original.rename(target)
+        original.symlink_to(target)
     else:
         Path(data.cells['model.layers.0.a', next(iter(data.formats_by_qname.values()))[0]][changed]).write_bytes(b'changed')
-    with pytest.raises((ValueError, RuntimeError), match='mismatch|changed'):
+    with pytest.raises((ValueError, RuntimeError), match='mismatch|changed|regular'):
         bridge.prepare_cache(runner, data, **options, qualification_resume=True)
     assert not any(row[0] == 'capture' for row in events)
