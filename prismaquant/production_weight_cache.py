@@ -566,6 +566,143 @@ class ProductionWeightCache:
             windows.append(tuple(window))
         return tuple(windows)
 
+    def _retained_window_preflight(self, keys, *, max_resident_bytes,
+                                   max_workers, max_load_buffer_bytes):
+        """Price one retained tensor lifetime and its bounded load quanta."""
+        self._window_limits(max_resident_bytes, max_workers)
+        buffer_cap = (max_resident_bytes if max_load_buffer_bytes is None
+                      else max_load_buffer_bytes)
+        if type(buffer_cap) is not int or buffer_cap <= 0:
+            raise ValueError('PWC retained window needs a positive serialized buffer budget')
+        keys = self._window_keys(keys)
+        if not keys:
+            raise RuntimeError('PWC retained window needs nonempty keys')
+        baseline = sum(self._window_resident_storages().values())
+        if baseline > max_resident_bytes:
+            raise RuntimeError('PWC existing resident storage exceeds retained window budget')
+
+        # Preflight every selected file before the first load. The persistent
+        # charge is its complete archive storage, while the serialized file
+        # buffer is charged only within the quantum that reads it.
+        files, file_keys = {}, []
+        persistent_bytes = baseline
+        incoming_lru_bytes = 0
+        quanta, quantum = [], []
+        quantum_buffer_bytes = peak_buffer_bytes = 0
+        for key in keys:
+            value = self.weights[key]
+            file_bytes = storage_bytes = 0
+            if not isinstance(value, torch.Tensor):
+                path, observed, file_bytes, storage_bytes = self._window_file(key)
+                files[str(path)] = (observed, file_bytes, storage_bytes)
+                file_keys.append(key)
+                persistent_bytes += storage_bytes
+                incoming_lru_bytes += storage_bytes
+                if file_bytes > buffer_cap:
+                    raise RuntimeError(f'PWC single serialized load buffer exceeds budget: {key}')
+                if persistent_bytes > max_resident_bytes:
+                    raise RuntimeError(f'PWC retained resident storage exceeds budget: {key}')
+            if quantum and (len(quantum) == max_workers
+                            or quantum_buffer_bytes + file_bytes > buffer_cap):
+                quanta.append(tuple(quantum))
+                peak_buffer_bytes = max(peak_buffer_bytes, quantum_buffer_bytes)
+                quantum, quantum_buffer_bytes = [], 0
+            quantum.append(key)
+            quantum_buffer_bytes += file_bytes
+        if quantum:
+            quanta.append(tuple(quantum))
+            peak_buffer_bytes = max(peak_buffer_bytes, quantum_buffer_bytes)
+        if (self._lru_order is not None and self._lru_max_bytes > 0
+                and self._lru_bytes + incoming_lru_bytes > self._lru_max_bytes):
+            raise RuntimeError('PWC retained window exceeds available LRU budget')
+        return keys, tuple(quanta), files, frozenset(file_keys), peak_buffer_bytes, buffer_cap
+
+    def plan_retained_window(self, keys, *, max_resident_bytes: int,
+                             max_workers: int, max_load_buffer_bytes: int | None = None):
+        """Return key-only bounded prefetch quanta for one retained lifetime.
+
+        All selected files and existing tensor storages are checked without
+        deserializing. This is a hint: ``retained_window`` repeats preflight
+        immediately before opening the context and guards each actual read.
+        """
+        return self._retained_window_preflight(
+            keys, max_resident_bytes=max_resident_bytes, max_workers=max_workers,
+            max_load_buffer_bytes=max_load_buffer_bytes)[1]
+
+    def retained_key_costs(self, keys):
+        """Price selected incoming PWC entries without loading or roster walks.
+
+        Returned keys are concrete aliases. Existing resident tensors have no
+        *incoming* charge; ``retained_window`` counts their complete backing
+        storages in its baseline. Disk entries report exact uncompressed
+        archive storage and conservative serialized file bytes. The context
+        repeats this preflight before loading because paths can change.
+        """
+        costs = {}
+        for key in self._window_keys(keys):
+            if isinstance(self.weights[key], torch.Tensor):
+                self._window_storage(self.weights[key])
+                costs[key] = {'incoming_storage_bytes': 0, 'serialized_bytes': 0}
+            else:
+                _, _, file_bytes, storage_bytes = self._window_file(key)
+                costs[key] = {'incoming_storage_bytes': storage_bytes,
+                              'serialized_bytes': file_bytes}
+        return costs
+
+    @contextmanager
+    def retained_window(self, keys, *, max_resident_bytes: int, max_workers: int,
+                        max_load_buffer_bytes: int | None = None,
+                        release_file_pages: bool = False):
+        """Keep many selected renders resident across repeated consumer passes.
+
+        Only PWC owns the tensors. The existing prefetch pool loads bounded
+        quanta, then every key must be resident before the consumer runs. The
+        cap covers all PWC backing storages; serialized buffers have a
+        separate concurrent-quantum cap. The consumer must release borrowed
+        references before context exit. Selected disk-backed entries are
+        restored to paths on success or failure.
+        """
+        if getattr(self, '_resident_window_files', None) is not None:
+            raise RuntimeError('PWC resident windows cannot be nested')
+        if type(release_file_pages) is not bool:
+            raise ValueError('PWC window page release must be boolean')
+        (keys, quanta, files, file_keys, peak_buffer_bytes, buffer_cap) = (
+            self._retained_window_preflight(
+                keys, max_resident_bytes=max_resident_bytes,
+                max_workers=max_workers,
+                max_load_buffer_bytes=max_load_buffer_bytes))
+        self._resident_window_files = files
+        self._resident_window_receipt_keys = file_keys
+        try:
+            loaded = 0
+            for quantum in quanta:
+                loaded += self.prefetch(quantum, max_workers=max_workers)
+                for key in quantum:
+                    self.get_resident(*key)
+                if sum(self._window_resident_storages().values()) > max_resident_bytes:
+                    raise RuntimeError('PWC actual backing storage exceeds retained window budget')
+            # Catch selected source drift between early and late quanta before
+            # exposing any partial window to the consumer.
+            for key in keys:
+                self.get_resident(*key)
+            actual = sum(self._window_resident_storages().values())
+            if actual > max_resident_bytes:
+                raise RuntimeError('PWC actual backing storage exceeds retained window budget')
+            if release_file_pages:
+                from .perturbed_x_cache import release_activation_cache_file_pages
+                for path, (observed, _, _) in files.items():
+                    release_activation_cache_file_pages(path, expected_stat=observed)
+            yield {'keys': keys, 'loaded': loaded, 'resident_bytes': actual,
+                   'budget_bytes': max_resident_bytes,
+                   'load_buffer_capacity_bytes': peak_buffer_bytes,
+                   'load_buffer_budget_bytes': buffer_cap,
+                   'file_pages_advised': len(files) if release_file_pages else 0,
+                   'load_quanta': quanta}
+        finally:
+            self.release_resident_tensors(keys)
+            self._resident_window_files = None
+            self._resident_window_receipt_keys = frozenset()
+
     @contextmanager
     def resident_window(self, keys, *, max_resident_bytes: int, max_workers: int,
                         max_load_buffer_bytes: int | None = None, release_file_pages: bool = False):
