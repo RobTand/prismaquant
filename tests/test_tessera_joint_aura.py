@@ -222,7 +222,8 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
         activation_quantized=True, wire_bytes=4, seconds=0.1, hessian_applied=True,
         input_global_scale=None)
     wire = tmp_path / "fixture.wire"; wire.write_bytes(b"wire")
-    cell = {"anchor": anchor, "record": {"expected": "derived"}, "wire": str(wire),
+    receipt = {"expected": "derived", "blob_bytes": 4, "blob_sha256": sha(wire)}
+    cell = {"anchor": anchor, "record": receipt, "wire": str(wire),
             "render_file_sha256": "a" * 64, "render_origin": "encoded"}
     seen = []
     def derive(value, *, weights, menus, calibration_source, static_scales, projected_units):
@@ -231,7 +232,7 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
         assert calibration_source is expected_inputs["calibration"]
         assert projected_units[value.qname] is expected_inputs["projection"]
         assert menus[value.qname][0].format_name == anchor["format_name"]
-        return {"expected": "derived"}
+        return receipt
     def verify(blob, record, expected):
         seen.append((blob, expected)); assert record == expected
     monkeypatch.setattr(tc, "_checkpoint_anchor_identity", derive)
@@ -258,6 +259,26 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
     with pytest.raises(ValueError, match="closed-vocabulary render_origin"):
         verify_anchor_render({k: v for k, v in cell.items() if k != "render_origin"},
                              source, rendered, **kwargs)
+
+
+def test_bounded_wire_read_fences_symlinks_size_and_actual_bytes(tmp_path):
+    from prismaquant.tessera_joint_aura import _read_verified_wire_blob
+
+    wire = tmp_path / "cell.tessera"
+    wire.write_bytes(b"exact-wire")
+    cell = {"wire": str(wire), "record": {
+        "blob_bytes": len(b"exact-wire"), "blob_sha256": sha(wire)}}
+    blob, digest = _read_verified_wire_blob(cell)
+    assert blob == b"exact-wire" and digest == sha(wire)
+
+    wire.write_bytes(b"wrong-wire")
+    with pytest.raises(ValueError, match="checksum"):
+        _read_verified_wire_blob(cell)
+    wire.write_bytes(b"exact-wire")
+    alias = tmp_path / "alias.tessera"
+    alias.symlink_to(wire.name)
+    with pytest.raises(ValueError, match="regular file, not a symlink"):
+        _read_verified_wire_blob({**cell, "wire": str(alias)})
 
 
 @pytest.mark.parametrize("field,value", [("probe_microbatch", 0), ("n_probes", 1),

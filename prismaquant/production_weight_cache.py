@@ -239,6 +239,67 @@ def is_packed_expert_param_qname(qname: str) -> bool:
     return bool(_PACKED_EXPERT_PARAM_RE.search(str(qname)))
 
 
+class _WindowTrackedWeights(dict):
+    """Index resident owners while retaining the public cache's dict API.
+
+    The large disk-backed roster needs one initial walk. Later window checks
+    inspect only live tensor keys, including values directly assigned by a
+    caller. Storage identities themselves are recomputed at every boundary so
+    views, aliases and changed tensor backing cannot undercount memory.
+    """
+
+    def __init__(self, values=()):
+        super().__init__(values)
+        self.tensor_keys = {key for key, value in self.items()
+                            if isinstance(value, torch.Tensor)}
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        if isinstance(value, torch.Tensor):
+            self.tensor_keys.add(key)
+        else:
+            self.tensor_keys.discard(key)
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self.tensor_keys.discard(key)
+
+    def update(self, *args, **kwargs):
+        for key, value in dict(*args, **kwargs).items():
+            self[key] = value
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def pop(self, key, *default):
+        value = super().pop(key, *default)
+        self.tensor_keys.discard(key)
+        return value
+
+    def popitem(self):
+        key, value = super().popitem()
+        self.tensor_keys.discard(key)
+        return key, value
+
+    def clear(self):
+        super().clear()
+        self.tensor_keys.clear()
+
+    @classmethod
+    def fromkeys(cls, keys, value=None):
+        return cls(dict.fromkeys(keys, value))
+
+    def __reduce__(self):
+        # The index is process-local bookkeeping, regenerated on demand.
+        return dict, (dict(self),)
+
+
 @dataclass
 class ProductionWeightCache:
     """Dict-like cache of production-faithful dequantized weights.
@@ -425,11 +486,12 @@ class ProductionWeightCache:
         return (tensor.device, storage.data_ptr()), storage.nbytes()
 
     def _window_resident_storages(self):
+        if not isinstance(self.weights, _WindowTrackedWeights):
+            self.weights = _WindowTrackedWeights(self.weights)
         storages = {}
-        for value in self.weights.values():
-            if isinstance(value, torch.Tensor):
-                identity, nbytes = self._window_storage(value)
-                storages[identity] = max(storages.get(identity, 0), nbytes)
+        for key in self.weights.tensor_keys:
+            identity, nbytes = self._window_storage(self.weights[key])
+            storages[identity] = max(storages.get(identity, 0), nbytes)
         return storages
 
     @staticmethod

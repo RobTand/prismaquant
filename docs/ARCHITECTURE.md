@@ -1,7 +1,46 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `integrate/pq588-release-20260913`. Stamps
+As of: 2026-09-13 · `integrate/pq591-release-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
+**bounded, recoverable Tessera joint-anchor qualification** (#590). The
+complete source proof from #588 still gates the streamed model and capture.
+With explicit qualification windows, `ProductionWeightCache` now builds one
+resident-key index and updates it across its public dict mutations; each
+window recomputes backing-storage identities only for live tensors, counting
+shared views once and detecting rebound storage. File bounds, serialized
+buffers, LRU limits and the actual post-prefetch storage cap stay intact.
+The capture owner validates and seals the complete manifest once, then reuses
+its immutable metadata and load-execution digest behind a same-file stat
+fence; individual X/H payload bytes are still verified on their actual load.
+Inside each PWC window a single worker reads the next receipt-sized Tessera
+wire while the GPU verifies the current cell. The current and pending blobs
+both count against the guard reserve; each read fences its regular file by
+path and descriptor stats, hashes the exact bytes, and hands those same bytes
+to the unchanged encoder-identity verifier and decoder. The future is joined
+before its window releases resident renders, including on failure.
+
+Preparation now writes an identity-bound qualification journal under
+`prepare/qualification` after each complete unit. Its identity binds the plan,
+source, capture/H, campaign checkpoint, decoder, backend, settings, policy and
+complete cell roster. `prepare --resume` first replays the journal and checks
+each skipped unit's canonical X/H, wire and render bytes before continuing;
+unfinished units enter the ordinary verified capture loader. Only the
+complete exact verified-cell roster
+can publish `production.pkl` and `prepared.json`; an interrupted action's log
+count is not a checkpoint. PrismaBuild `qualification` progress counts only
+durably written units. The previous `--resume` refusal changes for bounded
+preparation; legacy unwindowed preparation retains its prior path. No wire,
+numerical render comparison, provenance origin, format or serving gate changes.
+The journal stores one streaming SHA-256 and count over every sorted cell's
+anchor, wire receipt, resolved donor paths and origin; it recomputes the same
+digest on resume instead of copying the entire 197,990-cell record mapping
+into a second manifest. The original checkpoint and cost/census inputs remain
+independently SHA-bound, and any changed cell field still refuses reuse.
+The bounded, phase-matched 18-cell and 241-cell before/after rates and both-box resource
+evidence are in `docs/measurements/glm-joint-prep-bounded-ab-2026-09-13.md`;
+full-campaign throughput and work-per-joule remain unmeasured.
 
 Re-stamped (2026-09-13, `integrate/pq588-release-20260913`) to classify GLM's
 MTP index using `text_config.num_hidden_layers` (or the top-level backbone
