@@ -962,7 +962,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     runner's: the layer's source byte extents first (the streaming context
     prefetches them on ``install``), then, for each of the layer's units in
     sorted name order, that unit's capture file and then each measured rung's
-    render and wire. A plan that declares no ``qualification_window`` runs the
+    render and, for preparation, wire. A plan that declares no
+    ``qualification_window`` runs the
     older whole-layer window instead -- all of the layer's captures, then its
     renders and wires -- and the order here follows the plan.
 
@@ -982,14 +983,14 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     that the runner settles before the next phase; otherwise this linear ARC
     prefix cannot represent an in-flight future-layer read safely.
 
-    ``run`` hashes every cell's wire and render up front
-    (``load_measured_anchor_input`` with ``verify_payloads=True``), so it
-    carries a ``hash`` phase between the head and the layers, in the hashing
-    order: cells in sorted unit name then sorted format, wire before render.
-    Those files are then read again during the streaming pass; the contract
-    refuses a repeated ``(path, offset)``, so each is declared once, in the
-    phase that reads it first, and the re-read bytes are recorded under
-    ``annotations.reread_bytes_by_phase``.
+    ``run`` consumes prepared renders through PWC's verified load, so their
+    first reads belong to their layers. It consumes no wire bodies and does
+    not synthesize missing renders. Wire identities in its metadata are the
+    historical preparation evidence; selected export authenticates current
+    wire bytes. There is no whole-roster payload hash phase.
+    The inherited layer ordering covers these reads; it does not yet express
+    COST's forward/reverse execution or rewarm repeated source extents. The
+    global (path, offset) deduplication records rereads only as annotations.
 
     ``sha256`` is null for the same reason it is null on a campaign row: the
     manifest is a residency hint whose own bytes are content-addressed, not an
@@ -1058,6 +1059,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             path, size = _render_file(owners[name], render_sizes, name, fmt)
             if size:
                 continue
+            if command == "run":
+                raise SystemExit(f"prepared render is missing; COST will not synthesize it: {path}")
             absent.append(path)
             synthesized_wire_bytes += wire_bytes
             track.add(wire, 0, wire_bytes, "wires")
@@ -1094,11 +1097,6 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
                 raise SystemExit("bound joint source identity cache checksum changed")
             track.add(cache_path, 0, _required_size(cache_path,
                 "source identity cache"), "source_identity_cache")
-        track.begin("hash")
-        for name in roster:
-            for fmt, wire, wire_bytes in cells[name]:
-                track.add(wire, 0, wire_bytes, "wires")
-                _add_render(track, owners[name], render_sizes, name, fmt)
 
     # A plan that declares a qualification window runs one unit per capture
     # window; without one the whole layer's captures are loaded together.
