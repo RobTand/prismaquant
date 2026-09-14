@@ -104,6 +104,7 @@ def _workspace(scratch: Path) -> dict:
 
     model = scratch / "model"
     model.mkdir()
+    (model / "config.json").write_text(json.dumps({"num_hidden_layers": 2}))
     header = {}
     for index, name in enumerate(names):
         header[name + ".weight"] = {
@@ -373,6 +374,28 @@ def test_prepare_manifest_traces_full_source_sha_at_first_use_and_completion(
     assert whole_shard("source-complete", untouched)
     assert str(index_path) in _paths(manifest, "head")
     assert manifest["annotations"]["counts"]["source_authentication"] == 3
+
+
+def test_mtp_index_after_backbone_is_completion_auth_only(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    (model / "config.json").write_text(json.dumps({
+        "num_hidden_layers": 3, "text_config": {"num_hidden_layers": 2}}))
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.2.mlp.down_proj.weight"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "mtp-passthrough.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert str(shard) in _paths(manifest, "source-complete")
+    assert str(shard) not in _paths(manifest, "layer-0")
+    assert str(shard) not in _paths(manifest, "layer-1")
 
 
 def test_prepare_manifest_uses_exact_cached_source_sha_and_refuses_mutation(

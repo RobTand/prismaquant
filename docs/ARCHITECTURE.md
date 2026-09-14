@@ -1,7 +1,15 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `fix/joint-prepare-source-auth-20260913`. Stamps
+As of: 2026-09-13 · `integrate/pq588-release-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `integrate/pq588-release-20260913`) to classify GLM's
+MTP index using `text_config.num_hidden_layers` (or the top-level backbone
+depth) in the joint source-authentication schedule. Indexed tensors after the
+backbone are completion-authenticated, not treated as an unplanned streamed
+body layer; the 45-layer GLM body remains layers 0–44. A truly unplanned body
+layer still refuses. A valid cached full-shard proof still avoids a fresh body
+hash read. Gate: `test_mtp_index_after_backbone_is_completion_auth_only`.
 
 Re-stamped (2026-09-13, `fix/joint-prepare-source-auth-20260913`) for
 **complete-capture source authentication at first streamed use in joint
