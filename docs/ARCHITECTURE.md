@@ -258,6 +258,12 @@ demonstrates it, with the two further causes underneath it, is
 `docs/measurements/prefill-frontier-qwen3-0.6b-2026-09-13.md`. No default,
 stage, format or gate changed; §12 gains one row.
 
+Re-stamped (2026-09-13, `integrate/pq579-20260913`) to bind the installed
+quantiser table to the exact reviewed Tessera serving pin before any fp4
+panel can use it. An installed v25 table cannot promote fp4 pricing while
+this repository still pins contract v24; the corresponding test drives the
+production reader through the v25 fixture and expects a pin refusal.
+
 Re-stamped (2026-09-13, `claude/574-quantizer-attestation`) for the **fp4
 activation execution-identity gates** (#574, #567). Three gate changes, all
 tightenings. (a) `prepare_native_inputs` now REFUSES to freeze a

@@ -79,6 +79,15 @@ def test_an_absent_block_is_refused_not_skipped():
             CONTRACT, platform=PLATFORM, table={})
 
 
+def test_an_installed_table_cannot_bypass_the_reviewed_runtime_pin(monkeypatch):
+    """The v25 fixture is not an authorized v24 pricing table merely by being installed."""
+    from prismaquant.tessera_serving_runtime_pin import TesseraServingRuntimePinError
+
+    monkeypatch.setattr(trc, "contract_path", lambda: FIXTURE)
+    with pytest.raises(TesseraServingRuntimePinError, match="not the pinned Tessera"):
+        trc.require_activation_quantizer_attested(CONTRACT, platform=PLATFORM)
+
+
 def test_a_table_for_another_platform_does_not_attest_this_one():
     with pytest.raises(trc.TesseraContractError, match="publishes no quantiser"):
         trc.require_activation_quantizer_attested(

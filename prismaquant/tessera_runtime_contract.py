@@ -1996,13 +1996,22 @@ def packaged_activation_quantizers() -> tuple[str, dict]:
     returns ``None`` when the pin is not requested, and "the pin is not
     requested" must not be a way for an unattested quantiser to be priced.
     The digest travels with the table so a producer can stamp WHICH bytes
-    attested it.
+    attested it. It must also match the independently reviewed serving pin:
+    otherwise an installed v25 table would admit fp4 pricing while the pin
+    still declares v24, bypassing the review that moves the pin.
     """
     from importlib.resources import as_file
 
     with as_file(contract_path()) as path:
         raw = Path(path).read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
+    from .tessera_serving_runtime_pin import (
+        load_tessera_serving_runtime_pin,
+        require_exact_tessera_runtime_pin,
+    )
+
+    require_exact_tessera_runtime_pin(
+        load_tessera_serving_runtime_pin(), installed_contract_sha256=sha)
     payload = json.loads(raw.decode("utf-8"))
     return sha, _parse_activation_quantizers(payload, str(contract_path()))
 
