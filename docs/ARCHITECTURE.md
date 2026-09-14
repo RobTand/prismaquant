@@ -1,7 +1,17 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-14 · `integrate/pq611-release-20260913`. Stamps
+As of: 2026-09-14 · `codex/joint-retained-window-plan-20260914`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/joint-retained-window-plan-20260914`) for
+**combined retained-render COST admission** (#602). The opt-in scalar planner
+charges full metadata/runtime allowances, actual source owners, one operator
+statistics plane, retained PWC archive storage, bounded serialized/read-page
+buffers, exact-boundary/auxiliary state, workspace and the guard safety margin.
+A logical BF16 geometry forecast is not an archive-storage admission receipt.
+Oversized targets, unexpected live baselines and excessive replay-window counts
+refuse; the existing probe-major mode remains unchanged. PWC remains the sole
+render owner, with bounded loader quanta and checked release between quanta.
 
 Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
 `glm_packed_research_sm121` routed allocation menu. It now preserves the
@@ -135,6 +145,30 @@ not additive blocks. The panel changes no format, default, serving lane, or ship
 Gates: `tests/test_tessera_joint_eval_panel.py`
 and the existing joint-window/allocation suites.
 
+Re-stamped (2026-09-13, `codex/pwc-retained-window-20260913`) for
+opt-in retained PWC candidate windows. `retained_key_costs` inspects only
+selected concrete keys and reports incoming uncompressed Torch archive storage
+and serialized file bytes without loading tensors. `plan_retained_window`
+preflights the complete selected roster, including unrelated resident backing
+storages and the LRU cap, then returns key-only prefetch quanta bounded by CPU
+workers and the concurrent serialized-buffer budget. `retained_window` repeats
+preflight, uses the existing PWC prefetch pool for each quantum, and holds all
+selected tensors in the same cache for repeated probes. The total persistent
+storage cap applies throughout; actual loaded storages are checked after each
+quantum and before consumer entry. Existing file-read stat/SHA receipts,
+resident-only lookups, CB identity checks, checked page advice and selected
+disk-owner cleanup apply through the entire lifetime. Defaults and the earlier
+single-quantum `resident_window` contract remain unchanged. CPU gates are in
+`tests/test_pwc_resident_windows.py`; this is a memory-lifetime contract, not
+a speed or fit measurement.
+
+The retained lifetime advises each selected regular file after its last
+prefetch quantum, before loading later quanta. This limits avoidable page-cache
+co-residency, but advice alone does not prove physical reclaim. An optional
+main-thread `before_load_quantum` callback receives current PWC resident bytes,
+remaining incoming archive storage bytes, and the next quantum's serialized
+file bytes; a host memory guard can refuse the next load before entering the
+prefetch pool. A refusal releases all selected disk-backed tensor owners.
 Re-stamped (2026-09-13, `codex/arc-prewarm-prepare-final-20260913`) for the
 **joint prepare ARC frontier**. The post-campaign manifest keeps its exact
 ordered entries and divides windowed qualification at complete-unit
@@ -16008,3 +16042,24 @@ research questions rather than debt: deriving the GPTQ damp constant from the we
 XLAYER Q4 LFM2.5 routing-channel measurement. The remaining ~34 — mostly PrismaSCOUT-era items
 that died with their subsystem — are enumerated with verdicts in
 `scratch/doc-consolidation-2026-07-30/census_handovers.md` §POSSIBLY-STILL-OPEN.
+
+The retained COST path can consume PREPARE's already measured `rendered_weight`
+identity together with its required serialized-file SHA. It validates exact
+roster, shape, dtype and byte length before checkpoint admission; the existing
+PWC file reader authenticates actual bytes, and the operator checks the resident
+tensor against that identity before projection. This avoids a separate identity
+read of every render. Callers without those prepared proofs retain the explicit
+legacy identity scan.
+
+An optional sealed PB V2 read manifest records unique input extents and ordered
+references for setup/head, forward source capture, tail, and reverse source and
+retained windows. COST's boundaries are produced online, so PREPARE activation
+capture payloads are absent. Exact boundary artifact readback remains owned by
+`StreamedBoundaryArtifacts`; generated outputs are outside the static PB input
+read plan. The manifest descriptor is SHA/length-bound in the submitted command,
+separate from the persistent measurement plan. Before capture, runtime validates
+its full target roster and independently validated completed checkpoint set.
+Partial resume preserves every original window ID and only filters completed
+members. Each retained window publishes the existing per-unit checkpoints after
+all probes, then reports durable progress; source/window phase entry precedes
+its necessary reads. No application prewarmer or dispatcher is introduced.
