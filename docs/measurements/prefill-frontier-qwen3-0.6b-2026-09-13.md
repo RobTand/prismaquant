@@ -560,6 +560,23 @@ comparable to §3 in everything except the units and the route class.
    three MLP units, byte-matched arms: fp4 0.133104 ms against fp8 0.127616 ms,
    disjoint intervals, about 1.04x. At decode fp4 is the slowest of the three
    (§8.4). Rob's expectation is not supported by this measurement.
+   **Amended (PQ #568) — the scope of this finding is the route, not the
+   kernel, and "at this scope" means at M = 512.** Swept to M = 131 072 with
+   the device loaded (0.37 to 0.64 of the 140 W envelope, against 0.058 here),
+   the fp4 *route* still loses on this three-unit sum and loses by more —
+   1.295x at M = 131 072, worst 1.350x at M = 32 768, intervals disjoint at
+   every M — but the fp4 `torch._scaled_mm` **kernel** is 1.39x to 1.66x faster
+   than the fp8 one at every M measured, on a genuine sm_120-family block-scaled
+   CUTLASS schedule. **And one of the three units does cross:** `mlp.down_proj`
+   (N = 1024, a third of the other two units' output width) is faster in fp4
+   than in fp8 at M = 1024 (0.810x), 2048, 4096 and 8192, with disjoint
+   intervals. The route pays for exactly one kernel the fp8 route has no
+   counterpart for: `nvfp4_route.py:238` multiplies the entire M x N output by
+   the Python float `layer.tessera_epilogue_scale`. fp4 also wins work per joule
+   1.15x to 1.46x at every M. Read this item as: **Rob's expectation is right about the
+   arithmetic and wrong about the route as it is written.**
+   `docs/measurements/prefill-load-sweep-qwen3-0.6b-2026-09-13.md` is the
+   measurement; `docs/ARCHITECTURE.md` debt D40 is the consequence.
 3. A 7-unit fp4 arm **cannot be built** on this evidence: 3 of the 7 layer-0
    units are `timing_admissible`, 2 refuse the activation-side numeric gate, 1
    (`q_proj`) holds no receipt but the diagnostic probe shows it would refuse for
@@ -598,6 +615,24 @@ fraction of **0.058**. On GB10 `gpu_utilization` is non-diagnostic, and power
 says plainly that these layer-0 cells do not load the device. Read every §8.4
 number as a launch-and-activation-quantize overhead price, not an arithmetic-rate
 price.
+
+**Amended (PQ #568) — what that 8.15 W is, and what it is not.** The number is
+right and the sentence after it was too strong. Netdata's
+`nvidia_smi.gpu_power_draw` collector on sparklina runs at `update_every = 10`
+(tier 0), so the 324-second `28afcdc891db` window holds about 32 real samples,
+almost all taken while the container was importing torch, installing the plugin,
+preparing cells and writing evidence — 720 applies across nine cells and two
+phases is about 30 ms of GPU work inside 324 seconds of action. **8.15 W is the action's mean,
+not the apply's.** Re-measured with an in-process `pynvml` sampler at 100 ms
+around a *sustained* apply loop, the same M = 512 applies on the same three units
+and the same GPU draw 51.5 W on the fp4 arm and 90.2 W on the fp8 arm — 0.368 and 0.644
+of the 140 W envelope, and the box-level Netdata view of that whole action
+reads a mean of 61.3 W (0.438) with a 94 W peak. The conclusion §8.4 drew from the low number
+survives in a sharper form and with a number of its own: at M = 512 the CUDA-event
+median of one apply is 0.134928 ms while the sum of every kernel's self device
+time in that apply is 0.064326 ms, so about 52% of the apply is launch
+and Python. `docs/measurements/prefill-load-sweep-qwen3-0.6b-2026-09-13.md`
+sweeps M until that gap is under 3% and reports what changes.
 
 ### 8.2 The route is native fp4 — deliverable 2
 
@@ -755,6 +790,19 @@ group-16 UE4M3 block scales into a swizzled plane. bf16 (`torch.mm`) quantizes
 nothing and is the only arm whose prefill/decode ratio tracks M at all. This
 record measures the timing and names the code paths; it does not profile the
 kernels and does not claim the mechanism.
+
+**Amended (PQ #568) — the mechanism, profiled.** The kernels were profiled at
+nine values of M and the guess above was wrong in an instructive way. It is not
+the *shape* of the activation quantize that separates the arms: summed over the
+three units at M = 8192 the fp4 quantize costs 507.9 us and the fp8 quantize
+512.4 us, within a few percent of each other. What separates them is a
+kernel the fp8 route does not run at all. The fp4 route's
+`y = y * layer.tessera_epilogue_scale` (`nvfp4_route.py:238`) is a full-output
+elementwise pass; at M = 8192 it costs 913.7 us summed over the three units —
+more than the fp4 GEMM's own 737.6 us — and it is bandwidth-bound, moving the whole bf16 output out and back
+at about 245 GB/s. Meanwhile the fp4 GEMM is 737.6 us against fp8's
+1162.1 us. See `docs/measurements/prefill-load-sweep-qwen3-0.6b-2026-09-13.md`
+§5 and §6.
 
 **Labelling these numbers.** All nine f2 cells are `timing_admissible` — the
 three fp4 rows passed **both** numeric gates, with `qdq_numerics` at exactly 0.0.
