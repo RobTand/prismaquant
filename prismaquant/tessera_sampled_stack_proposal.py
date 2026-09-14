@@ -18,7 +18,8 @@ from . import format_registry as fr
 from .allocator_candidates import (
     aggregate_fused_siblings, aggregate_packed_serving_groups, build_candidates,
     expand_fused_sibling_assignment,
-    expand_packed_group_assignment, serialized_candidate_payload,
+    expand_packed_group_assignment, fused_sibling_group_members,
+    packed_serving_group_members, serialized_candidate_payload,
 )
 from .allocator_solver import solve_with_promotion
 from .cluster_campaign import _atomic_write_new_bytes
@@ -165,10 +166,15 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
     legal = _domain(full_legal_families, costs, stats)
     specs = [fr.get_format(fmt) for fmt in sorted({fmt for rows in costs.values() for fmt in rows})]
     mask = []
+    # Group members keep whole menus until aggregation prices the group: a rung
+    # pruned from one member drops out of the group's name intersection.
+    deferred = (packed_serving_group_members(stats, profile)
+                | fused_sibling_group_members(stats, profile))
     raw = build_candidates(stats, costs, specs,
                            source_manifest={name: 'bf16' for name in stats},
                            target_profile=target_profile, mask_records=mask,
-                           tessera_menu_mode='research')
+                           tessera_menu_mode='research',
+                           defer_menu_reduction=deferred)
     _require(set(raw) == set(stats) and all(raw.values()), 'some pilot unit has no legal measured candidate')
     grouped_stats, grouped_costs, grouped = aggregate_packed_serving_groups(
         stats, costs, specs, raw, profile)

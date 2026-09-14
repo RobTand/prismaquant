@@ -121,6 +121,7 @@ from .allocator_candidates import (
     _is_passthrough_format,
     _passthrough_source_ok,
     _scan_source_dtype_manifest,
+    source_kinds_in_row_namespace,
     aggregate_fused_siblings,
     aggregate_packed_serving_groups,
     build_candidates,
@@ -128,7 +129,9 @@ from .allocator_candidates import (
     check_stats_format_applicability,
     expand_fused_sibling_assignment,
     expand_packed_group_assignment,
+    fused_sibling_group_members,
     packed_role_split_profile,
+    packed_serving_group_members,
     selection_serving_lane_provenance,
     serialized_candidate_payload,
     summarize_applicability_masks,
@@ -3007,6 +3010,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             print(f"[alloc] source-dtype manifest: {summary} "
                   f"(gates {gated} per source)",
                   flush=True)
+            # The scan is recipe-keyed; probe rows may be live-keyed
+            # (glm5_next). Resolve each row through its recipe unit.
+            source_manifest = source_kinds_in_row_namespace(
+                source_manifest, stats, model_profile)
 
     # A requested production CB rung needs a measured row everywhere it is
     # otherwise legal. `build_candidates` historically skipped absent/error
@@ -3147,6 +3154,18 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
 
     candidate_mask_records: list[dict] = []
     tessera_menu_report: dict = {}
+    # Packed-group and fused-sibling members are intersected by format NAME
+    # before the DP sees them, so their menus must reach aggregation whole: a
+    # rung dominated for one member can still be on the group's own frontier.
+    # The post-aggregation reduction below reduces the super items exactly.
+    packed_members_deferred = (
+        packed_serving_group_members(stats, model_profile)
+        if not args.no_packed_aggregation else frozenset()
+    )
+    fused_members_deferred = (
+        fused_sibling_group_members(stats, model_profile)
+        if not args.no_fused_aggregation else frozenset()
+    ) - packed_members_deferred
     candidates = build_candidates(
         stats, costs, specs_sorted, calibrated_gains,
         source_manifest=source_manifest,
@@ -3159,9 +3178,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         bit_precision=float(args.bit_precision),
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
+        defer_menu_reduction=packed_members_deferred | fused_members_deferred,
         **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}),
     )
-    print(f"[alloc] candidates built for {len(candidates)} Linears")
+    print(f"[alloc] candidates built for {len(candidates)} Linears"
+          + (f" ({len(packed_members_deferred)} packed-group and "
+             f"{len(fused_members_deferred)} fused-sibling members keep whole "
+             "menus until aggregation)"
+             if packed_members_deferred or fused_members_deferred else ""))
 
     fixed_format_assignment: dict[str, str] = {}
     fixed_stats: dict[str, dict] = {}

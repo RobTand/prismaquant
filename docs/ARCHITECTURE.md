@@ -1,7 +1,21 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-14 · `codex/joint-retained-window-plan-20260914`. Stamps
+As of: 2026-09-14 · `claude/glm-first-artifact-census-wires`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-14, `claude/glm-first-artifact-census-wires`) for
+**fused-sibling members keeping whole menus until the group is priced**.
+`fused_sibling_group_members` joins `packed_serving_group_members` in
+`defer_menu_reduction`, because `aggregate_fused_siblings` also intersects
+member menus by name (§ "Reducing the menu for the DP"). Gate:
+`tests/test_allocator_packed_group_menu_reduction.py`.
+
+Re-stamped (2026-09-14, `claude/glm-first-artifact-census-wires`) for
+**packed-group members keeping whole menus until the group is priced**.
+`reduce_continuous_menu` no longer reduces a Linear that
+`aggregate_packed_serving_groups` will intersect with other members; the
+post-aggregation pass reduces the group item instead (§ "Reducing the menu for
+the DP"). Gate: `tests/test_allocator_packed_group_menu_reduction.py`.
 
 Re-stamped (2026-09-13, `codex/joint-retained-window-plan-20260914`) for
 **combined retained-render COST admission** (#602). The opt-in scalar planner
@@ -11460,6 +11474,22 @@ are reported, in `layer_config.json` under
 `__prismaquant__.tessera_menu = {per_linear, aggregated}` — written on every
 run, not only on the byte-budget path, which is where the first version of this
 stamp landed and therefore never appeared in a `--target-bits` run.
+
+**Packed-group and fused-sibling members skip the first pass.** Dominance and
+bin collapse are exact only for a unit the DP chooses on its own.
+`aggregate_packed_serving_groups` offers a packed group only the format names
+common to every member and prices each name by summing member bytes and costs,
+so a rung dominated for one member can still sit on the group's summed frontier.
+`aggregate_fused_siblings` intersects by name the same way; its per-member
+composites exist only where the pinned contract frees the rate per member, so an
+unpinned run has nothing to recover a pruned rung. `allocator.py` therefore
+passes `packed_serving_group_members(stats, profile)` and
+`fused_sibling_group_members(stats, profile)` to `build_candidates` as
+`defer_menu_reduction`, those members reach aggregation with whole menus, and
+the post-aggregation pass reduces the group item exactly. On GLM-5.3 Flash's
+515-name menu the old order left every one of the 42 expert stacks with a single
+rung (3.276 bpp, 30.4 GB of budget unused). Gate:
+`tests/test_allocator_packed_group_menu_reduction.py`.
 
 > **Attestation, read rather than assumed.** Whether a runtime can serve a
 > fused group whose members hold different rungs of one family is a fact about

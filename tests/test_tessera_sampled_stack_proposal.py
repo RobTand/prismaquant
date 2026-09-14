@@ -110,6 +110,27 @@ def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
     assert result['independent_selected_assignment_validation']['required_for_production_promotion']
 
 
+def test_stack_members_reach_aggregation_with_whole_menus(monkeypatch):
+    # Per-member reduction before aggregation can empty a stack's name
+    # intersection; test_allocator_packed_group_menu_reduction has the case.
+    from prismaquant import tessera_sampled_stack_proposal as mod
+    joint, *_tail, names = pilot_fixture()
+    monkeypatch.setattr(mod, '_domain', lambda *args, **kwargs: {})
+    seen = {}
+
+    class Captured(Exception):
+        pass
+
+    def capture(*args, **kwargs):
+        seen.update(kwargs)
+        raise Captured
+    monkeypatch.setattr(mod, 'build_candidates', capture)
+    with pytest.raises(Captured):
+        propose_bound_payload(joint, profile=AtomicProfile(), mutable_budget_bytes=600000,
+            immutable_bytes=101, reserve_bytes=11, full_legal_families=PRIMARY)
+    assert seen['defer_menu_reduction'] == frozenset(names)
+
+
 def test_unknown_independent_and_incomplete_stack_refuse(monkeypatch):
     from prismaquant import tessera_sampled_stack_proposal as mod
     joint, *_tail, names = pilot_fixture()
