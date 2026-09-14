@@ -19,8 +19,9 @@ Preparation now writes an identity-bound qualification journal under
 `prepare/qualification` after each complete unit. Its identity binds the plan,
 source, capture/H, campaign checkpoint, decoder, backend, settings, policy and
 complete cell roster. `prepare --resume` first replays the journal and checks
-current canonical capture X/H and every skipped unit's wire/render SHA before
-continuing at the next unit. Only the complete exact verified-cell roster
+each skipped unit's canonical X/H, wire and render bytes before continuing;
+unfinished units enter the ordinary verified capture loader. Only the
+complete exact verified-cell roster
 can publish `production.pkl` and `prepared.json`; an interrupted action's log
 count is not a checkpoint. PrismaBuild `qualification` progress counts only
 durably written units. The previous `--resume` refusal changes for bounded
