@@ -80,7 +80,7 @@ def test_selected_archive_cost_join_rejects_aliases_and_unrelated_footprints():
     plan = SimpleNamespace(targets=[SimpleNamespace(name='a', statistics_bytes=256, shape=(4, 16))])
     rows = targets_from_statistics_plan(plan, {'a': (('a', 'fmt'),)},
         {('a', 'fmt'): {'incoming_storage_bytes': 128, 'serialized_bytes': 2048}})
-    assert rows == (RetainedTarget('a', 256, 128, 2048, 256, 1),)
+    assert rows == (RetainedTarget('a', 256, 2048, 2048, 256, 1),)
     with pytest.raises(ValueError, match='unique'):
         targets_from_statistics_plan(plan, {'a': (('a', 'fmt'), ('a', 'fmt'))}, {})
     with pytest.raises(ValueError, match='empty PWC baseline'):

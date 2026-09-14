@@ -112,13 +112,14 @@ class RetainedTargetPlan:
                 'budget': self.budget.as_dict(), 'source_bytes': self.source_bytes,
                 'fixed_bytes': self.budget.fixed_bytes(self.source_bytes),
                 'footprint_scope': self.footprint_scope,
-                'archive_admission': self.footprint_scope == 'pwc_selected_archive_storage',
+                'archive_admission': self.footprint_scope in ('pwc_selected_archive_storage', 'pwc_serialized_upper_bound'),
                 'windows': [asdict(window) for window in self.windows]}
 
 
 def plan_retained_targets(targets, *, budget, source_bytes, footprint_scope):
     """Greedily pack complete targets, enforcing every owner cap together."""
-    if footprint_scope not in ('pwc_selected_archive_storage', 'logical_bf16_geometry_forecast'):
+    if footprint_scope not in ('pwc_selected_archive_storage', 'pwc_serialized_upper_bound',
+                               'logical_bf16_geometry_forecast'):
         raise ValueError('explicit owned archive or non-admitting geometry scope required')
     targets = tuple(sorted(targets, key=lambda target: target.name))
     if not targets or len({target.name for target in targets}) != len(targets):
@@ -155,7 +156,13 @@ def plan_retained_targets(targets, *, budget, source_bytes, footprint_scope):
 
 
 def targets_from_statistics_plan(statistics_plan, keys_by_name: Mapping, key_costs: Mapping):
-    """Join the joint lease's own matrices to PWC's selected-file byte facts."""
+    """Join matrices to serialized upper bounds, stable in a sealed read plan.
+
+    PWC proves that an uncompressed archive's backing storage is no larger
+    than its file. Charging the file size deliberately retains its small
+    header slack, so runtime window membership matches the sealed file-size
+    plan instead of silently repartitioning after ZIP inspection.
+    """
     result, seen = [], set()
     for target in statistics_plan.targets:
         keys = tuple(keys_by_name[target.name])
@@ -167,8 +174,10 @@ def targets_from_statistics_plan(statistics_plan, keys_by_name: Mapping, key_cos
             raise ValueError('PWC selected-key footprint grammar differs')
         if any(type(cost[field]) is not int or cost[field] <= 0 for cost in costs for field in cost):
             raise ValueError('retained COST requires an empty PWC baseline and file-backed candidate entries')
+        if any(cost['incoming_storage_bytes'] > cost['serialized_bytes'] for cost in costs):
+            raise ValueError('PWC archive storage exceeds its sealed serialized upper bound')
         result.append(RetainedTarget(target.name, target.statistics_bytes,
-            sum(cost['incoming_storage_bytes'] for cost in costs),
+            sum(cost['serialized_bytes'] for cost in costs),
             max(cost['serialized_bytes'] for cost in costs),
             4 * target.shape[0] * target.shape[1], len(keys)))
     if seen != set(key_costs):
