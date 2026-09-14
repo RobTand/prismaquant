@@ -267,7 +267,8 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
 
 def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True, reader=None,
                                synthesis_device="cpu", unit_scope=None,
-                               render_mirror_root=None, log_every=100):
+                               render_mirror_root=None, log_every=100,
+                               require_existing_renders=False):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -297,6 +298,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     instead of the campaign's row caches, so a measuring run can compare its
     bytes against the campaign's without being able to replace them.
 
+    ``require_existing_renders`` is for metadata-only export handoff readers:
+    it refuses a missing prepared shard instead of synthesizing into the
+    campaign workspace. No export manifest builder may repair frozen inputs.
+
     ``log_every`` prints a cumulative count and rate every N synthesized
     shards. Silence is the defect this phase was reported for: it ran for
     hours at 2.6 cells/s saying nothing. The default is chosen against that
@@ -310,6 +315,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _require(type(file_hash_workers) is int and file_hash_workers > 0,
              "positive file_hash_workers required")
     _require(type(log_every) is int and log_every >= 0, "non-negative log_every required")
+    _require(type(require_existing_renders) is bool, "require_existing_renders must be boolean")
     # Hashing only part of a roster does not verify that roster, so the two
     # options are refused together rather than quietly producing a record
     # that reads as a verified campaign input.
@@ -435,6 +441,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             target = (render if render_mirror_root is None
                       else _render_mirror_path(render, render_mirror_root))
             present = Path(target).is_file()
+            if require_existing_renders and not present:
+                raise ValueError(f"{name}@{fmt}: prepared render is missing; selected cache will not synthesize it")
             origin = _resolve_render_origin(target, wire=wire, record=record, name=name,
                                             fmt=fmt, shape=census["unit_shapes"][name],
                                             reader=reader, device=synthesis_device)
