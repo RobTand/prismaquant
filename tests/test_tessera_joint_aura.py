@@ -397,11 +397,16 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
         # The command holds the CUDA reservation, so any shard it still has to
         # synthesize decodes on that device rather than on one CPU core (#549).
         assert kwargs == {"reader": None, "synthesis_device": "cuda",
-                          **({"verify_payloads": False} if command == "prepare" else {})}
+                          **({"verify_payloads": False} if command == "prepare" else
+                             {"defer_render_hashes": True, "require_existing_renders": True})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
             cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
             payload={"provenance": {"hessian": {"calibration_identity": draw}}})
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
+    if command == "run":
+        # This test isolates the streamed-builder argument routing. The
+        # prepared completion's early admission is exercised separately.
+        monkeypatch.setattr(bridge, "_preflight_run_prepared", lambda *_a, **_k: None)
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((512, 512), dtype=torch.int64), {"provenance": draw}))
     source_owner = SimpleNamespace(close=lambda: None)
@@ -421,6 +426,25 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
         "execution": {"production_act_scales": "0", "n_calib_samples": 512, "calib_seqlen": 512}}
     with pytest.raises(Reached):
         bridge.execute(command, config, plan_sha256="b" * 64)
+
+
+@pytest.mark.parametrize('changed', ['schema', 'plan_sha256', 'implementation_sha256'])
+def test_run_refuses_stale_prepared_gate_before_full_wire_intake(tmp_path, monkeypatch, changed):
+    from prismaquant import aura_cost, gpu_guard, tessera_joint_aura as bridge
+
+    monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_args: None)
+    monkeypatch.setattr(aura_cost, '_aura_source_sha256', lambda: 'i' * 64)
+    monkeypatch.setattr(bridge, 'load_measured_anchor_input',
+                        lambda *_a, **_k: pytest.fail('full-wire intake ran before prepared gate'))
+    record = {'schema': bridge.PREPARED_SCHEMA, 'status': 'complete',
+              'plan_sha256': 'p' * 64, 'implementation_sha256': 'i' * 64}
+    record[changed] = 'old' if changed == 'schema' else 'x' * 64
+    prepared_path = tmp_path / 'prepared.json'
+    prepared_path.write_text(json.dumps(record))
+    config = {'model': 'fixture', 'inputs': {}, 'output_root': str(tmp_path),
+              'execution': {'production_act_scales': '0'}, 'profile_tool': 'cprofile'}
+    with pytest.raises(ValueError, match='prepared v3 schema|prepared plan_sha256|prepared implementation_sha256'):
+        bridge.execute('run', config, plan_sha256='p' * 64, prepared=bind(prepared_path))
 
 
 def test_bound_source_identity_seed_refuses_changed_or_conflicting_bytes(tmp_path):
@@ -527,6 +551,44 @@ def test_prepare_metadata_intake_defers_heavy_files_but_keeps_strict_default(tmp
     strict = bridge.load_measured_anchor_input(config)
     assert heavy <= set(calls)
     assert all('render_file_sha256' in cell for cell in strict.cells.values())
+
+
+def test_cost_intake_checks_all_wires_without_rereading_prepared_renders(tmp_path, monkeypatch):
+    from prismaquant import tessera_joint_aura as bridge
+    config, names, fmt, _payload, states = fixture(tmp_path)
+    original = bridge._sha
+    calls = []
+    def observed(path):
+        calls.append(Path(path))
+        return original(path)
+    monkeypatch.setattr(bridge, '_sha', observed)
+    data = bridge.load_measured_anchor_input(config, defer_render_hashes=True,
+                                             require_existing_renders=True)
+    assert set(data.cells) == {(name, fmt) for name in names}
+    assert {Path(cell['wire']) for cell in data.cells.values()} <= set(calls)
+    assert {Path(cell['render']) for cell in data.cells.values()}.isdisjoint(calls)
+    assert all('render_file_sha256' not in cell for cell in data.cells.values())
+    wire = Path(data.cells[names[0], fmt]['wire'])
+    wire.write_bytes(b'X' + wire.read_bytes()[1:])
+    with pytest.raises(ValueError, match='wire checksum'):
+        bridge.load_measured_anchor_input(config, defer_render_hashes=True,
+                                          require_existing_renders=True)
+    wire.write_bytes(('inert ' + names[0]).encode())
+    render = Path(data.cells[names[0], fmt]['render'])
+    render.unlink()
+    with pytest.raises(ValueError, match='prepared render is missing'):
+        bridge.load_measured_anchor_input(config, defer_render_hashes=True,
+                                          require_existing_renders=True)
+
+
+def test_deferred_render_hashes_requires_complete_strict_wire_gate(tmp_path):
+    from prismaquant import tessera_joint_aura as bridge
+    config, *_ = fixture(tmp_path)
+    with pytest.raises(ValueError, match='complete wire verification'):
+        bridge.load_measured_anchor_input(config, defer_render_hashes=True,
+                                          verify_payloads=False, require_existing_renders=True)
+    with pytest.raises(ValueError, match='existing prepared renders'):
+        bridge.load_measured_anchor_input(config, defer_render_hashes=True)
 
 
 def test_prepare_refuses_oversized_later_render_before_loading_any_layer(tmp_path):
