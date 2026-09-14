@@ -19,6 +19,11 @@ from .cost_stage_checkpoint import atomic_write_bytes, prepare_journal, write_un
 SCHEMA = 'prismaquant.tessera_calibration_cache.v2'
 STAGE = 'tessera_calibration_capture'
 SOURCE = 'tessera_campaign_prefix_f32_v1'
+# A capture manifest is retained only by an explicitly scoped owner.  The
+# current GLM manifest is 12.67 MiB; keep the reuse path bounded rather than
+# making a successful large campaign an unbounded metadata cache.
+MAX_CAPTURE_METADATA_BYTES = 16 * 1024**2
+MAX_CAPTURE_EXECUTION_POLICIES = 8
 
 
 def sha256(path, *, resource_check=None, release_read_pages=False, file_descriptor=None):
@@ -520,18 +525,23 @@ def _capture_storage_bytes(name, census, max_rows):
     return 4 * (columns**2 + min(count, max_rows)*columns)
 
 
-def _load_execution(policy, identity, output=None):
+def _load_execution(policy, identity, output=None, *, identity_sha256=None):
     from .perturbed_x_cache import normalize_verified_activation_load
     policy = normalize_verified_activation_load(policy)
     if policy is None:
         return None
-    descriptor = dict(schema='prismaquant.capture_load_execution.v1', policy=policy,
-                      capture_identity=identity)
-    hasher = hashlib.sha256()
-    for chunk in json.JSONEncoder(sort_keys=True, separators=(',', ':')).iterencode(descriptor):
-        hasher.update(chunk.encode())
-    digest = hasher.hexdigest()
-    value = dict(schema=descriptor['schema'], policy=policy, identity_sha256=digest,
+    if identity_sha256 is None:
+        descriptor = dict(schema='prismaquant.capture_load_execution.v1', policy=policy,
+                          capture_identity=identity)
+        hasher = hashlib.sha256()
+        for chunk in json.JSONEncoder(sort_keys=True, separators=(',', ':')).iterencode(descriptor):
+            hasher.update(chunk.encode())
+        identity_sha256 = hasher.hexdigest()
+    elif (not isinstance(identity_sha256, str) or len(identity_sha256) != 64 or
+          any(c not in '0123456789abcdef' for c in identity_sha256)):
+        raise ValueError('capture load execution needs a SHA256 identity')
+    value = dict(schema='prismaquant.capture_load_execution.v1', policy=policy,
+                 identity_sha256=identity_sha256,
                  loaded_entries=0, source_read_bytes=0, peak_buffer_bytes=0,
                  peak_archive_storage_bytes=0, live_buffer_bytes=0,
                  ordered_load_identities_sha256=hashlib.sha256(b'').hexdigest())
@@ -834,6 +844,98 @@ def require_capture_contract(path, expected_sha256=None):
     return validate_capture_contract(manifest)
 
 
+def _capture_manifest_stat(path):
+    """Return the mutation fence for a regular, non-symlink manifest."""
+    observed = Path(path).lstat()
+    if not stat.S_ISREG(observed.st_mode):
+        raise RuntimeError('canonical capture manifest must be a regular nonsymlink file')
+    return _source_stat(observed)
+
+
+class CaptureMetadataOwner:
+    """One hash-bound, bounded capture-manifest snapshot for selected rows.
+
+    The owner is deliberately separate from resident X/H ownership.  It keeps
+    the already validated metadata for a run that consumes many selected
+    units, while a strict same-path stat fence detects any replacement or
+    mutation before each reuse.  On a fence change it rehashes the path for
+    evidence and refuses; a changed pathname is never silently rebound.
+    """
+
+    def __init__(self, path, *, expected_identity, expected_sha256):
+        if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64 or
+                any(c not in '0123456789abcdef' for c in expected_sha256)):
+            raise RuntimeError('capture metadata owner requires a hash-bound complete capture')
+        self.path = Path(path).resolve()
+        before = _capture_manifest_stat(self.path)
+        raw = self.path.read_bytes()
+        after = _capture_manifest_stat(self.path)
+        if before != after:
+            raise RuntimeError('canonical capture manifest changed while its metadata was read')
+        if len(raw) > MAX_CAPTURE_METADATA_BYTES:
+            raise RuntimeError('canonical capture manifest exceeds bounded metadata budget')
+        self.sha256 = hashlib.sha256(raw).hexdigest()
+        if self.sha256 != expected_sha256:
+            raise RuntimeError('priced calibration capture manifest changed')
+        try:
+            manifest = validate_capture_contract(json.loads(raw))
+        except (TypeError, ValueError) as error:
+            raise RuntimeError('canonical capture manifest is not valid JSON') from error
+        expected = json.dumps(expected_identity, sort_keys=True, separators=(',', ':'),
+                              allow_nan=False)
+        identity = json.dumps(manifest['identity'], sort_keys=True, separators=(',', ':'),
+                              allow_nan=False)
+        if identity != expected:
+            raise RuntimeError('calibration capture identity, completeness or scope mismatch')
+        self._stat = after
+        self._manifest = manifest
+        self._identity_json = identity
+        self._execution_digests = {}
+
+    def _assert_unchanged(self, path):
+        candidate = Path(path).resolve()
+        if candidate != self.path:
+            raise RuntimeError('capture metadata owner path differs from requested capture')
+        observed = _capture_manifest_stat(candidate)
+        if observed != self._stat:
+            # The rehash is intentionally not an admission mechanism: a
+            # replacement with identical bytes still violates the held-path
+            # mutation fence.  It tells a caller whether content changed while
+            # preserving that fail-closed rule.
+            changed = hashlib.sha256(candidate.read_bytes()).hexdigest() != self.sha256
+            raise RuntimeError('canonical capture manifest metadata changed'
+                               + (' and content differs' if changed else ''))
+
+    def open(self, path):
+        self._assert_unchanged(path)
+        return self._manifest
+
+    def load_execution(self, policy, output=None):
+        from .perturbed_x_cache import normalize_verified_activation_load
+        policy = normalize_verified_activation_load(policy)
+        if policy is None:
+            return None
+        policy_json = json.dumps(policy, sort_keys=True, separators=(',', ':'), allow_nan=False)
+        digest = self._execution_digests.get(policy_json)
+        if digest is None:
+            # This is byte-for-byte the old sorted JSON descriptor, assembled
+            # from the sealed identity snapshot instead of reserializing it
+            # for every singleton prefetch.
+            raw = ('{"capture_identity":' + self._identity_json + ',"policy":' +
+                   policy_json + ',"schema":"prismaquant.capture_load_execution.v1"}').encode()
+            digest = hashlib.sha256(raw).hexdigest()
+            if len(self._execution_digests) >= MAX_CAPTURE_EXECUTION_POLICIES:
+                self._execution_digests.pop(next(iter(self._execution_digests)))
+            self._execution_digests[policy_json] = digest
+        return _load_execution(policy, None, output, identity_sha256=digest)
+
+
+def open_capture_metadata(path, *, expected_identity, expected_sha256):
+    """Create the explicit metadata owner required for warm selected reuse."""
+    return CaptureMetadataOwner(path, expected_identity=expected_identity,
+                                expected_sha256=expected_sha256)
+
+
 def validate_capture_contract(manifest):
     """Validate the canonical contract on an already owned metadata snapshot."""
     from prismaquant import validate_source_initialization_contract
@@ -1065,19 +1167,33 @@ def _capture_entry_artifact(path, manifest, name):
     return path.parent/relative
 
 
-def prefetch_capture(path, *, expected_identity, census, names, device,
+def prefetch_capture(path, *, expected_identity=None, census, names, device,
                      expected_sha256=None, resource_check=None,
                      release_file_pages=False, verified_load_policy=None,
-                     load_execution=None):
+                     load_execution=None, metadata_owner=None):
     """Verify selected files and make all selected X/H resident before encoding."""
     import torch
     from .perturbed_x_cache import activation_cache_filename
     path = Path(path)
-    execution = _load_execution(verified_load_policy, expected_identity, load_execution)
-    digest = sha256(path)
-    if expected_sha256 is not None and digest != expected_sha256:
-        raise RuntimeError('priced calibration capture manifest changed')
-    manifest = require_capture_contract(path, expected_sha256=expected_sha256)
+    if metadata_owner is None:
+        if expected_identity is None:
+            raise TypeError('prefetch needs an expected identity without a capture metadata owner')
+        execution = _load_execution(verified_load_policy, expected_identity, load_execution)
+        digest = sha256(path)
+        if expected_sha256 is not None and digest != expected_sha256:
+            raise RuntimeError('priced calibration capture manifest changed')
+        manifest = require_capture_contract(path, expected_sha256=expected_sha256)
+    else:
+        if not isinstance(metadata_owner, CaptureMetadataOwner):
+            raise TypeError('prefetch metadata owner has the wrong type')
+        if expected_identity is not None:
+            raise TypeError('prefetch metadata owner supplies its sealed identity')
+        if expected_sha256 is not None and expected_sha256 != metadata_owner.sha256:
+            raise RuntimeError('prefetch metadata owner SHA256 differs from requested capture')
+        manifest = metadata_owner.open(path)
+        expected_identity = manifest['identity']
+        digest = metadata_owner.sha256
+        execution = metadata_owner.load_execution(verified_load_policy, load_execution)
     names = sorted(names)
     if (manifest.get('schema') != SCHEMA or manifest.get('status') != 'complete' or
             manifest.get('identity') != expected_identity or

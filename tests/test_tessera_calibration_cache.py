@@ -57,6 +57,56 @@ def test_prefetch_only_selected_and_preserves_full_h_and_prefix_precision(captur
     assert values[2] == {'a':5}
 
 
+def _verified_policy():
+    return dict(schema='prismaquant.verified_activation_load.v1',
+                max_buffer_bytes=1024**2, max_scratch_bytes=1024**2)
+
+
+def test_capture_metadata_owner_reuses_one_sealed_manifest_snapshot(capture, monkeypatch):
+    """Warm singleton reads do not rehash or parse the complete manifest."""
+    root, _path, census, capture_id, acts, hessians, record = capture
+    owner = cc.open_capture_metadata(record['path'], expected_identity=capture_id,
+                                     expected_sha256=record['sha256'])
+    legacy = cc._load_execution(_verified_policy(), capture_id)['identity_sha256']
+    monkeypatch.setattr(cc, 'require_capture_contract',
+                        lambda *_a, **_k: pytest.fail('warm prefetch reparsed manifest'))
+    monkeypatch.setattr(cc, 'sha256',
+                        lambda *_a, **_k: pytest.fail('warm prefetch rehashed manifest'))
+    for name in ('a', 'b'):
+        execution = {}
+        values, receipt = cc.prefetch_capture(record['path'], census=census, names=[name],
+            device='cpu', metadata_owner=owner, verified_load_policy=_verified_policy(),
+            load_execution=execution)
+        assert receipt == dict(path=str(Path(record['path']).resolve()), sha256=record['sha256'])
+        assert execution['identity_sha256'] == legacy
+        assert torch.equal(values[0][name], acts[name])
+        assert torch.equal(values[1][name], hessians[name])
+
+
+def test_capture_metadata_owner_refuses_manifest_or_identity_mutation(capture, monkeypatch):
+    root, _path, census, capture_id, _acts, _hessians, record = capture
+    owner = cc.open_capture_metadata(record['path'], expected_identity=capture_id,
+                                     expected_sha256=record['sha256'])
+    # The owner seals a private snapshot.  A mutable caller identity cannot be
+    # slipped into a warm read, and creating a new owner from it is refused.
+    changed = copy.deepcopy(capture_id)
+    changed['calibration']['fit_ids_sha256'] = 'different-draw'
+    with pytest.raises(TypeError, match='supplies its sealed identity'):
+        cc.prefetch_capture(record['path'], expected_identity=changed, census=census,
+            names=['a'], device='cpu', metadata_owner=owner)
+    with pytest.raises(RuntimeError, match='identity'):
+        cc.open_capture_metadata(record['path'], expected_identity=changed,
+                                 expected_sha256=record['sha256'])
+
+    manifest = Path(record['path'])
+    manifest.write_bytes(manifest.read_bytes() + b' ')
+    monkeypatch.setattr(cc, '_verified_capture_entry',
+                        lambda *_a, **_k: pytest.fail('loaded after manifest mutation'))
+    with pytest.raises(RuntimeError, match='manifest metadata changed.*content differs'):
+        cc.prefetch_capture(record['path'], census=census, names=['a'], device='cpu',
+            metadata_owner=owner, verified_load_policy=_verified_policy())
+
+
 def test_selected_prefetch_guards_and_advises_verified_files(capture, monkeypatch):
     from prismaquant import perturbed_x_cache
     root, path, census, identity, acts, hessians, record = capture
