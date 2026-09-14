@@ -32,14 +32,18 @@ have no torch, and the producer they exercise imports nothing from the
 ``prismaquant`` package for the same reason.
 """
 
+import gzip
 import hashlib
 import json
 import os
 import pickle
 import shutil
+import socket
 import struct
+import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -100,6 +104,7 @@ def _workspace(scratch: Path) -> dict:
 
     model = scratch / "model"
     model.mkdir()
+    (model / "config.json").write_text(json.dumps({"num_hidden_layers": 2}))
     header = {}
     for index, name in enumerate(names):
         header[name + ".weight"] = {
@@ -319,6 +324,155 @@ def test_a_layer_phase_reads_source_then_capture_then_render_then_wire(
                      "capture", "render", "wire", "render", "wire",
                      "capture", "render", "wire", "render", "wire"]
     assert manifest["annotations"]["capture_window"] == "per_unit"
+
+
+def test_prepare_manifest_traces_full_source_sha_at_first_use_and_completion(
+    scratch, shared_mount,
+):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+
+    def add_shard(filename, tensor):
+        header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                      "data_offsets": [0, 2]}}).encode()
+        path = model / filename
+        path.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+        index["weight_map"][tensor] = filename
+        return path
+
+    head = add_shard("head.safetensors", "lm_head.weight")
+    untouched = add_shard("mtp.safetensors", "model.mtp.weight")
+    index_path.write_text(json.dumps(index))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    phases = manifest["annotations"]["phases"]
+    assert [phase["name"] for phase in phases] == [
+        "head", "layer-0", "layer-1", "source-complete"]
+
+    def entries(phase):
+        start = next((phases[i - 1]["cumulative_bytes"]
+                      for i, item in enumerate(phases) if item["name"] == phase and i), 0)
+        end = next(item["cumulative_bytes"] for item in phases if item["name"] == phase)
+        seen = 0
+        selected = []
+        for entry in manifest["entries"]:
+            if start <= seen < end:
+                selected.append(entry)
+            seen += entry["bytes"]
+        return selected
+
+    def whole_shard(phase, path):
+        return any(row["path"] == str(path) and row["offset"] == 0
+                   and row["bytes"] == path.stat().st_size for row in entries(phase))
+
+    assert whole_shard("head", head)
+    assert whole_shard("layer-0", fixture["shard"])
+    assert not whole_shard("layer-1", fixture["shard"])
+    assert whole_shard("source-complete", untouched)
+    assert str(index_path) in _paths(manifest, "head")
+    assert manifest["annotations"]["counts"]["source_authentication"] == 3
+
+
+def test_mtp_index_after_backbone_is_completion_auth_only(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    (model / "config.json").write_text(json.dumps({
+        "num_hidden_layers": 3, "text_config": {"num_hidden_layers": 2}}))
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.2.mlp.down_proj.weight"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "mtp-passthrough.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert str(shard) in _paths(manifest, "source-complete")
+    assert str(shard) not in _paths(manifest, "layer-0")
+    assert str(shard) not in _paths(manifest, "layer-1")
+
+    # A valid complete proof replaces every whole-shard hash. In particular,
+    # classifying MTP as completion-only must not turn it into a body read.
+    sources = (fixture["shard"], shard)
+    digests = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+               for path in sources}
+    capture_path = fixture["captures"] / "capture_manifest.json"
+    capture = json.loads(capture_path.read_text())
+    capture["identity"] = {"source_files": digests}
+    capture_path.write_text(json.dumps(capture))
+    cache_path = scratch / "source-identity.json"
+    cache_path.write_text(json.dumps({
+        "schema": "prismaquant.streamed_model.identity_cache.v1",
+        "source": str(model),
+        "identity": {"shards": [{"path": str(path), "sha256": digests[path.name]}
+                                for path in sources]},
+        "fingerprints": [{"path": str(path), "device": stat.st_dev,
+                          "inode": stat.st_ino, "size": stat.st_size,
+                          "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns}
+                         for path in sources for stat in (path.stat(),)],
+    }))
+    plan = json.loads(fixture["plan"].read_text())
+    plan["source_identity_cache"] = {"path": str(cache_path),
+        "sha256": hashlib.sha256(cache_path.read_bytes()).hexdigest()}
+    fixture["plan"].write_text(json.dumps(plan))
+    cached = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert cached["annotations"]["source_authentication_mode"] == (
+        "verified_streamed_identity_cache")
+    assert cached["annotations"]["counts"].get("source_authentication", 0) == 0
+    assert str(shard) not in {entry["path"] for entry in cached["entries"]}
+
+
+def test_prepare_manifest_uses_exact_cached_source_sha_and_refuses_mutation(
+    scratch, shared_mount,
+):
+    fixture = _workspace(scratch)
+    source = fixture["shard"]
+    stat = source.stat()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    capture_manifest = fixture["captures"] / "capture_manifest.json"
+    capture = json.loads(capture_manifest.read_text())
+    capture["identity"] = {"source_files": {source.name: digest}}
+    capture_manifest.write_text(json.dumps(capture))
+    cache = scratch / "source-identity.json"
+    cache.write_text(json.dumps({
+        "schema": "prismaquant.streamed_model.identity_cache.v1",
+        "source": str(fixture["model"]),
+        "identity": {"shards": [{"path": str(source), "sha256": digest}]},
+        "fingerprints": [{"path": str(source), "device": stat.st_dev,
+                          "inode": stat.st_ino, "size": stat.st_size,
+                          "mtime_ns": stat.st_mtime_ns,
+                          "ctime_ns": stat.st_ctime_ns}],
+    }))
+    plan = json.loads(fixture["plan"].read_text())
+    plan["source_identity_cache"] = {"path": str(cache),
+                                      "sha256": hashlib.sha256(cache.read_bytes()).hexdigest()}
+    fixture["plan"].write_text(json.dumps(plan))
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert manifest["annotations"]["source_authentication_mode"] == (
+        "verified_streamed_identity_cache")
+    assert manifest["annotations"]["source_identity_cache_host"] == socket.gethostname()
+    assert manifest["annotations"]["counts"]["source_identity_cache"] == 1
+    assert manifest["annotations"]["counts"].get("source_authentication", 0) == 0
+    assert str(cache) in _paths(manifest, "head")
+
+    before = source.stat()
+    with source.open("r+b") as handle:
+        handle.seek(-1, 2)
+        last = handle.read(1)
+        handle.seek(-1, 2)
+        handle.write(bytes([last[0] ^ 1]))
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    with pytest.raises(SystemExit, match="no longer proves"):
+        glm_data_manifests.build_joint_pass_manifest(
+            str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
 
 def test_a_rung_the_campaign_never_measured_contributes_no_wire(
@@ -556,13 +710,71 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
                      "gb10", "--priority", "-10", "--timeout-s", "86400"):
         assert expected in argv
     assert argv[argv.index("--data-manifest") + 1].endswith(
-        "prismaquant.tessera_joint_aura.prepare.json")
+        "prismaquant.tessera_joint_aura.prepare.json.gz")
     assert "tools.tessera_campaign_container" in argv
     assert "prismaquant.tessera_joint_aura" in argv
     # A dry run submits nothing and writes nothing.
     assert not manifest_dir.exists()
     assert "--detach" not in "".join(
         line for line in printed.splitlines() if line.startswith("[submit] "))
+
+
+def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
+    scratch, shared_mount, monkeypatch,
+):
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    original = glm_data_manifests.build_joint_pass_manifest
+
+    def cached(*args, **kwargs):
+        manifest = original(*args, **kwargs)
+        manifest["annotations"]["source_identity_cache_host"] = socket.gethostname()
+        return manifest
+
+    monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", cached)
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    with pytest.raises(RuntimeError, match="proof is local"):
+        dispatch.main([
+            "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+            "--cpus", "6", "--tag", "gb10", "--dry-run",
+        ])
+
+
+def test_joint_submit_writes_one_deterministic_gzip_manifest(
+    scratch, shared_mount, monkeypatch,
+):
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    directory = scratch / "manifests"
+    submitted = []
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    real_run = subprocess.run
+
+    def fake_run(argv, **kwargs):
+        if argv[0] == "git":
+            return real_run(argv, **kwargs)
+        submitted.append(argv)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    args = ["submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+            "--cpus", "6", "--tag", "gb10", "--manifest-dir", str(directory)]
+    assert dispatch.main(args) == 0
+    path = directory / "prismaquant.tessera_joint_aura.prepare.json.gz"
+    first = path.read_bytes()
+    payload = json.loads(gzip.decompress(first))
+    glm_data_manifests.check_manifest(payload)
+    assert submitted[0][submitted[0].index("--data-manifest") + 1] == str(path)
+    assert dispatch.main(args) == 0
+    assert path.read_bytes() == first
 
 
 def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
@@ -593,6 +805,7 @@ def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
         "head", "layer-0", "layer-1"]
     assert summary["total_bytes"] == summary["phases"][-1]["cumulative_bytes"]
     assert summary["manifest_bytes"] <= glm_data_manifests.MAX_MANIFEST_BYTES
+    assert summary["manifest_bytes"] < summary["decoded_manifest_bytes"]
 
 
 def test_the_manifest_of_a_pass_is_byte_identical_across_two_builds(
@@ -711,6 +924,13 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_46_phases(scratch):
         pytest.skip(
             "the campaign merge has not published the checkpoint unit shards "
             f"yet: {parts}")
+    source_cache = Path(payload["output_root"]) / "prepare/source-identity.json"
+    if source_cache.is_file():
+        cached = json.loads(source_cache.read_text())
+        first = cached["fingerprints"][0]
+        if first["device"] != Path(first["path"]).stat().st_dev:
+            pytest.skip("the full-source SHA cache is local to another mount "
+                        "device; this host cannot submit its reuse request")
 
     manifest = glm_data_manifests.build_joint_pass_manifest(
         str(plan), command="prepare",
@@ -737,17 +957,14 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_46_phases(scratch):
         annotations["measured_cells"] - annotations["counts"]["renders"])
     assert phases[0]["bytes"] >= annotations["synthesized_render_wire_bytes"]
 
-    # The gap this read set exposes, stated as a number rather than as prose.
-    # PrismaBuild's data manifest v1 refuses a manifest file over
-    # DATA_MANIFEST_MAX_BYTES (64 MiB) and reads no compressed form, and this
-    # pass's byte list is 105 MB of compact JSON -- 371,734 entries whose
-    # absolute shared-mount paths dominate it. The producer fails closed rather
-    # than submitting a truncated read set. When PrismaBuild raises the
-    # ceiling or accepts a compressed manifest, this assertion is what says so.
+    # The full read set exceeds the 64 MiB plain-file ceiling, but current PB
+    # accepts a gzip member up to 64 MiB stored / 512 MiB expanded. The submit
+    # path seals that member rather than truncating the read set.
     encoded = json.dumps(manifest, separators=(",", ":")).encode() + b"\n"
     assert len(encoded) > glm_data_manifests.MAX_MANIFEST_BYTES, (
-        "the joint pass's read set now fits PrismaBuild's manifest ceiling; "
-        "the submit path no longer needs to refuse it")
+        "the joint pass's read set now fits the plain manifest ceiling")
+    assert len(encoded) <= 512 * 1024 * 1024
+    assert len(gzip.compress(encoded, mtime=0)) <= glm_data_manifests.MAX_MANIFEST_BYTES
 
     # Written under the test's own scratch directory, never into the frozen
     # campaign tree.

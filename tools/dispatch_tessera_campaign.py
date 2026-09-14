@@ -80,6 +80,7 @@ edit them.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import math
@@ -1621,7 +1622,8 @@ def _manifest_path(args, plan: dict, *, entry_point: str, command: str) -> Path:
             raise RuntimeError(
                 "the plan declares no 'output_root'; pass --manifest-dir")
         directory = Path(root) / DATA_MANIFEST_DIR
-    return directory / f"{entry_point}.{command}.json"
+    extension = ".json.gz" if entry_point == JOINT_ENTRY_POINT else ".json"
+    return directory / f"{entry_point}.{command}{extension}"
 
 
 def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str],
@@ -1638,15 +1640,22 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     if args.dry_run:
         print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
     manifest = build()
-    # Compact JSON, unlike the row manifests' indented form: a row's read set
-    # is a couple of MB and reads better indented, while a joint pass declares
-    # hundreds of thousands of entries against PrismaBuild's 64 MiB ceiling,
-    # and the indentation is the difference between fitting and not.
-    blob = json.dumps(manifest, separators=(",", ":"), sort_keys=False).encode() + b"\n"
+    cache_host = manifest["annotations"].get("source_identity_cache_host")
+    if cache_host is not None and args.tag != cache_host:
+        raise RuntimeError(
+            f"source identity cache proof is local to {cache_host}; "
+            f"submit with --tag {cache_host}, not {args.tag!r}")
+    # PB accepts one gzip member up to 64 MiB stored / 512 MiB expanded.
+    # The full joint read set exceeds the plain limit, so seal its compressed
+    # bytes deterministically; the CAS action key includes their SHA256.
+    decoded = json.dumps(manifest, separators=(",", ":"), sort_keys=False).encode() + b"\n"
+    blob = (gzip.compress(decoded, mtime=0) if manifest_path.suffix == ".gz"
+            else decoded)
     summary = {
         "entry_point": f"{entry_point}:{command}",
         "data_manifest": str(manifest_path),
         "manifest_bytes": len(blob),
+        "decoded_manifest_bytes": len(decoded),
         "manifest_sha256": hashlib.sha256(blob).hexdigest(),
         "entry_count": manifest["entry_count"],
         "total_bytes": manifest["total_bytes"],

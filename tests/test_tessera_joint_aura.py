@@ -383,12 +383,15 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((512, 512), dtype=torch.int64), {"provenance": draw}))
+    source_owner = SimpleNamespace(close=lambda: None)
+    monkeypatch.setattr(bridge, "_prepare_source_owner", lambda *_a, **_k: source_owner)
     prefetch = dict(max_cache_slots=24, prefetch_workers=4, prefetch_lookahead=4,
         cache_headroom_gb=4.0, prefetch_min_available_gb=2.0, require_prefetched_residency=True)
     class Reached(Exception):
         pass
     def inspect(*_args, **kwargs):
         assert {key: kwargs.get(key) for key in prefetch} == prefetch
+        assert kwargs.get("source_authentication") is (source_owner if command == "prepare" else None)
         raise Reached
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", inspect)
     config = {"model": "fixture", "inputs": {}, "output_root": str(tmp_path),
@@ -397,6 +400,27 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
         "execution": {"production_act_scales": "0", "n_calib_samples": 512, "calib_seqlen": 512}}
     with pytest.raises(Reached):
         bridge.execute(command, config, plan_sha256="b" * 64)
+
+
+def test_bound_source_identity_seed_refuses_changed_or_conflicting_bytes(tmp_path):
+    from prismaquant import tessera_joint_aura as bridge
+
+    source = tmp_path / "old-source-identity.json"
+    source.write_bytes(b'{"full_checkpoint":"proof"}\n')
+    binding = {"path": str(source), "sha256": bridge._sha(source)}
+    new_root = tmp_path / "new-prepare"
+    new_root.mkdir()
+    destination = bridge._seed_source_identity_cache(
+        {"source_identity_cache": binding}, new_root)
+    assert destination.read_bytes() == source.read_bytes()
+
+    destination.write_bytes(b"conflicting local proof")
+    with pytest.raises(ValueError, match="existing output source identity cache"):
+        bridge._seed_source_identity_cache({"source_identity_cache": binding}, new_root)
+    destination.unlink()
+    source.write_bytes(b"changed bound proof")
+    with pytest.raises(ValueError, match="source identity cache: artifact checksum"):
+        bridge._seed_source_identity_cache({"source_identity_cache": binding}, new_root)
 
 
 @pytest.mark.parametrize("defect", ["missing", "disabled", "auto_slots", "zero_workers",

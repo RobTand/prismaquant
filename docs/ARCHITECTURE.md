@@ -1,7 +1,66 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `codex/glm-full-domain-price-bridge-20260913`. Stamps
+As of: 2026-09-13 · `integrate/pq588-release-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `integrate/pq588-release-20260913`) to classify GLM's
+MTP index using `text_config.num_hidden_layers` (or the top-level backbone
+depth) in the joint source-authentication schedule. Indexed tensors after the
+backbone are completion-authenticated, not treated as an unplanned streamed
+body layer; the 45-layer GLM body remains layers 0–44. A truly unplanned body
+layer still refuses. A valid cached full-shard proof still avoids a fresh body
+hash read. Gate: `test_mtp_index_after_backbone_is_completion_auth_only`.
+
+Re-stamped (2026-09-13, `fix/joint-prepare-source-auth-20260913`) for
+**complete-capture source authentication at first streamed use in joint
+preparation**. The prior prepare called `capture_identity` without a source
+owner after model construction; that rehashed all 120 GLM source shards
+(642.65 GB) serially before qualifying its first cell, even though the
+streamed-model identity had already reused a matching full-shard digest cache.
+The canonical complete-capture SHA proof remains required. Prepare now binds
+the existing `CaptureSourceAuthentication` descriptor owner to the hash-bound
+capture before constructing the streamed model, and hands that owner to the
+streaming loader and `capture_identity`. If the existing
+`prepare/source-identity.json` validates against the complete checkpoint,
+semantic config and all six-field shard fingerprints, the owner compares each
+recorded full-file SHA to the canonical capture and adopts it for the same held
+source descriptor. Stat fences run before and after tensor reads and again at
+close; a changed source or an invalid present cache refuses rather than
+falling back to undeclared reads. With no cache, the owner fresh-hashes a shard
+on first use. Before publishing the prepared cache and completion, it
+authenticates any still untouched files and records which proof was cached or
+fresh, then closes after the runner shuts down. This changes read order and
+startup latency, not source bytes, calibration draw, rendered weights or
+numerical qualification rule. It makes no claim yet about full-run time or
+GPU saturation.
+
+The joint prepare data manifest now declares the existing identity cache as a
+head input when its recorded shard SHA values match the canonical capture and
+its fingerprints match the live source; in that case no fresh whole-shard SHA
+read is declared or performed. With no cache, it declares each whole-shard
+authentication read at first use: head/visual shards in `head`, body shards
+before their first layer's source extents, and unused auxiliary shards in
+`source-complete`. The checkpoint index determines placement; source metadata
+is declared in `head`. The later per-layer extents remain separately declared
+because the loader reads tensors after authenticating their shard.
+An optional plan binding `source_identity_cache: {path, sha256}` seeds the
+existing per-pass `source-identity.json` slot in a new output root, with an
+exact checksum and conflict refusal; it does not create a weight or activation
+cache. A cache proven on another host's NFS mount is not portable merely
+because the paths and SHA rows match: the current six-field fingerprint includes
+the host-local `st_dev`. Manifest construction and owner adoption therefore
+refuse it on a different mount device. A reuse request has a real host-local
+dependency until a separately qualified cross-host source proof exists; the
+manifest names its proof host, and `submit-joint` refuses a broader placement
+tag before publication.
+The full joint manifest exceeds the old 64 MiB plain-JSON limit;
+`submit-joint` now writes one deterministic `.json.gz` member. The deployed PB
+reader admits up to 64 MiB stored / 512 MiB expanded and seals those
+compressed bytes in the action key.
+The active 2026-09-13 b59 request retains its original seal and behavior; a
+future request must rebuild its manifest from these source bytes. Gates:
+`tests/test_selected_source_authentication.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`, and the joint prepare tests.
 
 Research acquisition bridge (2026-09-13, `codex/glm-full-domain-price-bridge-20260913`, #581):
 `tessera_full_domain_acquisition` joins the grammar-derived complete rate domain
@@ -639,11 +698,11 @@ does not fit 390 GB in a 240 GiB ARC either; the entries are in read order and
 the running sum is per entry, so the window may stop inside a phase. Order
 within the head is approximate: the synthesized wires are declared after the
 calibration, backend and compatibility records, which the pass opens after
-`load_measured_anchor_input` returns. One measured limit came with
-it: PrismaBuild's data manifest v1 refuses a manifest file over 64 MiB and
-reads no compressed form, and this read set is 105 MB of compact JSON, so the
-submit path fails closed on the size rather than submitting a truncated read
-set. Gates: `tests/test_glm_joint_data_manifest_at_submit.py`.
+`load_measured_anchor_input` returns. One measured limit at the time was the
+64 MiB plain-manifest ceiling: this read set was 105 MB of compact JSON, so
+the then-current submit path refused rather than truncating it. The deployed
+PB reader now accepts gzip as stated in the newer stamp above. Gates:
+`tests/test_glm_joint_data_manifest_at_submit.py`.
 
 Re-stamped (2026-09-13, `pq/prefill-frontier-sweep`) for the **prefill-vs-
 accuracy frontier sweep** (#540, the sweep half of #237):

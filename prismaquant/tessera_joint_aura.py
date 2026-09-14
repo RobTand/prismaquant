@@ -630,7 +630,8 @@ def _qualification_capture_sizes(data, identity, policy):
 
 def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
                   qualification_window=None, capture_load_policy=None,
-                  source_capture_compatibility=None):
+                  source_capture_compatibility=None, source_authentication=None,
+                  qualification_guard=None):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
@@ -651,13 +652,14 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     capture_load_policy = normalize_verified_activation_load(capture_load_policy)
     if capture_load_policy is not None:
         _require(policy is not None, 'verified capture loading requires explicit qualification windows')
-    guard = None
+    guard = qualification_guard
     if policy is not None and str(runner.device).startswith('cuda'):
         import os
         from .autoscale import require_bounded_capture_environment
         from .memory_management import CaptureMemoryGuard
         require_bounded_capture_environment(os.environ)
-        guard = CaptureMemoryGuard(runner.device)
+        if guard is None:
+            guard = CaptureMemoryGuard(runner.device)
         guard.check('before_joint_qualification_identity')
     capture_path = _bound(capture, "canonical capture")
     stamped_capture = data.payload["provenance"].get("calibration_cache")
@@ -674,6 +676,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
         max_act_rows=recorded["max_act_rows"],
         model_load_contract=data.census["model_load_contract"],
         attention_implementation=data.census["attention_implementation"],
+        **({'source_authentication': source_authentication}
+           if source_authentication is not None else {}),
         **(dict(resource_check=None if guard is None else guard.check,
                 release_read_pages=True) if policy is not None else {}))
     _same(expected, recorded, "current source/canonical capture")
@@ -860,6 +864,8 @@ def _load_plan(path, digest, *, projection_runtime=True):
     path = _bound({"path": str(path), "sha256": digest}, "joint anchor plan")
     config = json.loads(path.read_text())
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
+    if config.get("source_identity_cache") is not None:
+        _bound(config["source_identity_cache"], "source identity cache")
     _source_prefetch(config)
     execution = config["execution"]
     from .glm_source_derivative import normalize_source_derivative
@@ -912,6 +918,62 @@ def _io_counters():
 
 
 ACTIVATION_SCALE_ENV = "PRISMAQUANT_PROD_ACT_SCALES"
+
+
+def _prepare_source_owner(config, data, *, resource_check=None):
+    """Bind the complete capture before any streamed source tensor is read.
+
+    The selected-source descriptor owner already authenticates a shard once,
+    at its first payload read, and checks replacement for the whole lease.
+    Preparation uses that same owner for its full roster: the late completion
+    gate authenticates any source file no streamed layer needed.
+    """
+    from . import tessera_calibration_cache as cc
+
+    capture = config["canonical_capture"]
+    manifest = cc.require_capture_contract(capture["path"],
+                                           expected_sha256=capture["sha256"])
+    owner = cc.authenticate_selected_capture_source(
+        config["inputs"]["census"]["path"], capture["path"],
+        expected_sha256=capture["sha256"], model=config["model"],
+        max_act_rows=manifest["identity"]["max_act_rows"],
+        attention_implementation=data.census["attention_implementation"],
+        resource_check=resource_check, release_read_pages=True)
+    try:
+        identity_cache = Path(config["output_root"]) / "prepare/source-identity.json"
+        if identity_cache.is_file():
+            adopted = owner.adopt_streamed_identity_cache(identity_cache)
+            print(f"tessera_joint_aura: adopted {adopted} full source SHA proofs "
+                  f"from {identity_cache}", flush=True)
+        return owner
+    except BaseException:
+        owner.close()
+        raise
+
+
+def _seed_source_identity_cache(config, root):
+    """Carry an explicitly bound old digest record into this pass's cache slot.
+
+    A new output root otherwise makes ``build_streamed_model_identity`` hash
+    the whole source again before it can compare the live model. This copies
+    only its existing identity JSON, never a weight or a render, and refuses
+    any pre-existing different local cache rather than mixing two proofs.
+    """
+    destination = Path(root) / "source-identity.json"
+    binding = config.get("source_identity_cache")
+    if binding is None:
+        return destination
+    source = _bound(binding, "source identity cache")
+    if source.resolve() == destination.resolve():
+        return destination
+    if destination.exists():
+        _same(_sha(destination), binding["sha256"],
+              "existing output source identity cache")
+    else:
+        atomic_write_bytes(destination, source.read_bytes())
+        _same(_sha(destination), binding["sha256"],
+              "seeded source identity cache")
+    return destination
 
 
 def _restores_activation_scale_env(function):
@@ -981,6 +1043,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
     execution = config["execution"]
     root = Path(config["output_root"]) / command
     root.mkdir(parents=True, exist_ok=True)
+    identity_cache_path = _seed_source_identity_cache(config, root)
     result = {"schema": "prismaquant.tessera_joint_aura.execution.v1", "command": command,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
                   "started_epoch": time.time(), "torch": str(torch.__version__),
@@ -1001,7 +1064,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
               ["-m", "prismaquant.tessera_joint_aura", command], "observed joint command")
         result["sampling_session"] = {"path": str(session_path),
                                       "sha256": hashlib.sha256(session_bytes).hexdigest()}
-    runner = None
+    runner = source_authentication = qualification_guard = None
     completion_path = completion = output = payload = None
     started, before_io = time.time(), _io_counters()
     if profiler is not None:
@@ -1049,18 +1112,30 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
             _same(calibration["provenance"].get(name), original_draw.get(name), f"original full draw {name}")
         result["calibration_input"] = calibration
+        if command == "prepare":
+            if config.get("qualification_window") is not None:
+                from .autoscale import require_bounded_capture_environment
+                from .memory_management import CaptureMemoryGuard
+                require_bounded_capture_environment(os.environ)
+                qualification_guard = CaptureMemoryGuard("cuda")
+                qualification_guard.check("before_joint_source_authentication")
+            source_authentication = _prepare_source_owner(
+                config, data, resource_check=(None if qualification_guard is None
+                                              else qualification_guard.check))
         source_prefetch = _source_prefetch(config)
         runner = build_streamed_causal_lm(config["model"], device=torch.device("cuda"),
             dtype=torch.bfloat16, offload_folder=str(root / "offload"),
             profile=detect_profile(config["model"]), attn_implementation="eager",
             **({'source_derivative': execution['source_derivative']} if execution.get('source_derivative') is not None else {}),
+            **({'source_authentication': source_authentication}
+               if source_authentication is not None else {}),
             **source_prefetch)
         from .glm_capture_compatibility import require_capture_compatibility
         require_capture_compatibility(config.get('source_capture_compatibility'),
                                       capture=config['canonical_capture'], model=runner.model)
         result["source_prefetch"] = source_prefetch
         source = build_streamed_model_identity(runner, config["model"],
-                                               identity_cache_path=root / "source-identity.json")
+                                               identity_cache_path=identity_cache_path)
         source_execution = source_execution_identity(runner.model)
         layer_bytes = data.layer_render_bytes(runner.layer_index_for_qname)
         operator_policy = _admit_candidate_phase(command, config, data, layer_bytes)
@@ -1082,10 +1157,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                                   max_render_bytes=config["max_render_bytes"], reader=reader,
                                   file_load_workers=file_hash_workers,
                                   qualification_window=config.get("qualification_window"),
+                                  source_authentication=source_authentication,
+                                  qualification_guard=qualification_guard,
                                   **({'capture_load_policy': config['capture_load_policy']}
                                      if config.get('capture_load_policy') is not None else {}),
                                   **({'source_capture_compatibility': config['source_capture_compatibility']}
                                      if config.get('source_capture_compatibility') is not None else {}))
+            source_receipt = source_authentication.authenticate_complete_source()
+            cache.metadata["source_authentication"] = source_receipt
+            result["source_authentication"] = source_receipt
             cache.metadata.update(plan_sha256=plan_sha256, source_model_identity=source,
                                   source_execution=source_execution, implementation_sha256=implementation,
                                   projection_backend=projection_backend.identity)
@@ -1166,6 +1246,9 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         # shut down successfully as well as after the allocation gate passes.
         completed_runner, runner = runner, None
         completed_runner.shutdown()
+        if source_authentication is not None:
+            source_authentication.close()
+            source_authentication = None
         if command == "prepare":
             _json(completion_path, completion)
             result["prepared"] = {"path": str(completion_path), "sha256": _sha(completion_path)}
@@ -1185,8 +1268,12 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                                  "end_epoch": result["env"]["finished_epoch"]})
         result["io_before"], result["io_after"] = before_io, _io_counters()
         _json(root / "results.json", result)
-        if runner is not None:
-            runner.shutdown()
+        try:
+            if runner is not None:
+                runner.shutdown()
+        finally:
+            if source_authentication is not None:
+                source_authentication.close()
     return result
 
 
