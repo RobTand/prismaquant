@@ -63,6 +63,7 @@ from glm_arc_prewarm import (  # noqa: E402
     argv_value, to_pool)
 
 SCHEMA = "prismaquant.prismabuild.data_manifest.v1"
+SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
 SHARED_MOUNT = "/mnt/shared"
 
 # Load this torch-free module without importing prismaquant.__init__, whose
@@ -90,6 +91,7 @@ ENTRY_KEYS = frozenset({"path", "offset", "bytes", "sha256"})
 #: here so a future read set that crosses one is refused by the producer
 #: rather than by the fleet.
 MAX_ENTRIES = 1_000_000
+MAX_READS = 4_000_000
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
 
@@ -615,6 +617,109 @@ class _Phases:
     @property
     def total_bytes(self) -> int:
         return self._total
+
+
+class _ReadPlanV2:
+    """One unique file-range roster with explicit, repeatable phase reads."""
+
+    def __init__(self) -> None:
+        self.entries = []
+        self._indices = {}
+        self._phases = []
+        self._current = None
+
+    def begin(self, name: str) -> None:
+        self.end()
+        self._current = {"name": name, "entry_indices": [], "seen": set()}
+
+    def end(self) -> None:
+        if self._current is not None:
+            self._phases.append(self._current)
+            self._current = None
+
+    def add(self, path: str, offset: int, size: int, kind: str) -> None:
+        if self._current is None:
+            raise SystemExit("internal: a V2 read was added outside a phase")
+        offset, size = int(offset), int(size)
+        if offset < 0 or size <= 0:
+            raise SystemExit(f"invalid {kind} file range: {path}@{offset}+{size}")
+        key = (path, offset)
+        index = self._indices.get(key)
+        if index is None:
+            index = len(self.entries)
+            self._indices[key] = index
+            self.entries.append({"path": path, "offset": offset,
+                                 "bytes": size, "sha256": None})
+        else:
+            # PB V2 admits one entry for a (path, offset). If independently
+            # coalesced source layers cover different lengths at that offset,
+            # warm their conservative union on every reference.
+            self.entries[index]["bytes"] = max(self.entries[index]["bytes"], size)
+        if index not in self._current["seen"]:
+            self._current["seen"].add(index)
+            self._current["entry_indices"].append(index)
+
+    def manifest(self, produced_by: dict, annotations: dict, *, where: str) -> dict:
+        self.end()
+        phases, cumulative = [], 0
+        for phase in self._phases:
+            size = sum(self.entries[index]["bytes"] for index in phase["entry_indices"])
+            cumulative += size
+            phases.append({"name": phase["name"],
+                           "entry_indices": phase["entry_indices"],
+                           "bytes": size, "cumulative_bytes": cumulative})
+        result = {"schema": SCHEMA_V2, "produced_by": produced_by,
+                  "mount_prefix": SHARED_MOUNT, "annotations": annotations,
+                  "entries": self.entries, "entry_count": len(self.entries),
+                  "total_bytes": sum(entry["bytes"] for entry in self.entries),
+                  "read_plan": {"phases": phases, "read_bytes": cumulative}}
+        return check_manifest_v2(result, where=where)
+
+
+def check_manifest_v2(manifest: dict, *, where: str = "data manifest V2") -> dict:
+    """Mirror the published PB V2 unique-entry and ordered-read gates."""
+    if set(manifest) != MANIFEST_KEYS | {"read_plan"} or manifest.get("schema") != SCHEMA_V2:
+        raise SystemExit(f"{where}: complete {SCHEMA_V2} fields required")
+    common = {key: value for key, value in manifest.items() if key != "read_plan"}
+    common["schema"] = SCHEMA
+    check_manifest(common, where=where)
+    if "phases" in manifest["annotations"]:
+        raise SystemExit(f"{where}: V2 uses read_plan, not annotations.phases")
+    plan = manifest["read_plan"]
+    if not isinstance(plan, dict) or set(plan) != {"phases", "read_bytes"}:
+        raise SystemExit(f"{where}: complete read_plan required")
+    phases = plan["phases"]
+    if not isinstance(phases, list) or not phases:
+        raise SystemExit(f"{where}: read_plan needs nonempty phases")
+    names, used, cumulative, reads = set(), set(), 0, 0
+    for phase in phases:
+        if not isinstance(phase, dict) or set(phase) != {
+                "name", "entry_indices", "bytes", "cumulative_bytes"}:
+            raise SystemExit(f"{where}: malformed read phase")
+        name, indices = phase["name"], phase["entry_indices"]
+        if (not isinstance(name, str) or not name or name.strip() != name
+                or "\x00" in name or name in names or not isinstance(indices, list)):
+            raise SystemExit(f"{where}: invalid or repeated read phase name/indices")
+        names.add(name)
+        reads += len(indices)
+        if reads > MAX_READS:
+            raise SystemExit(f"{where}: read references exceed {MAX_READS}")
+        local, size = set(), 0
+        for index in indices:
+            if (type(index) is not int or index < 0 or index >= len(manifest["entries"])
+                    or index in local):
+                raise SystemExit(f"{where}: invalid or repeated phase entry index")
+            local.add(index)
+            used.add(index)
+            size += manifest["entries"][index]["bytes"]
+        cumulative += size
+        if (type(phase["bytes"]) is not int or phase["bytes"] != size
+                or type(phase["cumulative_bytes"]) is not int
+                or phase["cumulative_bytes"] != cumulative):
+            raise SystemExit(f"{where}: phase byte accounting differs")
+    if used != set(range(len(manifest["entries"]))) or type(plan["read_bytes"]) is not int or plan["read_bytes"] != cumulative:
+        raise SystemExit(f"{where}: read_plan coverage or read_bytes differs")
+    return manifest
 
 
 
@@ -1215,6 +1320,255 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     }
     return _finish(track, produced_by, annotations,
                    where=f"{JOINT_ENTRY_POINT}:{command}")
+
+
+COST_COMPLETED_BINDING_SCHEMA = "prismaquant.joint_cost.validated_completed_units.v1"
+
+
+def _cost_completed_units(binding, *, plan_sha256, prepared_sha256, roster):
+    """Accept only an explicit caller-validated, identity-bound resume set."""
+    if binding is None:
+        return frozenset(), None
+    if (not isinstance(binding, dict) or set(binding) != {
+            "schema", "plan_sha256", "prepared_sha256", "units"}
+            or binding.get("schema") != COST_COMPLETED_BINDING_SCHEMA
+            or binding.get("plan_sha256") != plan_sha256
+            or binding.get("prepared_sha256") != prepared_sha256):
+        raise SystemExit("COST completed units need an exact validated plan/prepared binding")
+    units = binding["units"]
+    if (not isinstance(units, list) or any(not isinstance(name, str) for name in units)
+            or units != sorted(set(units)) or not set(units) <= set(roster)):
+        raise SystemExit("COST validated completed-unit roster is not a sorted campaign subset")
+    encoded = json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    return frozenset(units), hashlib.sha256(encoded).hexdigest()
+
+
+def _cost_layer_windows(names, *, formats_by_qname, census, owners,
+                        render_sizes, budget, source_bytes):
+    """Use real joint group geometry and serialized PWC file-size upper bounds.
+
+    This import is COST-only. PREPARE V1 and module import remain torch-free;
+    the COST producer runs in the pinned CPU environment that has the format
+    registry. No render archive is opened or deserialized here.
+    """
+    import torch
+    from prismaquant import format_registry as fr
+    from prismaquant.joint_statistics_plan import plan_joint_statistics_target_windows
+    from prismaquant.joint_retained_window_plan import (
+        plan_retained_targets, targets_from_statistics_plan)
+
+    shapes, maxima = census.get("unit_shapes"), census.get("max_abs")
+    if not isinstance(shapes, dict) or not isinstance(maxima, dict):
+        raise SystemExit("COST census lacks unit_shapes or max_abs for joint groups")
+    modules, specs, keys_by_name, costs, render_paths = {}, {}, {}, {}, {}
+    for name in names:
+        shape = shapes.get(name)
+        if (not isinstance(shape, (list, tuple)) or len(shape) != 2
+                or any(type(axis) is not int or axis <= 0 for axis in shape)
+                or name not in maxima):
+            raise SystemExit(f"COST census lacks a complete joint target geometry: {name}")
+        modules[name] = torch.nn.Linear(
+            shape[1], shape[0], bias=False, device="meta", dtype=torch.bfloat16)
+        fmts = formats_by_qname[name]
+        specs[name] = {fmt: fr.get_format(fmt) for fmt in fmts}
+        keys_by_name[name] = tuple((name, fmt) for fmt in fmts)
+        for fmt in fmts:
+            path, size = _render_file(owners[name], render_sizes, name, fmt)
+            if size <= 0:
+                raise SystemExit(f"prepared COST render is missing: {path}")
+            costs[name, fmt] = {"incoming_storage_bytes": size,
+                                "serialized_bytes": size}
+            render_paths[name, fmt] = (path, size)
+    statistics = plan_joint_statistics_target_windows(
+        modules, specs, max_statistics_bytes=budget.statistics_cap_bytes,
+        activation_max_abs={name: maxima[name] for name in names})
+    targets = targets_from_statistics_plan(statistics, keys_by_name, costs)
+    planned = plan_retained_targets(
+        targets, budget=budget, source_bytes=source_bytes,
+        footprint_scope="pwc_serialized_upper_bound")
+    return planned, render_paths
+
+
+def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
+                                 retained_budget, source_bytes, n_probes=4,
+                                 validated_completed_units=None, argv=None):
+    """Declare COST's forward/reverse reads with sealed retained-window IDs.
+
+    Full target partitions are derived before applying a validated resume
+    subset. Every layer's captures remain necessary while any target is
+    pending; only completed members' renders are omitted. Original window
+    phases and IDs remain in the read plan. Source rereads are explicit
+    V2 references to one unique entry, never duplicate entry records.
+    """
+    from prismaquant.joint_retained_window_plan import RetainedWindowBudget
+
+    if isinstance(retained_budget, dict):
+        retained_budget = RetainedWindowBudget.from_dict(retained_budget)
+    if not isinstance(retained_budget, RetainedWindowBudget):
+        raise SystemExit("COST V2 requires a complete retained-window budget")
+    if type(source_bytes) is not int or source_bytes <= 0:
+        raise SystemExit("COST V2 requires the fixed declared source-owner byte cap")
+    if type(n_probes) is not int or n_probes != 4:
+        raise SystemExit("COST V2 currently declares exactly four joint probes")
+    plan_path, prepared = os.path.abspath(plan_path), os.path.abspath(prepared)
+    plan = _read_json(plan_path, "joint plan")
+    if plan.get("schema") != JOINT_PLAN_SCHEMA:
+        raise SystemExit(f"{plan_path}: not a {JOINT_PLAN_SCHEMA} plan")
+    prefetch = plan.get("source_prefetch") or {}
+    if (prefetch.get("prefetch_lookahead") != 1
+            or prefetch.get("max_cache_slots") != 2):
+        raise SystemExit("COST V2 requires source lookahead one and two cache slots")
+    plan_sha256, prepared_sha256 = sha256_file(plan_path), sha256_file(prepared)
+    inputs = plan["inputs"]
+    campaign_plan_path = _bound(inputs["campaign_plan"], "plan inputs.campaign_plan")
+    roster = _campaign_roster(campaign_plan_path)
+    completed, completed_binding_sha256 = _cost_completed_units(
+        validated_completed_units, plan_sha256=plan_sha256,
+        prepared_sha256=prepared_sha256, roster=roster)
+    completion = _read_json(prepared, "prepared completion")
+    if completion.get("schema") != JOINT_PREPARED_SCHEMA or completion.get("status") != "complete":
+        raise SystemExit("COST V2 requires a complete prepared completion")
+    raw_formats = completion.get("formats_by_qname")
+    if not isinstance(raw_formats, dict) or set(raw_formats) != set(roster):
+        raise SystemExit("prepared COST candidate roster differs from the campaign")
+    formats_by_qname = {}
+    for name, raw in raw_formats.items():
+        if (not isinstance(raw, list) or raw.count("BF16") != 1
+                or raw[-1] != "BF16" or len(set(raw)) != len(raw)):
+            raise SystemExit(f"prepared COST formats are incomplete or repeated: {name}")
+        fmts = tuple(fmt for fmt in raw if fmt != "BF16")
+        if not fmts or any(not isinstance(fmt, str) or not fmt for fmt in fmts):
+            raise SystemExit(f"prepared COST has no measured candidate: {name}")
+        formats_by_qname[name] = fmts
+
+    workspace = os.path.dirname(campaign_plan_path)
+    campaign = _campaign_with_cached_capture_sizes(workspace)
+    if os.path.abspath(campaign.model_dir) != os.path.abspath(plan["model"]):
+        raise SystemExit("COST plan source model differs from campaign source")
+    owners = {name: row["dir"] for row in campaign.plan["rows"]
+              for name in row["members"]}
+    if set(owners) != set(roster):
+        raise SystemExit("COST row-owner roster differs from campaign")
+    render_sizes = {owner: _dir_sizes(os.path.join(owner, "cache"))
+                    for owner in sorted(set(owners.values()))}
+    census = _read_json(_bound(inputs["census"], "plan inputs.census"), "joint census")
+    layer_of = _layer_index_of(roster)
+    by_layer = {}
+    for name in roster:
+        by_layer.setdefault(layer_of[name], []).append(name)
+    prefix = LAYER_QNAME_RE.match(roster[0]).group("prefix")
+    source_layers = _source_layer_indices(
+        campaign.weight_map, prefix, _backbone_layer_count(campaign.model_dir))
+    if source_layers != list(range(source_layers[-1] + 1)):
+        raise SystemExit("COST source layers are not a contiguous backbone")
+    last_layer = source_layers[-1]
+    if any(layer not in source_layers for layer in by_layer):
+        raise SystemExit("COST target lies outside the source backbone")
+
+    # Freeze every full per-layer target partition from file-size upper bounds
+    # before applying completed units. Runtime PWC separately opens each
+    # selected archive and proves storage <= the declared file size.
+    windows_by_layer, render_paths = {}, {}
+    for layer in source_layers:
+        names = sorted(by_layer.get(layer, ()))
+        if not names:
+            windows_by_layer[layer] = ()
+            continue
+        planned, paths = _cost_layer_windows(
+            names, formats_by_qname=formats_by_qname, census=census,
+            owners=owners, render_sizes=render_sizes,
+            budget=retained_budget, source_bytes=source_bytes)
+        windows_by_layer[layer] = planned.windows
+        render_paths.update(paths)
+
+    track = _ReadPlanV2()
+    track.begin("cost_setup")
+    _parts, _states, _production_cache = _joint_head(
+        track, plan_path, plan, roster=roster, prepared=prepared)
+    for filename, size in sorted(_dir_sizes(plan["model"]).items()):
+        if filename.endswith((".json", ".model", ".txt", ".jinja", ".py")):
+            track.add(os.path.join(plan["model"], filename), 0, size,
+                      "source_metadata")
+    source_cache = plan.get("source_identity_cache")
+    if source_cache is not None:
+        path = _bound(source_cache, "source identity cache")
+        if sha256_file(to_pool(path)) != source_cache.get("sha256"):
+            raise SystemExit("bound COST source identity cache checksum changed")
+        track.add(path, 0, _required_size(path, "source identity cache"),
+                  "source_identity_cache")
+
+    base = prefix.removesuffix("layers.")
+    track.begin("cost_head")
+    for path, offset, length in _source_tensor_extents(campaign, (
+            base + "embed_tokens.", base + "norm.", base + "rotary_emb.",
+            "lm_head."), required=False):
+        track.add(path, offset, length, "source_head")
+
+    source_extents = {layer: _full_source_layer_extents(campaign, layer, prefix)
+                      for layer in source_layers}
+    pending_any = len(completed) < len(roster)
+    for layer in source_layers:
+        track.begin(f"cost_capture_{layer:03d}")
+        warmed = ((0, 1) if layer == 0 and last_layer >= 1 else (0,) if layer == 0
+                  else (layer + 1,) if layer < last_layer else ())
+        for source_layer in warmed:
+            for path, offset, length in source_extents[source_layer]:
+                track.add(path, offset, length, "source_forward")
+        if pending_any:
+            for name in sorted(by_layer.get(layer, ())):
+                found = campaign.capture_files_for([name])
+                if len(found) != 1 or found[0][1] <= 0:
+                    raise SystemExit(f"COST capture is absent for {name}")
+                _add_capture(track, found)
+    track.begin("cost_tail")  # retained last two source layers; no fresh read
+
+    window_metadata = []
+    for layer in reversed(source_layers):
+        track.begin(f"cost_reverse_{layer:03d}_source")
+        if 0 < layer < last_layer:
+            for path, offset, length in source_extents[layer - 1]:
+                track.add(path, offset, length, "source_reverse")
+        for index, window in enumerate(windows_by_layer[layer]):
+            phase_name = f"cost_reverse_{layer:03d}_window_{index:03d}"
+            track.begin(phase_name)
+            active = tuple(name for name in window.names if name not in completed)
+            for name in active:
+                for fmt in formats_by_qname[name]:
+                    path, size = render_paths[name, fmt]
+                    track.add(path, 0, size, "renders")
+            window_metadata.append({
+                "phase": phase_name, "layer": layer, "window_index": index,
+                "original_full_target_names": list(window.names),
+                "active_pending_names": list(active),
+                "statistics_bytes": window.statistics_bytes,
+                "render_file_upper_bound_bytes": window.render_bytes,
+                "candidate_count": window.candidate_count,
+            })
+
+    partition = [(item["layer"], item["window_index"],
+                  item["original_full_target_names"]) for item in window_metadata]
+    partition_sha256 = hashlib.sha256(json.dumps(
+        partition, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    annotations = {
+        "entry_point": f"{JOINT_ENTRY_POINT}:run",
+        "mode": "retained_cost_v2", "plan": plan_path,
+        "plan_sha256": plan_sha256, "prepared": prepared,
+        "prepared_sha256": prepared_sha256,
+        "source_owner_cap_bytes": source_bytes,
+        "retained_budget": retained_budget.as_dict(),
+        "probes_per_window": n_probes,
+        "source_prefetch_lookahead_layers": 1,
+        "tail_retained_source_layers": source_layers[-2:],
+        "window_partition_sha256": partition_sha256,
+        "windows": window_metadata,
+        "validated_completed_units_sha256": completed_binding_sha256,
+        "validated_completed_units": len(completed),
+        "sha256_present": False,
+        "sha256_absent_reason": SHA256_ABSENT_REASON,
+        "argv": None if argv is None else [str(item) for item in argv],
+    }
+    return track.manifest(produced_by, annotations,
+                          where=f"{JOINT_ENTRY_POINT}:run:retained_v2")
 
 
 def _finish(track: _Phases, produced_by: dict, annotations: dict, *, where: str) -> dict:
