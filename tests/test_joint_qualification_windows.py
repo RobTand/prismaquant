@@ -220,6 +220,28 @@ def test_qualification_journal_restarts_from_durable_unit(tmp_path, monkeypatch)
                         (2, 'qualification', 'model.layers.0.b')]
 
 
+def test_replay_reads_only_completed_capture_entries_before_resume(tmp_path, monkeypatch):
+    from prismaquant.perturbed_x_cache import activation_cache_filename
+    runner, data, capture, _events, _live, _observed = fixture(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.b')
+    options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,
+                   qualification_window=policy(), qualification_journal=tmp_path/'qualification',
+                   qualification_identity={'plan_sha256': 'p' * 64})
+    with pytest.raises(RuntimeError, match='intentional verification failure'):
+        bridge.prepare_cache(runner, data, **options)
+    unfinished = tmp_path / 'inputs' / activation_cache_filename('model.layers.0.b')
+    original_hash = bridge._qualification_file_sha
+    seen = []
+    def checked(path):
+        assert Path(path) != unfinished, 'replay eagerly reread uncommitted X/H'
+        seen.append(Path(path))
+        return original_hash(path)
+    monkeypatch.setattr(bridge, '_qualification_file_sha', checked)
+    with pytest.raises(RuntimeError, match='intentional verification failure'):
+        bridge.prepare_cache(runner, data, **options, qualification_resume=True)
+    assert tmp_path / 'inputs' / activation_cache_filename('model.layers.0.a') in seen
+
+
 @pytest.mark.parametrize('changed', ['plan', 'source', 'reader', 'implementation',
                                      'capture', 'wire', 'render', 'symlink_wire',
                                      'symlink_render'])

@@ -658,10 +658,12 @@ def _qualification_replay(data, manifest, completed):
     """A journal envelope alone does not authenticate files that remain live."""
     from .perturbed_x_cache import activation_cache_filename
 
-    # Capture entries contain both X and H. Check the complete canonical
-    # capture, including units not in the completed journal, before a skip.
+    # The immutable manifest seals the full roster. Only a unit whose
+    # qualification is actually skipped needs its X/H bytes re-authenticated
+    # here; unfinished units pass the usual verified capture loader later.
     root = Path(data.payload['provenance']['calibration_cache']['path']).parent
-    for name, entry in sorted(manifest['entries'].items()):
+    for name in sorted(completed):
+        entry = manifest['entries'][name]
         expected = str(Path('inputs') / activation_cache_filename(name))
         _same(entry.get('path'), expected, f'{name}: canonical X/H entry')
         _same(_qualification_file_sha(root / expected), entry['sha256'],
@@ -802,6 +804,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     renders = {name: tuple(fmt for fmt in fmts if fmt != "BF16")
                for name, fmts in data.formats_by_qname.items()}
     verified, telemetry = replayed if completed else {}, []
+    committed_units = len(completed)
     for depth in range(min(runner.num_layers, runner.prefetch_lookahead + 1)):
         runner.context.schedule_prefetch(depth)
     for layer in range(runner.num_layers):
@@ -904,7 +907,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                'prefetch': layer_stats[stats_start:],
                                **({'capture_load_execution': unit_load_execution}
                                   if capture_load_execution is not None else {})})
-                    _pb_commit(len({n for n, _ in verified}), 'qualification', unit=name)
+                    committed_units += 1
+                    _pb_commit(committed_units, 'qualification', unit=name)
             stats = layer_stats[0] if policy is None else {'windows': layer_stats}
             telemetry.append({"layer": layer, **stats})
             print(json.dumps({"qualified_layer": layer, "qualified_cells": len(verified),
