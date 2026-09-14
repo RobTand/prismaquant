@@ -522,6 +522,18 @@ def _layer_index_of(names) -> dict:
     return index
 
 
+def _backbone_layer_count(model_path: str) -> int:
+    """Read the streamed backbone depth; GLM's following MTP layer is passthrough."""
+    config = _read_json(os.path.join(to_pool(model_path), "config.json"),
+                        "source model config")
+    text = config.get("text_config")
+    source = text if isinstance(text, dict) else config
+    count = source.get("num_hidden_layers")
+    if type(count) is not int or count <= 0:
+        raise SystemExit("source config has no positive backbone num_hidden_layers")
+    return count
+
+
 class _Phases:
     """Entries plus the running byte sum PrismaBuild's prewarm loop windows on.
 
@@ -695,6 +707,7 @@ def _joint_source_authentication_schedule(model_path: str, roster: list):
         raise SystemExit("joint source checkpoint index has no weight_map")
     layer_of = _layer_index_of(roster)
     layers = set(layer_of.values())
+    backbone_layers = _backbone_layer_count(model)
     prefix = LAYER_QNAME_RE.match(roster[0]).group("prefix")
     base = prefix.removesuffix("layers.")
     head_prefixes = (base + "embed_tokens.", base + "norm.",
@@ -708,8 +721,11 @@ def _joint_source_authentication_schedule(model_path: str, roster: list):
         if match is not None and match.group("prefix") == prefix:
             layer = int(match.group("index"))
             if layer not in layers:
-                raise SystemExit(f"joint source checkpoint names unplanned layer {layer}")
-            phase = layer
+                if layer < backbone_layers:
+                    raise SystemExit(f"joint source checkpoint names unplanned layer {layer}")
+                phase = None  # MTP passthrough is never installed by the body runner
+            else:
+                phase = layer
         elif tensor.startswith(head_prefixes):
             phase = -1  # head/visual are materialized before layer 0
         else:
