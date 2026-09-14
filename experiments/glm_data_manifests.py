@@ -1067,7 +1067,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     runner's: the layer's source byte extents first (the streaming context
     prefetches them on ``install``), then, for each of the layer's units in
     sorted name order, that unit's capture file and then each measured rung's
-    render and wire. A plan that declares no ``qualification_window`` runs the
+    render and, for preparation, wire. A plan that declares no
+    ``qualification_window`` runs the
     older whole-layer window instead -- all of the layer's captures, then its
     renders and wires -- and the order here follows the plan.
 

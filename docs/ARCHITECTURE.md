@@ -1,5 +1,8 @@
 # PrismaQuant Architecture
 
+As of: 2026-09-14 · `codex/joint-retained-window-plan-20260914`. Stamps
+follow, newest first, each recording its own branch and date.
+
 Re-stamped (2026-09-13, `codex/joint-retained-window-plan-20260914`) for
 **combined retained-render COST admission** (#602). The opt-in scalar planner
 charges full metadata/runtime allowances, actual source owners, one operator
@@ -9,10 +12,6 @@ A logical BF16 geometry forecast is not an archive-storage admission receipt.
 Oversized targets, unexpected live baselines and excessive replay-window counts
 refuse; the existing probe-major mode remains unchanged. PWC remains the sole
 render owner, with bounded loader quanta and checked release between quanta.
-
-
-As of: 2026-09-14 · `codex/joint-retained-window-plan-20260914`. Stamps
-follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
 `glm_packed_research_sm121` routed allocation menu. It now preserves the
@@ -200,6 +199,25 @@ Resumed replay reads committed units before the layer walk and therefore
 does not claim this phase mapping; its submission keeps conservative
 unphased warming until a replay-order contract exists.
 
+Re-stamped (2026-09-13, `codex/cost-render-proof-integrated-20260913`) for
+**COST's prepared-render integrity on consumption**. PREPARE binds each
+decoded PWC shard's serialized-file SHA-256 to its bounded load receipt and
+verifies its wire/decoder/source contract. COST checks the complete campaign
+roster and refuses missing renders. It compares the prepared render SHA roster
+with each shard on COST's necessary bounded PWC load before admitting that
+tensor to joint AURA. Every resident read is fenced to the matching unmodified
+tensor and donor-file stat; eviction requires another verified read. The
+avoided render intake read is exactly one pass over all serialized `.pt` bytes,
+the sum of their file sizes; COST still loads each consumed render for PWC
+deserialization (window preflight may read the archive again). A changed
+same-size render refuses on first load; a resume that never uses a particular
+render has no claim that its current bytes were checked. Before metadata
+intake, COST checks the already bound plan SHA, implementation/source-package
+digest, prepared v3 status, reader and backend against the small completion;
+the full source/model/cell replays still run at their original boundary.
+No full campaign speedup or I/O delta is claimed without a paired profiler
+and both-box load series. Gates: `tests/test_pwc_file_load_receipts.py`,
+`tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
 **bounded, recoverable Tessera joint-anchor qualification** (#590). The
@@ -236,7 +254,7 @@ anchor, wire receipt, resolved donor paths and origin; it recomputes the same
 digest on resume instead of copying the entire 197,990-cell record mapping
 into a second manifest. The original checkpoint and cost/census inputs remain
 independently SHA-bound, and any changed cell field still refuses reuse.
-The bounded, phase-matched 18-cell before/after rate and both-box resource
+The bounded, phase-matched 18-cell and 241-cell before/after rates and both-box resource
 evidence are in `docs/measurements/glm-joint-prep-bounded-ab-2026-09-13.md`;
 full-campaign throughput and work-per-joule remain unmeasured.
 
