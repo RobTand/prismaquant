@@ -51,6 +51,7 @@ import json
 import os
 import pickle
 import re
+import socket
 import subprocess
 import sys
 
@@ -1059,6 +1060,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         "source_authentication_mode": ("not_applicable" if command == "run" else
             "verified_streamed_identity_cache" if source_cache is not None else
             "fresh_descriptor_sha256"),
+        **({"source_identity_cache_host": socket.gethostname()}
+           if source_cache is not None else {}),
         "sha256_present": False,
         "sha256_absent_reason": SHA256_ABSENT_REASON,
         "counts": track.counts,

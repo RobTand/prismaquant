@@ -42,7 +42,9 @@ cache. A cache proven on another host's NFS mount is not portable merely
 because the paths and SHA rows match: the current six-field fingerprint includes
 the host-local `st_dev`. Manifest construction and owner adoption therefore
 refuse it on a different mount device. A reuse request has a real host-local
-dependency until a separately qualified cross-host source proof exists.
+dependency until a separately qualified cross-host source proof exists; the
+manifest names its proof host, and `submit-joint` refuses a broader placement
+tag before publication.
 The active 2026-09-13 b59 request retains its original seal and behavior; a
 future request must rebuild its manifest from these source bytes. Gates:
 `tests/test_selected_source_authentication.py`,

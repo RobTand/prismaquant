@@ -1364,6 +1364,11 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     if args.dry_run:
         print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
     manifest = build()
+    cache_host = manifest["annotations"].get("source_identity_cache_host")
+    if cache_host is not None and args.tag != cache_host:
+        raise RuntimeError(
+            f"source identity cache proof is local to {cache_host}; "
+            f"submit with --tag {cache_host}, not {args.tag!r}")
     # Compact JSON, unlike the row manifests' indented form: a row's read set
     # is a couple of MB and reads better indented, while a joint pass declares
     # hundreds of thousands of entries against PrismaBuild's 64 MiB ceiling,

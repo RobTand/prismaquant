@@ -37,6 +37,7 @@ import json
 import os
 import pickle
 import shutil
+import socket
 import struct
 import sys
 from pathlib import Path
@@ -400,6 +401,7 @@ def test_prepare_manifest_uses_exact_cached_source_sha_and_refuses_mutation(
         str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
     assert manifest["annotations"]["source_authentication_mode"] == (
         "verified_streamed_identity_cache")
+    assert manifest["annotations"]["source_identity_cache_host"] == socket.gethostname()
     assert manifest["annotations"]["counts"]["source_identity_cache"] == 1
     assert manifest["annotations"]["counts"].get("source_authentication", 0) == 0
     assert str(cache) in _paths(manifest, "head")
@@ -658,6 +660,31 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
     assert not manifest_dir.exists()
     assert "--detach" not in "".join(
         line for line in printed.splitlines() if line.startswith("[submit] "))
+
+
+def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
+    scratch, shared_mount, monkeypatch,
+):
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    original = glm_data_manifests.build_joint_pass_manifest
+
+    def cached(*args, **kwargs):
+        manifest = original(*args, **kwargs)
+        manifest["annotations"]["source_identity_cache_host"] = socket.gethostname()
+        return manifest
+
+    monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", cached)
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    with pytest.raises(RuntimeError, match="proof is local"):
+        dispatch.main([
+            "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+            "--cpus", "6", "--tag", "gb10", "--dry-run",
+        ])
 
 
 def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
