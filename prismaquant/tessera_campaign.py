@@ -301,6 +301,12 @@ def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
     return sorted({snap(inside[0], allowed), snap(inside[-1], allowed)} - {None})
 
 
+def require_exhaustive_rate_research_mode(enabled: bool, mode: str) -> None:
+    """Keep complete-grid acquisition in its declared research menu."""
+    if enabled and mode != "research":
+        raise RuntimeError("--exhaustive-rate-grid requires --menu-mode research")
+
+
 def audit_extra_rate(allowed: "Sequence[int]", placed: "Sequence[int]",
                      *, snap) -> "int | None":
     """The one interior rung an audit unit measures on top of ``placed``.
@@ -5199,6 +5205,7 @@ def _main(argv, *, source_scope) -> int:
     serving_target = serving_target_from_args(args)
 
     mode = menu_mode(args.menu_mode)
+    require_exhaustive_rate_research_mode(args.exhaustive_rate_grid, mode)
     hessian_status = tessera_encoder_hessian_status()
     if args.hessian == "require" and not hessian_status["accepted"]:
         # Refuse before the model load, not after an hour of encodes.

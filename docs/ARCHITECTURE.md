@@ -3,6 +3,12 @@
 As of: 2026-09-13 · `codex/pr503-integrate-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-13, `integrate/pq503-release-20260913`) to enforce the
+already-declared research-only boundary on `--exhaustive-rate-grid`. The
+explicit complete-grid request now refuses the attested and readable menus;
+with the research menu, it still measures every legal rung inside the stated
+band. No production default or legal rate roster changes.
+
 Re-stamped (2026-09-13, `codex/pr503-integrate-20260913`) to retain
 the opt-in sparse-rate research contracts alongside the current
 prefill-frontier and platform-route contracts. The research path

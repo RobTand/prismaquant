@@ -1012,6 +1012,17 @@ def test_an_explicit_exhaustive_band_uses_each_legal_rung_only_in_that_band():
                         exhaustive_band=True)
 
 
+def test_exhaustive_grid_requires_the_research_menu():
+    from prismaquant.tessera_campaign import require_exhaustive_rate_research_mode
+    from prismaquant.tessera_menu import MENU_ATTESTED, MENU_READABLE, MENU_RESEARCH
+
+    for mode in (MENU_ATTESTED, MENU_READABLE):
+        with pytest.raises(RuntimeError, match="requires --menu-mode research"):
+            require_exhaustive_rate_research_mode(True, mode)
+        require_exhaustive_rate_research_mode(False, mode)
+    require_exhaustive_rate_research_mode(True, MENU_RESEARCH)
+
+
 def test_the_audit_anchor_lands_inside_the_bracket_or_nowhere():
     from prismaquant.tessera_campaign import audit_extra_rate
 
