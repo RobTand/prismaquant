@@ -105,6 +105,7 @@ def _workspace(scratch: Path) -> dict:
 
     model = scratch / "model"
     model.mkdir()
+    (model / "config.json").write_text(json.dumps({"num_hidden_layers": 2}))
     header = {}
     for index, name in enumerate(names):
         header[name + ".weight"] = {
@@ -203,6 +204,7 @@ def _workspace(scratch: Path) -> dict:
         "execution": {"projection_backend": {
             "binary": {"path": str(backend), "sha256": None}, "name": "f"}},
         "qualification_window": {"max_load_buffer_bytes": 1},
+        "source_prefetch": {"max_cache_slots": 2, "prefetch_lookahead": 1},
         "inputs": {
             "campaign_plan": {"path": str(campaign_plan), "sha256": None},
             "census": {"path": str(census), "sha256": None},
@@ -318,10 +320,9 @@ def test_a_layer_phase_reads_source_then_capture_then_render_then_wire(
             kinds.append("wire")
         else:  # pragma: no cover - a kind the fixture does not produce
             kinds.append(path)
-    # The runner installs the layer's source weights, then walks its units in
-    # sorted order: that unit's capture, then each measured rung's render and
-    # then its wire.
-    assert kinds == ["source",
+    # The runner begins source prefetch of this layer and its one-layer
+    # successor before walking captures, renders and wires by sorted unit.
+    assert kinds == ["source", "source",
                      "capture", "render", "wire", "render", "wire",
                      "capture", "render", "wire", "render", "wire"]
     assert manifest["annotations"]["capture_window"] == "per_unit"
@@ -349,6 +350,94 @@ def test_prepare_frontier_splits_only_between_units_and_binds_manifest(
     path.write_bytes(blob + b"x")
     with pytest.raises(RuntimeError, match="changed after submission"):
         load(str(path), digest, manifest["annotations"]["plan_sha256"])
+
+
+def test_full_layer_readset_includes_non_linear_source_buffers(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.0.self_attn.dt_bias"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "extra-layer-buffer.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+
+    campaign = glm_data_manifests.Campaign(str(fixture["workspace"]))
+    spans = glm_data_manifests._full_source_layer_extents(
+        campaign, 0, "model.language_model.layers.")
+    assert (str(shard), 0, shard.stat().st_size) in spans
+
+
+def test_prepare_declares_next_layer_source_at_prefetch_start(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.1.self_attn.dt_bias"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "next-layer.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert str(shard) in _paths(manifest, "layer-0-part-0")
+    assert str(shard) not in _paths(manifest, "layer-1-part-0")
+    assert manifest["annotations"]["source_prefetch_lookahead_layers"] == 1
+
+
+def test_prepare_refuses_a_prefetch_window_it_cannot_release(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    plan = json.loads(fixture["plan"].read_text())
+    plan["source_prefetch"]["max_cache_slots"] = 3
+    fixture["plan"].write_text(json.dumps(plan))
+    with pytest.raises(SystemExit, match="source prefetch can outlive"):
+        glm_data_manifests.build_joint_pass_manifest(
+            str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+
+
+def test_prepare_includes_a_source_only_tail_layer_at_its_prefetch(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.2.input_layernorm.weight"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "source-only-tail.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+    (model / "config.json").write_text(json.dumps({"num_hidden_layers": 3}))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert str(shard) in _paths(manifest, "layer-1-part-0")
+    assert manifest["annotations"]["layers"] == [0, 1]
+
+
+def test_mtp_passthrough_is_completion_auth_only(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.2.mlp.down_proj.weight"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "mtp-passthrough.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert str(shard) not in _paths(manifest, "layer-1-part-0")
+    assert str(shard) in _paths(manifest, "source-complete")
 
 
 def test_prepare_manifest_traces_full_source_sha_at_first_use_and_completion(
