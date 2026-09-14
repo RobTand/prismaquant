@@ -7,6 +7,9 @@ import os
 import torch
 
 from .joint_aura import JointOperatorStatisticsLease, arithmetic_identity
+from .joint_retained_window_plan import (
+    RetainedWindowBudget, plan_retained_targets, targets_from_statistics_plan,
+)
 from .joint_statistics_plan import plan_joint_statistics_target_windows
 
 SCHEMA = 'prismaquant.joint_operator_windows.v1'
@@ -144,3 +147,164 @@ def observe_and_project_windows(modules, specs, cache, policy, *, backward,
                     receipts.append(dict(receipt))
             results.update(lease.finish_projections())
     return results, diagnostics, dict(plan=plan.as_dict(), candidate_windows=receipts)
+
+
+def observe_and_project_retained_windows(
+        modules, specs, cache, policy, *, retained_budget, n_probes,
+        source_bytes, backward, record_operator, consume_probe,
+        collect_col_energy, backend, guard=None, source_fingerprints=None):
+    """Replay all probes inside each admitted target's retained PWC lifetime.
+
+    The selected-key-only PWC preflight and scalar target planner run before
+    any cache load. Every target window owns one PWC context; each probe owns a
+    new statistics lease. ``consume_probe`` receives scalar signed components
+    and compact diagnostics only after that lease has released its matrices.
+    Callbacks must not retain borrowed source/render tensor references.
+
+    ``source_bytes`` is the caller's declared, separately checked source-owner
+    cap. Passing a varying per-layer observation here would change the sealed
+    target-window roster. This utility does not check the pre-capture physical
+    baseline or manage source, boundary and auxiliary owners.
+    """
+    policy = normalize_operator_windows(policy)
+    if policy is None:
+        raise ValueError('retained joint replay requires an operator-window policy')
+    if isinstance(retained_budget, dict):
+        retained_budget = RetainedWindowBudget.from_dict(retained_budget)
+    if not isinstance(retained_budget, RetainedWindowBudget):
+        raise TypeError('retained joint replay requires a versioned retained budget')
+    if type(n_probes) is not int or n_probes <= 0:
+        raise ValueError('retained joint replay requires a positive probe count')
+    if type(source_bytes) is not int or source_bytes < 0:
+        raise ValueError('retained joint replay requires a declared source byte cap')
+    if any(not callable(callback) for callback in (backward, record_operator, consume_probe)):
+        raise TypeError('retained joint replay callbacks must be callable')
+    if type(collect_col_energy) is not bool:
+        raise ValueError('retained joint replay column-energy flag must be boolean')
+    for policy_key, budget_value in (
+            ('max_statistics_bytes', retained_budget.statistics_cap_bytes),
+            ('max_candidate_bytes', retained_budget.candidate_delta_bytes),
+            ('max_render_resident_bytes', retained_budget.retained_render_cap_bytes),
+            ('max_load_buffer_bytes', retained_budget.load_buffer_bytes)):
+        if policy[policy_key] < budget_value:
+            raise RuntimeError(f'retained joint {policy_key} is narrower than its sealed budget')
+
+    statistics_plan = plan_joint_statistics_target_windows(
+        modules, specs, max_statistics_bytes=retained_budget.statistics_cap_bytes,
+        activation_max_abs=cache.activation_max_abs, projection_backend=backend)
+    if source_fingerprints is None:
+        source_fingerprints = {
+            name: JointOperatorStatisticsLease._source_fingerprint(module.weight)
+            for name, module in modules.items()}
+    if set(source_fingerprints) != set(modules):
+        raise RuntimeError('joint source seal coverage differs')
+
+    def require_sources():
+        if any(JointOperatorStatisticsLease._source_fingerprint(modules[name].weight)
+               != fingerprint for name, fingerprint in source_fingerprints.items()):
+            raise RuntimeError('joint source changed between retained target windows')
+
+    # Existing PWC tensors, even unrelated ones, would make selected-file
+    # prices understate this otherwise empty baseline. The owner scans live
+    # tensor keys only after its one-time in-memory index build; no file walk.
+    if cache._window_resident_storages():
+        raise RuntimeError('retained joint replay requires an empty PWC resident baseline')
+
+    keys_by_name, requested_by_name = {}, {}
+    for target in statistics_plan.targets:
+        requested = tuple((target.name, fmt) for fmt in specs[target.name])
+        keys = tuple(cache.resolve_key(name, fmt) for name, fmt in requested)
+        if any(key is None for key in keys):
+            missing = [pair for pair, key in zip(requested, keys) if key is None]
+            raise RuntimeError(f'retained joint PWC candidate entry missing: {missing}')
+        keys_by_name[target.name] = keys
+        requested_by_name[target.name] = requested
+    selected_keys = tuple(key for target in statistics_plan.targets
+                          for key in keys_by_name[target.name])
+    key_costs = cache.retained_key_costs(selected_keys)
+    targets = targets_from_statistics_plan(statistics_plan, keys_by_name, key_costs)
+    retained_plan = plan_retained_targets(
+        targets, budget=retained_budget, source_bytes=source_bytes,
+        footprint_scope='pwc_serialized_upper_bound')
+    plan_receipt = retained_plan.as_dict()
+    require_sources()
+
+    candidate_receipts = []
+    for window_index, window in enumerate(retained_plan.windows):
+        require_sources()
+        names = window.names
+        selected = {name: modules[name] for name in names}
+        selected_specs = {name: specs[name] for name in names}
+        keys = tuple(key for name in names for key in keys_by_name[name])
+        requested = tuple(pair for name in names for pair in requested_by_name[name])
+
+        def before_load_quantum(state):
+            if guard is None:
+                return
+            reserve = (
+                state['remaining_incoming_storage_bytes']
+                + window.statistics_bytes
+                + retained_budget.workspace_reserve_bytes
+                + retained_budget.boundary_reserve_bytes
+                + retained_budget.load_buffer_bytes
+                + retained_budget.read_page_reserve_bytes
+                + retained_budget.candidate_delta_bytes
+            )
+            check_operator_allocation(
+                guard, 'before_joint_retained_candidate_load',
+                reserve_bytes=reserve)
+
+        with cache.retained_window(
+                keys, max_resident_bytes=retained_budget.retained_render_cap_bytes,
+                max_workers=policy['prefetch_workers'],
+                max_load_buffer_bytes=retained_budget.load_buffer_bytes,
+                release_file_pages=True,
+                before_load_quantum=before_load_quantum if guard is not None else None,
+                ) as candidate_receipt:
+            for probe_index in range(n_probes):
+                require_sources()
+                if guard is not None:
+                    check_operator_allocation(
+                        guard, 'before_joint_retained_statistics_probe',
+                        reserve_bytes=(window.statistics_bytes
+                                       + retained_budget.workspace_reserve_bytes
+                                       + retained_budget.boundary_reserve_bytes
+                                       + retained_budget.candidate_delta_bytes))
+                with JointOperatorStatisticsLease(
+                        selected, selected_specs,
+                        max_statistics_bytes=retained_budget.statistics_cap_bytes,
+                        max_candidate_bytes=retained_budget.candidate_delta_bytes,
+                        activation_max_abs=cache.activation_max_abs,
+                        projection_backend=backend) as lease:
+                    lease.begin_probe()
+                    backward(probe_index=probe_index,
+                             final=window_index == len(retained_plan.windows) - 1,
+                             lease=lease)
+                    require_sources()
+                    lease.finish_observations()
+                    diagnostics = lease.operator_diagnostics(
+                        collect_col_energy=collect_col_energy)
+                    for name, fmt in requested:
+                        rendered = source = delta = None
+                        try:
+                            source = modules[name].weight.detach()
+                            rendered = cache.get_resident(name, fmt)
+                            record_operator(name, fmt, source, rendered)
+                            require_sources()
+                            delta = rendered.to(
+                                device=source.device, dtype=torch.float32, copy=True)
+                            delta.sub_(source)
+                            lease.project({(name, fmt): delta})
+                        finally:
+                            rendered = source = delta = None
+                    terms = lease.finish_projections()
+                probe_receipt = {
+                    'plan': retained_plan.as_dict(),
+                    'window_index': window_index,
+                    'window_names': names,
+                    'candidate_window': dict(candidate_receipt),
+                }
+                consume_probe(probe_index, terms, diagnostics, probe_receipt)
+                require_sources()
+            candidate_receipts.append(dict(candidate_receipt))
+    return {'plan': plan_receipt, 'candidate_windows': candidate_receipts}
