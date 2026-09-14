@@ -10,6 +10,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 from types import SimpleNamespace
@@ -1143,6 +1144,67 @@ def canonical_fingerprint_key(fingerprint: dict[str, object]) -> str:
     return json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
 
 
+def source_identity_hash_threads() -> int:
+    """Worker count for hashing uncached source shards.
+
+    ``PRISMAQUANT_SOURCE_HASH_THREADS`` overrides; 1 restores the serial
+    loop. The default is the CPU affinity this process was given (PrismaBuild
+    assigns it per action), because each worker is one sequential read plus
+    one sha256 stream and ``hashlib`` releases the GIL on the 16 MiB updates:
+    the pool can use exactly the cores it was admitted to and no more. There is
+    no fixed I/O cap -- a slow backing store (a spinning-disk NFS pool, say)
+    is the caller's measured fact, so it sets the override rather than every
+    caller paying a guessed limit.
+    """
+    raw = str(os.environ.get("PRISMAQUANT_SOURCE_HASH_THREADS", "")).strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return max(1, len(os.sched_getaffinity(0)))
+
+
+def _hash_one_source_shard(path: Path, fingerprint: dict[str, object]) -> str:
+    digest = _file_sha256(path)
+    if _streamed_identity_stat_fingerprint(path) != fingerprint:
+        raise RuntimeError(
+            f"source checkpoint shard changed while hashing: {path}"
+        )
+    return digest
+
+
+def _hash_source_shards(
+    work: list[tuple[Path, dict[str, object]]],
+) -> list[str]:
+    """Hash each ``(path, fingerprint)`` pair, returning digests in input order.
+
+    The fingerprint was taken before hashing and is re-checked after, per
+    shard, exactly as the serial loop does. When several shards fail, the
+    error raised is the first one in input order, whatever order the workers
+    finished in, so a refusal names the same shard on every run.
+    """
+    threads = min(source_identity_hash_threads(), len(work))
+    if threads <= 1:
+        return [_hash_one_source_shard(path, fp) for path, fp in work]
+    from concurrent.futures import ThreadPoolExecutor
+
+    pool = ThreadPoolExecutor(
+        max_workers=threads, thread_name_prefix="source-hash"
+    )
+    try:
+        futures = [
+            pool.submit(_hash_one_source_shard, path, fp) for path, fp in work
+        ]
+        # `.result()` in submission order: the first failure in `ordered`
+        # order is the one raised.
+        return [future.result() for future in futures]
+    finally:
+        # On a refusal, do not start reading shards nobody will use; workers
+        # already inside a read finish it (a thread cannot be interrupted).
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
 def build_source_checkpoint_identity(
     source_model: str | Path,
     *,
@@ -1220,18 +1282,24 @@ def build_source_checkpoint_identity(
         else {}
     )
 
+    fingerprints = [_streamed_identity_stat_fingerprint(path) for path in ordered]
+    digests: list[str | None] = []
+    for fingerprint in fingerprints:
+        cached = reusable.get(canonical_fingerprint_key(fingerprint))
+        digests.append(str(cached["sha256"]) if cached is not None else None)
+    misses = [index for index, digest in enumerate(digests) if digest is None]
+    for index, digest in zip(
+        misses,
+        _hash_source_shards(
+            [(ordered[index], fingerprints[index]) for index in misses]
+        ),
+    ):
+        digests[index] = digest
+
     entries: list[dict[str, object]] = []
     shards: list[dict[str, object]] = []
-    for path in ordered:
-        fingerprint = _streamed_identity_stat_fingerprint(path)
-        cached = reusable.get(canonical_fingerprint_key(fingerprint))
-        digest = str(cached["sha256"]) if cached is not None else None
-        if digest is None:
-            digest = _file_sha256(path)
-            if _streamed_identity_stat_fingerprint(path) != fingerprint:
-                raise RuntimeError(
-                    f"source checkpoint shard changed while hashing: {path}"
-                )
+    for path, fingerprint, digest in zip(ordered, fingerprints, digests):
+        assert digest is not None
         entries.append({"fingerprint": fingerprint, "sha256": digest})
         # Relocating a checkpoint does not change its bytes, so the identity
         # is never keyed on the absolute path.
