@@ -508,8 +508,9 @@ def test_mtp_index_after_backbone_is_completion_auth_only(scratch, shared_mount)
     manifest = glm_data_manifests.build_joint_pass_manifest(
         str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
     assert str(shard) in _paths(manifest, "source-complete")
-    assert str(shard) not in _paths(manifest, "layer-0")
-    assert str(shard) not in _paths(manifest, "layer-1")
+    for phase in manifest["annotations"]["phases"]:
+        if phase["name"] != "source-complete":
+            assert str(shard) not in _paths(manifest, phase["name"])
 
     # A valid complete proof replaces every whole-shard hash. In particular,
     # classifying MTP as completion-only must not turn it into a body read.
