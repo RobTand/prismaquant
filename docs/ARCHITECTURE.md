@@ -4,6 +4,17 @@ As of: 2026-09-14 · `campaign/glm-budget-full-range-20260914`. Stamps
 follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
+`glm_packed_research_sm121` routed allocation menu. It now preserves the
+complete legal research families `TESSERA_E4M3_K1`, `TESSERA_BF16_K1`, and
+`TESSERA_E2M1_K2`, alongside plain BF16 source passthrough, so an allocator
+does not silently replace or discard a selected research format before the
+later route gate sees it. The profile is still emulation-only and has no export
+lane: this change does not promote a production format, attest a TP world size,
+or qualify routed E2M1/per-expert mixed-rate execution. The research-selected
+route's E4M3/BF16 semantics and its separate source/cache/geometry/runtime
+checks remain required. Gate: `tests/test_glm_packed_research_profile.py`.
+
+Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
 GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer has always
 forced eager execution and already carries the selected stock MP topology,
 including `moe_backend`; it now accepts the explicit stock-vLLM `CUSTOM`
