@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped (2026-09-13, `codex/joint-retained-window-plan-20260914`) for
+**combined retained-render COST admission** (#602). The opt-in scalar planner
+charges full metadata/runtime allowances, actual source owners, one operator
+statistics plane, retained PWC archive storage, bounded serialized/read-page
+buffers, exact-boundary/auxiliary state, workspace and the guard safety margin.
+A logical BF16 geometry forecast is not an archive-storage admission receipt.
+Oversized targets, unexpected live baselines and excessive replay-window counts
+refuse; the existing probe-major mode remains unchanged. PWC remains the sole
+render owner, with bounded loader quanta and checked release between quanta.
+
+
 As of: 2026-09-13 · `codex/joint-eval-panel-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
 
