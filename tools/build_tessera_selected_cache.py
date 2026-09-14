@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Publish the selected, closed Tessera dense+expert wire manifest.
+
+This consumes a completed joint handoff and a final allocation. It does not
+encode, interpolate bytes, change a source cache, or qualify a serving lane.
+The exporter's --cached-units intake remains the current-byte verifier.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import pickle
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from prismaquant.cluster_campaign import _atomic_write_new_bytes
+from prismaquant.layer_config import load_assignment, read_layer_config_metadata
+from prismaquant.tessera_export_lane import selected_cached_units_manifest
+from prismaquant.tessera_joint_aura import load_measured_anchor_input
+from tessera.cached_unit import CACHE_SCHEMA, CachedUnitBundle
+
+
+def _bound(path: str, digest: str, label: str) -> bytes:
+    raw = Path(path).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError(f"{label} SHA-256 differs from the selected receipt")
+    return raw
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--handoff", required=True)
+    parser.add_argument("--handoff-sha256", required=True)
+    parser.add_argument("--assignment", required=True)
+    parser.add_argument("--assignment-sha256", required=True)
+    parser.add_argument("--out", required=True)
+    args = parser.parse_args(argv)
+    handoff = pickle.loads(_bound(args.handoff, args.handoff_sha256, "joint handoff"))
+    _bound(args.assignment, args.assignment_sha256, "selected assignment")
+    assignment = load_assignment(args.assignment)
+    metadata = read_layer_config_metadata(args.assignment)
+    provenance = handoff.get("provenance", {})
+    joint = provenance.get("tessera_joint_anchors", {})
+    inputs = joint.get("inputs")
+    if not isinstance(inputs, dict):
+        raise ValueError("joint handoff has no bound original campaign inputs")
+    data = load_measured_anchor_input(inputs, verify_payloads=False,
+                                      require_existing_renders=True)
+    manifest = selected_cached_units_manifest(
+        assignment, metadata, handoff, data, schema=CACHE_SCHEMA)
+    directory = Path(provenance["wire_dir"]).resolve()
+    out = Path(args.out)
+    if out.is_symlink() or out.resolve().parent != directory:
+        raise ValueError("selected manifest must be a new file in the original wire directory")
+    CachedUnitBundle(manifest, directory, set(manifest["units"]), manifest["source"])
+    raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    _atomic_write_new_bytes(out, raw)
+    print(json.dumps({"schema": "prismaquant.tessera_selected_cache_handoff.v1",
+                      "status": "research_wires_only", "manifest": str(out.resolve()),
+                      "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                      "assignment_sha256": args.assignment_sha256,
+                      "handoff_sha256": args.handoff_sha256,
+                      "units": len(manifest["units"]),
+                      "export_qualified": False, "serving_qualified": False}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
