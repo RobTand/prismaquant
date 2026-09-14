@@ -27,7 +27,7 @@ ROW_FIELDS = ('hessian_identity', 'tessera_family', 'tessera_body_rate_q256',
               'wire_bytes', 'input_global_scale', 'activation_contract', 'activation_quantized')
 PROVENANCE_FIELDS = ('model', 'nsamples', 'seqlen', 'layer_stride', 'max_act_rows',
                      'hessian', 'activation_static_scales', 'wire_dir', 'calibration_cache',
-                     'population', 'tessera_expert_projection')
+                     'population', 'tessera_expert_projection', 'tessera_serving_scope')
 
 
 def _add(target, key, value, where):
@@ -37,24 +37,34 @@ def _add(target, key, value, where):
         target[key] = copy.deepcopy(value)
 
 
-def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha256, prepared_binding):
+def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha256, prepared_binding,
+                            scope='ordinary_handoff'):
     """Join already-authenticated artifacts without replacing any joint field."""
-    from .cost_currency import require_run_currency
+    from .cost_currency import require_run_currency, require_sampled_joint_run_currency
     from .schemas import validate_cost_payload, validate_probe_payload
     from . import tessera_expert_projection as tep
 
-    _require('joint_eval' not in joint.get('provenance', {}).get('tessera_joint_anchors', {})
-             and 'joint_eval' not in joint.get('provenance', {}),
-             'diagnostic joint evaluation requires a separate sampled-proposal path or validated promotion; ordinary allocation/export remains closed')
+    _require(scope in ('ordinary_handoff', 'sampled_joint_panel'), 'unknown joint binding scope')
+    if scope == 'ordinary_handoff':
+        _require('joint_eval' not in joint.get('provenance', {}).get('tessera_joint_anchors', {})
+                 and 'joint_eval' not in joint.get('provenance', {}),
+                 'diagnostic joint evaluation requires a separate sampled-proposal path or validated promotion; ordinary allocation/export remains closed')
+    else:
+        _require('joint_eval' in joint.get('provenance', {}),
+                 'sampled research binding requires a diagnostic joint panel')
 
     validate_cost_payload(joint)
     validate_probe_payload(joint)
-    currency = require_run_currency(joint)
+    currency_gate = (require_run_currency if scope == 'ordinary_handoff'
+                     else require_sampled_joint_run_currency)
+    currency = currency_gate(joint)
     _require(currency.get('joint_aura_rows', 0) > 0, 'a complete joint table is required')
     evidence = joint['provenance'].get('tessera_joint_anchors', {})
     _same(evidence.get('plan_sha256'), plan_sha256, 'joint plan')
     _same(evidence.get('prepared'), prepared_binding, 'joint prepared binding')
     _same(evidence.get('inputs'), data.inputs, 'joint original anchor inputs')
+    if scope == 'sampled_joint_panel':
+        _same(evidence.get('joint_eval'), joint['provenance']['joint_eval'], 'joint pilot identity')
     _same(prepared.get('schema'), PREPARED_SCHEMA, 'prepared schema')
     _same(prepared.get('status'), 'complete', 'prepared completion')
     _same(prepared.get('plan_sha256'), plan_sha256, 'prepared plan')
@@ -83,6 +93,13 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
         _same(evidence.get(key), value, f'joint {key}')
     original = data.payload['provenance']
     calibration = prepared['calibration_input']
+    pilot = joint['provenance']['joint_eval'] if scope == 'sampled_joint_panel' else None
+    if pilot is not None:
+        from .tessera_joint_eval_panel import validate_panel_descriptor
+        validate_panel_descriptor(pilot, n_samples=calibration['shape'][0],
+                                  seqlen=calibration['shape'][1],
+                                  artifact_sha256=calibration['artifact_sha256'])
+        _same(pilot['shape'][0], pilot['selection']['size'], 'pilot selected windows')
     original_draw = original['hessian']['calibration_identity']
     _same(calibration['provenance'], {key: original_draw.get(key) for key in calibration['provenance']},
           'anchor calibration draw')
@@ -99,8 +116,12 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
             operator, probe = row['joint_operator_identity'], row['probe_identity']
             _same(probe['source_model'], prepared['source_model_identity'], f'{name}: source model')
             _same(probe['source_model']['source'], original['model'], f'{name}: source model path')
-            _same(probe['calibration_sha256'], calibration['calibration_sha256'], f'{name}: probe calibration')
-            _same(probe.get('calibration_shape'), calibration['shape'], f'{name}: calibration shape')
+            _same(probe['calibration_sha256'],
+                  calibration['calibration_sha256'] if pilot is None else pilot['eval_ids_sha256'],
+                  f'{name}: probe calibration')
+            _same(probe.get('calibration_shape'),
+                  calibration['shape'] if pilot is None else pilot['shape'],
+                  f'{name}: calibration shape')
             _same(operator['arithmetic']['projection_backend'], prepared['projection_backend'], f'{name}: projection backend')
             _same(operator['source_weight']['shape'], shape, f'{name}: source shape')
             source = operator['source_weight']
@@ -157,14 +178,17 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
         # choosing a quantization: BF16 is only an inert receipt-validation arm.
         tep.allocation_expert_projection_block(result, {name: 'BF16' for name in roster})
     _add(result['provenance'], 'tessera_joint_allocation', {
-        'schema': HANDOFF_SCHEMA, 'status': 'research_metadata_handoff',
+        'schema': HANDOFF_SCHEMA,
+        'status': ('research_metadata_handoff' if scope == 'ordinary_handoff'
+                   else 'research_sampled_joint_panel'),
+        **({'export_authority': False} if scope == 'sampled_joint_panel' else {}),
         'plan_sha256': plan_sha256, 'prepared': prepared_binding,
         'units': len(roster), 'measured_cells': len(data.cells),
         'cost_fields': 'all_original_joint_fields_unchanged',
         'wire_validation': HISTORICAL_WIRE_VALIDATION,
         **render_census,
     }, 'joint provenance')
-    _same(require_run_currency(result), currency, 'unchanged joint currency')
+    _same(currency_gate(result), currency, 'unchanged joint currency')
     return result
 
 

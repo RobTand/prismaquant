@@ -241,7 +241,7 @@ def test_v5_unmatched_context_masks_only_the_attested_candidate(monkeypatch, mod
             admits=lambda selected_mode: selected_mode == tm.MENU_RESEARCH,
         )
 
-    monkeypatch.setattr(tm, "menu_mode", lambda: mode)
+    monkeypatch.setattr(tm, "menu_mode", lambda *args, **kwargs: mode)
     monkeypatch.setattr(tm, "route_admission", admit)
     monkeypatch.setattr(
         ac, "serving_lane_route",
@@ -281,7 +281,7 @@ def test_v5_unmatched_context_masks_only_the_attested_candidate(monkeypatch, mod
 def test_v5_scope_refusal_cannot_silently_remove_a_whole_unit(monkeypatch):
     specs = _fixture_specs(monkeypatch, _FORMAT)
     stats, costs = _tables({"unit.a": None})
-    monkeypatch.setattr(tm, "menu_mode", lambda: tm.MENU_ATTESTED)
+    monkeypatch.setattr(tm, "menu_mode", lambda *args, **kwargs: tm.MENU_ATTESTED)
     monkeypatch.setattr(tm, "route_admission", lambda *args, **kwargs: SimpleNamespace(
         requires_serving_context=True,
         detail="no explicit serving context was supplied",
@@ -303,7 +303,7 @@ def _legacy_scope_candidate_fixture(monkeypatch, *, context, mode, include_bf16=
     stats, costs = _tables({"unit.a": context})
     if include_bf16:
         costs["unit.a"]["BF16"] = {"weight_mse": 0.0, "predicted_dloss": 0.0}
-    monkeypatch.setattr(tm, "menu_mode", lambda: mode)
+    monkeypatch.setattr(tm, "menu_mode", lambda *args, **kwargs: mode)
     monkeypatch.setattr(tm, "route_admission", lambda *args, **kwargs: SimpleNamespace(
         requires_serving_context=False,
         attested=False,
