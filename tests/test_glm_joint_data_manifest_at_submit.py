@@ -32,6 +32,7 @@ have no torch, and the producer they exercise imports nothing from the
 ``prismaquant`` package for the same reason.
 """
 
+import gzip
 import hashlib
 import json
 import os
@@ -39,8 +40,10 @@ import pickle
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -653,7 +656,7 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
                      "gb10", "--priority", "-10", "--timeout-s", "86400"):
         assert expected in argv
     assert argv[argv.index("--data-manifest") + 1].endswith(
-        "prismaquant.tessera_joint_aura.prepare.json")
+        "prismaquant.tessera_joint_aura.prepare.json.gz")
     assert "tools.tessera_campaign_container" in argv
     assert "prismaquant.tessera_joint_aura" in argv
     # A dry run submits nothing and writes nothing.
@@ -687,6 +690,39 @@ def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
         ])
 
 
+def test_joint_submit_writes_one_deterministic_gzip_manifest(
+    scratch, shared_mount, monkeypatch,
+):
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    directory = scratch / "manifests"
+    submitted = []
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    real_run = subprocess.run
+
+    def fake_run(argv, **kwargs):
+        if argv[0] == "git":
+            return real_run(argv, **kwargs)
+        submitted.append(argv)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    args = ["submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+            "--cpus", "6", "--tag", "gb10", "--manifest-dir", str(directory)]
+    assert dispatch.main(args) == 0
+    path = directory / "prismaquant.tessera_joint_aura.prepare.json.gz"
+    first = path.read_bytes()
+    payload = json.loads(gzip.decompress(first))
+    glm_data_manifests.check_manifest(payload)
+    assert submitted[0][submitted[0].index("--data-manifest") + 1] == str(path)
+    assert dispatch.main(args) == 0
+    assert path.read_bytes() == first
+
+
 def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
     scratch, shared_mount, capsys, monkeypatch,
 ):
@@ -715,6 +751,7 @@ def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
         "head", "layer-0", "layer-1"]
     assert summary["total_bytes"] == summary["phases"][-1]["cumulative_bytes"]
     assert summary["manifest_bytes"] <= glm_data_manifests.MAX_MANIFEST_BYTES
+    assert summary["manifest_bytes"] < summary["decoded_manifest_bytes"]
 
 
 def test_the_manifest_of_a_pass_is_byte_identical_across_two_builds(
@@ -866,17 +903,14 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_46_phases(scratch):
         annotations["measured_cells"] - annotations["counts"]["renders"])
     assert phases[0]["bytes"] >= annotations["synthesized_render_wire_bytes"]
 
-    # The gap this read set exposes, stated as a number rather than as prose.
-    # PrismaBuild's data manifest v1 refuses a manifest file over
-    # DATA_MANIFEST_MAX_BYTES (64 MiB) and reads no compressed form, and this
-    # pass's byte list is 105 MB of compact JSON -- 371,734 entries whose
-    # absolute shared-mount paths dominate it. The producer fails closed rather
-    # than submitting a truncated read set. When PrismaBuild raises the
-    # ceiling or accepts a compressed manifest, this assertion is what says so.
+    # The full read set exceeds the 64 MiB plain-file ceiling, but current PB
+    # accepts a gzip member up to 64 MiB stored / 512 MiB expanded. The submit
+    # path seals that member rather than truncating the read set.
     encoded = json.dumps(manifest, separators=(",", ":")).encode() + b"\n"
     assert len(encoded) > glm_data_manifests.MAX_MANIFEST_BYTES, (
-        "the joint pass's read set now fits PrismaBuild's manifest ceiling; "
-        "the submit path no longer needs to refuse it")
+        "the joint pass's read set now fits the plain manifest ceiling")
+    assert len(encoded) <= 512 * 1024 * 1024
+    assert len(gzip.compress(encoded, mtime=0)) <= glm_data_manifests.MAX_MANIFEST_BYTES
 
     # Written under the test's own scratch directory, never into the frozen
     # campaign tree.

@@ -45,6 +45,10 @@ refuse it on a different mount device. A reuse request has a real host-local
 dependency until a separately qualified cross-host source proof exists; the
 manifest names its proof host, and `submit-joint` refuses a broader placement
 tag before publication.
+The full joint manifest exceeds the old 64 MiB plain-JSON limit;
+`submit-joint` now writes one deterministic `.json.gz` member. The deployed PB
+reader admits up to 64 MiB stored / 512 MiB expanded and seals those
+compressed bytes in the action key.
 The active 2026-09-13 b59 request retains its original seal and behavior; a
 future request must rebuild its manifest from these source bytes. Gates:
 `tests/test_selected_source_authentication.py`,
@@ -278,11 +282,11 @@ does not fit 390 GB in a 240 GiB ARC either; the entries are in read order and
 the running sum is per entry, so the window may stop inside a phase. Order
 within the head is approximate: the synthesized wires are declared after the
 calibration, backend and compatibility records, which the pass opens after
-`load_measured_anchor_input` returns. One measured limit came with
-it: PrismaBuild's data manifest v1 refuses a manifest file over 64 MiB and
-reads no compressed form, and this read set is 105 MB of compact JSON, so the
-submit path fails closed on the size rather than submitting a truncated read
-set. Gates: `tests/test_glm_joint_data_manifest_at_submit.py`.
+`load_measured_anchor_input` returns. One measured limit at the time was the
+64 MiB plain-manifest ceiling: this read set was 105 MB of compact JSON, so
+the then-current submit path refused rather than truncating it. The deployed
+PB reader now accepts gzip as stated in the newer stamp above. Gates:
+`tests/test_glm_joint_data_manifest_at_submit.py`.
 
 Re-stamped (2026-09-13, `pq/prefill-frontier-sweep`) for the **prefill-vs-
 accuracy frontier sweep** (#540, the sweep half of #237):
