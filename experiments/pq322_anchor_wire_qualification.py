@@ -107,7 +107,7 @@ def main():
             record, tensors = prepare_native_inputs(cache, weights[name], acts[name].to(torch.bfloat16),
                 unit=name, format_name=fmt, calibration_receipt=calibration,
                 wire_blob=Path(cell['wire']).read_bytes(), wire_record=cell['record'],
-                encoding_identity=encoding, numerics={'atol': 0.0, 'rtol': 0.0},
+                encoding_identity=encoding,
                 prefill_rows=4, decode_rows=1, max_resident_bytes=plan['max_render_bytes'])
             refs[name, fmt] = {key: record[key] for key in ('source_weight', 'rendered_weight', 'activation')}
             del tensors, record
