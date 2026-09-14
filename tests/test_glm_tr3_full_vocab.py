@@ -482,6 +482,19 @@ def test_observed_engine_contract_refuses_silent_kv_promotion_and_prefix_cache()
         served.observed_engine_configuration(llm, expected_kv_cache_dtype="fp8_ds_mla")
 
 
+def test_scorer_engine_kwargs_carry_glm53_nope_runtime_selection():
+    from types import SimpleNamespace as S
+    args = S(kv_cache_dtype="fp8_ds_mla", gpu_memory_utilization=.9,
+             attention_backend="CUSTOM",
+             kernel_config='{"enable_flashinfer_autotune": false}', quantization=None)
+    kwargs = served.scorer_engine_kwargs(args, model="candidate", topology={
+        "tensor_parallel_size": 2, "moe_backend": "triton"})
+    assert kwargs["attention_backend"] == "CUSTOM"
+    assert kwargs["kernel_config"] == {"enable_flashinfer_autotune": False}
+    assert kwargs["enforce_eager"] is True
+    assert kwargs["moe_backend"] == "triton"
+
+
 def test_worker_observation_refuses_promotion_hidden_from_coordinator():
     from types import SimpleNamespace as S
     config = S(model_config=S(enforce_eager=True, max_model_len=2049, logprobs_mode="raw_logprobs",

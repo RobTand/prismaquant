@@ -3,6 +3,25 @@
 As of: 2026-09-14 · `campaign/glm-budget-full-range-20260914`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
+GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer has always
+forced eager execution and already carries the selected stock MP topology,
+including `moe_backend`; it now accepts the explicit stock-vLLM `CUSTOM`
+attention backend and a JSON-object kernel configuration, then records both in
+`runtime_binding.engine_kwargs`. The one-window hook qualification and the
+25-window replay compare that complete binding, so a hook qualified under one
+attention/backend/kernel selection cannot authorize another. This is a
+measurement-tool contract only: `CUSTOM` remains an installed-plugin choice,
+the NoPE environment/configuration and actual worker backend still have to be
+observed at runtime, and no serving default, format menu, cache, export route
+or ship gate changes.
+
+The sealed benchmark is 25 context-2048 windows from four document clusters;
+fit overlap and document membership remain unverified, so it is not described
+as held out. No full 45-layer TP2 load, generation, quality, speed, or runtime
+qualification is established by this opt-in wiring. Gate:
+`tests/test_glm_tr3_full_vocab.py`.
+
 Re-stamped (2026-09-14, `codex/cost-historical-wire-592`) for
 **COST consuming prepared renders with historical wire provenance**. PREPARE
 still authenticates each wire against its actual source/H/settings, compares
