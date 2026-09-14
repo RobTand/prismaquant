@@ -663,6 +663,7 @@ def _prepare_wire_read_bound(data):
 
 QUALIFICATION_WINDOW_SCHEMA = "prismaquant.joint_anchor_qualification.v1"
 QUALIFICATION_STAGE = "Tessera joint anchor qualification"
+QUALIFICATION_CELLS_SCHEMA = "prismaquant.joint_qualification_cells.v1"
 
 
 def normalize_qualification_window(config):
@@ -759,6 +760,28 @@ def _qualification_replay(data, manifest, completed):
     return verified
 
 
+def _qualification_cells_sha256(cells):
+    """Seal exact cell fields without a second, full-roster JSON allocation.
+
+    The parent campaign checkpoint, cost and census are independently bound.
+    Origin markers and resolved render/wire paths can still differ, so hash
+    their complete sorted cell records here. Length framing keeps adjacent
+    variable-sized JSON rows unambiguous; one row is the largest live buffer.
+    """
+    digest = hashlib.sha256(QUALIFICATION_CELLS_SCHEMA.encode() + b"\n")
+    for name, fmt in sorted(cells):
+        cell = cells[name, fmt]
+        row = json.dumps((name, fmt, {
+            'anchor': cell['anchor'], 'record': cell['record'],
+            'render': cell['render'], 'wire': cell['wire'],
+            'render_origin': cell['render_origin'],
+        }), sort_keys=True, separators=(',', ':'), ensure_ascii=False,
+            allow_nan=False).encode('utf-8')
+        digest.update(len(row).to_bytes(8, 'big'))
+        digest.update(row)
+    return digest.hexdigest()
+
+
 def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
                   qualification_window=None, capture_load_policy=None,
                   source_capture_compatibility=None, source_authentication=None,
@@ -827,10 +850,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
         identity = dict(qualification_identity, schema='prismaquant.joint_qualification_journal.v1',
             inputs=data.inputs, campaign_checkpoint_sha256=data.manifest['identity_sha256'],
             capture=capture, capture_identity=expected,
-            cells={f'{name}|{fmt}': {'anchor': cell['anchor'], 'record': cell['record'],
-                                   'render': cell['render'], 'wire': cell['wire'],
-                                   'render_origin': cell['render_origin']}
-                   for (name, fmt), cell in sorted(data.cells.items())},
+            cells_digest_schema=QUALIFICATION_CELLS_SCHEMA,
+            cell_count=len(data.cells), cells_sha256=_qualification_cells_sha256(data.cells),
             qualification_window=policy, capture_load_policy=capture_load_policy,
             source_capture_compatibility=source_capture_compatibility,
             max_render_bytes=max_render_bytes)

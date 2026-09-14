@@ -235,6 +235,26 @@ def test_qualification_journal_restarts_from_durable_unit(tmp_path, monkeypatch)
                         (2, 'qualification', 'model.layers.0.b')]
 
 
+def test_qualification_journal_binds_cells_without_copying_full_roster(tmp_path, monkeypatch):
+    runner, data, capture, _events, _live, _observed = fixture(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.b')
+    journal = tmp_path / 'qualification'
+    options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,
+                   qualification_window=policy(), qualification_journal=journal,
+                   qualification_identity={'plan_sha256': 'p' * 64})
+    with pytest.raises(RuntimeError, match='intentional verification failure'):
+        bridge.prepare_cache(runner, data, **options)
+    from json import loads
+    identity = loads((journal / 'manifest.json').read_text())['identity']
+    assert 'cells' not in identity, 'journal duplicated the complete input records'
+    assert identity['cell_count'] == len(data.cells)
+    assert len(identity['cells_sha256']) == 64
+    first = ('model.layers.0.a', data.formats_by_qname['model.layers.0.a'][0])
+    data.cells[first]['anchor']['format_name'] = 'changed'
+    with pytest.raises((RuntimeError, ValueError), match='mismatch'):
+        bridge.prepare_cache(runner, data, **options, qualification_resume=True)
+
+
 def test_replay_reads_only_completed_capture_entries_before_resume(tmp_path, monkeypatch):
     from prismaquant.perturbed_x_cache import activation_cache_filename
     runner, data, capture, _events, _live, _observed = fixture(
