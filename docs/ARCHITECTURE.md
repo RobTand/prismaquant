@@ -1,30 +1,45 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `codex/cost-render-proof-integrated-20260913`. Stamps
+As of: 2026-09-14 · `codex/cost-historical-wire-592`. Stamps
 follow, newest first, each recording its own branch and date.
 
-Re-stamped (2026-09-13, `codex/cost-render-proof-integrated-20260913`) for
-**COST's prepared-render integrity on consumption**. PREPARE binds each
-decoded PWC shard's serialized-file SHA-256 to its bounded load receipt and
-verifies its wire/decoder/source contract. COST still checks the complete
-campaign roster, hashes every live wire against its journal, and refuses
-missing renders. It compares the prepared render SHA roster with each shard
-on COST's necessary bounded PWC load before admitting that tensor to joint
-AURA. Every resident read is fenced to the matching unmodified tensor and
-donor-file stat; eviction requires another verified read. The avoided read
-is exactly one pass over all serialized `.pt` bytes, the sum of their file
-sizes; COST still reads every wire once for its independent hash and each
-consumed render for PWC deserialization (window preflight may read the archive
-again). A changed same-size render refuses on first load; a resume that never
-uses a particular render has no claim that its current bytes were checked.
-Before COST's live-wire scan, it now checks the already bound plan SHA,
-implementation/source-package digest, prepared v3 status, reader and backend
-against the small completion; the full source/model/cell replays still run at
-their original boundary. A stale prepared input therefore refuses before a
-whole-roster wire read instead of spending that I/O on a doomed run.
-No full campaign speedup or I/O delta is claimed without a paired profiler
-and both-box load series. Gates: `tests/test_pwc_file_load_receipts.py`,
-`tests/test_tessera_joint_aura.py`.
+Re-stamped (2026-09-14, `codex/cost-historical-wire-592`) for
+**COST consuming prepared renders with historical wire provenance**. PREPARE
+still authenticates each wire against its actual source/H/settings, compares
+its decode with the BF16 PWC render, and records both identities. COST binds
+the completed preparation, exact campaign roster, source/model/calibration,
+reader and projection backend. It consumes only source/calibration and the
+prepared rendered weights: each serialized render is SHA-256 checked against
+PREPARE on its necessary bounded PWC load before its tensor reaches AURA.
+Resident reads retain their tensor/file guard; eviction requires a verified
+reload. Missing renders refuse, with no synthesis into the prepared campaign.
+
+COST no longer rereads wire bodies merely to authenticate files it does not
+consume. Its result and joint-anchor provenance explicitly say
+`historical_prepared_identity; current_bytes_require_export_gate`, matching
+the existing allocation handoff. Wire changes do not change COST's measured
+rendered operator. The original recorded wire SHA, prepared receipt and
+all numerical fields remain bound and unmodified. This does not attest current
+wire bytes: the selected-cache builder checks selected dense/expert wire
+bytes against those original records, and Tessera's exporter independently
+rederives source/H/settings and calls `verify_cached_unit` on consumed wires,
+including its research selected MoE path. A changed selected wire refuses;
+production format and serving qualification gates remain in force.
+
+The PB run data manifest consequently has no whole-roster hash phase or wire
+body entries; renders remain listed by layer. This inherited ordering is
+coverage, not a complete temporal COST schedule: forward capture, reverse
+probe/window execution and repeated source extents require the COST planner's
+phase handoff. The current manifest deduplicates repeated `(path, offset)`
+entries and only annotates reread bytes; removing unused wire reads does not
+resolve that scheduling limitation. The strict general
+intake default still verifies all payloads. This avoids the declared full-wire
+intake pass and the already removed render intake pass, not actual PWC loads
+or export verification. No full-campaign elapsed-time or energy improvement
+is claimed without paired profiles and both-box Netdata. Gates:
+`tests/test_tessera_joint_aura.py`, `tests/test_pwc_file_load_receipts.py`,
+`tests/test_tessera_selected_cache.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`.
 
 Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
 **bounded, recoverable Tessera joint-anchor qualification** (#590). The
@@ -2897,11 +2912,12 @@ never persist as another cache. Preparation uses this load receipt instead of gl
 post-prefetch render scans; the existing verifier reads each original wire,
 checks its recorded SHA/source/H/settings, and compares decoded values exactly.
 Prepared completion remains withheld until every measured cell qualifies.
-The strict intake API default remains a full payload scan. COST keeps its full
-wire hash and complete roster gates, but verifies prepared render bytes on the
-actual PWC load against the SHA-256 PREPARE recorded. It no longer rereads
-every render at intake. Its resumed reads use the same PWC guard before tensor
-consumption. This saves one render-file scan, not the wire scan or PWC load.
+The strict intake API default remains a full payload scan. COST keeps complete
+roster gates and verifies prepared render bytes on the actual PWC load against
+PREPARE's SHA-256. It carries historical wire identities without consuming
+wire bodies; selected export validates current wires. Its resumed reads use
+the same PWC guard before tensor consumption. No render or wire intake scan
+precedes the necessary PWC loads.
 Gate: `tests/test_pwc_file_load_receipts.py`, `tests/test_tessera_joint_aura.py`,
 and equal-work original fourteen-cell qualification with reader/identity held fixed.
 

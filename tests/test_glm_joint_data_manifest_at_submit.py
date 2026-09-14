@@ -18,9 +18,8 @@ and the exclusions that make the order true:
 * a rung the campaign adopted has a wire and no decoded shard, so the head
   decodes one from that wire: those wire bytes belong to the head phase, not
   to the layer that later verifies them;
-* ``run`` hashes every cell up front, so its wires and renders are declared in
-  that order and the streaming re-read is accounted for rather than declared
-  twice, which the contract refuses;
+* ``run`` declares each consumed render in its layer, with no wire bodies or
+  artificial whole-roster hash phase;
 * a joint pass submitted before the campaign merge published the checkpoint's
   unit shards is refused with the directory named, not submitted blind;
 * the submit command puts ``--data-manifest`` before ``--detach`` and mirrors
@@ -471,7 +470,7 @@ def test_the_wire_of_a_render_the_campaign_never_wrote_is_read_in_the_head(
     assert annotations["reread_bytes_by_phase"]["layer-0"] >= wire.stat().st_size
 
 
-def test_the_run_manifest_hashes_every_cell_before_the_first_layer(
+def test_the_run_manifest_reads_only_consumed_renders_after_the_head(
     scratch, shared_mount,
 ):
     fixture = _workspace(scratch)
@@ -489,28 +488,26 @@ def test_the_run_manifest_hashes_every_cell_before_the_first_layer(
         prepared=str(prepared))
 
     names = [phase["name"] for phase in manifest["annotations"]["phases"]]
-    assert names == ["head", "hash", "layer-0", "layer-1"]
+    assert names == ["head", "layer-0", "layer-1"]
     assert str(prepared) in _paths(manifest, "head")
     assert str(cache) in _paths(manifest, "head")
 
-    # ``verify_files`` hashes the wire and then the render of each cell, over
-    # cells in sorted unit then sorted format order.
-    expected = []
-    for name in sorted(fixture["names"]):
-        for fmt in sorted(MEASURED):
-            expected.append(str(fixture["wire_dir"] / _wire_filename(name, fmt)))
-            layer = int(name[len(PREFIX)].split(".")[0])
-            expected.append(str(
-                fixture["workspace"] / "rows" / f"row-{layer:04d}" / "cache"
-                / glm_data_manifests._cache_weight_filename(name, fmt)))
-    assert _paths(manifest, "hash") == expected
-
-    # The streaming pass reads those renders again. A repeated (path, offset)
-    # is refused by the contract, so the re-read is accounted for instead.
-    assert _paths(manifest, "layer-0") == [str(fixture["shard"])]
-    reread = manifest["annotations"]["reread_bytes_by_phase"]
-    assert set(reread) == {"layer-0", "layer-1"}
-    assert all(value > 0 for value in reread.values())
+    for layer in UNITS:
+        expected = [str(fixture["shard"])]
+        for name in sorted(UNITS[layer]):
+            for fmt in sorted(MEASURED):
+                expected.append(str(fixture["workspace"] / "rows" / f"row-{layer:04d}"
+                                    / "cache" / glm_data_manifests._cache_weight_filename(name, fmt)))
+        assert _paths(manifest, f"layer-{layer}") == expected
+    assert not any(entry['path'].endswith('.tessera') for entry in manifest['entries'])
+    assert manifest['annotations']['counts'].get('wires', 0) == 0
+    # A missing render cannot turn this metadata/price action into a wire
+    # consumer through the preparation synthesis fallback.
+    Path(expected[-1]).unlink()
+    with pytest.raises(SystemExit, match='prepared render is missing'):
+        glm_data_manifests.build_joint_pass_manifest(
+            str(fixture['plan']), command='run', produced_by=PRODUCED_BY,
+            prepared=str(prepared))
 
 
 def test_a_joint_pass_before_the_merge_is_refused_with_the_path_named(

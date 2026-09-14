@@ -398,7 +398,7 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
         # synthesize decodes on that device rather than on one CPU core (#549).
         assert kwargs == {"reader": None, "synthesis_device": "cuda",
                           **({"verify_payloads": False} if command == "prepare" else
-                             {"defer_render_hashes": True, "require_existing_renders": True})}
+                             {"verify_payloads": False, "require_existing_renders": True})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
             cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
             payload={"provenance": {"hessian": {"calibration_identity": draw}}})
@@ -553,7 +553,7 @@ def test_prepare_metadata_intake_defers_heavy_files_but_keeps_strict_default(tmp
     assert all('render_file_sha256' in cell for cell in strict.cells.values())
 
 
-def test_cost_intake_checks_all_wires_without_rereading_prepared_renders(tmp_path, monkeypatch):
+def test_explicit_wire_scan_checks_wires_without_rereading_renders(tmp_path, monkeypatch):
     from prismaquant import tessera_joint_aura as bridge
     config, names, fmt, _payload, states = fixture(tmp_path)
     original = bridge._sha
@@ -578,6 +578,37 @@ def test_cost_intake_checks_all_wires_without_rereading_prepared_renders(tmp_pat
     render.unlink()
     with pytest.raises(ValueError, match='prepared render is missing'):
         bridge.load_measured_anchor_input(config, defer_render_hashes=True,
+                                          require_existing_renders=True)
+
+
+def test_cost_metadata_keeps_historical_wire_while_export_rejects_changed_bytes(tmp_path, monkeypatch):
+    from prismaquant import tessera_joint_aura as bridge
+    from tessera.cached_unit import verify_cached_unit
+    config, names, fmt, _payload, states = fixture(tmp_path)
+    data = bridge.load_measured_anchor_input(config, verify_payloads=False,
+                                             require_existing_renders=True)
+    cell = data.cells[names[0], fmt]
+    wire = Path(cell['wire'])
+    changed = b'X' + wire.read_bytes()[1:]
+    wire.write_bytes(changed)
+    original = Path.read_bytes
+    heavy = {Path(item[k]) for item in data.cells.values() for k in ('wire', 'render')}
+    def read(path):
+        assert path not in heavy, 'COST metadata intake consumed a payload body'
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    historical = bridge.load_measured_anchor_input(config, verify_payloads=False,
+                                                   require_existing_renders=True)
+    assert historical.cells == data.cells
+    assert historical.payload == data.payload
+    assert historical.cells[names[0], fmt]['record'] == states[names[0]]['wire_records'][fmt]
+    # The real export intake checks the bytes it consumes against the original
+    # receipt. Inert fixture wires exercise refusal, not successful decoding.
+    with pytest.raises(ValueError, match='size/sha256 mismatch'):
+        verify_cached_unit(changed, cell['record'], cell['record']['identity'])
+    Path(cell['render']).unlink()
+    with pytest.raises(ValueError, match='prepared render is missing'):
+        bridge.load_measured_anchor_input(config, verify_payloads=False,
                                           require_existing_renders=True)
 
 

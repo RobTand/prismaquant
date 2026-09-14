@@ -29,6 +29,7 @@ from .cost_stage_checkpoint import (
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
+HISTORICAL_WIRE_VALIDATION = "historical_prepared_identity; current_bytes_require_export_gate"
 RENDER_ORIGIN_SCHEMA = "prismaquant.tessera_joint_aura.render_origin.v1"
 # Closed vocabularies. ``render_origin`` says where the decoded PWC shard on
 # disk came from; ``render_comparison`` says what the ``torch.equal`` leg of
@@ -322,9 +323,11 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     ``prepare_cache`` using actual source weights and the original capture.
     Interpolated menu rows are deliberately excluded rather than converted.
 
-    A prepared COST run can defer only render hashes to the PWC's verified
-    consumption, after binding its prepared SHA roster. Every wire is still
-    hashed here; a missing render or incomplete roster still refuses.
+    A prepared COST run uses metadata intake with existing renders required.
+    Its wire identities describe PREPARE's authenticated bytes; COST consumes
+    no wire bodies. PWC verifies each consumed render against PREPARE's SHA.
+    Selected export must authenticate its current wire bytes independently.
+    The optional strict wire-only scan remains available to other callers.
 
     A rung this campaign adopted has its wire but no decoded PWC shard. The
     shard is synthesized from that wire here and every cell carries the
@@ -1218,7 +1221,7 @@ def _seed_source_identity_cache(config, root):
 
 def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
                            reader_identity, projection_backend):
-    """Refuse a stale small completion before hashing the live wire roster.
+    """Refuse a stale small completion before reading the campaign metadata.
 
     Runtime/source/model and exact cell checks still run after input intake;
     this early gate checks only fields already independently known at startup.
@@ -1358,7 +1361,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             synthesis_device="cuda",
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
             **({"verify_payloads": False} if command == "prepare" else
-               {"defer_render_hashes": True, "require_existing_renders": True}))
+               {"verify_payloads": False, "require_existing_renders": True}))
         _require(data.unit_scope is None and data.render_mirror_root is None,
                  "joint execution requires the complete campaign roster in its own caches")
         result["file_hash_workers"] = file_hash_workers
@@ -1484,7 +1487,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                 _same(cache.metadata["verified_cells"][pair]["render_origin"], cell["render_origin"],
                       f"{pair}: qualified render origin changed")
                 _same(cache.metadata["verified_cells"][pair]["wire_sha256"], cell["record"]["blob_sha256"],
-                      f"{pair}: qualified wire changed")
+                      f"{pair}: historical qualified wire identity changed")
             expected_renders = {pair: cache.metadata["verified_cells"][pair]["render_file_sha256"]
                                 for pair in data.cells}
             # The prepared receipt bound the original serialized shard on
@@ -1493,6 +1496,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             cache.require_file_load_sha256(expected_renders,
                 max_file_bytes=_prepare_file_read_bound(data,
                     max_render_bytes=config["max_render_bytes"]))
+            result["wire_validation"] = HISTORICAL_WIRE_VALIDATION
             _live_targets(runner, data.formats_by_qname)
             formats = list(dict.fromkeys(fmt for values in data.formats_by_qname.values() for fmt in values))
             payload = compute_aura_cost_streamed(runner, ids.to(runner.device), formats,
@@ -1518,6 +1522,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             payload["provenance"]["tessera_joint_anchors"] = {
                 "plan_sha256": plan_sha256, "prepared": prepared, "inputs": data.inputs,
                 "calibration_input": calibration, "measured_cells": len(data.cells),
+                "wire_validation": HISTORICAL_WIRE_VALIDATION,
                 **render_census}
             output = root / "joint-cost.pkl"
         torch.cuda.synchronize()
