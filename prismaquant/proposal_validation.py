@@ -41,7 +41,11 @@ class SequenceLoss:
     def __post_init__(self) -> None:
         if not isinstance(self.sequence_id, str) or not self.sequence_id:
             raise ValueError("sequence_id must be a nonempty string")
-        if isinstance(self.scored_token_count, bool) or self.scored_token_count <= 0:
+        if (
+            isinstance(self.scored_token_count, bool)
+            or not isinstance(self.scored_token_count, int)
+            or self.scored_token_count <= 0
+        ):
             raise ValueError(
                 f"sequence {self.sequence_id!r} scored_token_count must be positive"
             )
@@ -85,8 +89,13 @@ class ProposalValidationBinding:
     tokenizer_sha256: str
     heldout_population_sha256: str
     selected_assignment_sha256: str
+    incumbent_assignment_sha256: str
     pilot_training_sha256: str
     pilot_evaluation_sha256: str
+    metric_schema: str
+    metric_direction: Literal["lower_is_better"]
+    metric_support: str
+    metric_identity_artifact_sha256: str
     heldout_training_overlap_audit_status: Literal["verified_disjoint", "unverified"]
     heldout_training_overlap_audit_sha256: str
     sequence_independence_declared: bool
@@ -102,11 +111,21 @@ class ProposalValidationBinding:
             "tokenizer_sha256",
             "heldout_population_sha256",
             "selected_assignment_sha256",
+            "incumbent_assignment_sha256",
             "pilot_training_sha256",
             "pilot_evaluation_sha256",
             "heldout_training_overlap_audit_sha256",
+            "metric_identity_artifact_sha256",
         ):
             _require_sha256(getattr(self, field), field)
+        for field in ("metric_schema", "metric_support"):
+            value = getattr(self, field)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{field} must be a nonempty descriptive string")
+        if self.metric_direction != "lower_is_better":
+            raise ValueError(
+                "metric_direction must be 'lower_is_better' for paired loss comparison"
+            )
         if self.heldout_training_overlap_audit_status not in {
             "verified_disjoint",
             "unverified",

@@ -12475,8 +12475,12 @@ artifact gate.** The adapter supplies complete per-sequence held-out losses
 from the existing full-sequence quality path (`kl_measurement.sequence_token_nll`), one row
 for the candidate selected assignment and one for the incumbent. The reusable
 CPU helper refuses unequal sequence-ID sets or scored-token counts, binds the
-source, teacher, tokenizer, held-out population, selected-assignment, pilot
-training/evaluation, and **held-out/training overlap-audit** SHA-256 identities.
+source, teacher, tokenizer, held-out population, **candidate and incumbent
+selected-assignment**, pilot training/evaluation, and **held-out/training
+overlap-audit** SHA-256 identities. It also binds the artifact-declared common
+metric schema, lower-is-better direction, scored-position support, and metric
+identity artifact SHA-256, so a full-vocabulary NLL and a top-k or differently
+scoped result cannot be compared as if they were the same loss.
 It refuses any exact training-sequence overlap or equal exact training/held-out
 population hash, and returns `inconclusive` unless the bound audit explicitly
 says `verified_disjoint`: different population hashes alone do not prove

@@ -23,8 +23,13 @@ def _binding(**overrides) -> ProposalValidationBinding:
         "tokenizer_sha256": _sha("c"),
         "heldout_population_sha256": _sha("d"),
         "selected_assignment_sha256": _sha("e"),
+        "incumbent_assignment_sha256": _sha("2"),
         "pilot_training_sha256": _sha("f"),
         "pilot_evaluation_sha256": _sha("0"),
+        "metric_schema": "prismaquant.full_vocab_token_nll.v1",
+        "metric_direction": "lower_is_better",
+        "metric_support": "all scored next-token positions in the held-out sequence",
+        "metric_identity_artifact_sha256": _sha("3"),
         "heldout_training_overlap_audit_status": "verified_disjoint",
         "heldout_training_overlap_audit_sha256": _sha("1"),
         "sequence_independence_declared": True,
@@ -79,6 +84,7 @@ def test_token_weighted_paired_difference_and_pass_report():
     assert report.validity == "independent_heldout"
     assert report.promotion == report.verdict
     assert report.to_dict()["binding"]["selected_assignment_sha256"] == _sha("e")
+    assert report.to_dict()["binding"]["incumbent_assignment_sha256"] == _sha("2")
 
 
 def test_bootstrap_is_deterministic_for_the_explicit_seed():
@@ -182,6 +188,14 @@ def test_no_implicit_statistical_defaults_or_invalid_digests():
         PairedBootstrapConfig()  # type: ignore[call-arg]
     with pytest.raises(ValueError, match="lowercase SHA-256"):
         _binding(source_sha256="not-a-digest")
+    with pytest.raises(ValueError, match="metric_direction"):
+        _binding(metric_direction="higher_is_better")
+
+
+@pytest.mark.parametrize("token_count", (True, 1.5, "2"))
+def test_scored_token_count_must_be_an_integral_position_count(token_count):
+    with pytest.raises(ValueError, match="scored_token_count must be positive"):
+        SequenceLoss("s-1", token_count, "complete", mean_loss=1.0)
 
 
 def test_shared_document_windows_resample_as_whole_manifest_clusters():
