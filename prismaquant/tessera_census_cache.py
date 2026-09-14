@@ -166,6 +166,23 @@ def census_layer_config(cost: Mapping[str, Any], assignment: Mapping[str, str], 
     return config
 
 
+def plan_layer_config_projection(config: Mapping[str, Any],
+                                 cost: Mapping[str, Any]) -> tuple[dict, list[str]]:
+    """The layer config a Tessera planner reads: census units and ``__*`` keys.
+
+    An allocator's layer config also names Linears kept outside the priced
+    population (GLM-5.3 Flash: 124 visual-tower BF16 rows). The census has no
+    wire for them and the planner's body projection does not name them, so the
+    planner refuses them. Returns the projection and the sorted names dropped.
+    Call it only after :func:`selected_census_assignment`, which refuses a
+    dropped name that is not BF16 passthrough.
+    """
+    costs = cost.get("costs") or {}
+    projected = {key: value for key, value in config.items()
+                 if key in costs or key.startswith("__")}
+    return projected, sorted(key for key in config if key not in projected)
+
+
 def selected_census_assignment(assignment: Mapping[str, str], metadata: Mapping[str, Any],
                                cost: Mapping[str, Any]) -> tuple[dict[str, str], dict, dict, dict]:
     """``(selected, source, units, stack_of)`` after the roster and projection checks."""

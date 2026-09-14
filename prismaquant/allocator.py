@@ -134,6 +134,7 @@ from .allocator_candidates import (
     packed_serving_group_members,
     selection_serving_lane_provenance,
     serialized_candidate_payload,
+    serving_groups_by_key,
     summarize_applicability_masks,
     reduce_continuous_menu,
 )
@@ -3166,8 +3167,19 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         fused_sibling_group_members(stats, model_profile)
         if not args.no_fused_aggregation else frozenset()
     ) - packed_members_deferred
+    # The campaign's measured interpolation error per (unit, family); the
+    # census LOO band guard in build_candidates reads it, and refuses a table
+    # with interpolated rows that does not carry it.
+    census_loo = cost_data.get("leave_one_anchor_out")
+    census_loo_groups = serving_groups_by_key(
+        stats, model_profile,
+        packed=not args.no_packed_aggregation,
+        fused=not args.no_fused_aggregation,
+    )
     candidates = build_candidates(
         stats, costs, specs_sorted, calibrated_gains,
+        census_loo=census_loo,
+        census_loo_groups=census_loo_groups,
         source_manifest=source_manifest,
         target_profile=target_profile,
         mask_records=candidate_mask_records,
@@ -3224,6 +3236,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             head_costs,
             [fr.get_format(lm_head_format_canonical)],
             calibrated_gains,
+            census_loo=census_loo,
             source_manifest=source_manifest,
             target_profile=target_profile,
             mask_records=candidate_mask_records,
@@ -3317,6 +3330,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             mtp_costs,
             [fr.get_format(mtp_format_canonical)],
             calibrated_gains,
+            census_loo=census_loo,
             source_manifest=source_manifest,
             target_profile=target_profile,
             mask_records=candidate_mask_records,
@@ -3390,6 +3404,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 visual_costs,
                 [fr.get_format(visual_format_canonical)],
                 calibrated_gains,
+                census_loo=census_loo,
                 source_manifest=source_manifest,
                 target_profile=target_profile,
                 mask_records=candidate_mask_records,

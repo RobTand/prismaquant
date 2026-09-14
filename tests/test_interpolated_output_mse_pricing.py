@@ -473,3 +473,235 @@ def test_the_ucb_hedge_conversion_follows_the_pricing_branch():
         [(stats_entry, weight_only, 1.0e-4, 1.0)], ucb_z=2.0)
     assert hedge == pytest.approx(2.0 * 2.0e-5)
     assert stderr_agg == pytest.approx(2.0e-5)
+
+
+# ---------------------------------------------------------------------------
+# 5. The census interpolated-rung guard reads the campaign's measured LOO band
+# ---------------------------------------------------------------------------
+#
+# prismaquant #615. The GLM-5.3 Flash E4M3 allocation picked
+# layers.{0,2}.mlp.{gate,up}_proj at interpolated TESSERA_E4M3_K1_R1026, a
+# 0.34% predicted gain over measured R1024 against a measured
+# leave-one-anchor-out error of 0.168 log2, and the census manifest then
+# refused the export: the rung has no measured wire. The guard the docs said
+# covered these rows had no call site.
+#
+# Rows below are the real layer-0 gate/up cells of that table
+# (extension-r1024-02/workspace/merged/cost.pkl, sha256 cd215410...):
+# (output_mse, memory_bytes, measured). The DP prices every one of them as
+# 0.5 * h_trace * output_mse, and h_trace cancels in the log ratio the guard
+# compares, so output_mse stands in for predicted_dloss.
+
+_CENSUS_GATE = "model.language_model.layers.0.mlp.gate_proj"
+_CENSUS_UP = "model.language_model.layers.0.mlp.up_proj"
+_CENSUS_ROWS = {
+    _CENSUS_GATE: {
+        "TESSERA_E4M3_K1_R832": (6.568958269781433e-06, 20488192, True),
+        "TESSERA_E4M3_K1_R960": (4.176926571138513e-06, 23633920, True),
+        "TESSERA_E4M3_K1_R1000": (3.3746392472655855e-06, 24616960, False),
+        "TESSERA_E4M3_K1_R1024": (2.9692697959641614e-06, 25206784, True),
+        "TESSERA_E4M3_K1_R1026": (2.9592090667764175e-06, 25255936, False),
+        "TESSERA_E4M3_K1_R1088": (2.6636753318598494e-06, 26779648, True),
+        "TESSERA_BF16_K1_R1024": (1.7195825421367772e-06, 25223168, True),
+        "TESSERA_BF16_K1_R1026": (1.708709278092314e-06, 25272320, False),
+    },
+    _CENSUS_UP: {
+        "TESSERA_E4M3_K1_R832": (7.395995756572423e-06, 20488192, True),
+        "TESSERA_E4M3_K1_R960": (4.592295226757415e-06, 23633920, True),
+        "TESSERA_E4M3_K1_R1000": (3.6464070725970356e-06, 24616960, False),
+        "TESSERA_E4M3_K1_R1024": (3.1751654508601255e-06, 25206784, True),
+        "TESSERA_E4M3_K1_R1026": (3.163383422190777e-06, 25255936, False),
+        "TESSERA_E4M3_K1_R1088": (2.819041886444514e-06, 26779648, True),
+        "TESSERA_BF16_K1_R1024": (2.0141892491665203e-06, 25223168, True),
+        "TESSERA_BF16_K1_R1026": (2.0011594897739525e-06, 25272320, False),
+    },
+}
+#: leave_one_anchor_out[unit][family]["max_abs_log2_error"] from the same table.
+_CENSUS_LOO_BANDS = {
+    _CENSUS_GATE: {"TESSERA_E4M3_K1": 0.16782182781580038,
+                   "TESSERA_BF16_K1": 0.23847425908406586},
+    _CENSUS_UP: {"TESSERA_E4M3_K1": 0.1803783836655495,
+                 "TESSERA_BF16_K1": 0.23379736289017633},
+}
+_CENSUS_GROUP = {("fused", "model.language_model.layers.0.mlp"):
+                 (_CENSUS_GATE, _CENSUS_UP)}
+
+
+def _census_world(units=(_CENSUS_GATE,)):
+    candidates, costs, loo = {}, {}, {}
+    for unit in units:
+        rows = _CENSUS_ROWS[unit]
+        costs[unit] = {
+            fmt: {
+                "output_mse": mse,
+                "output_mse_measured": measured,
+                "cost_source": ("tessera_campaign_measured" if measured
+                                else "tessera_campaign_interpolated"),
+                "tessera_family": fmt.rsplit("_R", 1)[0],
+            }
+            for fmt, (mse, _bytes, measured) in rows.items()
+        }
+        candidates[unit] = [
+            Candidate(fmt=fmt, bits_per_param=8.0 * size / (12288 * 4096),
+                      memory_bytes=size, predicted_dloss=mse)
+            for fmt, (mse, size, _measured) in rows.items()
+        ]
+        loo[unit] = {
+            family: {"interior_anchors": 2, "max_abs_log2_error": band,
+                     "median_abs_log2_error": band}
+            for family, band in _CENSUS_LOO_BANDS[unit].items()
+        }
+    return candidates, costs, loo
+
+
+def _menu(candidates, unit):
+    return {c.fmt for c in candidates[unit]}
+
+
+def test_census_loo_band_drops_r1026_within_holdout_error():
+    import math
+
+    from prismaquant.allocator_candidates import (
+        drop_census_interpolated_within_loo,
+    )
+
+    candidates, costs, loo = _census_world()
+    rows = _CENSUS_ROWS[_CENSUS_GATE]
+    r1024 = rows["TESSERA_E4M3_K1_R1024"][0]
+    r1026 = rows["TESSERA_E4M3_K1_R1026"][0]
+    r1000 = rows["TESSERA_E4M3_K1_R1000"][0]
+    r960 = rows["TESSERA_E4M3_K1_R960"][0]
+    band = _CENSUS_LOO_BANDS[_CENSUS_GATE]["TESSERA_E4M3_K1"]
+    assert abs(math.log2(r1024 / r1026)) < 0.005 < band
+    assert abs(math.log2(r1000 / r1024)) == pytest.approx(0.185, abs=1e-3)
+
+    kept = drop_census_interpolated_within_loo(candidates, costs, loo)
+    menu = _menu(kept, _CENSUS_GATE)
+    # Measured R1024 is smaller in bytes and 0.005 log2 away, inside 0.168.
+    assert "TESSERA_E4M3_K1_R1026" not in menu
+    # Same shape in the other family: measured BF16 R1024 vs its R1026.
+    assert "TESSERA_BF16_K1_R1026" not in menu
+    # R1000 is 0.185 log2 from R1024, outside the band (and R1024 is larger
+    # in bytes); the measured rungs no larger in bytes are R832 and R960, and
+    # R960 is 0.308 log2 away. A genuine trade stays on the menu.
+    assert "TESSERA_E4M3_K1_R1000" in menu
+    assert {fmt for fmt, (_m, _b, measured) in rows.items() if measured} <= menu
+
+    # The band is what decides R1000: widen it past R960's distance and it
+    # goes too.
+    assert abs(math.log2(r960 / r1000)) == pytest.approx(0.3077, abs=1e-3)
+    wide = {unit: {family: dict(record, max_abs_log2_error=0.31)
+                   for family, record in by_family.items()}
+            for unit, by_family in loo.items()}
+    assert "TESSERA_E4M3_K1_R1000" not in _menu(
+        drop_census_interpolated_within_loo(candidates, costs, wide),
+        _CENSUS_GATE)
+
+
+def test_census_loo_band_is_conjunctive_across_fused_members():
+    from prismaquant.allocator_candidates import (
+        drop_census_interpolated_within_loo,
+    )
+
+    candidates, costs, loo = _census_world((_CENSUS_GATE, _CENSUS_UP))
+    both = drop_census_interpolated_within_loo(
+        candidates, costs, loo, fused_groups=_CENSUS_GROUP)
+    for unit in (_CENSUS_GATE, _CENSUS_UP):
+        assert "TESSERA_E4M3_K1_R1026" not in _menu(both, unit)
+
+    # up_proj's R1026 sits 0.0054 log2 from its R1024. With a band below that,
+    # only gate_proj is dominated at R1026.
+    narrow = {unit: {family: dict(record) for family, record in by.items()}
+              for unit, by in loo.items()}
+    narrow[_CENSUS_UP]["TESSERA_E4M3_K1"]["max_abs_log2_error"] = 0.001
+    alone = drop_census_interpolated_within_loo(candidates, costs, narrow)
+    assert "TESSERA_E4M3_K1_R1026" not in _menu(alone, _CENSUS_GATE)
+    assert "TESSERA_E4M3_K1_R1026" in _menu(alone, _CENSUS_UP)
+
+    # Aggregation offers the group only names every member carries, so a
+    # per-member drop would remove R1026 from the group although up_proj is
+    # not dominated at it. The group keeps R1026 on both members.
+    report = {}
+    grouped = drop_census_interpolated_within_loo(
+        candidates, costs, narrow, fused_groups=_CENSUS_GROUP, report=report)
+    assert "TESSERA_E4M3_K1_R1026" in _menu(grouped, _CENSUS_GATE)
+    assert "TESSERA_E4M3_K1_R1026" in _menu(grouped, _CENSUS_UP)
+    # BF16 R1026 is dominated on both members, so it still drops.
+    for unit in (_CENSUS_GATE, _CENSUS_UP):
+        assert "TESSERA_BF16_K1_R1026" not in _menu(grouped, unit)
+    assert report["census_loo_band"]["kept_by_group_conjunction"] == 1
+
+
+@pytest.mark.parametrize("record", [
+    "absent_family", {"error": "fewer than three anchors"},
+    {"interior_anchors": 0, "note": "no interior anchor"},
+    {"interior_anchors": 2, "max_abs_log2_error": float("nan")},
+    "absent_table",
+])
+def test_census_loo_band_refuses_interpolated_cell_without_loo_record(record):
+    from prismaquant.allocator_candidates import (
+        CensusLooBandError, drop_census_interpolated_within_loo,
+    )
+
+    candidates, costs, loo = _census_world()
+    if record == "absent_table":
+        with pytest.raises(CensusLooBandError,
+                           match="carries no leave_one_anchor_out table"):
+            drop_census_interpolated_within_loo(candidates, costs, None)
+        # No interpolated row anywhere: an absent table is a no-op.
+        measured = {unit: {fmt: row for fmt, row in rows.items()
+                           if row["output_mse_measured"]}
+                    for unit, rows in costs.items()}
+        assert drop_census_interpolated_within_loo(
+            candidates, measured, None) is candidates
+        return
+    if record == "absent_family":
+        del loo[_CENSUS_GATE]["TESSERA_E4M3_K1"]
+    else:
+        loo[_CENSUS_GATE]["TESSERA_E4M3_K1"] = record
+    with pytest.raises(CensusLooBandError,
+                       match="no finite leave_one_anchor_out max_abs_log2_error"):
+        drop_census_interpolated_within_loo(candidates, costs, loo)
+
+
+def test_census_loo_band_prints_its_own_report_line(capsys, monkeypatch):
+    from prismaquant import allocator_candidates as ac
+
+    candidates, costs, loo = _census_world()
+    report = {}
+    ac.drop_census_interpolated_within_loo(candidates, costs, loo,
+                                           report=report)
+    lines = [line for line in capsys.readouterr().out.splitlines()
+             if line.startswith("[alloc] census LOO band guard:")]
+    assert len(lines) == 1, lines
+    assert ("dropped 2 of 3 interpolated Tessera candidate(s) on 1 unit(s)"
+            in lines[0])
+    assert "measured leave_one_anchor_out max_abs_log2_error" in lines[0]
+    assert "stricter than --loo-gate" in lines[0]
+    assert report["census_loo_band_dropped"] == 2
+    assert report["census_loo_band"]["per_unit"] == {_CENSUS_GATE: 2}
+
+    # build_candidates runs it, with the table, the groups and the same report
+    # dict the menu reduction writes into.
+    seen = {}
+
+    def fake_guard(out, costs_arg, loo_arg, **kwargs):
+        seen.update(loo=loo_arg, **kwargs)
+        return out
+
+    monkeypatch.setattr(ac, "drop_census_interpolated_within_loo", fake_guard)
+    monkeypatch.setattr(ac, "reduce_continuous_menu",
+                        lambda out, stats, **kwargs: out)
+    names = ("layer.self_attn.o_proj", "layer.mlp.down_proj")
+    stats = {name: {"n_params": 1600, "h_trace": 1.0, "in_features": 40,
+                    "out_features": 40} for name in names}
+    stock = {name: {"NVFP4": {"weight_mse": 0.01, "predicted_dloss": 0.005},
+                    "BF16": {"weight_mse": 0.0, "predicted_dloss": 0.0}}
+             for name in names}
+    menu_report = {}
+    ac.build_candidates(stats, stock, [fr.REGISTRY["NVFP4"], fr.REGISTRY["BF16"]],
+                        tessera_menu_report=menu_report, census_loo=loo,
+                        census_loo_groups=_CENSUS_GROUP)
+    assert seen["loo"] is loo
+    assert seen["fused_groups"] is _CENSUS_GROUP
+    assert seen["report"] is menu_report

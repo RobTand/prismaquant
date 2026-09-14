@@ -30,7 +30,8 @@ from prismaquant.layer_config import (
 )
 from prismaquant.tessera_census_cache import (
     census_layer_config, census_selected_cached_units_manifest,
-    load_selected_wire_records, selected_census_assignment, uniform_assignment,
+    load_selected_wire_records, plan_layer_config_projection, selected_census_assignment,
+    uniform_assignment,
 )
 from tessera.cached_unit import (
     CACHE_SCHEMA, ENCODING_INPUT_SCHEMA, INPUT_SCHEMA, CachedUnitBundle,
@@ -66,6 +67,10 @@ def main(argv=None) -> int:
     parser.add_argument("--layer-config-sha256")
     parser.add_argument("--target-profile", help="stamped into a uniform layer config")
     parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--plan-layer-config-out",
+                        help="write the layer config restricted to census units and __* keys, "
+                             "for the Tessera planner; written only after the outside-roster "
+                             "BF16 refusal has run, and refused if the path exists")
     parser.add_argument("--workers", type=int, default=16)
     args = parser.parse_args(argv)
     started = time.monotonic()
@@ -98,7 +103,24 @@ def main(argv=None) -> int:
     assignment = load_assignment(layer_config)
     metadata = read_layer_config_metadata(layer_config)
 
+    # Raises on any unit outside the census roster that is not BF16 passthrough;
+    # the planner projection below is written only once that check has passed.
     selected, *_ = selected_census_assignment(assignment, metadata, cost)
+    outside = sorted(set(assignment) - set(cost["costs"]))
+    plan_dropped = None
+    if args.plan_layer_config_out:
+        config_raw = Path(layer_config).read_bytes()
+        if hashlib.sha256(config_raw).hexdigest() != shas["layer_config"]:
+            raise SystemExit(f"layer config {layer_config} changed after it was bound")
+        projected, plan_dropped = plan_layer_config_projection(json.loads(config_raw), cost)
+        if plan_dropped != outside:
+            raise SystemExit(
+                f"plan layer config would drop {len(plan_dropped)} name(s), but "
+                f"{len(outside)} assigned unit(s) are outside the census; refusing a "
+                "projection that drops a name the BF16 passthrough check did not see")
+        shas["plan_layer_config"] = _write(
+            Path(args.plan_layer_config_out),
+            (json.dumps(projected, indent=2, allow_nan=False) + "\n").encode())
     records = load_selected_wire_records(Path(args.checkpoint_parts), selected,
                                          identity_sha256=roster["identity_sha256"],
                                          workers=args.workers)
@@ -116,7 +138,9 @@ def main(argv=None) -> int:
         "status": "research_wires_only", "export_qualified": False, "serving_qualified": False,
         "sha256": shas, "units": len(manifest["units"]),
         "unselected_bf16": sorted(n for n, f in selected.items() if f == "BF16"),
-        "outside_census_bf16_passthrough": sorted(set(assignment) - set(cost["costs"])),
+        "outside_census_bf16_passthrough": outside,
+        "plan_layer_config_sha256": shas.get("plan_layer_config"),
+        "plan_layer_config_dropped": plan_dropped,
         "formats": dict(sorted(Counter(selected.values()).items())),
         "blob_bytes": sum(int(r["blob_bytes"]) for r in manifest["units"].values()),
         "wire_dir": str(wire_dir), "seal_identity_sha256": roster["identity_sha256"],
