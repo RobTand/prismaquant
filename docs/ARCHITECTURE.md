@@ -1,7 +1,21 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `codex/prepare-throughput-20260913`. Stamps
+As of: 2026-09-13 · `codex/arc-prewarm-prepare-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/arc-prewarm-prepare-20260913`) for the
+**joint prepare ARC frontier**. The post-campaign manifest keeps its exact
+ordered entries and divides windowed qualification at complete-unit
+boundaries, targeting at most 32 GiB of newly declared bytes per phase.
+`submit-joint prepare` seals these names as PB progress phases only for a
+fresh journal and a reusable, verified source identity proof. The container
+checks the manifest's sealed digest and plan identity before running; it
+enters each phase before its first unit read and increments the cumulative
+counter only after that unit's journal write. PB's storage role can then
+release the consumed prefix and warm the next entry-aligned ARC window.
+Resumed replay reads committed units before the layer walk and therefore
+does not claim this phase mapping; its submission keeps conservative
+unphased warming until a replay-order contract exists.
 
 Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
 **bounded, recoverable Tessera joint-anchor qualification** (#590). The
@@ -645,8 +659,9 @@ shards the settled read set is projected near **6.8 TB** -- 5.20 TB plus
 the composition, not a byte count. The brief's 4.75 TB estimate was taken
 earlier the same morning, against fewer shards.
 A whole-set warm is not available at that ratio, so the manifest carries the
-consumption order: a `head` phase, then one `layer-<L>` phase per transformer
-layer, and the prewarm loop windows on `annotations.phases`. The head is not
+consumption order: a `head` phase, then bounded `layer-<L>-part-<P>` phases
+for windowed preparation, and the prewarm loop windows on
+`annotations.phases`. Each part starts at a complete unit. The head is not
 small on this census: 97,302 of its 197,990 measured cells are rungs the
 campaign adopted rather than encoded, and `load_measured_anchor_input`
 decodes a shard for each of them from its wire before the first layer

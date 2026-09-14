@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import pickle
@@ -62,6 +63,15 @@ from glm_arc_prewarm import (  # noqa: E402
 
 SCHEMA = "prismaquant.prismabuild.data_manifest.v1"
 SHARED_MOUNT = "/mnt/shared"
+
+# Load this torch-free module without importing prismaquant.__init__, whose
+# registry import requires the GPU image during a CPU-only manifest build.
+_phase_spec = importlib.util.spec_from_file_location(
+    "joint_prewarm_phases",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "prismaquant",
+                 "joint_prewarm_phases.py"))
+_phase_module = importlib.util.module_from_spec(_phase_spec)
+_phase_spec.loader.exec_module(_phase_module)
 
 #: ``prismabuild.core._DATA_MANIFEST_KEYS`` and ``_DATA_MANIFEST_ENTRY_KEYS``,
 #: restated because PrismaBuild is not importable from the environments that
@@ -871,9 +881,10 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     ``command`` is ``prepare`` or ``run``.
 
     The head phase is everything read before the first layer installs. Then
-    one ``layer-<L>`` phase per transformer layer, in ascending layer order,
-    because ``prepare_cache`` walks ``range(runner.num_layers)`` and installs
-    one layer's source weights at a time. Within a layer the order is the
+    bounded complete-unit ``layer-<L>-part-<P>`` phases for windowed prepare,
+    in ascending layer order, because ``prepare_cache`` walks
+    ``range(runner.num_layers)`` and journals each completed unit. Run keeps
+    one ``layer-<L>`` phase per layer. Within a layer the order is the
     runner's: the layer's source byte extents first (the streaming context
     prefetches them on ``install``), then, for each of the layer's units in
     sorted name order, that unit's capture file and then each measured rung's
@@ -1005,9 +1016,12 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     # A plan that declares a qualification window runs one unit per capture
     # window; without one the whole layer's captures are loaded together.
     per_unit_window = plan.get("qualification_window") is not None
+    phase_start_units = {}
     for layer in layers:
         names = sorted(by_layer[layer])
-        track.begin(f"layer-{layer}")
+        part = 0
+        track.begin(_phase_module.phase_name(layer, part) if command == "prepare" and per_unit_window
+                    else f"layer-{layer}")
         if source_schedule is not None and source_cache is None:
             for path, size in source_schedule["layers"][layer]:
                 track.add(path, 0, size, "source_authentication")
@@ -1025,6 +1039,14 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             for name in names:
                 _add_capture(track, captures[name])
         for name in names:
+            if command == "prepare" and per_unit_window:
+                # Only a complete unit is a durable progress boundary. Keep a
+                # first unit whose source extents make the phase oversized;
+                # the PB reader can still warm an entry-aligned prefix.
+                if track._phase_bytes >= _phase_module.MAX_PHASE_BYTES:
+                    part += 1
+                    track.begin(_phase_module.phase_name(layer, part))
+                phase_start_units[name] = track._phase
             if per_unit_window:
                 _add_capture(track, captures[name])
             for fmt, wire, wire_bytes in cells[name]:
@@ -1068,6 +1090,9 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         "bytes": track.bytes,
         "reread_bytes_by_phase": track.reread,
         "phases": track.phases,
+        **({"phase_start_units": phase_start_units,
+            "phase_target_bytes": _phase_module.MAX_PHASE_BYTES}
+           if command == "prepare" and per_unit_window else {}),
         "argv": None if argv is None else [str(item) for item in argv],
     }
     return _finish(track, produced_by, annotations,
