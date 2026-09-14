@@ -91,9 +91,15 @@ assert "PRISMABUILD_ACTION_PROGRESS_TOKEN=minted-token" in argv
 def test_host_progress_names_match_the_container_reporter():
     """Forwarded names and the in-container writer remain one PB contract."""
 
+    from runpy import run_path
+
     runner = importlib.import_module("tools.tessera_campaign_container")
-    assert runner.PATH_ENV == "PRISMABUILD_ACTION_PROGRESS_PATH"
-    assert runner.TOKEN_ENV == "PRISMABUILD_ACTION_PROGRESS_TOKEN"
+    # Read the stdlib-only reporter by file path: importing its package here
+    # would hide precisely the minimal-host import boundary this test guards.
+    reporter = run_path(str(Path(__file__).resolve().parents[1] /
+                            'prismaquant' / 'prismabuild_progress.py'))
+    assert runner.PATH_ENV == reporter['PATH_ENV']
+    assert runner.TOKEN_ENV == reporter['TOKEN_ENV']
 
 
 @pytest.mark.parametrize("target", ["/", "/workspace", "/workspace/tools", "/mnt/../workspace"])
