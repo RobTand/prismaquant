@@ -114,11 +114,18 @@ def test_cost_v2_read_plan_repeats_source_without_repeating_entries(
     assert len(render_refs) == len(set(render_refs))
     assert manifest == _build(fixture, prepared, budget)
 
-    # The published PB V2 validator is the final schema authority.
-    import sys
-    sys.path.insert(0, "/mnt/shared/prismabuild-fleet/repo/src")
-    from prismabuild.core import validate_data_manifest
-    assert validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
+
+def test_cost_v2_manifest_passes_published_prismabuild_validator(cost_fixture, monkeypatch):
+    """The published PB V2 validator is the final schema authority.
+
+    PrismaBuild is importable only where the fleet mount is present (PB
+    workers); hosted CI keeps every producer assertion above and skips here.
+    """
+    monkeypatch.syspath_prepend("/mnt/shared/prismabuild-fleet/repo/src")
+    core = pytest.importorskip("prismabuild.core")
+    fixture, prepared, budget = cost_fixture
+    manifest = _build(fixture, prepared, budget)
+    assert core.validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
 
 
 def test_cost_v2_resume_filters_reads_without_repartitioning(cost_fixture):
