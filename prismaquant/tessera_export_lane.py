@@ -743,7 +743,8 @@ CACHED_EXPERT_UNITS_FILENAME = "cached_expert_units.json"
 
 
 def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapping[str, Any],
-                                   handoff: Mapping[str, Any], data: Any, *, schema: str) -> dict:
+                                   handoff: Mapping[str, Any], data: Any, *, schema: str,
+                                   research_proposal: Mapping[str, Any] | None = None) -> dict:
     """Close the exact measured dense and expert wires selected by an allocation.
 
     This is metadata publication, never an encoder. The joint preparation has
@@ -761,8 +762,20 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
     from tessera.cached_unit import ENCODING_INPUT_SCHEMA, INPUT_SCHEMA
 
     provenance = handoff.get("provenance", {})
-    if provenance.get("tessera_joint_allocation", {}).get("status") != "research_metadata_handoff":
-        raise TesseraExportLaneError("selected cache requires the completed joint allocation handoff")
+    state = provenance.get("tessera_joint_allocation", {}).get("status")
+    if research_proposal is None:
+        if state != "research_metadata_handoff":
+            raise TesseraExportLaneError("selected cache requires the completed joint allocation handoff")
+    else:
+        from .tessera_sampled_stack_proposal import require_research_proposal_assignment
+        require_research_proposal_assignment(research_proposal, assignment)
+        if (state != 'research_sampled_joint_panel' or
+                research_proposal.get('pilot') != provenance.get('joint_eval') or
+                research_proposal.get('original_joint_plan_sha256') !=
+                    provenance.get('tessera_joint_allocation', {}).get('plan_sha256') or
+                research_proposal.get('original_prepared') !=
+                    provenance.get('tessera_joint_allocation', {}).get('prepared')):
+            raise TesseraExportLaneError('selected cache research pilot binding differs')
     if data.unit_scope is not None or set(data.census["unit_shapes"]) != set(handoff.get("costs", {})):
         raise TesseraExportLaneError("selected cache requires the complete joint campaign roster")
     carried = provenance.get(PROJECTION_KEY)
@@ -1672,6 +1685,12 @@ def preflight(model_path: str | Path, *, target=None,
     in BF16, which is a decision the allocator emits and this gate refused
     until #229.
     """
+    if assignment_path is not None:
+        from .layer_config import read_layer_config_metadata
+        if 'sampled_joint_proposal' in read_layer_config_metadata(assignment_path):
+            raise TesseraExportLaneError(
+                'sampled joint research assignment is pending independent '
+                'validation; ordinary native export preflight remains closed')
     structure = require_declared_structure(model_path)
     target = require_serving_target(target)
     executes = require_executes_derived_from_contract()

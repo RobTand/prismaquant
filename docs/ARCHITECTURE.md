@@ -10,6 +10,69 @@ Re-stamped (2026-09-14, `claude/glm-first-artifact-census-wires`) for
 post-aggregation pass reduces the group item instead (§ "Reducing the menu for
 the DP"). Gate: `tests/test_allocator_packed_group_menu_reduction.py`.
 
+Re-stamped (2026-09-13, `codex/sampled-stack-proposal-20260913`) for an
+**opt-in diagnostic whole-stack proposal adapter** (#597). The scoped
+`sampled_joint_panel` binding authenticates pilot token rows against the
+original calibration and retains the original H512 preparation, source,
+render, encoder and wire identities. Ordinary currency admission and handoff
+continue refusing the pilot. A projected routed expert is never an independent
+zero-price option: every profile serving group must equal an entire producer
+stack and every option uses one common measured exact rung. Missing groups,
+partial menus, unobserved dense units and wholly unobserved stacks refuse.
+The existing candidate builder, atomic packed/fused aggregation, promotion
+solver and serialized payload owner produce research proposals and exact byte
+checks; an uninvoked member's full-population price is null, while its
+contribution to the observed panel is zero only inside its whole stack. The
+producer grammar's full E4M3/BF16 rate ranges remain explicit, with only
+measured pilot rungs priced; the four probe samples give conditional probe
+uncertainty, not sequence uncertainty or a full-domain optimum. An explicit
+research-menu argument keeps measured writable candidate prices separate from
+the serving target's later qualification; it does not rewrite the original
+joint operator identity. The GLM source campaign has no serving-target scope,
+so a distinct target must be named before reading the large pilot for an
+validation config, and that target's equivalence remains pending the separate
+Tessera research-byte exporter's source/cache/reader/runtime and plan/export
+route gates. The selected-cache bridge authenticates current measured wires
+against the exact expanded assignment and proposal hash. The official Tessera
+preflight refuses any research-marked assignment pending independent validation,
+including one whose selected rungs happen to be device-qualified; ordinary
+assignments retain the unchanged native cell gate. Record the marker refusal
+and native qualification as separate facts, with no native-attestation waiver
+to obtain validation bytes. The separate producer research export must receive the same selected-MoE
+JSON at planning and encoding. Neither route claims production authority.
+The independent selected-assignment validation
+is pending, and the retained teacher panel cannot be called held-out until
+the fit-overlap audit verifies disjointness. Gates:
+`tests/test_tessera_sampled_stack_proposal.py`,
+`tests/test_tessera_joint_allocation.py`,
+`tests/test_tessera_joint_eval_panel.py`.
+
+Re-stamped (2026-09-13, `codex/joint-eval-panel-20260913`) for an **opt-in
+diagnostic joint evaluation panel**. A sealed joint plan may carry
+`joint_eval` v1, a deterministic Python random-permutation prefix and exact
+indices, shape, int64 token hash, and parent artifact SHA. It selects 16 of the
+original 512 calibration windows for the four joint probes in the GLM pilot;
+the ordinary plan continues using all 512. Preparation still loads and verifies
+the original calibration against the historical Hessian identity and uses the
+same original H, canonical activation capture, source model, static scales,
+and ProductionWeightCache. The subset is used only for the joint cotangent,
+statistics and costs; its distinct probe identity follows the actual selected
+int64 bytes. Operator-window backward observers record per-unit actual calls
+and token rows **per probe**. Totals are explicitly `summed_over_probes` and do
+not claim distinct token coverage; a separate route census would be required
+to make that claim. An invoked exact-zero unit with positive token rows is observed;
+an uninvoked routed unit or empty invocation is `unknown_unobserved`, even if its internal numerical buffer is
+zero. Pilot results remain `diagnostic_pilot`; the cost-currency admission and
+handoff refuse ordinary allocation/export until a separately validated
+promotion contract exists. Neither historical output-MSE costs nor Hessians
+are rescaled or renamed into panel prices. The current measured candidate
+roster is a subset of the experiment's full legal grammar; no full-domain
+pricing claim follows from this pilot. Larger nested prefixes preserve row
+inclusion, but a changed panel has a different full-token normalizer and probe
+identity and must reevaluate the entire selected union: old scalar prices are
+not additive blocks. The panel changes no format, default, serving lane, or ship gate.
+Gates: `tests/test_tessera_joint_eval_panel.py`
+and the existing joint-window/allocation suites.
 Re-stamped (2026-09-14, `codex/cost-historical-wire-592`) for
 **COST consuming prepared renders with historical wire provenance**. PREPARE
 still authenticates each wire against its actual source/H/settings, compares
@@ -232,6 +295,12 @@ identity and cost provenance name the exact member, and the campaign merger
 and allocator refuse its scalar cost table as a complete group or allocator
 input. The frozen Tessera producer and calibration/H contract are unchanged.
 Gate: `tests/test_tessera_research_exact_member.py`.
+
+Re-stamped (2026-09-13, `codex/sampled-proposal-validation`) for the sampled
+whole-stack proposal comparison contract (#595). It is a CPU-side,
+post-selection comparison over independently emitted per-sequence losses; it
+does not promote an allocation to export authority or establish a latency or
+serving claim. Its mechanics and limits are in §7.1.
 
 Re-stamped (2026-09-13, `claude/scoped-prefill-sweep`) because **the prefill
 frontier sweep can now run on a table whose fixed charge no gate admits, under
@@ -12835,6 +12904,7 @@ re-render, it is the render the gate declined to keep.
 | PrismaSnap BF16 fold fidelity | `tools/measure_vllm_full_kl.py` → `tools/prismasnap.py attest-fold-fidelity` | no — optional pre-pipeline candidate workflow | **blocking for a marked source**: original-BF16 → snapped-BF16 all-position forward KL `≤5e-4`, with BF16/no-spec-decode launch contracts and source, teacher payload, calibration, serve-fingerprint, index, weight-map, and shard-content replay; atomically transitions `MATERIALIZED` to `VERIFIED` |
 | PrismaSnap source admission | `python -m prismaquant.prismasnap_contract --model "$MODEL_PATH"`; exporter-local replay/refusal helpers | yes, but only when the source carries the marker | binary: verified content is admitted only to native compressed-tensors; missing marker is a no-op; malformed/unverified marker and every marked GGUF/Gridbook source refuse before expensive work/output |
 | Candidate real-KL (selection) | `validate_assignments_kl.py` | yes, only under `SELECTION_MODE=validated-surrogate` (`run-pipeline.sh:1223-1278`) | ranks, does not gate |
+| Sampled whole-stack proposal comparison | `proposal_validation.validate_sampled_proposal` over independently emitted `kl_measurement.sequence_token_nll` rows | no — explicit post-selection input only | **advisory, identity-bound**: requires matched candidate/incumbent sequence IDs and scored-token counts, retains failed/timed-out rows, and returns only an approximate paired manifest-cluster-bootstrap comparison; it cannot authorize export or assert latency |
 | Artifact survey (PPL/MMLU/end-KL) | `validation_harness.py` | no | **no thresholds at all** |
 | vLLM load + greedy smoke | `validate_native_export.py` | **echoed only** (`run-pipeline.sh:1704-1705`) | binary |
 | DSv4 CB exact eager + CUDA-graph load/generation | `scripts/serve_dsv4_cb_validate.sh {eager,graph}` → `validate_cb_endpoint.py` | no — operator-run, one fresh container per arm | **binary; each arm closes its matching `native_export.*` slot; eager also runs the independently recorded numeric gate before teardown** |
@@ -12854,6 +12924,38 @@ prerequisite source-integrity/fold-fidelity transition completed before `run-pip
 quantized-artifact promotion result. Once its `VERIFIED` record exists, the build pipeline only
 replays that record and the current source bytes. The ordinary build/serve boundary remains
 physical, so its contract is a **record**, not CI.
+
+**Sampled whole-stack proposal validation is deliberately narrower than an
+artifact gate.** The adapter supplies complete per-sequence held-out losses
+from the existing full-sequence quality path (`kl_measurement.sequence_token_nll`), one row
+for the candidate selected assignment and one for the incumbent. The reusable
+CPU helper refuses unequal sequence-ID sets or scored-token counts, binds the
+source, teacher, tokenizer, held-out population, **candidate and incumbent
+selected-assignment**, pilot training/evaluation, and **held-out/training
+overlap-audit** SHA-256 identities. It also binds the artifact-declared common
+metric schema, lower-is-better direction, scored-position support, and metric
+identity artifact SHA-256, so a full-vocabulary NLL and a top-k or differently
+scoped result cannot be compared as if they were the same loss.
+It refuses any exact training-sequence overlap or equal exact training/held-out
+population hash, and returns `inconclusive` unless the bound audit explicitly
+says `verified_disjoint`: different population hashes alone do not prove
+disjoint contents. An unverified audit does retain the paired mean and its
+approximate bootstrap interval as `validity: descriptive_only_overlap_unverified`, so a later audit can assess the same
+panel without rerunning it, but its `promotion` remains `inconclusive`.
+The caller must explicitly supply the seed, bootstrap replicate count,
+confidence, and non-inferiority margin: the result is candidate-minus-
+incumbent token-weighted loss, an explicitly **approximate** deterministic
+paired manifest-cluster-bootstrap interval, and `pass`, `inconclusive`, or
+`regression` against that margin. A failure or timeout remains in the raw
+coverage/failure report and forces `inconclusive`; the helper never tests only
+the surviving rows. It does not call a Hutchinson/probe error estimate for
+sequence uncertainty, choose a tradeoff, invoke rendering/export, or attach a
+latency conclusion. Each row supplies its manifest's `resampling_cluster_id`;
+only a manifest that affirmatively declares its sequences independent may use
+the sequence ID as the cluster. Packed windows sharing a source document must
+resample that document as a whole. The report records the cluster count, scope,
+and declared limitations, so a 25-window panel across four documents is never
+represented as 25 independent documents.
 
 **The bar is defined once, per lane** (`prismaquant/lane_specs/*.json` + `lane_spec.py`, re-vet
 **R16**). Each lane declares its `{serve command/scripts, endpoint, gate set, KL evaluator}`,

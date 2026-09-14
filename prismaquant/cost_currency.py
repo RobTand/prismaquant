@@ -162,7 +162,56 @@ def require_run_currency(cost_data: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _require_joint_run_currency(cost_data, costs):
+def require_sampled_joint_run_currency(cost_data):
+    """Validate pilot joint currency without admitting it to ordinary allocation.
+
+    This entry point is for the atomic research proposal adapter only.  The
+    ordinary ``require_run_currency`` retains its unconditional pilot refusal.
+    """
+    from .tessera_joint_eval_panel import STATUS, observation_status
+    provenance = cost_data.get("provenance", {})
+    panel = provenance.get("joint_eval")
+    anchors = provenance.get("tessera_joint_anchors", {})
+    if (not isinstance(panel, Mapping) or panel.get("status") != STATUS
+            or not isinstance(anchors, Mapping) or anchors.get("joint_eval") != panel):
+        raise CostCurrencyError("sampled joint proposal requires a bound diagnostic pilot panel")
+    costs, stats = cost_data.get("costs"), cost_data.get("stats")
+    if (not isinstance(costs, Mapping) or not isinstance(stats, Mapping)
+            or set(costs) != set(stats) or not costs):
+        raise CostCurrencyError("sampled joint pilot has an incomplete unit roster")
+    for name, entries in costs.items():
+        status = stats[name].get("joint_eval_status")
+        count = stats[name].get("joint_eval_observations")
+        if (not isinstance(count, Mapping) or type(count.get("n_probes")) is not int
+                or count["n_probes"] <= 0 or count.get("count_scope") != "summed_over_probes"
+                or not isinstance(count.get("per_probe"), list)
+                or len(count["per_probe"]) != count["n_probes"]
+                or any(observation_status(item) not in ("observed", "unknown_unobserved")
+                       for item in count["per_probe"])
+                or any(count.get(key) != sum(item[key] for item in count["per_probe"])
+                       for key in ("tokens", "calls"))
+                or status != observation_status(count)):
+            raise CostCurrencyError(f"{name}: pilot observation counts/status mismatch")
+        for fmt, row in entries.items():
+            if row.get("joint_eval_status") != status or row.get("joint_eval_observations") != count:
+                raise CostCurrencyError(f"{name}/{fmt}: pilot observation identity mismatch")
+            probe = row.get('probe_identity', {})
+            if (probe.get('n_probes') != count['n_probes'] or
+                    len(row.get('probe_ids', ())) != count['n_probes'] or
+                    len(row.get('signed_per_probe', ())) != count['n_probes'] or
+                    len(row.get('x2_per_probe', ())) != count['n_probes']):
+                raise CostCurrencyError(f'{name}/{fmt}: observation probes differ from joint probe identity')
+            if status == 'unknown_unobserved' and (
+                    any(value != 0.0 for value in row['signed_per_probe']) or
+                    any(value != 0.0 for value in row['x2_per_probe'])):
+                raise CostCurrencyError(f'{name}/{fmt}: unobserved panel row has nonzero projection')
+    answer = _require_joint_run_currency(cost_data, costs, sampled_research=True)
+    if answer is None or answer["joint_aura_rows"] != sum(map(len, costs.values())):
+        raise CostCurrencyError("sampled joint proposal requires homogeneous joint rows")
+    return answer
+
+
+def _require_joint_run_currency(cost_data, costs, *, sampled_research=False):
     """Joint AURA is an explicitly attested homogeneous measurement table.
 
     A weight-only AURA row and a joint row use related quadratic objectives,
@@ -172,6 +221,14 @@ def _require_joint_run_currency(cost_data, costs):
     """
     provenance = cost_data.get("provenance")
     provenance = provenance if isinstance(provenance, Mapping) else {}
+    anchors = provenance.get('tessera_joint_anchors')
+    if (not sampled_research and ('joint_eval' in provenance
+            or isinstance(anchors, Mapping) and 'joint_eval' in anchors
+            or any(isinstance(entry, Mapping) and 'joint_eval_status' in entry
+                   for rows in costs.values() if isinstance(rows, Mapping)
+                   for entry in rows.values()))):
+        raise CostCurrencyError('diagnostic joint evaluation requires a separate sampled-proposal '
+                                'path or validated promotion; ordinary allocation/export remains closed')
     rows = [(unit, fmt, entry) for unit, per_unit in costs.items()
             if isinstance(per_unit, Mapping)
             for fmt, entry in per_unit.items()

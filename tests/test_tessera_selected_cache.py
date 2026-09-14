@@ -69,6 +69,33 @@ def test_full_selected_bundle_includes_dense_and_expert(tmp_path):
     assert manifest["units"][DENSE]["identity"]["schema"] == "tessera.encoding_inputs.v1"
 
 
+def test_sampled_research_bundle_keeps_same_source_hessian_encoder_and_wire_gates(tmp_path):
+    from prismaquant.tessera_sampled_stack_proposal import (
+        SCHEMA, selected_assignment_sha256)
+    source, names, records, handoff, metadata, data = fixture(tmp_path)
+    assignment = {name: FMT for name in names}
+    panel = {'status': 'diagnostic_pilot'}
+    handoff['provenance']['joint_eval'] = panel
+    handoff['provenance']['tessera_joint_allocation'].update(
+        status='research_sampled_joint_panel', plan_sha256='a'*64,
+        prepared={'path': '/prepared', 'sha256': 'b'*64})
+    proposal = {'schema': SCHEMA, 'status': 'research_proposal',
+        'production_export_authority': False, 'validation_export_eligible': None,
+        'research_validation_permitted': True, 'pilot': panel,
+        'expanded_assignment': assignment,
+        'selected_assignment_sha256': selected_assignment_sha256(assignment),
+        'original_joint_plan_sha256': 'a'*64,
+        'original_prepared': handoff['provenance']['tessera_joint_allocation']['prepared']}
+    manifest = selected_cached_units_manifest(
+        assignment, metadata, handoff, data, schema='tessera.cached_units.v1',
+        research_proposal=proposal)
+    assert set(manifest['units']) == names
+    records[DENSE]['identity']['encoder_source_sha256'] = 'd'*64
+    with pytest.raises(TesseraExportLaneError, match='encoder differs'):
+        selected_cached_units_manifest(assignment, metadata, handoff, data,
+            schema='tessera.cached_units.v1', research_proposal=proposal)
+
+
 @pytest.mark.parametrize('kind', ['dense', 'expert'])
 def test_selected_bundle_refuses_same_size_wire_change_after_cost(tmp_path, kind):
     _, names, records, handoff, metadata, data = fixture(tmp_path)
