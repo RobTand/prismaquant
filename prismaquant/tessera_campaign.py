@@ -3852,6 +3852,29 @@ def selection_priced_units(selection: Mapping) -> tuple[set, set, dict]:
     return priced, audit, pi
 
 
+def research_exact_member_scope(selection: Mapping, resolved: Mapping[str, list[str]],
+                                member: str) -> dict:
+    """Price one named member of a validated whole group, without a stack estimate.
+
+    This is an endpoint measurement only. The full group still comes from the
+    census and ``select_anchor_groups`` checks every member before this narrow
+    operation; no inclusion probability or representative-stack claim exists.
+    """
+    if not isinstance(member, str) or not member:
+        raise RuntimeError("--research-exact-member requires one nonempty unit name")
+    groups = selection["groups"]
+    if len(groups) != 1 or any(
+            key in groups[0] for key in ("sampled", "audit", "inclusion_probability", "stack_samples")):
+        raise RuntimeError("--research-exact-member requires one unsampled whole group")
+    group = groups[0]
+    if member not in resolved[group["key"]]:
+        raise RuntimeError(f"--research-exact-member {member}: outside selected group {group['key']}")
+    return {"member": member, "full_group_key": group["key"],
+            "full_group_size": len(resolved[group["key"]]),
+            "purpose": "research_scalar_endpoint", "allocator_payload": False,
+            "stack_estimate": False}
+
+
 def select_anchor_groups(selection: Mapping, resolved: Mapping[str, list[str]],
                          *, where: str) -> list[str]:
     """The selected group keys, refusing any disagreement with this run's scope.
@@ -5077,6 +5100,11 @@ def _main(argv, *, source_scope) -> int:
                          "identity narrows with it, so two invocations over "
                          "disjoint selections never contend. Omitted: measure "
                          "every group in scope, exactly as before.")
+    ap.add_argument("--research-exact-member", default=None,
+                    help="Research-only scalar endpoint for one named member of a "
+                         "fully validated --units group. Requires a complete "
+                         "calibration census/cache and one rate-band; carries no "
+                         "allocator or stack-estimate licence.")
     ap.add_argument("--calibration-census", default=None,
                     help="JSON per-unit calibration row counts for the WHOLE "
                          "priced scope (prismaquant.tessera_campaign_census.v1, "
@@ -5319,6 +5347,7 @@ def _main(argv, *, source_scope) -> int:
 
     selection = None
     stack_samples = {}
+    exact_member_scope = None
     selected_groups: list[str] = sorted(scope_groups)
     audit_units: set = set()
     inclusion_probability: dict = {}
@@ -5332,6 +5361,16 @@ def _main(argv, *, source_scope) -> int:
             selection, scope_groups, where=f"--units {args.units}")
         priced, audit_units, inclusion_probability = selection_priced_units(
             selection)
+        if args.research_exact_member is not None:
+            if (mode != "research" or not args.calibration_census or
+                    not args.calibration_cache or parse_rate_band(args.rate_band) is None):
+                raise RuntimeError("--research-exact-member requires research menu, "
+                                   "calibration census/cache and --rate-band")
+            exact_member_scope = research_exact_member_scope(
+                selection, scope_groups, args.research_exact_member)
+            priced = {exact_member_scope["member"]}
+            audit_units = set()
+            inclusion_probability = {}
         # The group's membership was already checked whole; what the sample
         # narrows is only which of those members this run encodes. Keeping the
         # two separate is what lets a sampled run stay identity-honest: the
@@ -5356,6 +5395,8 @@ def _main(argv, *, source_scope) -> int:
         if not targets:
             raise RuntimeError(
                 f"--units {args.units}: the selection prices no unit")
+    elif args.research_exact_member is not None:
+        raise RuntimeError("--research-exact-member requires --units")
 
     context_by_unit = None
     structure_by_unit = None
@@ -6482,6 +6523,8 @@ def _main(argv, *, source_scope) -> int:
                     name: float(inclusion_probability[name])
                     for name in sorted(inclusion_probability)},
             },
+            **({"research_exact_member_scope": exact_member_scope}
+               if exact_member_scope is not None else {}),
             "tp_degree": int(args.tp_degree),
             "model": str(args.model),
             "nsamples": int(args.nsamples),
