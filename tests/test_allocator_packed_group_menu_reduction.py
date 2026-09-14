@@ -119,7 +119,15 @@ def test_build_candidates_forwards_the_deferral(monkeypatch):
         return out
 
     monkeypatch.setattr(ac, "reduce_continuous_menu", fake_reduce)
-    stats, costs, _, specs = _inputs()
+    # Stock formats: Tessera rows without an attested serving context are
+    # refused before the reduction runs, and only the forwarding is under test.
+    stats = {name: {"n_params": 1600, "h_trace": 1.0, "in_features": 40,
+                    "out_features": 40}
+             for name in _LOSS}
+    costs = {name: {"NVFP4": {"weight_mse": 0.01, "predicted_dloss": 0.005},
+                    "BF16": {"weight_mse": 0.0, "predicted_dloss": 0.0}}
+             for name in _LOSS}
+    specs = [fr.REGISTRY["NVFP4"], fr.REGISTRY["BF16"]]
     ac.build_candidates(stats, costs, specs,
                         defer_menu_reduction=frozenset(_MEMBERS))
     assert seen["defer_reduction"] == frozenset(_MEMBERS)
