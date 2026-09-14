@@ -15,7 +15,17 @@ import subprocess
 
 from tools.container_runtime_identity import (
     image_content_sha256, prismaquant_source_sha256)
-from prismaquant.prismabuild_progress import PATH_ENV, TOKEN_ENV
+
+
+# These are PrismaBuild's action environment contract, deliberately kept in
+# this host-side adapter rather than imported from ``prismaquant``.  Importing
+# the package runs its production initialisation before this launcher reaches
+# the qualified container, so a worker that only has the small host Python
+# runtime could fail before Docker starts (#601).  The container-side campaign
+# continues to use ``prismaquant.prismabuild_progress`` to write the record;
+# this adapter only carries the two sealed channel values across the boundary.
+PATH_ENV = "PRISMABUILD_ACTION_PROGRESS_PATH"
+TOKEN_ENV = "PRISMABUILD_ACTION_PROGRESS_TOKEN"
 
 
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
