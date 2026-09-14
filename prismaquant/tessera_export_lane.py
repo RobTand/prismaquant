@@ -1673,9 +1673,7 @@ def preflight(model_path: str | Path, *, target=None,
               assignment_path: str | Path | None = None,
               hessian_path: str | Path | None = None,
               input_scales_path: str | Path | None = None,
-              cached_expert_units: bool = False,
-              research_proposal: Mapping[str, Any] | None = None,
-              research_proposal_sha256: str | None = None) -> dict:
+              cached_expert_units: bool = False) -> dict:
     """Every gate, in the order that puts the cheapest refusal first.
 
     ``cached_expert_units`` additionally writes the producer's cached-unit
@@ -1687,22 +1685,12 @@ def preflight(model_path: str | Path, *, target=None,
     in BF16, which is a decision the allocator emits and this gate refused
     until #229.
     """
-    if research_proposal is not None:
-        if assignment_path is None or research_proposal_sha256 is None:
-            raise TesseraExportLaneError('research validation export needs bound proposal and assignment')
-        from .layer_config import load_assignment, read_layer_config_metadata
-        from .tessera_sampled_stack_proposal import require_research_proposal_assignment
-        binding = require_research_proposal_assignment(
-            research_proposal, load_assignment(assignment_path))
-        marker = read_layer_config_metadata(assignment_path).get('sampled_joint_proposal')
-        if marker != {'schema': binding['schema'],
-                      'proposal_sha256': research_proposal_sha256,
-                      'selected_assignment_sha256': binding['selected_assignment_sha256']}:
-            raise TesseraExportLaneError('assignment lacks exact sampled proposal research marker')
-    elif assignment_path is not None:
+    if assignment_path is not None:
         from .layer_config import read_layer_config_metadata
         if 'sampled_joint_proposal' in read_layer_config_metadata(assignment_path):
-            raise TesseraExportLaneError('sampled pilot assignment requires explicit research proposal')
+            raise TesseraExportLaneError(
+                'sampled joint research assignment is pending independent '
+                'validation; ordinary native export preflight remains closed')
     structure = require_declared_structure(model_path)
     target = require_serving_target(target)
     executes = require_executes_derived_from_contract()
@@ -1770,14 +1758,6 @@ def preflight(model_path: str | Path, *, target=None,
                         write_cached_expert_units(projection))
         if scope is not None:
             build.update(_write_plan_assignment(assignment_path, expected_sha256=assignment_sha))
-        if research_proposal is not None:
-            build['sampled_joint_validation_export'] = {
-                'schema': binding['schema'],
-                'proposal_sha256': research_proposal_sha256,
-                'selected_assignment_sha256': binding['selected_assignment_sha256'],
-                'integrity_status': 'preflight_passed_cached_unit_export_intake_pending',
-                'production_export_authority': False,
-            }
         if file_sha256(assignment_path) != assignment_sha:
             raise TesseraExportLaneError(
                 "allocation changed during scoped preflight; no build anchor was produced")
@@ -1830,9 +1810,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="the source checkpoint run-pipeline.sh is building")
     parser.add_argument("--assignment", default=None,
                         help="selected layer_config.json to attest before plan translation")
-    parser.add_argument('--research-proposal', default=None,
-                        help='SHA-256-bound sampled proposal: validation export only')
-    parser.add_argument('--research-proposal-sha256', default=None)
     parser.add_argument("--hessian", default=None,
                         help="the Hessian capture the exporter will be handed "
                              "(the campaign's hessian_capture.pt); required "
@@ -1861,16 +1838,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     add_serving_scope_arguments(parser)
     args = parser.parse_args(argv)
     try:
-        if bool(args.research_proposal) != bool(args.research_proposal_sha256):
-            raise TesseraExportLaneError('research proposal path and SHA-256 required together')
-        if args.research_proposal and args.assignment is None:
-            raise TesseraExportLaneError('research validation export needs --assignment')
-        research = None
-        if args.research_proposal:
-            raw = Path(args.research_proposal).read_bytes()
-            if hashlib.sha256(raw).hexdigest() != args.research_proposal_sha256:
-                raise TesseraExportLaneError('research proposal SHA-256 differs')
-            research = json.loads(raw)
         if args.print_build_sha256 and args.write_build_json is None:
             raise TesseraExportLaneError("--print-build-sha256 requires --write-build-json")
         if args.write_build_json is not None and args.assignment is None:
@@ -1897,8 +1864,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = preflight(args.model, target=target,
                                assignment_path=args.assignment,
                                cached_expert_units=args.write_cached_expert_units,
-                               research_proposal=research,
-                               research_proposal_sha256=args.research_proposal_sha256,
                                **priced)
         if args.write_build_json is not None:
             destination = Path(args.write_build_json)

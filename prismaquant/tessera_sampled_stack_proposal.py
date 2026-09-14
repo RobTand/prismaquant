@@ -27,6 +27,7 @@ from .tessera_formats import (family_q256_bounds, get_tessera_family,
                               parse_tessera_format_name, realisable_rungs)
 
 SCHEMA = 'prismaquant.tessera_sampled_stack_proposal.v1'
+PRIMARY_FAMILIES = frozenset({'TESSERA_E4M3_K1', 'TESSERA_BF16_K1'})
 
 
 def _require(ok, message):
@@ -38,6 +39,8 @@ def _domain(families, costs, stats):
     """Full producer-legal grammar, independent of source and runtime masks."""
     _require(isinstance(families, (list, tuple)) and len(families) == len(set(families))
              and families, 'explicit unique full legal family roster required')
+    _require(PRIMARY_FAMILIES <= set(families),
+             'full legal family roster must retain primary E4M3_K1 and BF16_K1')
     shapes = {name: (int(s['out_features']), int(s['in_features']))
               for name, s in stats.items()}
     result = {}
@@ -125,15 +128,14 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
     _require(type(max_exact_attempts) is int and max_exact_attempts > 0,
              'positive exact retry bound required')
     stats, costs = payload['stats'], payload['costs']
-    from .tessera_serving_scope import ServingTarget, context_by_unit_from_stats
+    _require(isinstance(full_legal_families, (list, tuple)) and
+             PRIMARY_FAMILIES <= set(full_legal_families),
+             'sampled proposal must retain both full legal primary families')
+    from .tessera_serving_scope import ServingTarget
     original_scope = payload['provenance'].get('tessera_serving_scope')
-    if serving_target is None and isinstance(original_scope, dict):
-        serving_target = ServingTarget(**original_scope['target'])
-    context_by_unit = context_by_unit_from_stats(serving_target, stats, profile)
-    if original_scope is not None and context_by_unit is not None:
-        _require(original_scope.get('by_unit') == {name: item.as_dict()
-                  for name, item in context_by_unit.items()},
-                 'proposal runtime context differs from original priced campaign')
+    if serving_target is not None:
+        _require(isinstance(serving_target, ServingTarget),
+                 'validation export target must be explicit ServingTarget')
     units, stacks = _stack_roster(payload, profile)
     unknown = set()
     for name, s in stats.items():
@@ -166,7 +168,7 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
     raw = build_candidates(stats, costs, specs,
                            source_manifest={name: 'bf16' for name in stats},
                            target_profile=target_profile, mask_records=mask,
-                           context_by_unit=context_by_unit)
+                           tessera_menu_mode='research')
     _require(set(raw) == set(stats) and all(raw.values()), 'some pilot unit has no legal measured candidate')
     grouped_stats, grouped_costs, grouped = aggregate_packed_serving_groups(
         stats, costs, specs, raw, profile)
@@ -258,21 +260,29 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
             'production_export_authority': False,
             'research_validation_permitted': True,
             'validation_export_eligible': None,
-            'validation_export_integrity_status': 'pending_existing_export_gates',
+            'validation_export_integrity_status': 'pending_separate_research_byte_exporter',
             'required_integrity_gates': [
                 'authenticated_original_source_and_H_preparation',
                 'selected_measured_wire_current_bytes_and_encoder_identity',
                 'expanded_assignment_exact_mutable_and_fixed_bytes',
-                'Tessera_release_pin_and_target_runtime_route',
+                'Tessera_research_byte_exporter_closed_source_cache_reader_runtime',
                 'priced_H_and_activation_scales',
                 'selected_cached_unit_bundle_current_byte_verification',
+                'same_research_selected_moe_json_to_Tessera_plan_and_export',
             ],
+            'official_native_export_gate': {
+                'scope': 'production_promotion',
+                'research_marker': 'ordinary_preflight_refused_pending_validation',
+                'native_cell_qualification': 'not_evaluated_by_proposal; record separately',
+                'waiver': False},
             'pilot': payload['provenance']['joint_eval'],
             'original_joint_plan_sha256': handoff['plan_sha256'],
             'original_prepared': handoff['prepared'],
             'price_source': 'sampled_joint_panel',
             'target_profile': target_profile,
             'serving_target': None if serving_target is None else serving_target.as_dict(),
+            'measurement_serving_scope': original_scope,
+            'measurement_to_validation_target_equivalence': 'pending_runtime_preflight',
             'objective': 'additive_sum_of_observed_panel_member_quadratic_prices',
             'uncertainty_scope': 'probe_sampling_conditional_on_fixed_'
                 f"{payload['provenance']['joint_eval']['selection']['size']}_window_panel",
@@ -370,6 +380,9 @@ def propose_from_bound_inputs(*, joint_binding, plan_binding, output_path,
                               serving_target=None):
     """Emit a research proposal; no ordinary cost table or export authority."""
     from .model_profiles.registry import detect_profile
+    from .tessera_serving_scope import ServingTarget
+    _require(isinstance(serving_target, ServingTarget),
+             'explicit validation ServingTarget required before reading large pilot inputs')
     bound, plan = bind_pilot_from_inputs(joint_binding=joint_binding,
                                           plan_binding=plan_binding)
     proposal = propose_bound_payload(bound, profile=detect_profile(plan['model']),
@@ -410,11 +423,8 @@ def validation_layer_config(bound_payload, proposal, *, proposal_sha256,
              'research proposal SHA-256 required')
     assignment = proposal['expanded_assignment']
     require_research_proposal_assignment(proposal, assignment)
-    if serving_target is None:
-        scope = bound_payload['provenance'].get('tessera_serving_scope')
-        _require(isinstance(scope, dict) and isinstance(scope.get('target'), dict),
-                 'validation export requires bound source serving target')
-        serving_target = ServingTarget(**scope['target'])
+    _require(isinstance(serving_target, ServingTarget),
+             'validation layer config needs a separate explicit ServingTarget')
     contexts = context_by_unit_from_stats(serving_target, bound_payload['stats'], profile)
     config = {name: fr.get_format(fmt).autoround_config()
               for name, fmt in sorted(assignment.items())}

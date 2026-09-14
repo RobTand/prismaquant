@@ -13,6 +13,8 @@ from prismaquant.tessera_sampled_stack_proposal import propose_bound_payload
 from test_tessera_expert_projection import STACK, _declared, _projection
 from test_tessera_joint_allocation import fixture
 
+PRIMARY = ['TESSERA_E4M3_K1', 'TESSERA_BF16_K1']
+
 
 class AtomicProfile:
     def packed_expert_format_group(self, name):
@@ -84,15 +86,20 @@ def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
     from prismaquant import allocator_candidates
     joint, *_tail, names = pilot_fixture()
     monkeypatch.setattr(mod, '_domain', lambda *args, **kwargs: {'fixture': 'producer-tested-separately'})
+    admitted_modes = []
+    def admits(mode):
+        admitted_modes.append(mode)
+        return mode == 'research'
     monkeypatch.setattr(tessera_menu, 'route_admission',
-                        lambda *args, **kwargs: SimpleNamespace(requires_serving_context=False,
-                                                                 admits=lambda mode: True))
+                        lambda *args, **kwargs: SimpleNamespace(requires_serving_context=True,
+                                                                 admits=admits))
     monkeypatch.setattr(allocator_candidates, 'serving_lane_route',
                         lambda *args, **kwargs: None)
     result = propose_bound_payload(joint, profile=AtomicProfile(),
         mutable_budget_bytes=600000, immutable_bytes=101, reserve_bytes=11,
-        full_legal_families=['TESSERA_E4M3_K1'])
+        full_legal_families=PRIMARY)
     assert result['status'] == 'research_proposal' and result['export_authority'] is False
+    assert 'research' in admitted_modes
     assert set(result['expanded_assignment']) == set(names)
     assert len(set(result['expanded_assignment'].values())) == 1
     assert len(result['solver_assignment']) == 1
@@ -110,7 +117,7 @@ def test_unknown_independent_and_incomplete_stack_refuse(monkeypatch):
     joint['provenance'][tep.PROJECTION_KEY]['stacks'][STACK].pop(names[1])
     with pytest.raises(tep.ExpertProjectionError, match='producer|projected|atomic|projects'):
         propose_bound_payload(joint, profile=AtomicProfile(), mutable_budget_bytes=10000,
-            immutable_bytes=0, reserve_bytes=0, full_legal_families=['TESSERA_E4M3_K1'])
+            immutable_bytes=0, reserve_bytes=0, full_legal_families=PRIMARY)
 
 
 def test_inconsistent_same_expert_panel_counts_and_nonzero_unknown_refuse(monkeypatch):
@@ -125,14 +132,14 @@ def test_inconsistent_same_expert_panel_counts_and_nonzero_unknown_refuse(monkey
         row['joint_eval_observations'] = copy.deepcopy(changed)
     with pytest.raises(ValueError, match='inconsistent per-probe route counts'):
         propose_bound_payload(joint, profile=AtomicProfile(), mutable_budget_bytes=1000000,
-            immutable_bytes=0, reserve_bytes=0, full_legal_families=['TESSERA_E4M3_K1'])
+            immutable_bytes=0, reserve_bytes=0, full_legal_families=PRIMARY)
     joint, *_tail, names = pilot_fixture()
     unknown = joint['costs'][names[3]]['TESSERA_E4M3_K1_R1024']
     unknown['signed_per_probe'][0] = 1.0
     unknown['x2_per_probe'][0] = 1.0
     with pytest.raises(CostCurrencyError, match='unobserved panel row has nonzero'):
         propose_bound_payload(joint, profile=AtomicProfile(), mutable_budget_bytes=1000000,
-            immutable_bytes=0, reserve_bytes=0, full_legal_families=['TESSERA_E4M3_K1'])
+            immutable_bytes=0, reserve_bytes=0, full_legal_families=PRIMARY)
 
 
 def test_byte_budget_refuses_even_when_solver_has_a_solution(monkeypatch):
@@ -141,7 +148,7 @@ def test_byte_budget_refuses_even_when_solver_has_a_solution(monkeypatch):
     monkeypatch.setattr(mod, '_domain', lambda *args, **kwargs: {})
     with pytest.raises(ValueError, match='exact-byte-feasible'):
         propose_bound_payload(joint, profile=AtomicProfile(), mutable_budget_bytes=1,
-            immutable_bytes=101, reserve_bytes=11, full_legal_families=['TESSERA_E4M3_K1'])
+            immutable_bytes=101, reserve_bytes=11, full_legal_families=PRIMARY)
 
 
 def test_scoped_binding_retains_pilot_and_generic_path_refuses():
@@ -164,7 +171,9 @@ def test_full_legal_inventory_contains_unmeasured_producer_rates():
     assert family_q256_bounds(get_tessera_family('TESSERA_E4M3_K1')) == (256, 2048)
     assert family_q256_bounds(get_tessera_family('TESSERA_BF16_K1')) == (256, 4096)
     joint, *_tail = pilot_fixture()
-    inventory = _domain(['TESSERA_E4M3_K1', 'TESSERA_BF16_K1'],
+    with pytest.raises(ValueError, match='retain primary'):
+        _domain(['TESSERA_E4M3_K1'], joint['costs'], joint['stats'])
+    inventory = _domain(PRIMARY,
                         joint['costs'], joint['stats'])
     assert inventory['TESSERA_E4M3_K1']['producer_grammar_q256'] == [256, 2048]
     assert inventory['TESSERA_BF16_K1']['producer_grammar_q256'] == [256, 4096]
@@ -174,7 +183,7 @@ def test_full_legal_inventory_contains_unmeasured_producer_rates():
     for width in (2048, 4096, 12288):
         shape_stats = {'shape': {'out_features': 256, 'in_features': width}}
         shape_costs = {'shape': {'BF16': {}}}
-        all_rates = _domain(['TESSERA_E4M3_K1', 'TESSERA_BF16_K1'],
+        all_rates = _domain(PRIMARY,
                             shape_costs, shape_stats)
         assert all_rates['TESSERA_E4M3_K1']['producer_legal_by_shape'][f'256x{width}']['count'] == 1793
         assert all_rates['TESSERA_BF16_K1']['producer_legal_by_shape'][f'256x{width}']['count'] == 3841
@@ -203,31 +212,22 @@ def test_research_selected_cache_requires_proposal_and_exact_assignment():
         selected_cached_units_manifest(assignment, {}, joint, None, schema=CACHE_SCHEMA)
 
 
-def test_research_preflight_refuses_missing_marker_before_runtime(tmp_path, monkeypatch):
+def test_missing_separate_validation_target_refuses_before_large_input_reads():
+    from prismaquant.tessera_sampled_stack_proposal import propose_from_bound_inputs
+    with pytest.raises(ValueError, match='before reading large pilot'):
+        propose_from_bound_inputs(joint_binding={'path': '/missing/pilot', 'sha256': 'a'*64},
+            plan_binding={'path': '/missing/plan', 'sha256': 'b'*64},
+            output_path='/missing/proposal', mutable_budget_bytes=1,
+            immutable_bytes=1, reserve_bytes=1, full_legal_families=PRIMARY)
+
+
+def test_official_preflight_refuses_research_marker_even_if_rung_is_native(tmp_path):
     import json
     from prismaquant import tessera_export_lane as tel
-    from prismaquant.tessera_sampled_stack_proposal import (
-        SCHEMA, selected_assignment_sha256)
-    assignment = {'model.layers.0.mlp.down_proj': 'BF16'}
-    digest = selected_assignment_sha256(assignment)
-    proposal = {'schema': SCHEMA, 'status': 'research_proposal',
-        'production_export_authority': False, 'validation_export_eligible': None,
-        'research_validation_permitted': True, 'pilot': {'status': 'diagnostic_pilot'},
-        'expanded_assignment': assignment, 'selected_assignment_sha256': digest}
     path = tmp_path / 'layer_config.json'
-    path.write_text(json.dumps({**assignment, '__prismaquant__': {}}))
-    with pytest.raises(tel.TesseraExportLaneError, match='research marker'):
-        tel.preflight(tmp_path, assignment_path=path, research_proposal=proposal,
-                      research_proposal_sha256='a'*64)
-    marker = {'schema': 'prismaquant.tessera_sampled_validation_export_binding.v1',
-              'proposal_sha256': 'a'*64, 'selected_assignment_sha256': digest}
-    path.write_text(json.dumps({**assignment,
-                                '__prismaquant__': {'sampled_joint_proposal': marker}}))
-    with pytest.raises(tel.TesseraExportLaneError, match='explicit research proposal'):
+    path.write_text(json.dumps({'model.layers.0.mlp.down_proj': 'TESSERA_E4M3_K1_R1024',
+        '__prismaquant__': {'sampled_joint_proposal': {
+            'schema': 'prismaquant.tessera_sampled_validation_export_binding.v1',
+            'proposal_sha256': 'a'*64}}}))
+    with pytest.raises(tel.TesseraExportLaneError, match='ordinary native export preflight remains closed'):
         tel.preflight(tmp_path, assignment_path=path)
-    def reached_runtime(*args, **kwargs):
-        raise RuntimeError('normal runtime gate reached')
-    monkeypatch.setattr(tel, 'require_declared_structure', reached_runtime)
-    with pytest.raises(RuntimeError, match='normal runtime gate reached'):
-        tel.preflight(tmp_path, assignment_path=path, research_proposal=proposal,
-                      research_proposal_sha256='a'*64)
