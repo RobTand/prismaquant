@@ -1369,5 +1369,6 @@ def _parallel_prefetch_capture(path, *, manifest, expected_identity, census, nam
         guard.release()
     resident = sum(t.numel()*t.element_size() for t in (*acts.values(),*hessians.values()))
     print(f'[campaign] calibration prefetched: {len(names)} units, {resident} resident bytes, '
-          f'0 misses, {threads} readers',flush=True)
+          f'0 misses, {min(threads, len(names))} active readers '
+          f'({threads} configured maximum)',flush=True)
     return (acts,hessians,counts,maxima),dict(path=str(path.resolve()),sha256=digest)
