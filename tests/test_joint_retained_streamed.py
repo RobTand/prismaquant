@@ -119,7 +119,7 @@ def test_partial_streamed_resume_reads_only_pending_renders(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize('mutation,match', [('shape', 'tensor proof'), ('hash', 'actual render'),
-                                         ('file', 'file.*SHA|sha256')])
+                                         ('file', 'prepared PWC render checksum changed')])
 def test_prepared_identity_reuse_refuses_changed_proof_or_file(tmp_path, monkeypatch, mutation, match):
     def change(proofs, files):
         key = next(iter(proofs))

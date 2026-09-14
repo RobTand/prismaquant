@@ -2619,6 +2619,8 @@ def compute_aura_cost_streamed(
 
     def commit_streamed_units(targets):
         targets = [name for name in targets if name not in completed_checkpoint_units]
+        if not targets:
+            return
         if joint_activation:
             if source_execution_identity(runner.model) != joint_probe_identity["source_execution"]:
                 raise RuntimeError("joint AURA source execution backend changed during measurement")
