@@ -22,7 +22,8 @@ import time
 from types import SimpleNamespace
 
 from .cost_stage_checkpoint import (
-    MANIFEST_SCHEMA, _load_unit, atomic_write_bytes, canonical_json_sha256, unit_path,
+    MANIFEST_SCHEMA, _load_unit, atomic_write_bytes, canonical_json_sha256,
+    prepare_journal, unit_path, write_unit,
 )
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
@@ -598,6 +599,7 @@ def _prepare_file_read_bound(data, *, max_render_bytes):
 
 
 QUALIFICATION_WINDOW_SCHEMA = "prismaquant.joint_anchor_qualification.v1"
+QUALIFICATION_STAGE = "Tessera joint anchor qualification"
 
 
 def normalize_qualification_window(config):
@@ -628,10 +630,65 @@ def _qualification_capture_sizes(data, identity, policy):
     return sizes
 
 
+def _qualification_file_sha(path):
+    """Hash live upstream bytes, refusing a file replaced during the read."""
+    path = Path(path)
+    def signature():
+        stat = path.stat()
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
+                stat.st_ctime_ns)
+    before = signature()
+    digest = _sha(path)
+    _same(signature(), before, f"qualification input changed while hashing: {path}")
+    return digest
+
+
+def _qualification_replay(data, manifest, completed):
+    """A journal envelope alone does not authenticate files that remain live."""
+    from .perturbed_x_cache import activation_cache_filename
+
+    # Capture entries contain both X and H. Check the complete canonical
+    # capture, including units not in the completed journal, before a skip.
+    root = Path(data.payload['provenance']['calibration_cache']['path']).parent
+    for name, entry in sorted(manifest['entries'].items()):
+        expected = str(Path('inputs') / activation_cache_filename(name))
+        _same(entry.get('path'), expected, f'{name}: canonical X/H entry')
+        _same(_qualification_file_sha(root / expected), entry['sha256'],
+              f'{name}: canonical X/H bytes changed')
+    verified = {}
+    for name, state in sorted(completed.items()):
+        rows = state.get('verified_cells')
+        _require(isinstance(rows, dict) and set(rows) == set(data.formats_by_qname[name]) - {'BF16'},
+                 f'{name}: incomplete qualification journal cells')
+        _require(isinstance(state.get('prefetch'), list), f'{name}: missing qualification prefetch')
+        for fmt, record in rows.items():
+            cell = data.cells[name, fmt]
+            required = {'source_weight', 'rendered_weight', 'encoding_identity_sha256',
+                        'wire_sha256', 'render_file_sha256', 'render_origin',
+                        'render_comparison', 'activation'}
+            _require(isinstance(record, dict) and set(record) == required and
+                     isinstance(record['activation'], dict),
+                     f'{name}@{fmt}: incomplete qualification receipt')
+            _same(record.get('render_origin'), cell['render_origin'],
+                  f'{name}@{fmt}: journal render origin')
+            _same(record.get('render_comparison'), RENDER_COMPARISON_BY_ORIGIN[cell['render_origin']],
+                  f'{name}@{fmt}: journal render comparison')
+            _same(record.get('wire_sha256'), cell['record']['blob_sha256'],
+                  f'{name}@{fmt}: journal wire receipt')
+            _same(_qualification_file_sha(cell['wire']), record['wire_sha256'],
+                  f'{name}@{fmt}: upstream wire bytes changed')
+            _same(_qualification_file_sha(cell['render']), record.get('render_file_sha256'),
+                  f'{name}@{fmt}: upstream render bytes changed')
+            cell['render_file_sha256'] = record['render_file_sha256']
+            verified[name, fmt] = record
+    return verified
+
+
 def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
                   qualification_window=None, capture_load_policy=None,
                   source_capture_compatibility=None, source_authentication=None,
-                  qualification_guard=None):
+                  qualification_guard=None, qualification_journal=None,
+                  qualification_resume=False, qualification_identity=None):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
@@ -682,8 +739,34 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                 release_read_pages=True) if policy is not None else {}))
     _same(expected, recorded, "current source/canonical capture")
     _same(data.manifest["identity"]["calibration"], recorded["calibration"], "journal/canonical draw")
+    metadata_owner = (None if policy is None else cc.open_capture_metadata(
+        capture_path, expected_identity=expected, expected_sha256=capture['sha256']))
     capture_sizes = (None if policy is None else
                      _qualification_capture_sizes(data, expected, policy))
+    _require(qualification_journal is None or
+             (policy is not None and isinstance(qualification_identity, dict)),
+             'qualification journal requires explicit windows and run identity')
+    journal = journal_sha = None
+    completed = {}
+    if qualification_journal is not None:
+        identity = dict(qualification_identity, schema='prismaquant.joint_qualification_journal.v1',
+            inputs=data.inputs, campaign_checkpoint_sha256=data.manifest['identity_sha256'],
+            capture=capture, capture_identity=expected,
+            cells={f'{name}|{fmt}': {'anchor': cell['anchor'], 'record': cell['record'],
+                                   'render': cell['render'], 'wire': cell['wire'],
+                                   'render_origin': cell['render_origin']}
+                   for (name, fmt), cell in sorted(data.cells.items())},
+            qualification_window=policy, capture_load_policy=capture_load_policy,
+            source_capture_compatibility=source_capture_compatibility,
+            max_render_bytes=max_render_bytes)
+        journal, journal_sha, completed = prepare_journal(
+            qualification_journal, stage=QUALIFICATION_STAGE,
+            resume=qualification_resume, identity=identity,
+            qnames=sorted(data.formats_by_qname))
+        if completed:
+            replayed = _qualification_replay(data, manifest, completed)
+        else:
+            replayed = {}
     capture_load_execution = cc._load_execution(capture_load_policy, expected)
     if capture_load_policy is not None:
         cc.preflight_verified_capture_entries(capture_path.parent, manifest['entries'],
@@ -707,7 +790,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                  for name, unit in units.items()}
     renders = {name: tuple(fmt for fmt in fmts if fmt != "BF16")
                for name, fmts in data.formats_by_qname.items()}
-    verified, telemetry = {}, []
+    verified, telemetry = replayed if completed else {}, []
     for depth in range(min(runner.num_layers, runner.prefetch_lookahead + 1)):
         runner.context.schedule_prefetch(depth)
     for layer in range(runner.num_layers):
@@ -725,8 +808,18 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             capture_windows = [names] if policy is None else [(name,) for name in names]
             layer_stats = []
             for unit_names in capture_windows:
+                if len(unit_names) == 1 and unit_names[0] in completed:
+                    name = unit_names[0]
+                    layer_stats.extend(completed[name]['prefetch'])
+                    if capture_load_execution is not None:
+                        partial = completed[name].get('capture_load_execution')
+                        _require(isinstance(partial, dict), f'{name}: missing capture load execution')
+                        cc.merge_load_execution(capture_load_execution, partial)
+                    continue
+                stats_start = len(layer_stats)
                 acts = hessians = calibration_source = source_weight = None
                 resident = rendered = bound_unit = None
+                unit_load_execution = {}
                 try:
                     if guard is not None:
                         guard.check('before_joint_qualification_unit:' + unit_names[0], reserve_bytes=
@@ -734,9 +827,10 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                             policy['max_load_buffer_bytes'] + policy['workspace_reserve_bytes'] +
                             (0 if capture_load_policy is None else 2 * capture_load_policy['max_buffer_bytes'] +
                              capture_load_policy['max_scratch_bytes']))
-                    unit_load_execution = {}
                     (acts, hessians, _counts, _maxima), _receipt = cc.prefetch_capture(capture_path,
-                        expected_sha256=capture["sha256"], expected_identity=expected,
+                        expected_sha256=capture["sha256"],
+                        **({"expected_identity": expected} if metadata_owner is None else
+                           {"metadata_owner": metadata_owner}),
                         census=data.census, names=unit_names, device=runner.device,
                         **(dict(resource_check=None if guard is None else guard.check,
                                 release_file_pages=True) if policy is not None else {}),
@@ -791,6 +885,15 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                     resident = rendered = bound_unit = None
                 if guard is not None:
                     guard.check('after_joint_qualification_unit:' + unit_names[0])
+                if journal is not None:
+                    name = unit_names[0]
+                    write_unit(journal, stage=QUALIFICATION_STAGE, qname=name,
+                        identity_sha256=journal_sha,
+                        state={'verified_cells': {fmt: verified[name, fmt] for fmt in renders[name]},
+                               'prefetch': layer_stats[stats_start:],
+                               **({'capture_load_execution': unit_load_execution}
+                                  if capture_load_execution is not None else {})})
+                    _pb_commit(len({n for n, _ in verified}), 'qualification', unit=name)
             stats = layer_stats[0] if policy is None else {'windows': layer_stats}
             telemetry.append({"layer": layer, **stats})
             print(json.dumps({"qualified_layer": layer, "qualified_cells": len(verified),
@@ -1150,7 +1253,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         if source_transition is not None:
             result["source_transition"] = source_transition.execution_provenance
         if command == "prepare":
-            _require(prepared is None and not resume, "preparation does not consume a prepared cache or cost resume")
+            _require(prepared is None, "preparation does not consume a prepared cache")
             completion_path = root / "prepared.json"
             _require(not completion_path.exists(), "prepared completion already exists; use its bound record")
             cache = prepare_cache(runner, data, capture=config["canonical_capture"],
@@ -1159,6 +1262,17 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                                   qualification_window=config.get("qualification_window"),
                                   source_authentication=source_authentication,
                                   qualification_guard=qualification_guard,
+                                  qualification_journal=(root / 'qualification' if
+                                                         config.get('qualification_window') is not None else None),
+                                  qualification_resume=resume,
+                                  qualification_identity={
+                                      'plan_sha256': plan_sha256,
+                                      'source_model_identity': source,
+                                      'source_execution': source_execution,
+                                      'implementation_sha256': implementation,
+                                      'calibration_input': calibration,
+                                      'reader_identity': reader_identity,
+                                      'projection_backend': projection_backend.identity},
                                   **({'capture_load_policy': config['capture_load_policy']}
                                      if config.get('capture_load_policy') is not None else {}),
                                   **({'source_capture_compatibility': config['source_capture_compatibility']}

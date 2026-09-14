@@ -1,7 +1,33 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `fix/joint-prepare-source-auth-20260913`. Stamps
+As of: 2026-09-13 · `codex/prepare-throughput-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
+**bounded, recoverable Tessera joint-anchor qualification** (#590). The
+complete source proof from #588 still gates the streamed model and capture.
+With explicit qualification windows, `ProductionWeightCache` now builds one
+resident-key index and updates it across its public dict mutations; each
+window recomputes backing-storage identities only for live tensors, counting
+shared views once and detecting rebound storage. File bounds, serialized
+buffers, LRU limits and the actual post-prefetch storage cap stay intact.
+The capture owner validates and seals the complete manifest once, then reuses
+its immutable metadata and load-execution digest behind a same-file stat
+fence; individual X/H payload bytes are still verified on their actual load.
+
+Preparation now writes an identity-bound qualification journal under
+`prepare/qualification` after each complete unit. Its identity binds the plan,
+source, capture/H, campaign checkpoint, decoder, backend, settings, policy and
+complete cell roster. `prepare --resume` first replays the journal and checks
+current canonical capture X/H and every skipped unit's wire/render SHA before
+continuing at the next unit. Only the complete exact verified-cell roster
+can publish `production.pkl` and `prepared.json`; an interrupted action's log
+count is not a checkpoint. PrismaBuild `qualification` progress counts only
+durably written units. The previous `--resume` refusal changes for bounded
+preparation; legacy unwindowed preparation retains its prior path. No wire,
+numerical render comparison, provenance origin, format or serving gate changes.
+The measured before/after rate and both-box resource evidence remain to be
+attached to #590 before any full-size campaign rerun.
 
 Re-stamped (2026-09-13, `fix/joint-prepare-source-auth-20260913`) for
 **complete-capture source authentication at first streamed use in joint
