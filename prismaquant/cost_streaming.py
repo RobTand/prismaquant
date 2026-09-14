@@ -174,6 +174,18 @@ class StreamedBoundaryArtifacts:
         self.telemetry["peak_resident_tensor_bytes"] = max(
             value, self.telemetry["peak_resident_tensor_bytes"])
 
+    @staticmethod
+    def _auxiliary_owners(batches, cotangents):
+        metadata = [(batch.input_ids, batch.position_ids, batch.position_embeddings,
+                     batch.attention_mask, batch.shared_pass_state) for batch in batches]
+        accumulators = [cotangent.resident_tensors() for row in cotangents for cotangent in row]
+        return metadata, accumulators
+
+    def actual_auxiliary_bytes(self, batches, *, cotangents=(), extra=()):
+        """Count live backing storages, distinct from the future shared reservation."""
+        metadata, accumulators = self._auxiliary_owners(batches, cotangents)
+        return _state_storage_bytes((metadata, accumulators, extra))
+
     def check_auxiliary(self, batches, *, cotangents=(), extra=(), shared_extra=()):
         """Bound retained metadata plus all potential per-probe shared adjoints.
 
@@ -182,9 +194,7 @@ class StreamedBoundaryArtifacts:
         per probe, including aliases at different shared-state keys; actual
         accumulators are checked too. No hidden tensor plane is called metadata.
         """
-        metadata = [(batch.input_ids, batch.position_ids, batch.position_embeddings,
-                     batch.attention_mask, batch.shared_pass_state) for batch in batches]
-        actual_accumulators = [cotangent.resident_tensors() for row in cotangents for cotangent in row]
+        metadata, actual_accumulators = self._auxiliary_owners(batches, cotangents)
         shared = [batch.shared_pass_state for batch in batches] + [shared_extra]
         reserved_shared = self._n_probes * sum(
             tensor.numel() * max(4, tensor.element_size())

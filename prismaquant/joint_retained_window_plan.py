@@ -67,9 +67,14 @@ class RetainedWindowBudget:
             raise RuntimeError('retained COST fixed owners exhaust the physical budget before statistics/PWC')
         return available
 
-    def require_observed_baseline(self, *, observed_bytes, source_bytes, label):
+    def require_observed_baseline(self, *, observed_bytes, source_bytes, label, actual_auxiliary_bytes=0):
         _integer(observed_bytes, 'observed_bytes')
-        limit = self.source_baseline_limit(source_bytes)
+        _integer(actual_auxiliary_bytes, 'actual_auxiliary_bytes')
+        if actual_auxiliary_bytes > self.auxiliary_reserve_bytes:
+            raise RuntimeError('actual auxiliary owner exceeds the declared auxiliary cap')
+        # Unallocated auxiliary capacity is not spare metadata allowance.
+        limit = (self.metadata_reserve_bytes + self.runtime_reserve_bytes
+                 + source_bytes + actual_auxiliary_bytes)
         if observed_bytes > limit:
             raise RuntimeError(f'{label}: actual cgroup-plus-CUDA baseline {observed_bytes} exceeds declared '
                                f'metadata/runtime/source/auxiliary owners {limit}; reseal an admitted plan')
