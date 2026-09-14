@@ -148,13 +148,13 @@ def test_scoped_binding_retains_pilot_and_generic_path_refuses():
     from prismaquant.cost_currency import CostCurrencyError, require_run_currency
     from prismaquant.tessera_joint_allocation import bind_allocation_payload
     joint, data, prepared, metadata, kwargs, names = pilot_fixture()
-    with pytest.raises(CostCurrencyError, match='UNKNOWN'):
+    with pytest.raises(CostCurrencyError, match='separate sampled-proposal'):
         require_run_currency(joint)
     # This fixture's wire/source identities predate its BF16 conversion above;
     # verify the narrow currency and panel-calibration seam independently.
     from prismaquant.cost_currency import require_sampled_joint_run_currency
     assert require_sampled_joint_run_currency(joint)['joint_aura_rows'] == 2 * len(names)
-    with pytest.raises(ValueError, match='UNKNOWN'):
+    with pytest.raises(ValueError, match='separate sampled-proposal'):
         bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
 
 
