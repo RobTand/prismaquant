@@ -1195,6 +1195,26 @@ def _seed_source_identity_cache(config, root):
     return destination
 
 
+def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
+                           reader_identity, projection_backend):
+    """Refuse a stale small completion before hashing the live wire roster.
+
+    Runtime/source/model and exact cell checks still run after input intake;
+    this early gate checks only fields already independently known at startup.
+    """
+    _require(prepared is not None, "cost execution requires independently bound prepared inputs")
+    completion = json.loads(_bound(prepared, "prepared anchors").read_text())
+    _same(completion.get("schema"), PREPARED_SCHEMA,
+          "prepared v3 schema required; legacy preparation requires fresh prepare and recompute")
+    _same(completion.get("status"), "complete", "prepared completion")
+    for key, value in (("plan_sha256", plan_sha256),
+                       ("implementation_sha256", implementation_sha256),
+                       ("reader_identity", reader_identity),
+                       ("projection_backend", projection_backend)):
+        _same(completion.get(key), value, f"prepared {key}")
+    return completion
+
+
 def _restores_activation_scale_env(function):
     """Scope ``execute``'s activation-scale write to the call that makes it.
 
@@ -1303,6 +1323,12 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         # second one.
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
+        implementation = (_aura_source_sha256() if source_transition is None
+                          else source_transition.measurement_source_sha256)
+        if command == "run":
+            _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
+                implementation_sha256=implementation, reader_identity=reader_identity,
+                projection_backend=projection_backend.identity)
         # The command holds a CUDA reservation (``require_cuda_hot_path``
         # above), so any shard it still has to synthesize decodes on that
         # device rather than on one CPU core beside an idle GPU. The standalone
@@ -1365,8 +1391,6 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         result.update(source_model_identity=source, source_execution=source_execution,
                       units=len(data.formats_by_qname), measured_cells=len(data.cells),
                       layer_render_bytes=layer_bytes)
-        implementation = (_aura_source_sha256() if source_transition is None
-                          else source_transition.measurement_source_sha256)
         if source_transition is not None:
             result["source_transition"] = source_transition.execution_provenance
         if command == "prepare":

@@ -17,6 +17,11 @@ sizes; COST still reads every wire once for its independent hash and each
 consumed render for PWC deserialization (window preflight may read the archive
 again). A changed same-size render refuses on first load; a resume that never
 uses a particular render has no claim that its current bytes were checked.
+Before COST's live-wire scan, it now checks the already bound plan SHA,
+implementation/source-package digest, prepared v3 status, reader and backend
+against the small completion; the full source/model/cell replays still run at
+their original boundary. A stale prepared input therefore refuses before a
+whole-roster wire read instead of spending that I/O on a doomed run.
 No full campaign speedup or I/O delta is claimed without a paired profiler
 and both-box load series. Gates: `tests/test_pwc_file_load_receipts.py`,
 `tests/test_tessera_joint_aura.py`.
