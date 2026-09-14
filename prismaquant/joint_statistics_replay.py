@@ -152,7 +152,8 @@ def observe_and_project_windows(modules, specs, cache, policy, *, backward,
 def observe_and_project_retained_windows(
         modules, specs, cache, policy, *, retained_budget, n_probes,
         source_bytes, backward, record_operator, consume_probe,
-        collect_col_energy, backend, guard=None, source_fingerprints=None):
+        collect_col_energy, backend, guard=None, source_fingerprints=None,
+        completed_names=(), sealed_windows=None, before_window=None, after_window=None):
     """Replay all probes inside each admitted target's retained PWC lifetime.
 
     The selected-key-only PWC preflight and scalar target planner run before
@@ -220,7 +221,13 @@ def observe_and_project_retained_windows(
         requested_by_name[target.name] = requested
     selected_keys = tuple(key for target in statistics_plan.targets
                           for key in keys_by_name[target.name])
-    key_costs = cache.retained_key_costs(selected_keys)
+    # File length is the sealed conservative storage bound. Archive validation
+    # belongs to the existing PWC window immediately before its first read,
+    # not an all-candidate header walk ahead of the PB read frontier.
+    key_costs = {}
+    for key in selected_keys:
+        size = cache.estimate_nbytes([key])
+        key_costs[key] = {'incoming_storage_bytes': size, 'serialized_bytes': size}
     targets = targets_from_statistics_plan(statistics_plan, keys_by_name, key_costs)
     retained_plan = plan_retained_targets(
         targets, budget=retained_budget, source_bytes=source_bytes,
@@ -228,10 +235,29 @@ def observe_and_project_retained_windows(
     plan_receipt = retained_plan.as_dict()
     require_sources()
 
+    completed_names = set(completed_names)
+    if not completed_names <= set(modules):
+        raise RuntimeError('retained completed target roster differs')
+    if sealed_windows is not None:
+        if len(sealed_windows) != len(retained_plan.windows):
+            raise RuntimeError('sealed retained window count differs from runtime geometry/files')
+        for sealed, actual in zip(sealed_windows, retained_plan.windows):
+            if (tuple(sealed.original_full_target_names) != actual.names or
+                    sealed.statistics_bytes != actual.statistics_bytes or
+                    sealed.render_file_upper_bound_bytes != actual.render_bytes or
+                    sealed.candidate_count != actual.candidate_count):
+                raise RuntimeError('sealed retained window membership or footprint differs')
+    active_indices = [i for i, window in enumerate(retained_plan.windows)
+                      if set(window.names) - completed_names]
+    last_active = active_indices[-1] if active_indices else None
     candidate_receipts = []
     for window_index, window in enumerate(retained_plan.windows):
+        if before_window is not None:
+            before_window(window_index, window.names)
         require_sources()
-        names = window.names
+        names = tuple(name for name in window.names if name not in completed_names)
+        if not names:
+            continue
         selected = {name: modules[name] for name in names}
         selected_specs = {name: specs[name] for name in names}
         keys = tuple(key for name in names for key in keys_by_name[name])
@@ -277,7 +303,7 @@ def observe_and_project_retained_windows(
                         projection_backend=backend) as lease:
                     lease.begin_probe()
                     backward(probe_index=probe_index,
-                             final=window_index == len(retained_plan.windows) - 1,
+                             final=window_index == last_active,
                              lease=lease)
                     require_sources()
                     lease.finish_observations()
@@ -298,7 +324,9 @@ def observe_and_project_retained_windows(
                             rendered = source = delta = None
                     terms = lease.finish_projections()
                 probe_receipt = {
-                    'plan': retained_plan.as_dict(),
+                    'plan': {'schema': 'prismaquant.joint_retained_target_plan.v1',
+                             'window_count': len(retained_plan.windows),
+                             'footprint_scope': retained_plan.footprint_scope},
                     'window_index': window_index,
                     'window_names': names,
                     'candidate_window': dict(candidate_receipt),
@@ -306,4 +334,9 @@ def observe_and_project_retained_windows(
                 consume_probe(probe_index, terms, diagnostics, probe_receipt)
                 require_sources()
             candidate_receipts.append(dict(candidate_receipt))
+        if after_window is not None:
+            after_window(window_index, names)
+    if not active_indices:
+        for probe_index in range(n_probes):
+            backward(probe_index=probe_index, final=True, lease=None)
     return {'plan': plan_receipt, 'candidate_windows': candidate_receipts}

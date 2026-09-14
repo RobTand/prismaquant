@@ -1917,6 +1917,8 @@ def compute_aura_cost_streamed(
     boundary_storage=None,
     operator_windows=None,
     retained_operator_windows=None,
+    prepared_render_identities=None,
+    cost_read_schedule=None,
     profile=None,
 ) -> dict:
     """Layer-streamed KL-adjoint with identity-bound per-Linear shards.
@@ -2261,7 +2263,30 @@ def compute_aura_cost_streamed(
         # Hash actual decoded production outputs before checkpoint admission,
         # in layer-bounded prefetch windows. This is identity preparation,
         # outside the cotangent/projection hot path; no tensor copy is retained.
-        if production_cache is not None:
+        if prepared_render_identities is not None:
+            expected_pairs = {(name, fmt) for name in names for fmt in render_formats[name]}
+            if (production_cache is None or not isinstance(prepared_render_identities, dict)
+                    or set(prepared_render_identities) != expected_pairs
+                    or set(production_cache._expected_file_sha256 or {}) != expected_pairs):
+                raise RuntimeError('prepared render identity/file SHA coverage differs from joint roster')
+            verified = (production_cache.metadata or {}).get('verified_cells', {})
+            for name, fmt in sorted(expected_pairs):
+                value = prepared_render_identities[name, fmt]
+                source = linears[name].weight
+                if (not isinstance(value, dict) or set(value) != {
+                        'shape', 'dtype', 'logical_bytes', 'content_sha256'}
+                        or value['shape'] != list(source.shape)
+                        or value['dtype'] != str(source.dtype)
+                        or value['logical_bytes'] != source.numel() * source.element_size()
+                        or not isinstance(value['content_sha256'], str)
+                        or len(value['content_sha256']) != 64
+                        or any(c not in '0123456789abcdef' for c in value['content_sha256'])
+                        or verified.get((name, fmt), {}).get('rendered_weight') != value
+                        or verified.get((name, fmt), {}).get('render_file_sha256') !=
+                           production_cache._expected_file_sha256[name, fmt]):
+                    raise RuntimeError(f'prepared render tensor proof differs for {name}@{fmt}')
+                joint_cache_renders.setdefault(name, {})[fmt] = dict(value)
+        elif production_cache is not None:
             for layer_names in names_by_layer.values():
                 if operator_windows is not None:
                     keys = [(name, fmt) for name in layer_names for fmt in render_formats[name]]
@@ -2470,6 +2495,7 @@ def compute_aura_cost_streamed(
             "streamed_boundary_release",
             "streamed_microbatch",
             "streamed_boundary_storage",
+            "retained_operator_windows",
         } & set(extra)
         if reserved:
             raise ValueError(
@@ -2582,6 +2608,63 @@ def compute_aura_cost_streamed(
                 joint_rows[name] = dict(rows)
             completed_checkpoint_units.add(name)
 
+    if cost_read_schedule is not None:
+        if retained_budget is None or prepared_render_identities is None:
+            raise RuntimeError('COST read schedule requires retained replay and prepared tensor identities')
+        cost_read_schedule.bind_runtime(
+            target_names_by_layer={layer: [name for name in names_by_layer.get(layer, [])
+                                         if render_formats[name]]
+                                   for layer in range(runner.num_layers)},
+            validated_completed_units=completed_checkpoint_units)
+
+    def commit_streamed_units(targets):
+        targets = [name for name in targets if name not in completed_checkpoint_units]
+        if joint_activation:
+            if source_execution_identity(runner.model) != joint_probe_identity["source_execution"]:
+                raise RuntimeError("joint AURA source execution backend changed during measurement")
+            for name in targets:
+                joint_rows[name] = {}
+                for fmt in unit_formats[name]:
+                    if fmt in raw_unmeasured.get(name, ()):
+                        continue
+                    key = (name, fmt)
+                    components = joint_components[key]
+                    if fmt in _ZERO_COST_FORMATS:
+                        components = [{"weight": 0.0, "activation": 0.0, "mixed": 0.0, "total": 0.0} for _ in range(n_probes)]
+                    joint_rows[name][fmt] = make_joint_aura_entry(
+                        operator_identity=joint_operators[key],
+                        probe_identity=joint_probe_identity,
+                        signed_components=components,
+                    )
+    
+        if checkpoint_root is not None:
+            assert checkpoint_identity_sha256 is not None
+            for name in targets:
+                _write_aura_unit_checkpoint(
+                    checkpoint_root,
+                    qname=name,
+                    identity_sha256=checkpoint_identity_sha256,
+                    state={**_aura_unit_state(
+                        name,
+                        render_formats[name],
+                        s2=s2,
+                        s4=s4,
+                        x2_probe=x2_probe,
+                        dw_src=dw_src,
+                        g_trace=g_trace,
+                        col_energy=col_energy,
+                        weight_mse_diagnostic=weight_mse_diagnostic,
+                        source_weight_identity=source_weight_identity,
+                        observation_counts=observation_counts,
+                    ), **({"joint_aura_rows": joint_rows[name]} if joint_activation else {}),
+                    **({"execution_provenance": source_transition.execution_provenance}
+                       if source_transition is not None else {})},
+                )
+            completed_checkpoint_units.update(targets)
+            if cost_read_schedule is not None:
+                cost_read_schedule.enter_phase(cost_read_schedule.current_phase,
+                                                len(completed_checkpoint_units))
+
     def _finish_streamed_payload() -> dict:
         payload = _assemble_streamed_aura_payload(
             linears=linears,
@@ -2609,6 +2692,10 @@ def compute_aura_cost_streamed(
             col_energy=col_energy,
             weight_mse_diagnostic=weight_mse_diagnostic,
         )
+        if cost_read_schedule is not None:
+            payload['provenance']['cost_read_schedule'] = cost_read_schedule.identity
+        if retained_budget is not None:
+            payload['provenance']['retained_operator_windows'] = retained_operator_windows
         if source_transition is not None:
             payload["provenance"]["source_transition"] = source_transition.final_provenance()
         if execution_partition is not None:
@@ -2755,6 +2842,11 @@ def compute_aura_cost_streamed(
             "temperature": temperature, "execution_partition": execution_partition,
             "joint_probe_identity": joint_probe_identity,
         }, n_probes=n_probes, check_memory=check_boundary_memory)
+    def capture_source_phase(stage, layer, actual_auxiliary_bytes):
+        if cost_read_schedule is not None and stage == 'source_loading':
+            cost_read_schedule.enter_phase(f'cost_capture_{layer:03d}', len(completed_checkpoint_units))
+        retained_source_phase(stage, layer, actual_auxiliary_bytes)
+
     _log(f"boundary capture: calib {tuple(calib_ids.shape)} in "
          f"{len(row_offsets)} partition(s) across {runner.num_layers} layers ...")
     capture_started = time.time()
@@ -2766,7 +2858,7 @@ def compute_aura_cost_streamed(
         batches = runner.capture_layer_major_boundaries(
             [calib_ids[offset:offset + batch_rows] for offset in row_offsets],
             storage=boundary_storage,
-            **({'source_phase': retained_source_phase} if retained_budget is not None else {}))
+            **({'source_phase': capture_source_phase} if retained_budget is not None else {}))
         retries = runner.layer_major_prefetch_retries
         if retries:
             _log(f"layer-major capture re-read {len(retries)} layer(s) whose speculative "
@@ -2808,6 +2900,8 @@ def compute_aura_cost_streamed(
     if boundary_storage is not None:
         boundary_storage.watch_auxiliary(batches, cotangents)
         boundary_storage.check_auxiliary(batches, cotangents=cotangents)
+    if cost_read_schedule is not None:
+        cost_read_schedule.enter_phase('cost_tail', len(completed_checkpoint_units))
     if retained_budget is not None:
         retained_source_phase('tail', runner.num_layers,
             boundary_storage.actual_auxiliary_bytes(batches, cotangents=cotangents))
@@ -2844,6 +2938,8 @@ def compute_aura_cost_streamed(
     reverse_started = time.time()
     reverse_layers_done = 0
     for layer in reversed(range(runner.num_layers)):
+        if cost_read_schedule is not None:
+            cost_read_schedule.enter_phase(f'cost_reverse_{layer:03d}_source', len(completed_checkpoint_units))
         if retained_budget is not None:
             retained_source_phase('source_loading', layer,
                 boundary_storage.actual_auxiliary_bytes(batches, cotangents=cotangents))
@@ -3164,7 +3260,9 @@ def compute_aura_cost_streamed(
                                 out = x_in = incoming_grad = isolated = roots = root_grads = None
                                 replay_owner = owner = None
 
-                measured = {name: linears[name] for name in pending if render_formats[name]}
+                measured = {name: linears[name] for name in (
+                    names_by_layer.get(layer, []) if retained_budget is not None else pending)
+                    if render_formats[name]}
                 source_seal = {name: JointOperatorStatisticsLease._source_fingerprint(module.weight)
                                for name, module in measured.items()}
                 def consume_window_probe(probe_index, terms, diagnostics, receipt):
@@ -3197,7 +3295,14 @@ def compute_aura_cost_streamed(
                         record_operator=_record_joint_operator,
                         consume_probe=consume_window_probe,
                         collect_col_energy=collect_col_energy, backend=joint_projection_backend,
-                        guard=operator_guard, source_fingerprints=source_seal)
+                        guard=operator_guard, source_fingerprints=source_seal,
+                        completed_names=set(measured) & completed_checkpoint_units,
+                        sealed_windows=(None if cost_read_schedule is None else
+                                        cost_read_schedule.windows_for_layer(layer)),
+                        before_window=(None if cost_read_schedule is None else
+                            lambda index, names: cost_read_schedule.enter_phase(
+                                f'cost_reverse_{layer:03d}_window_{index:03d}', len(completed_checkpoint_units))),
+                        after_window=lambda index, names: commit_streamed_units(names))
                 else:
                     for probe_index in range(n_probes):
                         if not measured:
@@ -3403,23 +3508,7 @@ def compute_aura_cost_streamed(
                     for handle in hook_handles:
                         handle.remove()
 
-            if joint_activation:
-                if source_execution_identity(runner.model) != joint_probe_identity["source_execution"]:
-                    raise RuntimeError("joint AURA source execution backend changed during measurement")
-                for name in pending:
-                    joint_rows[name] = {}
-                    for fmt in unit_formats[name]:
-                        if fmt in raw_unmeasured.get(name, ()):
-                            continue
-                        key = (name, fmt)
-                        components = joint_components[key]
-                        if fmt in _ZERO_COST_FORMATS:
-                            components = [{"weight": 0.0, "activation": 0.0, "mixed": 0.0, "total": 0.0} for _ in range(n_probes)]
-                        joint_rows[name][fmt] = make_joint_aura_entry(
-                            operator_identity=joint_operators[key],
-                            probe_identity=joint_probe_identity,
-                            signed_components=components,
-                        )
+            commit_streamed_units(pending)
 
             # This layer's input boundary will not be read again in the reverse
             # sweep (the next iteration consumes boundary ``layer - 1``).
@@ -3430,29 +3519,6 @@ def compute_aura_cost_streamed(
                     boundary_storage.retire(batch.activations_cpu[layer])
                 batch.activations_cpu[layer] = torch.empty(0)
 
-            if checkpoint_root is not None:
-                assert checkpoint_identity_sha256 is not None
-                for name in pending:
-                    _write_aura_unit_checkpoint(
-                        checkpoint_root,
-                        qname=name,
-                        identity_sha256=checkpoint_identity_sha256,
-                        state={**_aura_unit_state(
-                            name,
-                            render_formats[name],
-                            s2=s2,
-                            s4=s4,
-                            x2_probe=x2_probe,
-                            dw_src=dw_src,
-                            g_trace=g_trace,
-                            col_energy=col_energy,
-                            weight_mse_diagnostic=weight_mse_diagnostic,
-                            source_weight_identity=source_weight_identity,
-                            observation_counts=observation_counts,
-                        ), **({"joint_aura_rows": joint_rows[name]} if joint_activation else {}),
-                        **({"execution_provenance": source_transition.execution_provenance}
-                           if source_transition is not None else {})},
-                    )
             # Report measured progress without extrapolating a layer rate:
             # resumed layers and dense/MoE layers can have very different costs.
             reverse_layers_done += 1

@@ -232,3 +232,24 @@ def test_retained_replay_file_change_between_probes_refuses_and_cleans(tmp_path)
     assert consumed == [(0, 0)]
     assert all(isinstance(value, str) for value in cache.weights.values())
     assert cache._lru_bytes == 0 and cache._resident_window_files is None
+
+
+def test_resume_keeps_original_windows_and_only_final_active_updates_cotangents(tmp_path, monkeypatch):
+    modules, specs, cache, paths, policy, budget = _fixture(tmp_path)
+    loads, entered, committed = [], [], []
+    loader = cache._load_file_tensor
+    def load(path):
+        loads.append(str(path))
+        return loader(path)
+    monkeypatch.setattr(cache, '_load_file_tensor', load)
+    result, calls, consumed, _ = _run_retained(modules, specs, cache, policy, budget,
+        completed_names={'first'},
+        before_window=lambda index, names: entered.append((index, names)),
+        after_window=lambda index, names: committed.append((index, names)))
+    assert entered == [(0, ('first',)), (1, ('second',))]
+    assert committed == [(1, ('second',))]
+    assert calls == [(probe, True) for probe in range(4)]
+    assert len(loads) == 2 and all('second' in path for path in loads)
+    assert [w['names'] for w in result['plan']['windows']] == [('first',), ('second',)]
+    assert all(set(diagnostics) == {'second'} for _, _, diagnostics, _ in consumed)
+    assert not cache._window_resident_storages()

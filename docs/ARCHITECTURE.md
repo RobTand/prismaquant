@@ -16024,3 +16024,24 @@ research questions rather than debt: deriving the GPTQ damp constant from the we
 XLAYER Q4 LFM2.5 routing-channel measurement. The remaining ~34 — mostly PrismaSCOUT-era items
 that died with their subsystem — are enumerated with verdicts in
 `scratch/doc-consolidation-2026-07-30/census_handovers.md` §POSSIBLY-STILL-OPEN.
+
+The retained COST path can consume PREPARE's already measured `rendered_weight`
+identity together with its required serialized-file SHA. It validates exact
+roster, shape, dtype and byte length before checkpoint admission; the existing
+PWC file reader authenticates actual bytes, and the operator checks the resident
+tensor against that identity before projection. This avoids a separate identity
+read of every render. Callers without those prepared proofs retain the explicit
+legacy identity scan.
+
+An optional sealed PB V2 read manifest records unique input extents and ordered
+references for setup/head, forward source capture, tail, and reverse source and
+retained windows. COST's boundaries are produced online, so PREPARE activation
+capture payloads are absent. Exact boundary artifact readback remains owned by
+`StreamedBoundaryArtifacts`; generated outputs are outside the static PB input
+read plan. The manifest descriptor is SHA/length-bound in the submitted command,
+separate from the persistent measurement plan. Before capture, runtime validates
+its full target roster and independently validated completed checkpoint set.
+Partial resume preserves every original window ID and only filters completed
+members. Each retained window publishes the existing per-unit checkpoints after
+all probes, then reports durable progress; source/window phase entry precedes
+its necessary reads. No application prewarmer or dispatcher is introduced.
