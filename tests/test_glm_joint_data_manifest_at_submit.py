@@ -12,7 +12,7 @@ listed the files would be useless -- the loop has to know *when* each byte is
 read. These tests hold the consumption order, the per-layer phase boundaries
 and the exclusions that make the order true:
 
-* the head set first, then one ``layer-<L>`` phase per transformer layer;
+* the head set first, then complete-unit ``layer-<L>-part-<P>`` phases;
 * a rung the campaign never measured contributes no wire, even though its blob
   sits in the same directory as the measured ones;
 * a rung the campaign adopted has a wire and no decoded shard, so the head
@@ -37,6 +37,7 @@ import hashlib
 import json
 import os
 import pickle
+import shlex
 import shutil
 import socket
 import struct
@@ -203,6 +204,7 @@ def _workspace(scratch: Path) -> dict:
         "execution": {"projection_backend": {
             "binary": {"path": str(backend), "sha256": None}, "name": "f"}},
         "qualification_window": {"max_load_buffer_bytes": 1},
+        "source_prefetch": {"max_cache_slots": 2, "prefetch_lookahead": 1},
         "inputs": {
             "campaign_plan": {"path": str(campaign_plan), "sha256": None},
             "census": {"path": str(census), "sha256": None},
@@ -263,7 +265,7 @@ def _paths(manifest, phase_name):
     return out
 
 
-def test_the_prepare_manifest_is_the_head_then_one_phase_per_layer(
+def test_the_prepare_manifest_is_the_head_then_bounded_unit_phases(
     scratch, shared_mount,
 ):
     fixture = _workspace(scratch)
@@ -272,7 +274,8 @@ def test_the_prepare_manifest_is_the_head_then_one_phase_per_layer(
         str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
     names = [phase["name"] for phase in manifest["annotations"]["phases"]]
-    assert names == ["head", "layer-0", "layer-1"]
+    assert names == ["head", "layer-0-part-0", "layer-1-part-0"]
+    assert set(manifest["annotations"]["phase_start_units"]) == set(fixture["names"])
     assert manifest["annotations"]["layers"] == [0, 1]
     assert manifest["annotations"]["entry_point"] == (
         "prismaquant.tessera_joint_aura:prepare")
@@ -291,7 +294,7 @@ def test_the_prepare_manifest_is_the_head_then_one_phase_per_layer(
     head = _paths(manifest, "head")
     assert head[0] == str(fixture["plan"])
     assert str(fixture["checkpoint"]) in head
-    assert all(str(fixture["parts"]) not in path for path in _paths(manifest, "layer-0"))
+    assert all(str(fixture["parts"]) not in path for path in _paths(manifest, "layer-0-part-0"))
     # Every unit shard of the merged checkpoint is read before the first layer.
     assert manifest["annotations"]["counts"]["checkpoint_units"] == len(fixture["names"])
 
@@ -304,7 +307,7 @@ def test_a_layer_phase_reads_source_then_capture_then_render_then_wire(
     manifest = glm_data_manifests.build_joint_pass_manifest(
         str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
-    layer0 = _paths(manifest, "layer-0")
+    layer0 = _paths(manifest, "layer-0-part-0")
     kinds = []
     for path in layer0:
         if path.endswith(".safetensors"):
@@ -317,13 +320,124 @@ def test_a_layer_phase_reads_source_then_capture_then_render_then_wire(
             kinds.append("wire")
         else:  # pragma: no cover - a kind the fixture does not produce
             kinds.append(path)
-    # The runner installs the layer's source weights, then walks its units in
-    # sorted order: that unit's capture, then each measured rung's render and
-    # then its wire.
-    assert kinds == ["source",
+    # The runner begins source prefetch of this layer and its one-layer
+    # successor before walking captures, renders and wires by sorted unit.
+    assert kinds == ["source", "source",
                      "capture", "render", "wire", "render", "wire",
                      "capture", "render", "wire", "render", "wire"]
     assert manifest["annotations"]["capture_window"] == "per_unit"
+
+
+def test_prepare_frontier_splits_only_between_units_and_binds_manifest(
+    scratch, shared_mount, monkeypatch,
+):
+    fixture = _workspace(scratch)
+    monkeypatch.setattr(glm_data_manifests._phase_module, "MAX_PHASE_BYTES", 1)
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    starts = manifest["annotations"]["phase_start_units"]
+    assert len(starts) == len(fixture["names"])
+    assert len(set(starts.values())) == len(starts)
+    assert all(phase in {item["name"] for item in manifest["annotations"]["phases"]}
+               for phase in starts.values())
+
+    path = scratch / "prepare.json.gz"
+    blob = gzip.compress(json.dumps(manifest).encode(), mtime=0)
+    path.write_bytes(blob)
+    load = glm_data_manifests._phase_module.load_prepare_frontier
+    digest = hashlib.sha256(blob).hexdigest()
+    assert load(str(path), digest, manifest["annotations"]["plan_sha256"]) == starts
+    path.write_bytes(blob + b"x")
+    with pytest.raises(RuntimeError, match="changed after submission"):
+        load(str(path), digest, manifest["annotations"]["plan_sha256"])
+
+
+def test_full_layer_readset_includes_non_linear_source_buffers(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.0.self_attn.dt_bias"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "extra-layer-buffer.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+
+    campaign = glm_data_manifests.Campaign(str(fixture["workspace"]))
+    spans = glm_data_manifests._full_source_layer_extents(
+        campaign, 0, "model.language_model.layers.")
+    assert (str(shard), 0, shard.stat().st_size) in spans
+
+
+def test_prepare_declares_next_layer_source_at_prefetch_start(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.1.self_attn.dt_bias"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "next-layer.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert str(shard) in _paths(manifest, "layer-0-part-0")
+    assert str(shard) not in _paths(manifest, "layer-1-part-0")
+    assert manifest["annotations"]["source_prefetch_lookahead_layers"] == 1
+
+
+def test_prepare_refuses_a_prefetch_window_it_cannot_release(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    plan = json.loads(fixture["plan"].read_text())
+    plan["source_prefetch"]["max_cache_slots"] = 3
+    fixture["plan"].write_text(json.dumps(plan))
+    with pytest.raises(SystemExit, match="source prefetch can outlive"):
+        glm_data_manifests.build_joint_pass_manifest(
+            str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+
+
+def test_prepare_includes_a_source_only_tail_layer_at_its_prefetch(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.2.input_layernorm.weight"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "source-only-tail.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+    (model / "config.json").write_text(json.dumps({"num_hidden_layers": 3}))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert str(shard) in _paths(manifest, "layer-1-part-0")
+    assert manifest["annotations"]["layers"] == [0, 1]
+
+
+def test_mtp_passthrough_is_completion_auth_only(scratch, shared_mount):
+    fixture = _workspace(scratch)
+    model = fixture["model"]
+    index_path = model / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    tensor = "model.language_model.layers.2.mlp.down_proj.weight"
+    header = json.dumps({tensor: {"dtype": "BF16", "shape": [1],
+                                  "data_offsets": [0, 2]}}).encode()
+    shard = model / "mtp-passthrough.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0")
+    index["weight_map"][tensor] = shard.name
+    index_path.write_text(json.dumps(index))
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert str(shard) not in _paths(manifest, "layer-1-part-0")
+    assert str(shard) in _paths(manifest, "source-complete")
 
 
 def test_prepare_manifest_traces_full_source_sha_at_first_use_and_completion(
@@ -350,7 +464,7 @@ def test_prepare_manifest_traces_full_source_sha_at_first_use_and_completion(
         str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
     phases = manifest["annotations"]["phases"]
     assert [phase["name"] for phase in phases] == [
-        "head", "layer-0", "layer-1", "source-complete"]
+        "head", "layer-0-part-0", "layer-1-part-0", "source-complete"]
 
     def entries(phase):
         start = next((phases[i - 1]["cumulative_bytes"]
@@ -369,8 +483,8 @@ def test_prepare_manifest_traces_full_source_sha_at_first_use_and_completion(
                    and row["bytes"] == path.stat().st_size for row in entries(phase))
 
     assert whole_shard("head", head)
-    assert whole_shard("layer-0", fixture["shard"])
-    assert not whole_shard("layer-1", fixture["shard"])
+    assert whole_shard("layer-0-part-0", fixture["shard"])
+    assert not whole_shard("layer-1-part-0", fixture["shard"])
     assert whole_shard("source-complete", untouched)
     assert str(index_path) in _paths(manifest, "head")
     assert manifest["annotations"]["counts"]["source_authentication"] == 3
@@ -394,8 +508,9 @@ def test_mtp_index_after_backbone_is_completion_auth_only(scratch, shared_mount)
     manifest = glm_data_manifests.build_joint_pass_manifest(
         str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
     assert str(shard) in _paths(manifest, "source-complete")
-    assert str(shard) not in _paths(manifest, "layer-0")
-    assert str(shard) not in _paths(manifest, "layer-1")
+    for phase in manifest["annotations"]["phases"]:
+        if phase["name"] != "source-complete":
+            assert str(shard) not in _paths(manifest, phase["name"])
 
     # A valid complete proof replaces every whole-shard hash. In particular,
     # classifying MTP as completion-only must not turn it into a body read.
@@ -513,7 +628,7 @@ def test_the_wire_of_a_render_the_campaign_never_wrote_is_read_in_the_head(
     # before any layer installs, so the warm has to reach it in the head. A
     # declaration in ``layer-0`` would leave the pass to read it cold.
     assert str(wire) in _paths(manifest, "head")
-    assert str(wire) not in _paths(manifest, "layer-0")
+    assert str(wire) not in _paths(manifest, "layer-0-part-0")
     assert str(render) not in {entry["path"] for entry in manifest["entries"]}
 
     annotations = manifest["annotations"]
@@ -522,7 +637,7 @@ def test_the_wire_of_a_render_the_campaign_never_wrote_is_read_in_the_head(
     assert annotations["synthesized_render_wire_bytes"] == wire.stat().st_size
     # The layer verifies that wire again. The contract carries a byte range
     # once, so the second read is recorded rather than declared twice.
-    assert annotations["reread_bytes_by_phase"]["layer-0"] >= wire.stat().st_size
+    assert annotations["reread_bytes_by_phase"]["layer-0-part-0"] >= wire.stat().st_size
 
 
 def test_the_run_manifest_hashes_every_cell_before_the_first_layer(
@@ -719,6 +834,41 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
         line for line in printed.splitlines() if line.startswith("[submit] "))
 
 
+def test_fresh_verified_prepare_seals_the_same_phases_and_manifest_digest(
+    scratch, shared_mount, capsys, monkeypatch,
+):
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    original = glm_data_manifests.build_joint_pass_manifest
+
+    def verified(*args, **kwargs):
+        manifest = original(*args, **kwargs)
+        manifest["annotations"]["source_authentication_mode"] = (
+            "verified_streamed_identity_cache")
+        return manifest
+
+    monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    assert dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
+                          "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+                          "--manifest-dir", str(scratch / "manifests"),
+                          "--dry-run"]) == 0
+    printed = capsys.readouterr().out
+    command = next(line for line in printed.splitlines() if line.startswith("[dry-run] "))
+    argv = shlex.split(command[len("[dry-run] "):])
+    phases = [argv[i + 1].split("=", 1)[0] for i, value in enumerate(argv)
+              if value == "--progress-phase"]
+    assert phases == ["head", "layer-0-part-0", "layer-1-part-0"]
+    assert argv.index("--progress-phase") < argv.index("--data-manifest")
+    assert argv[argv.index("--prewarm-manifest") + 1] == (
+        argv[argv.index("--data-manifest") + 1])
+    summary = json.loads(printed[printed.index("{\n"):])
+    assert argv[argv.index("--prewarm-manifest-sha256") + 1] == summary["manifest_sha256"]
+
+
 def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
     scratch, shared_mount, monkeypatch,
 ):
@@ -802,7 +952,7 @@ def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
     summary = json.loads("\n".join(lines[start:]))
     assert summary["entry_point"] == "prismaquant.tessera_joint_aura:prepare"
     assert [phase["name"] for phase in summary["phases"]] == [
-        "head", "layer-0", "layer-1"]
+        "head", "layer-0-part-0", "layer-1-part-0"]
     assert summary["total_bytes"] == summary["phases"][-1]["cumulative_bytes"]
     assert summary["manifest_bytes"] <= glm_data_manifests.MAX_MANIFEST_BYTES
     assert summary["manifest_bytes"] < summary["decoded_manifest_bytes"]
@@ -889,11 +1039,11 @@ REAL_PLAN_TEMPLATE = BASE / "first-proof-joint-preparation-03" / "dryrun" / "pla
 #: earlier the same morning against fewer shards. Projected settled size once
 #: the remaining 97,302 shards exist: 5.20 TB + 97,302 x the 16.8 MB mean
 #: render = about 6.8 TB, which is where the upper bound below comes from.
-#: What the test pins is the shape -- one head phase and one phase per layer,
+#: What the test pins is the shape -- one head phase and bounded unit phases,
 #: a read set in the terabytes, dominated by captures, renders and wires --
 #: not a byte count of a tree that is still being written.
 TOTAL_BYTES_BAND = (4.5e12, 7.5e12)
-EXPECTED_PHASES = 46
+MIN_EXPECTED_PHASES = 46
 
 
 def _real_plan() -> Path | None:
@@ -906,7 +1056,7 @@ def _real_plan() -> Path | None:
     return None
 
 
-def test_the_real_joint_pass_read_set_is_terabytes_in_46_phases(scratch):
+def test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases(scratch):
     plan = _real_plan()
     if plan is None:
         pytest.skip(f"the frozen joint plan is absent: {REAL_PLAN}")
@@ -937,10 +1087,12 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_46_phases(scratch):
         produced_by={"tool": "test", "commit": "0" * 40})
 
     phases = manifest["annotations"]["phases"]
-    assert len(phases) == EXPECTED_PHASES, [phase["name"] for phase in phases]
+    assert MIN_EXPECTED_PHASES <= len(phases) <= 2048, len(phases)
     assert phases[0]["name"] == "head"
-    assert [phase["name"] for phase in phases[1:]] == [
-        f"layer-{index}" for index in range(len(phases) - 1)]
+    assert {int(phase["name"].split("-")[1]) for phase in phases[1:]} == set(range(45))
+    assert all(phase["name"].startswith("layer-") and "-part-" in phase["name"]
+               for phase in phases[1:])
+    assert len(manifest["annotations"]["phase_start_units"]) == 36423
     low, high = TOTAL_BYTES_BAND
     assert low <= manifest["total_bytes"] <= high, (
         f"{manifest['total_bytes']} bytes is outside the measured band "
