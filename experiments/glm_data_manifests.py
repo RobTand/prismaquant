@@ -1395,9 +1395,10 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
     """Declare COST's forward/reverse reads with sealed retained-window IDs.
 
     Full target partitions are derived before applying a validated resume
-    subset. Every layer's captures remain necessary while any target is
-    pending; only completed members' renders are omitted. Original window
-    phases and IDs remain in the read plan. Source rereads are explicit
+    subset. COST creates boundaries online from source and calibration IDs;
+    it never reads PREPARE's per-unit activation capture payloads. Only
+    completed members' renders are omitted. Original window phases and IDs
+    remain in the read plan. Source rereads are explicit
     V2 references to one unique entry, never duplicate entry records.
     """
     from prismaquant.joint_retained_window_plan import RetainedWindowBudget
@@ -1442,7 +1443,7 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
         formats_by_qname[name] = fmts
 
     workspace = os.path.dirname(campaign_plan_path)
-    campaign = _campaign_with_cached_capture_sizes(workspace)
+    campaign = Campaign(workspace)
     if os.path.abspath(campaign.model_dir) != os.path.abspath(plan["model"]):
         raise SystemExit("COST plan source model differs from campaign source")
     owners = {name: row["dir"] for row in campaign.plan["rows"]
@@ -1506,7 +1507,6 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
 
     source_extents = {layer: _full_source_layer_extents(campaign, layer, prefix)
                       for layer in source_layers}
-    pending_any = len(completed) < len(roster)
     for layer in source_layers:
         track.begin(f"cost_capture_{layer:03d}")
         warmed = ((0, 1) if layer == 0 and last_layer >= 1 else (0,) if layer == 0
@@ -1514,12 +1514,6 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
         for source_layer in warmed:
             for path, offset, length in source_extents[source_layer]:
                 track.add(path, offset, length, "source_forward")
-        if pending_any:
-            for name in sorted(by_layer.get(layer, ())):
-                found = campaign.capture_files_for([name])
-                if len(found) != 1 or found[0][1] <= 0:
-                    raise SystemExit(f"COST capture is absent for {name}")
-                _add_capture(track, found)
     track.begin("cost_tail")  # retained last two source layers; no fresh read
 
     window_metadata = []

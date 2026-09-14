@@ -80,6 +80,8 @@ def test_cost_v2_read_plan_repeats_source_without_repeating_entries(
     fixture, prepared, budget = cost_fixture
     monkeypatch.setattr(producer, "_unit_state",
                         lambda *args: pytest.fail("COST inspected every unit payload"))
+    monkeypatch.setattr(producer.Campaign, "capture_files_for",
+                        lambda *args: pytest.fail("COST read PREPARE activation captures"))
     manifest = _build(fixture, prepared, budget)
     assert manifest["schema"] == producer.SCHEMA_V2
     assert manifest["annotations"]["source_owner_cap_bytes"] == 31 << 30
@@ -87,6 +89,7 @@ def test_cost_v2_read_plan_repeats_source_without_repeating_entries(
     assert manifest["entry_count"] == len(manifest["entries"])
     assert len({(item["path"], item["offset"]) for item in manifest["entries"]}) == len(manifest["entries"])
     assert not any(item["path"].endswith(".tessera") for item in manifest["entries"])
+    assert not any("/inputs/" in item["path"] for item in manifest["entries"])
     assert manifest["read_plan"]["read_bytes"] > manifest["total_bytes"]
     phases = _phases(manifest)
     assert list(phases)[:6] == [
@@ -96,6 +99,9 @@ def test_cost_v2_read_plan_repeats_source_without_repeating_entries(
     assert set(phases["cost_reverse_001_source"]["entry_indices"]) & set(
         phases["cost_capture_000"]["entry_indices"])
     assert not phases["cost_reverse_000_source"]["entry_indices"]
+    assert all(manifest["entries"][index]["path"].endswith(".safetensors")
+               for layer in range(3)
+               for index in phases[f"cost_capture_{layer:03d}"]["entry_indices"])
     windows = manifest["annotations"]["windows"]
     assert len(windows) == 6  # two immutable whole-target windows per layer
     assert [window["layer"] for window in windows] == [2, 2, 1, 1, 0, 0]
