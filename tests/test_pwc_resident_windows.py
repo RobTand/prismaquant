@@ -64,6 +64,42 @@ def test_full_backing_storage_and_aliases_are_accounted():
     assert all(isinstance(cache.weights[key], torch.Tensor) for key in keys)
 
 
+def test_window_accounting_does_not_walk_entire_file_roster_each_time(tmp_path):
+    class CountedWeights(dict):
+        scans = 0
+
+        def values(self):
+            self.scans += 1
+            return super().values()
+
+    keys = [('first', 'FP8'), ('second', 'FP8')]
+    weights = CountedWeights({(f'absent-{index}', 'FP8'): 'not-read'
+                              for index in range(10000)})
+    weights.update({key: torch.zeros(4) for key in keys})
+    cache = ProductionWeightCache(weights, {})
+    for key in keys:
+        with cache.resident_window([key], max_resident_bytes=32, max_workers=1):
+            assert cache.get_resident(*key) is weights[key]
+    assert weights.scans <= 1, 'full roster was scanned at every window boundary'
+
+
+def test_window_accounting_tracks_direct_mutations_and_rebound_weights():
+    key = ('resident', 'FP8')
+    cache = ProductionWeightCache({key: torch.zeros(4)}, {})
+    assert cache.plan_resident_windows([key], max_resident_bytes=16, max_workers=1)
+    pool = torch.zeros(100)
+    cache.weights['alias', 'FP8'] = pool[:1]
+    cache.weights.update({('alias2', 'FP8'): pool[1:2]})
+    with pytest.raises(RuntimeError, match='budget'):
+        cache.plan_resident_windows([key], max_resident_bytes=399, max_workers=1)
+    del cache.weights['alias', 'FP8']
+    cache.weights.pop(('alias2', 'FP8'))
+    assert cache.plan_resident_windows([key], max_resident_bytes=16, max_workers=1)
+    cache.weights = {key: pool[:1]}
+    with pytest.raises(RuntimeError, match='budget'):
+        cache.plan_resident_windows([key], max_resident_bytes=399, max_workers=1)
+
+
 def test_invalid_roster_or_oversize_refuses_before_loading(tmp_path, monkeypatch):
     cache, paths, _ = make_cache(tmp_path)
     key, path = next(iter(paths.items()))
