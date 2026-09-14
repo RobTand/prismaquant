@@ -137,7 +137,23 @@ def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_h
     # Tessera's one producer receipt seals H for capture provenance and then
     # stamps its per-unit H identity. Both are producer-owned calls, once at
     # startup rather than once for every published anchor.
-    assert calls.count(id(hessian)) == 2
+    #
+    # How many of the two this instrument can SEE is a property of the pinned
+    # reader, so it is read off the reader rather than typed. At the pin this
+    # branch moves to (tessera 1c827abc) `cached_unit` grew
+    # `digest_host_tensor`: every digest -- `tensor_identity`'s and the seal
+    # prefetch's -- funnels through that new name, and the seal leg no longer
+    # passes through `tensor_identity`, which is the name patched above. The
+    # digest is still paid; this instrument stopped being where it is paid.
+    # The previous pin had no such function and both legs came through here.
+    #
+    # What must hold either way, and is the claim the comment above makes, is
+    # that H is digested per UNIT at startup and never once per published
+    # anchor -- so the bound against `len(anchors)` is asserted too, and it is
+    # the half that would catch a real regression.
+    legs = 1 if hasattr(cached_unit, "digest_host_tensor") else 2
+    assert calls.count(id(hessian)) == legs, calls.count(id(hessian))
+    assert calls.count(id(hessian)) < len(anchors)
     assert bound[name].observed_metadata_bytes() > 0
     replacement = tc.th.activation_source({name: hessian}, source.provenance)
     bound[name].replace_calibration_source(replacement)

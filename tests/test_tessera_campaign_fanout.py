@@ -603,6 +603,33 @@ _NARROW_COLUMNS = 16384
 _WIDE_COLUMNS = 131072
 
 
+def _write_model(model, shapes):
+    """The shard the census names, with the tensors it says are in it.
+
+    ``submit`` derives each row's read set from the model the plan names, so a
+    campaign whose model directory is empty has nothing to declare and is
+    refused. A row that reads nothing is not a shape production has: a Tessera
+    row exists to encode weights it reads off these shards. The fixture writes
+    them, at the shapes the census states, so the rows it plans are rows the
+    submit path can price.
+    """
+    import struct
+
+    header, offset = {}, 0
+    for name in sorted(shapes):
+        rows, columns = shapes[name]
+        size = rows * columns * 2  # bf16
+        header[name + ".weight"] = {
+            "dtype": "BF16", "shape": [rows, columns],
+            "data_offsets": [offset, offset + size]}
+        offset += size
+    blob = json.dumps(header).encode()
+    shard = model / "model-00001-of-00001.safetensors"
+    shard.write_bytes(struct.pack("<Q", len(blob)) + blob + b"\0" * offset)
+    (model / "model.safetensors.index.json").write_text(json.dumps(
+        {"weight_map": {key: shard.name for key in header}}))
+
+
 def _partition_workspace(tmp_path, *, wide=True, box_memory_gb=104):
     """A census whose last anchor group is far wider than the others."""
     model = tmp_path / "model"
@@ -612,6 +639,7 @@ def _partition_workspace(tmp_path, *, wide=True, box_memory_gb=104):
     shapes = {name: [8, _NARROW_COLUMNS] for names in groups.values()
               for name in names}
     shapes["wide"] = [8, _WIDE_COLUMNS]
+    _write_model(model, shapes)
     workspace = tmp_path / "campaign"
     workspace.mkdir()
     (workspace / "census.json").write_text(json.dumps({
@@ -650,7 +678,7 @@ def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
     assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
             for row in manifest] == ["row-0000.json", "row-0001.json",
                                      "row-0002.json"]
-    assert {row["demand"]["mem_gb"] for row in manifest} == {2}
+    assert {row["demand"]["mem_gb"] for row in manifest} == {5}
 
     plan = json.loads((workspace / "plan.json").read_text())
     # The plan is what an auditor reads, so it keeps the whole layout: every
@@ -659,12 +687,12 @@ def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
         "row-0000", "row-0001", "row-0002", "row-0003"]
     assert [entry["admissible"] for entry in plan["rows"]] == [
         True, True, True, False]
-    assert plan["row_memory_gb"] == {"row-0000": 2, "row-0001": 2,
-                                     "row-0002": 2, "row-0003": 65}
+    assert plan["row_memory_gb"] == {"row-0000": 5, "row-0001": 5,
+                                     "row-0002": 5, "row-0003": 68}
     declined = plan["inadmissible_rows"]
     assert [record["row_id"] for record in declined] == ["row-0003"]
     # The demand is recorded as derived, never rewritten to fit the box.
-    assert declined[0]["mem_gb"] == 65
+    assert declined[0]["mem_gb"] == 68
     assert declined[0]["rows_per_box"] == 2
     assert declined[0]["box_memory_gb"] == 104
     assert declined[0]["members"] == ["wide"]
@@ -673,14 +701,14 @@ def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
     out = capsys.readouterr().out
     assert "3 of 4 rows are admissible" in out
     assert "1 declined" in out
-    assert "row-0003" in out and "65" in out and "104" in out
+    assert "row-0003" in out and "68" in out and "104" in out
 
 
 def test_a_plan_whose_every_row_is_too_wide_refuses(tmp_path):
     import dispatch_tessera_campaign as dispatch
 
     spec, workspace = _partition_workspace(tmp_path, wide=False)
-    with pytest.raises(RuntimeError, match="65 GB"):
+    with pytest.raises(RuntimeError, match="68 GB"):
         dispatch.cmd_plan(_plan_args(spec, workspace))
     # Nothing to submit means nothing was written to submit.
     assert not (workspace / "manifest.json").exists()
@@ -733,14 +761,30 @@ def test_submit_hands_the_fleet_the_admissible_rows_only(tmp_path, monkeypatch):
         return types.SimpleNamespace(returncode=0, stdout="")
 
     monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    # Every manifest entry must sit under the mount the manifest declares, and
+    # the fleet warms only the shared mount. The fixture's campaign is the
+    # shared mount for the length of this test.
+    from experiments import glm_data_manifests
+    monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(tmp_path))
+
     args = types.SimpleNamespace(workspace=workspace, wait_s=1)
     assert dispatch.cmd_submit(args) == 0
 
-    assert len(seen) == 1
-    submitted = json.loads(pathlib.Path(seen[0][-1]).read_text())
+    # ``submit`` also asks git for the tree it built the manifests from, so
+    # the submission is picked out by name rather than by being the only
+    # subprocess the run makes.
+    submissions = [command for command in seen
+                   if any("pbcampaign" in str(word) for word in command)]
+    assert len(submissions) == 1
+    submitted = json.loads(pathlib.Path(submissions[0][-1]).read_text())
     assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
             for row in submitted] == ["row-0000.json", "row-0001.json",
                                       "row-0002.json"]
+    # And each of them carries the byte list the fleet needs to warm it.
+    for row in submitted:
+        manifest = json.loads(pathlib.Path(row["data_manifest"]).read_text())
+        assert manifest["entries"], "a submitted row declared no bytes"
+        assert manifest["total_bytes"] > 0
 
 
 # ---------------------------------------------------------------------------

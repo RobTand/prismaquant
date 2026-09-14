@@ -673,7 +673,17 @@ def test_a_new_cell_is_a_moved_answer_even_though_nothing_was_removed(
     # A new valid scope reaches the answer pin; a duplicate scope is already
     # malformed under v4 and must refuse in the shared parser first.
     extra["platform"] = "test_new_platform"
-    payload["lane_eligibility"]["platforms"][extra["platform"]] = {}
+    # v10 platforms are objects, so the invented scope is stated in the current
+    # grammar: same backend and executed contracts as sm_121, because the point
+    # of the test is the NEW CELL reaching the answer pin, not a malformed
+    # platform entry refusing earlier for an unrelated reason.
+    sm121 = payload["lane_eligibility"]["platforms"]["sm_121"]
+    payload["lane_eligibility"]["platforms"][extra["platform"]] = {
+        "backend": sm121["backend"],
+        "compute_capability": list(sm121["compute_capability"]),
+        "serve_image": sm121["serve_image"],
+        "executes": dict(sm121["executes"]),
+    }
     cells.append(extra)
     moved = tmp_path / "runtime_contract.json"
     moved.write_text(_json.dumps(payload), encoding="utf-8")
@@ -727,9 +737,14 @@ def test_the_answer_excludes_every_field_a_gate_does_not_read(dev_pin):
                            "mixed_rung_receipt_note"):
         assert identity_field not in flat, (
             f"{identity_field} is identity or prose, not an answer")
+    # ``loader_axes`` is answer for the same reason ``max_world_size`` is:
+    # ``tessera_menu.tessera_tp_axis_legal`` subtracts a rung on a published
+    # ``refused`` status, so the statuses are values an admission decision is
+    # made of.  The publisher's per-axis reason is prose and stays out.
     for family in ("TESSERA_E2M1_K2", "TESSERA_E4M3_K1", "TESSERA_BF16_K1"):
         assert set(answer["families"][family]) == {
-            "reader_rate_range_q256", "attested_rungs_q256", "max_world_size"}
+            "reader_rate_range_q256", "attested_rungs_q256", "max_world_size",
+            "loader_axes"}
 
 
 def test_the_fused_module_answer_is_the_values_a_gate_reads(dev_pin):

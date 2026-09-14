@@ -28,8 +28,16 @@ Four steps, and each one is separately re-runnable:
 ``plan``
     One ``--units`` selection file per row and one pbcampaign manifest.  Rows
     are portable (no host pin), not exclusive, GPU-demanding, and carry a
-    memory demand derived from the checkpoint's size and the selection's
-    shapes.
+    memory demand derived from the phase plan the row will check itself
+    against -- the plan's bytes, the process floor measured on this fleet, and
+    the margin the row's own guard holds back from its cap.
+
+``check``
+    The same derivation, run against a manifest that already exists, refusing
+    any row whose declared ``demand.mem_gb`` is below it or whose derived
+    demand is wider than a GPU box.  ``submit`` runs it first, so a row is
+    never queued for an admission that its own guard will decline
+    (RobTand/prismaquant#522).
 
 ``submit``
     ``pbcampaign`` over that manifest.  Re-running it **is** the resume: a
@@ -72,10 +80,12 @@ edit them.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import pickle
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -126,6 +136,244 @@ class MergeRefused(RuntimeError):
     """The rows do not describe one campaign."""
 
 
+class RowClassRefused(RuntimeError):
+    """The spec asks for a row this fleet cannot place, or must not place."""
+
+
+# ---------------------------------------------------------------------------
+# Row classes
+# ---------------------------------------------------------------------------
+
+#: The class every subcommand builds today, and the one a spec that declares no
+#: ``classes`` block is entirely made of.  Naming it does not change a row: the
+#: default class resolves to exactly the spec-level ``python`` / ``env`` /
+#: ``tags`` / ``cpus`` / ``container`` a row has always been built from, so the
+#: row dict -- and therefore the action key a finished row is memoized under --
+#: is byte-identical to what the same spec produced before classes existed.
+DEFAULT_ROW_CLASS = "default"
+
+#: What a class may declare.  ``python``/``env``/``tags``/``cpus``/``container``
+#: override the spec-level value of the same name; ``env`` merges over the
+#: spec's rather than replacing it, so a class states only what differs.
+ROW_CLASS_FIELDS = frozenset({
+    "python", "env", "tags", "cpus", "container",
+    "wire_shared", "weights_only", "_why",
+})
+
+#: Where the placement facts live: ISA, container GPU runtime and the host
+#: interpreters actually observed running work under each tag, each with the
+#: PrismaBuild action key that ran it.
+FLEET_INTERPRETERS = Path(__file__).resolve().parent / "fleet_interpreters.json"
+FLEET_INTERPRETERS_SCHEMA = "prismaquant.fleet_interpreters.v1"
+
+#: Campaign flags that make a row's bytes depend on a Hessian.  A weights-only
+#: class may not carry one: the Hessian-aware wire is NOT bit-comparable across
+#: ISAs (RobTand/tessera#472 -- ``torch.linalg.cholesky`` diverges between
+#: cuSOLVER and rocSOLVER by one fp32 epsilon, ``ldl`` explains 53.78% of the
+#: differing rendered elements and the encoder's own consumption of it a
+#: further 15.28%), so such a row encoded off-ISA would not be this campaign's
+#: bytes.  ``--seed-checkpoint`` / ``--seed-wire-dir`` are here for the same
+#: reason: they adopt anchors another box measured under its own Hessian.
+HESSIAN_AWARE_FLAGS = (
+    "--calibration-census", "--calibration-cache", "--calibration-cache-sha256",
+    "--capture-calibration-out", "--seed-checkpoint", "--seed-wire-dir",
+)
+
+#: Modules a weights-only class may never run.  ``tessera_campaign`` is the
+#: whole campaign: its ``census`` row runs a calibration forward over the scope,
+#: its ``capture`` row writes the calibration cache and its pricing rows fit and
+#: consume a Hessian, so every one of its row kinds is either Hessian-aware or
+#: needs the census environment (a resident model, transformers, a PrismaQuant
+#: install).  Listing the module rather than trusting the flags is what makes
+#: the refusal hold for a row kind that has not been written yet.
+WEIGHTS_ONLY_FORBIDDEN_MODULES = frozenset({"prismaquant.tessera_campaign"})
+
+
+def load_fleet_interpreters(path=None) -> dict:
+    """The placement attestation table, checked for shape before it is trusted."""
+
+    source = Path(path) if path is not None else FLEET_INTERPRETERS
+    table = json.loads(source.read_text())
+    if not isinstance(table, dict) or table.get("schema") != FLEET_INTERPRETERS_SCHEMA:
+        raise RowClassRefused(
+            f"{source}: not a {FLEET_INTERPRETERS_SCHEMA} document")
+    tags = table.get("tags")
+    if not isinstance(tags, dict) or not tags:
+        raise RowClassRefused(f"{source}: declares no tags")
+    for tag, shape in tags.items():
+        if not isinstance(shape, dict):
+            raise RowClassRefused(f"{source}: tag {tag!r} is not an object")
+        for field in ("isa", "gpu_runtime"):
+            if not isinstance(shape.get(field), str) or not shape[field]:
+                raise RowClassRefused(f"{source}: tag {tag!r} declares no {field}")
+        interpreters = shape.get("interpreters")
+        if not isinstance(interpreters, dict):
+            raise RowClassRefused(
+                f"{source}: tag {tag!r} declares no interpreters mapping")
+        for interpreter, record in interpreters.items():
+            if not isinstance(record, dict) or not isinstance(
+                    record.get("attested_by"), str) or not record["attested_by"]:
+                raise RowClassRefused(
+                    f"{source}: interpreter {interpreter} on tag {tag!r} names no "
+                    "PrismaBuild action key that ran it")
+    return table
+
+
+def row_class(spec: dict, name: str = DEFAULT_ROW_CLASS) -> dict:
+    """Resolve one class against the spec-level values it inherits.
+
+    A spec with no ``classes`` block has exactly one class, the default, and it
+    IS the spec: same interpreter, same environment, same tags, same container.
+    That is the property the action key depends on, so it is stated here rather
+    than left to the caller.
+    """
+
+    base = {
+        "name": name,
+        "python": spec["python"],
+        "env": dict(spec["env"]),
+        "tags": list(spec.get("tags", ["gb10"])),
+        "cpus": int(spec.get("cpus", 4)),
+        "wire_shared": True,
+        "weights_only": False,
+    }
+    if "container" in spec:
+        base["container"] = spec["container"]
+    declared = spec.get("classes") or {}
+    if name not in declared:
+        if name != DEFAULT_ROW_CLASS:
+            raise RowClassRefused(
+                f"the spec declares no row class {name!r}; it has "
+                f"{sorted(declared) or [DEFAULT_ROW_CLASS]}")
+        return base
+    override = declared[name]
+    if not isinstance(override, dict):
+        raise RowClassRefused(f"row class {name!r} is not an object")
+    unknown = set(override) - ROW_CLASS_FIELDS
+    if unknown:
+        raise RowClassRefused(
+            f"row class {name!r} declares {sorted(unknown)}, which a class does "
+            f"not own; a class may set {sorted(ROW_CLASS_FIELDS - {'_why'})}")
+    resolved = {**base, **{k: v for k, v in override.items() if k != "_why"}}
+    if "env" in override:
+        if not isinstance(override["env"], dict):
+            raise RowClassRefused(f"row class {name!r} env is not an object")
+        resolved["env"] = {**spec["env"], **override["env"]}
+    resolved["tags"] = list(resolved["tags"])
+    resolved["cpus"] = int(resolved["cpus"])
+    for flag in ("wire_shared", "weights_only"):
+        if not isinstance(resolved[flag], bool):
+            raise RowClassRefused(f"row class {name!r} {flag} must be a boolean")
+    if not resolved["tags"]:
+        raise RowClassRefused(f"row class {name!r} names no placement tag")
+    return resolved
+
+
+def _class_isa(resolved: dict, fleet: dict) -> str:
+    """The one ISA this class's tags place it on, or a refusal naming why not."""
+
+    tags = fleet["tags"]
+    found = {}
+    for tag in resolved["tags"]:
+        shape = tags.get(tag)
+        if shape is None:
+            raise RowClassRefused(
+                f"row class {resolved['name']!r} names tag {tag!r}, which "
+                f"{FLEET_INTERPRETERS.name} does not attest; add the tag with "
+                "its ISA, its container GPU runtime and the interpreters "
+                "observed running there")
+        found.setdefault(shape["isa"], []).append(tag)
+    if len(found) != 1:
+        raise RowClassRefused(
+            f"row class {resolved['name']!r} spans {len(found)} instruction "
+            f"sets ({', '.join(sorted(found))}); a row is placed on one of its "
+            "tags and the wire it writes is not the same object on both")
+    return next(iter(found))
+
+
+def _attest_placement(resolved: dict, fleet: dict) -> None:
+    """Refuse a class this fleet cannot actually run where it is sent."""
+
+    tags = fleet["tags"]
+    container = resolved.get("container")
+    for tag in resolved["tags"]:
+        shape = tags[tag]
+        if container is not None:
+            declared = container.get("gpu_runtime", "nvidia")
+            if declared != shape["gpu_runtime"]:
+                raise RowClassRefused(
+                    f"row class {resolved['name']!r} declares container GPU "
+                    f"runtime {declared!r}, and tag {tag!r} attaches its GPU "
+                    f"with {shape['gpu_runtime']!r}; the container would start "
+                    "without the device it was admitted for")
+            continue
+        if resolved["python"] not in shape["interpreters"]:
+            attested = sorted(shape["interpreters"])
+            raise RowClassRefused(
+                f"row class {resolved['name']!r} runs {resolved['python']}, "
+                f"which is not attested on tag {tag!r}; that tag attests "
+                f"{attested or 'no host interpreter'}. Run it there once and "
+                f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
+                "action key, or give the class a container")
+
+
+def validate_row_classes(spec: dict, *, fleet=None, where="spec") -> list[dict]:
+    """Check every declared class against the fleet, and say what each one is.
+
+    A spec that declares no ``classes`` block is not checked: it is the shape
+    every campaign in flight already has, and refusing it here would refuse
+    specs this tool accepts today for a reason that has nothing to do with
+    them.  A spec that DOES declare classes is checked in full, because the
+    only reason to declare one is to place a row somewhere new.
+
+    Two refusals carry the measurement rather than a taste.  A class whose
+    bytes must equal the campaign's (``wire_shared``, the default) may not sit
+    on an ISA other than the default class's: the Hessian-aware wire is not
+    bit-comparable across ISAs, so such a row would merge foreign bytes into
+    one table.  And a class that declares it does NOT share the wire must
+    declare ``weights_only``, because weights-only is the only encode measured
+    byte-identical across the two.
+    """
+
+    declared = spec.get("classes")
+    if declared is None:
+        return []
+    if not isinstance(declared, dict) or not declared:
+        raise RowClassRefused(f"{where}: classes must be a non-empty object")
+    fleet = load_fleet_interpreters() if fleet is None else fleet
+    default = row_class(spec, DEFAULT_ROW_CLASS)
+    default_isa = _class_isa(default, fleet)
+    _attest_placement(default, fleet)
+    records = []
+    for name in sorted(declared):
+        resolved = default if name == DEFAULT_ROW_CLASS else row_class(spec, name)
+        isa = default_isa if name == DEFAULT_ROW_CLASS else _class_isa(resolved, fleet)
+        if name != DEFAULT_ROW_CLASS:
+            _attest_placement(resolved, fleet)
+        if resolved["wire_shared"]:
+            if isa != default_isa:
+                raise RowClassRefused(
+                    f"{where}: row class {name!r} is placed on {isa} while this "
+                    f"campaign's default class is on {default_isa}, and it "
+                    "declares its bytes are the campaign's. A Hessian-aware "
+                    "Tessera wire is not bit-comparable across those two "
+                    "(RobTand/tessera#472). Declare wire_shared false and "
+                    "weights_only true, or keep the class on one ISA")
+        elif not resolved["weights_only"]:
+            raise RowClassRefused(
+                f"{where}: row class {name!r} declares wire_shared false "
+                "without weights_only; the only encode measured byte-identical "
+                "across instruction sets is the weights-only one")
+        records.append({
+            "class": name, "isa": isa, "tags": list(resolved["tags"]),
+            "python": resolved["python"], "cpus": resolved["cpus"],
+            "wire_shared": resolved["wire_shared"],
+            "weights_only": resolved["weights_only"],
+            "containerized": "container" in resolved,
+        })
+    return records
+
+
 # ---------------------------------------------------------------------------
 # The run spec
 # ---------------------------------------------------------------------------
@@ -160,23 +408,78 @@ def load_spec(path: Path) -> dict:
             "takes its deadline from the fleet, not from inside the round loop")
     if "container" in spec:
         validate_container(spec)
+    for name in sorted(spec.get("classes") or {}):
+        resolved = row_class(spec, name)
+        if "container" in resolved:
+            validate_container({"container": resolved["container"],
+                                "env": resolved["env"]})
+    validate_row_classes(spec, where=str(path))
     _process_baseline_bytes(spec, where=str(path))
     return spec
 
 
-def _process_baseline_bytes(spec: dict, *, where="spec") -> int:
-    """The per-row process floor this recipe reserves, in bytes.
+#: The process floor a row reserves when its spec declares none, in bytes.
+#:
+#: Measured, not invented.  Every completed row of the GLM-5.3
+#: ``extension-r1024-02`` campaign stamps the floor its own
+#: ``CaptureMemoryGuard`` read at its first check onto its ``cost.pkl``
+#: (``selected_source_preparation.memory_guard.baseline.bytes``).  Read on
+#: 2026-09-12 across rows 0058, 0061, 0062, 0063, 0066, 0074 and 0079, those
+#: readings span 0.88-1.15 GB, and this is the top of that range: a
+#: reservation is only worth the demand it moves if it covers the worst floor
+#: observed, not the average one.  The 1,062,359,040 bytes the
+#: ``_row_memory_gb`` docstring cites is an earlier reading, recorded on the
+#: RobTand/prismaquant#390 receipt rather than traced to one of these rows; it
+#: sits inside this range.
+#:
+#: Session note: ``pb_mem_gb_must_track_the_checked_phase_plan``, and
+#: RobTand/prismaquant#522, which records the three rows this default exists
+#: to stop losing.  It is a fleet number with a date on it, so a spec that
+#: knows its own box overrides it and says so in ``baseline_policy``.
+DEFAULT_PROCESS_BASELINE_BYTES = 1_150_000_000
 
-    Zero, the legacy default, reserves nothing and is what every spec written
-    before this key meant.  The value is the recipe's, not this tool's: no
-    universal torch-plus-CUDA constant is invented here, because a floor is a
-    property of the box and the runtime a row lands on and this planner never
-    enters either.
+
+def _process_baseline(spec: dict, *, where="spec") -> "tuple[int, str]":
+    """The per-row process floor this recipe reserves, and where it came from.
+
+    A spec that declares ``process_baseline_bytes`` owns the number, including
+    a declared zero, which reserves nothing.  A spec that declares nothing gets
+    ``DEFAULT_PROCESS_BASELINE_BYTES``, the worst floor measured on this fleet.
+    The two are reported under different ``baseline_policy`` values, so a
+    reader of a plan can tell a number an operator chose from a number this
+    tool supplied.
+
+    No universal torch-plus-CUDA constant is invented here: the default is a
+    reading taken on the boxes these rows run on, and it stays a reservation
+    rather than a measurement.  The row still measures its own floor at its
+    first ``CaptureMemoryGuard.check`` and stamps it on its receipt.
     """
-    from prismaquant.autoscale import validate_process_baseline_bytes
-    return validate_process_baseline_bytes(
-        spec.get("process_baseline_bytes", 0),
+    from prismaquant.autoscale import (BASELINE_POLICY_EXPLICIT_RESERVATION,
+                                       BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION,
+                                       validate_process_baseline_bytes)
+    declared = "process_baseline_bytes" in spec
+    value = validate_process_baseline_bytes(
+        spec.get("process_baseline_bytes", DEFAULT_PROCESS_BASELINE_BYTES),
         where=f"{where}: process_baseline_bytes")
+    return value, (BASELINE_POLICY_EXPLICIT_RESERVATION if declared
+                   else BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION)
+
+
+def _process_baseline_bytes(spec: dict, *, where="spec") -> int:
+    """The reservation alone, for callers that do not record its origin."""
+    return _process_baseline(spec, where=where)[0]
+
+
+def _guard_margin_bytes() -> int:
+    """The physical safety margin the row's own guard holds back from the cap.
+
+    Read from ``CaptureMemoryGuard`` rather than restated.  The guard refuses
+    at ``cap - margin``, so a demand that does not carry the margin buys an
+    admission the guard then declines, which is the failure this derivation
+    exists to stop.
+    """
+    from prismaquant.memory_management import CaptureMemoryGuard
+    return int(CaptureMemoryGuard.MARGIN_BYTES)
 
 
 def _model_bytes(model: str) -> int:
@@ -203,9 +506,13 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     A phase plan states deltas, and the floor those deltas sit on --
     interpreter, torch, the CUDA runtime, the pages the row's process has
     touched -- is a property of the box the row lands on, which this planner
-    never enters. So it is still never derived here; it is *declared*, as the
-    spec's ``process_baseline_bytes``, defaulting to zero. Its own scope
-    travels with it: it is the recipe's number, not a universal maximum.
+    never enters. So it is still never derived here; it is *reserved*. A spec
+    that declares ``process_baseline_bytes`` owns the number, including a
+    declared zero; a spec that declares nothing gets
+    ``DEFAULT_PROCESS_BASELINE_BYTES``, the worst floor measured on this fleet.
+    ``baseline_policy`` records which of the two a plan used. Either way the
+    scope travels with the number: it is this fleet's or this recipe's
+    reservation, not a universal maximum.
 
     It is added to the demand and never to ``memory_bytes``, because the
     demand becomes a cgroup cap of exactly that many GiB
@@ -221,31 +528,67 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     one thing on one path and nothing on the other.
 
     Rounding is not a reservation. ``ceil`` leaves at most one GiB of slack,
-    and the floor measured on this fleet is 1,062,359,040 bytes -- 0.9894 GiB,
+    and the floor on the #390 receipt is 1,062,359,040 bytes -- 0.9894 GiB,
     less than the most ``ceil`` can leave -- so before this key a row admitted
     according to where its ``memory_bytes`` landed modulo one GiB, which both
     inspected example rows lost. The row
     still measures its own floor at its first ``CaptureMemoryGuard.check`` and
     stamps it on its receipt (RobTand/prismaquant#390); that reading, not this
     declaration, remains the measured number.
+
+    **The guard's own margin is charged here too.** The row is refused not at
+    its cap but at ``cap - margin``: ``CaptureMemoryGuard.check`` compares its
+    absolute reading against ``cap_bytes - margin_bytes``
+    (``prismaquant/memory_management.py``). A demand that covers the plan and
+    the floor but not the margin therefore buys an admission the row's own
+    first check declines. The number is read from the guard, never restated,
+    so the two cannot drift apart.
+    """
+    return _row_memory_demand(spec, members, census,
+                              selected_source=selected_source)["mem_gb"]
+
+
+def _row_memory_demand(spec: dict, members: list[str], census: dict, *,
+                       selected_source=False) -> dict:
+    """The row's demand and every term it is made of.
+
+    ``_row_memory_gb`` is this, reduced to its GiB. The terms are kept because
+    a refusal has to name them: a row that dies on the admission predicate is
+    diagnosable from the plan, the floor and the margin, and before this they
+    were reachable only by unpickling a completed row's ``cost.pkl``
+    (RobTand/prismaquant#522).
     """
     gib = 1024 ** 3
-    baseline = _process_baseline_bytes(spec)
+    baseline, policy = _process_baseline(spec)
+    margin = _guard_margin_bytes()
     if "--streaming" in spec['campaign_argv']:
-        resource = _streamed_resource_plan(spec, census, members, selected_source=selected_source)
-        return int(math.ceil((resource['memory_bytes'] + baseline)/gib))
-    shapes = census.get("unit_shapes") or {}
-    hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
-    rows = sum(int(shapes.get(name, [0, 0])[1]) * int(spec.get("max_act_rows", 512)) * 4
-               for name in members)
-    total = _model_bytes(spec["model"]) + hessian + rows
-    return (int(math.ceil((total + baseline) / gib))
-            + int(spec.get("headroom_gb", 24)))
+        resource = _streamed_resource_plan(spec, census, members,
+                                           selected_source=selected_source)
+        plan_bytes = int(resource['memory_bytes'])
+        headroom_gb = 0
+    else:
+        shapes = census.get("unit_shapes") or {}
+        hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
+        rows = sum(int(shapes.get(name, [0, 0])[1]) * int(spec.get("max_act_rows", 512)) * 4
+                   for name in members)
+        plan_bytes = _model_bytes(spec["model"]) + hessian + rows
+        headroom_gb = int(spec.get("headroom_gb", 24))
+    demand_bytes = plan_bytes + baseline + margin
+    return {
+        "plan_bytes": int(plan_bytes),
+        "process_baseline_bytes": int(baseline),
+        "process_baseline_policy": policy,
+        "guard_margin_bytes": int(margin),
+        "demand_bytes": int(demand_bytes),
+        "headroom_gb": headroom_gb,
+        "mem_gb": int(math.ceil(demand_bytes / gib)) + headroom_gb,
+    }
 
 
 def _streamed_resource_plan(spec, census, members, *, selected_source=False):
     from prismaquant.autoscale import streamed_calibration_resources, selected_anchor_resources
     argv = spec['campaign_argv']
+    baseline_bytes, baseline_policy = _process_baseline(spec)
     def argument(name, default, convert=int):
         return convert(argv[argv.index(name)+1]) if name in argv else default
     shapes = census.get('unit_shapes') or {}
@@ -259,8 +602,9 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
                         argument('--streaming-cache-headroom-gb', 24., float)),
         # Recorded beside ``memory_bytes``, never summed into it: the plan
         # stays pure phase deltas and the reservation is charged once, in
-        # ``_row_memory_gb``, on the demand.
-        process_baseline_bytes=_process_baseline_bytes(spec))
+        # ``_row_memory_demand``, on the demand.
+        process_baseline_bytes=baseline_bytes,
+        process_baseline_policy=baseline_policy)
     if selected_source:
         return selected_anchor_resources(spec['model'], **options,
             anchor_batch_size=argument('--anchor-batch-size', 1),
@@ -277,6 +621,120 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
     return streamed_calibration_resources(spec['model'], **options,
         nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
         capture_policy=argument('--streaming-capture-policy', 'legacy', str))
+
+
+class DemandRefused(RuntimeError):
+    """A manifest row asks for less memory than the row it will run needs."""
+
+
+def _inner_campaign_argv(row: dict) -> list:
+    """The campaign argv a manifest row will actually run.
+
+    A row's command is ``python -u -m prismaquant.tessera_campaign <argv>``,
+    wrapped by the container launcher when the spec declares one, so the
+    campaign argv is whatever follows the LAST ``-m``. Reading it back from
+    the row, rather than rebuilding it from the spec, is the point: the
+    relaunch that lost three rows carried ``--publication-overlap-bytes`` in
+    the manifest while the spec that planned it did not
+    (RobTand/prismaquant#522).
+    """
+    argv = list(row.get("argv") or [])
+    if "-m" not in argv:
+        raise DemandRefused("row argv runs no python module, so its demand "
+                            "cannot be derived")
+    index = len(argv) - 1 - argv[::-1].index("-m")
+    return argv[index + 2:]
+
+
+def _row_label(inner_argv: list, index: int) -> str:
+    """The row id, taken from the selection file it names."""
+    if "--units" in inner_argv:
+        return Path(inner_argv[inner_argv.index("--units") + 1]).stem
+    return f"row-{index:04d}"
+
+
+def _units_members(inner_argv: list) -> list:
+    selection = json.loads(Path(inner_argv[inner_argv.index("--units") + 1]).read_text())
+    return [name for entry in selection["groups"]
+            for name in (entry.get("sampled") or entry["members"])]
+
+
+def verify_row_demand(spec: dict, census: dict, row: dict, *,
+                      box_memory_gb=None, label=None) -> dict:
+    """Recompute one row's demand from its own argv and refuse an under-declared one.
+
+    Two refusals, and neither is a warning:
+
+    * a declared ``demand.mem_gb`` below the derived one buys an admission the
+      row's own guard declines about twenty seconds later, which PrismaBuild
+      records as a failed row with no retry;
+    * a derived demand above the capacity the fleet's GPU boxes declare can
+      never be admitted at all, so it is refused here rather than queued.
+
+    ``box_memory_gb`` is a parameter and not a lookup: this function states
+    what the capacity has to be compared against, and the caller states what
+    the fleet declares.
+    """
+    inner = _inner_campaign_argv(row)
+    label = label or "row"
+    model = (inner[inner.index("--model") + 1] if "--model" in inner
+             else spec["model"])
+    row_spec = {**spec, "model": model, "campaign_argv": inner}
+    members = (_units_members(inner) if "--units" in inner
+               else sorted(census.get("counts") or {}))
+    demand = _row_memory_demand(row_spec, members, census,
+                                selected_source="--streaming" in inner)
+    gib = 1024 ** 3
+    declared_gb = int(row["demand"]["mem_gb"])
+    record = {"row": label, "declared_mem_gb": declared_gb,
+              "declared_bytes": declared_gb * gib, **demand}
+    terms = (f"plan {demand['plan_bytes']} B + process baseline "
+             f"{demand['process_baseline_bytes']} B "
+             f"({demand['process_baseline_policy']}) + guard margin "
+             f"{demand['guard_margin_bytes']} B = {demand['demand_bytes']} B")
+    if box_memory_gb is not None and demand["mem_gb"] > int(box_memory_gb):
+        raise DemandRefused(
+            f"{label}: derived demand {demand['mem_gb']} GiB is above the "
+            f"{int(box_memory_gb)} GiB a GPU box declares, so no admission "
+            f"can come: {terms}"
+            + (f" + {demand['headroom_gb']} GiB declared headroom"
+               if demand["headroom_gb"] else "")
+            + f"; declared demand.mem_gb {declared_gb} "
+            f"({declared_gb * gib} B). Reduce a plan term or run it on a "
+            "wider box; do not shrink the demand to fit.")
+    if declared_gb < demand["mem_gb"]:
+        raise DemandRefused(
+            f"{label}: declared demand.mem_gb {declared_gb} "
+            f"({declared_gb * gib} B) is below the {demand['mem_gb']} GiB its "
+            f"own argv derives: {terms}"
+            + (f" + {demand['headroom_gb']} GiB declared headroom"
+               if demand["headroom_gb"] else "")
+            + ". PrismaBuild would admit the row and its CaptureMemoryGuard "
+            "would then refuse it.")
+    return record
+
+
+def verify_manifest_demands(spec: dict, census: dict, rows: list, *,
+                            box_memory_gb=None) -> list:
+    """Every row in a manifest, refusing on the whole set rather than the first.
+
+    A campaign is re-queued as a set, so an operator needs every
+    under-declared row named at once, not one per run.
+    """
+    records, refusals = [], []
+    for index, row in enumerate(rows):
+        label = _row_label(_inner_campaign_argv(row), index)
+        try:
+            records.append(verify_row_demand(spec, census, row,
+                                             box_memory_gb=box_memory_gb,
+                                             label=label))
+        except DemandRefused as error:
+            refusals.append(str(error))
+    if refusals:
+        raise DemandRefused(
+            f"{len(refusals)} of {len(rows)} rows declare a memory demand "
+            "their own argv does not support:\n" + "\n".join(refusals))
+    return records
 
 
 def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
@@ -353,8 +811,39 @@ CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 18
 
 def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
          progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
-         module: str = "prismaquant.tessera_campaign") -> dict:
-    env = dict(spec['env'])
+         module: str = "prismaquant.tessera_campaign",
+         row_class_name: str = DEFAULT_ROW_CLASS) -> dict:
+    """One PrismaBuild row, built for one class of the spec.
+
+    The class supplies the interpreter, the environment, the placement tags,
+    the CPU count and the container; the default class supplies exactly the
+    spec-level values, so a row built for it is byte-identical to the row this
+    function returned before classes existed.  Nothing about the class is
+    written INTO the row: ``submit`` re-run is the resume, a finished row is a
+    CAS hit on its action key, and a key that moved is a row that re-runs.
+    Nothing records the class either: every subcommand today builds the
+    ``default`` class, so there is no second class in any plan to record, and
+    the first row kind that is built for another one records it in its own
+    plan entry when it lands.
+    """
+    resolved = row_class(spec, row_class_name)
+    if resolved["weights_only"]:
+        if module in WEIGHTS_ONLY_FORBIDDEN_MODULES:
+            raise RowClassRefused(
+                f"row class {row_class_name!r} is weights-only and {module} is "
+                "not: its census row runs a calibration forward over the whole "
+                "scope, its capture row writes the calibration cache, and its "
+                "pricing rows fit and consume a Hessian, whose wire is not "
+                "bit-comparable across instruction sets (RobTand/tessera#472)")
+        named = [flag for flag in HESSIAN_AWARE_FLAGS
+                 if any(arg == flag or arg.startswith(flag + "=")
+                        for arg in argv)]
+        if named:
+            raise RowClassRefused(
+                f"row class {row_class_name!r} is weights-only and this row's "
+                f"argv names {named}; those bytes depend on a Hessian this "
+                "class may not have measured or adopted")
+    env = dict(resolved['env'])
     policy_flag = '--streaming-capture-policy'
     bounded = (policy_flag+'=shared-inputs-bounded-v1' in argv or
                (policy_flag in argv and
@@ -365,18 +854,18 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
         from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
         env = {**BOUNDED_CAPTURE_ENV, **env}
         require_bounded_capture_environment(env)
-    command = [spec["python"], "-u", "-m", module, *argv]
-    if "container" in spec:
-        validate_container(spec)
+    command = [resolved["python"], "-u", "-m", module, *argv]
+    if "container" in resolved:
+        container_spec = {"container": resolved["container"], "env": env}
+        validate_container(container_spec)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
-                   json.dumps({"container": spec["container"], "env": env},
-                              sort_keys=True), "--", *command]
+                   json.dumps(container_spec, sort_keys=True), "--", *command]
     row = {
         "argv": command,
         "cwd": spec["cwd"],
-        "demand": {"gpu": 1, "cpu": int(spec.get("cpus", 4)), "mem_gb": int(mem_gb)},
+        "demand": {"gpu": 1, "cpu": int(resolved["cpus"]), "mem_gb": int(mem_gb)},
         "env": env,
-        "tags": list(spec.get("tags", ["gb10"])),
+        "tags": list(resolved["tags"]),
         # A row is one memoized action and a retry re-runs the same argv over
         # the same checkpoint, which is exactly what the journal is for.  The
         # policy is sealed into the action key, so it is spelled even though
@@ -858,6 +1347,11 @@ def cmd_plan(args) -> int:
     plan = {
         "schema": PLAN_SCHEMA,
         "model": spec["model"],
+        # The spec this plan was derived from, so ``check`` and ``submit`` can
+        # re-derive every row's demand without being told again. A plan
+        # written before this field exists is checked with an explicit
+        # ``--spec``.
+        "spec": str(args.spec),
         "census": str(workspace / "census.json"),
         "calibration_cache": calibration_cache,
         "manifest": str(manifest),
@@ -865,11 +1359,16 @@ def cmd_plan(args) -> int:
         "rows_per_box": per_box,
         "row_memory_gb": row_memory_gb,
         # The reservation those demands carry, stated once for the whole plan
-        # because it is a per-row constant. Zero means none was declared, and
-        # every row's phase plan records the same thing in its own
-        # ``baseline_policy``, so a reader cannot mistake an absent
-        # reservation for a covered one.
-        "process_baseline_bytes": _process_baseline_bytes(spec),
+        # because it is a per-row constant, with where it came from. Zero
+        # means the spec declared none, and every row's phase plan records the
+        # same thing in its own ``baseline_policy``, so a reader cannot
+        # mistake an absent reservation for a covered one.
+        "process_baseline_bytes": _process_baseline(spec)[0],
+        "process_baseline_policy": _process_baseline(spec)[1],
+        # The other term outside the phase deltas: the margin the row's own
+        # guard holds back from the cap. Recorded because a demand that does
+        # not carry it is admitted and then refused.
+        "guard_margin_bytes": _guard_margin_bytes(),
         # The rows the manifest does not hold, at the demand they were derived
         # at. A reader of the plan sees the whole layout; a reader of the
         # manifest sees only what was submitted.
@@ -904,12 +1403,394 @@ def cmd_plan(args) -> int:
     return 0
 
 
+def _checked_manifest(args, *, manifest: Path) -> list:
+    """Re-derive every row's demand from its own argv, or refuse to go on.
+
+    A manifest is an editable file and the plan that wrote it is not
+    authoritative over what it now says. So the check reads the rows as they
+    stand: a hand-edited argv, a hand-edited ``mem_gb``, or a plan term that
+    moved since are all the same question, asked of the bytes about to be
+    submitted.
+    """
+    workspace = Path(args.workspace)
+    plan_path = workspace / "plan.json"
+    plan = json.loads(plan_path.read_text()) if plan_path.is_file() else {}
+    spec_path = getattr(args, "spec", None) or plan.get("spec")
+    if not spec_path:
+        raise DemandRefused(
+            f"{manifest} cannot be checked: neither --spec nor a 'spec' field "
+            f"in {plan_path}. Pass the spec these rows were planned from.")
+    spec = load_spec(Path(spec_path))
+    census_path = getattr(args, "census", None) or plan.get("census") or (
+        workspace / "census.json")
+    census = json.loads(Path(census_path).read_text())
+    box_memory_gb = getattr(args, "box_memory_gb", None)
+    if box_memory_gb is None:
+        box_memory_gb = spec.get("box_memory_gb")
+    rows = json.loads(Path(manifest).read_text())
+    records = verify_manifest_demands(spec, census, rows,
+                                      box_memory_gb=box_memory_gb)
+    for record in records:
+        print(f"[dispatch] {record['row']} demands {record['declared_mem_gb']} "
+              f"GiB, derives {record['mem_gb']} GiB "
+              f"(plan {record['plan_bytes']} B, baseline "
+              f"{record['process_baseline_bytes']} B, margin "
+              f"{record['guard_margin_bytes']} B)")
+    return records
+
+
+def cmd_check(args) -> int:
+    """Recompute every manifest row's demand and refuse an under-declared one."""
+    manifest = Path(args.manifest) if getattr(args, "manifest", None) else (
+        Path(args.workspace) / "manifest.json")
+    records = _checked_manifest(args, manifest=manifest)
+    print(f"[dispatch] {len(records)} rows in {manifest} declare a demand "
+          "their own argv supports")
+    return 0
+
+#: Where ``submit`` writes the per-row read sets and the manifest that names
+#: them.  Both are derived, so both are rewritten on every submit and neither
+#: is the planned ``manifest.json``: ``plan`` owns that file.
+DATA_MANIFEST_DIR = "data-manifests"
+SUBMITTED_MANIFEST = "manifest.submitted.json"
+
+
+def _manifest_producer():
+    """The campaign's data-manifest producer, imported from ``experiments/``.
+
+    It is imported here rather than at module load because it reads the
+    campaign's plan and capture manifest, which only ``submit`` needs.
+    """
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from experiments import glm_data_manifests
+
+    return glm_data_manifests
+
+
+def attach_data_manifests(workspace: Path, rows: list[dict], *,
+                          out_dir: Path | None = None) -> list[dict]:
+    """Give every row the byte list PrismaBuild needs to warm it, or refuse.
+
+    Only the producer knows a row's read set: the capture files its members
+    name, the byte extents of those members' weights inside the safetensors
+    shards, and the seed wire the row's own argv points at.  Without that list
+    a row is invisible to the fleet's prewarm loop and starts against cold
+    spindles -- measured at 26 MB/s over 64 GB on sparky (row-0074,
+    2026-09-12), about 40 minutes of idle GPU per row.
+
+    The manifest is a ``pbrun`` input, not part of the campaign's own
+    checkpoint identity, so the row's ``argv`` is returned byte-identical to
+    what ``plan`` wrote; only the ``data_manifest`` key is added.  A row whose
+    manifest cannot be built is refused here, where the reason is readable,
+    rather than submitted blind.
+    """
+    producer = _manifest_producer()
+    campaign = producer.Campaign(str(workspace))
+    provenance = producer.deterministic_provenance(
+        str(workspace), campaign, "stat")
+    out_dir = out_dir or workspace / DATA_MANIFEST_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    attached: list[dict] = []
+    for index, row in enumerate(rows):
+        row_id = producer.row_id_of(row)
+        if row_id is None:
+            raise RuntimeError(
+                f"row {index} names no single units/row-XXXX.json in its argv, "
+                "so its read set cannot be derived; refusing to submit it "
+                "without a data manifest")
+        if row_id not in campaign.rows:
+            raise RuntimeError(
+                f"{row_id} is not a row of {workspace}/plan.json")
+        manifest = producer.build_manifest(
+            campaign, row_id, provenance, row.get("argv"))
+        path = out_dir / f"{row_id}.data-manifest.json"
+        blob = producer.check_manifest_bytes(
+            json.dumps(manifest, indent=1, sort_keys=False).encode() + b"\n",
+            where=row_id)
+        path.write_bytes(blob)
+        attached.append({**row, "data_manifest": str(path)})
+
+    missing = [producer.row_id_of(row) for row in attached
+               if not row.get("data_manifest")]
+    if missing:
+        raise RuntimeError(f"rows without a data manifest: {missing}")
+    return attached
+
+
 def cmd_submit(args) -> int:
     workspace = Path(args.workspace)
+    manifest = workspace / "manifest.json"
+    # An under-declared row is admitted and then refused by its own guard
+    # about twenty seconds in, which PrismaBuild records as failed with no
+    # retry (RobTand/prismaquant#522). Nothing about that is cheaper to find
+    # out later, so the demands are re-derived before any row is submitted.
+    # This reads the planned rows, and attaching a manifest below changes
+    # neither ``argv`` nor ``demand``, so what is checked is what is sent.
+    _checked_manifest(args, manifest=manifest)
+    rows = attach_data_manifests(workspace, json.loads(manifest.read_text()))
+    submitted = workspace / SUBMITTED_MANIFEST
+    submitted.write_text(json.dumps(rows, indent=2) + "\n")
+    plural = "" if len(rows) == 1 else "s"
+    print(f"[dispatch] data manifests attached to {len(rows)} row{plural} "
+          f"-> {submitted}")
     # Re-running the manifest IS the resume: a finished row is a cache hit and
-    # a running row is re-attached, both by pbcampaign itself.
-    return _pbcampaign(workspace / "manifest.json", wait_s=args.wait_s,
+    # a running row is re-attached, both by pbcampaign itself.  The manifests
+    # are a deterministic function of the campaign and the tree, so a second
+    # submit addresses the same action keys as the first.
+    return _pbcampaign(submitted, wait_s=args.wait_s,
                        receipts=workspace / "receipts.json")
+
+
+
+# ---------------------------------------------------------------------------
+# post-campaign GPU submissions
+# ---------------------------------------------------------------------------
+
+#: The published PrismaBuild client. ``pbrun`` snapshots the checkout and
+#: places the action; it is not vendored here so a stale copy cannot become a
+#: stale submission.
+PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
+
+JOINT_ENTRY_POINT = "prismaquant.tessera_joint_aura"
+ALLOCATION_ENTRY_POINT = "prismaquant.tessera_joint_allocation"
+EXPORT_ENTRY_POINT = "tessera.experiments.export_tessera_serving"
+
+
+def _sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
+    """The file's digest, checked against what the caller declared.
+
+    The entry point binds every input by digest, so a submission that names a
+    different one fails twenty seconds into an admitted action rather than
+    here. Computing it costs one read of a file the submitter already has.
+    """
+    actual = _sha256_of(path)
+    if declared is not None and declared != actual:
+        raise RuntimeError(
+            f"{label}: {path} hashes to {actual}, not the declared {declared}")
+    return actual
+
+
+def _pbrun_argv(args, *, manifest: Path, inner: list[str]) -> list[str]:
+    """The submission command, with ``--data-manifest`` before ``--detach``.
+
+    Everything after ``--`` is the action; ``--data-manifest`` is an option of
+    ``pbrun`` itself, so it has to precede the separator. ``pbrun`` validates
+    the manifest, ingests it as a second content-addressed input and seals its
+    summary into the action, which is also why ``produced_by`` carries nothing
+    run-specific: the manifest's digest is part of the action key.
+    """
+    spec = Path(args.spec).read_text()
+    argv = ["python3", str(args.pbrun), "--demand", args.demand]
+    if args.cpus is not None:
+        argv += ["--cpus", str(args.cpus)]
+    if args.tag:
+        argv += ["--tag", args.tag]
+    argv += ["--priority", str(args.priority)]
+    if args.timeout_s is not None:
+        argv += ["--timeout-s", str(args.timeout_s)]
+    argv += ["--data-manifest", str(manifest), "--detach", "--",
+             "python3", "-m", "tools.tessera_campaign_container"]
+    argv += list(args.container_arg or [])
+    argv += ["--spec", spec, "--", *inner]
+    return argv
+
+
+def _manifest_path(args, plan: dict, *, entry_point: str, command: str) -> Path:
+    """Where the manifest is written.
+
+    The brief's ``<output-root>/data-manifests`` is the default, but a plan's
+    output root can be a frozen campaign directory this tool may not write to,
+    so ``--manifest-dir`` names somewhere else. A dry run never writes, and
+    names the path it would have used.
+    """
+    if args.manifest_dir:
+        directory = Path(args.manifest_dir)
+    else:
+        root = plan.get("output_root")
+        if not root:
+            raise RuntimeError(
+                "the plan declares no 'output_root'; pass --manifest-dir")
+        directory = Path(root) / DATA_MANIFEST_DIR
+    return directory / f"{entry_point}.{command}.json"
+
+
+def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str],
+                       plan: dict, build) -> int:
+    """Build the read set, write it, and run the chain-style pbrun command.
+
+    Order matters for a dry run: the command shape is printed before the
+    manifest is built, so a plan whose inputs are not on disk yet still shows
+    what would be submitted.
+    """
+    manifest_path = _manifest_path(args, plan, entry_point=entry_point,
+                                   command=command)
+    argv = _pbrun_argv(args, manifest=manifest_path, inner=inner)
+    if args.dry_run:
+        print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
+    manifest = build()
+    # Compact JSON, unlike the row manifests' indented form: a row's read set
+    # is a couple of MB and reads better indented, while a joint pass declares
+    # hundreds of thousands of entries against PrismaBuild's 64 MiB ceiling,
+    # and the indentation is the difference between fitting and not.
+    blob = json.dumps(manifest, separators=(",", ":"), sort_keys=False).encode() + b"\n"
+    summary = {
+        "entry_point": f"{entry_point}:{command}",
+        "data_manifest": str(manifest_path),
+        "manifest_bytes": len(blob),
+        "manifest_sha256": hashlib.sha256(blob).hexdigest(),
+        "entry_count": manifest["entry_count"],
+        "total_bytes": manifest["total_bytes"],
+        "counts": manifest["annotations"]["counts"],
+        "bytes": manifest["annotations"]["bytes"],
+        # Cells the campaign adopted rather than encoded: the head decodes a
+        # shard from each of those wires, so the number belongs beside the
+        # phase table a reader uses to size the warm.
+        **{key: manifest["annotations"][key]
+           for key in ("renders_absent", "synthesized_render_wire_bytes")
+           if key in manifest["annotations"]},
+        "phases": manifest["annotations"]["phases"],
+    }
+    if args.dry_run:
+        print(json.dumps(summary, indent=1))
+        # Checked after the summary is printed, so a read set the fleet would
+        # refuse still reports the size and the phase boundaries that make the
+        # refusal readable.
+        _manifest_producer().check_manifest_bytes(
+            blob, where=f"{entry_point}:{command}")
+        return 0
+    _manifest_producer().check_manifest_bytes(blob, where=f"{entry_point}:{command}")
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = manifest_path.with_name(manifest_path.name + ".tmp")
+    temporary.write_bytes(blob)
+    os.replace(temporary, manifest_path)
+    print(json.dumps(summary, indent=1))
+    print("[submit] " + " ".join(shlex.quote(item) for item in argv))
+    return subprocess.run(argv, check=False).returncode
+
+
+def cmd_submit_joint(args) -> int:
+    producer = _manifest_producer()
+    plan_path = Path(args.plan).resolve()
+    plan = json.loads(plan_path.read_text())
+    plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    inner = ["python3", "-u", "-m", JOINT_ENTRY_POINT, args.command,
+             "--plan", str(plan_path), "--plan-sha256", plan_sha256]
+    prepared = None
+    if args.command == "run":
+        if not args.prepared:
+            raise RuntimeError("the run command requires --prepared")
+        prepared_path = Path(args.prepared).resolve()
+        prepared_sha256 = _bound_sha256(prepared_path, args.prepared_sha256,
+                                        label="prepared completion")
+        inner += ["--prepared", str(prepared_path),
+                  "--prepared-sha256", prepared_sha256]
+        prepared = str(prepared_path)
+    if args.resume:
+        inner += ["--resume"]
+    provenance = producer.deterministic_entry_provenance(
+        f"{JOINT_ENTRY_POINT}:{args.command}", plan=str(plan_path),
+        plan_sha256=plan_sha256,
+        workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
+    return _submit_gpu_action(
+        args, entry_point=JOINT_ENTRY_POINT, command=args.command, inner=inner,
+        plan=plan,
+        build=lambda: producer.build_joint_pass_manifest(
+            str(plan_path), command=args.command, produced_by=provenance,
+            argv=inner, prepared=prepared))
+
+
+def cmd_submit_allocation(args) -> int:
+    producer = _manifest_producer()
+    plan_path = Path(args.plan).resolve()
+    plan = json.loads(plan_path.read_text())
+    plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    joint_cost = Path(args.joint_cost).resolve()
+    joint_sha256 = _bound_sha256(joint_cost, args.joint_cost_sha256,
+                                 label="joint cost")
+    inner = ["python3", "-u", "-m", ALLOCATION_ENTRY_POINT,
+             "--joint-cost", str(joint_cost), "--joint-cost-sha256", joint_sha256,
+             "--plan", str(plan_path), "--plan-sha256", plan_sha256,
+             "--output", str(Path(args.output).resolve())]
+    provenance = producer.deterministic_entry_provenance(
+        ALLOCATION_ENTRY_POINT, plan=str(plan_path), plan_sha256=plan_sha256,
+        workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
+    return _submit_gpu_action(
+        args, entry_point=ALLOCATION_ENTRY_POINT, command="handoff", inner=inner,
+        plan=plan,
+        build=lambda: producer.build_allocation_manifest(
+            str(joint_cost), str(plan_path), produced_by=provenance, argv=inner))
+
+
+def cmd_submit_export(args) -> int:
+    producer = _manifest_producer()
+    plan_path = Path(args.plan).resolve()
+    plan = json.loads(plan_path.read_text())
+    plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    inner = list(args.inner or [])
+    if inner and inner[0] == "--":
+        inner = inner[1:]
+    if not inner:
+        raise RuntimeError(
+            "the export entry point lives in the Tessera tree, so its command "
+            "is not derived here; pass it after --")
+    provenance = producer.deterministic_entry_provenance(
+        EXPORT_ENTRY_POINT, plan=str(plan_path), plan_sha256=plan_sha256,
+        workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
+    return _submit_gpu_action(
+        args, entry_point=EXPORT_ENTRY_POINT, command="export", inner=inner,
+        plan=plan,
+        build=lambda: producer.build_export_manifest(
+            str(plan_path), assignment=str(Path(args.assignment).resolve()),
+            allocation_cost=str(Path(args.allocation_cost).resolve()),
+            produced_by=provenance, argv=inner))
+
+
+def _add_submission_arguments(parser) -> None:
+    """The demand and placement every post-campaign submission declares.
+
+    None of these carries a default demand. A demand copied from habit is what
+    #522 and the fleet note `pb_demand_must_be_measured_not_habitual` are
+    about: the numbers belong to the pass being submitted, and the caller
+    measures them.
+    """
+    parser.add_argument("--spec", required=True,
+                        help="container spec JSON; its text is passed to "
+                             "tools.tessera_campaign_container --spec")
+    parser.add_argument("--pbrun", default=str(PBRUN),
+                        help="the published pbrun client")
+    parser.add_argument("--demand", required=True,
+                        help="pbrun --demand for this pass, measured from what "
+                             "it holds (for example gpu=1,mem_gb=104)")
+    parser.add_argument("--cpus", type=int, default=None,
+                        help="cores the action reserves")
+    parser.add_argument("--tag", default=None,
+                        help="placement tag; the joint pass needs a GB10 box")
+    parser.add_argument("--priority", type=int, default=-10,
+                        help="queue band; agent and post-campaign work runs at "
+                             "-10 so it never displaces campaign rows")
+    parser.add_argument("--timeout-s", type=int, default=None,
+                        help="hard wall-clock cap for the action")
+    parser.add_argument("--container-arg", action="append", default=None,
+                        help="extra argument for tools.tessera_campaign_container, "
+                             "repeatable (for example --container-arg --cpu-only)")
+    parser.add_argument("--manifest-dir", default=None,
+                        help="where the data manifest is written; the plan's "
+                             "output_root/data-manifests by default. A frozen "
+                             "output root needs this.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print the command and the manifest summary; "
+                             "write nothing and submit nothing")
 
 
 # ---------------------------------------------------------------------------
@@ -1716,11 +2597,84 @@ def main(argv=None) -> int:
     plan.add_argument("--seed-wire-dir", default=None)
     plan.set_defaults(func=cmd_plan)
 
+    check = sub.add_parser(
+        "check", help="re-derive every manifest row's memory demand")
+    check.add_argument("--workspace", required=True)
+    check.add_argument("--manifest", default=None,
+                       help="the manifest to check; the workspace's "
+                            "manifest.json by default")
+    check.add_argument("--spec", default=None,
+                       help="the spec the rows were planned from; taken from "
+                            "the workspace's plan.json when it records one")
+    check.add_argument("--census", default=None,
+                       help="the census the rows were planned against; taken "
+                            "from plan.json or the workspace by default")
+    check.add_argument("--box-memory-gb", type=int, default=None,
+                       help="what a GPU box in the fleet declares, in GiB. A "
+                            "row deriving more than this can never be "
+                            "admitted and is refused. Defaults to the spec's "
+                            "'box_memory_gb'; unset on both, capacity is not "
+                            "checked.")
+    check.set_defaults(func=cmd_check)
+
     submit = sub.add_parser(
         "submit", help="submit the manifest; re-running it is the resume")
     submit.add_argument("--workspace", required=True)
     submit.add_argument("--wait-s", type=int, default=86400)
+    submit.add_argument("--spec", default=None,
+                       help="the spec the rows were planned from. Every row's "
+                            "demand is re-derived before submission, so a "
+                            "plan.json without a 'spec' field needs this.")
+    submit.add_argument("--census", default=None)
+    submit.add_argument("--box-memory-gb", type=int, default=None,
+                       help="what a GPU box in the fleet declares, in GiB; "
+                            "defaults to the spec's 'box_memory_gb'.")
     submit.set_defaults(func=cmd_submit)
+
+    joint = sub.add_parser(
+        "submit-joint",
+        help="submit a joint AURA pass with the read set it will consume")
+    joint.add_argument("command", choices=("prepare", "run"))
+    joint.add_argument("--plan", required=True,
+                       help="the resolved joint plan the pass runs from")
+    joint.add_argument("--plan-sha256", default=None,
+                       help="the digest the pass binds the plan by; computed "
+                            "when omitted and checked when given")
+    joint.add_argument("--prepared", default=None,
+                       help="the prepared completion the run command consumes")
+    joint.add_argument("--prepared-sha256", default=None)
+    joint.add_argument("--resume", action="store_true",
+                       help="forwarded to the pass, which resumes from its "
+                            "identity-bound checkpoints")
+    _add_submission_arguments(joint)
+    joint.set_defaults(func=cmd_submit_joint)
+
+    allocation = sub.add_parser(
+        "submit-allocation",
+        help="submit the allocation handoff with the read set it will consume")
+    allocation.add_argument("--plan", required=True)
+    allocation.add_argument("--plan-sha256", default=None)
+    allocation.add_argument("--joint-cost", required=True)
+    allocation.add_argument("--joint-cost-sha256", default=None)
+    allocation.add_argument("--output", required=True,
+                            help="where the handoff writes its own table")
+    _add_submission_arguments(allocation)
+    allocation.set_defaults(func=cmd_submit_allocation)
+
+    export = sub.add_parser(
+        "submit-export",
+        help="submit the serving export with the read set it will consume")
+    export.add_argument("--plan", required=True)
+    export.add_argument("--plan-sha256", default=None)
+    export.add_argument("--assignment", required=True,
+                        help="the layer_config.json the export ships")
+    export.add_argument("--allocation-cost", required=True,
+                        help="the allocation handoff's table")
+    _add_submission_arguments(export)
+    export.add_argument("inner", nargs=argparse.REMAINDER,
+                        help="the export command itself, after --; it lives "
+                             "in the Tessera tree and is not derived here")
+    export.set_defaults(func=cmd_submit_export)
 
     merge = sub.add_parser("merge", help="one cost.pkl and journal from the rows")
     merge.add_argument("--workspace", required=True)

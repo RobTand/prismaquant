@@ -40,23 +40,49 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `ba582d476a3b6db9057ebd1385dc52926f171451`,
-merged in Tessera #356 on 2026-09-05. It supplies the producer's
-`--priced-inputs` / `--priced-inputs-sha256` snapshot API used by PrismaQuant
-#231. Install that revision and point `TESSERA_REPO` at its complete checkout;
+The current pin is Tessera `7dbbacbd0900f6b6f468690e2525cc018564382d`,
+master's tip on 2026-09-13 after Tessera #474 (merged at `27be1a602`) and its
+#475. Install that revision and point `TESSERA_REPO` at its complete checkout;
 the producer scripts live in `experiments/` and are not wheel entry points.
 
-The contract remains v22, lane schema v9, with the same SHA-256 and reviewed
-admission answer as the previous `8ed1d9a` pin (Tessera #332). That previous
-pin introduced the derived smoke records; this update adds no evidence or
-serving promotion. A producer API dependency can require a newer pin even
-when the runtime contract bytes do not change. Re-check the exact commit:
+It moves the contract to **v24**, and the lane-eligibility schema stays at
+**v10**: v24 is additive for a v10 reader. Two things move. `gfx1201` (RDNA4,
+RX 9070 XT) gains its first two cells — `TESSERA_BF16_K1` dense, decode and
+batch, at rung `q256 = 1792`, `route_status: backed_with_serve_flag`,
+`qualification: device_qualified`, executing `torch.mm` through the
+`torch_window` decoder on a ROCm vLLM image — and that platform's
+`serve_image` stops being `null`, which v10 requires once one of its own cells
+attests an image.
+
+The ten `sm_121` cells are byte-identical and `versions.default_serve_image`
+is unchanged, so everything the previous pin admitted this one admits. What is
+NEW is a route: both cells publish `evidence.smoke.status: recorded`, and
+`cell_evidence_admits` is status-only, so accepting this pin flips
+`route_status_for("TESSERA_BF16_K1_R1792", platform="gfx1201")` from
+`unattested` / `:no_cell` to `backed_with_serve_flag`. The Tessera-16 W16A16
+lane is attested on one AMD device. `gfx1151` still ships no cell and still
+answers `:no_cell` for every family — backing is permission to price, a cell
+is permission to ship.
+
+Scope the receipts carry, and this pin inherits: the grade is
+`kl_lower_bound`, a top-1024 teacher-student intersection bound, not
+`kl_full_vocab` — no instrument in either repository produces a full-vocab KL.
+The receipt's own scope line says gfx1201 under WSL2 proves the HIP code path;
+it says nothing about gfx1151 numerics and nothing about performance.
+
+Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p ba582d476a3b6db9057ebd1385dc52926f171451:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 7dbbacbd0900f6b6f468690e2525cc018564382d:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
+
+History worth keeping: this paragraph named `ba582d47` (Tessera #356,
+2026-09-05, the `--priced-inputs` producer API) while the JSON beside it had
+already moved to `387eda36` (Tessera #441) — regenerated prose that was not
+regenerated. The commands below are the procedure; running them is what keeps
+this section true.
 
 **`version_is_release` is advisory.** Still required, still parsed, still
 recorded, and still unable to be `true` over a PENDING commit — so it keeps
@@ -142,14 +168,14 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-05:
+Verified against `RobTand/tessera` master on 2026-09-13:
 
 ```
-commit           8ed1d9a78b3f0c7036dcbe14d7df3a89f398812a
-contract_sha256  719daa02da1564b56a141ca2702ae29d4fda553460978efbb6510ddcd1824927
+commit           7dbbacbd0900f6b6f468690e2525cc018564382d
+contract_sha256  81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554
 versions.tessera 0.1.0
-contract_version 22
-lane schema      tessera.lane-eligibility.v9
+contract_version 24
+lane schema      tessera.lane-eligibility.v10
 ```
 
 Five values, two files, one commit. Resolve the new commit, digest and version

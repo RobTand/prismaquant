@@ -36,7 +36,16 @@ class CaptureMemoryGuard:
     ``peak_checkpoint`` and ``peak_by_checkpoint_prefix`` say where the peak
     was observed, so a plan that undercharges is attributable from one
     receipt instead of a rerun.
+
+    ``MARGIN_BYTES`` is that physical safety margin as a class attribute so a
+    producer that sizes the cgroup cap a row will run under reads the number
+    this guard refuses on instead of restating it. A second copy of it would
+    drift, and the drift would show up as a row that PrismaBuild admits and
+    the guard then refuses.
     """
+
+    #: Physical safety margin held back from the cgroup cap on every check.
+    MARGIN_BYTES = 2*1024**3
 
     def __init__(self, device, *, cgroup_root=Path('/sys/fs/cgroup'),
                  membership=Path('/proc/self/cgroup')):
@@ -64,7 +73,7 @@ class CaptureMemoryGuard:
         if not limits:
             raise RuntimeError('bounded capture requires a finite cgroup memory budget')
         self.cap_bytes, self.scope = min(limits, key=lambda pair: pair[0])
-        self.margin_bytes = 2*1024**3
+        self.margin_bytes = self.MARGIN_BYTES
         self.host_floor_bytes = 8*1024**3
         if self.cap_bytes <= self.margin_bytes:
             raise RuntimeError('capture budget cannot hold its physical safety margin')

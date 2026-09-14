@@ -127,8 +127,9 @@ class TesseraContractError(RuntimeError):
 #: read: an older table is not a subset of this one, and "missing field" is the
 #: wrong error to hand someone whose contract predates the field.
 #: ``TESSERA_LANE_SCHEMA`` is the CURRENT lane grammar and follows
-#: ``lane_eligibility.LANE_ELIGIBILITY_SCHEMA_TESSERA`` (v8 since 2026-09-05)
-#: so that the two readers cannot disagree about which schema is newest.
+#: ``lane_eligibility.LANE_ELIGIBILITY_SCHEMA_TESSERA`` (v10 since
+#: 2026-09-12) so that the two readers cannot disagree about which schema
+#: is newest.
 TESSERA_CONTRACT_SCHEMA = "tessera.runtime-contract.v1"
 TESSERA_LANE_SCHEMA = LANE_ELIGIBILITY_SCHEMA_TESSERA
 TESSERA_LANE_SCHEMAS = frozenset(
@@ -214,18 +215,80 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: derive.  The admission itself is unchanged: ``cell_evidence_admits`` is
 #: still status-only and still ``{repetitive}``.
 #:
+#: What moved v22 -> v23 (Tessera #456, merged as #464), and nothing else --
+#: same ten cell ids in the same order, byte for byte, and no family, rung,
+#: route status, launch, activation contract, image or version:
+#:   1. lane_schema v9 -> v10;
+#:   2. ``lane_eligibility.platforms`` entries stopped being bare keys. Each
+#:      now carries ``backend`` (``cuda | hip``), exactly one of
+#:      ``compute_capability`` / ``gcn_arch``, a ``serve_image`` that is a
+#:      digest iff the platform has at least one cell and ``null`` otherwise,
+#:      and ``executes`` -- a map over every family in ``formats[]`` whose
+#:      value is that family's own route contract or ``null``;
+#:   3. two AMD platforms arrived, ``gfx1151`` (Strix Halo, RDNA3.5) and
+#:      ``gfx1201`` (RDNA4), with ``serve_image: null``, NO cells,
+#:      ``TESSERA_BF16_K1`` backed and ``TESSERA_E4M3_K1`` /
+#:      ``TESSERA_E2M1_K2`` ``null``.
+#: Why the answer below moves by exactly ONE entry: the answer is the
+#: projection an ADMISSION gate reads, and at this pin nothing here decides on
+#: a platform's ``executes``.  The platform axis is published and admitted as
+#: grammar; the first gate that reads it (the platform-aware serving route,
+#: PrismaQuant #528) widens this projection, and widening a projection is its
+#: own re-review by the rule stated above.  ``contract_version`` itself is not
+#: in the answer (22 -> 23 alone would not have re-staled it); the lane schema
+#: is, and a v10 document read by a v9-closed reader is refused by name, which
+#: is the designed fail-closed rather than a compatibility break.
+#:
+#: What moved v23 -> v24 (Tessera #474, merged as 27be1a602, with its #475
+#: on top), and nothing else:
+#:   1. two NEW cells, ``tessera_bf16_k1_dense_gfx1201_decode`` and
+#:      ``..._batch`` -- ``TESSERA_BF16_K1`` dense on ``gfx1201`` (RDNA4,
+#:      RX 9070 XT) at rung q256 = 1792, ``route_status``
+#:      ``backed_with_serve_flag``, ``qualification`` ``device_qualified``,
+#:      executing ``[{torch.mm, torch_window}]`` on a ROCm vLLM image;
+#:   2. ``lane_eligibility.platforms.gfx1201.serve_image`` stops being
+#:      ``null`` -- v10 requires it to be an image one of that platform's OWN
+#:      cells attests, and at v23 it had none.
+#: The lane schema does NOT move: v24 is additive for a v10 reader, every
+#: field these cells carry is a field v10 already defines, and the ten
+#: ``sm_121`` cells are byte-identical -- the answer's drift is exactly the
+#: two NEW lines and no reviewed line changed.
+#:
+#: THIS ONE IS NOT A RE-TRANSCRIPTION.  The two bumps before it moved grammar
+#: or prose and admitted what the previous pin admitted; this one admits a
+#: route that did not exist on this side.  ``cell_evidence_admits`` is
+#: status-only and both cells publish ``smoke.status: recorded``, so accepting
+#: this answer flips ``ServingLaneSpec.route_status_for`` and
+#: ``tessera_render.tessera_attesting_cells`` for ``TESSERA_BF16_K1_R1792``
+#: on ``gfx1201`` from ``unattested``/``:no_cell`` to
+#: ``backed_with_serve_flag``.  That is the whole review: the Tessera-16
+#: W16A16 lane is now attested on one AMD device.  ``gfx1151`` still ships no
+#: cell and still answers ``:no_cell`` for every family -- backing is
+#: permission to price, a cell is permission to ship, and only one of the two
+#: AMD platforms crossed that line.
+#:
+#: Two scope facts the receipts carry, recorded because a claim inherits the
+#: scope of the artifact it was measured on (principle 14's corollary): the
+#: grade is ``kl_lower_bound`` (a top-1024 teacher-student intersection bound,
+#: KL >= 0.004906 over 4088 prefill positions for batch and >= 0.004804 over
+#: 256 M=1 positions for decode), NOT ``kl_full_vocab`` -- no instrument in
+#: either tree produces a full-vocab KL, so a producer-side gate that expected
+#: one would refuse an artifact for a measurement that does not exist.  And
+#: the receipt's own scope line says gfx1201 under WSL2 proves the HIP code
+#: path; it says nothing about gfx1151 numerics and nothing about performance.
+#:
 #: The resident-H integration uses the reviewed runtime tree from Tessera
-#: PR #441. Its contract blob is identical to the previous master pin; the
+#: PR #441, which this pin supersedes without changing any priced byte: the
 #: producer source identity changes and existing priced bytes keep their seal.
 #: No release tag names this development commit.
-TESSERA_DEV_PIN_COMMIT = "387eda36fd410d6b2a4fb86b22285eab2a5e072c"
+TESSERA_DEV_PIN_COMMIT = "7dbbacbd0900f6b6f468690e2525cc018564382d"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212"
+    "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -250,8 +313,45 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: cells, which gained the record and whose ``attribution`` moved
 #: ``unattributed`` -> ``shared_with_reference`` because v9 DERIVES it from
 #: that record.  Read those three and nothing else changed.
+#:
+#: Against the v24 contract the review is the two NEW ``gfx1201`` rows and
+#: nothing else: the ten ``sm_121`` rows below are byte-identical to the ones
+#: the v23 pin carried, in the same order, and no other key in this literal
+#: moved.  See :data:`TESSERA_DEV_PIN_COMMIT` for what accepting them admits.
+#:
+#: **The ``cells`` rows are POSITIONAL tuples, and this is the column order.**
+#: They stay positional -- a per-row dict would triple the diff a reviewer
+#: reads for no fact -- so the order lives here, beside the values, and it is
+#: the order :func:`contract_answer` builds.  ``platform`` has been column 1
+#: since the v10 re-review, which is what keeps two rows that differ only in
+#: their device from publishing as rows a reader cannot tell apart; v24 is the
+#: first contract where that actually happens.  The columns are::
+#:
+#:      0  id                     10  requires_serve_flags (sorted)
+#:      1  platform               11  executes [[symbol, decoder], ...]
+#:      2  family                 12  residency_modes (sorted)
+#:      3  structure              13  runtime {image, execution_modes}
+#:      4  regime                 14  runtime vllm version
+#:      5  rungs_q256 (sorted)    15  runtime torch version
+#:      6  activation_contract    16  evidence (see below)
+#:      7  route_status
+#:      8  qualification
+#:      9  requires_plugin
+#:
+#: Columns 13-15 are present only while the contract requires a serving
+#: context, and column 16 only while the cell publishes evidence -- both are
+#: conditional in :func:`contract_answer` and both hold at this pin.  Column
+#: 16 is itself positional, ``CellEvidence.answer()``::
+#:
+#:      0  grade                  4  smoke.control
+#:      1  smoke.status           5  smoke.artifact
+#:      2  kl kinds (sorted)      6  smoke.record
+#:      3  smoke.attribution
+#:
+#: A column added on either tuple is a WIDENED projection, and the rule above
+#: applies to it: it re-stales this pin even when no published value moved.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
- 'lane_schema': 'tessera.lane-eligibility.v9',
+ 'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
  'quant_method': 'tessera',
  'fused_module': {'schema': 'tessera.fused-module.v1',
@@ -294,14 +394,128 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                               'grid_arities': [1]}}}],
  'families': {'TESSERA_BF16_K1': {'reader_rate_range_q256': [256, 4096],
                                   'attested_rungs_q256': [1792],
-                                  'max_world_size': 1},
+                                  'max_world_size': 1,
+                                  'loader_axes': {'column': 'sharded',
+                                                  'row': 'sharded'}},
               'TESSERA_E2M1_K2': {'reader_rate_range_q256': [896, 896],
                                   'attested_rungs_q256': [896],
-                                  'max_world_size': 1},
+                                  'max_world_size': 1,
+                                  'loader_axes': {'column': 'sharded',
+                                                  'row': 'refused'}},
               'TESSERA_E4M3_K1': {'reader_rate_range_q256': [256, 2048],
                                   'attested_rungs_q256': [1024],
-                                  'max_world_size': 1}},
- 'cells': [['tessera_bf16_k1_dense_sm121_batch',
+                                  'max_world_size': 1,
+                                  'loader_axes': {'column': 'sharded',
+                                                  'row': 'sharded'}}},
+ 'cells': [['tessera_bf16_k1_dense_gfx1201_batch',
+            'gfx1201',
+            'TESSERA_BF16_K1',
+            'dense',
+            'batch',
+            [1792],
+            'bf16_unquantized',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident|streamed'],
+            [['torch.mm', 'torch_window']],
+            ['resident', 'streamed'],
+            {'image': '192.168.1.107/prismaquant/vllm-rocm@sha256:0461258dfe253a3e0baca9c62804a4b41a21ab445b2624b6fca0d51711e14000',
+             'execution_modes': ['compiled', 'eager']},
+            '0.30.0.dev0',
+            '2.11.0+rocm7.2.4.git5fbd98f3',
+            ['kl_lower_bound',
+             'recorded',
+             ['topk_intersection_lower_bound@1024'],
+             'unattributed',
+             None,
+             None,
+             ['experiments/moe_greedy_smoke.py',
+              'repetitive iff the completion ends in a cycle: some period p '
+              'with 2p <= L has a p-periodic suffix holding >= 2 full periods '
+              '(s >= 2p), whatever its share of the completion; not_recorded '
+              'iff the completion is empty (L = 0), which is no completion '
+              'for a verdict to be true of; recorded otherwise; tokens are '
+              "the artifact tokenizer's canonical encoding of the returned "
+              'text',
+              'bf16_source',
+              [['P0', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P1', 'campaign', 'raw_completion', 'recorded', 'repetitive'],
+               ['P2', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P3', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P4', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P5', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P6', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P0', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P1',
+                'pure_greedy',
+                'raw_completion',
+                'recorded',
+                'repetitive'],
+               ['P2', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P3', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P4', 'pure_greedy', 'chat_template', 'recorded', 'recorded'],
+               ['P5', 'pure_greedy', 'chat_template', 'recorded', 'recorded'],
+               ['P6',
+                'pure_greedy',
+                'chat_template',
+                'recorded',
+                'recorded']]]]],
+           ['tessera_bf16_k1_dense_gfx1201_decode',
+            'gfx1201',
+            'TESSERA_BF16_K1',
+            'dense',
+            'decode',
+            [1792],
+            'bf16_unquantized',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident|streamed'],
+            [['torch.mm', 'torch_window']],
+            ['resident', 'streamed'],
+            {'image': '192.168.1.107/prismaquant/vllm-rocm@sha256:0461258dfe253a3e0baca9c62804a4b41a21ab445b2624b6fca0d51711e14000',
+             'execution_modes': ['compiled', 'eager']},
+            '0.30.0.dev0',
+            '2.11.0+rocm7.2.4.git5fbd98f3',
+            ['kl_lower_bound',
+             'recorded',
+             ['topk_intersection_lower_bound@1024'],
+             'unattributed',
+             None,
+             None,
+             ['experiments/moe_greedy_smoke.py',
+              'repetitive iff the completion ends in a cycle: some period p '
+              'with 2p <= L has a p-periodic suffix holding >= 2 full periods '
+              '(s >= 2p), whatever its share of the completion; not_recorded '
+              'iff the completion is empty (L = 0), which is no completion '
+              'for a verdict to be true of; recorded otherwise; tokens are '
+              "the artifact tokenizer's canonical encoding of the returned "
+              'text',
+              'bf16_source',
+              [['P0', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P1', 'campaign', 'raw_completion', 'recorded', 'repetitive'],
+               ['P2', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P3', 'campaign', 'raw_completion', 'recorded', 'recorded'],
+               ['P4', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P5', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P6', 'campaign', 'chat_template', 'recorded', 'recorded'],
+               ['P0', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P1',
+                'pure_greedy',
+                'raw_completion',
+                'recorded',
+                'repetitive'],
+               ['P2', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P3', 'pure_greedy', 'raw_completion', 'recorded', 'recorded'],
+               ['P4', 'pure_greedy', 'chat_template', 'recorded', 'recorded'],
+               ['P5', 'pure_greedy', 'chat_template', 'recorded', 'recorded'],
+               ['P6',
+                'pure_greedy',
+                'chat_template',
+                'recorded',
+                'recorded']]]]],
+           ['tessera_bf16_k1_dense_sm121_batch',
             'sm_121',
             'TESSERA_BF16_K1',
             'dense',
@@ -923,6 +1137,12 @@ class TesseraContract:
     native_extensions: tuple[TesseraNativeExtension, ...]
     #: ``family -> max tensor-parallel world size``, closed world.
     max_world_size: Mapping[str, int]
+    #: ``family -> axis -> status`` from the same unit rows: what this build's
+    #: LOADER does with a shard on each axis.  A different question from the
+    #: ceiling beside it -- ``max_world_size`` says what a served receipt
+    #: covers, this says whether the cut loads at all -- and a family the
+    #: block does not list publishes neither.
+    loader_axes: Mapping[str, Mapping[str, str]]
     #: What one vLLM-fused module's roles must share, and what is free.
     fused_module: FusedModuleLicence
     quant_method: str
@@ -1153,6 +1373,10 @@ def contract_answer(contract: "TesseraContract") -> dict:
                 "attested_rungs_q256": sorted(
                     int(r) for r in contract.attested_rungs.get(family, ())),
                 "max_world_size": int(contract.max_world_size.get(family, 0)),
+                "loader_axes": {
+                    str(axis): str(status) for axis, status in
+                    sorted(contract.loader_axes.get(family, {}).items())
+                },
             }
             for family, rng in sorted(contract.reader_rate_range.items())
         },
@@ -1551,8 +1775,77 @@ def _parse_fused_module(payload: Mapping[str, Any], path: str
     )
 
 
-def _parse_tensor_parallel_limits(payload: Mapping[str, Any], path: str) -> dict[str, int]:
-    """Read the closed-world TP ceiling for both pin paths."""
+#: The shard axes ``tensor_parallel.units[].loader_axes`` may name, in
+#: Tessera's own vocabulary (``tessera.serving.sharding.AXES``).  A unit that
+#: names another axis, or omits one of these, is refused rather than read with
+#: the axes this reader happens to know: the point of publishing a status per
+#: axis is that the answer is not derivable from the axis's name.
+TP_LOADER_AXES = ("column", "row")
+
+#: What a published axis status may say.  ``sharded`` is "this build's loader
+#: accepts a shard on this axis", ``refused`` is "it does not, on every rank".
+#: Neither is an attestation: ``max_world_size`` in the same unit row is the
+#: attestation, and the two are separate questions (a loader that would cut an
+#: axis it has never been measured cutting is still unattested).
+TP_LOADER_AXIS_SHARDED = "sharded"
+TP_LOADER_AXIS_REFUSED = "refused"
+TP_LOADER_AXIS_STATUSES = (TP_LOADER_AXIS_SHARDED, TP_LOADER_AXIS_REFUSED)
+
+
+def _parse_loader_axes(block: Any, where: str) -> dict[str, str]:
+    """Read one unit's per-axis loader statuses, or refuse the table.
+
+    There is no default here on purpose.  A missing block, an axis this
+    reader does not share, a status it does not know, and a ``status`` read
+    off the prose beside it are all the same failure: a claim about what
+    another runtime's loader does, read as something other than what was
+    published (principle 14).  Reading absence as ``sharded`` would price a
+    cut the loader refuses on every rank.
+    """
+    if not isinstance(block, Mapping):
+        raise TesseraContractError(
+            f"{where} publishes no usable 'loader_axes' mapping (got "
+            f"{type(block).__name__}). This reader will not assume an axis "
+            "shards because the table did not say it does not."
+        )
+    if set(block) != set(TP_LOADER_AXES):
+        raise TesseraContractError(
+            f"{where}.loader_axes names axes {sorted(block)}; this reader "
+            f"implements exactly {sorted(TP_LOADER_AXES)} and refuses a "
+            "vocabulary it does not share rather than reading the axes it "
+            "recognises and dropping the rest"
+        )
+    axes: dict[str, str] = {}
+    for axis in sorted(TP_LOADER_AXES):
+        entry = block[axis]
+        if not isinstance(entry, Mapping):
+            raise TesseraContractError(
+                f"{where}.loader_axes.{axis} must be an object carrying a "
+                f"'status', got {entry!r}"
+            )
+        status = str(_require(entry, "status", f"{where}.loader_axes.{axis}"))
+        if status not in TP_LOADER_AXIS_STATUSES:
+            raise TesseraContractError(
+                f"{where}.loader_axes.{axis}.status is {status!r}; this "
+                f"reader knows {sorted(TP_LOADER_AXIS_STATUSES)}. The "
+                "``reason`` beside it is prose and is never the value a gate "
+                "reads."
+            )
+        axes[axis] = status
+    return axes
+
+
+def _parse_tensor_parallel(
+    payload: Mapping[str, Any], path: str,
+) -> tuple[dict[str, int], dict[str, dict[str, str]]]:
+    """Read both facts the ``tensor_parallel`` unit rows publish.
+
+    ``max_world_size`` is the ATTESTATION bound -- the largest world size a
+    served receipt covers -- and ``loader_axes`` is what this build's loader
+    does with each shard axis.  They answer different questions and they are
+    read together here so a unit row cannot be half-read: a family with a
+    ceiling and no axis claim is a table this reader refuses.
+    """
     tp = _require(payload, "tensor_parallel", path)
     if str(tp.get("semantics")) != "closed_world":
         raise TesseraContractError(
@@ -1562,12 +1855,19 @@ def _parse_tensor_parallel_limits(payload: Mapping[str, Any], path: str) -> dict
             "will not read an open-world table under that assumption"
         )
     world: dict[str, int] = {}
+    axes: dict[str, dict[str, str]] = {}
     for i, unit in enumerate(tp.get("units", ())):
         where = f"{path}.tensor_parallel.units[{i}]"
-        world[str(_require(unit, "unit", where))] = int(
-            _require(unit, "max_world_size", where))
+        name = str(_require(unit, "unit", where))
+        world[name] = int(_require(unit, "max_world_size", where))
+        axes[name] = _parse_loader_axes(unit.get("loader_axes"), where)
 
-    return world
+    return world, axes
+
+
+def _parse_tensor_parallel_limits(payload: Mapping[str, Any], path: str) -> dict[str, int]:
+    """Read the closed-world TP ceiling for both pin paths."""
+    return _parse_tensor_parallel(payload, path)[0]
 
 
 @lru_cache(maxsize=8)
@@ -1576,11 +1876,31 @@ def published_tensor_parallel_limits(path: str, sha: str) -> Mapping[str, int]:
 
     This accessor reports ceilings only; it does not grant TP admission.
     """
+    return _published_tensor_parallel(path, sha)[0]
+
+
+@lru_cache(maxsize=8)
+def published_tensor_parallel_axes(
+    path: str, sha: str,
+) -> Mapping[str, Mapping[str, str]]:
+    """``family -> axis -> status``, read from a contract file on disk.
+
+    The same reader the parsed contract uses, for the two callers that hold a
+    contract path rather than a loaded contract: the packaged-table route
+    admission, and ``prismaquant.tessera_tp_audit``'s ``--contract``.  One
+    reader means the vocabulary refusal is identical on every path.
+    """
+    return _published_tensor_parallel(path, sha)[1]
+
+
+def _published_tensor_parallel(
+    path: str, sha: str,
+) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
     raw = Path(path).read_bytes()
     if hashlib.sha256(raw).hexdigest() != sha:
         raise TesseraContractError(
             f"{path}: tensor-parallel metadata digest differs from attesting table")
-    return _parse_tensor_parallel_limits(json.loads(raw), path)
+    return _parse_tensor_parallel(json.loads(raw), path)
 
 
 def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
@@ -1686,7 +2006,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             evidence=cell.evidence,
         ))
 
-    world = _parse_tensor_parallel_limits(payload, path)
+    world, loader_axes = _parse_tensor_parallel(payload, path)
 
     fused = _parse_fused_module(payload, path)
 
@@ -1698,6 +2018,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
         cells=tuple(cells),
         native_extensions=extensions,
         max_world_size=world,
+        loader_axes=loader_axes,
         fused_module=fused,
         quant_method=str(method.get("canonical", "")),
         contract_version=int(payload.get("contract_version", 0)),

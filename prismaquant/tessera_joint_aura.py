@@ -16,6 +16,8 @@ import json
 import math
 from pathlib import Path
 import pickle
+import os
+import socket
 import time
 from types import SimpleNamespace
 
@@ -24,7 +26,20 @@ from .cost_stage_checkpoint import (
 )
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
-PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v2"
+PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
+RENDER_ORIGIN_SCHEMA = "prismaquant.tessera_joint_aura.render_origin.v1"
+# Closed vocabularies. ``render_origin`` says where the decoded PWC shard on
+# disk came from; ``render_comparison`` says what the ``torch.equal`` leg of
+# ``verify_anchor_render`` established for that rung. They are two different
+# facts and a record that collapses them claims verification it never had.
+RENDER_ORIGINS = ("encoded", "synthesized_from_wire")
+RENDER_COMPARISONS = ("independent_render_vs_wire", "wire_round_trip_only")
+# An encoded render is an independently produced tensor, so comparing it with
+# the decoded wire is evidence about the encode. A synthesized render was
+# written by decoding that same wire, so the comparison can only establish
+# that the ``.pt`` still round-trips to the bytes it was written from.
+RENDER_COMPARISON_BY_ORIGIN = {"encoded": "independent_render_vs_wire",
+                               "synthesized_from_wire": "wire_round_trip_only"}
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
 STAGE = "Tessera campaign"
@@ -66,6 +81,16 @@ class MeasuredAnchorInput:
     campaign_plan: dict
     cells: dict
     formats_by_qname: dict
+    # A read restricted to ``sorted(names)[lo:hi]``, or None for the whole
+    # roster. Only the standalone synthesis stage produces a scoped read, and
+    # ``execute`` refuses one: a partial roster is not the campaign's input.
+    unit_scope: "tuple | None" = None
+    # Where the synthesized shards were written when they were NOT written to
+    # the campaign's own row caches (the measure mirror), or None.
+    render_mirror_root: "str | None" = None
+    # How many shards THIS read synthesized. Distinct from the per-origin
+    # census, which counts what is on disk however it got there.
+    synthesized_now: int = 0
 
     @property
     def total_render_bytes(self):
@@ -78,7 +103,171 @@ class MeasuredAnchorInput:
         return dict(sizes)
 
 
-def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True):
+def _render_origin_marker_path(render):
+    return Path(render).with_name(Path(render).name + ".render_origin.json")
+
+
+def render_origin_census(origins):
+    """Count each closed-vocabulary value, including the ones nobody used.
+
+    A census that omits the zero keeps a reader from telling "no synthesized
+    renders" apart from "this report does not say".
+    """
+    counts = {value: 0 for value in RENDER_ORIGINS}
+    comparisons = {value: 0 for value in RENDER_COMPARISONS}
+    for origin in origins:
+        _require(origin in RENDER_ORIGINS, f"unknown render origin {origin!r}")
+        counts[origin] += 1
+        comparisons[RENDER_COMPARISON_BY_ORIGIN[origin]] += 1
+    return {"render_origins": counts, "render_comparisons": comparisons}
+
+
+def cell_render_census(cells):
+    """The census of a cell mapping, from the field every cell must carry."""
+    origins = []
+    for pair, cell in sorted(cells.items()):
+        _require(isinstance(cell, dict) and "render_origin" in cell,
+                 f"{pair}: cell carries no render_origin")
+        origins.append(cell["render_origin"])
+    return render_origin_census(origins)
+
+
+def _decode_wire(blob, *, reader, device="cpu"):
+    """The one decode seam: the bound reader's, or the module-level decoder."""
+    if reader is not None:
+        return reader.read_unit_artifact(blob, device=device)
+    from tessera.unit_artifact import read_unit_artifact
+
+    return read_unit_artifact(blob, device=device)
+
+
+def _render_mirror_path(render, mirror_root):
+    """Where a measuring run publishes a shard instead of the row cache.
+
+    The mirror keeps the render's absolute path under ``mirror_root`` so a
+    cell's two copies stay comparable by name and a measuring run can never
+    replace the campaign's own bytes.
+    """
+    render = Path(render)
+    return Path(mirror_root) / render.resolve().relative_to(Path(render.root))
+
+
+def _pb_commit(units, phase, unit=None):
+    """Report cumulative durable units to PrismaBuild; a no-op elsewhere.
+
+    Held byte for byte against the published submission skill's snippet
+    (``skills/prismabuild/SKILL.md``, ``pb-progress-snippet``) so an action
+    inside a container that cannot import PrismaBuild still reports. It is a
+    no-op when the action was not admitted under the progress contract, so it
+    is called unconditionally rather than by testing how we were launched.
+    """
+    path = os.environ.get("PRISMABUILD_ACTION_PROGRESS_PATH")
+    token = os.environ.get("PRISMABUILD_ACTION_PROGRESS_TOKEN")
+    if not path or not token:
+        return False
+    record = {"schema": "prismabuild.action_progress.v1", "token": token,
+              "phase": phase, "units_completed": units, "unit": unit,
+              "reported_unix": time.time()}
+    temporary = f"{path}.{os.getpid()}.tmp"
+    with open(temporary, "w") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+    os.replace(temporary, path)
+    return True
+
+
+def parse_unit_scope(spec, count=None):
+    """Read ``lo:hi`` as a half-open slice of the census's ``sorted(names)``.
+
+    The stage fans out over the one order every reader already walks, so a
+    row's range can be cut from the census alone and two rows with disjoint
+    ranges never contend for a cell.
+    """
+    if spec is None:
+        return None
+    _require(isinstance(spec, str) and spec.count(":") == 1,
+             "unit scope must be spelled lo:hi over the sorted census roster")
+    low, _, high = spec.partition(":")
+    start = 0 if not low.strip() else int(low)
+    stop = (count if not high.strip() else int(high))
+    _require(stop is not None, "an open-ended unit scope needs the roster size")
+    _require(type(start) is int and type(stop) is int and 0 <= start < stop,
+             f"empty or reversed unit scope {spec!r}")
+    return (start, stop)
+
+
+def _synthesize_render_from_wire(render, *, wire, record, name, fmt, shape, reader, device="cpu"):
+    """Write the missing decoded PWC shard from the verified wire blob.
+
+    A rung this campaign adopted rather than encoded has its wire but no
+    ``.pt``. Re-encoding it costs GPU-hours on the critical path; decoding
+    the wire costs an I/O pass. What the decode cannot buy is evidence about
+    the encode, so the marker below is written FIRST: a crash between the two
+    writes leaves a marker with no shard, which the next load re-synthesizes,
+    whereas the other order would leave a shard that reads as ``encoded``.
+
+    ``device`` is the decoder's, not the shard's. Tessera's decoder is device
+    parameterized and the same pure-torch reconstruction runs wherever it is
+    pointed; the published bytes are the canonical CPU BF16 tensor either way
+    (``_canonical_rendered_weight_tensor``). A caller that has already
+    reserved a GPU decodes on it rather than leaving it at idle while one
+    Python thread walks the wire (measured 0.064 s vs 0.92 s an expert cell).
+    """
+    import torch
+    from .production_weight_cache import _store_rendered_weight_entry
+
+    blob = Path(wire).read_bytes()
+    _same(hashlib.sha256(blob).hexdigest(), record["blob_sha256"],
+          f"{name}@{fmt}: wire checksum before synthesizing its render")
+    try:
+        decoded = _decode_wire(blob, reader=reader, device=device).to(torch.bfloat16)
+    except Exception as exc:
+        raise ValueError(f"{name}@{fmt}: original decoded PWC shard missing and "
+                         f"its wire does not decode: {exc}") from exc
+    _require(isinstance(decoded, torch.Tensor) and decoded.dtype == torch.bfloat16 and
+             list(decoded.shape) == list(shape) and bool(torch.isfinite(decoded).all()),
+             f"{name}@{fmt}: decoded wire is not the census BF16 render")
+    marker = _render_origin_marker_path(render)
+    Path(render).parent.mkdir(parents=True, exist_ok=True)
+    _json(marker, {"schema": RENDER_ORIGIN_SCHEMA, "render_origin": "synthesized_from_wire",
+                   "unit": name, "format_name": fmt, "wire_sha256": record["blob_sha256"],
+                   "wire_file": Path(wire).name})
+    _store_rendered_weight_entry(weights={}, cache_dir_path=Path(render).parent,
+                                 qname=name, fmt=fmt, tensor=decoded,
+                                 weight_dtype=torch.bfloat16, durable=True)
+    _require(Path(render).is_file(), f"{name}@{fmt}: synthesized render was not published")
+    return "synthesized_from_wire"
+
+
+def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, device="cpu"):
+    """Name where this rung's decoded PWC shard came from, never guess it.
+
+    The campaign journals fresh and resumed wires through one receipt grammar
+    (``_checkpoint_wire_record``), so nothing in the record distinguishes an
+    adopted rung from an encoded one. The marker beside the shard is the only
+    place that fact can live, and its absence beside an existing shard is the
+    campaign's own render.
+    """
+    render, marker = Path(render), _render_origin_marker_path(render)
+    if render.is_file():
+        if not marker.is_file():
+            return "encoded"
+        stamp = json.loads(marker.read_text())
+        _same(stamp.get("schema"), RENDER_ORIGIN_SCHEMA, f"{name}@{fmt}: render origin schema")
+        _same(stamp.get("render_origin"), "synthesized_from_wire",
+              f"{name}@{fmt}: marked render origin")
+        _same(stamp.get("unit"), name, f"{name}@{fmt}: marked render unit")
+        _same(stamp.get("format_name"), fmt, f"{name}@{fmt}: marked render format")
+        _same(stamp.get("wire_sha256"), record["blob_sha256"],
+              f"{name}@{fmt}: synthesized render names another wire")
+        return "synthesized_from_wire"
+    _require(Path(wire).is_file(), f"{name}@{fmt}: original decoded PWC shard missing")
+    return _synthesize_render_from_wire(render, wire=wire, record=record, name=name,
+                                        fmt=fmt, shape=shape, reader=reader, device=device)
+
+
+def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True, reader=None,
+                               synthesis_device="cpu", unit_scope=None,
+                               render_mirror_root=None, log_every=100):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -86,6 +275,33 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     roster gates still run here. Tensor/source/encoder verification occurs in
     ``prepare_cache`` using actual source weights and the original capture.
     Interpolated menu rows are deliberately excluded rather than converted.
+
+    A rung this campaign adopted has its wire but no decoded PWC shard. The
+    shard is synthesized from that wire here and every cell carries the
+    resulting ``render_origin``, so no later report can read "verified" as
+    "independently compared". ``reader`` is the same bound Tessera consumer
+    ``verify_anchor_render`` uses; there is one decode seam, not two.
+
+    ``synthesis_device`` is where that decode runs. It changes no published
+    byte -- the shard is the canonical CPU BF16 tensor either way -- so a
+    caller holding a GPU reservation passes it rather than spending the
+    reservation on one CPU core.
+
+    ``unit_scope`` restricts the per-cell walk to ``sorted(names)[lo:hi]``.
+    Every roster, seal and fanout gate above still runs over the whole
+    census; only the cells are cut, which is what makes the standalone
+    synthesis stage fannable. The result carries the scope, and a scoped
+    read is refused wherever the complete campaign input is required.
+
+    ``render_mirror_root`` publishes synthesized shards under that root
+    instead of the campaign's row caches, so a measuring run can compare its
+    bytes against the campaign's without being able to replace them.
+
+    ``log_every`` prints a cumulative count and rate every N synthesized
+    shards. Silence is the defect this phase was reported for: it ran for
+    hours at 2.6 cells/s saying nothing. The default is chosen against that
+    measured rate rather than rounded -- 100 shards is ~38 s there and ~16 s
+    on the GPU, inside the two minutes a silent phase is a defect after.
     """
     from .production_weight_cache import _cache_weight_filename
     from tools.dispatch_tessera_campaign import _require_receipts
@@ -93,6 +309,12 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _require(type(verify_payloads) is bool, "verify_payloads must be an explicit boolean")
     _require(type(file_hash_workers) is int and file_hash_workers > 0,
              "positive file_hash_workers required")
+    _require(type(log_every) is int and log_every >= 0, "non-negative log_every required")
+    # Hashing only part of a roster does not verify that roster, so the two
+    # options are refused together rather than quietly producing a record
+    # that reads as a verified campaign input.
+    _require(unit_scope is None or not verify_payloads,
+             "a scoped read cannot also verify the complete campaign payload")
     paths = {key: _bound(inputs[key], key) for key in (
         "campaign_plan", "census", "campaign_receipts", "merged_cost", "merged_checkpoint")}
     census = json.loads(paths["census"].read_text())
@@ -154,7 +376,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
 
     cells, formats = {}, {}
     wire_dir = Path(provenance["wire_dir"])
-    for name in sorted(names):
+    roster = sorted(names)
+    if unit_scope is not None:
+        low, high = unit_scope
+        _require(type(low) is int and type(high) is int and 0 <= low < high <= len(roster),
+                 f"unit scope {unit_scope} is outside the {len(roster)}-unit census roster")
+        roster = roster[low:high]
+    synthesized, started = 0, time.time()
+    for name in roster:
         state = _load_unit(unit_path(parts, name), stage=STAGE, qname=name, identity_sha256=seal)
         _require(isinstance(state, dict) and set(state) - {"unservable"} == {"anchors", "wire_records"},
                  f"{name}: incomplete measured anchor journal")
@@ -203,12 +432,35 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             _require(not wire.is_symlink() and wire.resolve().parent == wire_dir.resolve(), f"{name}: escaping wire path")
             _same(wire.stat().st_size, record["blob_bytes"], f"{name}: wire size")
             render = owners[name] / "cache" / _cache_weight_filename(name, fmt)
-            _require(render.is_file(), f"{name}@{fmt}: original decoded PWC shard missing")
+            target = (render if render_mirror_root is None
+                      else _render_mirror_path(render, render_mirror_root))
+            present = Path(target).is_file()
+            origin = _resolve_render_origin(target, wire=wire, record=record, name=name,
+                                            fmt=fmt, shape=census["unit_shapes"][name],
+                                            reader=reader, device=synthesis_device)
             cells[name, fmt] = {"anchor": anchor, "record": record, "wire": str(wire.resolve()),
-                               "render": str(render.resolve())}
+                               "render": str(Path(target).resolve()), "render_origin": origin,
+                               **({} if render_mirror_root is None
+                                  else {"campaign_render": str(render.resolve())})}
+            if not present:
+                synthesized += 1
+                # After the shard is durable, never on entering the loop.
+                _pb_commit(synthesized, "synthesize", unit=f"{name}@{fmt}")
+                if log_every and synthesized % log_every == 0:
+                    elapsed = max(time.time() - started, 1e-9)
+                    print(f"tessera_joint_aura: synthesized {synthesized} renders "
+                          f"in {elapsed:.0f}s ({synthesized / elapsed:.2f} cells/s), "
+                          f"at {name}@{fmt}", flush=True)
         formats[name] = (*sorted(anchors), "BF16")
+    if log_every and synthesized:
+        elapsed = max(time.time() - started, 1e-9)
+        print(f"tessera_joint_aura: synthesized {synthesized} renders in {elapsed:.0f}s "
+              f"({synthesized / elapsed:.2f} cells/s) on {synthesis_device}", flush=True)
+    scoped = dict(unit_scope=unit_scope, synthesized_now=synthesized,
+                  render_mirror_root=None if render_mirror_root is None else str(render_mirror_root))
     if not verify_payloads:
-        return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells, formats)
+        return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
+                                   formats, **scoped)
 
     def verify_files(item):
         pair, cell = item
@@ -235,7 +487,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         with ThreadPoolExecutor(max_workers=file_hash_workers, thread_name_prefix="anchor-file-hash") as workers:
             for pair, digest in workers.map(verify_files, cells.items()):
                 cells[pair]["render_file_sha256"] = digest
-    return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells, formats)
+    return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
+                               formats, **scoped)
 
 
 def calibrated_maxima(data, profile):
@@ -256,14 +509,29 @@ def calibrated_maxima(data, profile):
 def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_source,
                          projected_unit, static_scales, bound_unit=None, reader=None,
                          release_file_pages=False):
-    """Re-derive encoder inputs from actual source/H and compare decoded bytes."""
+    """Re-derive encoder inputs from actual source/H and compare decoded bytes.
+
+    Two legs, and they do not establish the same thing. ``verify_cached_unit``
+    checks the wire against an encoder identity re-derived from the streamed
+    source weights and H; it is independent of anything the cache holds and it
+    is what qualifies an adopted rung at all. The ``torch.equal`` leg compares
+    the decoded wire with the render on disk: for an ``encoded`` rung that is
+    an independent render/wire agreement, and for a ``synthesized_from_wire``
+    rung the render was written by decoding that same wire, so it can only
+    establish that the shard still round-trips -- a corruption check between
+    the write and this read, not evidence about the encode. The returned
+    record names both facts so a reader never has to infer which one it holds.
+    """
     import torch
-    from tessera.unit_artifact import read_unit_artifact
     from . import tessera_campaign as tc
     from .production_weight_cache import _cb_cache_tensor_identity
 
     anchor = tc.CampaignAnchor(**cell["anchor"])
     name, fmt = anchor.qname, anchor.format_name
+    render_origin = cell.get("render_origin")
+    _require(render_origin in RENDER_ORIGINS,
+             f"{name}@{fmt}: cell carries no closed-vocabulary render_origin")
+    render_comparison = RENDER_COMPARISON_BY_ORIGIN[render_origin]
     _require(source_weight.dtype == rendered_weight.dtype == torch.bfloat16 and
              source_weight.ndim == 2 and rendered_weight.shape == source_weight.shape,
              f"{name}@{fmt}: source/render BF16 shape differs")
@@ -280,9 +548,15 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
     blob = wire_path.read_bytes()
     verifier = tc._checkpoint_identity_api() if reader is None else reader
     verifier.verify_cached_unit(blob, cell["record"], expected)
-    decode = read_unit_artifact if reader is None else reader.read_unit_artifact
-    decoded = decode(blob, device=str(rendered_weight.device)).to(torch.bfloat16)
-    _require(torch.equal(decoded, rendered_weight), f"{name}@{fmt}: decoded wire differs from original PWC render")
+    decoded = _decode_wire(blob, reader=reader,
+                           device=str(rendered_weight.device)).to(torch.bfloat16)
+    # Run on both origins. On a synthesized render it cannot fail as evidence
+    # about the encode, and it is still live evidence that the shard on disk
+    # decodes to the bytes it was written from.
+    _require(torch.equal(decoded, rendered_weight),
+             f"{name}@{fmt}: decoded wire differs from original PWC render"
+             if render_origin == "encoded" else
+             f"{name}@{fmt}: synthesized PWC render no longer decodes from its wire")
     del decoded
     if release_file_pages:
         from .perturbed_x_cache import release_activation_cache_file_pages
@@ -292,7 +566,8 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
             "rendered_weight": _cb_cache_tensor_identity(rendered_weight),
             "encoding_identity_sha256": canonical_json_sha256(expected, where="joint anchor encoding"),
             "wire_sha256": hashlib.sha256(blob).hexdigest(),
-            "render_file_sha256": cell["render_file_sha256"]}
+            "render_file_sha256": cell["render_file_sha256"],
+            "render_origin": render_origin, "render_comparison": render_comparison}
 
 
 def _live_targets(runner, names):
@@ -514,7 +789,14 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             targets.update({member.qname: member for member in refresh_packed_expert_projections(members, runner.profile)})
     _same(set(verified), set(data.cells), "complete qualified wire/render roster")
     cache.disable_file_load_receipts()
+    census_of_renders = cell_render_census(data.cells)
+    for pair, record in verified.items():
+        _same(record["render_origin"], data.cells[pair]["render_origin"],
+              f"{pair}: qualified render origin")
+    _same(render_origin_census(record["render_origin"] for record in verified.values()),
+          census_of_renders, "qualified render origin census")
     cache.metadata.update({"verified_cells": verified, "prefetch": telemetry,
+        **census_of_renders,
         **({'capture_load_execution': capture_load_execution} if capture_load_execution is not None else {}),
         **({"qualification_window": policy, "capture_resident_bytes": capture_sizes,
             "qualification_memory_guard": None if guard is None else guard.snapshot()}
@@ -566,7 +848,7 @@ def _admit_candidate_phase(command, config, data, layer_bytes):
     return policy
 
 
-def _load_plan(path, digest):
+def _load_plan(path, digest, *, projection_runtime=True):
     path = _bound({"path": str(path), "sha256": digest}, "joint anchor plan")
     config = json.loads(path.read_text())
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
@@ -579,8 +861,18 @@ def _load_plan(path, digest):
     if normalize_verified_activation_load(config.get('capture_load_policy')) is not None:
         _require(config.get('qualification_window') is not None,
                  'verified capture loading requires explicit qualification windows')
-    from .joint_projection_backend import normalize_projection_backend
-    normalize_projection_backend(execution.get("projection_backend"))
+    from .joint_projection_backend import normalize_projection_backend, require_qualified_environment
+    selector = normalize_projection_backend(execution.get("projection_backend"))
+    if projection_runtime and selector["name"] != "torch":
+        # Step 3a loads this plan inside the campaign's own container spec, so
+        # the identity read here is the executing image's. Every capture-free
+        # axis is compared -- torch, cuda, machine, ATen headers, compiler and
+        # the image the launcher stamped. The ``device`` block needs
+        # ``torch.cuda.get_device_properties``, which a ``--cpu-only``
+        # preflight container does not have, so it is compared only when CUDA
+        # is present here and is otherwise refused by the first gate in
+        # ``execute`` -- seconds into the pass, before any render is written.
+        require_qualified_environment()
     from .cost_streaming import normalize_boundary_storage
     normalize_boundary_storage(execution.get("boundary_storage"))
     _operator_window_policy(config)
@@ -667,7 +959,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
     from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
     from .joint_aura import source_execution_identity, validate_joint_aura_entry
-    from .joint_projection_backend import prewarm_projection_backend
+    from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache
     from .gpu_guard import require_cuda_hot_path
@@ -686,6 +978,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                   "started_epoch": time.time(), "torch": str(torch.__version__),
                   "cuda": torch.version.cuda, "affinity": sorted(os.sched_getaffinity(0))},
               "phases": [], "passed": False}
+    result["env"]["container_content_sha256"] = executing_image()
     profile_tool = config.get("profile_tool", "cprofile")
     profiler = cProfile.Profile() if profile_tool == "cprofile" else None
     result["profile_tool"] = profile_tool
@@ -709,13 +1002,36 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         file_hash_workers = config.get("file_hash_workers", 1)
         _require(type(file_hash_workers) is int and 0 < file_hash_workers <= len(os.sched_getaffinity(0)),
                  "file_hash_workers exceeds PB-assigned CPU affinity")
-        data = load_measured_anchor_input(config["inputs"],
-            **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
-            **({"verify_payloads": False} if command == "prepare" else {}))
-        result["file_hash_workers"] = file_hash_workers
+        # Every capture-free identity gate runs first: an unqualified runtime,
+        # kernel source digest, build flag or binary sha256 is refused in
+        # seconds rather than after hours of measured anchor input (#553).
+        projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
+        result["projection_backend"] = projection_backend.identity
+        # The reader is bound first of the input owners: synthesizing an
+        # adopted rung's missing render decodes its wire, and that decode must
+        # come from the same bound consumer the qualification leg uses, not a
+        # second one.
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
+        # The command holds a CUDA reservation (``require_cuda_hot_path``
+        # above), so any shard it still has to synthesize decodes on that
+        # device rather than on one CPU core beside an idle GPU. The standalone
+        # ``synthesize`` stage normally leaves nothing to do here.
+        data = load_measured_anchor_input(config["inputs"], reader=reader,
+            synthesis_device="cuda",
+            **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
+            **({"verify_payloads": False} if command == "prepare" else {}))
+        _require(data.unit_scope is None and data.render_mirror_root is None,
+                 "joint execution requires the complete campaign roster in its own caches")
+        result["file_hash_workers"] = file_hash_workers
         result["reader_identity"] = reader_identity
+        # Per-run, not per-origin: the census says what is on disk, this says
+        # how much of it this run had to write.
+        result["renders_synthesized_now"] = data.synthesized_now
+        render_census = cell_render_census(data.cells)
+        # Stated whether or not this command reaches a completion: a run that
+        # dies still says how many of its renders were only ever round-tripped.
+        result.update(render_census)
         _same(config["model"], data.census["model"], "requested source model")
         _same(data.census["attention_implementation"], "eager", "qualified source attention")
         ids, calibration = load_calibration_input(config["calibration_input"]["path"],
@@ -725,8 +1041,6 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
         for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
             _same(calibration["provenance"].get(name), original_draw.get(name), f"original full draw {name}")
         result["calibration_input"] = calibration
-        projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
-        result["projection_backend"] = projection_backend.identity
         source_prefetch = _source_prefetch(config)
         runner = build_streamed_causal_lm(config["model"], device=torch.device("cuda"),
             dtype=torch.bfloat16, offload_folder=str(root / "offload"),
@@ -775,17 +1089,20 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                 "reader_identity": reader_identity, "projection_backend": projection_backend.identity,
                 "source_execution": source_execution, "calibration_input": calibration,
                 "production_cache": {"path": str(cache_path), "sha256": _sha(cache_path)},
-                "formats_by_qname": data.formats_by_qname, "measured_cells": len(data.cells)}
+                "formats_by_qname": data.formats_by_qname, "measured_cells": len(data.cells),
+                **render_census}
         else:
             _require(prepared is not None, "cost execution requires independently bound prepared inputs")
             completion = json.loads(_bound(prepared, "prepared anchors").read_text())
             _same(completion.get("schema"), PREPARED_SCHEMA,
-                  "prepared v2 schema required; legacy preparation requires fresh prepare and recompute")
+                  "prepared v3 schema required; legacy preparation requires fresh prepare and recompute")
             _same(completion.get("status"), "complete", "prepared completion")
             for key, value in (("plan_sha256", plan_sha256), ("implementation_sha256", implementation),
                                ("source_model_identity", source), ("source_execution", source_execution),
                                ("calibration_input", calibration), ("measured_cells", len(data.cells)),
                                ("reader_identity", reader_identity),
+                               ("render_origins", render_census["render_origins"]),
+                               ("render_comparisons", render_census["render_comparisons"]),
                                ("projection_backend", projection_backend.identity)):
                 _same(completion.get(key), value, f"prepared {key}")
             _same(completion["formats_by_qname"], {n: list(v) for n, v in data.formats_by_qname.items()},
@@ -797,7 +1114,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
             _same(cache.metadata.get("projection_backend"), projection_backend.identity, "prepared backend identity")
             _same(set(cache.metadata["verified_cells"]), set(data.cells), "prepared verified cell coverage")
             _same(cache.weights, {pair: cell["render"] for pair, cell in data.cells.items()}, "prepared original render paths")
+            for key in ("render_origins", "render_comparisons"):
+                _same(cache.metadata.get(key), render_census[key], f"prepared cache {key}")
             for pair, cell in data.cells.items():
+                _same(cache.metadata["verified_cells"][pair]["render_origin"], cell["render_origin"],
+                      f"{pair}: qualified render origin changed")
                 _same(cache.metadata["verified_cells"][pair]["render_file_sha256"], cell["render_file_sha256"],
                       f"{pair}: qualified render changed")
                 _same(cache.metadata["verified_cells"][pair]["wire_sha256"], cell["record"]["blob_sha256"],
@@ -826,7 +1147,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                     _require(validate_joint_aura_entry(row), f"{name}: invalid measured joint cost")
             payload["provenance"]["tessera_joint_anchors"] = {
                 "plan_sha256": plan_sha256, "prepared": prepared, "inputs": data.inputs,
-                "calibration_input": calibration, "measured_cells": len(data.cells)}
+                "calibration_input": calibration, "measured_cells": len(data.cells),
+                **render_census}
             output = root / "joint-cost.pkl"
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
@@ -860,9 +1182,96 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
     return result
 
 
+SYNTHESIS_SCHEMA = "prismaquant.tessera_joint_aura.render_synthesis.v1"
+
+
+def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_every=100,
+                       mirror_root=None, authorized=False, receipt=None, compare=False):
+    """Write the campaign's missing decoded PWC shards, as an independent quantum.
+
+    The joint ``prepare`` pass has always synthesized an adopted rung's
+    missing shard on the way past. Doing it there put an embarrassingly
+    parallel, GPU-free, one-decode-per-wire pass on the critical path of a
+    reservation it does not use: measured, 125,144 shards at 2.6 cells/s on
+    one core while the reserved GB10 sat at 5 W of 140 W (#549).
+
+    This is the same function, addressable on its own: a unit range, no
+    model, no capture, no GPU required, and idempotent -- a cell whose shard
+    exists is skipped, the origin marker is published before the shard, and
+    staging names are unique per writer. PrismaBuild owns the fan-out; rows
+    carry disjoint ``sorted(names)[lo:hi]`` ranges cut from the census, so no
+    two rows ever address the same cell and a retried row re-reads rather
+    than re-writes.
+
+    ``mirror_root`` publishes into a mirror of the render paths instead of
+    the campaign's row caches, and ``compare`` then byte-compares each
+    mirrored shard against the campaign's own. That is a measurement, not a
+    build: writing into the row caches needs ``authorized``.
+    """
+    from .tessera_reader import load_declared_reader
+
+    _require(bool(mirror_root) or authorized,
+             "publishing into the campaign row caches requires explicit authorization")
+    _require(mirror_root is not None or not compare,
+             "a byte comparison needs a mirror to compare against the campaign's shards")
+    census = json.loads(_bound(config["inputs"]["census"], "census").read_text())
+    scope = parse_unit_scope(units, len(census["unit_shapes"]))
+    reader = load_declared_reader(config.get("reader"))
+    started = time.time()
+    data = load_measured_anchor_input(config["inputs"], reader=reader, verify_payloads=False,
+                                      synthesis_device=device, unit_scope=scope,
+                                      render_mirror_root=mirror_root, log_every=log_every)
+    record = {"schema": SYNTHESIS_SCHEMA, "plan_sha256": plan_sha256, "units": units,
+              "unit_scope": scope, "device": device, "mirror_root": data.render_mirror_root,
+              "host": socket.gethostname(), "pid": os.getpid(),
+              "reader_identity": None if reader is None else reader.identity,
+              "decoder_source": _decoder_identity(reader),
+              "units_read": len(data.formats_by_qname), "cells": len(data.cells),
+              "renders_synthesized_now": data.synthesized_now,
+              "seconds": time.time() - started, **cell_render_census(data.cells)}
+    if compare:
+        record["comparison"] = _compare_mirrored_renders(data)
+    if receipt is not None:
+        _json(receipt, record)
+    return record
+
+
+def _decoder_identity(reader):
+    """Name the decoder that produced these bytes, never assume the pinned one.
+
+    A shard is a pure function of (wire bytes, decoder source), so a receipt
+    that does not name the decoder cannot say which source it is a function
+    of -- and the installed Tessera is not always the pinned one.
+    """
+    if reader is not None:
+        return {"kind": "bound_reader", "identity": reader.identity}
+    import tessera
+
+    return {"kind": "installed", "file": str(Path(tessera.__file__).resolve()),
+            "version": str(getattr(tessera, "__version__", "unknown"))}
+
+
+def _compare_mirrored_renders(data):
+    """Byte-compare each mirrored shard with the campaign's own, where it has one."""
+    counts = {"compared": 0, "byte_identical": 0, "differs": 0, "no_campaign_render": 0}
+    differing = []
+    for pair, cell in sorted(data.cells.items()):
+        campaign = Path(cell["campaign_render"])
+        if not campaign.is_file():
+            counts["no_campaign_render"] += 1
+            continue
+        counts["compared"] += 1
+        if _sha(campaign) == _sha(Path(cell["render"])):
+            counts["byte_identical"] += 1
+        else:
+            counts["differs"] += 1
+            differing.append("@".join(pair))
+    return {**counts, "differing_cells": differing[:32]}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "run"))
+    parser.add_argument("command", choices=("prepare", "run", "synthesize"))
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--prepared", type=Path)
@@ -870,19 +1279,50 @@ def main(argv=None):
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--source-transition", type=Path)
     parser.add_argument("--source-transition-sha256")
+    parser.add_argument("--units", help="synthesize: lo:hi over the sorted census roster. "
+                        "Rows carry disjoint ranges; submit each with "
+                        "--progress synthesize=SECONDS, because the stage reports its "
+                        "cumulative durable count under exactly that phase name and an "
+                        "undeclared phase grants no continuation")
+    parser.add_argument("--device", default="cpu", help="synthesize: where the wire decode runs")
+    parser.add_argument("--log-every", type=int, default=100,
+                        help="synthesize: log a cumulative count and rate every N shards")
+    parser.add_argument("--mirror-root", type=Path,
+                        help="synthesize: publish into this mirror instead of the row caches")
+    parser.add_argument("--compare", action="store_true",
+                        help="synthesize: byte-compare each mirrored shard with the campaign's")
+    parser.add_argument("--i-am-authorized", action="store_true",
+                        help="synthesize: publish into the campaign row caches")
+    parser.add_argument("--receipt", type=Path)
     args = parser.parse_args(argv)
     if bool(args.source_transition) != bool(args.source_transition_sha256):
         parser.error("--source-transition and --source-transition-sha256 are required together")
     if bool(args.prepared) != bool(args.prepared_sha256):
         parser.error("--prepared and --prepared-sha256 are required together")
-    config = _load_plan(args.plan, args.plan_sha256)
+    # ``synthesize`` constructs no lease and loads no backend: it decodes wires
+    # and publishes the canonical CPU BF16 shard, whose bytes are measured
+    # identical across x86/aarch64 and CPU/CUDA. It is the one command that
+    # does not need the projection runtime, and refusing it here would refuse
+    # the stage that exists to run off the qualified box.
+    config = _load_plan(args.plan, args.plan_sha256,
+                        projection_runtime=args.command != "synthesize")
+    if args.command == "synthesize":
+        record = synthesize_renders(config, plan_sha256=args.plan_sha256, units=args.units,
+                                    device=args.device, log_every=args.log_every,
+                                    mirror_root=args.mirror_root, compare=args.compare,
+                                    authorized=args.i_am_authorized, receipt=args.receipt)
+        print(json.dumps({key: record[key] for key in (
+            "units_read", "cells", "renders_synthesized_now", "seconds", "render_origins")}))
+        return 0
     result = execute(args.command, config, plan_sha256=args.plan_sha256,
         prepared=None if args.prepared is None else {"path": str(args.prepared), "sha256": args.prepared_sha256},
         resume=args.resume,
         **({"source_transition": {"path": str(args.source_transition),
                                   "sha256": args.source_transition_sha256}}
            if args.source_transition is not None else {}))
-    print(json.dumps({key: result[key] for key in ("command", "passed", "units", "measured_cells")}))
+    print(json.dumps({key: result[key] for key in ("command", "passed", "units",
+                                                   "measured_cells", "render_origins",
+                                                   "render_comparisons")}))
     return 0
 
 

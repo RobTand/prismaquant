@@ -1,0 +1,15 @@
+{
+  "__prismaquant__": {
+    "note": "Fixture for prismaquant.tessera_tp_audit. One column-parallel and one row-parallel Linear per family, a packed expert stack, a shared expert, and one non-Tessera unit -- the smallest assignment that exercises every branch of the loader-axis audit. Not produced by an allocator run.",
+    "target_profile": "tessera_research_sm121"
+  },
+  "model.layers.0.self_attn.q_proj": "TESSERA_E2M1_K2_R896",
+  "model.layers.0.self_attn.o_proj": "TESSERA_E2M1_K2_R896",
+  "model.layers.0.mlp.gate_up_proj": "TESSERA_E4M3_K1_R1024",
+  "model.layers.0.mlp.down_proj": "TESSERA_E4M3_K1_R1024",
+  "model.layers.1.mlp.experts.gate_up_proj": "TESSERA_E2M1_K2_R896",
+  "model.layers.1.mlp.experts.down_proj": "TESSERA_E2M1_K2_R896",
+  "model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_BF16_K1_R1792",
+  "model.layers.1.mlp.shared_experts.down_proj": "TESSERA_BF16_K1_R1792",
+  "lm_head": "BF16"
+}

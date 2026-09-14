@@ -177,9 +177,46 @@ another's would defeat the current gate.
    derive a peak. Persistent bytes, activation bytes, scratch and KV may not
    reuse one physical extent in the same interval.
 
+8. Classify an allocation that no unit interval contains against the engine
+   steps the capture declares. An allocation contained in exactly one declared
+   step is invocation-local scratch; one that overlaps a step without being
+   contained in it is carried across the boundary and is an activation; one
+   that overlaps no declared step is live during no engine step and belongs to
+   the `non_step` class, which no composition term charges. The whole
+   classification is licensed by `observations.step_coverage.state` being
+   `complete`. Under `partial` the capture ran a step it declared no interval
+   over, so an allocation live during no declared step may still be live during
+   an undeclared one; under `unobserved` there is no boundary at all. Both
+   refuse: the row stays unclassified and nulls every term, which is how this
+   consumer behaved before any step could be declared. An interval that spans
+   two steps refuses in either of the two ways one can: two declared steps that
+   overlap contradict each other about which step an allocation was live
+   during, so an interval spanning another step's extent refuses; and a unit
+   runs inside one engine step, so a unit invocation that overlaps a declared
+   step without being contained in it refuses too. The report carries no unit
+   intervals, so the second is derived from an `inside_unit` allocation, which
+   lies wholly inside its own unit interval: one that overlaps a declared step
+   without being contained in one proves its unit crossed the boundary.
+
 For a scalar adapter, the existing conservative measured composition is:
 
 `fixed_resident + sum(candidate_resident) + fixed_activation + max(candidate_activation) + fixed_scratch + max(candidate_scratch) + fixed_KV`.
+
+That composition prices **one engine step**. Bytes in the `non_step` class are
+live during none of them, so they are priced beside it rather than inside it,
+as `non_step_transient_peak_bytes`, by the same simultaneous sweep every other
+transient maximum uses. The obligation a placement has to satisfy is therefore
+
+`max(scalar_budget_bytes, non_step_transient_peak_bytes)`,
+
+and both sides move it: a larger per-step composition raises it, and so does a
+larger off-step peak. Neither side is defaulted to zero when it is not
+expressible, because an absent side is an absence of evidence and a maximum
+taken against it would read as the other side having been checked. An off-step
+price needs the same join a scratch term needs -- `history_join` and
+`external_closure` closed, and no unclassified or uncharged row, since either
+could itself be off-step -- so the price goes null while the count stays
+readable in `scope.non_step_allocation_count`.
 
 `evaluate_measured_assignment` additionally adds the caller's explicit
 `slos.kv_bytes` and `slos.peak_scratch_bytes` reserves. Those reserves must
@@ -249,15 +286,23 @@ TTFT/ITL and held-out quality gates remain independent.
 | Qualify timing observation | Existing timing recorder, profiler analysis and control arms | Complete stream/launch coverage, repeated same-workload event partitions and approved observer-impact policy. No invented times. |
 | Relate all observation runs | Existing PQ runtime relation | Original manifests retained, exact production dependencies/config/device bindings checked, separately versioned support for any extra engine/control runs. |
 | Freeze and implement producer schema | Tessera report assembly plus PQ pure artifact consumer | Closed fields and enums; independent raw recomputation; deterministic receipt generation; no arbitrary success flag accepted. |
-| Integrate allocator admission | `admit_fixed_resources`, v2 loader and existing feasibility evaluation | Only recomputed resources set `producer_admitted`; full assignment and member coverage remain exact; unsupported topology/domain refuses. |
+| Integrate allocator admission | `admit_fixed_resources`, v2 loader and existing feasibility evaluation | Only recomputed resources set `producer_admitted`; full assignment and member coverage remain exact; unsupported topology/domain refuses; the admitted extent is the recomputed `max(scalar_budget_bytes, non_step_transient_peak_bytes)`, and a report expressing only one side refuses by name. |
 
 CPU regressions for the eventual implementation must first fail on missing or
 incorrect admission: omitted unit/owner/extent; duplicate alias; candidate/fixed
 overlap; reused pointer generation; live-free mismatch; missing parent segment;
 unknown API; stale source/calibration/workload/runtime; altered cache capacity;
 foreign rank/device; missing timing tail; overlapping streams; unsupported
-boundary; nonfinite or boolean numeric fields; changed derived totals; and
-assignment-dependent shared state. Tampering tests must update outer hashes
+boundary; nonfinite or boolean numeric fields; changed derived totals;
+assignment-dependent shared state; partial step coverage, which refuses the
+same row complete coverage classifies; a declared step interval spanning
+another declared step's extent; a unit invocation spanning a declared step
+boundary, read off an `inside_unit` allocation that overlaps a step without
+being contained in one; a declared `complete` coverage state its own
+declared and executed counts do not support; and a
+`derived.non_step_transient_peak_bytes` that disagrees with the
+recomputation, which must refuse by name rather than by a general
+"totals changed" message. Tampering tests must update outer hashes
 so the semantic consumer, not only the checksum reader, catches the defect.
 A positive synthetic receipt proves the parser/recomputation contract only.
 A positive real table additionally needs the qualified original measurements.

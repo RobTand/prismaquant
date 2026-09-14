@@ -120,7 +120,8 @@ def test_exact_measured_roster_excludes_interpolation(tmp_path):
 
 
 @pytest.mark.parametrize("mutation", ["missing_unit", "missing_shard", "unfinished_fleet",
-    "interpolated_anchor", "unreceipted_measured", "altered_wire", "missing_render",
+    "interpolated_anchor", "unreceipted_measured", "altered_wire",
+    "missing_render_undecodable_wire", "missing_render_and_wire",
     "wrong_source", "wrong_scale", "partial_fanout"])
 def test_incomplete_or_conflicting_anchor_evidence_refuses(tmp_path, mutation):
     config, names, fmt, payload, states = fixture(tmp_path)
@@ -141,9 +142,15 @@ def test_incomplete_or_conflicting_anchor_evidence_refuses(tmp_path, mutation):
         payload["costs"][names[0]]["TESSERA_E4M3_K1_R896"] = dict(payload["costs"][names[0]][fmt])
     elif mutation == "altered_wire":
         (Path(payload["provenance"]["wire_dir"]) / states[names[0]]["wire_records"][fmt]["file"]).write_bytes(b"changed")
-    elif mutation == "missing_render":
+    elif mutation in ("missing_render_undecodable_wire", "missing_render_and_wire"):
+        # Synthesis is the answer to a missing shard only when the wire behind
+        # it decodes. The fixture's wires are inert bytes, so this is the
+        # refusal that survives; removing the wire too is the other one.
         from prismaquant.production_weight_cache import _cache_weight_filename
         (tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(names[0], fmt)).unlink()
+        if mutation == "missing_render_and_wire":
+            (Path(payload["provenance"]["wire_dir"]) /
+             states[names[0]]["wire_records"][fmt]["file"]).unlink()
     elif mutation in {"wrong_source", "wrong_scale"}:
         state = states[names[0]]
         if mutation == "wrong_source":
@@ -216,7 +223,7 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
         input_global_scale=None)
     wire = tmp_path / "fixture.wire"; wire.write_bytes(b"wire")
     cell = {"anchor": anchor, "record": {"expected": "derived"}, "wire": str(wire),
-            "render_file_sha256": "a" * 64}
+            "render_file_sha256": "a" * 64, "render_origin": "encoded"}
     seen = []
     def derive(value, *, weights, menus, calibration_source, static_scales, projected_units):
         assert value.qname == anchor["qname"]
@@ -234,8 +241,23 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
                   projected_unit=expected_inputs["projection"], static_scales={})
     result = verify_anchor_render(cell, source, rendered, **kwargs)
     assert seen and result["wire_sha256"] == sha(wire)
+    assert result["render_origin"] == "encoded"
+    assert result["render_comparison"] == "independent_render_vs_wire"
     with pytest.raises(ValueError, match="decoded wire differs"):
         verify_anchor_render(cell, source, rendered + 1, **kwargs)
+    # A synthesized render's equality leg is the same call and a different
+    # claim; it can never report the independent comparison.
+    synthesized = {**cell, "render_origin": "synthesized_from_wire"}
+    assert (verify_anchor_render(synthesized, source, rendered, **kwargs)["render_comparison"]
+            == "wire_round_trip_only")
+    with pytest.raises(ValueError, match="no longer decodes from its wire"):
+        verify_anchor_render(synthesized, source, rendered + 1, **kwargs)
+    for origin in (None, "unknown", True):
+        with pytest.raises(ValueError, match="closed-vocabulary render_origin"):
+            verify_anchor_render({**cell, "render_origin": origin}, source, rendered, **kwargs)
+    with pytest.raises(ValueError, match="closed-vocabulary render_origin"):
+        verify_anchor_render({k: v for k, v in cell.items() if k != "render_origin"},
+                             source, rendered, **kwargs)
 
 
 @pytest.mark.parametrize("field,value", [("probe_microbatch", 0), ("n_probes", 1),
@@ -282,7 +304,8 @@ def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypat
     draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
-        census={"model": "fixture", "attention_implementation": "eager"},
+        census={"model": "fixture", "attention_implementation": "eager"}, cells={},
+        unit_scope=None, render_mirror_root=None, synthesized_now=0,
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     # Called after the write, so it is where the live value can be read.
     during = {}
@@ -312,7 +335,8 @@ def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypat
     draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
-        census={"model": "fixture", "attention_implementation": "eager"},
+        census={"model": "fixture", "attention_implementation": "eager"}, cells={},
+        unit_scope=None, render_mirror_root=None, synthesized_now=0,
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((1, 512), dtype=torch.int64), {"provenance": {**draw, "nsamples": 1}}))
@@ -349,8 +373,12 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
     draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     def intake(_inputs, **kwargs):
-        assert kwargs == ({"verify_payloads": False} if command == "prepare" else {})
+        # The command holds the CUDA reservation, so any shard it still has to
+        # synthesize decodes on that device rather than on one CPU core (#549).
+        assert kwargs == {"reader": None, "synthesis_device": "cuda",
+                          **({"verify_payloads": False} if command == "prepare" else {})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
+            cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
             payload={"provenance": {"hessian": {"calibration_identity": draw}}})
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
@@ -467,3 +495,421 @@ def test_prepare_refuses_oversized_later_render_before_loading_any_layer(tmp_pat
                                   ('later', 'fmt'): {'render': str(huge)}})
     with pytest.raises(ValueError, match='read buffer|shard|budget'):
         bridge._prepare_file_read_bound(data, max_render_bytes=4096)
+
+
+def _unlink_render(tmp_path, name, fmt):
+    from prismaquant.production_weight_cache import _cache_weight_filename
+
+    path = tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(name, fmt)
+    path.unlink()
+    return path
+
+
+def _decoder(monkeypatch, tensor):
+    """Bind the module-level decode seam to a fixed answer."""
+    from tessera import unit_artifact
+
+    seen = []
+
+    def decode(blob, device="cpu"):
+        seen.append((blob, device))
+        return tensor.clone() if hasattr(tensor, "clone") else tensor
+
+    monkeypatch.setattr(unit_artifact, "read_unit_artifact", decode)
+    return seen
+
+
+def test_adopted_rung_render_is_synthesized_from_its_wire_and_stays_marked(tmp_path, monkeypatch):
+    """An adopted rung's shard is written from its wire, and says so -- twice.
+
+    The second load is the prepare/run boundary: the ``.pt`` now exists, and
+    the origin must not quietly become ``encoded`` because of it.
+    """
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, states = fixture(tmp_path)
+    render = _unlink_render(tmp_path, names[0], fmt)
+    decoded = torch.arange(16, dtype=torch.float32).reshape(4, 4).to(torch.bfloat16)
+    seen = _decoder(monkeypatch, decoded)
+
+    data = load(config)
+    assert data.cells[names[0], fmt]["render_origin"] == "synthesized_from_wire"
+    assert data.cells[names[1], fmt]["render_origin"] == "encoded"
+    assert bridge.cell_render_census(data.cells) == {
+        "render_origins": {"encoded": 1, "synthesized_from_wire": 1},
+        "render_comparisons": {"independent_render_vs_wire": 1, "wire_round_trip_only": 1}}
+    assert len(seen) == 1 and seen[0][0] == (tmp_path / "merged/cache/wire" /
+        states[names[0]]["wire_records"][fmt]["file"]).read_bytes()
+    assert render.is_file() and torch.equal(torch.load(render, weights_only=True), decoded)
+    marker = json.loads(bridge._render_origin_marker_path(render).read_text())
+    assert marker == {"schema": bridge.RENDER_ORIGIN_SCHEMA,
+                      "render_origin": "synthesized_from_wire", "unit": names[0],
+                      "format_name": fmt, "wire_file": names[0] + ".tessera",
+                      "wire_sha256": states[names[0]]["wire_records"][fmt]["blob_sha256"]}
+
+    again = load(config)
+    assert again.cells[names[0], fmt]["render_origin"] == "synthesized_from_wire"
+    assert again.cells[names[1], fmt]["render_origin"] == "encoded"
+    assert len(seen) == 1, "an existing shard must not be re-decoded"
+
+
+def test_synthesis_uses_the_bound_reader_when_one_is_declared(tmp_path, monkeypatch):
+    import torch
+    from types import SimpleNamespace
+    from prismaquant.tessera_joint_aura import load_measured_anchor_input
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _unlink_render(tmp_path, names[0], fmt)
+    module_level = _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    bound = []
+
+    def read(blob, device="cpu"):
+        bound.append(blob)
+        return torch.ones((4, 4), dtype=torch.bfloat16)
+
+    data = load_measured_anchor_input(config, reader=SimpleNamespace(read_unit_artifact=read))
+    assert bound and not module_level
+    assert data.cells[names[0], fmt]["render_origin"] == "synthesized_from_wire"
+
+
+@pytest.mark.parametrize("field,value", [("schema", "other"), ("unit", "elsewhere"),
+    ("format_name", "TESSERA_E4M3_K1_R768"), ("wire_sha256", "0" * 64),
+    ("render_origin", "encoded")])
+def test_a_render_origin_marker_that_names_another_rung_refuses(tmp_path, monkeypatch, field, value):
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    render = _unlink_render(tmp_path, names[0], fmt)
+    _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    load(config)
+    marker = bridge._render_origin_marker_path(render)
+    stamp = json.loads(marker.read_text())
+    stamp[field] = value
+    marker.write_text(json.dumps(stamp))
+    with pytest.raises(ValueError, match="marked render|render origin schema|names another wire"):
+        load(config)
+
+
+@pytest.mark.parametrize("answer", ["raises", "wrong_shape", "nonfinite", "not_a_tensor"])
+def test_a_wire_that_does_not_decode_to_the_census_render_still_refuses(tmp_path, monkeypatch, answer):
+    import torch
+    from tessera import unit_artifact
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _unlink_render(tmp_path, names[0], fmt)
+    values = {"wrong_shape": torch.zeros((2, 8), dtype=torch.bfloat16),
+              "nonfinite": torch.full((4, 4), float("nan"), dtype=torch.bfloat16),
+              "not_a_tensor": None}
+
+    def decode(blob, device="cpu"):
+        if answer == "raises":
+            raise RuntimeError("undecodable")
+        return values[answer]
+
+    monkeypatch.setattr(unit_artifact, "read_unit_artifact", decode)
+    with pytest.raises(ValueError, match="does not decode|not the census BF16 render|NoneType"):
+        load(config)
+
+
+def test_a_corrupted_synthesized_shard_fails_its_round_trip_leg(tmp_path, monkeypatch):
+    """The equality leg is vacuous about the encode and live about the bytes."""
+    import torch
+    from types import SimpleNamespace
+    from prismaquant import tessera_campaign as tc
+    from prismaquant.tessera_joint_aura import verify_anchor_render
+    from tessera import unit_artifact
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    render = _unlink_render(tmp_path, names[0], fmt)
+    decoded = torch.arange(16, dtype=torch.float32).reshape(4, 4).to(torch.bfloat16)
+    _decoder(monkeypatch, decoded)
+    data = load(config)
+    cell = data.cells[names[0], fmt]
+    assert cell["render_origin"] == "synthesized_from_wire"
+
+    monkeypatch.setattr(tc, "_checkpoint_anchor_identity",
+                        lambda *_args, **_kwargs: {"expected": "derived"})
+    monkeypatch.setattr(tc, "_checkpoint_identity_api",
+                        lambda: SimpleNamespace(verify_cached_unit=lambda *_args: None))
+    monkeypatch.setattr(unit_artifact, "read_unit_artifact",
+                        lambda blob, device="cpu": decoded.clone())
+    source = torch.zeros((4, 4), dtype=torch.bfloat16)
+    kwargs = dict(calibration_source=None, projected_unit=None, static_scales={})
+    record = verify_anchor_render(cell, source, torch.load(render, weights_only=True), **kwargs)
+    assert record["render_comparison"] == "wire_round_trip_only"
+
+    # Corrupt the published shard: the same call now refuses, which is the
+    # only thing this leg was ever able to establish for a synthesized rung.
+    torch.save(decoded + 1, render)
+    with pytest.raises(ValueError, match="no longer decodes from its wire"):
+        verify_anchor_render(cell, source, torch.load(render, weights_only=True), **kwargs)
+
+
+def test_render_census_counts_every_vocabulary_value_and_refuses_unknown_ones():
+    from prismaquant.tessera_joint_aura import cell_render_census, render_origin_census
+
+    assert render_origin_census([]) == {
+        "render_origins": {"encoded": 0, "synthesized_from_wire": 0},
+        "render_comparisons": {"independent_render_vs_wire": 0, "wire_round_trip_only": 0}}
+    with pytest.raises(ValueError, match="unknown render origin"):
+        render_origin_census(["adopted"])
+    with pytest.raises(ValueError, match="carries no render_origin"):
+        cell_render_census({("unit", "fmt"): {}})
+
+
+# --- #549: where the decode runs, what it stages, and saying so -------------
+
+
+#: The three rungs #549 measured its cpu/cuda byte agreement on.
+WIRE_RUNGS = ["TESSERA_E4M3_K1_R1024", "TESSERA_E2M1_K2_R896", "TESSERA_BF16_K1_R4096"]
+
+
+def _real_wire(fmt, shape=(64, 64), seed=549):
+    """A real Tessera wire for a small unit, encoded on the CPU.
+
+    Through ``encode_tessera_unit`` -- the one call PrismaQuant makes into
+    Tessera's byte path -- so the fixture is the wire the campaign writes for
+    this rung, not a second spelling of it. Real encoder, real bytes, real
+    bytes-only decoder; the surrounding campaign is still a fixture and
+    nothing here is a serving or GPU-qualification claim.
+    """
+    import torch
+    from prismaquant.tessera_render import encode_tessera_unit
+
+    weight = torch.randn(*shape, generator=torch.Generator().manual_seed(seed)).bfloat16()
+    _render, blob = encode_tessera_unit(weight, fmt, hessian_required=False, verify=False)
+    return weight, blob
+
+
+def _synthesis_kwargs(tmp_path, blob, fmt, shape):
+    wire = tmp_path / "wire" / f"{fmt}.tessera"
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    wire.write_bytes(blob)
+    return {"wire": wire, "record": {"blob_sha256": hashlib.sha256(blob).hexdigest()},
+            "name": "model.layers.0.mlp.down_proj", "fmt": fmt, "shape": list(shape),
+            "reader": None}
+
+
+@pytest.mark.parametrize("fmt", WIRE_RUNGS)
+def test_a_real_wire_synthesizes_the_same_shard_bytes_every_time(tmp_path, fmt):
+    """The shard is a function of (wire bytes, decoder) -- the property #549's
+    fan-out rests on. Two CPU decodes of one wire must publish one byte string."""
+    import torch
+    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.tessera_joint_aura import _synthesize_render_from_wire
+
+    weight, blob = _real_wire(fmt)
+    kwargs = _synthesis_kwargs(tmp_path, blob, fmt, weight.shape)
+    written = []
+    for run in ("a", "b"):
+        render = tmp_path / run / _cache_weight_filename(kwargs["name"], fmt)
+        assert _synthesize_render_from_wire(render, **kwargs) == "synthesized_from_wire"
+        written.append(render)
+    assert written[0].read_bytes() == written[1].read_bytes()
+    stored = torch.load(written[0], map_location="cpu", weights_only=True)
+    assert stored.dtype == torch.bfloat16 and stored.device.type == "cpu"
+    assert list(stored.shape) == list(weight.shape)
+
+
+@pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="CUDA device required")
+@pytest.mark.parametrize("fmt", WIRE_RUNGS)
+def test_a_cuda_decode_publishes_the_same_shard_as_a_cpu_decode(tmp_path, fmt):
+    """#549's whole premise: moving the decode onto the reserved GPU changes
+    where the work runs and nothing about the bytes it publishes."""
+    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.tessera_joint_aura import (
+        _render_origin_marker_path, _synthesize_render_from_wire)
+
+    weight, blob = _real_wire(fmt)
+    kwargs = _synthesis_kwargs(tmp_path, blob, fmt, weight.shape)
+    published = {}
+    for device in ("cpu", "cuda"):
+        render = tmp_path / device / _cache_weight_filename(kwargs["name"], fmt)
+        assert _synthesize_render_from_wire(render, device=device, **kwargs) == "synthesized_from_wire"
+        published[device] = (render.read_bytes(),
+                             _render_origin_marker_path(render).read_bytes())
+    assert published["cpu"] == published["cuda"]
+
+
+def test_the_decode_device_reaches_the_one_decode_seam(tmp_path, monkeypatch):
+    """The device is plumbed to the seam ``verify_anchor_render`` already uses,
+    and it defaults to the CPU so every existing caller keeps its behaviour."""
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    seen = _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    _unlink_render(tmp_path, names[0], fmt)
+    bridge.load_measured_anchor_input(config, verify_payloads=False)
+    assert [device for _blob, device in seen] == ["cpu"]
+    _unlink_render(tmp_path, names[0], fmt)
+    bridge.load_measured_anchor_input(config, verify_payloads=False, synthesis_device="cuda:3")
+    assert [device for _blob, device in seen] == ["cpu", "cuda:3"]
+
+
+def test_two_writers_of_one_cell_never_share_a_staging_path(tmp_path, monkeypatch):
+    """A fixed ``.tmp`` makes the staging path a function of the destination
+    alone, so a retried or overlapping writer can publish another's half file."""
+    import torch
+    from types import SimpleNamespace
+    from prismaquant import cost_stage_checkpoint as journal
+    from prismaquant.production_weight_cache import _store_rendered_weight_entry
+
+    tensor = torch.zeros((4, 4), dtype=torch.bfloat16)
+    real_save, staged = torch.save, []
+
+    def record(obj, path, *args, **kwargs):
+        staged.append(str(path))
+        return real_save(obj, path, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "save", record)
+    suffixes = []
+    for host, pid in (("dl380g10", 101), ("sparklina", 101), ("dl380g10", 202)):
+        monkeypatch.setattr(journal, "_TEMP_SUFFIX", None)
+        monkeypatch.setattr(journal, "socket", SimpleNamespace(gethostname=lambda host=host: host))
+        monkeypatch.setattr(journal.os, "getpid", lambda pid=pid: pid)
+        suffixes.append(journal.unique_temp_suffix())
+        _store_rendered_weight_entry(weights={}, cache_dir_path=tmp_path, qname="a.b",
+                                     fmt="NVFP4", tensor=tensor, weight_dtype=torch.bfloat16)
+    # A fork carries the parent's module state into the child, so a suffix that
+    # were merely memoised would put the two processes back on one staging path.
+    before = journal.unique_temp_suffix()
+    monkeypatch.setattr(journal.os, "getpid", lambda: 303)
+    assert journal.unique_temp_suffix() != before, "a forked child kept its parent's staging path"
+    monkeypatch.setattr(journal, "_TEMP_SUFFIX", None)
+    assert len(set(suffixes)) == 3, "writers on one box or one name shared a suffix"
+    assert len(set(staged)) == 3, "two writers staged the same cell at one path"
+    assert all(s.count(".") == 1 and s.isascii() for s in suffixes)
+
+
+def test_the_staging_name_keeps_the_bytes_the_campaign_already_published(tmp_path, monkeypatch):
+    """``torch.save`` names the zip archive after the basename minus its LAST
+    extension, so ``<name>.pt.tmp`` and ``<name>.pt.tmpsparky7`` both publish
+    an archive named ``<name>.pt`` -- and a suffix carrying a second dot, or a
+    hostname carrying one, would silently publish different bytes for shards
+    the campaign has already written. The uniqueness is free; that is the
+    property it must not cost."""
+    import torch
+    from prismaquant import cost_stage_checkpoint as journal
+    from prismaquant.production_weight_cache import (
+        _cache_weight_filename, _store_rendered_weight_entry)
+
+    assert journal.unique_temp_suffix().count(".") == 1
+    tensor = torch.arange(16, dtype=torch.bfloat16).reshape(4, 4)
+    _store_rendered_weight_entry(weights={}, cache_dir_path=tmp_path, qname="a.b",
+                                 fmt="NVFP4", tensor=tensor, weight_dtype=torch.bfloat16)
+    published = tmp_path / _cache_weight_filename("a.b", "NVFP4")
+    legacy = tmp_path / "legacy" / published.name
+    legacy.parent.mkdir()
+    # Exactly what the pre-#549 writer did: one fixed ``.tmp``, then replace.
+    torch.save(tensor.contiguous(), legacy.with_name(legacy.name + ".tmp"))
+    legacy.with_name(legacy.name + ".tmp").replace(legacy)
+    assert published.read_bytes() == legacy.read_bytes()
+
+
+def test_a_scoped_read_walks_only_its_units_and_is_refused_as_a_campaign_input(tmp_path, monkeypatch):
+    """The fan-out unit: rows carry disjoint halves of ``sorted(names)``, and a
+    partial roster can never be mistaken for the campaign's own input."""
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    for name in names:
+        _unlink_render(tmp_path, name, fmt)
+    first = bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(0, 1))
+    assert set(first.formats_by_qname) == {sorted(names)[0]}
+    assert first.unit_scope == (0, 1) and first.synthesized_now == 1
+    second = bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(1, 2))
+    assert set(second.formats_by_qname) == {sorted(names)[1]}
+    assert second.synthesized_now == 1
+    whole = bridge.load_measured_anchor_input(config, verify_payloads=False)
+    assert set(whole.formats_by_qname) == set(names)
+    # Both halves were published by the scoped rows, so the complete read has
+    # nothing left to do -- the property the stage exists for.
+    assert whole.synthesized_now == 0 and whole.unit_scope is None
+    with pytest.raises(ValueError, match="cannot also verify the complete campaign payload"):
+        bridge.load_measured_anchor_input(config, unit_scope=(0, 1))
+    with pytest.raises(ValueError, match="outside the 2-unit census roster"):
+        bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(0, 5))
+
+
+@pytest.mark.parametrize("spec,expected", [("0:4", (0, 4)), (":4", (0, 4)), ("2:", (2, 7)),
+                                           (None, None)])
+def test_a_unit_range_is_read_off_the_sorted_census_roster(spec, expected):
+    from prismaquant.tessera_joint_aura import parse_unit_scope
+
+    assert parse_unit_scope(spec, 7) == expected
+    for bad in ("4:4", "5:2", "3", "1:2:3"):
+        with pytest.raises(ValueError):
+            parse_unit_scope(bad, 7)
+
+
+def test_the_standalone_stage_mirrors_its_shards_and_leaves_the_row_cache_alone(tmp_path, monkeypatch):
+    """Measuring mode publishes into a mirror and compares; it cannot replace
+    the campaign's bytes, and publishing into them needs explicit authority."""
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.production_weight_cache import _cache_weight_filename
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    plan = {"inputs": config}
+    mirror = tmp_path / "mirror"
+    with pytest.raises(ValueError, match="requires explicit authorization"):
+        bridge.synthesize_renders(plan, plan_sha256="0" * 64)
+    # The row cache holds both campaign shards; the mirror holds neither.
+    before = {n: (tmp_path / "campaign/rows/row-0000/cache"
+                  / _cache_weight_filename(n, fmt)).read_bytes() for n in names}
+    record = bridge.synthesize_renders(plan, plan_sha256="0" * 64, units="0:1",
+                                       mirror_root=mirror, compare=True,
+                                       receipt=tmp_path / "synth.json")
+    assert record["renders_synthesized_now"] == 1 and record["cells"] == 1
+    assert record["comparison"]["compared"] == 1 and record["comparison"]["differs"] == 1
+    assert record["unit_scope"] == (0, 1) and record["decoder_source"]["kind"] == "installed"
+    assert json.loads((tmp_path / "synth.json").read_text())["schema"] == bridge.SYNTHESIS_SCHEMA
+    assert all((tmp_path / "campaign/rows/row-0000/cache"
+                / _cache_weight_filename(n, fmt)).read_bytes() == before[n] for n in names)
+    # Idempotent: a second row over the same range writes nothing further.
+    again = bridge.synthesize_renders(plan, plan_sha256="0" * 64, units="0:1",
+                                      mirror_root=mirror, compare=True)
+    assert again["renders_synthesized_now"] == 0
+
+
+def test_the_synthesis_loop_reports_what_it_has_committed(tmp_path, monkeypatch, capsys):
+    """Closed-loop observability: the phase ran for hours saying nothing (#549)."""
+    import torch
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, _payload, _states = fixture(tmp_path)
+    _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
+    for name in names:
+        _unlink_render(tmp_path, name, fmt)
+    reports = []
+    monkeypatch.setattr(bridge, "_pb_commit",
+                        lambda units, phase, unit=None: reports.append((units, phase, unit)))
+    data = bridge.load_measured_anchor_input(config, verify_payloads=False, log_every=1)
+    lines = [line for line in capsys.readouterr().out.splitlines() if "synthesized" in line]
+    assert len(lines) == 3 and "cells/s" in lines[-1]
+    assert data.synthesized_now == 2
+    assert [count for count, _, _ in reports] == [1, 2]
+    assert {phase for _, phase, _ in reports} == {"synthesize"}
+
+
+def test_progress_is_reported_only_into_an_admitted_action(tmp_path, monkeypatch):
+    """The reporting channel is the worker's; outside one it is a no-op, which
+    is why the call sites do not test how they were launched."""
+    from prismaquant.tessera_joint_aura import _pb_commit
+
+    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_PATH", raising=False)
+    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", raising=False)
+    assert _pb_commit(7, "synthesize") is False
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(tmp_path / "progress.json"))
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "t0ken")
+    assert _pb_commit(7, "synthesize", unit="a@b") is True
+    record = json.loads((tmp_path / "progress.json").read_text())
+    assert record == {"schema": "prismabuild.action_progress.v1", "token": "t0ken",
+                      "phase": "synthesize", "units_completed": 7, "unit": "a@b",
+                      "reported_unix": record["reported_unix"]}

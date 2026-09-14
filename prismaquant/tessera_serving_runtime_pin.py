@@ -190,12 +190,35 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: tile controls (#437/#438), including reviewed cached-export and rank-local
 #: intake fixes (#434/#436). Actual GLM pricing preserves measured bytes and
 #: scores; the unchanged contract and answer grant no new serving qualification.
+#: Re-pinned 2026-09-12 to 1c827abc4 (Tessera #464, closing its #456): runtime
+#: contract v23 / lane-eligibility schema v10, which turns each
+#: ``lane_eligibility.platforms`` entry into an object stating its backend and
+#: what it EXECUTES per family, and adds the two AMD platforms (``gfx1151``,
+#: ``gfx1201``) with no cells. The ten ``sm_121`` cells are byte-identical and
+#: ``versions.default_serve_image`` is unchanged, so this pin admits exactly
+#: what the previous one did; what it adds is grammar, not qualification.
+#: Re-pinned 2026-09-13 to 7dbbacbd0 (Tessera #474, merged at 27be1a602, plus
+#: its #475): runtime contract v24, and the FIRST cells on a platform that is
+#: not ``sm_121``. ``gfx1201`` (RDNA4, RX 9070 XT) gains two
+#: ``TESSERA_BF16_K1`` dense cells, decode and batch, at rung q256 = 1792, and
+#: its ``serve_image`` stops being ``null``. The lane-eligibility schema does
+#: NOT move -- v24 is additive for a v10 reader, every field the new cells
+#: carry is one v10 already defines -- and the ten ``sm_121`` cells are
+#: byte-identical. So this pin admits everything the previous one did AND, for
+#: the first time, a route on an AMD device: ``route_status_for`` answers
+#: ``backed_with_serve_flag`` for ``TESSERA_BF16_K1_R1792`` on ``gfx1201``
+#: where it answered ``unattested`` with ``:no_cell`` before. ``gfx1151``
+#: still ships no cell and still answers ``:no_cell`` for every family.
+#: The contract bytes are byte-identical between 27be1a602 (where v24 entered)
+#: and 7dbbacbd0 (master's tip at review), and the digest below is computed
+#: from ``git show 7dbbacbd0:src/tessera/serving/runtime_contract.json``, never
+#: from an installed copy.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "387eda36fd410d6b2a4fb86b22285eab2a5e072c"
+    "7dbbacbd0900f6b6f468690e2525cc018564382d"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "a688f8de244f936ec3a63a782e20af7985733e7a6fb0b4b981b5fe4c44112212"
+    "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the

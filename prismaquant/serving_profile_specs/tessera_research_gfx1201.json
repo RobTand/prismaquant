@@ -1,0 +1,31 @@
+{
+  "schema": "prismaquant.serving_profile.v1",
+  "id": "tessera_research_gfx1201",
+  "runtime": "vllm+tessera_plugin",
+  "target_platform": "gfx1201",
+  "emulation_only": true,
+  "_emulation_only_rationale": "EMULATION-ONLY. Identical in kind to the gfx1151 profile: the pinned contract declares gfx1201, publishes TESSERA_BF16_K1 as executing bf16_unquantized and E2M1/E4M3 as null, and ships no cell -- so every family resolves `unattested` with source serving_runtime_contract:<v>:no_cell and export fails closed without an override. It exists separately from the Strix Halo profile because the two are different devices with different receipts, and because gfx1201 is the one this project can execute on: a gfx1201 receipt proves the code path and says so, and it never stands in for gfx1151 numerics or performance. A gfx1201 cell at contract v24 promotes THIS profile and leaves the Strix Halo one where it is.",
+  "description": "RESEARCH-ONLY allocation profile for Tessera's WnA16 family on AMD RDNA4 (gfx1201), at the continuous 1/256-bpp rate axis. Same menu rule as the Strix Halo profile; this is the certification box, the device a correctness receipt can actually be taken on.",
+  "_no_format_rules_rationale": "Deliberately declares NO format_rules, and the menu is DERIVED rather than declared. Rob's ruling is that the RDNA3.5 lane is Tessera-16 WnA16 only, and the reason E2M1 and E4M3 are off this profile's menu is the pinned contract's own executes: null for gfx1201 -- a measured platform fact (principle 1's carve-out via principle 9: the runtime has no native route for those bytes on that device), not a profile opinion. Writing the ban here would be exactly the hardcoded format ban principle 1 vetoes, and it would go stale the day the runtime backs one more family. The menu is bounded on the Tessera side by tessera_menu.expand_tessera_menu -- family buildability, wire serialisability, shape legality, the TP shard, W(n<=A) and the route admission, which since PrismaQuant #528 asks the contract per platform -- and on the scalar side by FORMATS plus check_format_applicability. tests/test_tessera_amd_serving_profiles.py asserts the menu equals the set of families whose executes entry is non-null for this target, so a contract that backs more families widens the menu with no edit here.",
+  "tensor_parallel": {
+    "world_size": 1,
+    "_world_size_rationale": "1 is the honest default and also the pinned runtime's own ceiling: the tensor_parallel table in Tessera's packaged runtime_contract.json pins every Tessera family at max_world_size 1. The rules below are declared at world_size 1 so the vocabulary is reviewed before the degree is, and so raising the degree is a one-token change rather than a new mapping.",
+    "rules": [
+      {
+        "id": "column_parallel_attention_and_mlp_in",
+        "when": {
+          "regex": "\\.(q_proj|k_proj|v_proj|qkv_proj|gate_proj|up_proj|gate_up_proj)$"
+        },
+        "kind": "column"
+      },
+      {
+        "id": "row_parallel_attention_and_mlp_out",
+        "when": {
+          "regex": "\\.(o_proj|down_proj)$"
+        },
+        "kind": "row"
+      }
+    ],
+    "_rules_rationale": "ENUMERATED, not inferred. `fused implies column-parallel` is wrong for units PrismaQuant already allocates -- MLA's q_a_proj and kv_a_proj_with_mqa are replicated, a router gate is replicated, and Qwen3.5's fused DeltaNet in_proj_qkvz is not head-sharded -- so the mapping is a declaration and an unmatched qname resolves to `none`, which makes the gate a no-op rather than a guess. Packed experts are `none` by construction in check_shape: expert parallelism cuts the stack and leaves each expert's 2-D unit whole."
+  }
+}

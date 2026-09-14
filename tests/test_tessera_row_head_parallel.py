@@ -150,16 +150,27 @@ def test_the_seal_taken_ahead_is_the_producer_seal_and_the_hold_does_not_retake_
     hashed, lock = [], threading.Lock()
 
     def observed(value):
+        result = actual_hash(value)
         with lock:
-            hashed.append((id(value), threading.current_thread().name))
-        return actual_hash(value)
+            hashed.append((result["sha256"], threading.current_thread().name))
+        return result
 
     monkeypatch.setattr(cached_unit, "tensor_identity", observed)
     ahead = tc._SealAhead(source)
     assert ahead.wait() >= 0.0 and ahead.seconds is not None
     # Exactly the producer's seal: every resident H digested once, on the
     # helper thread, and a sealed owner is not digested again.
-    assert sorted(value for value, _ in hashed) == sorted(id(hessians[name]) for name in names)
+    #
+    # What is digested, not which object: the seal stages each H before
+    # hashing it (`export.ActivationSource._seal` at the pinned Tessera does
+    # `H.detach().cpu().contiguous()` and digests THAT, where the previous pin
+    # digested `self.hessians[name]` itself), so `id()` names a short-lived
+    # view and never matched here. The sealed bytes are what this test is
+    # about: the digest of each resident H, once each, and nothing else. Ids
+    # of temporaries are also reused, which would have made the old
+    # instrument able to pass for the wrong reason.
+    assert sorted(sha for sha, _ in hashed) == sorted(
+        actual_hash(hessians[name])["sha256"] for name in names)
     assert {thread for _, thread in hashed} == {"campaign-seal-ahead"}
     source.capture_sha256()
     assert len(hashed) == len(names)

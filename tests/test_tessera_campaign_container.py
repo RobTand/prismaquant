@@ -154,7 +154,7 @@ def test_an_interactive_run_outside_pbrun_keeps_its_behaviour():
         spec(), cpu_only=True, environ={'CUDA_VISIBLE_DEVICES': '0'})[0] is False
 
 
-def test_main_withholds_the_device_from_a_row_that_reserved_none(monkeypatch):
+def test_main_withholds_the_device_from_a_row_that_reserved_none(monkeypatch, tmp_path):
     """The same property through the real entry point, on the argv it execs.
 
     The unit assertions above call the decision directly; this one asserts on
@@ -171,6 +171,17 @@ def test_main_withholds_the_device_from_a_row_that_reserved_none(monkeypatch):
     monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '')
     data = spec()
     data['container'].pop('archive', None)
+    # main() also refuses a launch that would import PrismaQuant from the
+    # sealed checkout rather than the pinned mount (#519), so this row names a
+    # pinned tree it can actually reach.
+    pinned, checkout = tmp_path / 'pinned', tmp_path / 'checkout'
+    for root in (pinned, checkout):
+        (root / 'prismaquant').mkdir(parents=True)
+        (root / 'prismaquant' / '__init__.py').write_text(f'TREE = {root.name!r}\n')
+    data['container']['mounts'] = [
+        {'source': str(pinned), 'target': str(pinned), 'readonly': True}]
+    data['env']['PYTHONPATH'] = str(pinned)
+    monkeypatch.chdir(checkout)
     runner.main(['--spec', json.dumps(data), '--', 'python3', '-c', 'pass'])
     assert '--gpus' not in launched['argv'], (
         'the exec line still maps the whole GPU into a container whose row '

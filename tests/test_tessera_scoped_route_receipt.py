@@ -97,6 +97,7 @@ def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
                                             "shape": f"M{m}:N128:K128"}}
         census["record_owner"][phase] = {module: owner}
     formats = {FAMILY: {"family": FAMILY, "kind": "tessera_wire", "grid": "E4M3",
+                        "activation_contract": "fp8_per_token_dynamic",
                         "name_pattern": "TESSERA_E4M3_K1_R{k}", "reader_rate_range_q256": [256, 2048],
                         "residency_modes": ["resident", "streamed"]}}
     cells = [{"id": f"{structure}_{regime}", "platform": "sm_121", "family": FAMILY,
@@ -120,7 +121,16 @@ def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
                                      "control": None, "record": None},
                            "artifact": None}}
              for regime in ("decode", "batch")]
-    block = {"schema": lane.LANE_ELIGIBILITY_SCHEMA_TESSERA, "platforms": {"sm_121": {}},
+    # The platform entry tracks the CURRENT grammar for the same reason the
+    # evidence block above does: a schema bump has to land here as "state the
+    # new field", not as a document that names v10 and carries a v9 platform.
+    # Under v10 a platform is an object, and its `executes` value for a family
+    # must be the activation contract that family's own `formats[]` row
+    # publishes -- which is why the row above states one.
+    block = {"schema": lane.LANE_ELIGIBILITY_SCHEMA_TESSERA,
+             "platforms": {"sm_121": {"backend": "cuda", "compute_capability": [12, 1],
+                                      "serve_image": IMAGE,
+                                      "executes": {FAMILY: "fp8_per_token_dynamic"}}},
              "structures": [structure], "regimes": ["decode", "batch"], "cells": cells}
     # No extension launch in this fixture (torch / vLLM symbols only), so no
     # lane row is needed for the reader to bind launches to.

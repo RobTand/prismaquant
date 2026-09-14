@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-image=eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c
+image=${PQ_JOINT_PROJECTION_IMAGE:-eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c}
 input_root=/mnt/shared/tessera-measurements/first-model-20260907/inputs
-run_root=/mnt/shared/tessera-measurements/first-model-20260907/joint-fused-projection
+run_root=${PQ_JOINT_PROJECTION_RUN_ROOT:-/mnt/shared/tessera-measurements/first-model-20260907/joint-fused-projection}
 mode=$1
 shift
 gpu_args=()

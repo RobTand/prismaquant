@@ -189,6 +189,40 @@ def derive_executes(
     return tuple(sorted(derived))
 
 
+def derive_executes_by_platform(
+    contract_path_override=None,
+) -> dict[str, dict[str, "str | None"]]:
+    """What each declared platform executes, per family, from the contract.
+
+    The per-family derivation above answers "what does this family's route
+    run?" -- a property of the family, true wherever it is served. This one
+    answers "is it served HERE?", which nothing about the family implies. Under
+    a contract with no platform axis (lane schema v9 and earlier) the answer is
+    an empty map, which is an ABSENCE: v9 had no way to say a family is
+    unbacked on a device, so silence there means the question was never put,
+    not that every platform backs everything.
+    """
+    from importlib.resources import as_file
+
+    from .lane_eligibility import load_eligibility_table
+
+    if contract_path_override is not None:
+        table = load_eligibility_table(contract_path=contract_path_override)
+    else:
+        with as_file(packaged_contract_path()) as path:
+            table = load_eligibility_table(contract_path=path)
+    if not table.present:
+        raise TesseraExportLaneError(
+            "the packaged Tessera runtime contract publishes no "
+            "lane_eligibility table, so no platform statement can be derived "
+            "from it; an absent table is UNATTESTED, not a clean bill"
+        )
+    return {
+        key: dict(entry.executes)
+        for key, entry in sorted(table.platform_entries.items())
+    }
+
+
 def require_executes_derived_from_contract() -> tuple[str, ...]:
     """Principle 14: refuse when the lane spec and the runtime disagree.
 
@@ -218,6 +252,48 @@ def require_executes_derived_from_contract() -> tuple[str, ...]:
             "  The producer's claim about what the serving runtime executes "
             "must be DERIVED from the runtime's own machine-readable table. "
             "Re-read the table; never edit the list to silence this."
+        )
+    require_platform_executes_derived_from_contract(declared)
+    return derived
+
+
+def require_platform_executes_derived_from_contract(declared=None) -> dict:
+    """The same refusal, per platform (PrismaQuant #529).
+
+    ``executes`` is platform-blind, so it is silent about the question a
+    producer targeting an AMD device has to answer first: does the pinned
+    runtime run this family's route on THAT device at all? Contract v23
+    publishes it, this derives it, and a lane spec that disagrees is refused
+    for the same reason the family-level list is -- a claim about another
+    runtime is derived or it is refused.
+
+    A contract with no platform axis derives an empty map; the lane spec must
+    then declare an empty map too, so "the runtime does not publish this yet"
+    stays visible instead of reading as "every platform backs everything".
+    """
+    from .lane_spec import load_lane_spec
+
+    if declared is None:
+        spec = load_lane_spec("tessera")
+        declared = spec.served_activation_quantization
+        if declared is None:
+            raise TesseraExportLaneError(
+                "lane_specs/tessera.json declares no "
+                "served_activation_quantization")
+    derived = derive_executes_by_platform()
+    stated = {
+        platform: dict(entry)
+        for platform, entry in declared.executes_by_platform.items()
+    }
+    if stated != derived:
+        raise TesseraExportLaneError(
+            "PRINCIPLE 14: lane_specs/tessera.json declares "
+            f"executes_by_platform={json.dumps(stated, sort_keys=True)} but the "
+            "pinned runtime's packaged contract publishes "
+            f"{json.dumps(derived, sort_keys=True)}.\n"
+            "  What a platform executes is a claim about another runtime, so "
+            "it is DERIVED from that runtime's own table or it is refused. "
+            "Re-read the table; never edit the map to silence this."
         )
     return derived
 

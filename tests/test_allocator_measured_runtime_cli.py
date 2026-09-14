@@ -74,7 +74,22 @@ def test_measured_cli_refuses_ambiguous_configuration(monkeypatch, capsys, optio
     assert diagnostic in capsys.readouterr().err
 
 
-def _main_fixture(tmp_path, *, fixed_ms=0.0):
+#: Format -> (predicted_dloss, prefill_ms) for the default one-unit fixture:
+#: a same-byte pair where the slower rung has the lower loss.
+DEFAULT_MENU = {"FP8_E4M3": (1.0, 8.0), "FP8_E5M2": (2.0, 2.0)}
+
+
+def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_proj",),
+                  menu=DEFAULT_MENU, target_bits="9"):
+    """Synthetic probe/cost/table/context files plus the allocator argv.
+
+    ``units`` are the Linears priced (each with the same ``menu``); ``menu``
+    maps a registry format to its per-unit (predicted_dloss, prefill_ms).
+    The defaults reproduce the original one-unit, two-format fixture exactly;
+    ``tests/test_prefill_frontier.py`` passes several units and three formats
+    to get a curve with more than one corner. Returns ``(name, argv)`` where
+    ``name`` is the first unit, as before.
+    """
     import torch
     from prismaquant.joint_aura import (
         activation_identity, arithmetic_identity, identity_sha256, make_joint_aura_entry,
@@ -83,8 +98,9 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0):
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
     from prismaquant.measured_runtime_prices import SCHEMA, CONTEXT_SCHEMA
 
-    name = "model.layers.0.self_attn.o_proj"
-    formats = ["FP8_E4M3", "FP8_E5M2"]
+    units = list(units)
+    name = units[0]
+    formats = list(menu)
     shape = (64, 64)
     source_content = {"config": {"fixture": True}, "weight_map": {"fixture.weight": "fixture.weight"},
         "shards": [{"path": "/fixture/synthetic.safetensors", "size": 1, "sha256": "a" * 64}]}
@@ -93,29 +109,33 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0):
         "content_sha256": canonical_json_sha256(source_content, where="synthetic CLI fixture"),
         **source_content}
     arithmetic = arithmetic_identity(torch.float32)
-    rows = {}
-    for fmt, loss in zip(formats, (1.0, 2.0)):
-        probe = {"schema": "prismaquant.joint_aura.probes.v2", "seed_base": 0,
-                 "n_probes": 3, "calibration_sha256": "c" * 64,
-                 "producer_source_sha256": "d" * 64, "source_model": source_model,
-                 "distribution": "rademacher", "normalization": "global_kl_fisher",
-                 "temperature": 1.0, "arithmetic": arithmetic}
-        operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": name,
-                    "format": fmt, "probe_identity_sha256": identity_sha256(probe),
-                    "source_weight": {"content_sha256": "a" * 64, "shape": list(shape),
-                                      "dtype": "torch.float32", "logical_bytes": 16384},
-                    "rendered_weight": {"content_sha256": "b" * 64, "shape": list(shape),
-                                        "dtype": "torch.float32", "logical_bytes": 16384},
-                    "activation": activation_identity(allocator.fr.get_format(fmt), {}, name),
-                    "arithmetic": arithmetic}
-        rows[fmt] = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
-            signed_components=[dict(weight=math.sqrt(2 * loss), activation=0.0,
-                                    mixed=0.0, total=math.sqrt(2 * loss)) for _ in range(3)])
+    rows_by_unit = {}
+    for unit in units:
+        rows = {}
+        for fmt, (loss, _milliseconds) in menu.items():
+            probe = {"schema": "prismaquant.joint_aura.probes.v2", "seed_base": 0,
+                     "n_probes": 3, "calibration_sha256": "c" * 64,
+                     "producer_source_sha256": "d" * 64, "source_model": source_model,
+                     "distribution": "rademacher", "normalization": "global_kl_fisher",
+                     "temperature": 1.0, "arithmetic": arithmetic}
+            operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": unit,
+                        "format": fmt, "probe_identity_sha256": identity_sha256(probe),
+                        "source_weight": {"content_sha256": "a" * 64, "shape": list(shape),
+                                          "dtype": "torch.float32", "logical_bytes": 16384},
+                        "rendered_weight": {"content_sha256": "b" * 64, "shape": list(shape),
+                                            "dtype": "torch.float32", "logical_bytes": 16384},
+                        "activation": activation_identity(allocator.fr.get_format(fmt), {}, unit),
+                        "arithmetic": arithmetic}
+            rows[fmt] = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
+                signed_components=[dict(weight=math.sqrt(2 * loss), activation=0.0,
+                                        mixed=0.0, total=math.sqrt(2 * loss)) for _ in range(3)])
+        rows_by_unit[unit] = rows
+    rows = rows_by_unit[name]
     probe_path, cost_path = tmp_path / "probe.pkl", tmp_path / "costs.pkl"
-    probe_path.write_bytes(pickle.dumps({"stats": {name: {
-        "h_trace": 1.0, "n_params": 4096, "in_features": 64, "out_features": 64}},
-        "meta": {"model": None}}))
-    cost_path.write_bytes(pickle.dumps({"costs": {name: rows},
+    probe_path.write_bytes(pickle.dumps({"stats": {unit: {
+        "h_trace": 1.0, "n_params": 4096, "in_features": 64, "out_features": 64}
+        for unit in units}, "meta": {"model": None}}))
+    cost_path.write_bytes(pickle.dumps({"costs": rows_by_unit,
         "meta": {"formats": formats}, "provenance": {"cost_mode": "aura",
             "joint_activation": True, "cost_currency": "joint_aura_predicted_dloss"}}))
     receipt = tmp_path / "synthetic-receipt.txt"
@@ -127,21 +147,22 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0):
         "gpu_identity": "synthetic", "runtime_sha256": "a" * 64,
         "source_sha256": source_model["content_sha256"], "calibration_sha256": "c" * 64,
         "prompt_tokens": 16, "batch_size": 1, "tensor_parallel": 1, "graph_mode": "eager",
-        "operator_routes": {name: {fmt: f"synthetic-{fmt}" for fmt in formats}}}
+        "operator_routes": {unit: {fmt: f"synthetic-{fmt}" for fmt in formats} for unit in units}}
     table_rows = []
-    for fmt, milliseconds in zip(formats, (8.0, 2.0)):
-        from prismaquant.allocator_candidates import serialized_candidate_payload
-        serialized, _, _ = serialized_candidate_payload(
-            allocator.fr.get_format(fmt), shape, qname=name, cb_serialization_context=None)
-        table_rows.append({"unit": name, "format": fmt,
-            "binding": {"member_formats": {name: fmt},
-                "member_operator_identity_sha256": {name: rows[fmt]["joint_operator_identity_sha256"]},
-                "member_shapes": {name: list(shape)}, "operator_route": context["operator_routes"][name][fmt]},
-            "resources": vars(_resources(prefill_ms=milliseconds, decode_ms=None,
-                serialized_bytes=serialized, resident_bytes=16384)),
-            "prefill": {"method": "cuda_events", "samples_ms": [milliseconds] * 3,
-                "warmup_iterations": 3, "receipt_path": receipt.name, "receipt_sha256": receipt_sha},
-            "decode": None})
+    from prismaquant.allocator_candidates import serialized_candidate_payload
+    for unit in units:
+        for fmt, (_loss, milliseconds) in menu.items():
+            serialized, _, _ = serialized_candidate_payload(
+                allocator.fr.get_format(fmt), shape, qname=unit, cb_serialization_context=None)
+            table_rows.append({"unit": unit, "format": fmt,
+                "binding": {"member_formats": {unit: fmt},
+                    "member_operator_identity_sha256": {unit: rows_by_unit[unit][fmt]["joint_operator_identity_sha256"]},
+                    "member_shapes": {unit: list(shape)}, "operator_route": context["operator_routes"][unit][fmt]},
+                "resources": vars(_resources(prefill_ms=milliseconds, decode_ms=None,
+                    serialized_bytes=serialized, resident_bytes=16384)),
+                "prefill": {"method": "cuda_events", "samples_ms": [milliseconds] * 3,
+                    "warmup_iterations": 3, "receipt_path": receipt.name, "receipt_sha256": receipt_sha},
+                "decode": None})
     now = datetime.now(timezone.utc)
     table = {"schema": SCHEMA, "table_id": "synthetic-only", "status": "proposal_data",
         "composition": "sequential_operator_sum", "context": context,
@@ -155,8 +176,8 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0):
     table_path.write_text(json.dumps(table))
     context_path.write_text(json.dumps(context))
     argv = ["allocator", "--probe", str(probe_path), "--costs", str(cost_path),
-        "--formats", ",".join(formats), "--allow-default-profile", "--target-bits", "9",
-        "--pareto-targets", "9", "--layer-config", str(tmp_path / "layer.json"),
+        "--formats", ",".join(formats), "--allow-default-profile", "--target-bits", target_bits,
+        "--pareto-targets", target_bits, "--layer-config", str(tmp_path / "layer.json"),
         "--pareto-csv", str(tmp_path / "pareto.csv"),
         "--pareto-output-dir", str(tmp_path / "seeds"),
         "--measured-runtime-table", str(table_path), "--measured-runtime-context", str(context_path),
