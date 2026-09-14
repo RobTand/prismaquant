@@ -184,7 +184,6 @@ def observe_and_project_retained_windows(
     for policy_key, budget_value in (
             ('max_statistics_bytes', retained_budget.statistics_cap_bytes),
             ('max_candidate_bytes', retained_budget.candidate_delta_bytes),
-            ('max_render_resident_bytes', retained_budget.retained_render_cap_bytes),
             ('max_load_buffer_bytes', retained_budget.load_buffer_bytes)):
         if policy[policy_key] < budget_value:
             raise RuntimeError(f'retained joint {policy_key} is narrower than its sealed budget')

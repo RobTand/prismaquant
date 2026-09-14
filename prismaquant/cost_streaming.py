@@ -725,7 +725,7 @@ class StreamedCausalLM:
     def shutdown(self) -> None:
         self.context.shutdown()
 
-    def capture_layer_major_boundaries(self, input_batches, *, storage):
+    def capture_layer_major_boundaries(self, input_batches, *, storage, source_phase=None):
         """Capture exact baseline boundaries through the existing layer visitor."""
         if storage.config.get("capture_order") != "layer_major":
             raise ValueError("layer-major boundary capture requires the explicit v2 policy")
@@ -733,10 +733,11 @@ class StreamedCausalLM:
         def visit(_layer, forward_batch):
             for input_ids in input_batches:
                 forward_batch(input_ids)
-        return self.visit_layer_batches(input_batches, visit, boundary_storage=storage)
+        return self.visit_layer_batches(input_batches, visit, boundary_storage=storage,
+                                        source_phase=source_phase)
 
     def visit_layer_batches(self, input_batches, visitor, *, output_consumer=None,
-                            boundary_storage=None):
+                            boundary_storage=None, source_phase=None):
         """Visit one resident source layer over the original ordered batches.
 
         The original visitor retains one current hidden tensor per batch. With
@@ -750,6 +751,8 @@ class StreamedCausalLM:
         if self._pinned_layer is not None:
             raise RuntimeError("layer-batch traversal cannot start with a pinned layer")
         exact = boundary_storage is not None
+        if source_phase is not None and (not exact or not callable(source_phase)):
+            raise ValueError('source phase admission requires exact boundaries and a callable observer')
         if exact:
             if boundary_storage.config.get("capture_order") != "layer_major":
                 raise ValueError("layer visitor exact storage requires layer_major v2 policy")
@@ -778,6 +781,11 @@ class StreamedCausalLM:
                     extra=[state[2] for state in states],
                     shared_extra=[state[2] for batch, state in zip(batches, states)
                                   if batch.shared_pass_state is None])
+
+        def report_source_phase(stage, layer):
+            if source_phase is not None:
+                source_phase(stage, layer, boundary_storage.actual_auxiliary_bytes(
+                    batches, extra=[state[2] for state in states]))
 
         # The runner owns residency; this visitor keeps no residency state of
         # its own. `schedule_prefetch` is idempotent: it returns None for a hot
@@ -828,12 +836,15 @@ class StreamedCausalLM:
                 if not states:
                     raise ValueError("layer-batch traversal requires calibration batches")
                 if exact:
+                    report_source_phase('source_loading', 0)
                     for depth in range(min(self.num_layers, max(1, self.prefetch_lookahead))):
                         speculate(depth)
                 else:
                     for depth in range(min(self.num_layers, self.prefetch_lookahead + 1)):
                         self.context.schedule_prefetch(depth)
                 for layer in range(self.num_layers):
+                    if layer:
+                        report_source_phase('source_loading', layer)
                     if exact:
                         check_state()
                         reassert(layer)
@@ -845,6 +856,14 @@ class StreamedCausalLM:
                             speculate(layer + self.prefetch_lookahead)
                         else:
                             self.context.schedule_prefetch(layer + self.prefetch_lookahead)
+                        if source_phase is not None:
+                            # Loading may retain old source and packing buffers;
+                            # do not overlap that admitted phase with the graph
+                            # workspace. The existing source owner still owns
+                            # lookahead and its storage.
+                            self.context.settle_prefetched_layers(range(
+                                layer + 1, min(self.num_layers, layer + self.prefetch_lookahead + 1)))
+                            report_source_phase('capture_forward', layer)
                         next_batch = 0
                         with prefetched_boundary_batches(boundary_storage, batches, layer) if exact else nullcontext() as resident:
                             def forward_batch(input_ids):

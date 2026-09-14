@@ -845,6 +845,9 @@ def _operator_window_policy(config):
                  'operator-window campaign requires explicit exact boundary storage')
         _require(policy['max_render_resident_bytes'] <= config['max_render_bytes'],
                  'operator-window PWC cap exceeds campaign render admission')
+    from .joint_retained_window_plan import normalize_retained_execution
+    normalize_retained_execution(config['execution'].get('retained_operator_windows'),
+        operator_windows=policy, boundary_storage=config['execution'].get('boundary_storage'))
     return policy
 
 
@@ -1239,6 +1242,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                 min_free_gib=config["min_free_gib"], formats_by_qname=data.formats_by_qname,
                 checkpoint_dir=Path(config["output_root"]) / "checkpoints", resume=resume,
                 model_identity=source, profile=runner.profile,
+                **({'retained_operator_windows': execution['retained_operator_windows']}
+                   if execution.get('retained_operator_windows') is not None else {}),
                 checkpoint_identity_extra={"tessera_joint_anchor_plan_sha256": plan_sha256,
                     "prepared_anchor_sha256": prepared["sha256"], "calibration_input": calibration,
                     **({'joint_eval': eval_panel} if eval_panel is not None else {}),

@@ -11,6 +11,7 @@ from typing import Mapping
 
 
 SCHEMA = 'prismaquant.joint_retained_window_budget.v1'
+EXECUTION_SCHEMA = 'prismaquant.joint_retained_execution.v1'
 
 
 def _integer(value, name, *, positive=False):
@@ -188,3 +189,37 @@ def targets_from_statistics_plan(statistics_plan, keys_by_name: Mapping, key_cos
     if seen != set(key_costs):
         raise ValueError('PWC footprint roster differs from retained joint targets')
     return tuple(result)
+
+
+def normalize_retained_execution(value, *, operator_windows, boundary_storage):
+    """An explicit COST-only lifetime policy; PREPARE's cap is unchanged."""
+    if value is None:
+        return None
+    if (not isinstance(value, dict) or set(value) !=
+            {'schema', 'budget', 'source_reserve_bytes', 'source_loading_reserve_bytes'}
+            or value.get('schema') != EXECUTION_SCHEMA):
+        raise ValueError('complete versioned retained COST execution policy required')
+    budget = RetainedWindowBudget.from_dict(value['budget'])
+    source = _integer(value['source_reserve_bytes'], 'source_reserve_bytes', positive=True)
+    load = _integer(value['source_loading_reserve_bytes'], 'source_loading_reserve_bytes', positive=True)
+    if operator_windows is None or not isinstance(boundary_storage, dict):
+        raise ValueError('retained COST needs existing operator and exact boundary owners')
+    if boundary_storage.get('capture_order') != 'layer_major':
+        raise ValueError('retained COST requires layer-major source capture')
+    for field, bound in [('max_resident_bytes', budget.boundary_reserve_bytes),
+                         ('max_auxiliary_bytes', budget.auxiliary_reserve_bytes)]:
+        if boundary_storage[field] > bound:
+            raise RuntimeError(f'retained COST undercharges boundary owner {field}')
+    for field, bound in [('max_statistics_bytes', budget.statistics_cap_bytes),
+                         ('max_candidate_bytes', budget.candidate_delta_bytes),
+                         ('max_load_buffer_bytes', budget.load_buffer_bytes)]:
+        if operator_windows[field] < bound:
+            raise RuntimeError(f'retained COST budget exceeds its operator owner {field}')
+    budget.available_window_bytes(source)
+    # Loading and forward/adjoint work are separate phases: settled source
+    # prefetch prevents this allowance overlapping the graph workspace.
+    source_peak = (budget.source_baseline_limit(source) + budget.boundary_reserve_bytes + load)
+    if source_peak > budget.physical_limit_bytes - budget.safety_margin_bytes:
+        raise RuntimeError('source-loading phase cannot fit the retained COST physical budget')
+    return {'schema': EXECUTION_SCHEMA, 'budget': budget.as_dict(),
+            'source_reserve_bytes': source, 'source_loading_reserve_bytes': load}
