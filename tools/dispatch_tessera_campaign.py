@@ -105,6 +105,14 @@ PBCAMPAIGN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbcampaign.py")
 #: from the plan rather than from the directory listing it happens to find.
 PLAN_SCHEMA = "prismaquant.tessera_campaign_plan.v1"
 
+#: The plan key that declares a census scope deliberately left partly unpriced:
+#: the rows the plan dropped and why.  ``merge`` reads only this declaration
+#: to expect less than the scope -- never which row directories happen to hold
+#: a ``cost.pkl`` -- and writes what it read into the merged table under
+#: ``provenance.coverage``.  A plan without it claims the whole scope.
+DENSE_ROWS_EXCLUDED_KEY = "dense_rows_excluded"
+COVERAGE_SCHEMA = "prismaquant.tessera_campaign_coverage.v1"
+
 #: Provenance fields every row must agree on before a merge is possible.  Each
 #: one describes the run, not the selection, so a disagreement means two
 #: campaigns are being merged into one table.
@@ -1835,13 +1843,52 @@ def _hessian_identities(payload: dict) -> list[dict]:
             if "hessian_identity" in row]
 
 
-def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> dict:
+def declared_coverage(plan: dict) -> dict | None:
+    """The coverage a plan declares, or ``None`` when it claims the scope.
+
+    A plan prices its census's whole scope unless it says otherwise under
+    ``dense_rows_excluded``.  When it does, the anchor groups the merge expects
+    are exactly the union of the plan's remaining rows' ``groups`` -- read from
+    the plan, never from which rows exist on disk -- and the declaration's
+    reason travels with them into the merged table.  A malformed declaration
+    refuses rather than reading as either shape.
+    """
+    declared = plan.get(DENSE_ROWS_EXCLUDED_KEY)
+    if declared is None:
+        return None
+    rows = declared.get("rows") if isinstance(declared, dict) else None
+    reason = declared.get("reason") if isinstance(declared, dict) else None
+    if (not isinstance(rows, list) or not rows
+            or not all(isinstance(row, str) for row in rows)
+            or not isinstance(reason, str) or not reason.strip()):
+        raise MergeRefused(
+            f"plan.json {DENSE_ROWS_EXCLUDED_KEY} must list the excluded row ids "
+            "and give a reason")
+    planned = {entry["row_id"] for entry in plan["rows"]}
+    both = sorted(set(rows) & planned)
+    if both:
+        raise MergeRefused(
+            f"plan.json {DENSE_ROWS_EXCLUDED_KEY} names planned row(s): " + ", ".join(both[:8]))
+    expected = sorted({key for entry in plan["rows"] for key in entry["groups"]})
+    if not expected:
+        raise MergeRefused("plan.json declares no priced anchor group")
+    return {"expected_groups": expected, "excluded_rows": list(rows), "reason": reason}
+
+
+def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
+                   plan_coverage: dict | None = None) -> dict:
     """One cost payload from N rows, refusing anything they do not share.
 
     The merged table is the monolith's on every field the monolith's rows would
     carry: the union of the per-unit prices, one Hessian identity, and a
     coverage block rebuilt over the **scope** rather than over any one row's
     selection.
+
+    ``plan_coverage`` is what :func:`declared_coverage` read from the plan.
+    Without it the rows must price every anchor group of the scope; with it
+    they must price exactly the groups the plan declares, and the merged table
+    says which scope groups it leaves unpriced and why under
+    ``provenance.coverage``, with ``unit_selection.selected`` True.
     """
     from prismaquant.tessera_campaign import (
         SCHEMA, campaign_population_block, canonical_refusals, selection_stack_samples,
@@ -1921,7 +1968,8 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
                    if _hessian_identities(payload) else None)
              for row, payload in row_payloads.items()})
 
-    # Coverage: every group in the scope priced exactly once.
+    # Coverage: every expected group priced exactly once.  The expectation is
+    # the scope, or the groups the plan declares when it declares fewer.
     selected: dict[str, str] = {}
     selection_entries = {}
     for row_id, prov in provenances.items():
@@ -1934,17 +1982,36 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
                 raise MergeRefused(f"{row_id}: selection {key!r} differs from campaign scope")
             selected[key] = row_id
             selection_entries[key] = entry
-    missing = sorted(set(scope["anchor_groups"]) - set(selected))
+    if plan_coverage is None:
+        expected = set(scope["anchor_groups"])
+        expected_by = "scope"
+    else:
+        expected = set(plan_coverage["expected_groups"])
+        expected_by = "plan"
+        outside = sorted(expected - set(scope["anchor_groups"]))
+        if outside:
+            raise MergeRefused(
+                f"the plan declares {len(outside)} anchor group(s) outside the campaign "
+                "scope: " + ", ".join(outside[:8]))
+    missing = sorted(expected - set(selected))
     if missing:
         raise MergeRefused(
-            f"the rows do not cover {len(missing)} anchor group(s) of the scope: "
+            f"the rows do not cover {len(missing)} anchor group(s) of the {expected_by}: "
             + ", ".join(missing[:8]))
+    undeclared = sorted(set(selected) - expected)
+    if undeclared:
+        raise MergeRefused(
+            f"the rows price {len(undeclared)} anchor group(s) the plan does not declare: "
+            + ", ".join(undeclared[:8]))
+    unpriced = sorted(set(scope["anchor_groups"]) - expected)
 
     sampled = any("stack_samples" in entry or entry.get("sampled")
                   for entry in selection_entries.values())
     merged_selection = {
         "schema": "prismaquant.tessera_campaign_units.v2" if sampled else "prismaquant.tessera_campaign_units.v1",
-        "selected": False,
+        # False is the whole-scope claim a monolith writes; a table the plan
+        # left partly unpriced is a selection and says so.
+        "selected": bool(unpriced),
         "groups": [selection_entries[key] if sampled else
                    {"key": key, "members": list(scope["anchor_groups"][key])}
                    for key in sorted(selection_entries)],
@@ -2054,6 +2121,15 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str) -> 
             "seed_checkpoints": seeds,
         },
     })
+    if plan_coverage is not None:
+        provenance["coverage"] = {
+            "schema": COVERAGE_SCHEMA,
+            "scope_groups": len(scope["anchor_groups"]),
+            "priced_groups": len(expected),
+            "unpriced_groups": unpriced,
+            "excluded_rows": list(plan_coverage["excluded_rows"]),
+            "reason": plan_coverage["reason"],
+        }
     if any("no_admitted_rung" in prov for prov in provenances.values()):
         provenance["no_admitted_rung"] = sorted({name for prov in provenances.values()
                                                for name in prov.get("no_admitted_rung", [])})
@@ -2504,7 +2580,14 @@ def cmd_merge(args) -> int:
         identity=reference["hessian"]["calibration_identity"],
         policy=reference["activation_static_scales"]["policy"],
         static_scales=static_scales, census=census)
-    merged = merge_payloads(payloads, census=census, capture_sha256=capture_sha256)
+    coverage = declared_coverage(plan)
+    merged = merge_payloads(payloads, census=census, capture_sha256=capture_sha256,
+                            plan_coverage=coverage)
+    if coverage is not None:
+        block = merged["provenance"]["coverage"]
+        print(f"[dispatch] coverage: {block['priced_groups']} of {block['scope_groups']} "
+              f"anchor groups priced; {len(block['unpriced_groups'])} left unpriced by "
+              f"the plan's {DENSE_ROWS_EXCLUDED_KEY}: {block['reason']}")
     merged["provenance"]["cache_dir"] = str(out_cache)
     merged["provenance"]["wire_dir"] = str(out_cache / "wire")
     merged["provenance"]["hessian"]["capture_path"] = (

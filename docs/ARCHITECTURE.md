@@ -1,7 +1,15 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-14 · `claude/census-loo-guard-plan-projection`. Stamps
+As of: 2026-09-14 · `claude/a4-merge-declared-coverage`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-14, `claude/a4-merge-declared-coverage`) for **the campaign
+merge expecting a declared partial coverage** (#621). `merge` still requires
+every anchor group of the rows' `campaign_scope` priced exactly once, unless
+the plan declares `dense_rows_excluded`; then it expects exactly the union of
+the plan's rows' groups and stamps `provenance.coverage` plus
+`unit_selection.selected: True` on the merged table. No row, plan or census
+identity changes. Gate: `tests/test_tessera_campaign_merge_declared_coverage.py`.
 
 Re-stamped (2026-09-14, `claude/census-loo-guard-plan-projection`) for **the
 census interpolated-rung guard having a call site** (#615).
@@ -10905,6 +10913,24 @@ the resume -- a finished row is a CAS hit and a running row is re-attached --
 so nothing here decides what to skip, and a row may not carry
 `--deadline-seconds`, which stops a run mid-round and would price a different
 anchor set than one run would have.
+
+**Merge coverage is the scope, or exactly what the plan declares** (2026-09-14,
+#621). Every row stamps the whole census scope into `campaign_scope` whether
+or not the plan ran every row, and `merge` requires every anchor group of that
+scope to be priced by exactly one row — so a plan that deliberately dropped
+rows (`dense_rows_excluded`: the dropped row ids and a reason) is the only
+thing that lets `merge` expect less. `declared_coverage(plan)` reads that
+declaration; the expected groups are then the union of the plan's remaining
+rows' `groups`, read from the plan and never inferred from which row
+directories hold a `cost.pkl`. A declared group missing from the rows, a row
+pricing an undeclared group, a declared group outside the scope, or a
+declaration without rows or a reason all refuse. A partial table says so
+where its readers look: `unit_selection.selected` is `True` (the monolith's
+whole-scope claim is `False`) and `provenance.coverage` records
+`scope_groups`, `priced_groups`, the `unpriced_groups` keys, the
+`excluded_rows` and the `reason`; a whole-scope merge writes no block. The
+population block is still rebuilt over the scope, so the unpriced units are
+counted there as before. Gate: `tests/test_tessera_campaign_merge_declared_coverage.py`.
 
 **Row classes: placement is a property of the class, not of the spec**
 (2026-09-13, #542). A spec may declare a `classes` block, and a class owns the
