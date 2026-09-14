@@ -116,6 +116,7 @@ def main(argv=None) -> int:
         "status": "research_wires_only", "export_qualified": False, "serving_qualified": False,
         "sha256": shas, "units": len(manifest["units"]),
         "unselected_bf16": sorted(n for n, f in selected.items() if f == "BF16"),
+        "outside_census_bf16_passthrough": sorted(set(assignment) - set(cost["costs"])),
         "formats": dict(sorted(Counter(selected.values()).items())),
         "blob_bytes": sum(int(r["blob_bytes"]) for r in manifest["units"].values()),
         "wire_dir": str(wire_dir), "seal_identity_sha256": roster["identity_sha256"],

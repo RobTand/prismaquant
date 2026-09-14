@@ -107,6 +107,30 @@ def test_uniform_control_refuses_an_unmeasured_cell(tmp_path):
         uniform_assignment(cost, FMT)
 
 
+def test_allocator_sidecar_outside_the_census_passes_through_at_bf16(tmp_path):
+    # A real allocator layer config also names the Linears it kept outside the
+    # priced population; GLM-5.3 Flash's carries 124 visual-tower BF16 rows.
+    names, _experts, _records, cost, roster, shapes, assignment, metadata = _control(tmp_path)
+    assignment["model.visual.blocks.0.attn.proj"] = "BF16"
+    manifest = _build(tmp_path, assignment, metadata, cost, roster, shapes)
+    assert set(manifest["units"]) == set(names)
+
+
+@pytest.mark.parametrize("fmt", [FMT, "NVFP4"])
+def test_a_wired_rung_outside_the_census_refuses(tmp_path, fmt):
+    *_, cost, roster, shapes, assignment, metadata = _control(tmp_path)
+    # Records come from the census names: the journal holds nothing for the
+    # outside unit, so the refusal under test is the manifest's own.
+    loaded = load_selected_wire_records(tmp_path / "parts", assignment,
+                                        identity_sha256=SEAL, workers=2)
+    assignment["model.visual.blocks.0.attn.proj"] = fmt
+    with pytest.raises(CensusCacheError, match="outside the census roster are not BF16"):
+        census_selected_cached_units_manifest(
+            assignment, metadata, cost, roster, shapes, loaded, input_schema=INPUT_SCHEMA,
+            encoding_input_schema=ENCODING_SCHEMA, cache_schema="tessera.cached_units.v1",
+            hash_workers=2)
+
+
 def _routed(experts):
     return sorted(experts)[0]
 

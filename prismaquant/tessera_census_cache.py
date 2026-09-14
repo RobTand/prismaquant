@@ -10,7 +10,8 @@ receipt -- dense receipts live only there.
 This module keeps that function's refusals and adds the checks the census
 evidence allows:
 
-* the assignment covers the complete census roster;
+* the assignment covers the complete census roster, and any unit it names
+  outside the roster passes through at BF16;
 * the layer config carries the census's exact producer projection, wire
   directory and stack formats;
 * every selected Tessera cell is a measured census row
@@ -181,8 +182,18 @@ def selected_census_assignment(assignment: Mapping[str, str], metadata: Mapping[
             {name: selected[name] for name in units if name in selected}, stack_of, units)
     except (ExpertProjectionError, KeyError) as exc:
         raise CensusCacheError(f"selected cache projection: {exc}") from exc
-    if set(selected) != set(costs):
+    if not set(costs) <= set(selected):
         raise CensusCacheError("selected cache assignment does not cover the full source roster")
+    # An allocator's layer config also names the Linears it kept outside the
+    # priced population (GLM-5.3 Flash: 124 visual-tower Linears at BF16). The
+    # census holds no wire for them, so they may only pass through at BF16.
+    outside = {name: fmt for name, fmt in selected.items() if name not in costs}
+    wired = sorted(f"{name}@{fmt}" for name, fmt in outside.items() if fmt != "BF16")
+    if wired:
+        raise CensusCacheError(
+            f"{len(wired)} selected unit(s) outside the census roster are not BF16 passthrough "
+            f"(first: {wired[0]})")
+    selected = {name: fmt for name, fmt in selected.items() if name in costs}
     if metadata.get(STACK_FORMATS_KEY) != stack_formats:
         raise CensusCacheError("selected cache stack formats differ from the assignment")
     return dict(selected), source, units, stack_of
