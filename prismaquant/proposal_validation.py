@@ -17,6 +17,7 @@ from .cost_stage_checkpoint import canonical_json_sha256
 
 
 SAMPLED_PROPOSAL_VALIDATION_SCHEMA = "prismaquant.sampled_proposal_validation.v1"
+BOOTSTRAP_SAMPLER = "sha256_counter_rejection_v1"
 SequenceStatus = Literal["complete", "failed", "timed_out"]
 ValidationVerdict = Literal["pass", "inconclusive", "regression"]
 _STATUSES = frozenset({"complete", "failed", "timed_out"})
@@ -188,7 +189,7 @@ class BootstrapInterval:
     upper: float
     confidence: float
     approximate: bool = True
-    method: str = "paired_manifest_cluster_bootstrap_token_weighted"
+    method: str = "paired_manifest_cluster_bootstrap_token_weighted_sha256_counter_v1"
 
 
 @dataclass(frozen=True)
@@ -268,6 +269,7 @@ def validate_sampled_proposal(
     input_sha256 = canonical_json_sha256(
         {
             "schema": SAMPLED_PROPOSAL_VALIDATION_SCHEMA,
+            "bootstrap_sampler": BOOTSTRAP_SAMPLER,
             "binding": asdict(binding),
             "bootstrap": asdict(bootstrap),
             "candidate_rows": [asdict(candidates[key]) for key in ordered_ids],
