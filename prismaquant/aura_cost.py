@@ -943,6 +943,7 @@ def _aura_unit_state(
     col_energy: Mapping[str, torch.Tensor],
     weight_mse_diagnostic: Mapping[tuple[str, str], float] | None = None,
     source_weight_identity: Mapping[str, Mapping[str, object]] | None = None,
+    observation_counts: Mapping[str, Mapping[str, int]] | None = None,
 ) -> dict[str, object]:
     rows: dict[str, dict[str, object]] = {}
     for fmt in nonzero_formats:
@@ -975,6 +976,8 @@ def _aura_unit_state(
         state["source_weight_identity"] = dict(
             source_weight_identity[name]
         )
+    if observation_counts is not None:
+        state['joint_eval_observations'] = dict(observation_counts[name])
     return state
 
 
@@ -995,7 +998,24 @@ def _restore_aura_unit_state(
     weight_mse_diagnostic: dict[tuple[str, str], float] | None = None,
     require_source_weight_identity: bool = False,
     source_weight_identity: dict[str, dict[str, object]] | None = None,
+    observation_counts: dict[str, dict[str, int]] | None = None,
 ) -> None:
+    if observation_counts is not None:
+        observation = state.get('joint_eval_observations')
+        if (not isinstance(observation, Mapping)
+                or set(observation) != {'tokens', 'calls', 'per_probe', 'count_scope', 'n_probes'}
+                or observation.get('count_scope') != 'summed_over_probes'
+                or observation.get('n_probes') != n_probes
+                or not isinstance(observation.get('per_probe'), list)
+                or len(observation['per_probe']) != n_probes
+                or any(not isinstance(item, Mapping) or set(item) != {'tokens', 'calls'}
+                       or any(type(value) is not int or value < 0 for value in item.values())
+                       for item in observation['per_probe'])
+                or any(type(observation.get(key)) is not int
+                       or observation[key] != sum(item[key] for item in observation['per_probe'])
+                       for key in ('tokens', 'calls'))):
+            raise RuntimeError(f'joint pilot checkpoint observation counts missing for {name}')
+        observation_counts[name] = {**observation, 'per_probe': [dict(item) for item in observation['per_probe']]}
     try:
         g_trace[name] = float(state["g_trace"])
     except Exception as exc:
@@ -2362,6 +2382,14 @@ def compute_aura_cost_streamed(
     col_energy: dict[str, torch.Tensor] = {}
     weight_mse_diagnostic: dict[tuple[str, str], float] = {}
     source_weight_identity: dict[str, dict[str, object]] = {}
+    pilot_panel = (checkpoint_identity_extra or {}).get('joint_eval') if joint_activation else None
+    if pilot_panel is not None and operator_windows is None:
+        raise ValueError('joint diagnostic panel requires observer-backed operator windows')
+    observation_counts = ({name: {'tokens': 0, 'calls': 0, 'n_probes': n_probes,
+                           'count_scope': 'summed_over_probes',
+                           'per_probe': [{'tokens': 0, 'calls': 0} for _ in range(n_probes)]}
+                           for name in names}
+                          if pilot_panel is not None else None)
     completed_checkpoint_units: set[str] = set()
     checkpoint_root: Path | None = None
     checkpoint_identity_sha256: str | None = None
@@ -2481,6 +2509,7 @@ def compute_aura_cost_streamed(
                 weight_mse_diagnostic=weight_mse_diagnostic,
                 require_source_weight_identity=anchor_renderer is not None,
                 source_weight_identity=source_weight_identity,
+                observation_counts=observation_counts,
             )
             if joint_activation:
                 rows = state.get("joint_aura_rows")
@@ -2541,6 +2570,22 @@ def compute_aura_cost_streamed(
             if set(joint_rows) != set(names):
                 raise RuntimeError("joint AURA incomplete unit coverage")
             payload["costs"] = joint_rows
+            if observation_counts is not None:
+                from .tessera_joint_eval_panel import observation_status
+                if set(observation_counts) != set(names):
+                    raise RuntimeError('joint pilot observation roster differs')
+                for name in names:
+                    count = observation_counts[name]
+                    if (any(count[key] != sum(item[key] for item in count['per_probe'])
+                            for key in ('tokens', 'calls'))
+                            or count['count_scope'] != 'summed_over_probes'):
+                        raise RuntimeError(f'joint pilot invalid observation count for {name}')
+                    payload['stats'][name]['joint_eval_observations'] = dict(count)
+                    payload['stats'][name]['joint_eval_status'] = observation_status(count)
+                    for row in payload['costs'][name].values():
+                        row['joint_eval_status'] = payload['stats'][name]['joint_eval_status']
+                        row['joint_eval_observations'] = dict(count)
+                payload['provenance']['joint_eval'] = pilot_panel
             payload["provenance"].update({
                 "cost_mode": "aura", "joint_activation": True,
                 "cost_currency": "joint_aura_predicted_dloss",
@@ -2552,7 +2597,7 @@ def compute_aura_cost_streamed(
                 **({'joint_operator_windows': operator_window_receipts,
                     'joint_operator_memory': operator_guard.snapshot() if operator_guard is not None else None}
                    if operator_windows is not None else {}),
-                "measurement_status": "research",
+                "measurement_status": "diagnostic_pilot" if pilot_panel is not None else "research",
                 "uncertainty_scope": "probe_sampling_conditional_on_fixed_calibration",
             })
         if anchor_renderer is not None:
@@ -3076,6 +3121,11 @@ def compute_aura_cost_streamed(
                     operator_window_receipts.append(dict(layer=layer, probe_index=probe_index, **receipt))
                     for name, diagnostic in diagnostics.items():
                         g_trace[name] += diagnostic['g_trace']
+                        if observation_counts is not None:
+                            observation_counts[name]['tokens'] += diagnostic['observed_tokens']
+                            observation_counts[name]['calls'] += diagnostic['observed_calls']
+                            observation_counts[name]['per_probe'][probe_index]['tokens'] += diagnostic['observed_tokens']
+                            observation_counts[name]['per_probe'][probe_index]['calls'] += diagnostic['observed_calls']
                         if collect_col_energy:
                             previous = col_energy.get(name)
                             col_energy[name] = (diagnostic['col_energy'] if previous is None
@@ -3324,6 +3374,7 @@ def compute_aura_cost_streamed(
                             col_energy=col_energy,
                             weight_mse_diagnostic=weight_mse_diagnostic,
                             source_weight_identity=source_weight_identity,
+                            observation_counts=observation_counts,
                         ), **({"joint_aura_rows": joint_rows[name]} if joint_activation else {}),
                         **({"execution_provenance": source_transition.execution_provenance}
                            if source_transition is not None else {})},

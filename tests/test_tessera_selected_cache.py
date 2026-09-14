@@ -69,6 +69,18 @@ def test_full_selected_bundle_includes_dense_and_expert(tmp_path):
     assert manifest["units"][DENSE]["identity"]["schema"] == "tessera.encoding_inputs.v1"
 
 
+@pytest.mark.parametrize('kind', ['dense', 'expert'])
+def test_selected_bundle_refuses_same_size_wire_change_after_cost(tmp_path, kind):
+    _, names, records, handoff, metadata, data = fixture(tmp_path)
+    name = DENSE if kind == 'dense' else next(name for name in names if name != DENSE)
+    path = tmp_path / records[name]['file']
+    raw = path.read_bytes()
+    path.write_bytes(bytes([raw[0] ^ 1]) + raw[1:])
+    with pytest.raises(TesseraExportLaneError, match='wire|sha256'):
+        selected_cached_units_manifest({name: FMT for name in names}, metadata, handoff,
+                                       data, schema='tessera.cached_units.v1')
+
+
 @pytest.mark.parametrize("change,match", [
     ("interpolated", "no exact measured joint wire"),
     ("source", "source differs from checkpoint seal"),

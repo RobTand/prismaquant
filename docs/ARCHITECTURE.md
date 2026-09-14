@@ -1,7 +1,245 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `fix/research-exact-member-endpoints-20260913`. Stamps
+As of: 2026-09-14 · `integrate/pq596-release-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `codex/joint-eval-panel-20260913`) for an **opt-in
+diagnostic joint evaluation panel**. A sealed joint plan may carry
+`joint_eval` v1, a deterministic Python random-permutation prefix and exact
+indices, shape, int64 token hash, and parent artifact SHA. It selects 16 of the
+original 512 calibration windows for the four joint probes in the GLM pilot;
+the ordinary plan continues using all 512. Preparation still loads and verifies
+the original calibration against the historical Hessian identity and uses the
+same original H, canonical activation capture, source model, static scales,
+and ProductionWeightCache. The subset is used only for the joint cotangent,
+statistics and costs; its distinct probe identity follows the actual selected
+int64 bytes. Operator-window backward observers record per-unit actual calls
+and token rows **per probe**. Totals are explicitly `summed_over_probes` and do
+not claim distinct token coverage; a separate route census would be required
+to make that claim. An invoked exact-zero unit with positive token rows is observed;
+an uninvoked routed unit or empty invocation is `unknown_unobserved`, even if its internal numerical buffer is
+zero. Pilot results remain `diagnostic_pilot`; the cost-currency admission and
+handoff refuse ordinary allocation/export until a separately validated
+promotion contract exists. Neither historical output-MSE costs nor Hessians
+are rescaled or renamed into panel prices. The current measured candidate
+roster is a subset of the experiment's full legal grammar; no full-domain
+pricing claim follows from this pilot. Larger nested prefixes preserve row
+inclusion, but a changed panel has a different full-token normalizer and probe
+identity and must reevaluate the entire selected union: old scalar prices are
+not additive blocks. The panel changes no format, default, serving lane, or ship gate.
+Gates: `tests/test_tessera_joint_eval_panel.py`
+and the existing joint-window/allocation suites.
+Re-stamped (2026-09-14, `codex/cost-historical-wire-592`) for
+**COST consuming prepared renders with historical wire provenance**. PREPARE
+still authenticates each wire against its actual source/H/settings, compares
+its decode with the BF16 PWC render, and records both identities. COST binds
+the completed preparation, exact campaign roster, source/model/calibration,
+reader and projection backend. It consumes only source/calibration and the
+prepared rendered weights: each serialized render is SHA-256 checked against
+PREPARE on its necessary bounded PWC load before its tensor reaches AURA.
+Resident reads retain their tensor/file guard; eviction requires a verified
+reload. Missing renders refuse, with no synthesis into the prepared campaign.
+
+COST no longer rereads wire bodies merely to authenticate files it does not
+consume. Its result and joint-anchor provenance explicitly say
+`historical_prepared_identity; current_bytes_require_export_gate`, matching
+the existing allocation handoff. Wire changes do not change COST's measured
+rendered operator. The original recorded wire SHA, prepared receipt and
+all numerical fields remain bound and unmodified. This does not attest current
+wire bytes: the selected-cache builder checks selected dense/expert wire
+bytes against those original records, and Tessera's exporter independently
+rederives source/H/settings and calls `verify_cached_unit` on consumed wires,
+including its research selected MoE path. A changed selected wire refuses;
+production format and serving qualification gates remain in force.
+
+The PB run data manifest consequently has no whole-roster hash phase or wire
+body entries; renders remain listed by layer. This inherited ordering is
+coverage, not a complete temporal COST schedule: forward capture, reverse
+probe/window execution and repeated source extents require the COST planner's
+phase handoff. The current manifest deduplicates repeated `(path, offset)`
+entries and only annotates reread bytes; removing unused wire reads does not
+resolve that scheduling limitation. The strict general
+intake default still verifies all payloads. This avoids the declared full-wire
+intake pass and the already removed render intake pass, not actual PWC loads
+or export verification. No full-campaign elapsed-time or energy improvement
+is claimed without paired profiles and both-box Netdata. Gates:
+`tests/test_tessera_joint_aura.py`, `tests/test_pwc_file_load_receipts.py`,
+`tests/test_tessera_selected_cache.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`.
+Re-stamped (2026-09-13, `codex/arc-prewarm-prepare-final-20260913`) for the
+**joint prepare ARC frontier**. The post-campaign manifest keeps its exact
+ordered entries and divides windowed qualification at complete-unit
+boundaries, targeting at most 32 GiB of newly declared bytes per phase.
+`submit-joint prepare` seals these names as PB progress phases only for a
+fresh journal and a reusable, verified source identity proof. The container
+checks the manifest's sealed digest and plan identity before running; it
+enters each phase before its first unit read and increments the cumulative
+counter only after that unit's journal write. PB's storage role can then
+release the consumed prefix and warm the next entry-aligned ARC window.
+The source read set now includes the head's actual materialized tensor
+extents and every indexed tensor in each installed layer, including norms
+and named buffers. Streaming installs whole layers even when only a subset
+of their Linears is qualified, so declaring only the quantizable unit
+extents would leave those source reads cold. The prepare phases place a
+source layer at its earliest declared prefetch phase, up to the plan's
+lookahead, rather than waiting for its later install phase. A windowed
+prepare read frontier is admitted only when the source layers are contiguous
+and `max_cache_slots=prefetch_lookahead+1`, so the runner's settle step has
+finished those prefetched reads before the phase can release their bytes.
+The backbone depth comes from `text_config.num_hidden_layers`. GLM's index
+also names layer 45, but the config has 45 backbone layers (0–44) and treats
+layer 45 as MTP passthrough; the streaming runner does not install it.
+Fresh whole-source authentication may read that shard in its completion
+phase, while a valid full-source proof removes that read entirely.
+Resumed replay reads committed units before the layer walk and therefore
+does not claim this phase mapping; its submission keeps conservative
+unphased warming until a replay-order contract exists.
+
+Re-stamped (2026-09-13, `codex/cost-render-proof-integrated-20260913`) for
+**COST's prepared-render integrity on consumption**. PREPARE binds each
+decoded PWC shard's serialized-file SHA-256 to its bounded load receipt and
+verifies its wire/decoder/source contract. COST checks the complete campaign
+roster and refuses missing renders. It compares the prepared render SHA roster
+with each shard on COST's necessary bounded PWC load before admitting that
+tensor to joint AURA. Every resident read is fenced to the matching unmodified
+tensor and donor-file stat; eviction requires another verified read. The
+avoided render intake read is exactly one pass over all serialized `.pt` bytes,
+the sum of their file sizes; COST still loads each consumed render for PWC
+deserialization (window preflight may read the archive again). A changed
+same-size render refuses on first load; a resume that never uses a particular
+render has no claim that its current bytes were checked. Before metadata
+intake, COST checks the already bound plan SHA, implementation/source-package
+digest, prepared v3 status, reader and backend against the small completion;
+the full source/model/cell replays still run at their original boundary.
+No full campaign speedup or I/O delta is claimed without a paired profiler
+and both-box load series. Gates: `tests/test_pwc_file_load_receipts.py`,
+`tests/test_tessera_joint_aura.py`.
+
+Re-stamped (2026-09-13, `codex/prepare-throughput-20260913`) for the
+**bounded, recoverable Tessera joint-anchor qualification** (#590). The
+complete source proof from #588 still gates the streamed model and capture.
+With explicit qualification windows, `ProductionWeightCache` now builds one
+resident-key index and updates it across its public dict mutations; each
+window recomputes backing-storage identities only for live tensors, counting
+shared views once and detecting rebound storage. File bounds, serialized
+buffers, LRU limits and the actual post-prefetch storage cap stay intact.
+The capture owner validates and seals the complete manifest once, then reuses
+its immutable metadata and load-execution digest behind a same-file stat
+fence; individual X/H payload bytes are still verified on their actual load.
+Inside each PWC window a single worker reads the next receipt-sized Tessera
+wire while the GPU verifies the current cell. The current and pending blobs
+both count against the guard reserve; each read fences its regular file by
+path and descriptor stats, hashes the exact bytes, and hands those same bytes
+to the unchanged encoder-identity verifier and decoder. The future is joined
+before its window releases resident renders, including on failure.
+
+Preparation now writes an identity-bound qualification journal under
+`prepare/qualification` after each complete unit. Its identity binds the plan,
+source, capture/H, campaign checkpoint, decoder, backend, settings, policy and
+complete cell roster. `prepare --resume` first replays the journal and checks
+each skipped unit's canonical X/H, wire and render bytes before continuing;
+unfinished units enter the ordinary verified capture loader. Only the
+complete exact verified-cell roster
+can publish `production.pkl` and `prepared.json`; an interrupted action's log
+count is not a checkpoint. PrismaBuild `qualification` progress counts only
+durably written units. The previous `--resume` refusal changes for bounded
+preparation; legacy unwindowed preparation retains its prior path. No wire,
+numerical render comparison, provenance origin, format or serving gate changes.
+The journal stores one streaming SHA-256 and count over every sorted cell's
+anchor, wire receipt, resolved donor paths and origin; it recomputes the same
+digest on resume instead of copying the entire 197,990-cell record mapping
+into a second manifest. The original checkpoint and cost/census inputs remain
+independently SHA-bound, and any changed cell field still refuses reuse.
+The bounded, phase-matched 18-cell and 241-cell before/after rates and both-box resource
+evidence are in `docs/measurements/glm-joint-prep-bounded-ab-2026-09-13.md`;
+full-campaign throughput and work-per-joule remain unmeasured.
+
+Re-stamped (2026-09-13, `integrate/pq588-release-20260913`) to classify GLM's
+MTP index using `text_config.num_hidden_layers` (or the top-level backbone
+depth) in the joint source-authentication schedule. Indexed tensors after the
+backbone are completion-authenticated, not treated as an unplanned streamed
+body layer; the 45-layer GLM body remains layers 0–44. A truly unplanned body
+layer still refuses. A valid cached full-shard proof still avoids a fresh body
+hash read. Gate: `test_mtp_index_after_backbone_is_completion_auth_only`.
+
+Re-stamped (2026-09-13, `fix/joint-prepare-source-auth-20260913`) for
+**complete-capture source authentication at first streamed use in joint
+preparation**. The prior prepare called `capture_identity` without a source
+owner after model construction; that rehashed all 120 GLM source shards
+(642.65 GB) serially before qualifying its first cell, even though the
+streamed-model identity had already reused a matching full-shard digest cache.
+The canonical complete-capture SHA proof remains required. Prepare now binds
+the existing `CaptureSourceAuthentication` descriptor owner to the hash-bound
+capture before constructing the streamed model, and hands that owner to the
+streaming loader and `capture_identity`. If the existing
+`prepare/source-identity.json` validates against the complete checkpoint,
+semantic config and all six-field shard fingerprints, the owner compares each
+recorded full-file SHA to the canonical capture and adopts it for the same held
+source descriptor. Stat fences run before and after tensor reads and again at
+close; a changed source or an invalid present cache refuses rather than
+falling back to undeclared reads. With no cache, the owner fresh-hashes a shard
+on first use. Before publishing the prepared cache and completion, it
+authenticates any still untouched files and records which proof was cached or
+fresh, then closes after the runner shuts down. This changes read order and
+startup latency, not source bytes, calibration draw, rendered weights or
+numerical qualification rule. It makes no claim yet about full-run time or
+GPU saturation.
+
+The joint prepare data manifest now declares the existing identity cache as a
+head input when its recorded shard SHA values match the canonical capture and
+its fingerprints match the live source; in that case no fresh whole-shard SHA
+read is declared or performed. With no cache, it declares each whole-shard
+authentication read at first use: head/visual shards in `head`, body shards
+before their first layer's source extents, and unused auxiliary shards in
+`source-complete`. The checkpoint index determines placement; source metadata
+is declared in `head`. The later per-layer extents remain separately declared
+because the loader reads tensors after authenticating their shard.
+An optional plan binding `source_identity_cache: {path, sha256}` seeds the
+existing per-pass `source-identity.json` slot in a new output root, with an
+exact checksum and conflict refusal; it does not create a weight or activation
+cache. A cache proven on another host's NFS mount is not portable merely
+because the paths and SHA rows match: the current six-field fingerprint includes
+the host-local `st_dev`. Manifest construction and owner adoption therefore
+refuse it on a different mount device. A reuse request has a real host-local
+dependency until a separately qualified cross-host source proof exists; the
+manifest names its proof host, and `submit-joint` refuses a broader placement
+tag before publication.
+The full joint manifest exceeds the old 64 MiB plain-JSON limit;
+`submit-joint` now writes one deterministic `.json.gz` member. The deployed PB
+reader admits up to 64 MiB stored / 512 MiB expanded and seals those
+compressed bytes in the action key.
+The active 2026-09-13 b59 request retains its original seal and behavior; a
+future request must rebuild its manifest from these source bytes. Gates:
+`tests/test_selected_source_authentication.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`, and the joint prepare tests.
+
+Research acquisition bridge (2026-09-13, `codex/glm-full-domain-price-bridge-20260913`, #581):
+`tessera_full_domain_acquisition` joins the grammar-derived complete rate domain
+with the existing `adaptive_trellis_rate_surface` refiner. Missing outer
+endpoints and BF16 table-width boundaries become bounded measurement requests;
+once present, the allocation multiplier prioritizes interior refinement. An
+explicit `boundary_policy=defer` postpones those measurements and lets the
+existing refiner use measured support; it preserves every unknown boundary
+and asserts no invented loss bound or dominance. Every
+legal rate remains on the research domain. Missing prices stay unknown, and no
+extrapolated objective, complete-grid measurement requirement, serving approval,
+or allocator payload is introduced. Atomic serving-group acquisition and exact
+selected-rate scoring remain caller obligations. `full_domain_measured` is
+coverage only; `adaptive_converged: null` makes explicit that this adapter
+defines no stopping rule and demands no full-grid measurement. The opt-in adapter changes no
+pipeline default or shipping gate.
+
+Re-stamped (2026-09-13, `integrate/pq503-release-20260913`) to enforce the
+already-declared research-only boundary on `--exhaustive-rate-grid`. The
+explicit complete-grid request now refuses the attested and readable menus;
+with the research menu, it still measures every legal rung inside the stated
+band. No production default or legal rate roster changes.
+
+Re-stamped (2026-09-13, `codex/pr503-integrate-20260913`) to retain
+the opt-in sparse-rate research contracts alongside the current
+prefill-frontier and platform-route contracts. The research path
+changes no production interpolation default, serving admission,
+pipeline stage or ship gate.
 
 Re-stamped (2026-09-13, `fix/research-exact-member-endpoints-20260913`) for
 the research-only Tessera exact-member endpoint contract (#583). A selected
@@ -274,6 +512,32 @@ reach `build_runtime_resources` today, for any contents. The measurement that
 demonstrates it, with the two further causes underneath it, is
 `docs/measurements/prefill-frontier-qwen3-0.6b-2026-09-13.md`. No default,
 stage, format or gate changed; §12 gains one row.
+
+Re-stamped (2026-09-13, `integrate/pq579-20260913`) to bind the installed
+quantiser table to the exact reviewed Tessera serving pin before any fp4
+panel can use it. The table's operation and scale vocabulary must also match
+the oracle's operation and static scale; malformed group lengths refuse.
+An installed v25 table cannot promote fp4 pricing while
+this repository still pins contract v24; the corresponding test drives the
+production reader through the v25 fixture and expects a pin refusal.
+
+Re-stamped (2026-09-13, `claude/574-quantizer-attestation`) for the **fp4
+activation execution-identity gates** (#574, #567). Three gate changes, all
+tightenings. (a) `prepare_native_inputs` now REFUSES to freeze a
+`reference_qdq` for a static-scale activation contract unless the pinned
+Tessera contract publishes a machine-readable quantiser attestation
+(`activation_quantizers`) that PrismaQuant's own oracle reproduces, both the
+stored UE4M3 byte and every element's code. The pinned contract is v24, which
+publishes none, so every Tessera fp4 cell refuses -- the correct state, and not
+a regression. Tessera contract v25 does publish one (RobTand/tessera#485);
+moving the pin to it is its own reviewed change. (b) The `qdq_numerics` gate is now
+EXACT -- `max_abs_error == 0.0`, no tolerance -- because with a bit-identical
+stored scale both sides compute the same integer code. (c) The GEMM-output
+tolerance is derived from the operands and the dtypes
+(`native_operator_panel.derive_gemm_numerics`) instead of arriving as a
+`0.015625` CLI default, and `--atol`/`--rtol` are gone from
+`experiments/pq_frontier_native_cells.py`. §12 gains two rows (D41, D42). No
+pipeline default, stage or format changed.
 
 Re-stamped (2026-09-13, `claude/load-sweep-the-fp4-route`) for **debt D40**:
 the fp4 route class was re-priced with the device actually loaded — the same
@@ -572,8 +836,9 @@ shards the settled read set is projected near **6.8 TB** -- 5.20 TB plus
 the composition, not a byte count. The brief's 4.75 TB estimate was taken
 earlier the same morning, against fewer shards.
 A whole-set warm is not available at that ratio, so the manifest carries the
-consumption order: a `head` phase, then one `layer-<L>` phase per transformer
-layer, and the prewarm loop windows on `annotations.phases`. The head is not
+consumption order: a `head` phase, then bounded `layer-<L>-part-<P>` phases
+for windowed preparation, and the prewarm loop windows on
+`annotations.phases`. Each part starts at a complete unit. The head is not
 small on this census: 97,302 of its 197,990 measured cells are rungs the
 campaign adopted rather than encoded, and `load_measured_anchor_input`
 decodes a shard for each of them from its wire before the first layer
@@ -591,11 +856,11 @@ does not fit 390 GB in a 240 GiB ARC either; the entries are in read order and
 the running sum is per entry, so the window may stop inside a phase. Order
 within the head is approximate: the synthesized wires are declared after the
 calibration, backend and compatibility records, which the pass opens after
-`load_measured_anchor_input` returns. One measured limit came with
-it: PrismaBuild's data manifest v1 refuses a manifest file over 64 MiB and
-reads no compressed form, and this read set is 105 MB of compact JSON, so the
-submit path fails closed on the size rather than submitting a truncated read
-set. Gates: `tests/test_glm_joint_data_manifest_at_submit.py`.
+`load_measured_anchor_input` returns. One measured limit at the time was the
+64 MiB plain-manifest ceiling: this read set was 105 MB of compact JSON, so
+the then-current submit path refused rather than truncating it. The deployed
+PB reader now accepts gzip as stated in the newer stamp above. Gates:
+`tests/test_glm_joint_data_manifest_at_submit.py`.
 
 Re-stamped (2026-09-13, `pq/prefill-frontier-sweep`) for the **prefill-vs-
 accuracy frontier sweep** (#540, the sweep half of #237):
@@ -1116,6 +1381,64 @@ table, production setting, pin, serving lane or admission behavior changes,
 and no GPU, served, latency, quality or capacity measurement was run.
 Gates: `tests/test_full_engine_resource_report.py`,
 `tests/test_runtime_provenance.py`.
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for explicit research
+curve audit-region annotation corrections. The complete-curve collector's
+optional `--audit-region-correction` binds the original plan path and SHA256
+and accepts only the exact intersection of every original audit region with
+the original legal-rate roster, retaining empty labels. The frozen plan,
+acquisition identity and point-receipt plan hashes remain unchanged. A curve
+records the correction's path/hash and effective regions; the existing curve
+validator verifies that binding and rederives the intersection. Prospective
+protocol implementation hashes include this shared correction helper. This
+does not change a measurement, prediction rule or production policy. Gates:
+`tests/test_collect_complete_rate_curve.py` and
+`tests/test_sparse_rate_family_transfer.py`.
+
+Re-stamped (2026-09-11, `codex/prospective-family-transfer-20260911`) for a
+research-only prospective paired-family transfer evaluator (§4.10).
+`experiments/sparse_rate_family_transfer.py` freezes all named, receipted
+curve-piece plans before their measurements, including separate singleton
+endpoints and a separate E2 terminal.  The E4 seal may read only a complete BF
+source plus two E4 endpoint curves and writes both frozen forms (an affine BF
+fit and rate-linear BF delta); the E2 seal may read only its two endpoints and
+writes a value-linear window prediction.  Neither seal accepts an interior
+curve path.  Later audits recheck protocol, plan, curve and receipt hashes,
+require the complementary interior roster, score unseen interiors only, and
+leave E2's terminal as a measured, unpredicted point.  A metadata-only ledger
+of historically preexposed rates is frozen with the protocol; reports retain
+both all-interior and fresh-only metrics, with an empty subset never passing.
+This is not a production interpolation path, qualification, or measurement
+savings claim.  Gate: `tests/test_sparse_rate_family_transfer.py`.
+
+Re-stamped (2026-09-11, `codex/adaptive-nonmonotone-20260911`) for the
+research-only adaptive nonmonotone policy (§4.10). `AdaptiveAnchoredCurve`
+now carries `require_strict_decrease: bool = True` as immutable state and its
+`start` API preserves that strict default. An explicit `False` accepts any
+positive finite measured values, including flat or locally increasing values;
+the finite roster, exact anchors, deterministic sentinel order, frozen-parent
+residuals, split/refinement and cap semantics do not change. The all-truth
+minimum-anchor oracle takes the same defaulted policy, and
+`--allow-nonmonotone` selects `False` while recording it in the report. This
+opt-in research path does not alter production interpolation, allocator prices,
+campaign defaults, serving qualification or ship gates.
+
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for the opt-in complete
+rate-grid experiment and deterministic adaptive sampler (§4.10). The campaign
+can measure every legal rung in an explicit band through its existing encoder,
+cache and checkpoint path. The separate research sampler requests additional
+measurements using observed values only; sentinel agreement records empirical
+evidence and does not certify unseen rungs. Complete-curve audits keep families,
+activation contracts and recipe segments separate. Production interpolation
+and serving admission retain their existing contracts.
+
+Re-stamped (2026-09-11, `codex/sparse-rate-20260911`) for opt-in endpoint
+curvature in the receipt-bound research replay (§4.10). A small shared pilot
+fits curvature conditioned on each unit's two measured endpoints. Binding
+expands the fitted polynomial once; scalar queries use Horner arithmetic,
+preserve the endpoints exactly, and refuse extrapolation or invalid values.
+The existing replay owns currency/recipe boundaries, frozen audit errors,
+measured overlays and group measurement requests. This adds no production
+interpolation default, allocator price, runtime qualification or serving cell.
 
 Re-stamped (2026-09-11, `claude/495-probe-reduction-schedule`) for the routed
 stack **probe-reduction schedule**, parts 1-3 of RobTand/prismaquant#495
@@ -2801,7 +3124,12 @@ never persist as another cache. Preparation uses this load receipt instead of gl
 post-prefetch render scans; the existing verifier reads each original wire,
 checks its recorded SHA/source/H/settings, and compares decoded values exactly.
 Prepared completion remains withheld until every measured cell qualifies.
-The strict intake API default and cost/resume payload scans remain unchanged.
+The strict intake API default remains a full payload scan. COST keeps complete
+roster gates and verifies prepared render bytes on the actual PWC load against
+PREPARE's SHA-256. It carries historical wire identities without consuming
+wire bodies; selected export validates current wires. Its resumed reads use
+the same PWC guard before tensor consumption. No render or wire intake scan
+precedes the necessary PWC loads.
 Gate: `tests/test_pwc_file_load_receipts.py`, `tests/test_tessera_joint_aura.py`,
 and equal-work original fourteen-cell qualification with reader/identity held fixed.
 
@@ -3002,6 +3330,44 @@ panel/runtime/route/tensor and resource-trace identities while retaining
 unknown fixed/full-model resources. Operator observations alone cannot become
 a measured-runtime table, and no pin, format default or serving gate changes.
 Gate: `tests/test_native_operator_panel.py`.
+
+**The activation reference is attested before it is frozen, and gated on codes
+(2026-09-13, #574).** `reference_qdq` is not a runtime artifact: it is
+PrismaQuant's own re-implementation of the rounding rule a Tessera serve
+executes (`native_operator_panel.py` -> `perturbed_x_cache._activation_qdq` ->
+`nvfp4_activation_contract.nvfp4_activation_qdq_served`), and the pinned
+contract published only the rule's NAME. Two mechanisms close that:
+
+* `tessera_runtime_contract.require_activation_quantizer_attested` reads the
+  runtime's own `activation_quantizers` block (`tessera.activation-quantizer.v1`,
+  keyed by platform then activation contract): probe **groups** of
+  `unit_length` bf16 inputs at a published global scale, with the UE4M3 byte
+  the kernel stored and the code it emitted for each element, generated by
+  running `torch.ops._C.scaled_fp4_quant` and by nothing else. PrismaQuant
+  recomputes **both** halves -- `nvfp4_group_stored_scale` for the byte,
+  `nvfp4_e2m1_normalize` + `nvfp4_e2m1_magnitude_index` for the codes, the same
+  functions `nvfp4_activation_qdq_served` calls -- and refuses on any
+  disagreement, on a grammar or vocabulary it does not transcribe, on a
+  coverage gap, and on no table at all. Coverage is checked **numerically**
+  from the published bits (all seven E2M1 midpoints, both signs, element
+  saturation, the block-scale underflow bytes), so a mislabelled `boundary`
+  buys nothing. It sits beside `require_pin_native_extensions_match_contract`,
+  which is the same shape for the extension table.
+* `native_operator_panel.validate_native_numerics(..., exact=True)` admits only
+  `max_abs_error == 0.0` on `qdq_numerics`. With a fixed scale the dequant map
+  is injective over the sixteen codes -- adjacent E2M1 magnitudes differ by at
+  least 33% relative against bf16's 2^-7 spacing -- so exact value agreement is
+  exact code agreement, up to the two zero codes no GEMM can tell apart.
+
+The GEMM-output gate keeps a tolerance, now derived: `derive_gemm_numerics`
+returns `atol = (4 u_bf16 + 2 K u_fp32) * max_j sum_i |qx_i||w_ij|` with
+`rtol = 0`, from the two operand roundings, each side's final bf16 rounding and
+each side's fp32 accumulation. `4 u_bf16` is `2^-6`, the constant it replaces:
+the old default had the right magnitude against the wrong quantity (`|expected|`
+rather than the operand magnitude sum), which is the mechanism by which one
+unit's verdict became a function of its calibrated `max_abs` and its row count.
+Gates: `tests/test_activation_quantizer_attestation.py`,
+`tests/test_native_qdq_exact_gate.py`.
 
 That boundary has now been exercised on a receipt a producer actually wrote on
 GPU, not only on synthetic fixtures:
@@ -10246,12 +10612,44 @@ close the leave-one-out gate and report its error as null.
 
 **Cost is an anchor campaign, not an enumeration** (`prismaquant/tessera_campaign.py`).
 
+The opt-in `--exhaustive-rate-grid --rate-band lo,hi` experiment measures every
+legal family rung in the declared band. It reuses the campaign's group grid,
+resident encoder, journal and publication path. It neither extends the legal
+rate domain nor attests a serving route. Outside this explicit experiment,
+the campaign retains its sparse adaptive policy.
+
+`prismaquant.adaptive_anchored_shape.AdaptiveAnchoredCurve` is a separate
+research acquisition state machine over a declared finite rate roster. It
+starts from measured endpoints and requests one midpoint or two third-point
+checks per interval. Failed checks split the interval; accepted checks retain
+their predictions made before measurement. Value and log2 PWL modes preserve
+measured anchors exactly. `require_strict_decrease=True` is the default and
+refuses flat or nonmonotone observations. An explicit research API opt-in of
+`False` accepts any positive finite measurement while preserving the same
+deterministic acquisition and refinement rules. Budget exhaustion leaves
+unresolved intervals explicit. The complete-curve study audits only points
+never revealed to the sampler. Its offline all-truth minimum-anchor oracle is
+a diagnostic lower bound for the same selected policy, not a deployable
+measurement policy; `--allow-nonmonotone` records the relaxed policy in its
+report.
+
+The study CLI exposes the same raw-measurement opt-in and
+`--max-measurements` (default 65, supported range 2–257). Its frozen plan binds
+both choices and the sampler, study and oracle source hashes. Expanded budgets
+add 129- and 257-anchor checkpoints, capped by the declared legal roster.
+Measuring every candidate leaves an empty held-out audit, never an accuracy
+pass or a demonstrated measurement saving.
+
 The separate `tools/tessera_surface_replay.py` research command can compare
 the existing PWL model with shared-shape transfer from one/two anchors. It
 binds current campaign payload and journal identities, checks recorded wire
 hashes, and keeps activation/recipe segments distinct. A successful replay is
-not fresh source/producer attestation or serving qualification. Details and
-the pending joint-AURA/prefill extension (#237) are in
+not fresh source/producer attestation or serving qualification. The optional
+`shape_model.kind=endpoint_curvature` fits an endpoint-conditioned value or
+log2 polynomial from a shared pilot. It requires two measured domain endpoints
+per held-out unit, separate audits, and no post-audit refit. The original
+centered-log shape remains the default. Details and the boundary with the
+separate opt-in joint-AURA/runtime path (#237) are in
 [`docs/design/tessera_anchored_replay.md`](design/tessera_anchored_replay.md).
 
 Resume is an identity check, not a name match. The JSON checkpoint manifest
@@ -15526,6 +15924,8 @@ New with the 2026-07-30 merge:
 | D38 | **The GLM-5.3 serve runs a PATCHED runtime, and a patched runtime is not an attested one** (added 2026-09-13, RobTand/prismaquant#543). GLM-5.3-Flash cannot serve on the pinned image as shipped; the fix is five source edits in `flashinfer_mla_sparse_sm120.py` plus two GB10 hardening edits, now recorded at `prismaquant/serving_runtime_patches/glm53_nope_sm120/` and read by `serving_runtime_patch_set.py`. Three things are owed and none is patched here. **(a) Qualification.** The set is measured on a 4-layer stub of a 45-layer body, and the full body has never been served with it; the reader refuses the wider claim rather than making it. **(b) Numerical agreement.** Eager and CUDA-graph arms produce logprobs differing by up to 0.67 nats on the same prompt, each internally bit-deterministic; principle 10 wants bit-exactness with capture off, and the cause is not established (`--enforce-eager` also disables torch.compile, so capture is confounded, and the stub's logits are nearly flat). No KL number may be quoted from this lane until this is re-measured on a real body. **(c) The principle-14 position.** A patched runtime's executed-activation-contract table is not the pinned runtime's, so the GLM lane's `executes` list would have to be re-derived against the derived image before any gate reads it; the manifest is therefore `attested: false` and hands no caller a route. Also open: the derived image exists only as a local docker image id on sparklina, so `derived_image` is `null` until it is pushed to a registry serving on port 80 (the digest grammar's repository charset has no `:`). | `prismaquant/serving_runtime_patch_set.py`; `prismaquant/serving_runtime_patches/glm53_nope_sm120/MANIFEST.json`; `tests/test_serving_runtime_patch_set.py`; RobTand/prismaquant#543 | HIGH | Serve the 45-layer body on the derived image and re-run the eager-vs-graph comparison; push the image and record its registry digest; then decide, as a contract question for Rob and not a worker fix, whether a patched serving runtime can be attested at all, and if so what it publishes. |
 | D39 | **An fp4 table's rows bind to no full-engine bytes** (added 2026-09-13, RobTand/prismaquant#559; leg (a) closed 2026-09-13 by #566). Measured on one box in one session, nine cells over the three layer-0 MLP units at `TESSERA_E4M3_K1_R1006`, `TESSERA_BF16_K1_R1792` and `TESSERA_E2M1_K2_R896`, all nine `timing_admissible`. **Leg (a), CLOSED (#566):** `native_receipt_table.derive_context` required `identity_sha256(panel["runtime"])` to be equal across every bound panel, and the only field that differed across those nine panels was `runtime.native_libraries` -- the three fp4 panels carry the JIT-built `tessera_nvfp4_84439e84….so` (sha256 `7bfe7714dba8f16b…`) and the other six do not -- so the emitter refused with `native receipts were produced on more than one runtime` and no mixed-route table was emitted at all. A route's kernel is not a coordinate of the box: `native_libraries` is now the one runtime field a bound panel may differ in (`PER_ROUTE_RUNTIME_FIELD`, `:112`), with every other field still equal over the same canonical digest, the field sets still required to match, and a shared library path still required to carry the same bytes (`_require_one_runtime`, `:261`). The per-row binding was already the stronger one and is untouched (`runtime_provenance.py:771`). Re-emitted on the nine real receipts, the table now emits with 9 rows (sha256 `24cac16b1c9e3f57…`) and the refusal that stands is leg (b)'s. **Leg (b), OPEN (#570):** `runtime_provenance.py:418-432` requires every native production library to exist in the full-engine run at the same digest, and the #399 `engine-a5` run served a `TESSERA_FP8` artifact that never loaded that extension, so an fp4 table refuses at `load_runtime_relation` with `complete native production dependency coverage: evidence mismatch`, naming the unbound library. Satisfiable in principle -- the coverage rule is one-directional and the relation already models a full-engine superset -- but not by an engine run on a single-route-class artifact; #570 carries the two ways and their costs, including that the relation's `configuration` names the served artifact, so a new one means re-launching every native cell. The fp8/bf16 control table from the same session admits 6 rows, so neither refusal is a harness fault. Separately observed there and **fixed since, in #565**: a row's `binding.operator_route` was the GEMM symbol alone, so `TESSERA_FP8` and `TESSERA_NVFP4` rows were indistinguishable in that field although they run different kernels on differently packed operands. It now carries the route class -- the whole declared route, canonically spelled by `native_operator_panel.operator_route_identity`. | `prismaquant/native_receipt_table.py` `PER_ROUTE_RUNTIME_FIELD` (`:112`), `_require_one_runtime` (`:261`), `unshared_native_libraries` (`:299`) and `derive_context` (`:315`); `prismaquant/runtime_provenance.py` `_load_runtime_relation` (`:418-432`) and `admit_native_rows` (`:771`); `docs/measurements/prefill-frontier-qwen3-0.6b-2026-09-13.md` §8.5 | HIGH | Leg (a) is closed: the emitter emits a mixed-route table and the refusal that stands names the library it is about. Decide leg (b) in #570 -- what full-engine evidence a route-specific extension must bind to before its rows may be priced -- because until it lands the allocator still cannot see a mixed-format prefill table, which is the table it needs. |
 | D40 | **The fp4 route's arithmetic already wins on Blackwell and its route still loses, to one full-output elementwise pass the fp8 route does not have** (added 2026-09-13, RobTand/prismaquant#568). Measured on one box in one session, the three byte-matched layer-0 Qwen3-0.6B MLP units at `TESSERA_E2M1_K2_R896`, `TESSERA_E4M3_K1_R1006` and `TESSERA_BF16_K1_R1792`, M swept 512 to 131 072 with power read in-process at 100 ms around a sustained apply loop (0.37 to 0.64 of the 140 W envelope, against the 0.058 D39's measurement saw): the fp4 `torch._scaled_mm` kernel (`cutlass3x_sm120_bstensorop_s16864gemm_block_scaled_ue4m3xe2m1_ue…`, a genuine sm_120-family block-scaled schedule, not a fallback) costs 0.60x to 0.72x the fp8 GEMM's device time at **every** M — 1.39x to 1.66x faster, so the arithmetic expectation the route was built on is confirmed — and the fp4 route's three-unit operator sum is nevertheless 1.052x fp8's at M = 512, 1.350x at M = 32 768 and 1.295x at M = 131 072, intervals disjoint at every M. One unit does cross: `mlp.down_proj` (N = 1024, a third of the other two units' output width, so a third of the epilogue) is faster in fp4 at M = 1024 (0.810x), 2048, 4096 and 8192 with disjoint intervals, and loses again from M = 16 384 once the pass saturates bandwidth — the crossing is governed by output width, so one fp4-route price for all Linears is the wrong shape. The whole difference is one kernel: `nvfp4_route.py:238` (frozen producer tree `producer-source-d403cc5a31`) applies `y = y * layer.tessera_epilogue_scale` — a **Python float**, built at `:207` as `float(prepared.global_scale) / gs` — as a separate `AUnaryFunctor` pass over the entire M x N bf16 output, costing 913.7 us at M = 8192 against the fp4 GEMM's 737.6 us, and running at about 245 GB/s, i.e. bandwidth-bound on the unified LPDDR5X pool. The fp8 route's apply has no counterpart pass (`fp8_route.py:447-484`). fp4 also wins work per joule 1.15x to 1.46x at every M, so the route is already the right choice on an energy budget and the wrong one on latency. This is a **route** debt, not a numerics or a rate debt, and it is independent of D39's two table gates. | frozen producer tree `producer-source-d403cc5a31` `src/tessera/serving/nvfp4_route.py:207,238` and `src/tessera/serving/fp8_route.py:444-484`; `docs/measurements/prefill-load-sweep-qwen3-0.6b-2026-09-13.md` §5, §6 | HIGH | Decide, in Tessera, whether the shared global can leave the apply: neither `scale_a` nor `scale_b` on the nvfp4 `_scaled_mm` call can carry it (both are quantized UE4M3 planes), so removing the pass means either a kernel epilogue argument or fusing the multiply into the consumer. **Both are unmeasured and neither is claimed here** — this entry records what the pass costs, not that it can be removed. Until it is, price the fp4 route by its route cost, not by its GEMM, and do not read #563's headline as an arithmetic-rate finding. |
+| D41 | **PrismaQuant's activation quantiser is asserted, not attested, on the pinned contract -- and the fp4 divergence survives the attestation** (added 2026-09-13, RobTand/prismaquant#567, #574). `reference_qdq` is PrismaQuant's own re-implementation of the rule `torch.ops._C.scaled_fp4_quant` executes; the **pinned** contract (v24) publishes the rule's name (`e2m1_group16_ue4m3_static`) and nothing of its arithmetic, so `require_activation_quantizer_attested` refuses and no fp4 cell can be frozen or admitted. Two things are now known and neither closes it. **(a)** Tessera v25 publishes the table (RobTand/tessera#485), and PrismaQuant reproduces it exactly -- all eleven probe groups, 176 elements, the stored UE4M3 byte and every code, over the seven midpoints at dyadic and non-dyadic used scales, midpoints plus and minus one bf16 ulp, saturation and the block-scale underflow tie (`tests/test_activation_quantizer_attestation.py`). So the tie-break, the saturation convention and the scale rounding are **not** the cause. **(b)** The divergence measured on sparklina `GPU-b1eceeea`, sm_121, TP1, batch 1, eager -- `o_proj` prefill 0.095703125, `v_proj` prefill 0.1435546875, single E2M1 code flips on ~3.4% of one tensor while every fp8 cell and the three MLP units agreed at exactly 0.0 -- therefore still has no established mechanism. Every published probe is exact on both sides by construction, and the refused cells ran at `G = 1.7454545` with non-dyadic group maxima, which is where the remaining suspicion belongs and which no contract row can settle. Consequence: **no fp4 prefill timing may be published as a price and no fp4 activation term of `predicted_dloss` is admissible**, with magnitude AND SIGN unknown (a flip at a midpoint moves `dx` by plus or minus gap/2). The weight term is unaffected: it uses the unquantised `x2`. | `prismaquant/tessera_runtime_contract.py` `require_activation_quantizer_attested`; `prismaquant/nvfp4_activation_contract.py` `nvfp4_group_stored_scale`, `nvfp4_e2m1_magnitude_index`; `prismaquant/native_operator_panel.py` `require_attested_activation_oracle`; `docs/measurements/prefill-frontier-qwen3-0.6b-2026-09-13.md` | HIGH | Move the Tessera pin to v25 (its own reviewed change: commit, contract sha and `TESSERA_DEV_PIN_ANSWER` in one commit), then run a bulk differential probe on the real activation tensor -- for each disagreeing element, its distance to the nearest midpoint in units of the group's used scale -- because that is the instrument the contract table cannot be. Do not widen a tolerance. |
+| D42 | **Two things the fp4 attestation still does not reach** (added 2026-09-13, RobTand/prismaquant#574). (a) **The dynamic-scale lane is unattested.** `fp8_per_token_dynamic` derives its scale from `x`, so both sides compute the same function of the same tensor and every measured fp8 cell agreed at exactly 0.0 -- evidence, not attestation. Its table is a different shape (no static `G` to publish against), so panels on that lane carry an explicit `unattested_dynamic_scale` stamp rather than a silent absence, and the exact gate still applies. (b) **Non-dyadic used scales are unreachable by a contract table.** Every probe is a value both sides represent exactly, by construction; a probe whose inputs are inexact cannot be checked without the checker owning the runtime's arithmetic, which is the thing being avoided. Also unclosed: the receipt harness applies one scalar `atol`/`rtol` pair to both gates, so the derived GEMM bound is the maximum over output elements and is loose wherever the worst row cancels. | `prismaquant/native_operator_panel.py` `require_attested_activation_oracle`, `derive_gemm_numerics`; Tessera `experiments/bench_native_operator.py` `compare_tensors` | MEDIUM | Publish a dynamic-scale table shape for fp8; move the receipt's numerical comparison to a per-element bound so the GEMM gate stops being the maximum over `j`. The non-dyadic question is D41's bulk differential probe, not a contract row. |
 
 **Open items carried from session handovers.** Of the 41 items the handover census could not
 map to a verified closure, the prior FP4-CB fast-expander/Triton item is now closed by the

@@ -201,6 +201,101 @@ def _mutate_preserving_mtime(path):
     os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
 
 
+def test_complete_source_finish_reuses_authenticated_shard_and_refuses_mutation(
+    complete_source, monkeypatch,
+):
+    """A joint prepare may defer a SHA, but must finish the complete roster."""
+    from safetensors import safe_open
+    from prismaquant import tessera_calibration_cache as cc
+
+    f = complete_source
+    hashed = []
+    original = cc.sha256
+
+    def count(path, **kwargs):
+        hashed.append(Path(path).name)
+        return original(path, **kwargs)
+
+    with cc.authenticate_selected_capture_source(**f.kwargs) as owner:
+        monkeypatch.setattr(cc, 'sha256', count)
+        with owner.safe_open(safe_open, f.root/'selected.safetensors', framework='pt') as handle:
+            handle.get_tensor('model.layers.0.a.weight')
+        receipt = owner.authenticate_complete_source()
+        assert sorted(row['name'] for row in receipt['verified_files']) == sorted(
+            [*f.tensors, 'config.json', 'model.safetensors.index.json',
+             'chat_template.jinja'])
+        assert hashed.count('selected.safetensors') == 1
+        assert hashed.count('unused.safetensors') == 1
+        assert receipt['metadata_only_shards'] == []
+
+    owner = cc.authenticate_selected_capture_source(**f.kwargs)
+    _mutate_preserving_mtime(f.root/'unused.safetensors')
+    try:
+        with pytest.raises(RuntimeError, match='changed during consumption|content differs'):
+            owner.authenticate_complete_source()
+    finally:
+        owner.close()
+
+
+def test_adopted_full_source_sha_reuses_bytes_but_rejects_same_size_mutation(
+    complete_source, monkeypatch, tmp_path,
+):
+    """A cached SHA is usable only for the exact held source object."""
+    from safetensors import safe_open
+    from prismaquant import cost_streaming
+    from prismaquant import tessera_calibration_cache as cc
+
+    f = complete_source
+    shards = []
+    fingerprints = []
+    for name in sorted(f.tensors):
+        path = f.root / name
+        stat = path.stat()
+        shards.append({'path': str(path), 'size': stat.st_size,
+                       'sha256': cc.sha256(path)})
+        fingerprints.append({'path': str(path), 'device': stat.st_dev,
+                             'inode': stat.st_ino, 'size': stat.st_size,
+                             'mtime_ns': stat.st_mtime_ns,
+                             'ctime_ns': stat.st_ctime_ns})
+    identity = {'shards': shards,
+                'checkpoint_weight_map': {name: path for name, path in
+                                          json.loads((f.root/'model.safetensors.index.json').read_text())['weight_map'].items()}}
+    cache = tmp_path / 'source-identity.json'
+    cache_record = {'identity': identity, 'fingerprints': fingerprints}
+    cache.write_text(json.dumps(cache_record))
+    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+                        lambda *_a, **_k: (cache_record, identity))
+    monkeypatch.setattr(cost_streaming, '_local_checkpoint_shards',
+                        lambda *_a, **_k: (identity['checkpoint_weight_map'],
+                                           [Path(row['path']) for row in shards]))
+    original = cc.sha256
+    hashed = []
+
+    def count(path, **kwargs):
+        hashed.append(Path(path).name)
+        return original(path, **kwargs)
+
+    with cc.authenticate_selected_capture_source(**f.kwargs) as owner:
+        monkeypatch.setattr(cc, 'sha256', count)
+        assert owner.adopt_streamed_identity_cache(cache) == len(shards)
+        with owner.safe_open(safe_open, f.root/'selected.safetensors', framework='pt') as handle:
+            handle.get_tensor('model.layers.0.a.weight')
+        receipt = owner.authenticate_complete_source()
+        assert receipt['payload_bytes_hashed'] == 0
+        assert all(row['proof_source'] == 'verified_streamed_identity_cache'
+                   for row in receipt['verified_files']
+                   if row['name'].endswith('.safetensors'))
+        assert not any(name.endswith('.safetensors') for name in hashed)
+
+    owner = cc.authenticate_selected_capture_source(**f.kwargs)
+    _mutate_preserving_mtime(f.root/'selected.safetensors')
+    try:
+        with pytest.raises(RuntimeError, match='another object|changed'):
+            owner.adopt_streamed_identity_cache(cache)
+    finally:
+        owner.close()
+
+
 @pytest.mark.parametrize('name', ['config.json', 'model.safetensors.index.json', 'chat_template.jinja'])
 def test_metadata_tampering_refused_before_source_construction(complete_source, name):
     from prismaquant import tessera_calibration_cache as cc
