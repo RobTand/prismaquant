@@ -169,7 +169,12 @@ def prepare(args):
     calibration = ids.to("cuda")
     identity = {"schema": "prismaquant.frontier_native_cells.v1", "model": args.model, "cells": plan,
                 "calibration": calibration_receipt, "n_probes": args.n_probes, "seed_base": args.seed_base,
-                "runtime_image": args.runtime_image, "numerics": {"atol": args.atol, "rtol": args.rtol},
+                "runtime_image": args.runtime_image,
+                # No run-wide tolerance: each cell's GEMM bound is derived from
+                # its own operands (native_operator_panel.derive_gemm_numerics)
+                # and stamped into that cell's inputs, and the activation gate
+                # is exact.  The constant that used to live here was 2^-6 with
+                # no derivation behind it (#574).
                 "prefill_rows": args.prefill_rows, "decode_rows": args.decode_rows,
                 "activation_scale_policy": {"PRISMAQUANT_PROD_ACT_SCALES": os.environ.get("PRISMAQUANT_PROD_ACT_SCALES")},
                 "torch": torch.__version__, "cuda": torch.version.cuda, "device": torch.cuda.get_device_name(),
@@ -278,7 +283,7 @@ def prepare(args):
             blob = (out / render["wire_path"]).read_bytes()
             inputs, tensors = prepare_native_inputs(cache, weight, rows, unit=name, format_name=fmt,
                 calibration_receipt=calibration_receipt, wire_blob=blob, wire_record=render["wire_record"],
-                encoding_identity=render["encoding_identity"], numerics={"atol": args.atol, "rtol": args.rtol},
+                encoding_identity=render["encoding_identity"],
                 prefill_rows=args.prefill_rows, decode_rows=args.decode_rows,
                 max_resident_bytes=args.max_resident_bytes)
             cell = cell_dir(out, name, fmt)
@@ -390,8 +395,6 @@ def main(argv=None):
     p.add_argument("--min-free-gib", type=float, default=4.0)
     p.add_argument("--prefill-rows", type=int, default=512)
     p.add_argument("--decode-rows", type=int, default=1)
-    p.add_argument("--atol", type=float, default=0.015625)
-    p.add_argument("--rtol", type=float, default=0.015625)
     p.add_argument("--max-resident-bytes", type=int, default=1 << 30)
     p.set_defaults(func=prepare)
     f = sub.add_parser("freeze")
