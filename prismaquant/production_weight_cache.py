@@ -248,7 +248,7 @@ class _WindowTrackedWeights(dict):
     views, aliases and changed tensor backing cannot undercount memory.
     """
 
-    def __init__(self, values):
+    def __init__(self, values=()):
         super().__init__(values)
         self.tensor_keys = {key for key, value in self.items()
                             if isinstance(value, torch.Tensor)}
@@ -290,6 +290,10 @@ class _WindowTrackedWeights(dict):
     def clear(self):
         super().clear()
         self.tensor_keys.clear()
+
+    @classmethod
+    def fromkeys(cls, keys, value=None):
+        return cls(dict.fromkeys(keys, value))
 
     def __reduce__(self):
         # The index is process-local bookkeeping, regenerated on demand.
