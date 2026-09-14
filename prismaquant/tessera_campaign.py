@@ -51,11 +51,11 @@ What this stage does NOT do
 ---------------------------
 It measures ``output_mse`` under the route's activation contract, which is the
 render-cost currency (``COST_MODE=production-render-score``'s
-``--score-field output_mse``).  It is not the AURA adjoint: AURA prices ``dW``
-against a KL-Fisher weight gradient and applies the A side afterwards as a
-calibrated per-family multiplier, and a Tessera family has no such calibration
-yet.  The payload declares its own currency so nothing downstream can mistake
-one for the other.
+``--score-field output_mse``). It is not an AURA price. The separate streamed
+``--joint-activation`` path projects the complete signed weight/activation
+residual through KL cotangents before squaring. This campaign does not perform
+that projection; its payload declares its own currency so downstream code
+cannot mistake output MSE for measured joint AURA.
 """
 from __future__ import annotations
 
@@ -263,7 +263,7 @@ def require_seed_family_scope(name, state, *, family_restriction, structure_by_u
 
 
 def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
-                    snap) -> list[int]:
+                    snap, exhaustive_band: bool = False) -> list[int]:
     """Where round one puts this family's anchors on this group's grid.
 
     Without a band the schedule spans the family's whole realisable range,
@@ -279,11 +279,16 @@ def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
     around the rates the artifact will actually use.
 
     A family whose realisable rungs do not reach the band gets no anchor here
-    and is left to say so, rather than being priced at a rate outside it.
+    and is left to say so, rather than being priced at a rate outside it.  An
+    explicit research acquisition may instead request every legal rung in a
+    declared band.  That mode remains bounded by the band's realisable grid;
+    it does not widen a family or change serving admission.
     """
     if not allowed:
         return []
     if band is None:
+        if exhaustive_band:
+            raise RuntimeError("an exhaustive rate grid requires --rate-band")
         return sorted({r for r in (snap(rate, allowed) for rate in
                                    anchor_schedule(allowed[0], allowed[-1], anchors))
                        if r is not None})
@@ -291,7 +296,15 @@ def round_one_rates(allowed: "Sequence[int]", *, band, anchors: int,
     inside = [rate for rate in allowed if lo <= int(rate) <= hi]
     if not inside:
         return []
+    if exhaustive_band:
+        return sorted(set(inside))
     return sorted({snap(inside[0], allowed), snap(inside[-1], allowed)} - {None})
+
+
+def require_exhaustive_rate_research_mode(enabled: bool, mode: str) -> None:
+    """Keep complete-grid acquisition in its declared research menu."""
+    if enabled and mode != "research":
+        raise RuntimeError("--exhaustive-rate-grid requires --menu-mode research")
 
 
 def audit_extra_rate(allowed: "Sequence[int]", placed: "Sequence[int]",
@@ -3852,6 +3865,29 @@ def selection_priced_units(selection: Mapping) -> tuple[set, set, dict]:
     return priced, audit, pi
 
 
+def research_exact_member_scope(selection: Mapping, resolved: Mapping[str, list[str]],
+                                member: str) -> dict:
+    """Price one named member of a validated whole group, without a stack estimate.
+
+    This is an endpoint measurement only. The full group still comes from the
+    census and ``select_anchor_groups`` checks every member before this narrow
+    operation; no inclusion probability or representative-stack claim exists.
+    """
+    if not isinstance(member, str) or not member:
+        raise RuntimeError("--research-exact-member requires one nonempty unit name")
+    groups = selection["groups"]
+    if len(groups) != 1 or any(
+            key in groups[0] for key in ("sampled", "audit", "inclusion_probability", "stack_samples")):
+        raise RuntimeError("--research-exact-member requires one unsampled whole group")
+    group = groups[0]
+    if member not in resolved[group["key"]]:
+        raise RuntimeError(f"--research-exact-member {member}: outside selected group {group['key']}")
+    return {"member": member, "full_group_key": group["key"],
+            "full_group_size": len(resolved[group["key"]]),
+            "purpose": "research_scalar_endpoint", "allocator_payload": False,
+            "stack_estimate": False}
+
+
 def select_anchor_groups(selection: Mapping, resolved: Mapping[str, list[str]],
                          *, where: str) -> list[str]:
     """The selected group keys, refusing any disagreement with this run's scope.
@@ -5043,6 +5079,10 @@ def _main(argv, *, source_scope) -> int:
                          "range, and an audited unit gets a third inside it. "
                          "Unset reproduces every artifact built before "
                          "2026-09-06.")
+    ap.add_argument("--exhaustive-rate-grid", action="store_true",
+                    help="Research-only: in the declared --rate-band, measure every "
+                         "legal family rung in round one. This changes neither the "
+                         "family's legal domain nor serving/export admission.")
     ap.add_argument("--anchor-budget", type=int, default=12,
                     help="max anchors per (fused group, family) surface. The "
                          "adaptive loop keeps splitting the worst-predicted "
@@ -5077,6 +5117,11 @@ def _main(argv, *, source_scope) -> int:
                          "identity narrows with it, so two invocations over "
                          "disjoint selections never contend. Omitted: measure "
                          "every group in scope, exactly as before.")
+    ap.add_argument("--research-exact-member", default=None,
+                    help="Research-only scalar endpoint for one named member of a "
+                         "fully validated --units group. Requires a complete "
+                         "calibration census/cache and one rate-band; carries no "
+                         "allocator or stack-estimate licence.")
     ap.add_argument("--calibration-census", default=None,
                     help="JSON per-unit calibration row counts for the WHOLE "
                          "priced scope (prismaquant.tessera_campaign_census.v1, "
@@ -5128,6 +5173,8 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--calibration-cache-sha256", default=None,
                     help="Expected capture manifest hash, sealed by the campaign planner.")
     args = ap.parse_args(argv)
+    if args.exhaustive_rate_grid and parse_rate_band(args.rate_band) is None:
+        ap.error("--exhaustive-rate-grid requires --rate-band")
     from .perturbed_x_cache import normalize_verified_activation_load
     try:
         args.capture_load_policy = normalize_verified_activation_load(args.capture_load_policy)
@@ -5186,6 +5233,7 @@ def _main(argv, *, source_scope) -> int:
     serving_target = serving_target_from_args(args)
 
     mode = menu_mode(args.menu_mode)
+    require_exhaustive_rate_research_mode(args.exhaustive_rate_grid, mode)
     hessian_status = tessera_encoder_hessian_status()
     if args.hessian == "require" and not hessian_status["accepted"]:
         # Refuse before the model load, not after an hour of encodes.
@@ -5319,6 +5367,7 @@ def _main(argv, *, source_scope) -> int:
 
     selection = None
     stack_samples = {}
+    exact_member_scope = None
     selected_groups: list[str] = sorted(scope_groups)
     audit_units: set = set()
     inclusion_probability: dict = {}
@@ -5332,6 +5381,16 @@ def _main(argv, *, source_scope) -> int:
             selection, scope_groups, where=f"--units {args.units}")
         priced, audit_units, inclusion_probability = selection_priced_units(
             selection)
+        if args.research_exact_member is not None:
+            if (mode != "research" or not args.calibration_census or
+                    not args.calibration_cache or parse_rate_band(args.rate_band) is None):
+                raise RuntimeError("--research-exact-member requires research menu, "
+                                   "calibration census/cache and --rate-band")
+            exact_member_scope = research_exact_member_scope(
+                selection, scope_groups, args.research_exact_member)
+            priced = {exact_member_scope["member"]}
+            audit_units = set()
+            inclusion_probability = {}
         # The group's membership was already checked whole; what the sample
         # narrows is only which of those members this run encodes. Keeping the
         # two separate is what lets a sampled run stay identity-honest: the
@@ -5356,6 +5415,8 @@ def _main(argv, *, source_scope) -> int:
         if not targets:
             raise RuntimeError(
                 f"--units {args.units}: the selection prices no unit")
+    elif args.research_exact_member is not None:
+        raise RuntimeError("--research-exact-member requires --units")
 
     context_by_unit = None
     structure_by_unit = None
@@ -6190,7 +6251,8 @@ def _main(argv, *, source_scope) -> int:
                     grid = sorted(set.intersection(*member_rates.values())) if members else []
                     if round_index == 1:
                         want = round_one_rates(allowed, band=rate_band,
-                                               anchors=args.anchors, snap=_snap)
+                                               anchors=args.anchors, snap=_snap,
+                                               exhaustive_band=args.exhaustive_rate_grid)
                         extra = (None if not audit_units else
                                  audit_extra_rate(allowed, want, snap=_snap))
                         for m in members:
@@ -6482,6 +6544,8 @@ def _main(argv, *, source_scope) -> int:
                     name: float(inclusion_probability[name])
                     for name in sorted(inclusion_probability)},
             },
+            **({"research_exact_member_scope": exact_member_scope}
+               if exact_member_scope is not None else {}),
             "tp_degree": int(args.tp_degree),
             "model": str(args.model),
             "nsamples": int(args.nsamples),
