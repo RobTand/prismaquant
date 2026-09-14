@@ -3,6 +3,35 @@
 As of: 2026-09-13 · `campaign/glm-budget-full-range-20260914`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-13, `codex/arc-prewarm-prepare-final-20260913`) for the
+**joint prepare ARC frontier**. The post-campaign manifest keeps its exact
+ordered entries and divides windowed qualification at complete-unit
+boundaries, targeting at most 32 GiB of newly declared bytes per phase.
+`submit-joint prepare` seals these names as PB progress phases only for a
+fresh journal and a reusable, verified source identity proof. The container
+checks the manifest's sealed digest and plan identity before running; it
+enters each phase before its first unit read and increments the cumulative
+counter only after that unit's journal write. PB's storage role can then
+release the consumed prefix and warm the next entry-aligned ARC window.
+The source read set now includes the head's actual materialized tensor
+extents and every indexed tensor in each installed layer, including norms
+and named buffers. Streaming installs whole layers even when only a subset
+of their Linears is qualified, so declaring only the quantizable unit
+extents would leave those source reads cold. The prepare phases place a
+source layer at its earliest declared prefetch phase, up to the plan's
+lookahead, rather than waiting for its later install phase. A windowed
+prepare read frontier is admitted only when the source layers are contiguous
+and `max_cache_slots=prefetch_lookahead+1`, so the runner's settle step has
+finished those prefetched reads before the phase can release their bytes.
+The backbone depth comes from `text_config.num_hidden_layers`. GLM's index
+also names layer 45, but the config has 45 backbone layers (0–44) and treats
+layer 45 as MTP passthrough; the streaming runner does not install it.
+Fresh whole-source authentication may read that shard in its completion
+phase, while a valid full-source proof removes that read entirely.
+Resumed replay reads committed units before the layer walk and therefore
+does not claim this phase mapping; its submission keeps conservative
+unphased warming until a replay-order contract exists.
+
 Re-stamped (2026-09-13, `codex/cost-render-proof-integrated-20260913`) for
 **COST's prepared-render integrity on consumption**. PREPARE binds each
 decoded PWC shard's serialized-file SHA-256 to its bounded load receipt and
@@ -725,8 +754,9 @@ shards the settled read set is projected near **6.8 TB** -- 5.20 TB plus
 the composition, not a byte count. The brief's 4.75 TB estimate was taken
 earlier the same morning, against fewer shards.
 A whole-set warm is not available at that ratio, so the manifest carries the
-consumption order: a `head` phase, then one `layer-<L>` phase per transformer
-layer, and the prewarm loop windows on `annotations.phases`. The head is not
+consumption order: a `head` phase, then bounded `layer-<L>-part-<P>` phases
+for windowed preparation, and the prewarm loop windows on
+`annotations.phases`. Each part starts at a complete unit. The head is not
 small on this census: 97,302 of its 197,990 measured cells are rungs the
 campaign adopted rather than encoded, and `load_measured_anchor_input`
 decodes a shard for each of them from its wire before the first layer

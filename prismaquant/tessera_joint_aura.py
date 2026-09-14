@@ -800,7 +800,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                   qualification_window=None, capture_load_policy=None,
                   source_capture_compatibility=None, source_authentication=None,
                   qualification_guard=None, qualification_journal=None,
-                  qualification_resume=False, qualification_identity=None):
+                  qualification_resume=False, qualification_identity=None,
+                  prewarm_phase_starts=None):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
@@ -877,6 +878,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             replayed = _qualification_replay(data, manifest, completed)
         else:
             replayed = {}
+    _require(prewarm_phase_starts is None or journal is not None,
+             "ARC read-frontier progress requires a durable qualification journal")
     capture_load_execution = cc._load_execution(capture_load_policy, expected)
     if capture_load_policy is not None:
         cc.preflight_verified_capture_entries(capture_path.parent, manifest['entries'],
@@ -894,6 +897,9 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     max_wire_read_bytes = _prepare_wire_read_bound(data)
     cache.enable_file_load_receipts(max_file_bytes=max_file_bytes)
     targets = _live_targets(runner, data.formats_by_qname)
+    if prewarm_phase_starts is not None:
+        _same(set(prewarm_phase_starts), set(targets),
+              "sealed prewarm phase/qualification roster")
     layers = defaultdict(list)
     for name in targets:
         layers[runner.layer_index_for_qname(name)].append(name)
@@ -903,10 +909,23 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                for name, fmts in data.formats_by_qname.items()}
     verified, telemetry = replayed if completed else {}, []
     committed_units = len(completed)
+    current_prewarm_phase = "head"
+    if prewarm_phase_starts is not None:
+        first = next((sorted(layers[layer])[0] for layer in range(runner.num_layers)
+                      if layers.get(layer)), None)
+        _require(first is not None, "sealed prewarm plan has no qualification units")
+        current_prewarm_phase = prewarm_phase_starts[first]
+        _pb_commit(committed_units, current_prewarm_phase, unit=first)
     for depth in range(min(runner.num_layers, runner.prefetch_lookahead + 1)):
         runner.context.schedule_prefetch(depth)
     for layer in range(runner.num_layers):
         names = sorted(layers.get(layer, ()))
+        if prewarm_phase_starts is not None and names:
+            phase = prewarm_phase_starts.get(names[0])
+            _require(phase is not None, f"{names[0]} has no sealed prewarm phase")
+            if phase != current_prewarm_phase:
+                _pb_commit(committed_units, phase, unit=names[0])
+                current_prewarm_phase = phase
         runner.context.install(layer, require_prefetched=runner.require_prefetched_residency)
         runner.context.schedule_prefetch(layer + runner.prefetch_lookahead)
         members = [targets[name] for name in names if isinstance(targets[name], PackedExpertProjection)]
@@ -920,6 +939,15 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             capture_windows = [names] if policy is None else [(name,) for name in names]
             layer_stats = []
             for unit_names in capture_windows:
+                if prewarm_phase_starts is not None:
+                    phase = prewarm_phase_starts.get(unit_names[0])
+                    _require(phase is not None, f"{unit_names[0]} has no sealed prewarm phase")
+                    if phase != current_prewarm_phase:
+                        # The previous unit has already been journaled. This
+                        # phase names bytes we are ABOUT to read; PB releases
+                        # only the preceding manifest prefix.
+                        _pb_commit(committed_units, phase, unit=unit_names[0])
+                        current_prewarm_phase = phase
                 if len(unit_names) == 1 and unit_names[0] in completed:
                     name = unit_names[0]
                     layer_stats.extend(completed[name]['prefetch'])
@@ -1030,7 +1058,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                **({'capture_load_execution': unit_load_execution}
                                   if capture_load_execution is not None else {})})
                     committed_units += 1
-                    _pb_commit(committed_units, 'qualification', unit=name)
+                    _pb_commit(committed_units, current_prewarm_phase if
+                               prewarm_phase_starts is not None else 'qualification', unit=name)
             stats = layer_stats[0] if policy is None else {'windows': layer_stats}
             telemetry.append({"layer": layer, **stats})
             print(json.dumps({"qualified_layer": layer, "qualified_cells": len(verified),
@@ -1270,7 +1299,8 @@ def _restores_activation_scale_env(function):
 
 
 @_restores_activation_scale_env
-def execute(command, config, *, plan_sha256, prepared=None, resume=False, source_transition=None):
+def execute(command, config, *, plan_sha256, prepared=None, resume=False,
+            source_transition=None, prewarm_manifest=None):
     """Execute one admitted preparation or one dependent cost action."""
     if source_transition is not None:
         from .joint_aura_source_transition import load_transition
@@ -1303,6 +1333,13 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
     execution = config["execution"]
     root = Path(config["output_root"]) / command
     root.mkdir(parents=True, exist_ok=True)
+    prewarm_phase_starts = None
+    if prewarm_manifest is not None:
+        _require(command == "prepare" and config.get("qualification_window") is not None,
+                 "sealed prewarm phases require windowed preparation")
+        from .joint_prewarm_phases import load_prepare_frontier
+        prewarm_phase_starts = load_prepare_frontier(
+            prewarm_manifest["path"], prewarm_manifest["sha256"], plan_sha256)
     identity_cache_path = _seed_source_identity_cache(config, root)
     result = {"schema": "prismaquant.tessera_joint_aura.execution.v1", "command": command,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
@@ -1427,6 +1464,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False, source
                                   qualification_journal=(root / 'qualification' if
                                                          config.get('qualification_window') is not None else None),
                                   qualification_resume=resume,
+                                  prewarm_phase_starts=prewarm_phase_starts,
                                   qualification_identity={
                                       'plan_sha256': plan_sha256,
                                       'source_model_identity': source,
@@ -1654,6 +1692,8 @@ def main(argv=None):
     parser.add_argument("--prepared", type=Path)
     parser.add_argument("--prepared-sha256")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--prewarm-manifest", type=Path)
+    parser.add_argument("--prewarm-manifest-sha256")
     parser.add_argument("--source-transition", type=Path)
     parser.add_argument("--source-transition-sha256")
     parser.add_argument("--units", help="synthesize: lo:hi over the sorted census roster. "
@@ -1676,6 +1716,8 @@ def main(argv=None):
         parser.error("--source-transition and --source-transition-sha256 are required together")
     if bool(args.prepared) != bool(args.prepared_sha256):
         parser.error("--prepared and --prepared-sha256 are required together")
+    if bool(args.prewarm_manifest) != bool(args.prewarm_manifest_sha256):
+        parser.error("--prewarm-manifest and --prewarm-manifest-sha256 are required together")
     # ``synthesize`` constructs no lease and loads no backend: it decodes wires
     # and publishes the canonical CPU BF16 shard, whose bytes are measured
     # identical across x86/aarch64 and CPU/CUDA. It is the one command that
@@ -1694,6 +1736,9 @@ def main(argv=None):
     result = execute(args.command, config, plan_sha256=args.plan_sha256,
         prepared=None if args.prepared is None else {"path": str(args.prepared), "sha256": args.prepared_sha256},
         resume=args.resume,
+        **({"prewarm_manifest": {"path": str(args.prewarm_manifest),
+                                   "sha256": args.prewarm_manifest_sha256}}
+           if args.prewarm_manifest is not None else {}),
         **({"source_transition": {"path": str(args.source_transition),
                                   "sha256": args.source_transition_sha256}}
            if args.source_transition is not None else {}))
