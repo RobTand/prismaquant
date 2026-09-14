@@ -38,7 +38,7 @@ anchor, wire receipt, resolved donor paths and origin; it recomputes the same
 digest on resume instead of copying the entire 197,990-cell record mapping
 into a second manifest. The original checkpoint and cost/census inputs remain
 independently SHA-bound, and any changed cell field still refuses reuse.
-The bounded, phase-matched 18-cell before/after rate and both-box resource
+The bounded, phase-matched 18-cell and 241-cell before/after rates and both-box resource
 evidence are in `docs/measurements/glm-joint-prep-bounded-ab-2026-09-13.md`;
 full-campaign throughput and work-per-joule remain unmeasured.
 
