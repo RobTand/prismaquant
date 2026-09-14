@@ -715,9 +715,16 @@ def test_the_answer_excludes_every_field_a_gate_does_not_read(dev_pin):
     # ``required_regimes`` joins the answer for a SCOPED lane table (v5 and
     # later): under one serving context every declared regime must resolve, so
     # the regime roster is a value the admission decision is made of.
+    # ``activation_quantizers`` joins it at contract v25 for the same reason:
+    # ``require_activation_quantizer_attested`` recomputes every published
+    # probe group and refuses the panel on any disagreement, so the table is a
+    # value a gate decides on -- and a pin that starts or stops publishing one
+    # must show up as a diff of this literal rather than as a silent change of
+    # what the fp4 lane is allowed to price.
     assert set(answer) == {"schema", "lane_schema", "quant_method",
                            "native_extensions", "fused_module",
-                           "families", "cells", "required_regimes"}
+                           "families", "cells", "required_regimes",
+                           "activation_quantizers"}
     flat = repr(answer)
     # ``native_extensions`` is answer because the §7.4 fingerprint gate reads
     # it; the two fields of it that name files in the RUNTIME's own tree move
