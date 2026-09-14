@@ -510,6 +510,37 @@ def test_mtp_index_after_backbone_is_completion_auth_only(scratch, shared_mount)
     assert str(shard) not in _paths(manifest, "layer-0")
     assert str(shard) not in _paths(manifest, "layer-1")
 
+    # A valid complete proof replaces every whole-shard hash. In particular,
+    # classifying MTP as completion-only must not turn it into a body read.
+    sources = (fixture["shard"], shard)
+    digests = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+               for path in sources}
+    capture_path = fixture["captures"] / "capture_manifest.json"
+    capture = json.loads(capture_path.read_text())
+    capture["identity"] = {"source_files": digests}
+    capture_path.write_text(json.dumps(capture))
+    cache_path = scratch / "source-identity.json"
+    cache_path.write_text(json.dumps({
+        "schema": "prismaquant.streamed_model.identity_cache.v1",
+        "source": str(model),
+        "identity": {"shards": [{"path": str(path), "sha256": digests[path.name]}
+                                for path in sources]},
+        "fingerprints": [{"path": str(path), "device": stat.st_dev,
+                          "inode": stat.st_ino, "size": stat.st_size,
+                          "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns}
+                         for path in sources for stat in (path.stat(),)],
+    }))
+    plan = json.loads(fixture["plan"].read_text())
+    plan["source_identity_cache"] = {"path": str(cache_path),
+        "sha256": hashlib.sha256(cache_path.read_bytes()).hexdigest()}
+    fixture["plan"].write_text(json.dumps(plan))
+    cached = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert cached["annotations"]["source_authentication_mode"] == (
+        "verified_streamed_identity_cache")
+    assert cached["annotations"]["counts"].get("source_authentication", 0) == 0
+    assert str(shard) not in {entry["path"] for entry in cached["entries"]}
+
 
 def test_prepare_manifest_uses_exact_cached_source_sha_and_refuses_mutation(
     scratch, shared_mount,
