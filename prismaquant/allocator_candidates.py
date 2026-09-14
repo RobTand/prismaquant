@@ -2114,6 +2114,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      tessera_menu_report: dict | None = None,
                      context_by_unit: Mapping[str, ServingContext] | None = None,
                      preserve_runtime_frontier: bool = False,
+                     tessera_menu_mode: str | None = None,
                      ) -> dict[str, list[Candidate]]:
     """Build runtime-legal format candidates for every measured Linear.
 
@@ -2243,7 +2244,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 admission = admission_cache[cache_key]
                 if (
                     (admission.requires_serving_context or serving_context is not None)
-                    and not admission.admits(tessera_menu.menu_mode())
+                    and not admission.admits(tessera_menu.menu_mode(tessera_menu_mode))
                 ):
                     reason = "tessera_serving_context"
                     if mask_records is not None:

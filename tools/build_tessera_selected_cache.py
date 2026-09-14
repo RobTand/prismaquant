@@ -37,11 +37,38 @@ def main(argv=None) -> int:
     parser.add_argument("--assignment", required=True)
     parser.add_argument("--assignment-sha256", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--research-proposal", default=None,
+                        help="explicit sampled-pilot research proposal for validation export")
+    parser.add_argument("--research-proposal-sha256", default=None)
     args = parser.parse_args(argv)
-    handoff = pickle.loads(_bound(args.handoff, args.handoff_sha256, "joint handoff"))
+    if bool(args.research_proposal) != bool(args.research_proposal_sha256):
+        raise ValueError('research proposal path and SHA-256 must be supplied together')
+    pilot_binding = {'path': args.handoff, 'sha256': args.handoff_sha256}
+    research = None
+    if args.research_proposal:
+        from prismaquant.tessera_sampled_stack_proposal import (
+            bind_pilot_from_inputs, require_research_proposal_assignment)
+        research = json.loads(_bound(args.research_proposal,
+                                    args.research_proposal_sha256, 'research proposal'))
+        if research.get('input_bindings', {}).get('pilot_joint_cost') != pilot_binding:
+            raise ValueError('research proposal does not bind the supplied pilot cost')
+        handoff, _plan = bind_pilot_from_inputs(joint_binding=pilot_binding,
+            plan_binding=research['input_bindings']['pilot_plan'])
+    else:
+        handoff = pickle.loads(_bound(args.handoff, args.handoff_sha256, "joint handoff"))
     _bound(args.assignment, args.assignment_sha256, "selected assignment")
     assignment = load_assignment(args.assignment)
     metadata = read_layer_config_metadata(args.assignment)
+    if research is not None:
+        binding = require_research_proposal_assignment(research, assignment,
+                                                        pilot_joint_binding=pilot_binding)
+        if metadata.get('sampled_joint_proposal') != {
+                'schema': binding['schema'],
+                'proposal_sha256': args.research_proposal_sha256,
+                'selected_assignment_sha256': binding['selected_assignment_sha256']}:
+            raise ValueError('selected cache assignment lacks exact research proposal marker')
+    elif 'sampled_joint_proposal' in metadata:
+        raise ValueError('selected cache pilot assignment requires explicit research proposal')
     provenance = handoff.get("provenance", {})
     joint = provenance.get("tessera_joint_anchors", {})
     inputs = joint.get("inputs")
@@ -50,7 +77,8 @@ def main(argv=None) -> int:
     data = load_measured_anchor_input(inputs, verify_payloads=False,
                                       require_existing_renders=True)
     manifest = selected_cached_units_manifest(
-        assignment, metadata, handoff, data, schema=CACHE_SCHEMA)
+        assignment, metadata, handoff, data, schema=CACHE_SCHEMA,
+        research_proposal=research)
     directory = Path(provenance["wire_dir"]).resolve()
     out = Path(args.out)
     if out.is_symlink() or out.resolve().parent != directory:
@@ -63,6 +91,7 @@ def main(argv=None) -> int:
                       "manifest_sha256": hashlib.sha256(raw).hexdigest(),
                       "assignment_sha256": args.assignment_sha256,
                       "handoff_sha256": args.handoff_sha256,
+                      "research_proposal_sha256": args.research_proposal_sha256,
                       "units": len(manifest["units"]),
                       "export_qualified": False, "serving_qualified": False}, sort_keys=True))
     return 0
