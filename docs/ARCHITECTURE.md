@@ -56,8 +56,14 @@ count is not a checkpoint. PrismaBuild `qualification` progress counts only
 durably written units. The previous `--resume` refusal changes for bounded
 preparation; legacy unwindowed preparation retains its prior path. No wire,
 numerical render comparison, provenance origin, format or serving gate changes.
-The measured before/after rate and both-box resource evidence remain to be
-attached to #590 before any full-size campaign rerun.
+The journal stores one streaming SHA-256 and count over every sorted cell's
+anchor, wire receipt, resolved donor paths and origin; it recomputes the same
+digest on resume instead of copying the entire 197,990-cell record mapping
+into a second manifest. The original checkpoint and cost/census inputs remain
+independently SHA-bound, and any changed cell field still refuses reuse.
+The bounded, phase-matched 18-cell before/after rate and both-box resource
+evidence are in `docs/measurements/glm-joint-prep-bounded-ab-2026-09-13.md`;
+full-campaign throughput and work-per-joule remain unmeasured.
 
 Re-stamped (2026-09-13, `fix/joint-prepare-source-auth-20260913`) for
 **complete-capture source authentication at first streamed use in joint
