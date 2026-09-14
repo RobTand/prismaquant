@@ -1,7 +1,18 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-13 · `claude/scoped-prefill-sweep`. Stamps
+As of: 2026-09-13 · `fix/research-exact-member-endpoints-20260913`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-13, `fix/research-exact-member-endpoints-20260913`) for
+the research-only Tessera exact-member endpoint contract (#583). A selected
+atomic group is still checked member-for-member against the full calibration
+census before `--research-exact-member` narrows the encoded unit. This path
+requires the existing calibration census/cache, a research menu and a stated
+rate band; it creates no statistical sample or stack estimate. The checkpoint
+identity and cost provenance name the exact member, and the campaign merger
+and allocator refuse its scalar cost table as a complete group or allocator
+input. The frozen Tessera producer and calibration/H contract are unchanged.
+Gate: `tests/test_tessera_research_exact_member.py`.
 
 Re-stamped (2026-09-13, `claude/scoped-prefill-sweep`) because **the prefill
 frontier sweep can now run on a table whose fixed charge no gate admits, under
