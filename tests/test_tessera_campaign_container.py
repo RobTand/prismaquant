@@ -1,7 +1,9 @@
 """The fanout must execute the sealed source in its declared Docker runtime."""
 import importlib
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -48,6 +50,50 @@ def test_container_uses_worker_snapshot_and_host_user_without_shell():
     assert "type=bind,src=/producer,dst=/producer,readonly" in argv
     assert argv[-3:] == ["sha256:resolved", "python3", "a path;$(touch bad)"]
     assert not any(arg.startswith("--cpuset") or arg == "--cgroup-parent" for arg in argv)
+
+
+def test_host_adapter_needs_no_prismaquant_dependencies_and_forwards_progress(tmp_path):
+    """The host launcher must reach Docker before importing the pinned image.
+
+    Sparklina's minimal action interpreter deliberately has no
+    ``compressed_tensors``.  Before #601 importing this module initialized
+    ``prismaquant`` first and failed there, even though that dependency belongs
+    to the qualified container.  ``-S`` also makes this a minimal interpreter
+    check rather than accidentally satisfying the dependency from site-packages.
+    """
+
+    root = Path(__file__).resolve().parents[1]
+    script = f"""
+import json
+import os
+import sys
+sys.path.insert(0, {str(root)!r})
+from tools import tessera_campaign_container as runner
+spec = {json.dumps(spec())!r}
+environ = {{
+    "PRISMABUILD_ACTION_PROGRESS_PATH": "/mnt/shared/queue/k.progress",
+    "PRISMABUILD_ACTION_PROGRESS_TOKEN": "minted-token",
+}}
+argv = runner.docker_command(json.loads(spec), ["python3"], cwd="/snapshot",
+                            uid=1, gid=1, image_id="sha256:resolved",
+                            environ=environ)
+assert "PRISMABUILD_ACTION_PROGRESS_PATH=/mnt/shared/queue/k.progress" in argv
+assert "PRISMABUILD_ACTION_PROGRESS_TOKEN=minted-token" in argv
+"""
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    completed = subprocess.run([sys.executable, "-S", "-c", script],
+                               cwd=tmp_path, env=environment,
+                               capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_host_progress_names_match_the_container_reporter():
+    """Forwarded names and the in-container writer remain one PB contract."""
+
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    assert runner.PATH_ENV == "PRISMABUILD_ACTION_PROGRESS_PATH"
+    assert runner.TOKEN_ENV == "PRISMABUILD_ACTION_PROGRESS_TOKEN"
 
 
 @pytest.mark.parametrize("target", ["/", "/workspace", "/workspace/tools", "/mnt/../workspace"])
