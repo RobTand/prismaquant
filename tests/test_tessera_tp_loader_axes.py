@@ -121,6 +121,72 @@ def _written(tmp_path, payload, name="runtime_contract.json"):
 
 
 # ---------------------------------------------------------------------------
+# A ceiling above 1 is a served run's claim (contract v29, Tessera #517)
+# ---------------------------------------------------------------------------
+
+def _receipt(world_size=2, executed=(FP8,), receipt_id="tp2_run"):
+    return {"id": receipt_id, "world_size": world_size,
+            "executed_units": list(executed)}
+
+
+def _receipted_payload(unit_world, *, receipt=None, cite="tp2_run"):
+    unit = _unit(FP8, _BOTH_SHARDED, max_world_size=unit_world)
+    if cite is not None:
+        unit["world_size_receipt"] = cite
+    payload = _axes_payload([unit])
+    payload["tensor_parallel"]["world_size_receipts"] = (
+        [] if receipt is None else [receipt])
+    return payload
+
+
+def test_a_ceiling_the_receipt_covers_is_read(tmp_path):
+    path, sha = _written(tmp_path, _receipted_payload(2, receipt=_receipt()))
+    assert trc.published_tensor_parallel_limits(path, sha) == {FP8: 2}
+
+
+def test_a_ceiling_of_one_needs_no_receipt(tmp_path):
+    """Every contract before v29 published world size 1 with no receipt."""
+    path, sha = _written(tmp_path, _receipted_payload(1, cite=None))
+    assert trc.published_tensor_parallel_limits(path, sha) == {FP8: 1}
+
+
+@pytest.mark.parametrize("payload,match", [
+    pytest.param(_receipted_payload(2, receipt=_receipt(), cite=None),
+                 "names no world_size_receipt", id="uncited"),
+    pytest.param(_receipted_payload(2, receipt=None),
+                 "does not publish", id="cited-but-unpublished"),
+    pytest.param(_receipted_payload(2, receipt=_receipt(executed=(E2M1,))),
+                 "did not execute", id="receipt-never-ran-the-unit"),
+    pytest.param(_receipted_payload(4, receipt=_receipt(world_size=2)),
+                 "served world size 2", id="receipt-world-below-ceiling"),
+])
+def test_a_ceiling_no_served_run_covers_is_refused(tmp_path, payload, match):
+    """The TP gate reads ``max_world_size``; this is what keeps it honest.
+
+    ``tessera_tp_world_attested`` admits ``tp <= max_world_size``, so a
+    ceiling the table raised without a run behind it -- or above the world
+    the run served -- would admit a degree nobody served.  Each refusal is
+    the reader's, before any menu is built.
+    """
+    path, sha = _written(tmp_path, payload)
+    with pytest.raises(trc.TesseraContractError, match=match):
+        trc.published_tensor_parallel_limits(path, sha)
+
+
+def test_the_real_pinned_contract_cites_a_receipt_for_every_raised_ceiling():
+    """The installed v29 table passes the same refusal it is read through."""
+    path, sha, payload = _installed_contract()
+    limits = trc.published_tensor_parallel_limits(path, sha)
+    assert limits == {E2M1: 2, FP8: 2, BF16: 2}
+    receipts = {row["id"]: row for row in
+                payload["tensor_parallel"]["world_size_receipts"]}
+    for unit in payload["tensor_parallel"]["units"]:
+        receipt = receipts[unit["world_size_receipt"]]
+        assert receipt["world_size"] >= unit["max_world_size"]
+        assert unit["unit"] in receipt["executed_units"]
+
+
+# ---------------------------------------------------------------------------
 # The contract reader: a published vocabulary, or a refusal
 # ---------------------------------------------------------------------------
 
@@ -142,8 +208,10 @@ def test_the_real_pinned_contract_round_trips_every_declared_loader_axis():
     test.
     """
     path, sha, payload = _installed_contract()
+    # Contract v26 (Tessera #484) moved K2's ``row`` axis refused -> sharded;
+    # the refused-axis legality leg is still driven below on a synthetic table.
     assert trc.published_tensor_parallel_axes(path, sha) == {
-        E2M1: {"column": "sharded", "row": "refused"},
+        E2M1: {"column": "sharded", "row": "sharded"},
         FP8: {"column": "sharded", "row": "sharded"},
         BF16: {"column": "sharded", "row": "sharded"},
     }
@@ -224,7 +292,7 @@ def test_the_reviewed_answer_carries_the_axis_statuses():
         }
         assert set(entry["loader_axes"]) == {"row", "column"}
         assert set(entry["loader_axes"].values()) <= {"sharded", "refused"}
-    assert answer["families"][E2M1]["loader_axes"]["row"] == "refused"
+    assert answer["families"][E2M1]["loader_axes"]["row"] == "sharded"
     assert "state_{-1}" not in repr(answer), (
         "the publisher's reason is prose and no gate reads it"
     )
@@ -243,7 +311,7 @@ def test_the_projection_emits_what_the_reviewed_answer_declares():
     for family in (E2M1, FP8, BF16):
         assert (answer["families"][family]["loader_axes"]
                 == dict(sorted(contract.loader_axes[family].items())))
-    assert answer["families"][E2M1]["loader_axes"]["row"] == "refused"
+    assert answer["families"][E2M1]["loader_axes"]["row"] == "sharded"
 
 
 # ---------------------------------------------------------------------------

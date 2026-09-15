@@ -442,7 +442,7 @@ def test_the_dev_pin_attests_exactly_the_rungs_the_contract_publishes(dev_pin):
             flag for cell in cells for flag in cell.requires_serve_flags
         }))
         assert rung.admission.source.startswith("tessera_dev_pin:runtime_contract:")
-        assert rung.admission.max_world_size == 1
+        assert rung.admission.max_world_size == 2
 
     # ...and the derivation is not vacuous: the contract must actually attest
     # something, or an empty menu would pass every assertion above.
@@ -906,7 +906,11 @@ def test_reading_the_contract_needs_no_serving_runtime_and_no_gpu():
         "assert 'vllm' not in sys.modules, sorted(\n"
         "    m for m in sys.modules if m.startswith('vllm'))\n"
         "serving = sorted(m for m in sys.modules if m.startswith('tessera.serving'))\n"
-        "assert serving == ['tessera.serving', 'tessera.serving.contract'], serving\n"
+        # Contract v25 added ``activation_attestation``: ``contract`` validates
+        # the published quantiser table through it.  It is portable (stdlib and
+        # ``tessera.alphabet``); the bare-interpreter half below measures that.
+        "assert serving == ['tessera.serving', 'tessera.serving.activation_attestation',"
+        " 'tessera.serving.contract'], serving\n"
         "print('OK')\n"
     )
     portable = subprocess.run(
@@ -932,28 +936,63 @@ def test_reading_the_contract_needs_no_serving_runtime_and_no_gpu():
 def test_tp_above_the_attested_world_size_is_refused_in_the_attested_menu(dev_pin):
     """Two legs, and the attestation one binds first.
 
-    The contract's ``tensor_parallel`` block is ``closed_world`` and lists both
-    families at ``max_world_size: 1``. A ``[2048, 1024]`` unit shards perfectly
-    at TP=2 on either axis, so geometry alone would admit it; the runtime says
-    it serves one rank, and that is the answer. The research menu is unmoved --
+    The contract's ``tensor_parallel`` block is ``closed_world`` and, since
+    v29 (Tessera #517), lists every family at ``max_world_size: 2`` on one
+    served TP2 receipt. A ``[2048, 1024]`` unit shards perfectly at TP=4 on
+    either axis, so geometry alone would admit it; the runtime says it has
+    served two ranks, and that is the answer. The research menu is unmoved --
     it prices unattested rungs on purpose.
     """
     geometry_ok, _ = tm.tessera_tp_legal(
         "TESSERA_E4M3_K1", 1024, SHAPE,
-        tp_degree=2, parallel_kind=tm.PARALLEL_COLUMN)
+        tp_degree=4, parallel_kind=tm.PARALLEL_COLUMN)
     assert geometry_ok, "the shape shards; only the attestation should refuse"
     legal, reason = tm.tessera_tp_legal(
         "TESSERA_E4M3_K1", 1024, SHAPE,
-        tp_degree=2, parallel_kind=tm.PARALLEL_COLUMN,
+        tp_degree=4, parallel_kind=tm.PARALLEL_COLUMN,
         require_attested_world=True)
     assert not legal
-    assert "unattested" in reason and "world size 1" in reason
+    assert "tp4_unattested" in reason and "world size 2" in reason
+    context = _dense_context()
     assert tm.expand_tessera_menu(
-        SHAPE, mode=tm.MENU_ATTESTED, tp_degree=2,
-        parallel_kind=tm.PARALLEL_COLUMN) == []
+        SHAPE, mode=tm.MENU_ATTESTED, tp_degree=4,
+        parallel_kind=tm.PARALLEL_COLUMN, serving_context=context) == []
     assert tm.expand_tessera_menu(
-        SHAPE, mode=tm.MENU_RESEARCH, tp_degree=2,
+        SHAPE, mode=tm.MENU_RESEARCH, tp_degree=4,
         parallel_kind=tm.PARALLEL_COLUMN)
+
+
+@pytest.mark.parametrize("parallel_kind", [tm.PARALLEL_COLUMN, tm.PARALLEL_ROW])
+def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(dev_pin, parallel_kind):
+    """The regression #632 names: a TP2 allocation dropped every Tessera rung.
+
+    Under the v24 pin every family sat at ``max_world_size: 1``, so the
+    attested menu at TP=2 was EMPTY -- ``tessera_tp_world_attested`` refused
+    each rung before the shape was looked at. v29 attests all three units at
+    world size 2 on a served receipt, so the TP=2 menu must be exactly the
+    TP=1 menu on a shape both axes shard, and each surviving rung must still
+    say the ceiling it was admitted under. Derived from the contract rather
+    than typed, so a family the pin stops attesting at 2 fails here by name.
+    """
+    contract = trc.load_tessera_contract()
+    context = _dense_context()
+    at_one = [r.format_name for r in tm.expand_tessera_menu(
+        SHAPE, mode=tm.MENU_ATTESTED, serving_context=context)]
+    at_two = tm.expand_tessera_menu(
+        SHAPE, mode=tm.MENU_ATTESTED, tp_degree=2,
+        parallel_kind=parallel_kind, serving_context=context)
+    assert at_one, "the pinned contract must attest something at TP=1"
+    assert [r.format_name for r in at_two] == at_one
+    families = {r.admission.payload_family for r in at_two}
+    assert {"TESSERA_E2M1_K2", "TESSERA_E4M3_K1",
+            "TESSERA_BF16_K1"} <= families, sorted(families)
+    for rung in at_two:
+        assert contract.max_world_size[rung.admission.payload_family] >= 2
+        legal, reason = tm.tessera_tp_legal(
+            rung.admission.payload_family, rung.body_rate_q256, SHAPE,
+            tp_degree=2, parallel_kind=parallel_kind,
+            require_attested_world=True)
+        assert legal, (rung.format_name, reason)
 
 
 def test_research_menu_is_dense_and_stamps_its_status():

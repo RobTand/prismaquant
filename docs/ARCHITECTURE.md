@@ -1,7 +1,51 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-14 · `claude/575-tessera-route-gate`. Stamps
+As of: 2026-09-15 · `claude/tessera-v29-pin`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-15, `claude/tessera-v29-pin`) for the Tessera pin at
+**runtime contract v29** (#632, consuming Tessera #517 at master `4c384e6049`,
+contract digest `db9ca4c0…2299b3`, 88 commits after `7dbbacbd`). The
+lane-eligibility schema stays at v10. The pin crosses five contract versions,
+and `TESSERA_DEV_PIN_ANSWER` moves by exactly seven entries, each an admission
+change (§9.4, §10):
+
+- **v29: every Tessera unit's `max_world_size` goes from 1 to 2**, and each
+  cites the served TP2 receipt `glm53_a4_stub_tp2_sm121`.
+  `tessera_tp_world_attested` is unchanged and still refuses `tp` above the
+  ceiling (now `tp4_unattested: … world size 2`). Tessera rungs now survive a
+  TP2 allocation in the attested menu, where before every one was refused
+  `tp2_unattested`. The reader newly refuses a ceiling above 1 that no
+  published receipt covers: the receipt must be cited and published, must
+  have executed the unit, and must have served at least that world
+  (`tessera_runtime_contract._require_world_size_receipt`). The receipt's
+  images, flags, traces and KL table are not read and not projected into the
+  answer.
+- **v26:** `TESSERA_E2M1_K2`'s `row` loader axis goes from `refused` to
+  `sharded`, so a column-parallel K2 unit is no longer unloadable at TP > 1.
+- **v25:** `activation_quantizers` publishes the `sm_121`
+  `e2m1_group16_ue4m3_static` table. `require_activation_quantizer_attested`
+  no longer refuses that contract for want of a table. It recomputes all
+  eleven probe groups with PrismaQuant's oracle and refuses any disagreement
+  (#567, #574). This replaces the 2026-09-13 state, "an installed v25 table
+  cannot promote fp4 pricing while this repository still pins contract v24".
+- **v28: two new routed-MoE cells**, `TESSERA_E2M1_K2` at q896 on `sm_121`
+  (decode and batch, resident, eager). They are `backed_with_serve_flag` and
+  `device_qualified`, carry evidence grade `route_only`, and publish
+  `smoke.status: not_recorded`. `cell_evidence_admits` refuses only
+  `repetitive`, so **accepting this pin admits routed-MoE E2M1_K2 R896 at
+  those scopes**. That is a principle-9 routed-MoE admission, flagged for
+  Rob's review in the PR (#198) rather than decided here.
+
+v27's per-format `structures` lists are grammar that no gate reads. The legal
+domain is a re-transcription, not a re-measurement: `grammar.py` and
+`export.py` are byte-identical at the new commit.
+
+Moving the pin also needs new PrismaBuild interpreters, because every lane
+checks the installed Tessera commit before pytest runs.
+`pq-cpu312-tessera-4c384e60` (dl380g10) and `pq-cu130-tessera-4c384e60` (sparky
+and sparklina) are git-commit installs from
+`/mnt/shared/tessera-pins/tessera-4c384e60.bundle`.
 
 Re-stamped (2026-09-14, `claude/575-tessera-route-gate`) for **the Tessera
 served route-trace gate** (§7.1, §9.4; part of #575). Principle 14's serve-side
@@ -10552,9 +10596,13 @@ menu's E4M3 leg rests on interpolation in the currency impeached above.
 
 **Tensor parallelism has three legs, and all three bind.** The *attestation*
 leg is the contract's `tensor_parallel` block, whose semantics are
-`closed_world`: it lists every family at `max_world_size: 1`, so **no Tessera
-rung is attested at TP > 1 at any shape**, and `tessera_tp_world_attested`
-refuses in the attested menu before geometry is consulted. The research menu
+`closed_world`: since contract v29 it lists every family at
+`max_world_size: 2`, each ceiling citing a served receipt the reader requires
+(`world_size_receipt` → `world_size_receipts[]`, which must have executed the
+unit at a world at least that large), so **Tessera rungs are attested at TP 2
+and at no larger degree**, and `tessera_tp_world_attested` refuses `tp > 2` in
+the attested menu before geometry is consulted. Through contract v24 every
+family sat at 1 and a TP2 allocation's attested menu was empty. The research menu
 passes that leg by construction (it prices unattested rungs deliberately and
 stamps every one). The *loader-axis* leg reads the second fact the same unit
 rows publish — `loader_axes`, `sharded` or `refused` per axis, validated by
@@ -10562,8 +10610,10 @@ Tessera against the `ROUTE_TP_AXES` its routes gate on — and
 `tessera_menu.tessera_tp_axis_legal` asks it before the geometry leg, because
 a `refused` axis is refused on every rank: no world size and no shape makes it legal, so naming a
 granularity there would name the wrong obstacle. It does not depend on
-`require_attested_world`. Today it refuses `TESSERA_E2M1_K2` on `row`, which
-is the axis a **column**-parallel Linear cuts. The *geometry* leg is below,
+`require_attested_world`. Through contract v25 it refused `TESSERA_E2M1_K2`
+on `row`, the axis a **column**-parallel Linear cuts; since v26 every family
+publishes both axes `sharded`, so today the leg refuses nothing on the pinned
+table and stays live for a table that refuses an axis. The *geometry* leg is below,
 and a refusal names which leg answered:
 `tp{n}_unattested:…`, `tp_axis_refused:<family>:<unit>:<axis>`, or
 `tp{n}_{axis}_granularity: …`. `python -m prismaquant.tessera_tp_audit` asks
@@ -12360,7 +12410,8 @@ so the pin now names an exact commit and the digest of the contract that commit
 packages, and the dense rungs are ADMITTED under it. What is refused instead is
 any *other* Tessera: `require_pinned_tessera_runtime` hashes
 `tessera/serving/runtime_contract.json` as installed and refuses when it is not
-`81014e9b…579554` (Tessera master `7dbbacbd…`, contract v24; `bafe8a4e…`
+`db9ca4c0…2299b3` (Tessera master `4c384e60…`, contract v29; `81014e9b…`
+carried v24 at `7dbbacbd…`, `bafe8a4e…`
 carried v23 at `1c827abc…`, `a688f8de…`
 carried v22 at `387eda36…`, the release `e78959ed…` carried v20 at
 `374ce4a9…625dd4`, and the first pin, 2026-09-04, was `ba3a3c69…e055e6` at
@@ -13409,7 +13460,7 @@ schema is not `tessera.serving.route_census/2`. Under
 `tessera.lane-eligibility.v4` and the producer's `tools/tessera_route_census.py`
 emitted `route_census/1`, so no scoped receipt could be filled or replayed and
 `route.census` on a scoped card stayed `UNFILLED` by the pin. At the pin this
-document is stamped for (`7dbbacbd`, contract v24) the packaged table is
+document is stamped for (`4c384e60`, contract v29) the packaged table is
 `tessera.lane-eligibility.v10` -- the schema the constant names -- and the
 producer at that commit emits `route_census/2`, so both refusals lift and the
 comparison below is the live gate on a scoped card. What has NOT changed: no
@@ -15513,7 +15564,7 @@ flowchart LR
 
   R3 -.->|"no qualified deployment"| H2
   R4 -.->|"no qualified deployment"| H2
-  R5 -.->|"contract v24 backs Tessera-16 WnA16 only here (E2M1/E4M3 executes null); emulation_only; gfx1201 has BF16 cells at 1792, gfx1151 has none"| H2
+  R5 -.->|"contract v29 backs Tessera-16 WnA16 only here (E2M1/E4M3 executes null); emulation_only; gfx1201 has BF16 cells at 1792, gfx1151 has none"| H2
   R5 -.->|"same menu rule; emulation_only; gfx1151 still has no cell"| H3
 
   classDef proven stroke:#2d7a2d,stroke-width:2px
@@ -15765,10 +15816,15 @@ Tessera goes on the menu is Rob's under principle 9
 which Tessera's changelog expected a consumer to admit on; this reader read
 it, named it in the refusal and did not decide on it, because an attribution
 that the reference shares the symptom is not a record of the route generating
-correctly. v21 retired that control from the cells. The published
-`tensor_parallel` units declare `max_world_size: 1`: a Tessera unit is one blob
-per vLLM module against a shared rate schedule, so a sharded form needs
-per-rank wires rather than a byte range. `expert_parallel.units` is empty.
+correctly. v21 retired that control from the cells. Contract v28 adds two more
+`routed_moe` cells, `TESSERA_E2M1_K2` at q896 on `sm_121` (decode and batch,
+resident, eager, grade `route_only`, `smoke.status: not_recorded`); the
+status-only predicate does not refuse `not_recorded`, so the v29 pin admits
+them, and that admission is Rob's to confirm under #198. The published
+`tensor_parallel` units declare `max_world_size: 2` since contract v29 (1
+before), each on the served TP2 receipt `glm53_a4_stub_tp2_sm121`, which the
+reader requires to exist, to have executed the unit and to have served at
+least that world. `expert_parallel.units` is empty.
 Both residency modes are receipted and both must be exercised.
 
 **The platform axis: which device, answered by the contract.** Lane schema v10
@@ -15820,7 +15876,7 @@ which is this case) — while the refusal that actually stops bytes is
 takes no override on this lane. These two profiles declare no export lane at
 all, so the question never reaches it. The lane-level
 `ServingLaneSpec.route_status_for` reaches the same answer by a shorter road:
-it resolves the pinned contract itself (#537), and at contract v24 the two AMD
+it resolves the pinned contract itself (#537), and at contract v29 the two AMD
 platforms part company there. `gfx1151` still has no cell, so every family on
 it answers `unattested` with source `serving_runtime_contract:<v>:no_cell`.
 `gfx1201` carries two `TESSERA_BF16_K1` dense cells at rung `q256 = 1792`
@@ -15833,14 +15889,15 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `7dbbacbd0900f6b6f468690e2525cc018564382d` (master's tip at review
-time, after Tessera #474 and its #475; version `0.1.0`, contract v24, lane
-schema v10 — unchanged: v24 is additive for a v10 reader. v23 was pinned at
+Tessera `4c384e6049dca3eeaf503bb2c9cd1cd2778978d1` (master's tip at review
+time, the merge of Tessera #517; version `0.1.0`, contract v29, lane
+schema v10 — unchanged: v25-v29 are additive for a v10 reader. v24 was pinned
+at `7dbbacbd…`, v23 at
 `1c827abc…`, v22 at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
 in Tessera #313 and the release `e78959ed…` carried v20; first pinned
 2026-09-04 at `5acc2a6f…`, contract v17)
 and the SHA-256 of the `runtime_contract.json` it packages
-(`81014e9b…579554`);
+(`db9ca4c0…2299b3`);
 `require_pinned_tessera_runtime` refuses unless the pin equals the reader's
 three constants AND the installed contract hashes to that digest, and
 `tessera_lane_attested` ANDs that in (§5.7), as does the container arm's
@@ -16036,7 +16093,7 @@ served quality gates could be completed, and the prototype sources and dispatch 
 deleted from the canonical Gridbook tree. PrismaQuant still contains no copy, and the
 Gridbook lane itself retired on 2026-09-02. None of that is a claim about Tessera on AMD.
 
-What is true now: Tessera contract v24 declares `gfx1151` and `gfx1201`, publishes
+What is true now: Tessera contract v29 declares `gfx1151` and `gfx1201`, publishes
 `TESSERA_BF16_K1` as executing `bf16_unquantized` on both, and publishes `null` for
 `TESSERA_E4M3_K1` and `TESSERA_E2M1_K2` — the pinned runtime has no native route for those
 bytes on those devices. Rob's ruling follows the contract: the RDNA3.5 lane is **Tessera-16

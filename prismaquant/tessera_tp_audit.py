@@ -20,9 +20,10 @@ What it audits, and what it does not:
 * **Loader axis** -- audited. The contract publishes, per unit and per axis,
   whether this build's loader accepts a shard (``tensor_parallel.units[]
   .loader_axes``, which Tessera validates equal to the ``ROUTE_TP_AXES`` its
-  routes gate on). ``TESSERA_E2M1_K2`` refuses the ``row`` axis, which is the
-  axis a **column**-parallel Linear cuts, so every column-parallel K2 unit is
-  refused at ``--tp 2`` and above.
+  routes gate on). Through contract v25 ``TESSERA_E2M1_K2`` refused the
+  ``row`` axis, which is the axis a **column**-parallel Linear cuts, so every
+  column-parallel K2 unit was refused at ``--tp 2`` and above; since v26 every
+  family publishes both axes ``sharded`` and the pinned table refuses none.
 * **Packed-expert cut kind** -- audited. Expert parallelism cuts the stack and
   leaves each expert's 2-D unit whole, so a packed expert resolves to a
   ``none`` cut whatever the profile's name rules say. The receipt records the

@@ -24,8 +24,10 @@ FIXTURE = str(Path(__file__).parent / "fixtures"
 PROFILE = "tessera_research_sm121"
 
 #: The one column-parallel K2 Linear in the fixture: a column-parallel cut
-#: splits the output features, which are this unit's rows, and the contract
-#: refuses the K2 loader a row shard on every rank.
+#: splits the output features, which are this unit's rows.  Through contract
+#: v25 the contract refused the K2 loader a row shard on every rank; v26
+#: (Tessera #484) shards it, so the refusal leg is driven on a copy of the
+#: installed table with that one status set back to ``refused``.
 REFUSED_UNIT = "model.layers.0.self_attn.q_proj"
 
 
@@ -36,6 +38,27 @@ def contract_file(tmp_path):
         copy = tmp_path / "runtime_contract.json"
         copy.write_bytes(Path(path).read_bytes())
         return str(copy)
+
+
+@pytest.fixture
+def k2_row_refused_contract_file(tmp_path):
+    """The installed contract with ``TESSERA_E2M1_K2``'s row axis refused.
+
+    The audit reads ``--contract`` by its own digest, so this is the real
+    table with exactly one published status moved -- the shape contracts
+    before v26 published.
+    """
+    with as_file(trc.contract_path()) as path:
+        payload = json.loads(Path(path).read_bytes())
+    units = payload["tensor_parallel"]["units"]
+    k2 = next(unit for unit in units if unit["unit"] == "TESSERA_E2M1_K2")
+    assert k2["loader_axes"]["row"]["status"] == "sharded", (
+        "the pinned table refuses the K2 row axis again; drive the refusal on it "
+        "directly and retire this fixture")
+    k2["loader_axes"]["row"] = {"status": "refused", "reason": "test fixture"}
+    copy = tmp_path / "runtime_contract_k2_row_refused.json"
+    copy.write_text(json.dumps(payload), encoding="utf-8")
+    return str(copy)
 
 
 def _run(tmp_path, contract_file, *, tp, out="receipt.json"):
@@ -56,9 +79,19 @@ def test_a_whole_unit_world_has_nothing_to_refuse(tmp_path, contract_file):
     assert {unit["cut_axis"] for unit in receipt["units"]} == {None}
 
 
-def test_the_column_parallel_k2_linear_is_refused_at_tp2(tmp_path, contract_file):
-    """One refusal, named, and a non-zero exit."""
+def test_the_pinned_contract_refuses_no_axis_at_tp2(tmp_path, contract_file):
+    """Contract v26 shards the K2 row axis, so the real table passes at tp=2."""
     code, receipt = _run(tmp_path, contract_file, tp=2)
+    assert code == audit.EXIT_OK
+    assert receipt["verdict"] == "pass"
+    by_unit = {unit["unit"]: unit for unit in receipt["units"]}
+    assert by_unit[REFUSED_UNIT]["axis_status"] == "sharded"
+
+
+def test_the_column_parallel_k2_linear_is_refused_at_tp2(tmp_path,
+                                                         k2_row_refused_contract_file):
+    """One refusal, named, and a non-zero exit, on a table that refuses the axis."""
+    code, receipt = _run(tmp_path, k2_row_refused_contract_file, tp=2)
     assert code == audit.EXIT_REFUSED
     assert receipt["verdict"] == "refused"
 
@@ -132,7 +165,7 @@ def test_the_receipt_says_which_legs_it_did_not_audit(tmp_path, contract_file):
     assert receipt["contract"]["sha256"] == hashlib.sha256(
         Path(contract_file).read_bytes()).hexdigest()
     assert receipt["summary"]["non_tessera_units"] == 1, "lm_head is BF16"
-    assert receipt["units"][0]["max_world_size"] == 1, (
+    assert receipt["units"][0]["max_world_size"] == 2, (
         "what the contract does attest, recorded beside what it refuses"
     )
 
@@ -143,11 +176,12 @@ def test_the_audit_never_writes_the_assignment(tmp_path, contract_file):
     assert hashlib.sha256(Path(FIXTURE).read_bytes()).hexdigest() == before
 
 
-def test_the_receipt_can_be_written_to_stdout(tmp_path, contract_file, capsys):
+def test_the_receipt_can_be_written_to_stdout(tmp_path, k2_row_refused_contract_file,
+                                             capsys):
     """``--out -`` so a receipt survives a run on a machine you do not keep."""
     code = audit.main([
         "--layer-config", FIXTURE, "--target-profile", PROFILE,
-        "--tp", "2", "--contract", contract_file, "--out", "-",
+        "--tp", "2", "--contract", k2_row_refused_contract_file, "--out", "-",
     ])
     assert code == audit.EXIT_REFUSED
     captured = capsys.readouterr()

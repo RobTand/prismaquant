@@ -39,7 +39,7 @@ def test_production_pin_preserves_attested_conditions(monkeypatch, residency):
     payload = json.loads(contract.contract_path().read_text())
     ceiling = next(row["max_world_size"] for row in payload["tensor_parallel"]["units"]
                    if row["unit"] == reference.family)
-    assert admission.max_world_size == ceiling == 1
+    assert admission.max_world_size == ceiling == 2
     monkeypatch.setenv(contract.TESSERA_DEV_PIN_ENV, "1")
     dev = menu.route_admission(name, serving_context=context)
     assert (admission.route_status, admission.requires_serve_flags, admission.max_world_size) == (

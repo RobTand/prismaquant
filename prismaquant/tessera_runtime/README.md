@@ -30,7 +30,7 @@ question the digest raises. The two are bound at review time by one pair of
 commands, so they cannot become two independent assertions about one runtime:
 
 ```bash
-TS=$(mktemp -d) && git -C "$TS" init -q
+TS=/home/rob/tmp/tessera-pin-probe-$$ && mkdir -p "$TS" && git -C "$TS" init -q
 git -C "$TS" fetch -q https://github.com/RobTand/tessera master
 SHA=$(git -C "$TS" rev-parse FETCH_HEAD)
 git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha256sum
@@ -40,40 +40,42 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `7dbbacbd0900f6b6f468690e2525cc018564382d`,
-master's tip on 2026-09-13 after Tessera #474 (merged at `27be1a602`) and its
-#475. Install that revision and point `TESSERA_REPO` at its complete checkout;
-the producer scripts live in `experiments/` and are not wheel entry points.
+The current pin is Tessera `4c384e6049dca3eeaf503bb2c9cd1cd2778978d1`,
+master's tip on 2026-09-15, the merge of Tessera #517. Install that revision
+and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
+`experiments/` and are not wheel entry points.
 
-It moves the contract to **v24**, and the lane-eligibility schema stays at
-**v10**: v24 is additive for a v10 reader. Two things move. `gfx1201` (RDNA4,
-RX 9070 XT) gains its first two cells — `TESSERA_BF16_K1` dense, decode and
-batch, at rung `q256 = 1792`, `route_status: backed_with_serve_flag`,
-`qualification: device_qualified`, executing `torch.mm` through the
-`torch_window` decoder on a ROCm vLLM image — and that platform's
-`serve_image` stops being `null`, which v10 requires once one of its own cells
-attests an image.
+It moves the contract from **v24** to **v29**, and the lane-eligibility schema
+stays at **v10**: every bump in between is additive for a v10 reader. Four
+admission facts move, and `TESSERA_DEV_PIN_ANSWER`'s diff is their review:
 
-The ten `sm_121` cells are byte-identical and `versions.default_serve_image`
-is unchanged, so everything the previous pin admitted this one admits. What is
-NEW is a route: both cells publish `evidence.smoke.status: recorded`, and
-`cell_evidence_admits` is status-only, so accepting this pin flips
-`route_status_for("TESSERA_BF16_K1_R1792", platform="gfx1201")` from
-`unattested` / `:no_cell` to `backed_with_serve_flag`. The Tessera-16 W16A16
-lane is attested on one AMD device. `gfx1151` still ships no cell and still
-answers `:no_cell` for every family — backing is permission to price, a cell
-is permission to ship.
+- **v29:** every `tensor_parallel` unit's `max_world_size` goes from 1 to 2,
+  and each cites the served TP2 receipt `glm53_a4_stub_tp2_sm121`. Tessera
+  rungs now survive a TP2 allocation in the attested menu, and any larger
+  degree is still refused. The reader refuses a ceiling above 1 unless its
+  cited receipt is published, executed that unit, and served at least that
+  world.
+- **v26:** `TESSERA_E2M1_K2`'s `row` loader axis goes from `refused` to
+  `sharded`.
+- **v25:** the `sm_121` `e2m1_group16_ue4m3_static` activation-quantizer
+  table is published. `require_activation_quantizer_attested` recomputes it
+  instead of refusing for want of a table.
+- **v28:** two routed-MoE `TESSERA_E2M1_K2` cells at q896 on `sm_121`
+  (decode and batch, resident, eager). Their grade is `route_only`, and
+  `smoke.status` is `not_recorded`. `cell_evidence_admits` refuses only
+  `repetitive`, so accepting this pin admits them. That routed-MoE admission
+  is Rob's call under principle 9 (#198).
 
-Scope the receipts carry, and this pin inherits: the grade is
-`kl_lower_bound`, a top-1024 teacher-student intersection bound, not
-`kl_full_vocab` — no instrument in either repository produces a full-vocab KL.
-The receipt's own scope line says gfx1201 under WSL2 proves the HIP code path;
-it says nothing about gfx1151 numerics and nothing about performance.
+The twelve v24 cells are byte-identical, so everything the previous pin
+admitted, this one still admits. The world-size receipt's own scope is one
+degenerate four-layer GLM-5.3 stub served across sparky and sparklina,
+eager only. It attests that the route executes at world size 2. It is not a
+full-model TP2 qualification.
 
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p 7dbbacbd0900f6b6f468690e2525cc018564382d:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 4c384e6049dca3eeaf503bb2c9cd1cd2778978d1:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -168,22 +170,30 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-13:
+Verified against `RobTand/tessera` master on 2026-09-15:
 
 ```
-commit           7dbbacbd0900f6b6f468690e2525cc018564382d
-contract_sha256  81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554
+commit           4c384e6049dca3eeaf503bb2c9cd1cd2778978d1
+contract_sha256  db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3
 versions.tessera 0.1.0
-contract_version 24
+contract_version 29
 lane schema      tessera.lane-eligibility.v10
 ```
 
-Five values, two files, one commit. Resolve the new commit, digest and version
+Five values, two files, one commit — plus the same commit and digest in the
+three places that copy them on purpose, each of which refuses on its own if it
+is left behind: the development pin (`TESSERA_DEV_PIN_COMMIT` /
+`TESSERA_DEV_PIN_CONTRACT_SHA256` in `prismaquant/tessera_runtime_contract.py`,
+which `tools/resolve_tessera_dev_pin.py` reads as a literal, so it cannot be
+derived), and `FROZEN_PINS` in `prismaquant/tessera_legal_domain.py`, whose
+`pin_drift` is what forces the legal-domain re-audit on a pin move. The third
+script below edits all of them; when the contract bytes do not move, that
+script and this block are the whole code change. Resolve the new commit, digest and version
 first — from one `git` object fetched from the canonical remote, so they name
 the same tree and no local checkout is trusted:
 
 ```bash
-TS=$(mktemp -d) && git -C "$TS" init -q
+TS=/home/rob/tmp/tessera-pin-probe-$$ && mkdir -p "$TS" && git -C "$TS" init -q
 git -C "$TS" fetch -q https://github.com/RobTand/tessera master
 SHA=$(git -C "$TS" rev-parse FETCH_HEAD)
 BLOB="$SHA:src/tessera/serving/runtime_contract.json"
@@ -223,15 +233,58 @@ p.write_text(s)
 EDIT_CONSTS
 ```
 
+...and the development pin plus the legal domain's frozen copy, which name the
+same object:
+
+```bash
+python3 - "$SHA" "$DIGEST" "$VER" <<'EDIT_COPIES'
+import re, sys, pathlib
+sha, digest, ver = sys.argv[1:4]
+p = pathlib.Path("prismaquant/tessera_runtime_contract.py")
+s = p.read_text()
+s, a = re.subn(r'TESSERA_DEV_PIN_COMMIT = "[0-9a-f]{40}"',
+               'TESSERA_DEV_PIN_COMMIT = "%s"' % sha, s, count=1)
+s, b = re.subn(r'TESSERA_DEV_PIN_CONTRACT_SHA256 = \(\n    "[0-9a-f]{64}"\n\)',
+               'TESSERA_DEV_PIN_CONTRACT_SHA256 = (\n    "%s"\n)' % digest, s, count=1)
+assert (a, b) == (1, 1)
+p.write_text(s)
+p = pathlib.Path("prismaquant/tessera_legal_domain.py")
+s = p.read_text()
+head, sep, tail = s.partition("FROZEN_PINS = DomainPins(")
+body, close, rest = tail.partition("\n)\n")
+body = re.sub(r'"[0-9a-f]{40}"', '"%s"' % sha, body)
+body = re.sub(r'"[0-9a-f]{64}"', '"%s"' % digest, body)
+body = re.sub(r'serving_runtime_pinned_version="[^"]*"',
+              'serving_runtime_pinned_version="%s"' % ver, body)
+p.write_text(head + sep + body + close + rest)
+EDIT_COPIES
+```
+
+A contract whose bytes moved also moves `TESSERA_DEV_PIN_ANSWER`: regenerate
+it with `contract_answer` on the new bytes (see below) and review the diff.
+Hash `src/tessera/grammar.py` and `src/tessera/export.py` at the new commit
+before touching `tessera_legal_domain.py`'s prose; new bytes there are a
+re-measurement, not a re-transcription.
+
+Every PrismaBuild lane checks the INSTALLED Tessera against
+`TESSERA_DEV_PIN_COMMIT` before pytest runs (`tools/resolve_tessera_dev_pin.py`
+inside `pbtest`), so a pin move also needs one new sibling interpreter per
+lane, named `pq-<lane>-tessera-<short commit>`, installed from a git commit and
+never re-pinned in place: bundle the commit into `/mnt/shared/tessera-pins/`,
+then on each box clone the bundle and `pip install --no-deps
+--no-build-isolation git+file://<clone>@<commit>`. For the `-tessera-4c384e60`
+interpreters that was one bundle plus three builds (dl380g10, sparky,
+sparklina), 72-211 s each through PrismaBuild.
+
 Use a fleet interpreter provisioned at the reviewed pin, then route CPU
 verification through PrismaBuild:
 
 ```bash
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd /home/rob/prismaquant --tag x86 --cpus 4 --demand mem_gb=8 \
+  --cwd /home/rob/prismaquant --tag dl380g10 --cpus 4 --demand mem_gb=8 \
   --priority -10 --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
   --env OPENBLAS_NUM_THREADS=1 -- \
-  /home/rob/venvs/pq-cpu312/bin/python -m pytest -q -n 4 \
+  /home/rob/venvs/pq-cpu312-tessera-4c384e60/bin/python -m pytest -q -n 4 \
   tests/test_tessera_serving_pin.py tests/test_tessera_lane_v6.py \
   tests/test_tessera_lane_admission.py tests/test_tessera_export_lane.py
 ```
