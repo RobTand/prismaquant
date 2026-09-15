@@ -47,7 +47,7 @@ from prismaquant.tessera_serving_runtime_pin import (
 #: The smallest roster this pin is allowed to carry. A floor rather than an
 #: equality so that a contract which ADDS a cell fails the identity assertion
 #: below -- which names what moved -- instead of failing a count that does not.
-MINIMUM_CELLS = 12
+MINIMUM_CELLS = 14
 
 EVIDENCE_KEYS = {"artifact", "grade", "kl", "smoke"}
 

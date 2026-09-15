@@ -259,6 +259,38 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: ``sm_121`` cells are byte-identical -- the answer's drift is exactly the
 #: two NEW lines and no reviewed line changed.
 #:
+#: What moved v24 -> v29 (Tessera master 4c384e6049, the merge of its #517,
+#: 88 commits after 7dbbacbd), and nothing else -- no rate range, attested
+#: rung, quant method, fused module, native extension or lane schema, and the
+#: twelve v24 cells are byte-identical in the answer:
+#:   1. ``activation_quantizers`` (v25, Tessera #484/#485) stops being empty:
+#:      the ``sm_121`` / ``e2m1_group16_ue4m3_static`` table, eleven probe
+#:      groups run on ``torch.ops._C.scaled_fp4_quant``.  This FLIPS
+#:      ``require_activation_quantizer_attested`` for that contract from
+#:      "publishes no quantiser" to recomputing every group with PrismaQuant's
+#:      own oracle -- the review of a rounding rule #567/#574 asked for;
+#:   2. ``TESSERA_E2M1_K2``'s ``row`` loader axis ``refused`` -> ``sharded``
+#:      (v26), so a column-parallel K2 unit stops being unloadable at TP > 1;
+#:   3. two NEW cells (v28): ``tessera_e2m1_k2_routed_moe_sm121_decode_resident``
+#:      and ``..._batch_resident`` -- ``TESSERA_E2M1_K2`` routed MoE at q896,
+#:      ``backed_with_serve_flag``, ``device_qualified``, executing
+#:      ``vllm.fused_moe.modular_kernel`` through ``torch_materialize_stock``,
+#:      eager only, evidence grade ``route_only`` with ``smoke.status:
+#:      not_recorded``;
+#:   4. every unit's ``max_world_size`` 1 -> 2 (v29), each citing the served
+#:      TP2 receipt ``glm53_a4_stub_tp2_sm121`` that
+#:      :func:`_require_world_size_receipt` now requires above 1.
+#: v27's per-format ``structures`` lists are grammar no gate here reads, so
+#: they are not in the answer.
+#:
+#: ITEM 3 IS AN ADMISSION, AND A HUMAN'S CALL.  ``cell_evidence_admits``
+#: refuses only ``repetitive``; ``not_recorded`` is not a refusal, so
+#: accepting this answer admits routed-MoE ``TESSERA_E2M1_K2_R896`` on
+#: ``sm_121`` at those two scopes on a ``route_only`` grade with no recorded
+#: smoke.  That is a routed-MoE promotion under principle 9 and it is flagged
+#: for review in the pull request rather than decided by this literal
+#: (prismaquant #198).
+#:
 #: THIS ONE IS NOT A RE-TRANSCRIPTION.  The two bumps before it moved grammar
 #: or prose and admitted what the previous pin admitted; this one admits a
 #: route that did not exist on this side.  ``cell_evidence_admits`` is
@@ -286,14 +318,14 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: PR #441, which this pin supersedes without changing any priced byte: the
 #: producer source identity changes and existing priced bytes keep their seal.
 #: No release tag names this development commit.
-TESSERA_DEV_PIN_COMMIT = "7dbbacbd0900f6b6f468690e2525cc018564382d"
+TESSERA_DEV_PIN_COMMIT = "4c384e6049dca3eeaf503bb2c9cd1cd2778978d1"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
+    "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -323,6 +355,13 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: nothing else: the ten ``sm_121`` rows below are byte-identical to the ones
 #: the v23 pin carried, in the same order, and no other key in this literal
 #: moved.  See :data:`TESSERA_DEV_PIN_COMMIT` for what accepting them admits.
+#:
+#: Against the v29 contract the review is seven entries: the
+#: ``activation_quantizers`` table, three ``max_world_size`` 1 -> 2, the K2
+#: ``row`` axis, and the two routed-MoE K2 rows appended to ``cells``.  The
+#: twelve rows above them did not move.  The literal is
+#: ``pprint.pformat(contract_answer(c), width=79, sort_dicts=False)`` with
+#: each dict in the key order the previous literal used.
 #:
 #: **The ``cells`` rows are POSITIONAL tuples, and this is the column order.**
 #: They stay positional -- a per-row dict would triple the diff a reviewer
@@ -356,12 +395,416 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: A column added on either tuple is a WIDENED projection, and the rule above
 #: applies to it: it re-stales this pin even when no published value moved.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
- # Empty at v24: the contract publishes no quantiser attestation, so every
- # activation residual PrismaQuant prices through its own oracle is REFUSED by
- # require_activation_quantizer_attested.  When Tessera publishes the table
- # this list moves, and that diff is the review of a rounding rule
- # (RobTand/prismaquant#567).
- 'activation_quantizers': [],
+ # Published at v25 and read since this pin (v29): the sm_121
+ # e2m1_group16_ue4m3_static quantiser table, eleven probe groups the kernel
+ # was run on (RobTand/tessera#484/#485). require_activation_quantizer_attested
+ # now compares PrismaQuant's own reference_qdq against these rows instead of
+ # refusing every fp4 activation residual for want of a table; this block's
+ # diff is the review of that rounding rule (RobTand/prismaquant#567/#574).
+ 'activation_quantizers': [['sm_121',
+                            'e2m1_group16_ue4m3_static',
+                            'torch.ops._C.scaled_fp4_quant',
+                            'group',
+                            16,
+                            'E2M1',
+                            'UE4M3',
+                            'static_per_module',
+                            [['midpoint_dyadic',
+                              'e2m1_midpoint_dyadic',
+                              1065353216,
+                              [16576,
+                               16000,
+                               16192,
+                               16288,
+                               16352,
+                               16416,
+                               16480,
+                               16544,
+                               48768,
+                               48960,
+                               49056,
+                               49120,
+                               49184,
+                               49248,
+                               49312,
+                               0],
+                              56,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['code_identity',
+                              'e2m1_code_identity',
+                              1065353216,
+                              [0,
+                               32768,
+                               16128,
+                               16256,
+                               16320,
+                               16384,
+                               16448,
+                               16512,
+                               16576,
+                               48896,
+                               49024,
+                               49088,
+                               49152,
+                               49216,
+                               49280,
+                               49344],
+                              56,
+                              [0,
+                               8,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               7,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               15]],
+                             ['midpoint_reciprocal',
+                              'e2m1_midpoint_reciprocal',
+                              1065353216,
+                              [16656,
+                               16064,
+                               16272,
+                               16368,
+                               16424,
+                               16496,
+                               16552,
+                               16624,
+                               48832,
+                               49040,
+                               49136,
+                               49192,
+                               49264,
+                               49320,
+                               49392,
+                               0],
+                              60,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_global_scale',
+                              'e2m1_midpoint_global_scale',
+                              1069547520,
+                              [16656,
+                               16064,
+                               16272,
+                               16368,
+                               16424,
+                               16496,
+                               16552,
+                               16624,
+                               48832,
+                               49040,
+                               49136,
+                               49192,
+                               49264,
+                               49320,
+                               49392,
+                               0],
+                              65,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_seven_fourths',
+                              'e2m1_midpoint_reciprocal',
+                              1065353216,
+                              [16680,
+                               16096,
+                               16296,
+                               16396,
+                               16452,
+                               16524,
+                               16580,
+                               16652,
+                               48864,
+                               49064,
+                               49164,
+                               49220,
+                               49292,
+                               49348,
+                               49420,
+                               0],
+                              62,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_reciprocal_ulp_below',
+                              'e2m1_midpoint_ulp_below',
+                              1065353216,
+                              [16656,
+                               16063,
+                               16271,
+                               16367,
+                               16423,
+                               16495,
+                               16551,
+                               16623,
+                               48831,
+                               49039,
+                               49135,
+                               49191,
+                               49263,
+                               49319,
+                               49391,
+                               0],
+                              60,
+                              [7,
+                               0,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               8,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               0]],
+                             ['midpoint_reciprocal_ulp_above',
+                              'e2m1_midpoint_ulp_above',
+                              1065353216,
+                              [16656,
+                               16065,
+                               16273,
+                               16369,
+                               16425,
+                               16497,
+                               16553,
+                               16625,
+                               48833,
+                               49041,
+                               49137,
+                               49193,
+                               49265,
+                               49321,
+                               49393,
+                               0],
+                              60,
+                              [7,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               7,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               15,
+                               0]],
+                             ['element_saturation',
+                              'e2m1_saturation',
+                              1065353216,
+                              [16584,
+                               49352,
+                               16580,
+                               49348,
+                               16576,
+                               49344,
+                               16574,
+                               49342,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              56,
+                              [7,
+                               15,
+                               7,
+                               15,
+                               7,
+                               15,
+                               7,
+                               15,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_underflow_tie',
+                              'block_scale_underflow_tie',
+                              1065353216,
+                              [15296,
+                               48064,
+                               15168,
+                               47936,
+                               15040,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              0,
+                              [0,
+                               8,
+                               0,
+                               8,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_underflow_above',
+                              'block_scale_underflow_above',
+                              1065353216,
+                              [15297,
+                               48065,
+                               15168,
+                               47936,
+                               15040,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              1,
+                              [5,
+                               13,
+                               3,
+                               11,
+                               2,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_overflow',
+                              'block_scale_overflow',
+                              1065353216,
+                              [17728,
+                               50496,
+                               17600,
+                               50368,
+                               17472,
+                               17344,
+                               16128,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              126,
+                              [7,
+                               15,
+                               5,
+                               13,
+                               3,
+                               2,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]]]]],
  'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
  'quant_method': 'tessera',
@@ -405,17 +848,17 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                               'grid_arities': [1]}}}],
  'families': {'TESSERA_BF16_K1': {'reader_rate_range_q256': [256, 4096],
                                   'attested_rungs_q256': [1792],
-                                  'max_world_size': 1,
+                                  'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}},
               'TESSERA_E2M1_K2': {'reader_rate_range_q256': [896, 896],
                                   'attested_rungs_q256': [896],
-                                  'max_world_size': 1,
+                                  'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
-                                                  'row': 'refused'}},
+                                                  'row': 'sharded'}},
               'TESSERA_E4M3_K1': {'reader_rate_range_q256': [256, 2048],
                                   'attested_rungs_q256': [1024],
-                                  'max_world_size': 1,
+                                  'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}}},
  'cells': [['tessera_bf16_k1_dense_gfx1201_batch',
@@ -608,6 +1051,54 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
              'execution_modes': ['compiled', 'eager']},
             '0.28.0',
+            '2.13.0+cu130',
+            ['route_only',
+             'not_recorded',
+             [],
+             'unattributed',
+             None,
+             None,
+             None]],
+           ['tessera_e2m1_k2_routed_moe_sm121_batch_resident',
+            'sm_121',
+            'TESSERA_E2M1_K2',
+            'routed_moe',
+            'batch',
+            [896],
+            'e2m1_group16_ue4m3_static',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident'],
+            [['vllm.fused_moe.modular_kernel', 'torch_materialize_stock']],
+            ['resident'],
+            {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb',
+             'execution_modes': ['eager']},
+            '0.28.1rc1.dev397+gfd4a15126.d20260904',
+            '2.13.0+cu130',
+            ['route_only',
+             'not_recorded',
+             [],
+             'unattributed',
+             None,
+             None,
+             None]],
+           ['tessera_e2m1_k2_routed_moe_sm121_decode_resident',
+            'sm_121',
+            'TESSERA_E2M1_K2',
+            'routed_moe',
+            'decode',
+            [896],
+            'e2m1_group16_ue4m3_static',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident'],
+            [['vllm.fused_moe.modular_kernel', 'torch_materialize_stock']],
+            ['resident'],
+            {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb',
+             'execution_modes': ['eager']},
+            '0.28.1rc1.dev397+gfd4a15126.d20260904',
             '2.13.0+cu130',
             ['route_only',
              'not_recorded',
@@ -2371,15 +2862,97 @@ def _parse_tensor_parallel(
             "world (a family absent from it is not attested at any degree) and "
             "will not read an open-world table under that assumption"
         )
+    receipts = _parse_world_size_receipts(tp, path)
     world: dict[str, int] = {}
     axes: dict[str, dict[str, str]] = {}
     for i, unit in enumerate(tp.get("units", ())):
         where = f"{path}.tensor_parallel.units[{i}]"
         name = str(_require(unit, "unit", where))
-        world[name] = int(_require(unit, "max_world_size", where))
+        declared = int(_require(unit, "max_world_size", where))
+        if declared > 1:
+            _require_world_size_receipt(unit, name, declared, receipts, where)
+        world[name] = declared
         axes[name] = _parse_loader_axes(unit.get("loader_axes"), where)
 
     return world, axes
+
+
+def _parse_world_size_receipts(
+    tp: Mapping[str, Any], path: str,
+) -> dict[str, tuple[int, frozenset[str]]]:
+    """``receipt id -> (world_size, executed_units)``, the two members a gate needs.
+
+    Contract v29 (Tessera #517) raised ``max_world_size`` above 1 and, in the
+    same bump, published the served run that covers it.  This reads only the
+    numbers the ceiling rests on: which world the run served and which units it
+    executed.  The images, flags, route traces and the single-rank KL table
+    beside them are the publisher's evidence for a human, not values this side
+    decides on, so they are neither read nor projected into the answer.
+    """
+    rows = tp.get("world_size_receipts", ())
+    where_block = f"{path}.tensor_parallel.world_size_receipts"
+    if not isinstance(rows, (list, tuple)):
+        raise TesseraContractError(f"{where_block} must be a list")
+    receipts: dict[str, tuple[int, frozenset[str]]] = {}
+    for i, row in enumerate(rows):
+        where = f"{where_block}[{i}]"
+        receipt_id = str(_require(row, "id", where))
+        if receipt_id in receipts:
+            raise TesseraContractError(
+                f"{where}: receipt id {receipt_id!r} is published twice")
+        world_size = _require(row, "world_size", where)
+        if (isinstance(world_size, bool) or not isinstance(world_size, int)
+                or world_size < 1):
+            raise TesseraContractError(
+                f"{where}.world_size must be a positive integer, got "
+                f"{world_size!r}")
+        executed = _require(row, "executed_units", where)
+        if (not isinstance(executed, (list, tuple))
+                or not all(isinstance(u, str) for u in executed)):
+            raise TesseraContractError(
+                f"{where}.executed_units must be a list of unit names")
+        receipts[receipt_id] = (world_size, frozenset(executed))
+    return receipts
+
+
+def _require_world_size_receipt(
+    unit: Mapping[str, Any],
+    name: str,
+    declared: int,
+    receipts: Mapping[str, tuple[int, frozenset[str]]],
+    where: str,
+) -> None:
+    """Refuse a ceiling above 1 that no published served run covers.
+
+    A world size of 1 is what a unit serves with no collective, and every
+    contract before v29 published it with no receipt, so it needs none here.
+    Above 1 the ceiling is a claim about a run: the unit must name a receipt,
+    the receipt must be published, it must have EXECUTED this unit, and it
+    must have served at least the declared world.  A receipt at a smaller
+    world than the ceiling claims would let ``tessera_tp_world_attested``
+    admit a degree nobody served.
+    """
+    receipt_id = unit.get("world_size_receipt")
+    if receipt_id is None:
+        raise TesseraContractError(
+            f"{where}: {name} declares max_world_size {declared} but names no "
+            "world_size_receipt; a ceiling above 1 is admitted only on a "
+            "published served run, never on the table's word")
+    if str(receipt_id) not in receipts:
+        raise TesseraContractError(
+            f"{where}: {name} cites world_size_receipt {receipt_id!r}, which "
+            "tensor_parallel.world_size_receipts does not publish")
+    world_size, executed = receipts[str(receipt_id)]
+    if name not in executed:
+        raise TesseraContractError(
+            f"{where}: world_size_receipt {receipt_id!r} did not execute "
+            f"{name} (executed_units {sorted(executed)}), so it attests no "
+            "world size for it")
+    if world_size < declared:
+        raise TesseraContractError(
+            f"{where}: {name} declares max_world_size {declared} but "
+            f"world_size_receipt {receipt_id!r} served world size "
+            f"{world_size}; the ceiling may not exceed the run that covers it")
 
 
 def _parse_tensor_parallel_limits(payload: Mapping[str, Any], path: str) -> dict[str, int]:

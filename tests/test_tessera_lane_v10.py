@@ -104,13 +104,15 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v24_at_the_pinned_digest():
-    """v24 is additive for a v10 reader, so the schema string does not move.
+def test_the_packaged_contract_is_v29_at_the_pinned_digest():
+    """v24 through v29 are additive for a v10 reader, so the schema string does not move.
 
     The contract version and the lane schema are two different clocks, and
-    this is the bump that separates them: v24 adds cells and fills a
+    v24 was the bump that separated them: it added cells and filled a
     ``serve_image``, both of them shapes v10 already defines, so a v10 reader
-    reads the document with the code it already has.  A bump that changed what
+    reads the document with the code it already has. v25-v29 did the same
+    (a quantiser table, a loader axis, format structures, two routed-MoE
+    cells and a TP2 receipt), and none moved the lane schema.  A bump that changed what
     a field MEANS would move the schema string and fail this reader closed, as
     v10 itself did to v9 below.
     """
@@ -120,7 +122,7 @@ def test_the_packaged_contract_is_v24_at_the_pinned_digest():
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 24
+    assert payload["contract_version"] == 29
     assert (payload["lane_eligibility"]["schema"]
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10)
 
@@ -138,7 +140,8 @@ def test_the_v10_table_parses_and_publishes_the_two_amd_platforms():
     # v24 is the first contract with a cell off ``sm_121``: two
     # ``TESSERA_BF16_K1`` dense cells on ``gfx1201``, decode and batch.
     assert {cell.platform for cell in table.cells} == {"sm_121", "gfx1201"}
-    assert len(table.cells) == 12
+    # v28 adds the two routed-MoE TESSERA_E2M1_K2 cells on sm_121.
+    assert len(table.cells) == 14
     gfx = sorted(c.id for c in table.cells if c.platform == "gfx1201")
     assert gfx == ["tessera_bf16_k1_dense_gfx1201_batch",
                    "tessera_bf16_k1_dense_gfx1201_decode"], gfx
@@ -175,7 +178,8 @@ def test_the_gfx1201_cells_are_admitted_and_the_sm121_ten_did_not_move():
             admits, why = lane.cell_evidence_admits(cell)
             assert admits, (cell.id, why)
     sm121 = [c.id for c in table.cells if c.platform == "sm_121"]
-    assert len(sm121) == 10, sm121
+    # Ten at v24; v28 added the two routed-MoE E2M1_K2 q896 cells.
+    assert len(sm121) == 12, sm121
 
 
 def test_a_declared_platform_with_no_cell_is_still_a_refusal_to_claim():

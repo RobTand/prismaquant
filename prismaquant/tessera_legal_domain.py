@@ -202,9 +202,9 @@ SPEC_NAMED_STUDY_PRODUCER = "d403cc5a3199a348cc7ee6262f4adbdab8138745"
 #: live.
 #:
 #: The key ``reader-pin-387eda36`` names the state the audit was *taken*
-#: through, not today's reader pin.  The reader pin moved to ``7dbbacbd``
-#: (contract v24 / lane schema v10, unchanged), and ``export.py`` at
-#: ``7dbbacbd`` is
+#: through, not today's reader pin.  The reader pin moved to ``4c384e60``
+#: (contract v29 / lane schema v10, unchanged), and ``export.py`` at
+#: ``4c384e60`` is
 #: byte-identical to the frozen study producer ``d403cc5a`` -- so
 #: :func:`tessera_source_state` resolves an import at the current pin under the
 #: name ``study-producer-d403cc5a``, which is already in
@@ -378,18 +378,29 @@ def live_pins() -> DomainPins:
 #: ``serve_image``, which no number here reads: the legal domain is a fact
 #: about the rate grammar and the wire recipe, not about which device serves
 #: them.  :data:`AUDITED_RATE_COUNTS` therefore does not need re-measuring.
+#:
+#: **Re-taken 2026-09-15 for the v29 pin, and it is a re-transcription for the
+#: same reason.**  The pin moved ``7dbbacbd`` -> ``4c384e60`` (contract v24 ->
+#: v29, 88 commits), and both deciding files were hashed at the new commit:
+#: ``src/tessera/grammar.py`` is still ``f2545274…`` and
+#: ``src/tessera/export.py`` is still ``b1b04f26…``, so
+#: :func:`tessera_source_state` keeps naming ``study-producer-d403cc5a`` and no
+#: :data:`TESSERA_SOURCE_STATES` entry is added.  What v25-v29 changed -- a
+#: quantiser table, a loader axis, format structure lists, two routed-MoE
+#: cells and the tensor-parallel ceiling -- is serving scope, which no number
+#: here reads.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="7dbbacbd0900f6b6f468690e2525cc018564382d",
+    reader_dev_pin_commit="4c384e6049dca3eeaf503bb2c9cd1cd2778978d1",
     reader_dev_pin_contract_sha256=(
-        "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
+        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
     ),
-    serving_runtime_pinned_commit="7dbbacbd0900f6b6f468690e2525cc018564382d",
+    serving_runtime_pinned_commit="4c384e6049dca3eeaf503bb2c9cd1cd2778978d1",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
+        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
     ),
     producer_installed_contract_sha256=(
-        "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
+        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
     ),
 )
 

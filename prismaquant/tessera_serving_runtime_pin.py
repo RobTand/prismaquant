@@ -213,12 +213,23 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: and 7dbbacbd0 (master's tip at review), and the digest below is computed
 #: from ``git show 7dbbacbd0:src/tessera/serving/runtime_contract.json``, never
 #: from an installed copy.
+#: Re-pinned 2026-09-15 to 4c384e604 (Tessera #517, closing PrismaQuant #632):
+#: runtime contract v29, lane schema still v10. Four admission facts move, and
+#: ``TESSERA_DEV_PIN_ANSWER``'s diff is their review: every Tessera unit's
+#: ``max_world_size`` 1 -> 2 on the served TP2 receipt
+#: ``glm53_a4_stub_tp2_sm121``, so Tessera rungs survive a TP2 allocation;
+#: ``TESSERA_E2M1_K2``'s ``row`` loader axis becomes ``sharded`` (v26); the
+#: ``sm_121`` fp4 activation-quantiser table is published (v25); and two
+#: routed-MoE ``TESSERA_E2M1_K2`` q896 cells arrive with ``route_only`` grade
+#: and ``smoke.status: not_recorded`` (v28), which ``cell_evidence_admits``
+#: does not refuse. The digest is from ``git cat-file`` on the canonical
+#: remote's object, never from an installed copy.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "7dbbacbd0900f6b6f468690e2525cc018564382d"
+    "4c384e6049dca3eeaf503bb2c9cd1cd2778978d1"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "81014e9b70c4945d440a671a1fc322413b101062b93e6335f9c66b42fd579554"
+    "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the

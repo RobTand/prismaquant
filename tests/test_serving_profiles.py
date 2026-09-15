@@ -675,10 +675,11 @@ def test_no_live_serving_profile_spec_names_the_retired_gridbook_runtime():
     tensor_parallel table.  Both authorities left the tree on 2026-09-02
     (`archive/gridbook_lane_2026-09-02/`) when Gridbook withdrew its Tessera
     lane; the table that answers now is Tessera's OWN packaged
-    `runtime_contract.json`, whose tensor_parallel table pins
-    TESSERA_E2M1_K2 and TESSERA_E4M3_K1 at `max_world_size` 1.  Same
-    conclusion, checkable derivation -- principle 14 is about the value a
-    reader can verify, not only about the verdict being right.
+    `runtime_contract.json`, whose tensor_parallel table pinned
+    TESSERA_E2M1_K2 and TESSERA_E4M3_K1 at `max_world_size` 1 (2 since
+    contract v29, on a served TP2 receipt).  Same conclusion at the time,
+    checkable derivation -- principle 14 is about the value a reader can
+    verify, not only about the verdict being right.
 
     Historical PROSE naming Gridbook is fine and deliberate everywhere in this
     tree (`trellis_research_sm121.json` keeps a dated "it named
