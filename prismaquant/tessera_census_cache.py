@@ -20,7 +20,14 @@ evidence allows:
   schema matches the unit kind, its source shape matches the census, its
   byte count matches the measured row, and a routed receipt equals both the
   cost table's and the layer config's;
-* every referenced blob is re-hashed inside the census wire directory.
+* every referenced blob sits inside the census wire directory with its
+  recorded byte count.
+
+Blob content is not hashed here by default.  The exporter hashes every blob as
+it reads it (``tessera.cached_unit.verify_cached_unit``, with the identity
+recomputed from source and Hessian), so a build-time pass would read the whole
+selected wire set (153.8 GB, about 2700 s of a 2978 s GLM-5.3 control build) only to
+refuse earlier.  ``hash_blobs=True`` adds that pass back as an audit.
 
 The seal is the checkpoint manifest's ``identity``, recomputed here from the
 manifest's bytes and compared to its stored digest; every journal envelope is
@@ -40,7 +47,7 @@ from .tessera_expert_projection import (
     EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, WIRE_DIR_KEY,
     ExpertProjectionError, allocation_expert_projection_block, cached_units_manifest,
     carried_units, check_expert_wire_receipt, expand_stack_decision_assignment,
-    require_stack_uniform_assignment, verify_expert_wire_record,
+    locate_expert_wire, require_stack_uniform_assignment, verify_expert_wire_record,
 )
 from .tessera_joint_aura import STAGE
 
@@ -234,10 +241,15 @@ def load_selected_wire_records(parts_root: Path, selected: Mapping[str, str], *,
         return dict(pool.map(one, wanted))
 
 
-def _verify_dense_blob(name: str, fmt: str, record: Mapping[str, Any], wire_dir: Path) -> None:
+def _verify_dense_blob(name: str, fmt: str, record: Mapping[str, Any], wire_dir: Path, *,
+                       hash_blob: bool) -> None:
     path = wire_dir / record["file"]
     if path.is_symlink() or path.resolve().parent != wire_dir or not path.is_file():
         raise CensusCacheError(f"{name}@{fmt}: dense wire escapes the campaign directory")
+    if not hash_blob:
+        if path.stat().st_size != record["blob_bytes"]:
+            raise CensusCacheError(f"{name}@{fmt}: dense wire differs from measured receipt")
+        return
     digest = hashlib.sha256()
     size = 0
     with path.open("rb") as handle:
@@ -252,11 +264,13 @@ def census_selected_cached_units_manifest(
         assignment: Mapping[str, str], metadata: Mapping[str, Any], cost: Mapping[str, Any],
         roster: Mapping[str, Any], census_shapes: Mapping[str, Any],
         records: Mapping[str, Any], *, input_schema: str, encoding_input_schema: str,
-        cache_schema: str, hash_workers: int = 8) -> dict:
+        cache_schema: str, blob_workers: int = 8, hash_blobs: bool = False) -> dict:
     """The ``tessera.cached_units.v1`` bundle of exactly the census wires an assignment selected.
 
     Schemas are the producer's constants, passed in by a caller that imported
-    them.  ``records`` is :func:`load_selected_wire_records`'s answer.
+    them.  ``records`` is :func:`load_selected_wire_records`'s answer.  Each
+    blob is located and sized on ``blob_workers`` threads; ``hash_blobs`` also
+    hashes it (see the module docstring).
     """
     from .tessera_formats import parse_tessera_format_name
 
@@ -317,16 +331,17 @@ def census_selected_cached_units_manifest(
             except ExpertProjectionError as exc:
                 raise CensusCacheError(f"{name}@{fmt}: {exc}") from exc
             blobs.append(lambda n=name, f=fmt, r=record, u=units[name], q=int(q256), g=grid:
-                         _verify_routed_blob(n, f, r, u, q, g, wire_dir))
+                         _verify_routed_blob(n, f, r, u, q, g, wire_dir, hash_blobs))
         else:
             recipe = identity.get("recipe") or {}
             if identity.get("unit") != name or recipe.get("grid") != grid or recipe.get("q256") != int(q256):
                 raise CensusCacheError(f"{name}@{fmt}: dense wire identity differs from selected rung")
-            blobs.append(lambda n=name, f=fmt, r=record: _verify_dense_blob(n, f, r, wire_dir))
+            blobs.append(lambda n=name, f=fmt, r=record:
+                         _verify_dense_blob(n, f, r, wire_dir, hash_blob=hash_blobs))
         checked[name] = dict(record)
     if not checked:
         raise CensusCacheError("selected cache has no selected Tessera wires")
-    with ThreadPoolExecutor(max_workers=max(1, int(hash_workers))) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, int(blob_workers))) as pool:
         for future in [pool.submit(check) for check in blobs]:
             future.result()
     try:
@@ -335,9 +350,13 @@ def census_selected_cached_units_manifest(
         raise CensusCacheError(f"selected cache: {exc}") from exc
 
 
-def _verify_routed_blob(name, fmt, record, unit, q256, grid, wire_dir) -> None:
+def _verify_routed_blob(name, fmt, record, unit, q256, grid, wire_dir, hash_blob) -> None:
+    # check_expert_wire_receipt already ran on this record in the caller.
     try:
-        verify_expert_wire_record(record, name=name, unit=unit, q256=q256, grid=grid,
-                                  wire_dir=wire_dir)
+        if hash_blob:
+            verify_expert_wire_record(record, name=name, unit=unit, q256=q256, grid=grid,
+                                      wire_dir=wire_dir)
+        else:
+            locate_expert_wire(record, name=name, wire_dir=wire_dir)
     except ExpertProjectionError as exc:
         raise CensusCacheError(f"{name}@{fmt}: {exc}") from exc
