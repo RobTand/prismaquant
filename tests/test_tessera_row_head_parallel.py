@@ -328,7 +328,9 @@ def test_resumed_wire_receipts_verify_on_threads_in_adopt_order(monkeypatch):
             tc._verify_wire_records_on_threads(pending, "/wire", threads=threads)
 
 
-def test_the_campaign_refuses_threads_without_a_hold_and_clamps_to_admitted_cpus(monkeypatch):
+def test_the_campaign_clamps_threads_to_admitted_cpus_and_refuses_zero(monkeypatch, tmp_path):
+    # Threads no longer need --campaign-identity-bytes: the streaming row head
+    # reads on them by default (RobTand/prismaquant#640).
     import os
     from prismaquant import tessera_campaign as tc
     monkeypatch.setattr(os, "sched_getaffinity", lambda pid: {0, 1, 2})
@@ -336,6 +338,7 @@ def test_the_campaign_refuses_threads_without_a_hold_and_clamps_to_admitted_cpus
     assert tc._identity_threads_for_this_process(2) == 2
     with pytest.raises(ValueError, match="positive int"):
         tc._identity_threads_for_this_process(0)
-    with pytest.raises(SystemExit):
-        tc.main(["--model", "/nowhere", "--out", "/nowhere/out",
-                 "--campaign-identity-threads", "4"])
+    with pytest.raises(SystemExit) as refused:
+        tc.main(["--model", "/nowhere", "--out", str(tmp_path / "out"),
+                 "--cache-dir", str(tmp_path / "cache"), "--campaign-identity-threads", "0"])
+    assert refused.value.code == 2 and not (tmp_path / "cache").exists()

@@ -1,7 +1,48 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-15 · `claude/plan-data-manifest`. Stamps
+As of: 2026-09-15 · `claude/stream-row-head-640`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-15, `claude/stream-row-head-640`) for the **streaming row
+head** (§4.10, RobTand/prismaquant#640). **A selected-source Tessera campaign
+row now defaults to `--row-head stream`: it starts encoding once the first
+batch's capture entries are verified and resident, rather than after every
+selected X and H is resident and hashed.** `tessera_row_stream.RowStream` reads
+one entry at a time on `--campaign-identity-threads` reader threads, whose
+default is now the CPUs the row was admitted with. Each read goes through the
+verified loader the load-all prefetch uses, so the checksum, geometry, census
+count and maximum, and finite checks all run before the encoder sees the
+entry. The same reader builds that unit's run-level receipts (`tensor_identity`
+of W, X and H) and its bound producer identity over a per-unit
+`ActivationSource`. Before batch b the row keeps batches b and b+1 and releases
+every other unit's X, H, holder and encoder factors, so at most
+`2 * --anchor-batch-size` entries are resident; a unit a later, non-adjacent
+batch needs is read again and must reproduce its first receipts.
+
+Six writes cite the run identity, which binds every priced unit's receipts, so
+they move to finalize: the checkpoint manifest, the unit shards with their
+`pricing` progress report, `hessian_capture.references.json`,
+`input_scales.safetensors`, `capture-load-execution-<sha256>.json` and the cost
+payload. Wire blobs and render entries are keyed by unit and rung only
+(`_wire_path`) and carry no run identity, so they still land during the loop.
+The finalized files are the load-all head's, byte for byte once the wall-clock
+seconds two runs never share are set aside: the gate
+(`tests/test_tessera_row_stream.py`) pins the clock and compares bytes, and on
+GLM-5.3 row 0055 the two heads differ only in per-anchor `encode_seconds`,
+inside `cost.pkl` and the unit shards. A row runs `--row-head load-all`, and prints
+the dependency, when it needs the whole set first: a present checkpoint (a
+resume) or `--seed-checkpoint`, `--max-rounds` other than 1, no
+`--capture-load-policy`, or no `--export-hessian-reference-policy`. The
+selected-source plan adds `stream_phases` and `stream_memory_bytes`; a stream
+row's admission and the dispatcher's demand use them, and `memory_bytes` still
+sizes the load-all head. `--campaign-identity-threads` no longer requires
+`--campaign-identity-bytes`, and the dispatcher forwards the class's `cpus` as
+its default. Two limits: PrismaBuild sees no `pricing` progress until
+finalize, so the whole encode runs under the `startup` allowance; and a row
+that dies before finalize leaves wires but no journal, so a retry re-encodes
+it. The GLM-5.3 row-0055 before and after measurements are recorded on the PR
+that landed this stamp. No cost-mode default, stage graph, format menu, serving
+lane, wire recipe or ship gate changes.
 
 Re-stamped (2026-09-15, `claude/plan-data-manifest`) for the campaign plan
 path. **`dispatch_tessera_campaign.py plan` now attaches a PrismaBuild data
@@ -11018,8 +11059,16 @@ census and exits before encoding. The existing activation-cache writer and
 cost-stage journal seal a complete `prismaquant.tessera_calibration_cache.v2`
 manifest. `plan --calibration-cache` binds that manifest path and SHA256 into
 each anchor action. The action verifies its actual initializer, backend,
-runtime, complete source bytes, calibration and geometry, then prefetches only
-its selected X/H artifacts before encoding. Cost provenance retains the same
+runtime, complete source bytes, calibration and geometry. By default
+(`--row-head stream`, `tessera_row_stream.RowStream`) it then reads only its
+selected X/H entries, one at a time on reader threads sized to the CPUs it was
+admitted with, verifies each entry before the encoder sees it, and starts the
+first batch as soon as that batch's entries are resident. It holds at most two
+batches of entries and defers the six writes that cite the run identity to
+finalize. `--row-head load-all`, or any named dependency (a resume, a seed
+checkpoint, more than one round, no verified load policy, or the legacy
+`hessian_capture.pt` export), prefetches every selected X/H artifact before
+encoding instead and prints why. Cost provenance retains the same
 manifest; selected-wire materialization derives reuse from that provenance.
 Legacy unqualified capture manifests refuse. Without a cache, each row still
 performs its own selected-unit calibration over the exact draw.

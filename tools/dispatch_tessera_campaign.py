@@ -573,7 +573,12 @@ def _row_memory_demand(spec: dict, members: list[str], census: dict, *,
     if "--streaming" in spec['campaign_argv']:
         resource = _streamed_resource_plan(spec, census, members,
                                            selected_source=selected_source)
-        plan_bytes = int(resource['memory_bytes'])
+        # A selected row that runs the streaming row head holds a window, not
+        # the population, and is admitted against the window's plan
+        # (RobTand/prismaquant#640).
+        stream = bool(selected_source and 'stream_memory_bytes' in resource
+                      and _row_head_dependency(spec['campaign_argv']) is None)
+        plan_bytes = int(resource['stream_memory_bytes' if stream else 'memory_bytes'])
         headroom_gb = 0
     else:
         shapes = census.get("unit_shapes") or {}
@@ -624,12 +629,35 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
             # campaign it is not about to run.
             publication_overlap_bytes=argument('--publication-overlap-bytes', 0),
             campaign_identity_bytes=argument('--campaign-identity-bytes', 0),
-            campaign_identity_threads=argument('--campaign-identity-threads', 1),
+            # The campaign's default is the CPUs the row is admitted with,
+            # which is the class's declared ``cpus`` demand.
+            campaign_identity_threads=argument('--campaign-identity-threads',
+                                               int(spec.get('cpus', 4))),
             **(dict(capture_load_policy=argument('--capture-load-policy', None, json.loads))
                if '--capture-load-policy' in argv else {}))
     return streamed_calibration_resources(spec['model'], **options,
         nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
         capture_policy=argument('--streaming-capture-policy', 'legacy', str))
+
+
+def _row_head_dependency(argv):
+    """What makes a selected row's argv run the load-all head, or ``None``.
+
+    The campaign's own rule (``tessera_row_stream.stream_head_dependency``)
+    applied to what argv can say. A plan cannot see a checkpoint an earlier
+    attempt leaves behind: a row that resumes one runs the load-all head, and
+    its own admission then refuses a stream-sized reservation by name.
+    """
+    from prismaquant.tessera_row_stream import stream_head_dependency
+
+    def value(name, default=None):
+        return argv[argv.index(name) + 1] if name in argv else default
+    return stream_head_dependency(
+        row_head=value('--row-head', 'stream'), selected_source=True,
+        capture_load_policy='--capture-load-policy' in argv,
+        export_hessian_reference_policy='--export-hessian-reference-policy' in argv,
+        max_rounds=int(value('--max-rounds', 0)), seed_checkpoint=value('--seed-checkpoint'),
+        checkpoint_exists=False)
 
 
 class DemandRefused(RuntimeError):

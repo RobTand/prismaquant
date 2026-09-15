@@ -627,7 +627,54 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
             capture_serialized_buffer_bytes=capture_load_policy['max_buffer_bytes'],
             capture_source_page_cache_bytes=capture_load_policy['max_buffer_bytes'],
             capture_load_scratch_bytes=capture_load_policy['max_scratch_bytes'])
-    return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases,
+    stream = {}
+    if capture_load_policy is not None:
+        # The streaming row head (tessera_row_stream, RobTand/prismaquant#640)
+        # never holds the selected population: its phases replace
+        # capture_prefetch, resident_anchors and export_inputs for a row that
+        # runs it, and are kept apart from ``phases`` so ``memory_bytes`` still
+        # admits the load-all head a resume or an ineligible argv falls back to.
+        widest_prefix = max(4*min(counts[name], max_act_rows)*shape[1]
+                            for name, shape in unit_shapes.items())
+        stream_phases = dict(
+            # Menus and the producer projection run with only the weights
+            # resident: the projection's page window is the one transient.
+            stream_projection=dict(common,
+                source_validation_bytes=encoding['source_validation_bytes']),
+            stream_window=dict(common,
+                # Batch b and batch b+1, each entry the loader's FP32 X and H.
+                window_capture_entry_bytes=2*anchor_batch_size*widest_capture_entry,
+                # One read per reader thread in flight: the serialized buffer,
+                # its source pages and the loader scratch, then the reader's
+                # receipts -- tensor_identity stages no copy of a contiguous
+                # host tensor, and the bound holder's finite checks and the
+                # per-unit capture seal are two FP32-width passes over W and H.
+                reader_working_bytes=int(campaign_identity_threads)*(
+                    2*capture_load_policy['max_buffer_bytes']
+                    + capture_load_policy['max_scratch_bytes'] + 2*widest_h + 2*widest_weight),
+                encoder_memo_bytes=encoding['encoder_memo_bytes'],
+                # ActivationSource.for_unit returns H.to(device) as the
+                # 'hessian' refit metric; from a host entry that is a device
+                # copy each retained memo entry keeps.
+                encoder_hessian_copy_bytes=memo_capacity*widest_h,
+                factorization_scratch_bytes=encoding['factorization_scratch_bytes'],
+                compatible_batch_weight_bytes=encoding['compatible_batch_weight_bytes'],
+                # activations=acts[name].to(device) for each unit of the batch.
+                batch_activation_bytes=anchor_batch_size*widest_prefix,
+                publication_staging_bytes=int(publication_overlap_bytes),
+                # Declared ceiling for the window's bound holders. Their bound
+                # is a function of the expanded menus, which a plan made from
+                # argv cannot compute; the row reserves the computed bound at
+                # its guard before the first read.
+                campaign_identity_metadata_bytes=int(campaign_identity_bytes)),
+            # The reference descriptor takes every H receipt from the readers
+            # and writes metadata only; no H is resident at finalize.
+            stream_finalize=dict(common,
+                export_input_page_window_bytes=export_inputs['export_input_page_window_bytes'],
+                publication_staging_bytes=int(publication_overlap_bytes)))
+        stream = dict(stream_phases=stream_phases, stream_memory_bytes=max(
+            sum(phase.values()) for phase in (preparation, *stream_phases.values())))
+    return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases, **stream,
         **({'source_snapshot_policy': source_snapshot_policy,
             'source_tensor_keys': source['source_tensor_keys']}
            if source_snapshot_policy == 'selected-tensors-v1' else {}),

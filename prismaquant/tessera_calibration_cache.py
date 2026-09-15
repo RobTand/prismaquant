@@ -1039,6 +1039,11 @@ def canonical_hessian_reference_descriptor(*, hessians, counts, provenance,
             continue
         known = sealed.get(name)
         if known is None:
+            if value.device.type == 'meta':
+                # A stand-in carries geometry only. Digesting it would commit
+                # to bytes nobody read, so a stand-in needs a sealed receipt.
+                raise RuntimeError(f'Hessian reference for {name} has neither a sealed '
+                                   'receipt nor resident bytes')
             identities[name] = tensor_identity(value)
             continue
         if (not isinstance(known, dict) or set(known) != {'algorithm','dtype','shape','sha256'}

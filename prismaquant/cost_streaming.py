@@ -436,7 +436,8 @@ class StreamedCausalLM:
         return layer
 
     def snapshot_selected_weights(self, names, *, max_resident_bytes: int,
-                                  resource_check=None, expected_source_keys=None):
+                                  resource_check=None, expected_source_keys=None,
+                                  host=False):
         """Copy selected source Linears from the existing resident layer cache.
 
         This is preparation for a consumer that already owns its ``weights``
@@ -445,6 +446,10 @@ class StreamedCausalLM:
         is disabled so a sparse selection never reads unrelated layers.
         Independent copies prevent an expert view from pinning its complete
         packed parent after the source layer has been released.
+
+        ``host=True`` makes each copy a contiguous CPU tensor. The streaming
+        row head hashes weights on reader threads while the encode thread owns
+        the device, so its weights must not be device tensors.
         """
         from .routed_experts import (
             profile_declared_packed_expert_projections,
@@ -524,7 +529,14 @@ class StreamedCausalLM:
                             raise RuntimeError(f"selected source has wrong resident tensor: {name}")
                         if resource_check is not None:
                             resource_check(f"before_selected_source_copy:{name}", reserve_bytes=nbytes)
-                        weights[name] = value.detach().clone(memory_format=torch.contiguous_format)
+                        if host:
+                            copy = torch.empty(shape, dtype=dtype, device="cpu")
+                            copy.copy_(value.detach())
+                            weights[name] = copy
+                            del copy
+                        else:
+                            weights[name] = value.detach().clone(
+                                memory_format=torch.contiguous_format)
                         del value
                 if self.device.type == "cuda":
                     torch.cuda.synchronize(self.device)
