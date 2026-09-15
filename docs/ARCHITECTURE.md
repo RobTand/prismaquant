@@ -39,6 +39,34 @@ and the compressed-tensors lane, which has no route telemetry. The
 script never performed this leg. Gate: `tests/test_tessera_route_trace_gate.py`,
 on the real m44e1 TP2 traces, shown failing before the fix.
 
+Re-stamped (2026-09-14, `claude/reseal-strata-covers-rows`) for **the reseal
+proof coverage rule** (#628). `tools/reseal_campaign_identity.py` rewrites the
+source pins of Tessera campaign rows under a proof bundle. A bundle now
+authorizes only rows whose strata it proved; before, it authorized any row
+once it met a fixed table, so a bundle with no routed E2M1 cell could rewrite
+routed `TESSERA_E2M1_K2` rows. The rule:
+
+- `identity_strata` (`:123`) derives each row's (kind, family) strata from its
+  sealed identity: routed or dense from the unit name through `unit_kind`
+  (`:100`), the same classifier `assemble_bundle` applies to proof cells
+  (`:367`), and the family of every menu format. `plan_row` refuses a shard
+  anchor or receipt outside the unit's sealed menu (`:586-589`).
+- `bundle_coverage` (`:137`) reads the bundle's `strata`. It refuses a bundle
+  without them, or one whose strata differ from its own cells.
+- `require_coverage` (`:461`) checks every row before `dry-run --proof`
+  (`:848`) or `migrate` (`:877`) plans or rewrites any of them, and names each
+  uncovered row and stratum. The migration record stamps `row_strata` and
+  `proof_strata`.
+- `REQUIRED_STRATA` (`:85`) stays the floor for assembling a bundle. It no
+  longer decides which rows a bundle may rewrite.
+
+The prefix arm in `experiments/reseal_identity_proof.py` refuses, before any
+encode, a prefix whose first `--limit-anchors` anchors reach no batch of a
+requested shape class (`require_prefix_classes`, `:167`). On a single-rate
+row, three batches per class put a 16-anchor prefix entirely in down_proj.
+No default, format menu, lane or sealed row moves. Gate:
+`tests/test_reseal_campaign_identity.py`.
+
 Re-stamped (2026-09-14, `claude/a4-routed-scale-guard-624`) for **the routed
 NVFP4 static activation-scale export guard** (#624). The campaign prices one
 static `input_global_scale` per unit, so on the Tessera routed NVFP4 wire it
@@ -11042,6 +11070,19 @@ partial B table is read through `unit_selection.selected` and
 Serial by design after profiling: the per-unit envelope load is
 `pickle.loads` plus checks under the GIL. Gate:
 `tests/test_union_tessera_census_tables.py`.
+
+**A reseal proof bundle authorizes only the strata it proved** (2026-09-14,
+#628). `tools/reseal_campaign_identity.py dry-run --proof` and `migrate`
+derive each row's (kind, family) strata from its sealed identity
+(`identity_strata`). Before any row is planned or rewritten, they refuse when
+a row prices a stratum that has no passing cell in the bundle
+(`require_coverage`), and they name each such row and stratum.
+`REQUIRED_STRATA` is only the floor for `proof-bundle`. The rows after
+tessera#486 are the case this closes: `extension-e2m1-01` rows 0045-0052 are
+`routed:TESSERA_E2M1_K2` only, and 42 of the 132 `extension-r1024-02` rows
+are `routed:{TESSERA_BF16_K1, TESSERA_E2M1_K2, TESSERA_E4M3_K1}`. The 09-11
+bundle's routed cells cover none of those new strata. Gate:
+`tests/test_reseal_campaign_identity.py`.
 
 **Row classes: placement is a property of the class, not of the spec**
 (2026-09-13, #542). A spec may declare a `classes` block, and a class owns the

@@ -22,6 +22,17 @@ from tools import reseal_campaign_identity as tool  # noqa: E402
 OLD = dict(prismaquant_source_sha256='a'*64, encoder_source_sha256='b'*64)
 NEW = dict(prismaquant_source_sha256='c'*64, encoder_source_sha256='d'*64)
 FIXTURE = 'f'*64
+E4M3_FORMATS = ('TESSERA_E4M3_K1_R832', 'TESSERA_E4M3_K1_R960')
+# What write_bundle proves unless told otherwise: the stratum make_row prices by default.
+DEFAULT_STRATA = {'routed': {'TESSERA_E4M3_K1': [832, 960]}}
+
+
+def _rate(fmt):
+    return int(fmt.rsplit('_R', 1)[1])
+
+
+def _family(fmt):
+    return fmt.rsplit('_R', 1)[0]
 
 
 def _wire(root, name, fmt, seal):
@@ -31,18 +42,17 @@ def _wire(root, name, fmt, seal):
     path.write_bytes(blob)
     return dict(file=path.name, blob_sha256=hashlib.sha256(blob).hexdigest(), blob_bytes=len(blob),
                 identity=dict(unit=name, encoder_fixture_id=FIXTURE, encoder_source_sha256=seal,
-                              recipe=dict(q256=int(fmt.rsplit('R', 1)[1])), schema='tessera.cached_unit_inputs.v1'))
+                              recipe=dict(q256=_rate(fmt)), schema='tessera.cached_unit_inputs.v1'))
 
 
 def make_row(root, *, pins=OLD, units=('layers.0.mlp.experts.0.down_proj', 'layers.0.mlp.experts.1.down_proj'),
-             with_cost=True, expert_wires=True, settings=None):
+             with_cost=True, expert_wires=True, settings=None, formats=E4M3_FORMATS):
     root.mkdir(parents=True, exist_ok=True)
     identity = dict(campaign_schema='prismaquant.tessera_campaign.v1', currency='output_mse',
                     settings=dict(settings if settings is not None else dict(nsamples=4, seqlen=8)),
                     calibration=dict(fit_tokens=3), serving_scope=None,
                     encoder_recipe=dict(body='window'), **pins, input_global_scale_policy='static',
-                    expert_projection=None, units={u: dict(menu=['TESSERA_E4M3_K1_R832', 'TESSERA_E4M3_K1_R960'],
-                                                            weight=dict(sha256='e'*64)) for u in units})
+                    expert_projection=None, units={u: dict(menu=list(formats), weight=dict(sha256='e'*64)) for u in units})
     sha = tool.identity_sha256(identity)
     parts = root/'cost.anchors.json.parts'
     manifest = dict(schema=tool.MANIFEST_SCHEMA, stage=tool.STAGE, identity_sha256=sha,
@@ -51,9 +61,9 @@ def make_row(root, *, pins=OLD, units=('layers.0.mlp.experts.0.down_proj', 'laye
     (root/'cost.anchors.json').write_bytes(tool.manifest_bytes(manifest))
     wires = {}
     for u in units:
-        records = {fmt: _wire(root, u, fmt, pins['encoder_source_sha256']) for fmt in ('TESSERA_E4M3_K1_R832', 'TESSERA_E4M3_K1_R960')}
+        records = {fmt: _wire(root, u, fmt, pins['encoder_source_sha256']) for fmt in formats}
         wires[u] = records
-        state = dict(anchors=[dict(qname=u, format_name=fmt, family='TESSERA_E4M3_K1', body_rate_q256=int(fmt[-3:]),
+        state = dict(anchors=[dict(qname=u, format_name=fmt, family=_family(fmt), body_rate_q256=_rate(fmt),
                                    dloss=0.5, seconds=1.0) for fmt in records], wire_records=records)
         payload = pickle.dumps(state, protocol=5)
         envelope = dict(schema=tool.UNIT_SCHEMA, stage=tool.STAGE, qname=u, identity_sha256=sha,
@@ -63,9 +73,9 @@ def make_row(root, *, pins=OLD, units=('layers.0.mlp.experts.0.down_proj', 'laye
         path.write_bytes(pickle.dumps(envelope, protocol=5))
     if with_cost:
         cost = dict(provenance=dict(model='m', wall_seconds=3.0, tessera_commit=''), schema='prismaquant.tessera_campaign.v1',
-                    costs={u: {fmt: dict(output_mse=0.5, encode_seconds=1.0) for fmt in ('TESSERA_E4M3_K1_R832', 'TESSERA_E4M3_K1_R960')} for u in units},
-                    formats=['TESSERA_E4M3_K1_R832'], currency='output_mse', leave_one_anchor_out={}, non_interpolable=[],
-                    menu_sizes={u: 2 for u in units}, anchor_counts={u: 2 for u in units})
+                    costs={u: {fmt: dict(output_mse=0.5, encode_seconds=1.0) for fmt in formats} for u in units},
+                    formats=[formats[0]], currency='output_mse', leave_one_anchor_out={}, non_interpolable=[],
+                    menu_sizes={u: len(formats) for u in units}, anchor_counts={u: len(formats) for u in units})
         if expert_wires:
             cost['tessera_expert_wires'] = wires
         (root/'cost.pkl').write_bytes(pickle.dumps(cost, protocol=4))
@@ -80,10 +90,23 @@ def write_pins(path, old=OLD, new=NEW, drop_settings=None):
     return path
 
 
-def write_bundle(path, old=OLD, new=NEW, ok=True):
+def _bundle_cells(strata):
+    """One passing cell per (kind, family, rate), the shape assemble_bundle records."""
+    cells = []
+    for kind, families in strata.items():
+        qname = 'layers.0.mlp.experts.0.down_proj' if kind == 'routed' else 'layers.0.mlp.gate_proj'
+        for family, rates in families.items():
+            cells.extend(dict(qname=qname, format_name=f'{family}_R{rate}', family=family, kind=kind, body_rate_q256=rate)
+                         for rate in rates)
+    return cells
+
+
+def write_bundle(path, old=OLD, new=NEW, ok=True, strata=DEFAULT_STRATA):
     bundle = dict(schema=tool.BUNDLE_SCHEMA, ok=ok, pins=dict(old=old, new=new), encoder_fixture_id_equal=True,
                   arms=[], fixture_id=dict(result='synthetic-fixture-id-arm', ids={'old': FIXTURE, 'new': FIXTURE}),
                   cell_count=24, pb_actions=['k1'])
+    if strata is not None:
+        bundle.update(strata=strata, cells=_bundle_cells(strata))
     path.write_text(json.dumps(bundle))
     return path
 
@@ -423,3 +446,128 @@ def test_a_settings_only_migration_keeps_the_pins(tmp_path):
     none = tmp_path/'none.json'
     none.write_text(json.dumps(dict(schema=tool.PINS_SCHEMA, old=NEW, new=NEW)))
     assert run('dry-run', '--pins', none, '--row', row) == 2
+
+
+# ---------------------------------------------------------------------------
+# Coverage: a bundle authorizes only the (kind, family) strata it proved
+# ---------------------------------------------------------------------------
+
+E2M1_896 = ('TESSERA_E2M1_K2_R896',)
+
+
+def _files(row):
+    return {p: p.read_bytes() for p in Path(row).rglob('*') if p.is_file()}
+
+
+def test_a_bundle_without_routed_e2m1_cells_does_not_authorize_a_routed_e2m1_row(tmp_path, capsys):
+    """The row-0045 shape: every unit a routed expert priced at TESSERA_E2M1_K2_R896 only.
+
+    Same row, same pins, same command: only the bundle changes, and the bundle
+    alone decides whether the row is rewritten.
+    """
+    row = tmp_path/'row-0045'
+    make_row(row, formats=E2M1_896)
+    pins = write_pins(tmp_path/'pins.json')
+    e4m3_only = write_bundle(tmp_path/'e4m3-only.json')
+    before = _files(row)
+    for command in ('dry-run', 'migrate'):
+        assert run(command, '--pins', pins, '--proof', e4m3_only, '--row', row) == 2, command
+        err = capsys.readouterr().err
+        assert 'row-0045 [routed:TESSERA_E2M1_K2]' in err, err
+    assert _files(row) == before
+    assert not [p for p in row.iterdir() if p.name.startswith('.reseal-') or p.name == 'identity_migration.json']
+    covering = write_bundle(tmp_path/'e2m1.json', strata={'routed': {'TESSERA_E2M1_K2': [896]}})
+    assert run('dry-run', '--pins', pins, '--proof', covering, '--row', row) == 0
+    assert run('migrate', '--pins', pins, '--proof', covering, '--row', row) == 0
+    assert run('verify', '--pins', pins, '--row', row) == 0
+    record = json.loads((row/'cost.anchors.json').read_text())['identity_migration'][-1]
+    assert record['row_strata'] == ['routed:TESSERA_E2M1_K2'] and record['proof_strata'] == ['routed:TESSERA_E2M1_K2']
+
+
+def test_one_uncovered_row_refuses_the_run_before_any_row_is_rewritten(tmp_path, capsys):
+    covered = tmp_path/'row-0001'
+    make_row(covered)
+    dense = tmp_path/'row-0002'
+    make_row(dense, units=('layers.0.mlp.gate_proj',), formats=('TESSERA_BF16_K1_R832', 'TESSERA_E4M3_K1_R832'))
+    pins = write_pins(tmp_path/'pins.json')
+    bundle = write_bundle(tmp_path/'bundle.json')
+    before = {row: _files(row) for row in (covered, dense)}
+    assert run('migrate', '--pins', pins, '--proof', bundle, '--row', covered, '--row', dense) == 2
+    err = capsys.readouterr().err
+    assert 'row-0002 [dense:TESSERA_BF16_K1, dense:TESSERA_E4M3_K1]' in err and 'row-0001' not in err, err
+    assert {row: _files(row) for row in (covered, dense)} == before
+
+
+def test_an_assembled_bundle_covers_only_the_strata_of_its_arms(tmp_path, capsys):
+    """The 09-11 bundle's shape: routed E4M3, dense BF16/E4M3/E2M1, and no routed E2M1."""
+    pq_only = dict(NEW, encoder_source_sha256=OLD['encoder_source_sha256'])
+    pins = write_pins(tmp_path/'pins.json', new=pq_only)
+    arm = _arm_result(tmp_path/'arm.json', OLD, pq_only)
+    assert run('proof-bundle', '--pins', pins, '--arm', arm, '--out', tmp_path/'b.json') == 0
+    routed = tmp_path/'row-0045'
+    make_row(routed, formats=E2M1_896)
+    assert run('migrate', '--pins', pins, '--proof', tmp_path/'b.json', '--row', routed) == 2
+    assert 'row-0045 [routed:TESSERA_E2M1_K2]' in capsys.readouterr().err
+    dense = tmp_path/'row-0046'
+    make_row(dense, units=('layers.0.mlp.up_proj',), formats=E2M1_896)
+    assert run('migrate', '--pins', pins, '--proof', tmp_path/'b.json', '--row', dense) == 0
+
+
+def test_a_bundle_must_carry_strata_that_its_cells_bear_out(tmp_path, capsys):
+    row = tmp_path/'row-0001'
+    make_row(row)
+    pins = write_pins(tmp_path/'pins.json')
+    bare = write_bundle(tmp_path/'bare.json', strata=None)
+    assert run('migrate', '--pins', pins, '--proof', bare, '--row', row) == 2
+    assert 'carries no strata' in capsys.readouterr().err
+    claimed = write_bundle(tmp_path/'claimed.json')
+    value = json.loads(claimed.read_text())
+    value['strata']['routed']['TESSERA_E2M1_K2'] = [896]
+    claimed.write_text(json.dumps(value))
+    assert run('migrate', '--pins', pins, '--proof', claimed, '--row', row) == 2
+    assert 'do not match the strata of its cells' in capsys.readouterr().err
+    assert json.loads((row/'cost.anchors.json').read_text())['identity']['encoder_source_sha256'] == OLD['encoder_source_sha256']
+
+
+def test_a_shard_anchor_outside_the_sealed_menu_is_refused(tmp_path, capsys):
+    row = tmp_path/'row-0001'
+    make_row(row)
+    path = sorted((row/'cost.anchors.json.parts'/'units').iterdir())[0]
+    envelope = pickle.loads(path.read_bytes())
+    state = pickle.loads(envelope['payload'])
+    state['anchors'][0].update(format_name='TESSERA_E2M1_K2_R896', family='TESSERA_E2M1_K2')
+    envelope['payload'] = pickle.dumps(state, protocol=5)
+    envelope['payload_sha256'] = hashlib.sha256(envelope['payload']).hexdigest()
+    path.write_bytes(pickle.dumps(envelope, protocol=5))
+    pins = write_pins(tmp_path/'pins.json')
+    assert run('dry-run', '--pins', pins, '--row', row) == 2
+    assert "not a format of the unit's sealed menu" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Prefix arm on a single-rate row
+# ---------------------------------------------------------------------------
+
+def _single_rate_round_one():
+    """Round one of a one-rate routed row (``--rate-band 896,896``): down_proj batches, then gate/up."""
+    family = 'TESSERA_E2M1_K2'
+    down = [[(f'layers.10.mlp.experts.{e}.down_proj', family, 896) for e in range(i*8, i*8+8)] for i in range(3)]
+    gate_up = [[(f'layers.10.mlp.experts.{e}.{p}', family, 896) for e in range(i*4, i*4+4) for p in ('gate_proj', 'up_proj')]
+               for i in range(3)]
+    return down + gate_up
+
+
+def test_a_single_rate_prefix_must_reach_every_requested_shape_class():
+    import importlib
+    proof = importlib.import_module('experiments.reseal_identity_proof')
+    classes = ['down_proj', 'gate_up']
+    batches = _single_rate_round_one()
+    one = proof.shape_interleaved(batches, classes=classes, per_class=1)
+    assert [proof.batch_class(b) for b in one[:2]] == classes
+    assert proof.require_prefix_classes(one, classes=classes, limit=16) is one
+    # The default three batches per class: a 16-anchor prefix is two down_proj batches.
+    three = proof.shape_interleaved(batches, classes=classes, per_class=3)
+    assert [proof.batch_class(b) for b in three[:3]] == ['down_proj']*3
+    with pytest.raises(ValueError, match=r"encodes no \['gate_up'\] batch"):
+        proof.require_prefix_classes(three, classes=classes, limit=16)
+    assert proof.require_prefix_classes(three, classes=classes, limit=48) is three
