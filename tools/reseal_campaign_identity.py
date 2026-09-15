@@ -39,6 +39,16 @@ before any row is rewritten when a row prices a stratum that has no passing
 cell in the bundle, and the refusal names every such row and stratum.
 ``REQUIRED_STRATA`` is only the floor a bundle must meet to be assembled.
 
+An arm normally carries exactly the pins file's old and new pins. For an
+encoder-only migration (the pins file holds the PrismaQuant pin, old == new,
+and moves the encoder pin), an arm may come from rows written under another
+PrismaQuant tree: the claim under test is the encoder transition, each arm
+still proves identity equality under its own pins, and the fixture-id arm does
+not depend on the PrismaQuant tree. Such a cross-tree arm must hold its own
+PrismaQuant pin fixed and carry the pins file's encoder old and new pins.
+``arm_pin_scope`` states the rule, ``proof-bundle`` records each arm's pins
+and scope, and ``load_bundle`` checks the rule again against the arm results.
+
 Pins file (``prismaquant.reseal_pins.v1``)::
 
     {"schema": "prismaquant.reseal_pins.v1",
@@ -294,6 +304,44 @@ def load_pins(path):
     return pins
 
 
+def arm_pin_scope(arm_old, arm_new, pins, *, where):
+    """``'same-tree'`` or ``'cross-tree'`` for an arm's pins against the pins file; refuse anything else.
+
+    A same-tree arm carries exactly the pins file's old and new pins. A
+    cross-tree arm re-encoded rows written under another PrismaQuant tree, so
+    it proves the encoder transition and nothing about a PrismaQuant change.
+    It is accepted only when all of these hold:
+
+    * its encoder old and new pins are the pins file's;
+    * the pins file holds its PrismaQuant pin fixed and moves the encoder pin;
+    * the arm holds its own PrismaQuant pin fixed.
+    """
+    pq, encoder = PIN_KEYS
+    for side, block in (('old', arm_old), ('new', arm_new)):
+        if not isinstance(block, dict) or set(block) != set(PIN_KEYS):
+            raise Refused(f'{where}: arm {side} pins must carry exactly {PIN_KEYS}')
+    if (arm_old[encoder], arm_new[encoder]) != (pins['old'][encoder], pins['new'][encoder]):
+        raise Refused(f'{where}: arm encoder transition {arm_old[encoder]} -> {arm_new[encoder]} is not the '
+                      f'pins file\'s {pins["old"][encoder]} -> {pins["new"][encoder]}')
+    if arm_old == pins['old'] and arm_new == pins['new']:
+        return 'same-tree'
+    if pins['old'][pq] != pins['new'][pq]:
+        raise Refused(f'{where}: arm PrismaQuant pins {arm_old[pq]} -> {arm_new[pq]} are not the pins file\'s '
+                      f'{pins["old"][pq]} -> {pins["new"][pq]}; the pins file moves the PrismaQuant pin, so '
+                      'every arm must come from that tree')
+    if pins['old'][encoder] == pins['new'][encoder]:
+        raise Refused(f'{where}: arm PrismaQuant pin {arm_old[pq]} is not the pins file\'s {pins["old"][pq]}, and a '
+                      'cross-tree arm proves only an encoder transition, which this pins file does not make')
+    if arm_old[pq] != arm_new[pq]:
+        raise Refused(f'{where}: arm moves its PrismaQuant pin {arm_old[pq]} -> {arm_new[pq]}; a cross-tree arm '
+                      'must hold its PrismaQuant pin fixed')
+    return 'cross-tree'
+
+
+def _arm_comparison(result):
+    return result.get('comparison', result)
+
+
 def load_bundle(path, pins):
     bundle = json.loads(Path(path).read_text())
     if bundle.get('schema') != BUNDLE_SCHEMA:
@@ -312,6 +360,10 @@ def load_bundle(path, pins):
         actual = sha256_file(arm['result'])
         if actual != arm['result_sha256']:
             raise Refused(f'{path}: arm result {arm["result"]} changed since the bundle was assembled')
+        comparison = _arm_comparison(json.loads(Path(arm['result']).read_text()))
+        scope = arm_pin_scope(comparison.get('old_pins'), comparison.get('new_pins'), pins, where=f'{path}: {arm["result"]}')
+        if arm.get('pin_scope') not in (None, scope):
+            raise Refused(f'{path}: arm {arm["result"]} is recorded as {arm["pin_scope"]}, but its pins make it {scope}')
     bundle['covered'] = bundle_coverage(bundle, path)
     bundle['bundle_sha256'] = sha256_file(path)
     bundle['path'] = str(Path(path).resolve())
@@ -342,15 +394,21 @@ def assemble_bundle(args):
     cells, arms, strata = [], [], {}
     for path in args.arm:
         result = json.loads(Path(path).read_text())
-        comparison = result.get('comparison', result)
+        comparison = _arm_comparison(result)
         if comparison.get('kind') == 'comparison':
             pass
         elif result.get('kind') not in ('prefix', 'dense'):
             raise Refused(f'{path}: not a prefix/dense proof arm result')
         if not comparison.get('ok'):
             raise Refused(f'{path}: arm did not pass ({comparison.get("failures")})')
-        if comparison['old_pins'] != pins['old'] or comparison['new_pins'] != pins['new']:
-            raise Refused(f'{path}: arm pins differ from the pins file')
+        scope = arm_pin_scope(comparison.get('old_pins'), comparison.get('new_pins'), pins, where=path)
+        # A GPU arm records the pins it actually ran under; they must be the
+        # new pins it declares, or the arm is labelled with another tree.
+        running = result.get('environment') or {}
+        for key in PIN_KEYS:
+            if key in running and running[key] != comparison['new_pins'][key]:
+                raise Refused(f'{path}: arm ran with {key}={running[key]}, not its declared new pin '
+                              f'{comparison["new_pins"][key]}')
         # The arm has to have compared against the identity ``migrate`` will
         # write, dropped settings and all.  An arm that dropped nothing proves
         # a different migration than the one this pins file describes, and an
@@ -373,6 +431,8 @@ def assemble_bundle(args):
                               dloss=cell['dloss'], encoder_fixture_id=cell.get('encoder_fixture_id')))
         arms.append(dict(result=str(Path(path).resolve()), result_sha256=sha256_file(path), kind=result.get('kind', 'comparison'),
                          cells=len(comparison['cells']), strata=comparison.get('strata'), environment=result.get('environment'),
+                         pin_scope=scope, old_pins=dict(comparison['old_pins']), new_pins=dict(comparison['new_pins']),
+                         fused_engagement=(result.get('fused_engagement') or {}).get('summary'),
                          action_key=None))
     missing = []
     for kind, families in REQUIRED_STRATA.items():
@@ -396,6 +456,8 @@ def assemble_bundle(args):
                   pins={'old': pins['old'], 'new': pins['new']}, sources=pins.get('sources'), source_checks=pins['source_checks'],
                   fixture_id=fixture_record,
                   encoder_fixture_id_equal=fixture_record['fixture_id_equal'], arms=arms,
+                  arm_prismaquant_pins=sorted({arm['new_pins']['prismaquant_source_sha256'] for arm in arms}),
+                  cross_tree_arms=sum(arm['pin_scope'] == 'cross-tree' for arm in arms),
                   pb_actions=list(args.action or []), cells=cells, cell_count=len(cells), duplicate_cells=duplicate_cells,
                   strata={k: {f: sorted(r) for f, r in fam.items()} for k, fam in strata.items()},
                   strata_missing=missing, min_cells=MIN_CELLS, ok=ok and fixture_record['fixture_id_equal'])

@@ -24,7 +24,11 @@ assembles those into the proof bundle it requires before rewriting a row.
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
+import importlib
+import importlib.machinery
+import importlib.util
 import json
 import math
 import os
@@ -32,6 +36,7 @@ import pickle
 import platform
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -42,6 +47,21 @@ ANCHOR_VOLATILE = ('seconds', 'encoding_batch_size')
 # not scores, and never equal across two runs of the same encode.
 COST_VOLATILE = ('encode_seconds', 'encode_seconds_accounting', 'encoding_batch_size')
 STRIPPED_FLAGS = ('--seed-checkpoint', '--seed-wire-dir')
+# The driver checkout: the tree this file was loaded from, which PB snapshots
+# and the container mounts at the working directory. Its ``experiments``
+# helpers drive the arm; the PrismaQuant tree under test is --prismaquant-root.
+DRIVER_EXPERIMENTS = Path(__file__).resolve().parent
+# The tessera#486 fused encoder paths, and what each call says about them:
+# a refusal function returns None when the fused path admits the call, a fused
+# function returns None when its tripwire hands the call back to the reference.
+FUSED_PROBES = (
+    ('tessera.lut_fused', 'lut_swap_refusal', 'refusal'),
+    ('tessera.lut_fused', 'swap_passes_fused', 'fused'),
+    ('tessera.encode', '_lut_swap_passes_reference', 'reference'),
+    ('tessera.tcq_fused', 'tcq_fused_refusal', 'refusal'),
+    ('tessera.tcq_fused', 'viterbi_columns_fused', 'fused'),
+)
+FUSED_ENV = ('TESSERA_LUT_FUSED', 'TESSERA_TCQ_FUSED', 'TESSERA_TCQ_GRAPH')
 
 
 # ---------------------------------------------------------------------------
@@ -71,12 +91,129 @@ def bind_prismaquant(root):
     return prismaquant
 
 
+def pin_driver_experiments():
+    """Make ``experiments.*`` resolve from the driver checkout, whatever ``sys.path`` holds.
+
+    ``experiments`` has no ``__init__.py``, so it is a namespace package whose
+    ``__path__`` is recomputed from ``sys.path`` on each import.
+    ``bind_prismaquant`` drops the driver checkout (the cwd) from ``sys.path``,
+    after which ``experiments.campaign_prefix_profile`` would be looked up in
+    the bound PrismaQuant root: the code under test, which need not carry the
+    helper (PQ 9753a5b7c5 does not, and both prefix arms on it failed with
+    ModuleNotFoundError). Pinning ``__path__`` moves only ``experiments``;
+    ``prismaquant`` still resolves from the bound root alone.
+    """
+    package = sys.modules.get('experiments')
+    if package is None:
+        spec = importlib.machinery.ModuleSpec('experiments', None, is_package=True)
+        spec.submodule_search_locations = [str(DRIVER_EXPERIMENTS)]
+        package = importlib.util.module_from_spec(spec)
+        sys.modules['experiments'] = package
+    package.__path__ = [str(DRIVER_EXPERIMENTS)]
+    return package
+
+
+def driver_modules():
+    """Every loaded ``experiments`` module with a file; refuse one outside the driver checkout."""
+    loaded = {name: Path(module.__file__).resolve() for name, module in list(sys.modules.items())
+              if name.startswith('experiments.') and getattr(module, '__file__', None)}
+    outside = {name: str(path) for name, path in loaded.items() if path.parent != DRIVER_EXPERIMENTS}
+    if outside:
+        raise RuntimeError(f'experiments modules loaded from outside the driver checkout {DRIVER_EXPERIMENTS}: {outside}')
+    return {name: dict(file=str(path), sha256=sha256_file(path)) for name, path in sorted(loaded.items())}
+
+
+def import_prefix_helper():
+    """``experiments.campaign_prefix_profile`` from the driver checkout, with the modules it loaded."""
+    pin_driver_experiments()
+    helper = importlib.import_module('experiments.campaign_prefix_profile')
+    return helper, driver_modules()
+
+
+class FusedEngagement:
+    """Count what the tessera#486 fused encoder paths did in this process.
+
+    Tessera publishes no counter for them, and an arm whose cells never took a
+    fused path proves nothing about the fused kernels. Each probe wraps one
+    module attribute and counts its outcomes: a refusal function by reason
+    (``admitted`` when it returned None), a fused function by ``ran`` or
+    ``fell_back``, and the reference swap passes by calls. The encoder looks
+    these up on their modules at call time, so the wrappers see every call;
+    they return what they wrap and read nothing from the tensors. A module the
+    producer does not have is recorded as absent.
+    """
+
+    MAX_REASONS = 32
+
+    def __init__(self, probes=FUSED_PROBES):
+        self.probes = tuple(probes)
+        self.installed = {}
+        self.counts = {}
+        self._originals = []
+        self._lock = threading.Lock()
+
+    def install(self):
+        for module_name, attr, role in self.probes:
+            key = f'{module_name}.{attr}'
+            try:
+                module = importlib.import_module(module_name)
+            except ModuleNotFoundError as error:
+                self.installed[key] = f'absent: {error}'
+                continue
+            original = getattr(module, attr, None)
+            if original is None:
+                self.installed[key] = 'absent: no such attribute'
+                continue
+            setattr(module, attr, self._wrap(key, role, original))
+            self._originals.append((module, attr, original))
+            self.installed[key] = role
+        return self
+
+    def uninstall(self):
+        for module, attr, original in reversed(self._originals):
+            setattr(module, attr, original)
+        self._originals.clear()
+
+    def _count(self, key, label):
+        with self._lock:
+            entry = self.counts.setdefault(key, {})
+            if label not in entry and len(entry) >= self.MAX_REASONS:
+                label = 'other'
+            entry[label] = entry.get(label, 0) + 1
+
+    def _wrap(self, key, role, original):
+        def probe(*args, **kwargs):
+            value = original(*args, **kwargs)
+            if role == 'refusal':
+                label = 'admitted' if value is None else str(value)[:200]
+            elif role == 'fused':
+                label = 'fell_back' if value is None else 'ran'
+            else:
+                label = 'calls'
+            self._count(key, label)
+            return value
+        return functools.wraps(original)(probe)
+
+    def record(self):
+        with self._lock:
+            counts = json.loads(json.dumps(self.counts))
+        def ran(module):
+            return counts.get(f'{module}.' + ('swap_passes_fused' if module.endswith('lut_fused') else 'viterbi_columns_fused'), {}).get('ran', 0)
+        summary = dict(lut_fused_ran=ran('tessera.lut_fused'), tcq_fused_ran=ran('tessera.tcq_fused'),
+                       lut_reference_calls=counts.get('tessera.encode._lut_swap_passes_reference', {}).get('calls', 0),
+                       lut_refusals={k: v for k, v in counts.get('tessera.lut_fused.lut_swap_refusal', {}).items() if k != 'admitted'},
+                       tcq_refusals={k: v for k, v in counts.get('tessera.tcq_fused.tcq_fused_refusal', {}).items() if k != 'admitted'})
+        summary['engaged'] = bool(summary['lut_fused_ran'] or summary['tcq_fused_ran'])
+        return dict(probes=dict(self.installed), counts=counts, summary=summary,
+                    env={name: os.environ.get(name) for name in FUSED_ENV})
+
+
 def environment_record(*, with_pins):
     record = dict(python=sys.version, executable=sys.executable, platform=platform.platform(),
                   hostname=platform.node(), cwd=os.getcwd(),
                   env={k: os.environ.get(k) for k in ('PYTHONPATH', 'TESSERA_REPO', 'TESSERA_WINDOW_BEST_FORM',
                        'TESSERA_WINDOW_BEST_TILE', 'TESSERA_SEAL_PREFETCH', 'PRISMAQUANT_DETERMINISTIC',
-                       'PRISMAQUANT_CONTAINER_CONTENT_SHA256',
+                       'PRISMAQUANT_CONTAINER_CONTENT_SHA256', *FUSED_ENV,
                        'PRISMABUILD_ACTION_KEY', 'CUDA_VISIBLE_DEVICES')})
     if with_pins:
         import prismaquant
@@ -498,87 +635,105 @@ def run_gpu_arm(args, *, prefix):
     import torch
     if not torch.cuda.is_available():
         raise RuntimeError('the re-encode proof runs on the campaign GPU platform')
+    # The prefix helper is driver code: import it now, from the driver checkout,
+    # so a tree that cannot drive the arm fails before anything is measured.
+    helper, driver = import_prefix_helper() if prefix else (None, driver_modules())
     old, new = _pins(args)
     command = redirect_outputs(_campaign_argv(args), run)
     started = time.time()
     record = dict(schema=SCHEMA, kind='prefix' if prefix else 'dense', out=str(out), run=str(run),
                   stored_row=str(args.stored_row), command=command, started_unix=started,
-                  environment=environment_record(with_pins=True))
+                  environment=environment_record(with_pins=True),
+                  driver=dict(experiments=str(DRIVER_EXPERIMENTS), modules=driver))
     for key, expected in (('prismaquant_source_sha256', new['prismaquant_source_sha256']),
                           ('encoder_source_sha256', new['encoder_source_sha256'])):
         if record['environment'][key] != expected:
             raise RuntimeError(f'running {key}={record["environment"][key]} is not the declared new pin {expected}')
     write_json(out/'result.json', dict(record, status='running'))
     from prismaquant import tessera_campaign as campaign
-    if prefix:
-        from experiments.campaign_prefix_profile import run_prefix, PrefixComplete
-        classes = args.shape_classes.split(',')
-        original = campaign._anchor_batches
-        original_groups = campaign.resolve_anchor_groups
-        original_loo = campaign._loo_for
-        observer = _SilentObserver()
-        if args.members_per_class:
-            # Restricted groups; the campaign's own batching order applies.
-            # The first leave-one-out evaluation after the requested prefix
-            # is the third round's gate on the restricted members; stop
-            # there, before the campaign finalizes a table for units it
-            # never measured.
-            # ``select_anchor_groups`` resolves the same groups to check the
-            # --units selection covers every member; only the pricing loop's
-            # resolution (tessera_campaign._main, after selection) is
-            # restricted, so the selection gate still sees the whole stack.
-            # Both resolutions happen in tessera_campaign._main: the scope
-            # groups first (which the --units selection is checked against,
-            # member for member) and the pricing groups second (which the
-            # round loop pends anchors from).  Only the second is restricted.
-            calls = []
+    # Counted from here: the campaign's own encodes, not the pins check above.
+    engagement = FusedEngagement().install()
+    try:
+        if prefix:
+            run_prefix, PrefixComplete = helper.run_prefix, helper.PrefixComplete
+            classes = args.shape_classes.split(',')
+            original = campaign._anchor_batches
+            original_groups = campaign.resolve_anchor_groups
+            original_loo = campaign._loo_for
+            observer = _SilentObserver()
+            if args.members_per_class:
+                # Restricted groups; the campaign's own batching order applies.
+                # The first leave-one-out evaluation after the requested prefix
+                # is the third round's gate on the restricted members; stop
+                # there, before the campaign finalizes a table for units it
+                # never measured.
+                # ``select_anchor_groups`` resolves the same groups to check the
+                # --units selection covers every member; only the pricing loop's
+                # resolution (tessera_campaign._main, after selection) is
+                # restricted, so the selection gate still sees the whole stack.
+                # Both resolutions happen in tessera_campaign._main: the scope
+                # groups first (which the --units selection is checked against,
+                # member for member) and the pricing groups second (which the
+                # round loop pends anchors from).  Only the second is restricted.
+                calls = []
 
-            def restricted_groups(*a, **kw):
-                groups = original_groups(*a, **kw)
-                calls.append(len(groups))
-                if len(calls) == 1:
-                    return groups
-                return restrict_groups(groups, classes=classes, per_class=args.members_per_class)
-            campaign.resolve_anchor_groups = restricted_groups
+                def restricted_groups(*a, **kw):
+                    groups = original_groups(*a, **kw)
+                    calls.append(len(groups))
+                    if len(calls) == 1:
+                        return groups
+                    return restrict_groups(groups, classes=classes, per_class=args.members_per_class)
+                campaign.resolve_anchor_groups = restricted_groups
 
-            def stop_after_prefix(*a, **kw):
-                if observer.result.get('completed_anchor_units', 0) >= args.limit_anchors or _prefix_done(observer, args.limit_anchors):
-                    raise PrefixComplete()
-                return original_loo(*a, **kw)
-            campaign._loo_for = stop_after_prefix
-            record['group_restriction'] = dict(classes=classes, members_per_class=args.members_per_class, resolutions=calls)
+                def stop_after_prefix(*a, **kw):
+                    if observer.result.get('completed_anchor_units', 0) >= args.limit_anchors or _prefix_done(observer, args.limit_anchors):
+                        raise PrefixComplete()
+                    return original_loo(*a, **kw)
+                campaign._loo_for = stop_after_prefix
+                record['group_restriction'] = dict(classes=classes, members_per_class=args.members_per_class, resolutions=calls)
+            else:
+                checked = []
+
+                def interleaved(*a, **kw):
+                    order = shape_interleaved(original(*a, **kw), classes=classes, per_class=args.batches_per_class)
+                    if not checked:
+                        # The campaign calls this once per round with every pending
+                        # anchor; the first call is round one, before any encode.
+                        require_prefix_classes(order, classes=classes, limit=args.limit_anchors)
+                        checked.append(True)
+                    return order
+                campaign._anchor_batches = interleaved
+            try:
+                run_prefix(campaign, command, observer, limit=args.limit_anchors, expected_source_units=args.expected_source_units)
+            finally:
+                campaign._anchor_batches = original
+                campaign.resolve_anchor_groups = original_groups
+                campaign._loo_for = original_loo
+            record['prefix'] = {k: v for k, v in observer.result.items() if k != 'resident_prefetch'}
+            record['resident_prefetch'] = {k: v for k, v in observer.result.get('resident_prefetch', {}).items()
+                                           if k in ('units', 'hessian_bytes', 'activation_bytes', 'devices', 'finished_unix')}
+            expected_cells = args.limit_anchors
         else:
-            checked = []
-
-            def interleaved(*a, **kw):
-                order = shape_interleaved(original(*a, **kw), classes=classes, per_class=args.batches_per_class)
-                if not checked:
-                    # The campaign calls this once per round with every pending
-                    # anchor; the first call is round one, before any encode.
-                    require_prefix_classes(order, classes=classes, limit=args.limit_anchors)
-                    checked.append(True)
-                return order
-            campaign._anchor_batches = interleaved
-        try:
-            run_prefix(campaign, command, observer, limit=args.limit_anchors, expected_source_units=args.expected_source_units)
-        finally:
-            campaign._anchor_batches = original
-            campaign.resolve_anchor_groups = original_groups
-            campaign._loo_for = original_loo
-        record['prefix'] = {k: v for k, v in observer.result.items() if k != 'resident_prefetch'}
-        record['resident_prefetch'] = {k: v for k, v in observer.result.get('resident_prefetch', {}).items()
-                                       if k in ('units', 'hessian_bytes', 'activation_bytes', 'devices', 'finished_unix')}
-        expected_cells = args.limit_anchors
-    else:
-        campaign.main(command)
-        expected_cells = args.expected_cells
+            campaign.main(command)
+            expected_cells = args.expected_cells
+    except BaseException as error:
+        # A campaign that raises leaves a record saying so, with whatever the
+        # fused paths did before it stopped, instead of a result left 'running'.
+        record.update(status='failed', error=repr(error)[:4000], failed_unix=time.time(),
+                      fused_engagement=engagement.record())
+        write_json(out/'result.json', record)
+        raise
+    finally:
+        engagement.uninstall()
+    record['fused_engagement'] = engagement.record()
     record['campaign_finished_unix'] = time.time()
     comparison = compare_rows(run, args.stored_row, old=old, new=new, expected_cells=expected_cells,
                               require_cost=not prefix, drop_settings=args.drop_setting)
     record.update(comparison=comparison, ok=comparison['ok'], finished_unix=time.time(), status='finished')
     write_json(out/'result.json', record)
     print(json.dumps(dict(ok=record['ok'], cells=len(comparison['cells']), strata=comparison['strata'],
-                          failures=comparison['failures'][:4], seconds=record['finished_unix']-started)), flush=True)
+                          failures=comparison['failures'][:4], seconds=record['finished_unix']-started,
+                          fused=record['fused_engagement']['summary'])), flush=True)
     return 0 if record['ok'] else 1
 
 

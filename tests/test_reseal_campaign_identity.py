@@ -254,7 +254,7 @@ def test_hash_definitions_match_the_campaign(tmp_path):
 
 
 def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(832, 960, 1088),
-                dropped=()):
+                dropped=(), environment=None):
     cells = []
     def cell(qname, family, rate):
         cells.append(dict(ok=True, byte_identical=True, dloss=0.5, stored_dloss=0.5, qname=qname, family=family,
@@ -268,9 +268,12 @@ def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(8
             for j in range(2):
                 cell(f'layers.{j}.mlp.gate_proj', family, rate)
     cell('layers.0.mlp.up_proj', 'TESSERA_E2M1_K2', 896)
-    path.write_text(json.dumps(dict(kind='dense', comparison=dict(
+    result = dict(kind='dense', comparison=dict(
         kind='comparison', ok=True, old_pins=old, new_pins=new, identity_matches_with_pins_substituted=True,
-        dropped_settings=list(dropped), cells=cells))))
+        dropped_settings=list(dropped), cells=cells))
+    if environment is not None:
+        result['environment'] = environment
+    path.write_text(json.dumps(result))
     return path
 
 
@@ -571,3 +574,110 @@ def test_a_single_rate_prefix_must_reach_every_requested_shape_class():
     with pytest.raises(ValueError, match=r"encodes no \['gate_up'\] batch"):
         proof.require_prefix_classes(three, classes=classes, limit=16)
     assert proof.require_prefix_classes(three, classes=classes, limit=48) is three
+
+
+# ---------------------------------------------------------------------------
+# Cross-tree arms: an encoder-only migration may be proven on rows of another
+# PrismaQuant tree, and nothing else may
+# ---------------------------------------------------------------------------
+
+OTHER_PQ = '9'*64
+ENCODER_ONLY_NEW = dict(OLD, encoder_source_sha256=NEW['encoder_source_sha256'])
+
+
+def _pin_pair(pq, encoder):
+    return dict(prismaquant_source_sha256=pq, encoder_source_sha256=encoder)
+
+
+def _fixture_result(path, old_seal=OLD['encoder_source_sha256'], new_seal=NEW['encoder_source_sha256']):
+    path.write_text(json.dumps(dict(kind='fixture_id', ok=True, fixture_id_equal=True,
+                                    encoder_source_sha256={'old': old_seal, 'new': new_seal},
+                                    encoder_fixture_ids={'old': FIXTURE, 'new': FIXTURE})))
+    return path
+
+
+def _other_tree_arm(path, *, old_pq=OTHER_PQ, new_pq=OTHER_PQ, old_encoder=OLD['encoder_source_sha256'],
+                    new_encoder=NEW['encoder_source_sha256'], **kwargs):
+    return _arm_result(path, _pin_pair(old_pq, old_encoder), _pin_pair(new_pq, new_encoder), **kwargs)
+
+
+def test_an_encoder_only_bundle_takes_its_floor_from_another_prismaquant_tree(tmp_path):
+    """The census shape: PQ pin fixed, encoder pin moving, the dense floor proven on a 0afe6bc5-style tree."""
+    pins = write_pins(tmp_path/'pins.json', new=ENCODER_ONLY_NEW)
+    floor = _other_tree_arm(tmp_path/'floor.json', environment=_pin_pair(OTHER_PQ, NEW['encoder_source_sha256']))
+    same = _arm_result(tmp_path/'same.json', OLD, ENCODER_ONLY_NEW, routed_rates=(1024,), dense_rates=())
+    out = tmp_path/'bundle.json'
+    assert run('proof-bundle', '--pins', pins, '--fixture-id', _fixture_result(tmp_path/'fixture.json'),
+               '--arm', floor, '--arm', same, '--out', out) == 0
+    bundle = json.loads(out.read_text())
+    assert bundle['ok'] and not bundle['strata_missing'] and bundle['cross_tree_arms'] == 1
+    assert [(a['pin_scope'], a['new_pins']['prismaquant_source_sha256']) for a in bundle['arms']] == [
+        ('cross-tree', OTHER_PQ), ('same-tree', OLD['prismaquant_source_sha256'])]
+    assert bundle['arm_prismaquant_pins'] == sorted({OTHER_PQ, OLD['prismaquant_source_sha256']})
+    row = tmp_path/'row-0045'
+    make_row(row)
+    assert run('migrate', '--pins', pins, '--proof', out, '--row', row) == 0
+    assert run('verify', '--pins', pins, '--row', row) == 0
+
+
+def test_a_cross_tree_arm_that_moves_its_prismaquant_pin_is_refused(tmp_path, capsys):
+    pins = write_pins(tmp_path/'pins.json', new=ENCODER_ONLY_NEW)
+    fixture = _fixture_result(tmp_path/'fixture.json')
+    for name, arm in (('other-root', _other_tree_arm(tmp_path/'a.json', new_pq='8'*64)),
+                      ('from-the-pinned-root', _other_tree_arm(tmp_path/'b.json', old_pq=OLD['prismaquant_source_sha256']))):
+        assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', arm, '--out', tmp_path/'x.json') == 2, name
+        assert 'moves its PrismaQuant pin' in capsys.readouterr().err, name
+    assert not (tmp_path/'x.json').exists()
+
+
+def test_an_arm_with_another_encoder_transition_is_refused_from_either_tree(tmp_path, capsys):
+    pins = write_pins(tmp_path/'pins.json', new=ENCODER_ONLY_NEW)
+    fixture = _fixture_result(tmp_path/'fixture.json')
+    other_tree = _other_tree_arm(tmp_path/'a.json', new_encoder='7'*64)
+    same_tree = _arm_result(tmp_path/'b.json', OLD, dict(OLD, encoder_source_sha256='7'*64))
+    old_side = _other_tree_arm(tmp_path/'c.json', old_encoder='7'*64)
+    for arm in (other_tree, same_tree, old_side):
+        assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', arm, '--out', tmp_path/'x.json') == 2
+        assert 'encoder transition' in capsys.readouterr().err
+
+
+def test_no_cross_tree_arm_when_the_pins_file_moves_the_prismaquant_pin(tmp_path, capsys):
+    moving = write_pins(tmp_path/'moving.json')
+    assert run('proof-bundle', '--pins', moving, '--fixture-id', _fixture_result(tmp_path/'fixture.json'),
+               '--arm', _other_tree_arm(tmp_path/'a.json'), '--out', tmp_path/'x.json') == 2
+    assert 'the pins file moves the PrismaQuant pin' in capsys.readouterr().err
+    # Nor when nothing but settings move: there is no encoder transition for the other tree to prove.
+    settings_only = write_pins(tmp_path/'settings.json', new=OLD, drop_settings=list(KNOBS))
+    arm = _other_tree_arm(tmp_path/'b.json', new_encoder=OLD['encoder_source_sha256'], dropped=list(KNOBS))
+    assert run('proof-bundle', '--pins', settings_only, '--arm', arm, '--out', tmp_path/'x.json') == 2
+    assert 'proves only an encoder transition' in capsys.readouterr().err
+    assert not (tmp_path/'x.json').exists()
+
+
+def test_an_arm_that_ran_under_other_pins_than_it_declares_is_refused(tmp_path, capsys):
+    pins = write_pins(tmp_path/'pins.json', new=ENCODER_ONLY_NEW)
+    liar = _other_tree_arm(tmp_path/'a.json', environment=_pin_pair('8'*64, NEW['encoder_source_sha256']))
+    assert run('proof-bundle', '--pins', pins, '--fixture-id', _fixture_result(tmp_path/'fixture.json'),
+               '--arm', liar, '--out', tmp_path/'x.json') == 2
+    assert 'ran with prismaquant_source_sha256=' + '8'*64 in capsys.readouterr().err
+
+
+def test_a_bundle_is_rechecked_against_its_arm_results_when_loaded(tmp_path, capsys):
+    """A bundle written by hand cannot carry an arm the pin rule refuses, or relabel one."""
+    pins = write_pins(tmp_path/'pins.json', new=ENCODER_ONLY_NEW)
+    row = tmp_path/'row-0001'
+    make_row(row)
+    path = write_bundle(tmp_path/'bundle.json', new=ENCODER_ONLY_NEW)
+    bundle = json.loads(path.read_text())
+
+    def with_arm(arm, scope):
+        bundle['arms'] = [dict(result=str(arm), result_sha256=tool.sha256_file(arm), pin_scope=scope)]
+        path.write_text(json.dumps(bundle))
+        return run('dry-run', '--pins', pins, '--proof', path, '--row', row)
+
+    assert with_arm(_other_tree_arm(tmp_path/'moving.json', new_pq='8'*64), 'cross-tree') == 2
+    assert 'moves its PrismaQuant pin' in capsys.readouterr().err
+    good = _other_tree_arm(tmp_path/'good.json')
+    assert with_arm(good, 'same-tree') == 2
+    assert 'recorded as same-tree, but its pins make it cross-tree' in capsys.readouterr().err
+    assert with_arm(good, 'cross-tree') == 0
