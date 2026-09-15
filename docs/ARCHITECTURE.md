@@ -1,7 +1,43 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-14 · `claude/a4-routed-scale-guard-624`. Stamps
+As of: 2026-09-14 · `claude/575-tessera-route-gate`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-14, `claude/575-tessera-route-gate`) for **the Tessera
+served route-trace gate** (§7.1, §9.4; part of #575). Principle 14's serve-side
+leg had no consumer after the Gridbook lane retired. The Tessera lane now
+declares a required `route.trace` shipcard slot (`lane_specs/tessera.json`,
+replayed by `shipcard._verify_route_trace_record`).
+`python -m prismaquant.shipcard_cli fill-route-trace` reads every rank's
+`TESSERA_ROUTE_TRACE` file (`tessera.route_trace/1`), and
+`tessera_route_trace_gate.compare_route_traces` compares two histograms:
+
+- **Served:** the module count under each (route family, kind, activation
+  contract), at each token count M, on each rank. Every M and every rank must
+  give the same histogram.
+- **Priced:** one module per `config.json` `config_groups` target, keyed by
+  `scheme.family`, structure and activation contract. The contract is what the
+  packaged contract's `lane_eligibility.platforms[<platform>].executes` says
+  for the payload family whose `formats[].grid` equals the scheme's grid. The
+  platform is `card.build.tessera_serving_scope.target.platform`, or
+  `--platform`; when both are given they must agree.
+
+Agreement fills the slot. A difference exits 1 and names each contract with
+its priced and served counts. A missing, unreadable, empty, other-schema or
+compiled (`M*`) rank trace exits 3 as NOT VERIFIED and leaves the slot
+unfilled, so `tools/publish_artifact.py` refuses the card. `verify` replays the
+comparison from the carried traces and config text against the current
+packaged contract, and refuses carried config text that differs from the
+artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the trace
+and fill steps.
+
+The comparison is a histogram because the trace names no modules; Tessera #509
+asks it to emit module prefixes, rank and platform. Not covered: which module
+rode which contract, the activation representation (#567), compiled forwards,
+and the compressed-tensors lane, which has no route telemetry. The
+`validate_native_export` claim in CLAUDE.md principle 14 is corrected: that
+script never performed this leg. Gate: `tests/test_tessera_route_trace_gate.py`,
+on the real m44e1 TP2 traces, shown failing before the fix.
 
 Re-stamped (2026-09-14, `claude/a4-routed-scale-guard-624`) for **the routed
 NVFP4 static activation-scale export guard** (#624). The campaign prices one
@@ -15786,14 +15822,18 @@ closed: `route.census` names its slot, the derived vocabulary carries it
 and the arm runs `python -m prismaquant.lane_shipcard open --lane tessera
 --artifact <exported>` before exiting (`run-pipeline.sh:2452-2458`), so an
 un-run gate is an unfilled slot on a real card rather than a sentence in a JSON
-file. A Tessera card owes **seven** slots, and they arrive from two
+file. A Tessera card owes **eight** slots, and they arrive from two
 derivations that know nothing about each other and compose by union. The lane's
-six declared gates close six slots (`lane_gate_slots("tessera")` —
-`native_export.eager`, `native_export.graph`, `route.census`, `ship_gate`,
-`gold.kl`, `gold.ppl`), five of which are the base `REQUIRED_SLOTS` the lane
-happens to re-declare and one, `route.census`, that only this lane opens. The
-seventh is `uniform_control`, which `required_slots` adds because the artifact
-has a rate axis, not because any lane asked for it (#121, §7.1).
+seven declared gates close seven slots (`lane_gate_slots("tessera")` —
+`native_export.eager`, `native_export.graph`, `route.census`, `route.trace`,
+`ship_gate`, `gold.kl`, `gold.ppl`), five of which are the base
+`REQUIRED_SLOTS` the lane happens to re-declare and two, `route.census` and
+`route.trace` (#575), that only this lane opens. `route.trace` closes through
+`python -m prismaquant.shipcard_cli fill-route-trace`, which compares every
+rank's served `TESSERA_ROUTE_TRACE` contract histogram with the one the
+artifact's `config.json` prices, and stays unfilled when any rank's trace is
+missing. The eighth is `uniform_control`, which `required_slots` adds because
+the artifact has a rate axis, not because any lane asked for it (#121, §7.1).
 `open_lane_shipcard` stamps `export_container` into the card's build block so
 that second obligation rests on the card as well as on the checkpoint's
 `config.json`.

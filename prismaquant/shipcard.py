@@ -103,6 +103,16 @@ UNIFORM_CONTROL_SLOT = "uniform_control"
 #: carried boolean.
 ROUTE_CENSUS_SLOT = "route.census"
 
+#: Principle 14's serve-side leg (RobTand/prismaquant#575): the activation
+#: contracts a live serve dispatched, read from every rank's
+#: ``TESSERA_ROUTE_TRACE`` file, against the contracts the artifact's own
+#: ``config.json`` prices on its platform.  A separate slot from
+#: `route.census`: the census is a dedicated offline run judged per cell; the
+#: trace is what the served process itself counted.  The record carries the
+#: traces and the config text, and `verify` replays the comparison against the
+#: current packaged contract (`tessera_route_trace_gate`).
+ROUTE_TRACE_SLOT = "route.trace"
+
 #: Claims that can be attached to an already exported artifact.  Missing/null
 #: claims remain non-blocking for target-only artifacts, but every non-null
 #: recognized claim is verified automatically.  The only member until
@@ -1720,14 +1730,14 @@ def verify(
             problems.extend(_verify_uniform_control_record(
                 slot, record, card=card, model_dir=model_dir))
             continue
-        if slot == ROUTE_CENSUS_SLOT:
+        if slot in (ROUTE_CENSUS_SLOT, ROUTE_TRACE_SLOT):
             # Routed PAST the generic `passed` check for the same reason:
-            # the verdict lives in the carried route records, and the
-            # verifier below replays the priced-vs-served comparison from
-            # them, so a hand-set flag buys nothing.  Dispatched through the
-            # lane-slot registry (#162) so the admission invariant and the
-            # replay read the same entry.
-            problems.extend(LANE_SLOT_VERIFIERS[ROUTE_CENSUS_SLOT](
+            # the verdict lives in the carried route records (census) or
+            # route traces (trace), and the verifier below replays the
+            # priced-vs-served comparison from them, so a hand-set flag buys
+            # nothing.  Dispatched through the lane-slot registry (#162) so
+            # the admission invariant and the replay read the same entry.
+            problems.extend(LANE_SLOT_VERIFIERS[slot](
                 slot, record, card=card, model_dir=model_dir))
             continue
         if record.get("passed") is not True:
@@ -3139,8 +3149,128 @@ def _verify_route_census_record(
 #: with no entry here is REFUSED wherever it is declared, filled, or verified
 #: (RobTand/prismaquant#162). Lane-slot verifiers take ``(slot, record)``;
 #: the scoped census also receives the independent ``card``/``model_dir``.
+def make_route_trace_record(
+    *,
+    tool: str,
+    model_sha: str | None,
+    traces: Sequence[tuple[str, Any]],
+    expected_ranks: int,
+    config_json: str,
+    build: Mapping[str, Any] | None = None,
+    platform: str | None = None,
+    serve_fingerprint: str | None = None,
+    git_commit: str | None = None,
+) -> dict[str, Any]:
+    """Close `route.trace` from every rank's served trace (#575).
+
+    Raises ``RouteTraceNotVerified`` when no usable observation exists and
+    ``TesseraRouteTraceError`` when the observation disagrees with the price:
+    neither produces a record, so the slot stays unfilled and publication
+    refuses.  Only an agreeing verdict is written, and `verify` replays it.
+    """
+    from copy import deepcopy
+
+    from prismaquant import tessera_route_trace_gate as gate
+
+    executes, formats = gate.load_trace_contract()
+    resolved = gate.resolve_platform(build, platform)
+    try:
+        config = json.loads(config_json)
+    except ValueError as exc:
+        raise gate.TesseraRouteTraceError(f"config.json is not JSON: {exc}") from exc
+    verdict = gate.compare_route_traces(
+        list(traces), expected_ranks=expected_ranks, config=config,
+        platform=resolved, executes_by_platform=executes, formats=formats)
+    if verdict["status"] == gate.NOT_VERIFIED:
+        raise gate.RouteTraceNotVerified(verdict["detail"])
+    if verdict["status"] != gate.AGREE:
+        raise gate.TesseraRouteTraceError(verdict["detail"])
+    carried = []
+    for label, payload in traces:
+        if isinstance(payload, (str, bytes)):
+            payload = json.loads(payload)
+        carried.append({"rank": label, "trace": deepcopy(payload)})
+    return make_record(
+        slot=ROUTE_TRACE_SLOT,
+        tool=tool,
+        passed=True,
+        model_sha=model_sha,
+        metrics={
+            "n_ranks": len(carried),
+            "n_priced_modules": sum(verdict["priced"].values()),
+            "n_served_modules": sum((verdict["served"] or {}).values()),
+        },
+        detail=verdict["detail"],
+        serve_fingerprint=serve_fingerprint,
+        git_commit=git_commit,
+        extra={
+            "route_traces": carried,
+            "expected_ranks": expected_ranks,
+            "platform": resolved,
+            "config_json": config_json,
+            "trace_verdict": verdict,
+        },
+    )
+
+
+def _verify_route_trace_record(
+    slot: str,
+    record: Mapping[str, Any],
+    *,
+    card: Mapping[str, Any] | None = None,
+    model_dir: str | os.PathLike | None = None,
+) -> list[str]:
+    """Replay the served-vs-priced contract histogram from the carried traces."""
+    from prismaquant import tessera_route_trace_gate as gate
+
+    traces = record.get("route_traces")
+    config_json = record.get("config_json")
+    expected = record.get("expected_ranks")
+    problems: list[str] = []
+    if not isinstance(traces, list) or not traces or not all(
+            isinstance(row, Mapping) and isinstance(row.get("rank"), str)
+            for row in traces):
+        problems.append(
+            f"{slot}: record carries no route_traces; an absent observation is "
+            "not a clean bill")
+    if not isinstance(config_json, str) or not config_json:
+        problems.append(f"{slot}: record carries no config_json to price against")
+    if type(expected) is not int:
+        problems.append(f"{slot}: record carries no expected_ranks")
+    if problems:
+        return problems
+    if model_dir is not None:
+        try:
+            on_disk = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
+        except (OSError, ValueError) as exc:
+            return [f"{slot}: cannot read the artifact's config.json: {exc}"]
+        if on_disk != config_json:
+            problems.append(
+                f"{slot}: carried config_json differs from the artifact's "
+                "config.json; the traces were compared against another price")
+    try:
+        executes, formats = gate.load_trace_contract()
+        platform = gate.resolve_platform((card or {}).get("build"), record.get("platform"))
+        verdict = gate.compare_route_traces(
+            [(row["rank"], row.get("trace")) for row in traces],
+            expected_ranks=expected, config=json.loads(config_json),
+            platform=platform, executes_by_platform=executes, formats=formats)
+    except (gate.TesseraRouteTraceError, ValueError) as exc:
+        return problems + [f"{slot}: REFUSED on replay: {exc}"]
+    if verdict["status"] != gate.AGREE:
+        problems.append(f"{slot}: {verdict['detail']}")
+    if record.get("passed") is not True:
+        problems.append(f"{slot}: record carries passed={record.get('passed')!r}")
+    if record.get("trace_verdict") != verdict:
+        problems.append(
+            f"{slot}: carried trace_verdict differs from the replay against "
+            "the current packaged contract")
+    return problems
+
+
 LANE_SLOT_VERIFIERS: dict[str, Callable[..., list[str]]] = {
     ROUTE_CENSUS_SLOT: _verify_route_census_record,
+    ROUTE_TRACE_SLOT: _verify_route_trace_record,
 }
 
 

@@ -1,0 +1,410 @@
+{
+ "schema": "tessera.route_trace/1",
+ "pid": 427,
+ "started_utc": "2026-09-15T02:29:05.442412+00:00",
+ "flushed_utc": "2026-09-15T02:31:03.944395+00:00",
+ "flushes": 8,
+ "note": "launches counted per module per served dispatch; a shape of M* means the record was written while torch.compile was tracing, where one graph serves every M and a count is not a launch count",
+ "entries": [
+  {
+   "policy": "TESSERA_BF16:resident",
+   "shape": "M178:N4096:K6144",
+   "symbol": "torch.mm",
+   "decoder": "torch_window",
+   "contract": "bf16_unquantized",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_BF16:resident",
+   "shape": "M1:N4096:K6144",
+   "symbol": "torch.mm",
+   "decoder": "torch_window",
+   "contract": "bf16_unquantized",
+   "kind": "dense",
+   "launches": 94,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_BF16:resident",
+   "shape": "M2048:N4096:K6144",
+   "symbol": "torch.mm",
+   "decoder": "torch_window",
+   "contract": "bf16_unquantized",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_BF16:resident",
+   "shape": "M2:N4096:K6144",
+   "symbol": "torch.mm",
+   "decoder": "torch_window",
+   "contract": "bf16_unquantized",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_BF16:resident",
+   "shape": "M356:N4096:K6144",
+   "symbol": "torch.mm",
+   "decoder": "torch_window",
+   "contract": "bf16_unquantized",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_BF16:resident",
+   "shape": "M4:N4096:K6144",
+   "symbol": "torch.mm",
+   "decoder": "torch_window",
+   "contract": "bf16_unquantized",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_BF16:resident",
+   "shape": "M5:N4096:K6144",
+   "symbol": "torch.mm",
+   "decoder": "torch_window",
+   "contract": "bf16_unquantized",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_BF16:resident",
+   "shape": "M6:N4096:K6144",
+   "symbol": "torch.mm",
+   "decoder": "torch_window",
+   "contract": "bf16_unquantized",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M178:N12288:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "torch_window",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N12288:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "torch_window",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 94,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N12288:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "torch_window",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2:N12288:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "torch_window",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M356:N12288:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "torch_window",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M4:N12288:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "torch_window",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M5:N12288:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "torch_window",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M6:N12288:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "torch_window",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M178:N2048:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M178:N2048:K4096",
+   "symbol": "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS",
+   "decoder": "torch_materialize_stock",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "moe",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M178:N4096:K1024",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M1:N2048:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 94,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M1:N2048:K4096",
+   "symbol": "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS",
+   "decoder": "torch_materialize_stock",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "moe",
+   "launches": 94,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M1:N4096:K1024",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 94,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M2048:N2048:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M2048:N2048:K4096",
+   "symbol": "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS",
+   "decoder": "torch_materialize_stock",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "moe",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M2048:N4096:K1024",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M2:N2048:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M2:N2048:K4096",
+   "symbol": "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS",
+   "decoder": "torch_materialize_stock",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "moe",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M2:N4096:K1024",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M356:N2048:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M356:N2048:K4096",
+   "symbol": "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS",
+   "decoder": "torch_materialize_stock",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "moe",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M356:N4096:K1024",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M4:N2048:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M4:N2048:K4096",
+   "symbol": "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS",
+   "decoder": "torch_materialize_stock",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "moe",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M4:N4096:K1024",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M5:N2048:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M5:N2048:K4096",
+   "symbol": "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS",
+   "decoder": "torch_materialize_stock",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "moe",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M5:N4096:K1024",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M6:N2048:K4096",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M6:N2048:K4096",
+   "symbol": "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS",
+   "decoder": "torch_materialize_stock",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "moe",
+   "launches": 1,
+   "modules": 1
+  },
+  {
+   "policy": "TESSERA_NVFP4:resident",
+   "shape": "M6:N4096:K1024",
+   "symbol": "torch._scaled_mm",
+   "decoder": "native_span2",
+   "contract": "e2m1_group16_ue4m3_static",
+   "kind": "dense",
+   "launches": 1,
+   "modules": 1
+  }
+ ]
+}
