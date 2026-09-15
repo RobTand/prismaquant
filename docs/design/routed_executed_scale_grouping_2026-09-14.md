@@ -51,8 +51,11 @@ and size of the dloss change are not measured.
   (`qualified: false`) on the build anchor, beside the closed `priced_inputs`
   block that Tessera's exporter reads.
 
-A routed A4 export can proceed today. Its card says the A-side prices are per
-unit and not qualified.
+A routed A4 export passes this guard today, and the build anchor records its
+A-side prices as per unit and not qualified. Whether the lane admits the
+selection at all is a separate gate: the pinned `runtime_contract.json` lists no
+routed E2M1_K2 cell, so a served routed A4 export needs the pin bump
+regardless.
 
 ## The real fix: rescore routed cells under the executed grouping
 
@@ -107,7 +110,7 @@ refuses and a scale file that still ships per-unit values.
    (`verify_expert_wire_record`, then `api.verify_cached_unit`), and refuse on
    mismatch.
 3. Call `_prepare_anchor` (`:488`) with the group G. G enters only in
-   `activation_qdq` (`:532`). Skip encoding and take the render from the
+   `activation_qdq` (`:534-538`). Skip encoding and take the render from the
    production-cache bf16 entry, or decode the verified wire, then score it
    through `_finish_anchor` (`:562`) unchanged.
 
