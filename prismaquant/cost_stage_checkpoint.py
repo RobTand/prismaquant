@@ -110,6 +110,48 @@ def atomic_write_bytes(path: Path, payload: bytes) -> None:
         os.close(directory_fd)
 
 
+#: Record fields that name one row's own seals; a merged record drops them.
+MIGRATION_ROW_FIELDS = frozenset({"old_identity_sha256", "new_identity_sha256", "shards",
+                                  "receipt_seals", "cost_seals", "run_id"})
+
+
+def merge_identity_migrations(per_source: Mapping[str, object], *,
+                              error: type[Exception] = ValueError) -> "list | None":
+    """The union of ``identity_migration`` records from several checkpoints, or None.
+
+    A re-sealed checkpoint (tools/reseal_campaign_identity.py) carries the pins
+    it was priced under, the pins it now carries, and the proof that licensed
+    the change.  A merge or union rebuilds its manifest and payload from fixed
+    keys, so without this the record would end there and the output would
+    show only its new pins with nothing saying they were amended.  Records are
+    deduplicated on the proof bundle and the pin pair, so sources migrated
+    under one proof contribute one record (the first in source-name order);
+    the fields that differ between such sources (clock, strata, tool commit)
+    stay in each source's own evidence.  A source without the key contributes
+    nothing: both callers refuse sources whose pins differ, so an unmigrated
+    source cannot sit beside a migrated one.
+    """
+    merged: list = []
+    seen = set()
+    present = False
+    for name in sorted(per_source):
+        records = per_source[name]
+        if records is None:
+            continue
+        if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
+            raise error(f"{name}: identity_migration is not a list of records")
+        present = True
+        for record in records:
+            key = (record.get("proof_bundle_sha256"),
+                   json.dumps(record.get("old_pins"), sort_keys=True),
+                   json.dumps(record.get("new_pins"), sort_keys=True))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append({k: v for k, v in record.items() if k not in MIGRATION_ROW_FIELDS})
+    return merged if present else None
+
+
 def unit_path(root: Path, qname: str) -> Path:
     digest = hashlib.sha256(str(qname).encode("utf-8")).hexdigest()
     return root / "units" / f"{digest}.pkl"
