@@ -181,6 +181,29 @@ def git_commit(tree: str) -> str:
         return "unknown"
 
 
+#: The source files whose code derives a row's read set: this module's
+#: ``build_manifest`` and the ``Campaign`` expansion it walks.  Relative to the
+#: repository root.
+PRODUCER_SOURCES = ("experiments/glm_data_manifests.py",
+                    "experiments/glm_arc_prewarm.py")
+
+
+def producer_source_sha256() -> str:
+    """One digest over the producer's source, the same on every box.
+
+    Each file contributes its path and length before its bytes, so moving
+    code from one file to the other is a different digest.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    digest = hashlib.sha256()
+    for relative in PRODUCER_SOURCES:
+        with open(os.path.join(root, relative), "rb") as fh:
+            data = fh.read()
+        digest.update(relative.encode() + b"\0" + str(len(data)).encode() + b"\0")
+        digest.update(data)
+    return digest.hexdigest()
+
+
 class CachedSizeCampaign(Campaign):
     """``Campaign`` whose capture sizes come from a cached inventory.
 
@@ -343,11 +366,20 @@ def deterministic_provenance(workspace: str, campaign: Campaign,
     hostname, a clock reading -- gives the same row a new key on every submit.
     That is not a cosmetic loss: a finished row stops being a cache hit and is
     re-run, which is the opposite of what re-running ``submit`` is for.  Every
-    field here is a property of the campaign and the tree, not of the run.
+    field here is a property of the campaign and the producer, not of the run.
+
+    The producer is named by the digest of its own source, not by ``git
+    rev-parse HEAD``.  ``plan`` publishes these bytes and runs as a
+    PrismaBuild action, where ``HEAD`` is pbrun's snapshot commit rather than
+    the submitter's, and inside a container, where git exits 128 on a checkout
+    another uid owns and ``git_commit`` reads that as ``"unknown"``.  A
+    host-side ``submit`` re-deriving the same row would then write a different
+    commit, and a different action key, for the same read set.  The source
+    digest is the same wherever the producer runs.
     """
     return {
         "tool": "prismaquant/experiments/glm_data_manifests.py",
-        "commit": git_commit(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "producer_sha256": producer_source_sha256(),
         "workspace": workspace,
         "capture_manifest": campaign.capture_manifest_path,
         "size_source": size_source,

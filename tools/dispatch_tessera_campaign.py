@@ -1343,15 +1343,7 @@ def cmd_plan(args) -> int:
     for entry in planned:
         entry["admissible"] = entry["row_id"] in admitted
 
-    # A refused fit check must not rewrite selections still named by an
-    # existing published manifest. Derive every row before publishing bytes.
-    units_dir.mkdir(parents=True, exist_ok=True)
-    for units_path, selection_text in selection_writes:
-        units_path.write_text(selection_text)
     manifest = workspace / "manifest.json"
-    manifest.write_text(json.dumps(
-        [row for entry, row in zip(planned, rows) if entry["admissible"]],
-        indent=2) + "\n")
     plan = {
         "schema": PLAN_SCHEMA,
         "model": spec["model"],
@@ -1405,6 +1397,26 @@ def cmd_plan(args) -> int:
         },
         "rows": planned,
     }
+
+    # Every published row names the bytes PrismaBuild's prewarm loop warms it
+    # from, so a subset copied out of manifest.json carries them too. Only the
+    # producer knows a row's read set, and a row whose read set cannot be
+    # derived refuses the plan here.
+    published_rows, manifest_writes = planned_data_manifests(
+        workspace, plan,
+        {str(path): json.loads(text) for path, text in selection_writes},
+        [row for entry, row in zip(planned, rows) if entry["admissible"]])
+
+    # A refused fit check, or a row with no derivable read set, must not
+    # rewrite selections still named by an existing published manifest.
+    # Derive every row and every data manifest before publishing bytes.
+    units_dir.mkdir(parents=True, exist_ok=True)
+    for units_path, selection_text in selection_writes:
+        units_path.write_text(selection_text)
+    for path, blob in manifest_writes:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(blob)
+    manifest.write_text(json.dumps(published_rows, indent=2) + "\n")
     (workspace / "plan.json").write_text(json.dumps(plan, indent=2) + "\n")
     print(f"[dispatch] planned {len(rows)} rows over {len(ordered)} anchor "
           f"groups, {len(admissible)} submitted -> {manifest}")
@@ -1454,20 +1466,29 @@ def cmd_check(args) -> int:
     records = _checked_manifest(args, manifest=manifest)
     print(f"[dispatch] {len(records)} rows in {manifest} declare a demand "
           "their own argv supports")
+    rows = json.loads(Path(manifest).read_text())
+    require_data_manifests(rows, where=manifest)
+    print(f"[dispatch] {len(rows)} rows in {manifest} name a data manifest "
+          "PrismaBuild can warm them from")
     return 0
 
-#: Where ``submit`` writes the per-row read sets and the manifest that names
-#: them.  Both are derived, so both are rewritten on every submit and neither
-#: is the planned ``manifest.json``: ``plan`` owns that file.
+#: Where ``plan`` writes each row's read set, and the manifest ``submit`` hands
+#: the fleet.  ``submit`` re-derives the read sets and refuses one that no
+#: longer matches the bytes ``plan`` published.
 DATA_MANIFEST_DIR = "data-manifests"
 SUBMITTED_MANIFEST = "manifest.submitted.json"
+
+
+class DataManifestRefused(RuntimeError):
+    """A row would reach PrismaBuild without the read set it is warmed from."""
 
 
 def _manifest_producer():
     """The campaign's data-manifest producer, imported from ``experiments/``.
 
     It is imported here rather than at module load because it reads the
-    campaign's plan and capture manifest, which only ``submit`` needs.
+    campaign's plan and capture manifest, which only ``plan``, ``check`` and
+    ``submit`` need.
     """
     root = Path(__file__).resolve().parents[1]
     if str(root) not in sys.path:
@@ -1475,6 +1496,97 @@ def _manifest_producer():
     from experiments import glm_data_manifests
 
     return glm_data_manifests
+
+
+def _derived_data_manifests(workspace: Path, rows: list[dict], campaign, *,
+                            out_dir: Path) -> list[tuple[str, Path, bytes]]:
+    """Each row's id, manifest path and manifest bytes, or a refusal.
+
+    Writes nothing, so a caller can refuse the whole set before any byte of it
+    is published.
+    """
+    producer = _manifest_producer()
+    provenance = producer.deterministic_provenance(
+        str(workspace), campaign, "stat")
+    derived = []
+    for index, row in enumerate(rows):
+        row_id = producer.row_id_of(row)
+        if row_id is None:
+            raise RuntimeError(
+                f"row {index} names no single units/row-XXXX.json in its argv, "
+                "so its read set cannot be derived; refusing to submit it "
+                "without a data manifest")
+        if row_id not in campaign.rows:
+            raise RuntimeError(
+                f"{row_id} is not a row of {workspace}/plan.json")
+        manifest = producer.build_manifest(
+            campaign, row_id, provenance, row.get("argv"))
+        blob = producer.check_manifest_bytes(
+            json.dumps(manifest, indent=1, sort_keys=False).encode() + b"\n",
+            where=row_id)
+        derived.append((row_id, out_dir / f"{row_id}.data-manifest.json", blob))
+    return derived
+
+
+def planned_data_manifests(workspace: Path, plan: dict,
+                           selections: dict[str, dict], rows: list[dict]
+                           ) -> tuple[list[dict], list[tuple[Path, bytes]]]:
+    """The rows ``plan`` publishes, each naming its manifest, and the bytes to write.
+
+    Derived from the plan and the selections ``plan`` is about to write, not
+    from disk: until the whole set is derived nothing is published, and the
+    files on disk may still be the previous plan's.  ``argv`` and ``demand``
+    are the row's action identity and are returned byte-identical; the only
+    change to a row is ``data_manifest``, appended last.
+    """
+    producer = _manifest_producer()
+    campaign = producer.Campaign(str(workspace), plan=plan,
+                                 selections=selections)
+    derived = _derived_data_manifests(workspace, rows, campaign,
+                                      out_dir=workspace / DATA_MANIFEST_DIR)
+    return ([{**row, "data_manifest": str(path)}
+             for row, (_, path, _) in zip(rows, derived)],
+            [(path, blob) for _, path, blob in derived])
+
+
+def require_data_manifests(rows: list[dict], *, where) -> None:
+    """Refuse a manifest any of whose rows PrismaBuild could not warm.
+
+    ``pbcampaign`` submits a row with no ``data_manifest`` without a word, and
+    the row then reads its inputs off cold spindles: every partial release of
+    ``extension-r1024-02`` and of the 09-15 census did, because each was a
+    filtered copy of a ``manifest.json`` planned before ``plan`` attached the
+    manifests.  This is the check a subset goes through before it is released,
+    so it names every such row at once.  It reads the manifest each row names
+    and holds it to the rules PrismaBuild applies, and to belonging to the row
+    that names it; it does not re-derive the read set, which ``submit`` does.
+    """
+    producer = _manifest_producer()
+    refusals = []
+    for index, row in enumerate(rows):
+        label = _row_label(_inner_campaign_argv(row), index)
+        named = row.get("data_manifest")
+        if not named:
+            refusals.append(f"{label}: names no data manifest")
+            continue
+        try:
+            blob = Path(named).read_bytes()
+            manifest = producer.check_manifest(
+                json.loads(producer.check_manifest_bytes(blob, where=label)),
+                where=label)
+        except (OSError, ValueError, SystemExit) as error:
+            refusals.append(f"{label}: {named}: {error}")
+            continue
+        owner = manifest["annotations"].get("row_id")
+        if owner != producer.row_id_of(row):
+            refusals.append(f"{label}: {named} is the read set of {owner}")
+    if refusals:
+        raise DataManifestRefused(
+            f"{len(refusals)} of {len(rows)} rows in {where} would reach "
+            "PrismaBuild without a data manifest its prewarm loop can warm "
+            "them from:\n" + "\n".join(refusals) + "\nA subset copied from a "
+            "manifest.json that plan published carries one; re-plan a "
+            "workspace planned before plan attached them.")
 
 
 def attach_data_manifests(workspace: Path, rows: list[dict], *,
@@ -1493,38 +1605,50 @@ def attach_data_manifests(workspace: Path, rows: list[dict], *,
     what ``plan`` wrote; only the ``data_manifest`` key is added.  A row whose
     manifest cannot be built is refused here, where the reason is readable,
     rather than submitted blind.
+
+    ``plan`` already attached a manifest to every row it published, so for
+    those rows this is a re-derivation: the row must name the path derived
+    now, and the file there must hold exactly the bytes derived now.  A row
+    that does not is refused rather than rewritten, because a subset of the
+    plan may already have sealed the published bytes into an action key, and
+    the same row submitted under different bytes would run twice.  A row
+    planned before ``plan`` attached manifests names none, and gets one here.
     """
     producer = _manifest_producer()
     campaign = producer.Campaign(str(workspace))
-    provenance = producer.deterministic_provenance(
-        str(workspace), campaign, "stat")
     out_dir = out_dir or workspace / DATA_MANIFEST_DIR
+    derived = _derived_data_manifests(workspace, rows, campaign, out_dir=out_dir)
+
+    drifted = []
+    for row, (row_id, path, blob) in zip(rows, derived):
+        named = row.get("data_manifest")
+        if named is None:
+            continue
+        if named != str(path):
+            drifted.append(f"{row_id}: names {named}, derives {path}")
+            continue
+        try:
+            current = Path(named).read_bytes()
+        except OSError as error:
+            drifted.append(f"{row_id}: {named} is unreadable: {error}")
+            continue
+        if current != blob:
+            drifted.append(f"{row_id}: {named} differs from the read set "
+                           "derived now")
+    if drifted:
+        raise DataManifestRefused(
+            f"{len(drifted)} of {len(rows)} rows name a data manifest that is "
+            "not the one their read set derives now:\n" + "\n".join(drifted)
+            + "\nThe row's inputs or the producer changed since plan. "
+            "Submitting under new bytes would re-key rows a released subset "
+            "may already run; re-plan the workspace instead.")
+
     out_dir.mkdir(parents=True, exist_ok=True)
-
     attached: list[dict] = []
-    for index, row in enumerate(rows):
-        row_id = producer.row_id_of(row)
-        if row_id is None:
-            raise RuntimeError(
-                f"row {index} names no single units/row-XXXX.json in its argv, "
-                "so its read set cannot be derived; refusing to submit it "
-                "without a data manifest")
-        if row_id not in campaign.rows:
-            raise RuntimeError(
-                f"{row_id} is not a row of {workspace}/plan.json")
-        manifest = producer.build_manifest(
-            campaign, row_id, provenance, row.get("argv"))
-        path = out_dir / f"{row_id}.data-manifest.json"
-        blob = producer.check_manifest_bytes(
-            json.dumps(manifest, indent=1, sort_keys=False).encode() + b"\n",
-            where=row_id)
-        path.write_bytes(blob)
+    for row, (_, path, blob) in zip(rows, derived):
+        if row.get("data_manifest") is None:
+            path.write_bytes(blob)
         attached.append({**row, "data_manifest": str(path)})
-
-    missing = [producer.row_id_of(row) for row in attached
-               if not row.get("data_manifest")]
-    if missing:
-        raise RuntimeError(f"rows without a data manifest: {missing}")
     return attached
 
 
@@ -1535,8 +1659,9 @@ def cmd_submit(args) -> int:
     # about twenty seconds in, which PrismaBuild records as failed with no
     # retry (RobTand/prismaquant#522). Nothing about that is cheaper to find
     # out later, so the demands are re-derived before any row is submitted.
-    # This reads the planned rows, and attaching a manifest below changes
-    # neither ``argv`` nor ``demand``, so what is checked is what is sent.
+    # This reads the planned rows, and re-deriving their manifests below
+    # changes neither ``argv`` nor ``demand``, so what is checked is what is
+    # sent.
     _checked_manifest(args, manifest=manifest)
     rows = attach_data_manifests(workspace, json.loads(manifest.read_text()))
     submitted = workspace / SUBMITTED_MANIFEST

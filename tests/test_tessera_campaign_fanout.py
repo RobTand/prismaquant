@@ -47,10 +47,17 @@ def test_standalone_planner_without_pythonpath(tmp_path):
         sys.executable, str(root / "tools/dispatch_tessera_campaign.py"),
         "plan", "--spec", str(spec), "--workspace", str(workspace),
     ], cwd=tmp_path, env=env, text=True, capture_output=True)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    rows = json.loads((workspace / "manifest.json").read_text())
-    assert len(rows) == 1
-    assert rows[0]["argv"][3] == "prismaquant.tessera_campaign"
+    # The planner resolves both ``prismaquant`` and the data-manifest producer
+    # in ``experiments/`` without PYTHONPATH, derives the row, and then
+    # refuses it: this model directory holds no shard, so the row reads
+    # nothing PrismaBuild could warm, and a plan that cannot say what its
+    # rows read publishes none of them.  The rows a real model plans are
+    # covered in-process by ``tests/test_campaign_plan_publishes_data_manifests.py``.
+    output = completed.stdout + completed.stderr
+    assert completed.returncode != 0, output
+    assert "ModuleNotFoundError" not in output and "ImportError" not in output
+    assert "entries must be a non-empty array" in output, output
+    assert not (workspace / "manifest.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +637,18 @@ def _write_model(model, shapes):
         {"weight_map": {key: shard.name for key in header}}))
 
 
+@pytest.fixture
+def shared_mount(tmp_path, monkeypatch):
+    """The fixture's root is the mount every data manifest entry sits under.
+
+    ``plan`` derives each published row's read set, and the fleet warms only
+    the shared mount, so a planned row reading outside it is refused.
+    """
+    from experiments import glm_data_manifests
+    monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(tmp_path))
+    return tmp_path
+
+
 def _partition_workspace(tmp_path, *, wide=True, box_memory_gb=104):
     """A census whose last anchor group is far wider than the others."""
     model = tmp_path / "model"
@@ -666,7 +685,7 @@ def _plan_args(spec, workspace, **overrides):
 
 
 def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
-        tmp_path, capsys):
+        tmp_path, capsys, shared_mount):
     import dispatch_tessera_campaign as dispatch
 
     spec, workspace = _partition_workspace(tmp_path)
@@ -714,7 +733,7 @@ def test_a_plan_whose_every_row_is_too_wide_refuses(tmp_path):
     assert not (workspace / "manifest.json").exists()
 
 
-def test_a_spec_with_no_box_budget_keeps_every_row(tmp_path, capsys):
+def test_a_spec_with_no_box_budget_keeps_every_row(tmp_path, capsys, shared_mount):
     import dispatch_tessera_campaign as dispatch
 
     spec, workspace = _partition_workspace(tmp_path, box_memory_gb=None)
@@ -728,13 +747,15 @@ def test_a_spec_with_no_box_budget_keeps_every_row(tmp_path, capsys):
         capsys.readouterr().out
 
 
-def test_failed_fit_replan_preserves_published_selection_bytes(tmp_path):
+def test_failed_fit_replan_preserves_published_selection_bytes(tmp_path, shared_mount):
     import dispatch_tessera_campaign as dispatch
 
     spec, workspace = _partition_workspace(tmp_path)
     assert dispatch.cmd_plan(_plan_args(spec, workspace, rows_per_box=1)) == 0
     published = [workspace / 'manifest.json', workspace / 'plan.json',
-                 *sorted((workspace / 'units').glob('row-*.json'))]
+                 *sorted((workspace / 'units').glob('row-*.json')),
+                 *sorted((workspace / 'data-manifests').glob('*.json'))]
+    assert any(path.parent.name == 'data-manifests' for path in published)
     before = {path: path.read_bytes() for path in published}
 
     # The same census now bundles two groups into each selection. The large
@@ -746,7 +767,8 @@ def test_failed_fit_replan_preserves_published_selection_bytes(tmp_path):
     assert {path: path.read_bytes() for path in published} == before
 
 
-def test_submit_hands_the_fleet_the_admissible_rows_only(tmp_path, monkeypatch):
+def test_submit_hands_the_fleet_the_admissible_rows_only(
+        tmp_path, monkeypatch, shared_mount):
     import types
 
     import dispatch_tessera_campaign as dispatch
@@ -761,17 +783,11 @@ def test_submit_hands_the_fleet_the_admissible_rows_only(tmp_path, monkeypatch):
         return types.SimpleNamespace(returncode=0, stdout="")
 
     monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
-    # Every manifest entry must sit under the mount the manifest declares, and
-    # the fleet warms only the shared mount. The fixture's campaign is the
-    # shared mount for the length of this test.
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(tmp_path))
 
     args = types.SimpleNamespace(workspace=workspace, wait_s=1)
     assert dispatch.cmd_submit(args) == 0
 
-    # ``submit`` also asks git for the tree it built the manifests from, so
-    # the submission is picked out by name rather than by being the only
+    # The submission is picked out by name rather than by being the only
     # subprocess the run makes.
     submissions = [command for command in seen
                    if any("pbcampaign" in str(word) for word in command)]

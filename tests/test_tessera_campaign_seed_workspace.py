@@ -40,6 +40,12 @@ def test_plan_reuses_partial_seed_and_prices_unstarted_row(tmp_path, monkeypatch
     monkeypatch.setattr(d, 'load_spec', lambda _: spec)
     monkeypatch.setattr(d, '_row_memory_gb', lambda *a, **k: 1)
     monkeypatch.setattr(d, '_row', lambda spec, argv, **kw: {'argv': argv, 'demand': {'mem_gb': 1}})
+    # ``plan`` also derives every published row's data manifest, from the
+    # shards the model directory holds. This fixture's model is a bare path;
+    # the seed gates are what is under test, and the read set is covered by
+    # ``tests/test_campaign_plan_publishes_data_manifests.py``.
+    monkeypatch.setattr(d, 'planned_data_manifests',
+                        lambda workspace, plan, selections, rows: (rows, []))
     args = SimpleNamespace(spec='unused', workspace=str(workspace), calibration_cache=None,
         stack_sample=None, seed_checkpoint=None, seed_wire_dir=None, seed_workspace=str(root),
         groups_per_row=1, rows_per_box=1, timeout_s=60, stack_sample_seed=0, audit_rate=10, probe=None)

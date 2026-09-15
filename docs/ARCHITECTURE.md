@@ -1,7 +1,37 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-15 · `claude/tessera-v29-pin`. Stamps
+As of: 2026-09-15 · `claude/plan-data-manifest`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-15, `claude/plan-data-manifest`) for the campaign plan
+path. **`dispatch_tessera_campaign.py plan` now attaches a PrismaBuild data
+manifest to every row it publishes, and refuses the plan when a row's read
+set cannot be derived.** Until now only `submit` attached one, and only to
+the whole `manifest.json`. Every partial release was a filtered copy of
+`manifest.json` handed to `pbcampaign.py` directly, so none of its rows
+carried a manifest and PrismaBuild's prewarm loop never warmed them:
+`extension-r1024-02`'s `manifest.remaining-130.json` and `remaining-19-*`, and
+the 09-15 census gate and rest sets, which read cold at about 3 Gbps against
+3,298.7 MB/s for a warm row (306.9 MB/s cold, 2026-09-11). A subset copied from
+what `plan` publishes now inherits `data_manifest`. The manifests are derived
+from the in-memory plan and selections after the fit check and before any
+byte is written, so a refused row rewrites nothing an existing manifest still
+names. `argv` and `demand` are byte-identical to what `plan` wrote before;
+`data_manifest` is appended last. `submit` re-derives each row's manifest and
+refuses a row whose published bytes or path differ, rather than re-keying rows
+a released subset may already run. `check --manifest` refuses a row that names
+no data manifest, names one PrismaBuild would refuse, or names another row's.
+The row manifest's `produced_by` names the producer by `producer_sha256`, a
+digest of `experiments/glm_data_manifests.py` and
+`experiments/glm_arc_prewarm.py`, instead of `git rev-parse HEAD`: `plan`
+runs as a PrismaBuild action, where `HEAD` is pbrun's snapshot commit, and
+inside a container, where git refuses a checkout another uid owns. Either one
+would have given the same row different bytes, and a different action key, at
+plan and at submit. The joint, allocation and export pass manifests still
+carry `commit` from `deterministic_entry_provenance`. Gates:
+`tests/test_campaign_plan_publishes_data_manifests.py`,
+`tests/test_tessera_campaign_fanout.py`,
+`tests/test_glm_data_manifest_at_submit.py`.
 
 Re-stamped (2026-09-15, `claude/tessera-v29-pin`) for the Tessera pin at
 **runtime contract v29** (#632, consuming Tessera #517 at master `4c384e6049`,
@@ -11048,23 +11078,29 @@ whose `menu_mode` disagrees.
 `submit` / `merge` over `pbcampaign`. Rows are portable (no host pin),
 GPU-demanding, not exclusive, `retry_safe`, and carry a memory demand computed
 from the phase plan the row checks itself against, plus the measured process
-floor and the guard's margin (#522). `check` re-derives that demand from a
-manifest row's own argv and refuses an under-declared or over-capacity row.
-`submit` runs two gates in order, both before any row reaches the fleet: that
-demand check on the planned rows first, then a data manifest for every row --
-the exact shared-mount files and byte extents the row will read, built by
-`experiments/glm_data_manifests.py` from the row's units file and its own argv
--- refusing a row whose read set it cannot derive, because a row without one is
-invisible to PrismaBuild's prewarm loop and starts against cold spindles. A row
-whose argv names `--seed-wire-dir` and whose directory yields no readable file
-is refused for the same reason: zero seed bytes against a named directory is a
-broken read set, not an empty one. The two gates are independent -- one reads
-`demand`, the other reads the bytes the row will open -- and attaching a
-manifest changes neither `argv` nor `demand`, so what `check` verified is what
-is submitted. The manifest is a `pbrun` input and leaves the campaign argv
-byte-identical; it is written under `WORKSPACE/data-manifests/` and the rows
-that name it under `WORKSPACE/manifest.submitted.json`, so `plan`'s
-`manifest.json` is never rewritten. Re-running the manifest **is**
+floor and the guard's margin (#522). Every row `plan` publishes names a data
+manifest -- the exact shared-mount files and byte extents the row will read,
+built by `experiments/glm_data_manifests.py` from the row's selection and its
+own argv, written under `WORKSPACE/data-manifests/` -- so a subset copied out of
+`manifest.json` carries it. `plan` derives every manifest after the fit check
+and before publishing any byte, and refuses when a row's read set cannot be
+derived, because a row without one is invisible to PrismaBuild's prewarm loop
+and starts against cold spindles. A row whose argv names `--seed-wire-dir` and
+whose directory yields no readable file is refused for the same reason: zero
+seed bytes against a named directory is a broken read set, not an empty one.
+The manifest's `produced_by` holds no clock, host or git commit, so a plan run
+under pbrun or in a container publishes the bytes a host-side `submit`
+re-derives. `check` re-derives the demand from a manifest row's own argv and
+refuses an under-declared or over-capacity row, then refuses a row that names
+no data manifest, one PrismaBuild would refuse, or another row's; it is the
+preflight for a subset released with `pbcampaign.py` directly. `submit` runs
+the demand check on the planned rows, then re-derives each row's data manifest
+and refuses a row whose published path or bytes differ, since a released
+subset may already have sealed them into an action key; a row planned before
+`plan` attached manifests gets one. Neither gate changes `argv` or `demand`, so
+what `check` verified is what is submitted. The manifest is a `pbrun` input and
+leaves the campaign argv byte-identical, and `submit` hands the fleet
+`WORKSPACE/manifest.submitted.json`. Re-running the manifest **is**
 the resume -- a finished row is a CAS hit and a running row is re-attached --
 so nothing here decides what to skip, and a row may not carry
 `--deadline-seconds`, which stops a run mid-round and would price a different

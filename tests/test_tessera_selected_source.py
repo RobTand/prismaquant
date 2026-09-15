@@ -211,6 +211,12 @@ def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monke
         assert selected_source and members == ['layers.0.proj']
         return dict(memory_bytes=3*1024**3, selected_layers=['0'])
     monkeypatch.setattr(dispatch, '_streamed_resource_plan', resources)
+    # ``plan`` derives each row's data manifest from the capture manifest and
+    # the model's shards; both are bare paths here. The phase plan is under
+    # test; the read set is covered by
+    # ``tests/test_campaign_plan_publishes_data_manifests.py``.
+    monkeypatch.setattr(dispatch, 'planned_data_manifests',
+                        lambda workspace, plan, selections, rows: (rows, []))
     assert dispatch.main([*common, '--calibration-cache', '/capture']) == 0
     rows = json.loads((tmp_path/'manifest.json').read_text())
     # 3 GiB of plan, plus the process floor this fleet measured and the margin
@@ -461,6 +467,10 @@ def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
         lambda spec, census, members, *, selected_source: dict(
             memory_bytes=_ROUNDING_LOSER_PLAN_BYTES, selected_layers=['0'],
             baseline_policy='declared-headroom-pre-run-measured-in-row'))
+    # The capture manifest and model are bare paths, so there is no read set
+    # to derive; the demand is under test here.
+    monkeypatch.setattr(dispatch, 'planned_data_manifests',
+                        lambda workspace, plan, selections, rows: (rows, []))
 
     assert dispatch.main(['plan', '--spec', str(tmp_path/'spec.json'),
                           '--workspace', str(tmp_path),

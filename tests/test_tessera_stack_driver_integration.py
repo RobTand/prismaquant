@@ -16,6 +16,11 @@ def _plan(tmp_path, monkeypatch):
     import dispatch_tessera_campaign as dispatch
     from prismaquant import model_profiles
     monkeypatch.setattr(model_profiles, 'detect_profile', lambda _: _profile())
+    # The model is a name with no shards behind it, so ``plan`` has no read
+    # set to derive; the draw is under test here, the data manifest in
+    # ``tests/test_campaign_plan_publishes_data_manifests.py``.
+    monkeypatch.setattr(dispatch, 'planned_data_manifests',
+                        lambda workspace, plan, selections, rows: (rows, []))
     data = json.loads((Path(__file__).parent / 'fixtures/tessera_stack_lfm_layer18.json').read_text())
     stats = data['packed_probe_rows']
     probe = tmp_path / 'probe.pkl'
