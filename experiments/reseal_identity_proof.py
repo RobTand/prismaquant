@@ -142,10 +142,13 @@ def batch_class(batch):
 def shape_interleaved(batches, *, classes, per_class):
     """The first ``per_class`` batches of each shape class, then the rest.
 
-    Membership of every batch is preserved; only whole batches move.  With
-    the unit-major order of ``_anchor_batches`` the first three batches of a
-    class are its first chunk at each of the three rung rates, so a prefix of
-    ``per_class * batch_size`` anchors per class covers every rate.
+    Membership of every batch is preserved; only whole batches move.  The
+    rates those batches carry follow the row's round-one rates, in the
+    unit-major order of ``_anchor_batches``: on a banded row the first batches
+    of a class move through the band ends, and on a single-rate row
+    (``--rate-band 896,896``) they are successive member chunks at that one
+    rate.  Whether a prefix reaches every class depends on the limit as well;
+    ``require_prefix_classes`` checks that before anything is encoded.
     """
     chosen, rest, taken = [], [], {name: 0 for name in classes}
     for batch in batches:
@@ -161,6 +164,27 @@ def shape_interleaved(batches, *, classes, per_class):
     return chosen + rest
 
 
+def require_prefix_classes(batches, *, classes, limit):
+    """Refuse an order whose first ``limit`` anchors encode no batch of a requested class.
+
+    ``run_prefix`` stops after ``limit`` anchors.  At three batches per class,
+    a 16-anchor prefix of a single-rate row is two down_proj batches and never
+    reaches gate/up, so the arm would pass while proving one of the two shape
+    classes it was asked for.
+    """
+    seen, done = set(), 0
+    for batch in batches:
+        if done + len(batch) > limit:
+            break
+        seen.add(batch_class(batch))
+        done += len(batch)
+    missing = [name for name in classes if name not in seen]
+    if missing:
+        raise ValueError(f'a {limit}-anchor prefix encodes no {missing} batch; '
+                         'raise --limit-anchors or lower --batches-per-class')
+    return batches
+
+
 def restrict_groups(groups, *, classes, per_class):
     """Keep the first ``per_class`` members of each shape class in every group.
 
@@ -171,7 +195,9 @@ def restrict_groups(groups, *, classes, per_class):
     group's rate grid is the intersection over its members, and the stored
     rows measured every member at the same three rates, so the subset's
     grid is the same one.  The comparator, not this permutation, judges
-    whether the rates and scores agree with the stored row.
+    whether the rates and scores agree with the stored row.  The arm stops at
+    the first leave-one-out gate after the prefix, which a ``--max-rounds 1``
+    single-rate row never reaches; use ``--batches-per-class`` there.
     """
     kept = {}
     for key, members in groups.items():
@@ -522,7 +548,17 @@ def run_gpu_arm(args, *, prefix):
             campaign._loo_for = stop_after_prefix
             record['group_restriction'] = dict(classes=classes, members_per_class=args.members_per_class, resolutions=calls)
         else:
-            campaign._anchor_batches = lambda *a, **kw: shape_interleaved(original(*a, **kw), classes=classes, per_class=args.batches_per_class)
+            checked = []
+
+            def interleaved(*a, **kw):
+                order = shape_interleaved(original(*a, **kw), classes=classes, per_class=args.batches_per_class)
+                if not checked:
+                    # The campaign calls this once per round with every pending
+                    # anchor; the first call is round one, before any encode.
+                    require_prefix_classes(order, classes=classes, limit=args.limit_anchors)
+                    checked.append(True)
+                return order
+            campaign._anchor_batches = interleaved
         try:
             run_prefix(campaign, command, observer, limit=args.limit_anchors, expected_source_units=args.expected_source_units)
         finally:
