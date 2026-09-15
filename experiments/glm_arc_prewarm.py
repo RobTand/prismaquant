@@ -224,11 +224,26 @@ def _files_under(path: str) -> list[tuple[str, int]]:
 class Campaign:
     """Read-only view of the campaign's plan, units and capture manifest."""
 
-    def __init__(self, workspace: str, manifest_sha_check: bool = False) -> None:
+    def __init__(self, workspace: str, manifest_sha_check: bool = False, *,
+                 plan: "dict | None" = None,
+                 selections: "dict[str, dict] | None" = None) -> None:
+        """Read the campaign off disk, or from the plan about to be published.
+
+        ``dispatch_tessera_campaign.py plan`` derives every row's read set
+        before it writes a byte, so that a row whose manifest cannot be built
+        refuses the plan without rewriting a selection an existing manifest
+        still names.  It passes the plan it is about to write as ``plan`` and
+        each row's units selection, keyed by the ``units`` path the plan
+        records, as ``selections``.  Given ``selections``, a row's members are
+        read from it and never from disk, where the file may still hold the
+        previous plan's bytes.
+        """
         self.workspace = workspace
-        plan = _json(os.path.join(workspace, "plan.json"))
+        if plan is None:
+            plan = _json(os.path.join(workspace, "plan.json"))
         if plan is None:
             raise SystemExit(f"unreadable plan: {workspace}/plan.json")
+        self._selections = None if selections is None else dict(selections)
         self.plan = plan
         self.rows = {r["row_id"]: r for r in plan["rows"]}
         self.model_dir = plan["model"]
@@ -259,7 +274,10 @@ class Campaign:
     def members(self, row_id: str) -> list[str]:
         if row_id not in self._units_cache:
             row = self.rows[row_id]
-            units = _json(row["units"])
+            if self._selections is not None:
+                units = self._selections.get(row["units"])
+            else:
+                units = _json(row["units"])
             if units is None:
                 raise SystemExit(f"unreadable units: {row['units']}")
             names = [m for g in units["groups"] for m in g["members"]]

@@ -346,6 +346,12 @@ def test_check_reports_every_row_it_verified(monkeypatch, tmp_path, capsys):
                                           selected_source=True)['mem_gb']
     (tmp_path / 'manifest.json').write_text(json.dumps(
         [_manifest_row(tmp_path, mem_gb=derived)]))
+    # ``check`` also refuses a row naming no data manifest the fleet can warm
+    # it from. This row's model is a bare path with no read set; the demand
+    # is under test here, that gate in
+    # ``tests/test_campaign_plan_publishes_data_manifests.py``.
+    monkeypatch.setattr(dispatch, 'require_data_manifests',
+                        lambda rows, *, where: None)
     assert dispatch.main(['check', '--workspace', str(tmp_path),
                           '--spec', str(tmp_path / 'spec.json'),
                           '--census', str(tmp_path / 'census.json')]) == 0

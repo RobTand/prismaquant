@@ -53,7 +53,7 @@ def _campaign_source(tmp_path):
     return model, source
 
 
-def _stack_selection(tmp_path, census_payload, model, source):
+def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):
     """The planner's own sampled ``s:`` row, drawn from a packed probe.
 
     The draw goes through ``dispatch.cmd_plan`` rather than a hand written
@@ -90,6 +90,12 @@ def _stack_selection(tmp_path, census_payload, model, source):
                            probe=probe, stack_sample_seed=5, audit_rate=10,
                            groups_per_row=1, seed_checkpoint=None,
                            seed_wire_dir=None, rows_per_box=1, timeout_s=300)
+    # The fixture's source is not under the shared mount the fleet warms, so
+    # ``plan`` could not publish a data manifest for it; the draw is under
+    # test here, the read set in
+    # ``tests/test_campaign_plan_publishes_data_manifests.py``.
+    monkeypatch.setattr(dispatch, 'planned_data_manifests',
+                        lambda workspace, plan, selections, rows: (rows, []))
     assert dispatch.cmd_plan(args) == 0
 
     rows = []
@@ -145,7 +151,8 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
     assert json.loads(manifest.read_text())['status'] == 'complete'
 
     census_payload = json.loads(census.read_text())
-    units_path, selection = _stack_selection(tmp_path, census_payload, model, source)
+    units_path, selection = _stack_selection(tmp_path, census_payload, model, source,
+                                             monkeypatch)
     priced = sorted(selection['groups'][0]['sampled'])
 
     # Two rungs, not one: with a single rung the row cannot say whether it
