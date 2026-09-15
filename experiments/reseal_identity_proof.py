@@ -574,13 +574,16 @@ def load_units(root, manifest, qnames):
 
 
 def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cost=False,
-                 drop_settings=()):
+                 drop_settings=(), prefix=False):
     """Compare a produced run against the stored row it re-encodes.
 
     Returns a result dict with ``ok`` and the cell table.  Nothing here is
     tolerant: a produced cell must match the stored one in every wire byte,
     every receipt field but the producer seal, and every anchor field but
     the two timing/batching fields the campaign itself does not compare.
+    ``prefix`` says the produced run measured only the units it journaled, so
+    a cost table it wrote compares on exactly those units
+    (``compare_cost_tables``).
     """
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256, canonical_json
     from prismaquant.production_weight_cache import first_identity_difference
@@ -691,26 +694,69 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
             p_cost = pickle.load(stream)
         with (stored/'cost.pkl').open('rb') as stream:
             s_cost = pickle.load(stream)
-        report = dict(keys_compared=[], provenance_excluded=True, cost_fields_masked=list(COST_VOLATILE))
-        if set(p_cost) != set(s_cost):
-            fail(dict(what='cost_keys', produced=sorted(p_cost), stored=sorted(s_cost)))
-        for key in sorted(set(p_cost) & set(s_cost)):
-            if key == 'provenance':
-                continue
-            a, b = p_cost[key], s_cost[key]
-            if key == 'tessera_expert_wires':
-                a, b = _strip_wire_seals(a), _strip_wire_seals(b)
-            elif key == 'costs':
-                a, b = _mask_cost_timing(a), _mask_cost_timing(b)
-            diffs = deep_equal(a, b, key)
-            report['keys_compared'].append(key)
-            if diffs:
-                fail(dict(what='cost_content', key=key, sample=[f'{w}: {d}' for w, d in diffs[:8]]))
-        result['cost_pkl'] = report
+        failures, result['cost_pkl'] = compare_cost_tables(p_cost, s_cost, units=produced_names if prefix else None)
+        for failure in failures:
+            fail(failure)
     elif require_cost:
         fail(dict(what='cost_pkl', detail='produced run wrote no cost.pkl'))
     result['ok'] = not result['failures']
     return result
+
+
+# The cost-table keys whose content is keyed by unit (tessera_campaign's
+# campaign_cost_payload and the anchor_counts it adds before writing).
+COST_UNIT_KEYS = ('anchor_counts', 'costs', 'leave_one_anchor_out', 'tessera_expert_wires')
+
+
+def compare_cost_tables(p_cost, s_cost, *, units=None):
+    """Exact comparison of a produced cost table against the stored row's.
+
+    Returns ``(failures, report)``.  With ``units`` None the produced run priced
+    the whole row, and every key compares whole.
+
+    A prefix run measured only its own units, so ``units`` names them.  Its
+    table, if it wrote one, compares on exactly those units: the per-unit keys
+    (``COST_UNIT_KEYS``) and the ``non_interpolable`` refusals are restricted
+    to them on both sides and must then be equal, so a unit the stored row
+    prices and the prefix does not is a difference, never a gap.  ``formats``
+    must equal the formats the stored table prices on those units.  An entry
+    for any other unit is refused.  No key is dropped: a key this function does
+    not restrict compares whole.
+    """
+    failures = []
+    fail = failures.append
+    scope = None if units is None else set(units)
+    report = dict(keys_compared=[], provenance_excluded=True, cost_fields_masked=list(COST_VOLATILE),
+                  restricted_to_units=None if scope is None else len(scope))
+    if set(p_cost) != set(s_cost):
+        fail(dict(what='cost_keys', produced=sorted(p_cost), stored=sorted(s_cost)))
+    for key in sorted(set(p_cost) & set(s_cost)):
+        if key == 'provenance':
+            continue
+        a, b = p_cost[key], s_cost[key]
+        if scope is not None and key in COST_UNIT_KEYS:
+            outside = sorted(str(unit) for unit in a if unit not in scope)
+            if outside:
+                fail(dict(what='cost_outside_prefix', key=key, count=len(outside), sample=outside[:8]))
+            a = {unit: value for unit, value in a.items() if unit in scope}
+            b = {unit: value for unit, value in b.items() if unit in scope}
+        elif scope is not None and key == 'non_interpolable':
+            outside = sorted({str(entry.get('qname')) for entry in a if entry.get('qname') not in scope})
+            if outside:
+                fail(dict(what='cost_outside_prefix', key=key, count=len(outside), sample=outside[:8]))
+            a = [entry for entry in a if entry.get('qname') in scope]
+            b = [entry for entry in b if entry.get('qname') in scope]
+        elif scope is not None and key == 'formats':
+            b = sorted({fmt for unit, rows in s_cost.get('costs', {}).items() if unit in scope for fmt in rows})
+        if key == 'tessera_expert_wires':
+            a, b = _strip_wire_seals(a), _strip_wire_seals(b)
+        elif key == 'costs':
+            a, b = _mask_cost_timing(a), _mask_cost_timing(b)
+        diffs = deep_equal(a, b, key)
+        report['keys_compared'].append(key)
+        if diffs:
+            fail(dict(what='cost_content', key=key, sample=[f'{w}: {d}' for w, d in diffs[:8]]))
+    return failures, report
 
 
 def _mask_cost_timing(costs):
@@ -850,7 +896,7 @@ def run_gpu_arm(args, *, prefix):
     record['fused_engagement'] = engagement.record()
     record['campaign_finished_unix'] = time.time()
     comparison = compare_rows(run, args.stored_row, old=old, new=new, expected_cells=expected_cells,
-                              require_cost=not prefix, drop_settings=args.drop_setting)
+                              require_cost=not prefix, drop_settings=args.drop_setting, prefix=prefix)
     record.update(comparison=comparison, ok=comparison['ok'], finished_unix=time.time(), status='finished')
     write_json(out/'result.json', record)
     print(json.dumps(dict(ok=record['ok'], cells=len(comparison['cells']), strata=comparison['strata'],
@@ -912,7 +958,7 @@ def run_compare(args):
     bind_prismaquant(args.prismaquant_root)
     old, new = _pins(args)
     result = compare_rows(args.produced, args.stored_row, old=old, new=new, expected_cells=args.expected_cells,
-                          require_cost=args.require_cost, drop_settings=args.drop_setting)
+                          require_cost=args.require_cost, drop_settings=args.drop_setting, prefix=args.prefix)
     write_json(args.out, result)
     print(json.dumps(dict(ok=result['ok'], cells=len(result['cells']), strata=result['strata'], failures=result['failures'][:4])), flush=True)
     return 0 if result['ok'] else 1
@@ -958,6 +1004,8 @@ def main(argv=None):
     p.add_argument('--stored-row', required=True)
     p.add_argument('--expected-cells', type=int)
     p.add_argument('--require-cost', action='store_true')
+    p.add_argument('--prefix', action='store_true',
+                   help='the produced run is a prefix: a cost table it wrote compares on its own units only')
     _add_pins(p)
     args = parser.parse_args(argv)
     if args.arm == 'prefix':
