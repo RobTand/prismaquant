@@ -13,11 +13,35 @@ every file both arms wrote.
 from __future__ import annotations
 
 import argparse
+import pickle
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compare_arms as ca  # noqa: E402
+
+
+def unwrap(value):
+    """Decode nested pickled payloads so the diff reports their fields.
+
+    A checkpoint unit shard is an envelope whose ``payload`` is the unit state
+    pickled on its own, beside that pickle's digest
+    (``cost_stage_checkpoint.write_unit``). Comparing the bytes reports the
+    whole payload as one opaque difference, so unpickle anything that carries
+    a pickle protocol header and recurse.
+    """
+    if isinstance(value, bytes):
+        if value[:1] != b"\x80":
+            return value
+        try:
+            return unwrap(pickle.loads(value))
+        except Exception:  # noqa: BLE001 - not a pickle after all
+            return value
+    if isinstance(value, dict):
+        return {key: unwrap(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(unwrap(item) for item in value)
+    return value
 
 
 def main() -> int:
@@ -37,8 +61,8 @@ def main() -> int:
         print(f"{name}\n  sha256 equal: {same}")
         if same:
             continue
-        da = ca.substitute(ca.decode(pa), arm_a)
-        db = ca.substitute(ca.decode(pb), arm_b)
+        da = ca.substitute(unwrap(ca.decode(pa)), arm_a)
+        db = ca.substitute(unwrap(ca.decode(pb)), arm_b)
         paths = ca.differences(da, db)
         print(f"  differing fields: {len(paths)}")
         for path in paths:
