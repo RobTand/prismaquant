@@ -19,6 +19,16 @@ of these, which vary from run to run by construction:
   record that holds a ``memory_guard`` snapshot. Its content is compared with
   that snapshot removed.
 
+A checkpoint unit shard is compared as its state, not as bytes.
+``cost_stage_checkpoint.write_unit`` wraps one unit's pickled state in an
+envelope beside that pickle's digest, so comparing the envelope reports the
+whole payload as one opaque difference and the digest that restates it as a
+second. Each arm's digest is checked against its own payload -- a mismatch is
+a corrupt shard, and is reported -- the payload is then unpickled, and the
+digest leaves the comparison because the bytes it covers are compared
+directly. A difference inside the state is reported field by field and
+normalized by the same rule as every other file.
+
 ``cache/row-head-execution.json`` records which head ran and is reported, not
 compared. Acceptance (b) compares every arm's ``cache/wire/*.tessera`` blob with
 the census row's stored blob of the same name.
@@ -38,6 +48,8 @@ VOLATILE = {"seconds", "encode_seconds", "wall_seconds", "memory_guard", "baseli
 EXECUTION = re.compile(r"^cache/capture-load-execution-[0-9a-f]{64}\.json$")
 SIDECAR = "cache/row-head-execution.json"
 ROOTS = ("cost.pkl", "cost.anchors.json", "cost.anchors.json.parts", "cache")
+UNIT_ENVELOPE = frozenset({"schema", "stage", "qname", "identity_sha256",
+                           "payload", "payload_sha256"})
 
 
 def sha256(path: Path) -> str:
@@ -74,6 +86,25 @@ def decode(path: Path):
         from safetensors.torch import load_file
         return load_file(str(path))
     return None
+
+
+def unwrap_unit(record, path: Path):
+    """A checkpoint unit shard as its state, with its digest checked in place.
+
+    The envelope's ``payload_sha256`` covers the payload this arm wrote, so it
+    is verified against that arm's own bytes and then leaves the comparison:
+    the bytes it restates are compared field by field instead. Anything that is
+    not a unit envelope is returned unchanged.
+    """
+    if not isinstance(record, dict) or not UNIT_ENVELOPE <= set(record):
+        return record
+    payload = record["payload"]
+    if hashlib.sha256(payload).hexdigest() != record["payload_sha256"]:
+        raise ValueError(f"{path}: payload_sha256 does not cover its own payload")
+    unwrapped = {key: value for key, value in record.items()
+                 if key not in ("payload", "payload_sha256")}
+    unwrapped["payload"] = pickle.loads(payload)
+    return unwrapped
 
 
 def substitute(value, arm: Path):
@@ -148,7 +179,8 @@ def compare_pair(name_a, arm_a, name_b, arm_b):
             report["identical"] += 1
             continue
         try:
-            da, db = substitute(decode(fa[key]), arm_a), substitute(decode(fb[key]), arm_b)
+            da = substitute(unwrap_unit(decode(fa[key]), fa[key]), arm_a)
+            db = substitute(unwrap_unit(decode(fb[key]), fb[key]), arm_b)
         except Exception as error:  # noqa: BLE001
             report["different"].append(dict(file=key, reason=f"undecodable: {error}"))
             continue
@@ -216,8 +248,17 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=1, sort_keys=True, default=str) + "\n")
     outputs = report["outputs"]
-    print(json.dumps(dict(identical=outputs["identical"], normalized=len(outputs["normalized"]),
-                          different=len(outputs["different"]), only_in=outputs["only_in"],
+    def summarize(entries, limit):
+        return [dict(file=entry["file"], field_count=entry.get("field_count"),
+                     fields=entry.get("fields", [])[:4], reason=entry.get("reason"))
+                for entry in entries[:limit]]
+
+    print(json.dumps(dict(identical=outputs["identical"],
+                          normalized_count=len(outputs["normalized"]),
+                          normalized=summarize(outputs["normalized"], 8),
+                          different_count=len(outputs["different"]),
+                          different=summarize(outputs["different"], 8),
+                          only_in=outputs["only_in"],
                           run_identity=outputs["run_identity_sha256"],
                           wires=[{k: (len(v) if isinstance(v, list) else v) for k, v in w.items()}
                                  for w in report["wires"]]), indent=1, default=str))
