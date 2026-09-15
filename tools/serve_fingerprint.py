@@ -100,13 +100,19 @@ _GOLD_PRODUCER_TOOL_FILES = {
         "tools/container_runtime_identity.py",
         "tools/full_kl_teacher_payload.py",
     ),
+    # `gold_measurement_fidelity.py` binds the bytes that decide which
+    # estimator a result says it is.  A number labelled full-vocabulary that
+    # was top-K, or the reverse, is a worse confound than a wrong version
+    # string, so the label's source travels in the producer identity.
     "measure_vllm_full_kl": (
         "tools/gold_engine_options.py",
+        "tools/gold_measurement_fidelity.py",
         "tools/full_kl_teacher_payload.py",
         "tools/measure_vllm_full_kl.py",
     ),
     "measure_vllm_wikitext_ppl": (
         "tools/gold_engine_options.py",
+        "tools/gold_measurement_fidelity.py",
         "tools/full_kl_teacher_payload.py",
         "tools/measure_vllm_wikitext_ppl.py",
     ),
@@ -152,6 +158,25 @@ _GOLD_PRODUCER_TOOL_FILES = {
 SUBSTRING_EXTENSION_PATTERN = re.compile(
     r"prismaquant|pq_(?:cb|mxfp8|fp8_source)|flashinfer|"
     r"causal_conv1d|/fla/")
+
+#: The collective-library environment a multi-node measurement's fabric is
+#: REQUESTED through. These are NCCL's own variable names.
+#
+# They live here, rather than in the gold tool that reads them, for the reason
+# stated in this module's docstring: `serve_fingerprint` runs inside the serving
+# container from a bootstrapped snapshot that ships the tool files plus the pin
+# JSON and no installed PrismaQuant, so a name it needs at import time cannot
+# come from a sibling module that snapshot may not carry.
+# `tools/gold_engine_options.py` imports the tuple from here and builds the
+# recorded `gold_fabric_request` block from it, so the allowlist and the block
+# cannot name different variables.
+#
+# Recording these is what stops two arms that crossed DIFFERENT fabrics from
+# sharing a `performance_stack_fingerprint`: until they were projected,
+# `tools/kl_ab.py` compared a sockets run against a RoCE run as matched and
+# printed a delta. The projection records only names that are SET, so a
+# single-box run that sets none of them hashes exactly as it did before.
+NCCL_FABRIC_ENV = ("NCCL_IB_DISABLE", "NCCL_SOCKET_IFNAME", "NCCL_IB_HCA")
 
 #: The rule name a published table uses to say "fnmatch the glob against the
 #: BASENAME of a mapped `.so`".  Tessera's contract publishes it as a value
@@ -435,6 +460,23 @@ SERVER_ENV_ALLOWLIST = (
     # values into the performance-stack fingerprint, so two serves of one
     # artifact in different residency modes do not hash identically.
     TESSERA_SERVING_RESIDENCY_ENV,
+    # VALUE is the record: NCCL's fabric selectors, for the same reason as the
+    # knob above and discovered the same way.  A multi-node gold measurement
+    # crosses either sockets or RoCE, the two are not interchangeable on this
+    # Spark pair (RoCE `ibv_reg_mr` ENOMEM is unsolved), and until these names
+    # were projected, two arms that crossed DIFFERENT fabrics produced the same
+    # performance-stack fingerprint -- so ``tools/kl_ab.py`` called them matched
+    # and printed a delta.  The projection records only names that are SET, so a
+    # single-box run that sets none of them hashes exactly as it did before and
+    # every receipt written earlier still replays its own fingerprint.
+    #
+    # This records the REQUEST, not the transport NCCL chose; the observation is
+    # NCCL's own `NET/Socket`/`NET/IB` line (principle 14).  The names are
+    # NCCL's own, and this module is where they are spelled: it is the one that
+    # must stay importable from a transported container snapshot carrying no
+    # PrismaQuant package, so it cannot reach into a sibling tool for them.
+    # `tools/gold_engine_options.py` imports the tuple back from here.
+    *NCCL_FABRIC_ENV,
 )
 
 

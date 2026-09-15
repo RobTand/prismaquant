@@ -361,7 +361,11 @@ def test_the_tool_records_the_pins_residency_env_name():
     pin = json.loads(
         tessera_serving_runtime_pin_path().read_text(encoding="utf-8"))
     assert pin["serving_residency_env"] == TESSERA_SERVING_RESIDENCY_ENV
-    assert (serve_fingerprint.SERVER_ENV_ALLOWLIST
+    # The pin's knob keeps its position; the three NCCL fabric selectors were
+    # appended when the gold runners learned multi-node topology (see
+    # `tests/test_serve_fingerprint_descendants.py` for why). What this test
+    # owns is unchanged: the residency name is the PIN's, not this file's.
+    assert (serve_fingerprint.SERVER_ENV_ALLOWLIST[:3]
             == ("PYTHONPATH", "PYTHONSAFEPATH", pin["serving_residency_env"]))
     assert (serve_fingerprint.TESSERA_SERVING_RESIDENCY_ENV
             == pin["serving_residency_env"])

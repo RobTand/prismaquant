@@ -22,7 +22,14 @@ from prismaquant_source_bootstrap import activate_prismaquant_source
 activate_prismaquant_source()
 
 try:  # package mode (`python -m tools.measure_vllm_full_kl`)
-    from .gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
+    from .gold_engine_options import (
+        add_gold_engine_arguments,
+        gold_engine_kwargs,
+        gold_fabric_request,
+        headless_peer_argv,
+        validate_gold_engine_arguments,
+    )
+    from .gold_measurement_fidelity import full_kl_fidelity
     from .full_kl_teacher_payload import (
         TEACHER_PAYLOAD_V2_SCHEMA,
         load_teacher_evidence,
@@ -32,7 +39,14 @@ try:  # package mode (`python -m tools.measure_vllm_full_kl`)
     from .serve_fingerprint import gold_producer_identity, self_manifest
     from .spec_decode_guard import refuse_if_spec_decode
 except ImportError:  # script mode (`python /repo/tools/measure_vllm_full_kl.py`)
-    from gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
+    from gold_engine_options import (  # type: ignore
+        add_gold_engine_arguments,
+        gold_engine_kwargs,
+        gold_fabric_request,
+        headless_peer_argv,
+        validate_gold_engine_arguments,
+    )
+    from gold_measurement_fidelity import full_kl_fidelity  # type: ignore
     from full_kl_teacher_payload import (  # type: ignore
         TEACHER_PAYLOAD_V2_SCHEMA,
         load_teacher_evidence,
@@ -53,6 +67,10 @@ except ImportError:  # script mode (`python /repo/tools/measure_vllm_full_kl.py`
 #: `None` means "could not inspect", which the shipcard refuses — an unverified
 #: negative is exactly what the draft-logprobs trap looked like.
 _SPEC_DECODE_DETECTED: bool | None = None
+
+#: The exact kwargs this process built its `LLM` with, captured so a multi-node
+#: receipt can state the peer argv they imply. `None` until an engine is built.
+_ENGINE_KWARGS: dict | None = None
 
 
 def _file_sha256(path: str | Path) -> str:
@@ -102,12 +120,27 @@ def _provenance(args) -> dict:
     delta (`tools/kl_ab.py` refuses them).
     """
     producer = gold_producer_identity("measure_vllm_full_kl")
+    topology = gold_engine_kwargs(args)
+    # A TP>1 number is not readable without the fabric it crossed, and the
+    # fabric is an environment request rather than an engine argument, so it
+    # rides beside the topology instead of inside it. On a single node there is
+    # no collective to label, but the block is still recorded: "this ran on one
+    # box" is the honest reading of an absent fabric, and omitting the key
+    # would make a TP1 receipt and an unlabelled TP2 receipt look alike.
+    extra = {
+        "measurement_tool": "measure_vllm_full_kl",
+        "producer_identity": producer,
+        "gold_engine_configuration": topology,
+        "gold_fabric_request": gold_fabric_request(),
+    }
+    if int(topology.get("nnodes", 1)) > 1 and _ENGINE_KWARGS is not None:
+        # The peer argv this coordinator's own kwargs imply. Recorded so the
+        # launcher that started rank 1 can be checked against the engine rank 0
+        # actually built, rather than trusted because both were typed by hand.
+        extra["headless_peer_argv"] = headless_peer_argv(
+            _ENGINE_KWARGS, node_rank=1)
     manifest = self_manifest(
-        extra={
-            "measurement_tool": "measure_vllm_full_kl",
-            "producer_identity": producer,
-            "gold_engine_configuration": gold_engine_kwargs(args),
-        },
+        extra=extra,
         image=_resolve_serve_image(args),
     )
     return {
@@ -208,6 +241,10 @@ def _load_llm(args, *, max_model_len: int) -> "LLM":
         # max_num_batched_tokens >= their chunk-alignment floor (~2096);
         # the seqlen+16 max_model_len alone can drive it below that.
         kwargs["max_num_batched_tokens"] = args.max_num_batched_tokens
+    # Captured before the engine exists, so a multi-node receipt states the
+    # peer argv these very kwargs imply rather than one retyped elsewhere.
+    global _ENGINE_KWARGS
+    _ENGINE_KWARGS = dict(kwargs)
     # Environment/bootstrap above must precede the first vLLM import.
     from vllm import LLM
 
@@ -448,6 +485,11 @@ def _teacher(args) -> int:
             "teacher_shape": list(topk_lps.shape),
             "topk_coverage_mean": float(cov.mean()),
             "topk_coverage_min": float(cov.min()),
+            "measurement_fidelity": full_kl_fidelity(
+                score_positions="all",
+                prompt_top_k=int(args.prompt_top_k),
+                vocab_size=int(vocab_size),
+            ),
             "elapsed_s": time.monotonic() - started,
             **_provenance(args),
         }
@@ -478,6 +520,11 @@ def _teacher(args) -> int:
         "corpus": corpus,
         "vocab_size": int(vocab_size),
         "teacher_shape": list(logprobs.shape),
+        "measurement_fidelity": full_kl_fidelity(
+            score_positions="final",
+            prompt_top_k=None,
+            vocab_size=int(vocab_size),
+        ),
         "elapsed_s": time.monotonic() - started,
         **_provenance(args),
     }
@@ -621,6 +668,11 @@ def _student_all_positions(args, payload, teacher_evidence=None) -> int:
         if bool(confident.any()) else None,
         "n_confident": int(confident.sum()),
         "kl_per_sample": [float(x) for x in kl_pos.mean(dim=1).tolist()],
+        "measurement_fidelity": full_kl_fidelity(
+            score_positions="all",
+            prompt_top_k=int(top_k),
+            vocab_size=int(vocab_size),
+        ),
         "elapsed_s": time.monotonic() - started,
         "teacher_evidence": teacher_evidence,
         **_provenance(args),
@@ -697,6 +749,11 @@ def _student(args) -> int:
         "kl_min": float(per_sample.min().item()),
         "kl_max": float(per_sample.max().item()),
         "kl_per_sample": [float(x) for x in per_sample.tolist()],
+        "measurement_fidelity": full_kl_fidelity(
+            score_positions="final",
+            prompt_top_k=None,
+            vocab_size=int(vocab_size),
+        ),
         "elapsed_s": time.monotonic() - started,
         **({"score_positions": "final", "n_positions": len(prompts),
             "teacher_evidence": teacher_evidence} if final_companion else {}),

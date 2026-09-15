@@ -65,8 +65,8 @@ def test_stable_fingerprint_excludes_phase_but_binds_runtime_stack_fields():
 
 
 def test_server_environment_allowlist_is_path_vars_plus_the_pinned_residency_knob():
-    """Two interpreter-path variables that must be ABSENT, plus one serving
-    runtime knob whose VALUE is recorded.
+    """Two interpreter-path variables that must be ABSENT, one serving runtime
+    knob whose VALUE is recorded, and the collective fabric's three.
 
     The first two prove the serving process resolved its imports from the
     installed distribution rather than a working-directory shadow, which is
@@ -76,6 +76,16 @@ def test_server_environment_allowlist_is_path_vars_plus_the_pinned_residency_kno
     fingerprint. The name is the pin's
     (`prismaquant/tessera_runtime/tessera_serving_runtime_pin.json`), not this
     file's opinion -- a serving-lane env belongs to another runtime.
+
+    The last three are NCCL's fabric selectors. They joined the allowlist when
+    the gold runners learned multi-node topology: two arms of one A/B that
+    crossed different fabrics -- sockets on one, RoCE on the other -- otherwise
+    produced the SAME performance-stack fingerprint, so `tools/kl_ab.py`
+    compared them as matched and printed a delta. Because
+    `server_environment_snapshot` records only names that are actually SET, a
+    single-box run that sets none of them projects exactly as it did before,
+    and every receipt written before this change still replays its own stored
+    fingerprint.
     """
     import json
     from pathlib import Path
@@ -89,7 +99,41 @@ def test_server_environment_allowlist_is_path_vars_plus_the_pinned_residency_kno
         "PYTHONPATH",
         "PYTHONSAFEPATH",
         pin["serving_residency_env"],
+        "NCCL_IB_DISABLE",
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_IB_HCA",
     )
+
+
+def test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined(
+    monkeypatch,
+):
+    """Backward compatibility as a property, checked on a real process.
+
+    The allowlist grew, but the projection records only names that are SET. A
+    process with no NCCL variables must therefore produce the same `values`
+    mapping under the new allowlist as under the old three-name one --
+    otherwise every existing single-box receipt would stop comparing against a
+    new one. Setting one of them must then move it, or the names would be
+    recorded without being able to distinguish anything.
+    """
+    import os
+
+    for name in serve_fingerprint.NCCL_FABRIC_ENV:
+        monkeypatch.delenv(name, raising=False)
+    pids = [os.getpid()]
+
+    before = serve_fingerprint.server_environment_snapshot(
+        pids, names=("PYTHONPATH", "PYTHONSAFEPATH", "TESSERA_SERVE_MODE"))
+    unset = serve_fingerprint.server_environment_snapshot(
+        pids, names=serve_fingerprint.SERVER_ENV_ALLOWLIST)
+    assert before["values"] == unset["values"]
+
+    monkeypatch.setenv("NCCL_IB_DISABLE", "1")
+    sockets = serve_fingerprint.server_environment_snapshot(
+        pids, names=serve_fingerprint.SERVER_ENV_ALLOWLIST)
+    assert sockets["values"] != unset["values"]
+    assert sockets["values"]["NCCL_IB_DISABLE"] == "1"
 
 
 def _write_status(root: Path, pid: int, text: str) -> None:
