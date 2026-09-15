@@ -1908,8 +1908,16 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
                                   expert_projection=None, stack_sampling_identity=None,
-                                  structure_by_unit=None, bound_units=None):
+                                  structure_by_unit=None, bound_units=None,
+                                  unit_receipts=None):
     """Bind the priced population, including score inputs when H is off.
+
+    ``unit_receipts`` (``{unit: {weight, scoring_rows, hessian}}``) are the
+    streaming row head's per-entry receipts (``tessera_row_stream``): the same
+    producer ``tensor_identity`` records, taken on reader threads from each
+    entry while it was resident, so this identity can be built after every X
+    and H has been released. They replace ``acts``/``hessians``/``bound_units``
+    and must cover exactly the priced units.
 
     The static A-side contract is a scoring input like the score rows: the
     policy is env-resolved (``PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE``) and
@@ -1968,8 +1976,11 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "publication_overlap_bytes", "campaign_identity_bytes",
                  "campaign_identity_threads", "source_snapshot_policy",
                  "streaming_cache_slots", "streaming_prefetch_workers",
-                 "streaming_cache_headroom_gb"):
+                 "streaming_cache_headroom_gb", "row_head"):
         settings.pop(name, None)
+    if unit_receipts is not None and (bound_units is not None
+                                      or set(unit_receipts) != set(weights)):
+        raise ValueError("unit receipts must cover exactly the priced units, without a hold")
     return {
         **({"family_restriction": {"policy": restriction,
              "structure_by_unit": dict(sorted(structure_by_unit.items()))}}
@@ -2003,11 +2014,14 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                 # before journal admission.  The journal retains the same
                 # source/H records the former direct calls made, without a
                 # second DtoH copy later for every published receipt.
-                "weight": (bound_units[name].campaign_inputs()["source"]
+                "weight": (unit_receipts[name]["weight"] if unit_receipts is not None
+                           else bound_units[name].campaign_inputs()["source"]
                            if bound_units is not None else api.tensor_identity(weight)),
-                "scoring_rows": (None if acts.get(name) is None
+                "scoring_rows": (unit_receipts[name]["scoring_rows"] if unit_receipts is not None
+                                 else None if acts.get(name) is None
                                  else api.tensor_identity(acts[name])),
-                "hessian": (None if hessians.get(name) is None else
+                "hessian": (unit_receipts[name]["hessian"] if unit_receipts is not None
+                            else None if hessians.get(name) is None else
                             (bound_units[name].campaign_inputs()["hessian"]
                              if (bound_units is not None and
                                  bound_units[name].campaign_inputs()["hessian"] is not None)
@@ -2515,6 +2529,43 @@ def _bound_hessian_identities(bound_units, hessians):
         if identity is not None:
             identities[name] = identity
     return identities
+
+
+def _stream_unit_identity(name, *, weight, inputs, hessian, source, menu, projected_unit,
+                          static_scales, metadata_bound=None):
+    """One unit's bound producer identity and run-level receipts, for the stream head.
+
+    Runs on a row-stream reader thread over host tensors only
+    (``tessera_row_stream.RowStream``). With a nonempty menu the unit's
+    closed-roster holder is built exactly as the load-all hold builds it, over
+    this unit's own ``ActivationSource``, and the run-level weight and H
+    receipts are the ones its template sealed; a unit whose menu admits
+    nothing has no holder and is receipted directly. Returns ``(holder,
+    {weight, scoring_rows, hessian})``.
+    """
+    api = _checkpoint_identity_api()
+    holder = None
+    try:
+        weight_receipt = hessian_receipt = None
+        if menu:
+            holder = bind_checkpoint_unit_identity(
+                _campaign_identity_anchor_roster(name, menu, calibration_source=source,
+                                                 static_scales=static_scales),
+                source_weight=weight, calibration_source=source,
+                projected_unit=projected_unit, static_scales=static_scales,
+                retain_source_receipt=False)
+            if metadata_bound is not None and holder.observed_metadata_bytes() > metadata_bound:
+                raise RuntimeError("campaign identity metadata exceeded its preallocation bound")
+            receipts = holder.campaign_inputs()
+            weight_receipt, hessian_receipt = receipts["source"], receipts["hessian"]
+        return holder, dict(
+            weight=api.tensor_identity(weight) if weight_receipt is None else weight_receipt,
+            scoring_rows=api.tensor_identity(inputs),
+            hessian=api.tensor_identity(hessian) if hessian_receipt is None else hessian_receipt)
+    except BaseException:
+        if holder is not None:
+            holder.close()
+        raise
 
 
 def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
@@ -4975,9 +5026,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
 def _prefetch_selected_capture(args, *, expected_identity, census, names, device,
                                resources, guard=None):
     """Use the existing resident prefetch and publish its separate load receipt."""
-    import hashlib
     from . import tessera_calibration_cache as store
-    from .cost_stage_checkpoint import atomic_write_bytes
     from .perturbed_x_cache import normalize_verified_activation_load
     policy = normalize_verified_activation_load(args.capture_load_policy)
     execution = {} if policy is not None else None
@@ -4988,6 +5037,19 @@ def _prefetch_selected_capture(args, *, expected_identity, census, names, device
         **(dict(verified_load_policy=policy, load_execution=execution) if policy is not None else {}))
     if execution is None:
         return values, capture, None
+    return values, capture, _publish_capture_load_execution(
+        args, capture=capture, execution=execution, resources=resources, guard=guard)
+
+
+def _publish_capture_load_execution(args, *, capture, execution, resources, guard=None):
+    """Write one row's capture load execution record; ``{path, sha256}``.
+
+    The one writer for both row heads: the load-all prefetch's folded record,
+    and the streaming head's per-entry receipts folded in the same name order
+    at finalize (``tessera_row_stream.RowStream.load_execution``).
+    """
+    import hashlib
+    from .cost_stage_checkpoint import atomic_write_bytes
     record = dict(schema='prismaquant.capture_load_run.v1', capture=capture,
         prefetch=execution, resources=resources,
         memory_guard=None if guard is None else guard.snapshot())
@@ -4997,7 +5059,7 @@ def _prefetch_selected_capture(args, *, expected_identity, census, names, device
     # already referenced by a surviving priced output.
     output = Path(args.cache_dir)/f'capture-load-execution-{digest}.json'
     atomic_write_bytes(output, raw)
-    return values, capture, dict(path=str(output.resolve()), sha256=digest)
+    return dict(path=str(output.resolve()), sha256=digest)
 
 
 def main(argv: "Sequence[str] | None" = None) -> int:
@@ -5051,12 +5113,22 @@ def _main(argv, *, source_scope) -> int:
                     help="experimental closed-roster producer identity hold reservation. "
                          "0 keeps the feature off; a positive value is charged by "
                          "selected-source PB admission and runtime refuses a larger plan.")
-    ap.add_argument("--campaign-identity-threads", type=int, default=1,
-                    help="build the closed-roster producer identity hold on N "
-                         "threads (each hashes one unit's resident weight and "
-                         "Hessian) and verify resumed wire receipts on N threads; "
-                         "the selected-source plan charges N in-flight host copies. "
-                         "1 keeps the serial head. Requires --campaign-identity-bytes.")
+    from .tessera_row_stream import ROW_HEAD_STREAM, ROW_HEADS
+    ap.add_argument("--campaign-identity-threads", type=int, default=None,
+                    help="threads that read, verify and receipt selected capture "
+                         "entries (the streaming row head), or that build the "
+                         "closed-roster identity hold and verify resumed wire "
+                         "receipts (the load-all head). Default: the CPUs this row "
+                         "was admitted with. The selected-source plan charges N "
+                         "in-flight host copies.")
+    ap.add_argument("--row-head", default=ROW_HEAD_STREAM, choices=ROW_HEADS,
+                    help="how a selected-source row gets its X and H. 'stream' "
+                         "(default) starts encoding once the first batch's capture "
+                         "entries are verified and resident, keeps two batches "
+                         "resident, and writes the six identity-bound outputs at "
+                         "finalize; a row that needs the whole set first runs "
+                         "'load-all' instead and prints the dependency. 'load-all' "
+                         "makes every selected X and H resident before the first encode.")
     ap.add_argument("--publication-overlap-bytes", type=int, default=0,
                     help="stage up to N bytes of already-encoded render/wire "
                          "artifacts on one writer thread so the next batch "
@@ -5223,10 +5295,8 @@ def _main(argv, *, source_scope) -> int:
         ap.error("--publication-overlap-bytes cannot be negative")
     if args.campaign_identity_bytes < 0:
         ap.error("--campaign-identity-bytes cannot be negative")
-    if args.campaign_identity_threads < 1:
+    if args.campaign_identity_threads is not None and args.campaign_identity_threads < 1:
         ap.error("--campaign-identity-threads must be positive")
-    if args.campaign_identity_threads > 1 and not args.campaign_identity_bytes:
-        ap.error("--campaign-identity-threads requires --campaign-identity-bytes")
     if args.anchor_batch_size > 1:
         from .tessera_render import require_tessera_batch_encoder
         require_tessera_batch_encoder()
@@ -5258,6 +5328,34 @@ def _main(argv, *, source_scope) -> int:
     checkpoint = Path(args.checkpoint) if args.checkpoint else (
         Path(args.out).with_suffix(".anchors.json")
     )
+
+    from .tessera_row_stream import (EXECUTION_FILENAME, EXECUTION_SCHEMA, ROW_HEAD_LOAD_ALL,
+                                     checkpoint_present, resolve_identity_threads,
+                                     stream_head_dependency)
+    # One reader/builder count for the plan and both heads: argv's, else the
+    # CPUs PrismaBuild admitted this row with (RobTand/prismaquant#640).
+    identity_threads_requested = resolve_identity_threads(args.campaign_identity_threads)
+    streaming_head = False
+    if selected_source:
+        row_head_dependency = stream_head_dependency(
+            row_head=args.row_head, selected_source=selected_source,
+            capture_load_policy=args.capture_load_policy,
+            export_hessian_reference_policy=args.export_hessian_reference_policy,
+            max_rounds=args.max_rounds, seed_checkpoint=args.seed_checkpoint,
+            checkpoint_exists=checkpoint_present(checkpoint))
+        streaming_head = row_head_dependency is None
+        if streaming_head:
+            print(f"[campaign] row head: stream "
+                  f"({_identity_threads_for_this_process(identity_threads_requested)} "
+                  f"reader threads, window {2 * args.anchor_batch_size} units)", flush=True)
+        else:
+            # Load-all is a performance defect unless something needs the whole
+            # set first, so the row names what did.
+            print(f"[campaign] row head: load-all ({row_head_dependency})", flush=True)
+            from .cost_stage_checkpoint import atomic_write_bytes
+            atomic_write_bytes(cache_dir / EXECUTION_FILENAME, (json.dumps(dict(
+                schema=EXECUTION_SCHEMA, row_head=ROW_HEAD_LOAD_ALL,
+                dependency=row_head_dependency), indent=2, sort_keys=True) + "\n").encode())
 
     source_authentication = None
     selected_guard = None
@@ -5486,7 +5584,7 @@ def _main(argv, *, source_scope) -> int:
             anchor_batch_size=args.anchor_batch_size,
             publication_overlap_bytes=args.publication_overlap_bytes,
             campaign_identity_bytes=args.campaign_identity_bytes,
-            campaign_identity_threads=args.campaign_identity_threads,
+            campaign_identity_threads=identity_threads_requested,
             source_snapshot_policy=args.source_snapshot_policy,
             **(dict(capture_load_policy=args.capture_load_policy)
                if args.capture_load_policy is not None else {}))
@@ -5503,7 +5601,10 @@ def _main(argv, *, source_scope) -> int:
             # cap - margin is one unit throughout, and subtracting the baseline
             # there would count the floor twice.
             selected_guard.check('before_selected_capture_identity')
-            if (selected_resources['memory_bytes'] >
+            # The stream head holds a window, not the population, and is
+            # admitted against the plan for the head it will actually run.
+            plan_key = 'stream_memory_bytes' if streaming_head else 'memory_bytes'
+            if (selected_resources[plan_key] >
                     selected_guard.cap_bytes - selected_guard.baseline_bytes()):
                 # Every term of the predicate, in the message and on disk.
                 # Three rows died here on 2026-09-12 with 8-13 MB of slack and
@@ -5511,13 +5612,13 @@ def _main(argv, *, source_scope) -> int:
                 # recovered by unpickling completed rows' cost.pkl
                 # (RobTand/prismaquant#522).
                 detail = memory_admission_detail(
-                    plan_bytes=selected_resources['memory_bytes'],
+                    plan_bytes=selected_resources[plan_key],
                     cap_bytes=selected_guard.cap_bytes,
                     baseline_bytes=selected_guard.baseline_bytes())
                 from .cost_stage_checkpoint import atomic_write_bytes
                 atomic_write_bytes(
                     cache_dir/'selected-anchor-memory-refusal.json',
-                    (json.dumps(dict(detail,
+                    (json.dumps(dict(detail, plan=plan_key,
                                      memory_guard=selected_guard.snapshot()),
                                 indent=2, sort_keys=True)+'\n').encode())
                 raise RuntimeError(
@@ -5549,7 +5650,8 @@ def _main(argv, *, source_scope) -> int:
                 targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
                 **({'expected_source_keys': selected_resources['source_tensor_keys']}
                    if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
-                resource_check=None if selected_guard is None else selected_guard.check)
+                resource_check=None if selected_guard is None else selected_guard.check,
+                **({'host': True} if streaming_head else {}))
         finally:
             runner.shutdown()
         selected_source_preparation.update(resources=selected_resources,
@@ -5569,7 +5671,7 @@ def _main(argv, *, source_scope) -> int:
         import gc
         gc.collect()
         torch.cuda.empty_cache()
-        if selected_guard is not None:
+        if selected_guard is not None and not streaming_head:
             selected_guard.check('before_selected_capture_prefetch', reserve_bytes=
                 selected_resources['phases']['resident_anchors']['selected_hessian_bytes']+
                 selected_resources['phases']['resident_anchors']['selected_prefix_bytes'])
@@ -5582,7 +5684,14 @@ def _main(argv, *, source_scope) -> int:
             print(f"[campaign] complete calibration capture reused: {record}", flush=True)
             return 0
     if args.calibration_cache:
-        if selected_source:
+        if streaming_head:
+            # Nothing is read here. The row stream below reads each entry
+            # when its batch needs it, and finalize checks every observed
+            # count and maximum against the census. The receipt key is
+            # placed now so the payload keeps the load-all head's key order.
+            values = ({}, {}, {}, {})
+            selected_source_preparation['capture_load_execution'] = None
+        elif selected_source:
             values, calibration_cache, load_receipt = _prefetch_selected_capture(args,
                 expected_identity=capture_identity, census=census, names=targets,
                 device=device, resources=selected_resources, guard=selected_guard)
@@ -5594,7 +5703,7 @@ def _main(argv, *, source_scope) -> int:
                 census=census, names=targets, device=device,
                 expected_sha256=args.calibration_cache_sha256)
         acts, hessians, hessian_rows, act_max_abs = values
-        if selected_guard is not None:
+        if selected_guard is not None and not streaming_head:
             selected_guard.check('after_selected_capture_prefetch')
     else:
         acts, hessians, hessian_rows, act_max_abs = _collect_activations(
@@ -5665,7 +5774,8 @@ def _main(argv, *, source_scope) -> int:
     # (principle 8).
     calibration_source = None
     seal_ahead = None
-    if want_h:
+    # The stream head builds one source per entry on its reader threads.
+    if want_h and not streaming_head:
         calibration_source = th.activation_source(hessians, hessian_identity)
         if args.campaign_identity_bytes > 0:
             # The producer's capture seal, taken now on a helper thread so it
@@ -5775,20 +5885,22 @@ def _main(argv, *, source_scope) -> int:
     identity_metadata_bounds, identity_planning_scratch_bytes = ({}, 0)
     # An empty menu has no closed producer roster. Preserve the existing
     # empty-menu refusal path instead of constructing a synthetic holder.
-    reuse_campaign_identity = bool(args.campaign_identity_bytes > 0 and all(menus.values()))
-    identity_threads = 1
+    # The stream head builds each unit's holder on its reader thread, inside
+    # the window, so it never holds the population's.
+    reuse_campaign_identity = bool(not streaming_head and args.campaign_identity_bytes > 0
+                                   and all(menus.values()))
+    # The plan charges the requested builder count; the row never runs more
+    # builders, readers or wire verifiers than the CPUs it was admitted with.
+    identity_threads = _identity_threads_for_this_process(identity_threads_requested)
     identity_hold_seconds = seal_wait_seconds = None
     if reuse_campaign_identity:
-        # The plan charges the requested builder count; the row never runs
-        # more builders than the CPUs it was admitted with.
-        identity_threads = _identity_threads_for_this_process(args.campaign_identity_threads)
         # No real receipt nor tensor value is read here. This source-free
         # model is charged as its own transient alongside the retained hold.
         identity_metadata_bounds, identity_planning_scratch_bytes = \
             _campaign_identity_metadata_plan(
                 weights=weights, menus=menus, calibration_source=calibration_source,
                 projected_units=projected_units, static_scales=static_scales,
-                threads=args.campaign_identity_threads)
+                threads=identity_threads_requested)
         identity_metadata_bytes = sum(identity_metadata_bounds.values())
         if selected_source:
             reserved_identity_bytes = int(args.campaign_identity_bytes)
@@ -5825,28 +5937,73 @@ def _main(argv, *, source_scope) -> int:
                  f"; capture seal ahead {seal_ahead.seconds:.1f} s, waited {seal_wait_seconds:.1f} s"),
               flush=True)
 
-    # The resume identity, run level: everything a price is a function of,
-    # including the static A-side contract (scales + policy) the W4A4 rows
-    # are scored under.  A checkpoint from another calibration or policy is
-    # refused here, by field, before a row of it is read.
-    checkpoint_identity = _campaign_checkpoint_identity(
-        weights=weights, acts=acts, hessians=hessians, menus=menus, args=args,
-        calibration_identity=hessian_identity,
-        serving_scope=(scope_provenance(serving_target, context_by_unit)
-                       if serving_target is not None else None),
-        static_scales=static_scales, static_scale_policy=static_scale_policy,
-        expert_projection=expert_projection,
-        stack_sampling_identity={name: record
-            for entry in (selection or {}).get("groups", [])
-            for name, record in entry.get("stack_samples", {}).items()},
-        structure_by_unit=structure_by_unit,
-        **({"bound_units": bound_checkpoint_units} if bound_checkpoint_units else {}),
-    )
-    journal, identity_sha256, resumed = prepare_journal(
-        checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
-        stage="Tessera campaign", resume=True, identity=checkpoint_identity,
-        qnames=targets,
-    )
+    row_stream = None
+    if streaming_head:
+        from .tessera_row_stream import RowStream
+        stream_threads = identity_threads
+        # Holder metadata for the units the window can hold at once: its two
+        # batches plus one in flight on every reader.
+        window_bounds, window_scratch_bytes = _campaign_identity_metadata_plan(
+            weights=weights, menus=menus, calibration_source=(True if want_h else None),
+            projected_units=projected_units, static_scales=static_scales,
+            threads=stream_threads)
+        window_metadata_bytes = window_scratch_bytes + sum(sorted(
+            window_bounds.values(), reverse=True)[:2 * args.anchor_batch_size + stream_threads])
+        if 0 < args.campaign_identity_bytes < window_metadata_bytes:
+            raise RuntimeError('row stream identity window plan exceeds --campaign-identity-bytes')
+        if selected_guard is not None:
+            selected_guard.check('before_row_stream_identity_window',
+                                 reserve_bytes=window_metadata_bytes)
+        row_stream = RowStream(
+            capture_path=args.calibration_cache, expected_sha256=args.calibration_cache_sha256,
+            expected_identity=capture_identity, census=census, names=targets,
+            policy=args.capture_load_policy, weights=weights, hessian_identity=hessian_identity,
+            bind=lambda name, *, weight, inputs, hessian, source: _stream_unit_identity(
+                name, weight=weight, inputs=inputs, hessian=hessian,
+                source=source if want_h else None, menu=menus[name],
+                projected_unit=projected_units.get(name), static_scales=static_scales,
+                metadata_bound=window_bounds[name]),
+            threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
+            memo_capacity=selected_resources['encoder_memo_capacity'],
+            resource_check=None if selected_guard is None else selected_guard.check,
+            factor_scratch_bytes=(selected_resources['phases']['resident_anchors']
+                                  ['factorization_scratch_bytes']))
+        source_scope.callback(row_stream.close)
+        calibration_cache = row_stream.capture
+
+    def run_identity(**receipts):
+        # The resume identity, run level: everything a price is a function of,
+        # including the static A-side contract (scales + policy) the W4A4 rows
+        # are scored under.  A checkpoint from another calibration or policy is
+        # refused here, by field, before a row of it is read.
+        return _campaign_checkpoint_identity(
+            weights=weights, acts=acts, hessians=hessians, menus=menus, args=args,
+            calibration_identity=hessian_identity,
+            serving_scope=(scope_provenance(serving_target, context_by_unit)
+                           if serving_target is not None else None),
+            static_scales=static_scales, static_scale_policy=static_scale_policy,
+            expert_projection=expert_projection,
+            stack_sampling_identity={name: record
+                for entry in (selection or {}).get("groups", [])
+                for name, record in entry.get("stack_samples", {}).items()},
+            structure_by_unit=structure_by_unit, **receipts)
+
+    def open_journal(identity):
+        return prepare_journal(
+            checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
+            stage="Tessera campaign", resume=True, identity=identity,
+            qnames=targets,
+        )
+
+    # Under the stream head the identity, and so the journal, exist only at
+    # finalize (``finalize_row_stream``): the identity binds every unit's
+    # receipts, and the last of them is taken when the last entry is read.
+    checkpoint_identity = journal = identity_sha256 = None
+    resumed = {}
+    if not streaming_head:
+        checkpoint_identity = run_identity(
+            **({"bound_units": bound_checkpoint_units} if bound_checkpoint_units else {}))
+        journal, identity_sha256, resumed = open_journal(checkpoint_identity)
     measured: dict[str, dict[str, list[CampaignAnchor]]] = {}
     # Rows adopted from another campaign whose rungs THIS run's menu does not
     # admit.  They are measurements of the same rate/distortion law and cost
@@ -5995,34 +6152,91 @@ def _main(argv, *, source_scope) -> int:
     # capture is then the whole scope's H under the whole scope's counts --
     # exactly the object a whole-scope run writes -- and the merge can prove it
     # by recomputing the digest.
-    if selected_guard is not None:
-        phase = selected_resources['phases']['export_inputs']
-        selected_guard.check('before_selected_export_input_write', reserve_bytes=
-            phase['export_input_page_window_bytes']+phase['serialization_scratch_bytes'])
-    if seal_ahead is not None:
-        # Already joined before the hold; here for the empty-menu path, so no
-        # helper is digesting resident H while the encode loop runs.
-        seal_ahead.wait()
-    hessian_capture_path, input_scales_path, capture_sha256 = write_export_inputs(
-        cache_dir,
-        hessians=hessians if want_h else None,
-        hessian_rows=(hessian_rows if census is None else census["counts"]),
-        hessian_identity=hessian_identity,
-        static_scales=static_scales,
-        static_scale_policy=static_scale_policy,
-        **(dict(hessian_reference=dict(canonical_capture=calibration_cache,
-                census_path=args.calibration_census,load_policy=args.export_hessian_reference_policy),
-                # The H commitments are the receipts the hold sealed from these
-                # same resident tensors; only H-free rosters are digested here.
-                **({} if not bound_checkpoint_units or not want_h else dict(
-                    hessian_identities=_bound_hessian_identities(bound_checkpoint_units, hessians))))
-           if args.export_hessian_reference_policy is not None else {}),
-        **(dict(release_file_pages=True,
-                resource_check=None if selected_guard is None else selected_guard.check)
-           if selected_source else {}),
-    )
+    def publish_export_inputs(export_hessians, hessian_identities):
+        return write_export_inputs(
+            cache_dir,
+            hessians=export_hessians if want_h else None,
+            hessian_rows=(hessian_rows if census is None else census["counts"]),
+            hessian_identity=hessian_identity,
+            static_scales=static_scales,
+            static_scale_policy=static_scale_policy,
+            **(dict(hessian_reference=dict(canonical_capture=calibration_cache,
+                    census_path=args.calibration_census,load_policy=args.export_hessian_reference_policy),
+                    **({} if hessian_identities is None
+                       else dict(hessian_identities=hessian_identities)))
+               if args.export_hessian_reference_policy is not None else {}),
+            **(dict(release_file_pages=True,
+                    resource_check=None if selected_guard is None else selected_guard.check)
+               if selected_source else {}),
+        )
 
-    if args.export_hessian_reference_policy is not None:
+    hessian_capture_path = input_scales_path = capture_sha256 = None
+    if not streaming_head:
+        if selected_guard is not None:
+            phase = selected_resources['phases']['export_inputs']
+            selected_guard.check('before_selected_export_input_write', reserve_bytes=
+                phase['export_input_page_window_bytes']+phase['serialization_scratch_bytes'])
+        if seal_ahead is not None:
+            # Already joined before the hold; here for the empty-menu path, so no
+            # helper is digesting resident H while the encode loop runs.
+            seal_ahead.wait()
+        hessian_capture_path, input_scales_path, capture_sha256 = publish_export_inputs(
+            hessians,
+            # The H commitments are the receipts the hold sealed from these
+            # same resident tensors; only H-free rosters are digested here.
+            None if not bound_checkpoint_units or not want_h
+            else _bound_hessian_identities(bound_checkpoint_units, hessians))
+
+    def finalize_row_stream():
+        """Write the stream head's six identity-bound outputs' inputs, in order.
+
+        Every entry the loop never admitted is read and receipted first, and
+        every observed count and maximum is checked against the census, so a
+        corrupt or changed entry refuses before any of the writes exists. Then
+        the capture load execution record, the journal manifest, and the
+        export inputs; the caller flushes the unit shards and writes the cost
+        payload after this returns.
+        """
+        nonlocal checkpoint_identity, journal, identity_sha256
+        nonlocal hessian_capture_path, input_scales_path, capture_sha256
+        started = _time.monotonic()
+        row_stream.finish()
+        census_token_counts(census, row_stream.observed_counts())
+        census_max_abs(census, row_stream.observed_max_abs())
+        receipts = row_stream.unit_identities()
+        selected_source_preparation['capture_load_execution'] = _publish_capture_load_execution(
+            args, capture=row_stream.capture, execution=row_stream.load_execution(),
+            resources=selected_resources, guard=selected_guard)
+        checkpoint_identity = run_identity(unit_receipts=receipts)
+        journal, identity_sha256, adopted = open_journal(checkpoint_identity)
+        if adopted:
+            raise RuntimeError("a checkpoint appeared under the stream head while it encoded; "
+                               "refusing to adopt it at finalize")
+        if selected_guard is not None:
+            phase = selected_resources['stream_phases']['stream_finalize']
+            selected_guard.check('before_selected_export_input_write', reserve_bytes=
+                phase['export_input_page_window_bytes'])
+        # Geometry-only stand-ins: every H commitment is the receipt its
+        # reader sealed while the entry was resident, so no H is read again.
+        stand_ins = {name: torch.empty([census['unit_shapes'][name][1]] * 2,
+                                       dtype=torch.float32, device='meta')
+                     for name in sorted(targets)}
+        hessian_capture_path, input_scales_path, capture_sha256 = publish_export_inputs(
+            stand_ins, {name: receipts[name]['hessian'] for name in sorted(targets)})
+        from .cost_stage_checkpoint import atomic_write_bytes
+        from .tessera_row_stream import EXECUTION_FILENAME
+        record = dict(row_stream.execution_record(),
+                      finalize_seconds=round(_time.monotonic() - started, 3))
+        atomic_write_bytes(cache_dir / EXECUTION_FILENAME,
+                           (json.dumps(record, indent=2, sort_keys=True) + "\n").encode())
+        print(f"[campaign] row head: stream finalized {record['units']} units "
+              f"(first batch ready {record['first_batch_ready_seconds']} s, "
+              f"reads {record['read_seconds']} s, waited {record['wait_seconds']} s, "
+              f"{record['hash_only_entries']} receipt-only, {record['rereads']} re-read, "
+              f"peak {record['peak_resident_units']} units; finalize "
+              f"{record['finalize_seconds']} s)", flush=True)
+
+    if args.export_hessian_reference_policy is not None and not streaming_head:
         # Resume was checked before any export input changed. Now reuse the
         # commitments just computed from these same resident tensors, so the
         # first anchor does not hash the full population again. Both encoder
@@ -6058,6 +6272,10 @@ def _main(argv, *, source_scope) -> int:
               f"{len(menus)} units against {contract_source_label()}; "
               "refusing to write an empty cost table", file=sys.stderr,
               flush=True)
+        if row_stream is not None:
+            # The load-all head leaves the journal manifest and the export
+            # inputs on this path, so the stream head does too.
+            finalize_row_stream()
         return EXIT_EMPTY_MENU
 
     # An anchor waits in the ledger, rather than in ``measured``, for exactly
@@ -6088,6 +6306,10 @@ def _main(argv, *, source_scope) -> int:
         journal_anchor=journal_anchor)
 
     def flush_checkpoint() -> None:
+        if journal is None:
+            # The stream head before finalize: the shards cite a run identity
+            # that does not exist yet. The dirty units stay dirty until then.
+            return
         # The rows are snapshotted here, on the thread that owns them, and
         # only the write itself is ordered behind the receipts it cites.
         # ``vars`` returns the anchor's live ``__dict__``, so it is copied
@@ -6321,9 +6543,12 @@ def _main(argv, *, source_scope) -> int:
             print(f"[campaign] round {round_index}: {len(pending)} anchors",
                   flush=True)
             batches = _anchor_batches(
-                [item for item in pending if acts.get(item[0]) is not None],
+                [item for item in pending
+                 if row_stream is not None or acts.get(item[0]) is not None],
                 weights=weights, expert_members=expert_members,
                 batch_size=args.anchor_batch_size)
+            if row_stream is not None:
+                row_stream.plan([[item[0] for item in batch] for batch in batches])
             completed = 0
             # One entry per encode step, in order, each the growth across that
             # step's own bracket. The list is stamped on the selected receipt now
@@ -6332,7 +6557,7 @@ def _main(argv, *, source_scope) -> int:
             anchor_batch_growth = []
             if selected_source and selected_source_preparation is not None:
                 selected_source_preparation['anchor_batch_growth_bytes'] = anchor_batch_growth
-            for batch in batches:
+            for batch_index, batch in enumerate(batches):
                 # Rows whose files landed while the last batch encoded. Applied at
                 # the top of the batch rather than the bottom, so the receipt read
                 # back off each published file runs one batch behind the write
@@ -6345,7 +6570,14 @@ def _main(argv, *, source_scope) -> int:
                     # and journalled before the loop is left; they were paid for.
                     ledger.drain()
                     break
+                if row_stream is not None:
+                    # This batch's entries verified and resident, the next
+                    # batch's reads started, everything else released. A
+                    # refused entry raises here, outside the per-batch retry.
+                    row_stream.admit(batch_index)
                 names = [item[0] for item in batch]
+                scoring_rows = (acts if row_stream is None else
+                                {name: row_stream.entry(name).inputs for name in names})
                 family, rung = batch[0][1:]
                 fmt = f"{family}_R{rung}"
                 batch_floor = None
@@ -6363,19 +6595,20 @@ def _main(argv, *, source_scope) -> int:
                 try:
                     common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
                         activation_kwargs_for=(
-                            _activation_kwargs_for if want_h else None),
+                            ((_activation_kwargs_for if row_stream is None
+                              else row_stream.encoder_kwargs) if want_h else None)),
                         hessian_required=want_h, publisher=publisher)
                     if len(batch) == 1:
                         name = names[0]
                         anchors = [_measure_anchor(
                             qname=name, weight=weights[name].to(device),
-                            activations=acts[name].to(device),
+                            activations=scoring_rows[name].to(device),
                             static_input_scale=static_scales.get(name), **common)]
                     else:
                         anchors = _measure_anchor_batch(
                             qnames=names,
                             weights=[weights[name].to(device) for name in names],
-                            activations=[acts[name].to(device) for name in names],
+                            activations=[scoring_rows[name].to(device) for name in names],
                             static_input_scales=static_scales, **common)
                 except (HessianContractError, ActivationScaleContractError,
                         PublicationError):
@@ -6409,6 +6642,17 @@ def _main(argv, *, source_scope) -> int:
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
                 for anchor in anchors:
+                    if row_stream is not None:
+                        # The reader's holder, over this entry's own source:
+                        # a template copy on the encode thread, taken while
+                        # the window still holds the entry and its holder.
+                        entry = row_stream.entry(anchor.qname)
+                        ledger.record(anchor, _checkpoint_anchor_identity(
+                            anchor, weights=weights, menus=menus,
+                            calibration_source=entry.source if want_h else None,
+                            static_scales=static_scales, projected_units=projected_units,
+                            bound_unit=entry.holder))
+                        continue
                     identity_of = functools.partial(
                         _checkpoint_anchor_identity, anchor, weights=weights,
                         menus=menus, calibration_source=calibration_source,
@@ -6444,6 +6688,12 @@ def _main(argv, *, source_scope) -> int:
                     f"campaign adaptive round {round_index} made no progress: "
                     "all pending anchors failed; successful anchors are journaled. "
                     "Refusing to repeat unchanged work; retry after resolving the failure.")
+
+        if row_stream is not None:
+            # The identity-bound writes, now that every entry has a receipt;
+            # then the shards the loop could not yet journal.
+            finalize_row_stream()
+            flush_checkpoint()
 
         # Finalization is quiet on purpose -- the last drain, the leave-one-out
         # checks and the cost payload commit nothing the journal counts -- so
