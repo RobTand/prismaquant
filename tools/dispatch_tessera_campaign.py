@@ -2579,39 +2579,10 @@ def merge_checkpoint(row_dirs: dict, out_manifest: Path) -> dict:
 
 
 def merge_identity_migrations(per_row: dict) -> "list | None":
-    """The union of the rows' ``identity_migration`` records, or None.
-
-    A re-sealed row (tools/reseal_campaign_identity.py) carries the pins it
-    was priced under, the pins it now carries, and the proof that licensed
-    the change.  The merged journal and payload are rebuilt from fixed keys,
-    so without this the record would end at the merge and the merged
-    checkpoint would show only its new pins with nothing saying they were
-    amended.  Records are deduplicated on the proof bundle and the pin pair;
-    rows migrated under the same proof contribute one record.  A row without
-    the key contributes nothing -- the merge already refuses rows whose pins
-    differ, so an unmigrated row cannot sit beside a migrated one.
-    """
-    merged: list = []
-    seen = set()
-    present = False
-    for row_id in sorted(per_row):
-        records = per_row[row_id]
-        if records is None:
-            continue
-        if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
-            raise MergeRefused(f"{row_id}: identity_migration is not a list of records")
-        present = True
-        for record in records:
-            key = (record.get("proof_bundle_sha256"),
-                   json.dumps(record.get("old_pins"), sort_keys=True),
-                   json.dumps(record.get("new_pins"), sort_keys=True))
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append({k: v for k, v in record.items()
-                           if k not in {"old_identity_sha256", "new_identity_sha256", "shards",
-                                        "receipt_seals", "cost_seals", "run_id"}})
-    return merged if present else None
+    """The rows' ``identity_migration`` records, merged by
+    ``cost_stage_checkpoint.merge_identity_migrations``."""
+    from prismaquant.cost_stage_checkpoint import merge_identity_migrations as merge
+    return merge(per_row, error=MergeRefused)
 
 
 def _merge_family_restriction(left, right, row_id):

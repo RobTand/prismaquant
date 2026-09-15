@@ -107,6 +107,13 @@ Identity shape (the sealed ``cost.anchors.json``)
   (``cost_stage_checkpoint.canonical_json_sha256``), computed by streaming
   the same bytes; ``tessera_census_cache.seal_roster``
   (``tessera_census_cache.py:98``) recomputes it and the tests prove equality.
+* ``identity_migration`` (beside the identity, outside the seal) = the tables'
+  reseal records merged by ``cost_stage_checkpoint.merge_identity_migrations``,
+  the rule the dispatcher's row merge applies: one record per proof bundle and
+  pin pair.  ``provenance.identity_migration`` in ``cost.pkl`` follows the
+  same rule, and each table's own records stay under
+  ``provenance.union.tables``.  Every other key beside the identity must be
+  equal across tables.
 
 The manifest is written in the layout the campaign and the dispatcher write
 (``json.dumps(indent=2, sort_keys=True, ensure_ascii=False)``,
@@ -222,7 +229,8 @@ from typing import Any, Callable, Iterator, Mapping
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import (  # noqa: E402
-    MANIFEST_SCHEMA, _load_unit, unique_temp_suffix, unit_path, write_unit,
+    MANIFEST_SCHEMA, _load_unit, merge_identity_migrations, unique_temp_suffix, unit_path,
+    write_unit,
 )
 from prismaquant.tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY  # noqa: E402
 from prismaquant.tessera_joint_aura import STAGE  # noqa: E402
@@ -812,9 +820,12 @@ def _union_provenance(tables: list[Table], *, costs, menu_sizes, capture_path: P
             provenance[key] = values[tables[0].name]
         elif key == "rate_band":
             provenance[key] = None
-    migrations = {n: p.get("identity_migration") for n, p in provs.items()}
-    if any(value is not None for value in migrations.values()):
-        provenance["identity_migration"] = _equal("provenance.identity_migration", migrations)
+    # Tables resealed under one proof carry records that differ in clock,
+    # strata and tool commit; each table's own stays under ``union.tables``.
+    migration = merge_identity_migrations(
+        {n: p.get("identity_migration") for n, p in provs.items()}, error=UnionRefused)
+    if migration is not None:
+        provenance["identity_migration"] = migration
 
     hessians = {n: p.get("hessian") for n, p in provs.items()}
     if not all(isinstance(h, Mapping) for h in hessians.values()):
@@ -1092,8 +1103,13 @@ def build_plan(specs: list[str], out: Path) -> Plan:
     scales_sha = _equal("cache/input_scales.safetensors sha256",
                         {t.name: t.scales_sha256 for t in tables})
     del scales_sha
-    extras = {t.name: t.manifest_extra for t in tables}
+    extras = {t.name: {key: value for key, value in t.manifest_extra.items()
+                       if key != "identity_migration"} for t in tables}
     manifest_extra = _equal("checkpoint manifest extra keys", extras)
+    migration = merge_identity_migrations(
+        {t.name: t.manifest_extra.get("identity_migration") for t in tables}, error=UnionRefused)
+    if migration is not None:
+        manifest_extra["identity_migration"] = migration
 
     cost, cost_stats = _union_cost(tables, identity["units"], capture_sha256=capture_sha256, paths=paths)
     top = cost["provenance"]

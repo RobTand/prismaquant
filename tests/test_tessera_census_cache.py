@@ -77,13 +77,14 @@ def _control(tmp_path: Path):
     return names, experts, records, cost, roster, shapes, assignment, config[LAYER_CONFIG_META_KEY]
 
 
-def _build(tmp_path, assignment, metadata, cost, roster, shapes, *, parts=None, seal=SEAL):
+def _build(tmp_path, assignment, metadata, cost, roster, shapes, *, parts=None, seal=SEAL,
+           hash_blobs=False):
     loaded = load_selected_wire_records(parts or tmp_path / "parts", assignment,
                                         identity_sha256=seal, workers=2)
     return census_selected_cached_units_manifest(
         assignment, metadata, cost, roster, shapes, loaded, input_schema=INPUT_SCHEMA,
         encoding_input_schema=ENCODING_SCHEMA, cache_schema="tessera.cached_units.v1",
-        hash_workers=2)
+        blob_workers=2, hash_blobs=hash_blobs)
 
 
 def test_uniform_control_closes_every_dense_and_routed_wire(tmp_path):
@@ -159,6 +160,7 @@ def test_plan_layer_config_out_drops_the_outside_bf16_rows_after_the_refusal(tmp
     assert set(projected) == set(names) | {LAYER_CONFIG_META_KEY}
     assert projected[LAYER_CONFIG_META_KEY] == config[LAYER_CONFIG_META_KEY]
     summary = json.loads((out / "summary.json").read_text())
+    assert summary["hash_blobs"] is False
     assert summary["plan_layer_config_dropped"] == [outside]
     assert summary["plan_layer_config_dropped"] == summary["outside_census_bf16_passthrough"]
     import hashlib
@@ -186,7 +188,7 @@ def test_a_wired_rung_outside_the_census_refuses(tmp_path, fmt):
         census_selected_cached_units_manifest(
             assignment, metadata, cost, roster, shapes, loaded, input_schema=INPUT_SCHEMA,
             encoding_input_schema=ENCODING_SCHEMA, cache_schema="tessera.cached_units.v1",
-            hash_workers=2)
+            blob_workers=2)
 
 
 def _routed(experts):
@@ -247,6 +249,26 @@ def test_changed_census_evidence_refuses(tmp_path, change, match):
         shapes.pop(DENSE)
     with pytest.raises(CensusCacheError, match=match):
         _build(tmp_path, assignment, metadata, cost, roster, shapes, seal=seal)
+
+
+@pytest.mark.parametrize("which", ["dense", "routed"])
+def test_same_size_changed_blob_refuses_at_export_intake_or_under_hash_blobs(tmp_path, which):
+    # The build locates and sizes each blob but does not read it; the exporter
+    # hashes the bytes it reads.  A same-size content change therefore passes
+    # the default build and refuses where the blob is consumed.
+    from tessera.cached_unit import CachedUnitBundle, verify_cached_unit
+    names, experts, records, cost, roster, shapes, assignment, metadata = _control(tmp_path)
+    name = DENSE if which == "dense" else _routed(experts)
+    path = Path(cost["provenance"]["wire_dir"]) / records[name]["file"]
+    path.write_bytes(bytes(byte ^ 0xFF for byte in path.read_bytes()))
+    manifest = _build(tmp_path, assignment, metadata, cost, roster, shapes)
+    bundle = CachedUnitBundle(manifest, path.parent, set(names), manifest["source"])
+    blob, record = bundle.read(name)
+    with pytest.raises(ValueError, match="blob size/sha256 mismatch"):
+        verify_cached_unit(blob, record, record["identity"])
+    with pytest.raises(CensusCacheError,
+                       match="dense wire differs from measured receipt|does not match its receipt"):
+        _build(tmp_path, assignment, metadata, cost, roster, shapes, hash_blobs=True)
 
 
 def _manifest_for(identity: dict) -> dict:
