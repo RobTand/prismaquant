@@ -253,13 +253,30 @@ def test_hash_definitions_match_the_campaign(tmp_path):
         tool.load_pins(bad)
 
 
+def _recipe(family, rate):
+    """(body, plane) as ``tessera.export.wire_recipe`` gives them and a wire receipt records them."""
+    if family == 'TESSERA_E2M1_K2':
+        return ('tcq', 'lut16') if rate >= 896 else ('window', 'lut16')
+    return ('window', 'channel')
+
+
+# What a GPU arm over TCQ/LUT16 cells records in its encode window when both
+# fused stages ran (the kernel worker's e2m1-01 row-0045 after arm, per batch of 8).
+ENGAGED = dict(encode_windows=4, stage1_admitted=256, stage1_refused=0, stage1_fused=256, stage1_refusals={},
+               stage2_admitted=40, stage2_refused=0, stage2_fused=40, stage2_tripped=0, stage2_nonfinite=0,
+               stage2_refusals={}, stage1_counts_agree=True, stage2_counts_agree=True)
+# A window/CHANNEL arm: its cells reach neither gate.
+IDLE = dict(ENGAGED, stage1_admitted=0, stage1_fused=0, stage2_admitted=0, stage2_fused=0)
+
+
 def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(832, 960, 1088),
-                dropped=(), environment=None):
+                dropped=(), environment=None, engagement=ENGAGED, e2m1_rates=(896,)):
     cells = []
     def cell(qname, family, rate):
+        body, plane = _recipe(family, rate)
         cells.append(dict(ok=True, byte_identical=True, dloss=0.5, stored_dloss=0.5, qname=qname, family=family,
                           format_name=f'{family}_R{rate}', body_rate_q256=rate, blob_sha256='e'*64, blob_bytes=10,
-                          encoder_fixture_id=FIXTURE))
+                          encoder_fixture_id=FIXTURE, recipe_body=body, recipe_plane=plane))
     for rate in routed_rates:
         for j in range(4):
             cell(f'layers.0.mlp.experts.{j}.down_proj', 'TESSERA_E4M3_K1', rate)
@@ -267,12 +284,15 @@ def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(8
         for family in ('TESSERA_BF16_K1', 'TESSERA_E4M3_K1'):
             for j in range(2):
                 cell(f'layers.{j}.mlp.gate_proj', family, rate)
-    cell('layers.0.mlp.up_proj', 'TESSERA_E2M1_K2', 896)
+    for rate in e2m1_rates:
+        cell('layers.0.mlp.up_proj', 'TESSERA_E2M1_K2', rate)
     result = dict(kind='dense', comparison=dict(
         kind='comparison', ok=True, old_pins=old, new_pins=new, identity_matches_with_pins_substituted=True,
         dropped_settings=list(dropped), cells=cells))
     if environment is not None:
         result['environment'] = environment
+    if engagement is not None:
+        result['fused_engagement'] = dict(summary=dict(engagement))
     path.write_text(json.dumps(result))
     return path
 
@@ -282,7 +302,8 @@ def test_proof_bundle_needs_a_fixture_arm_only_when_the_encoder_pin_moves(tmp_pa
     pins_moving = write_pins(tmp_path/'pins-both.json')
     pins_pq_only = write_pins(tmp_path/'pins-pq.json', new=pq_only)
     arm_moving = _arm_result(tmp_path/'arm-both.json', OLD, NEW)
-    arm_pq_only = _arm_result(tmp_path/'arm-pq.json', OLD, pq_only)
+    # An unchanged producer owes no fused-stage record.
+    arm_pq_only = _arm_result(tmp_path/'arm-pq.json', OLD, pq_only, engagement=None)
     fixture = tmp_path/'fixture.json'
     fixture.write_text(json.dumps(dict(kind='fixture_id', ok=True, fixture_id_equal=True,
                                        encoder_source_sha256={'old': OLD['encoder_source_sha256'], 'new': NEW['encoder_source_sha256']},
@@ -681,3 +702,87 @@ def test_a_bundle_is_rechecked_against_its_arm_results_when_loaded(tmp_path, cap
     assert with_arm(good, 'same-tree') == 2
     assert 'recorded as same-tree, but its pins make it cross-tree' in capsys.readouterr().err
     assert with_arm(good, 'cross-tree') == 0
+    # Nor an arm whose TCQ cells were encoded without the fused trellis running.
+    unengaged = _other_tree_arm(tmp_path/'idle.json', engagement=dict(ENGAGED, stage1_admitted=0, stage1_fused=0))
+    assert with_arm(unengaged, 'cross-tree') == 2
+    assert 'need fused stage1' in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# tessera#486: an arm shows the fused encoder stages its cells reach
+# ---------------------------------------------------------------------------
+
+def _encoder_only(tmp_path):
+    return write_pins(tmp_path/'pins.json', new=ENCODER_ONLY_NEW), _fixture_result(tmp_path/'fixture.json')
+
+
+def test_an_arm_must_show_the_fused_stages_its_cells_reach(tmp_path, capsys):
+    """In the encode window: TCQ cells need stage 1 admitted and run, LUT16 cells stage 2; nothing refused or tripped."""
+    pins, fixture = _encoder_only(tmp_path)
+    torch_refusal = {'torch <n>.<n>.<n>+cu<n>: the replicated sum order is checked on <n>.<n>.x only': 160}
+    cases = {
+        'predates the record': (None, 'no fused-engagement counts'),
+        'no encode window': (dict(ENGAGED, encode_windows=0), 'no encode window'),
+        'stage 1 never admitted': (dict(ENGAGED, stage1_admitted=0, stage1_fused=0), 'need fused stage1'),
+        'stage 2 never admitted': (dict(ENGAGED, stage2_admitted=0, stage2_fused=0), 'need fused stage2'),
+        'stage 1 refused a call': (dict(ENGAGED, stage1_refused=12, stage1_refusals={'targets are on cpu': 12}),
+                                   'stage1 gate refused 12'),
+        'stage 2 refused on torch 2.13': (dict(ENGAGED, stage2_admitted=0, stage2_fused=0, stage2_refused=160,
+                                               stage2_refusals=torch_refusal), 'stage2 gate refused 160'),
+        'the tripwire fired': (dict(ENGAGED, stage2_tripped=1), 'tripwire fired 1 time'),
+        'a fit was nonfinite': (dict(ENGAGED, stage2_nonfinite=2), '2 fused LUT fit(s) were nonfinite'),
+        'stage 1 counters disagree': (dict(ENGAGED, stage1_fused=255), 'counters disagree'),
+        'stage 2 counters disagree': (dict(ENGAGED, stage2_counts_agree=False), 'counters disagree'),
+    }
+    errors = {}
+    for name, (engagement, message) in cases.items():
+        arm = _arm_result(tmp_path/f'{name}.json', OLD, ENCODER_ONLY_NEW, engagement=engagement)
+        assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', arm, '--out', tmp_path/'x.json') == 2, name
+        errors[name] = capsys.readouterr().err
+        assert message in errors[name], (name, errors[name])
+    assert 'checked on <n>.<n>.x only' in errors['stage 2 refused on torch 2.13']
+    # A refusal is refused even from an arm whose cells need no fused stage.
+    window = _arm_result(tmp_path/'window-refused.json', OLD, ENCODER_ONLY_NEW, e2m1_rates=(),
+                         engagement=dict(IDLE, stage2_refused=3, stage2_refusals=torch_refusal))
+    assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', window, '--out', tmp_path/'x.json') == 2
+    assert 'stage2 gate refused 3' in capsys.readouterr().err
+    assert not (tmp_path/'x.json').exists()
+    arm = _arm_result(tmp_path/'engaged.json', OLD, ENCODER_ONLY_NEW)
+    assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', arm, '--out', tmp_path/'x.json') == 0
+    recorded = json.loads((tmp_path/'x.json').read_text())['arms'][0]['engagement']
+    assert recorded['expects'] == {'stage1': True, 'stage2': True} and recorded['stage1_fused'] == ENGAGED['stage1_fused']
+
+
+def test_cells_that_predate_the_recipe_record_are_refused_when_the_encoder_moves(tmp_path, capsys):
+    pins, fixture = _encoder_only(tmp_path)
+    arm = _arm_result(tmp_path/'old.json', OLD, ENCODER_ONLY_NEW)
+    result = json.loads(arm.read_text())
+    for cell in result['comparison']['cells']:
+        del cell['recipe_plane']
+    arm.write_text(json.dumps(result))
+    assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', arm, '--out', tmp_path/'x.json') == 2
+    assert 'records no recipe body/plane' in capsys.readouterr().err
+
+
+def test_window_cells_need_no_fused_stage_but_the_bundle_needs_each_stage_from_some_arm(tmp_path):
+    """BF16 and E4M3 are window over CHANNEL at every rung, so their arms cannot show a fused stage run."""
+    pins, fixture = _encoder_only(tmp_path)
+    window = _arm_result(tmp_path/'window.json', OLD, ENCODER_ONLY_NEW, e2m1_rates=(), engagement=IDLE)
+    out = tmp_path/'window-bundle.json'
+    assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', window, '--out', out) == 1
+    bundle = json.loads(out.read_text())
+    assert bundle['arms'][0]['engagement']['expects'] == {'stage1': False, 'stage2': False}
+    assert not bundle['ok'] and [m.split(':')[0] for m in bundle['engagement_missing']] == ['stage1', 'stage2']
+    # A sub-cap E2M1 cell is window over LUT16: it needs stage 2 and cannot show stage 1.
+    subcap = _arm_result(tmp_path/'subcap.json', OLD, ENCODER_ONLY_NEW, e2m1_rates=(768,),
+                         engagement=dict(ENGAGED, stage1_admitted=0, stage1_fused=0))
+    out = tmp_path/'subcap-bundle.json'
+    assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', subcap, '--out', out) == 1
+    bundle = json.loads(out.read_text())
+    assert not bundle['strata_missing'] and [m.split(':')[0] for m in bundle['engagement_missing']] == ['stage1']
+    # Beside an arm whose TCQ/LUT16 cells ran both stages, the window arm is part of a bundle that certifies.
+    fused = _arm_result(tmp_path/'fused.json', OLD, ENCODER_ONLY_NEW, routed_rates=(), dense_rates=())
+    out = tmp_path/'bundle.json'
+    assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', window, '--arm', fused, '--out', out) == 0
+    bundle = json.loads(out.read_text())
+    assert bundle['ok'] and bundle['engagement_missing'] == [] and bundle['engagement_required']

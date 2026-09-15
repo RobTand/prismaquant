@@ -49,6 +49,15 @@ PrismaQuant pin fixed and carry the pins file's encoder old and new pins.
 ``arm_pin_scope`` states the rule, ``proof-bundle`` records each arm's pins
 and scope, and ``load_bundle`` checks the rule again against the arm results.
 
+When the encoder pin moves, each arm must also show the fused encoder stages
+(tessera#486) its cells reach running inside its encode window: a TCQ-body cell
+needs the fused trellis (stage 1), a LUT16-plane cell the fused LUT swap passes
+(stage 2), and no gate may refuse, trip or see a nonfinite fit in that window.
+BF16 and E4M3 cells are window over CHANNEL at every rung and reach neither
+stage, so their arms prove bytes on the unchanged paths; ``proof-bundle``
+requires each stage from at least one arm. ``arm_engagement`` states the rule
+and ``load_bundle`` checks it again.
+
 Pins file (``prismaquant.reseal_pins.v1``)::
 
     {"schema": "prismaquant.reseal_pins.v1",
@@ -338,6 +347,67 @@ def arm_pin_scope(arm_old, arm_new, pins, *, where):
     return 'cross-tree'
 
 
+# Which tessera#486 fused stage a cell's encode can reach, read from the recipe
+# its own wire receipt records (``tessera.export.WireRecipe.to_config``): the
+# fused TCQ trellis sits behind ``viterbi_columns``, which only the TCQ body
+# calls (a window body runs ``viterbi_window``); the fused LUT swap passes sit
+# behind ``_pack_scales_lut``, which only the LUT16 scale plane calls. BF16 and
+# E4M3 are window over CHANNEL at every rung, so their cells reach neither.
+FUSED_STAGES = {'stage1': ('recipe_body', 'tcq'), 'stage2': ('recipe_plane', 'lut16')}
+
+
+ENGAGEMENT_COUNTS = ('encode_windows', 'stage1_admitted', 'stage1_refused', 'stage1_fused',
+                     'stage2_admitted', 'stage2_refused', 'stage2_fused', 'stage2_tripped', 'stage2_nonfinite')
+
+
+def arm_engagement(result, comparison, *, where):
+    """What the arm's cells needed from the fused encoder stages and what its encode window shows; refuse a gap.
+
+    Required whenever the pins file moves the encoder pin. An arm must carry the
+    fused-engagement counts ``reseal_identity_proof`` scopes to its encode
+    window (first encode call to last); one that predates them reads as
+    unengaged. In that window no gate may have refused a call, the fused LUT
+    tripwire (its cost disagreeing with torch's) may not have fired, no fused
+    LUT fit may have been nonfinite, and every stage-1 admission must have run
+    the fused trellis. A stage is required of an arm only when one of its cells
+    is encoded through it: then the gate must have admitted calls and the fused
+    stage must have run. An arm whose cells reach neither stage (BF16, E4M3)
+    still proves its bytes through the unchanged window/CHANNEL paths;
+    ``assemble_bundle`` requires each stage from some arm.
+    """
+    cells = comparison.get('cells') or ()
+    for cell in cells:
+        if any(cell.get(field) is None for field, _ in FUSED_STAGES.values()):
+            raise Refused(f'{where}: cell {cell.get("qname")}@{cell.get("format_name")} records no recipe body/plane, '
+                          'so which fused stages the arm had to engage cannot be read (the arm predates the field)')
+    expects = {stage: any(cell[field] == value for cell in cells) for stage, (field, value) in FUSED_STAGES.items()}
+    summary = (result.get('fused_engagement') or {}).get('summary')
+    if not isinstance(summary, dict) or any(type(summary.get(name)) is not int for name in ENGAGEMENT_COUNTS):
+        raise Refused(f'{where}: the arm carries no fused-engagement counts scoped to its encode window '
+                      '(it predates the field), so it reads as unengaged')
+    if summary['encode_windows'] <= 0:
+        raise Refused(f'{where}: no encode window was recorded, so the fused-stage counts are not this arm\'s encodes')
+    for stage in FUSED_STAGES:
+        if summary[f'{stage}_refused']:
+            raise Refused(f'{where}: the {stage} gate refused {summary[f"{stage}_refused"]} call(s) in the encode window: '
+                          f'{summary.get(f"{stage}_refusals") or {}}')
+    if summary['stage2_tripped']:
+        raise Refused(f'{where}: the fused LUT tripwire fired {summary["stage2_tripped"]} time(s) in the encode window; '
+                      'its cost disagreed with the reference')
+    if summary['stage2_nonfinite']:
+        raise Refused(f'{where}: {summary["stage2_nonfinite"]} fused LUT fit(s) were nonfinite in the encode window '
+                      'and ran the reference')
+    if summary['stage1_admitted'] != summary['stage1_fused'] or summary.get('stage2_counts_agree') is False:
+        raise Refused(f'{where}: the fused-stage counters disagree (stage 1 admitted {summary["stage1_admitted"]}, '
+                      f'fused {summary["stage1_fused"]}; stage 2 probe and STATS agree: {summary.get("stage2_counts_agree")})')
+    for stage, needed in expects.items():
+        if needed and (summary[f'{stage}_admitted'] <= 0 or summary[f'{stage}_fused'] <= 0):
+            field, value = FUSED_STAGES[stage]
+            raise Refused(f'{where}: cells with {field}={value} need fused {stage}, and it never ran in the encode window '
+                          f'(admitted {summary[f"{stage}_admitted"]}, fused {summary[f"{stage}_fused"]})')
+    return dict(expects=expects, **{name: summary[name] for name in ENGAGEMENT_COUNTS})
+
+
 def _arm_comparison(result):
     return result.get('comparison', result)
 
@@ -353,17 +423,20 @@ def load_bundle(path, pins):
             raise Refused(f'{path}: bundle {side} pins {bundle["pins"][side]} differ from the pins file {pins[side]}')
     if not bundle.get('encoder_fixture_id_equal'):
         raise Refused(f'{path}: encoder_fixture_id is not shown equal between the producers')
-    if bundle['pins']['old']['encoder_source_sha256'] != bundle['pins']['new']['encoder_source_sha256'] \
-            and not (bundle.get('fixture_id') or {}).get('result'):
+    encoder_moves = bundle['pins']['old']['encoder_source_sha256'] != bundle['pins']['new']['encoder_source_sha256']
+    if encoder_moves and not (bundle.get('fixture_id') or {}).get('result'):
         raise Refused(f'{path}: the encoder pin moves but the bundle carries no fixture-id arm')
     for arm in bundle['arms']:
         actual = sha256_file(arm['result'])
         if actual != arm['result_sha256']:
             raise Refused(f'{path}: arm result {arm["result"]} changed since the bundle was assembled')
-        comparison = _arm_comparison(json.loads(Path(arm['result']).read_text()))
+        result = json.loads(Path(arm['result']).read_text())
+        comparison = _arm_comparison(result)
         scope = arm_pin_scope(comparison.get('old_pins'), comparison.get('new_pins'), pins, where=f'{path}: {arm["result"]}')
         if arm.get('pin_scope') not in (None, scope):
             raise Refused(f'{path}: arm {arm["result"]} is recorded as {arm["pin_scope"]}, but its pins make it {scope}')
+        if encoder_moves:
+            arm_engagement(result, comparison, where=f'{path}: {arm["result"]}')
     bundle['covered'] = bundle_coverage(bundle, path)
     bundle['bundle_sha256'] = sha256_file(path)
     bundle['path'] = str(Path(path).resolve())
@@ -419,6 +492,7 @@ def assemble_bundle(args):
                           f'drops {sorted(pins["drop_settings"])}')
         if not comparison.get('identity_matches_with_pins_substituted'):
             raise Refused(f'{path}: produced identity does not equal the stored identity with pins substituted')
+        engagement = arm_engagement(result, comparison, where=path) if encoder_moves else None
         for cell in comparison['cells']:
             if not (cell.get('ok') and cell.get('byte_identical') and cell.get('dloss') == cell.get('stored_dloss')):
                 raise Refused(f'{path}: cell {cell.get("qname")}@{cell.get("format_name")} is not a passing cell')
@@ -433,13 +507,20 @@ def assemble_bundle(args):
                          cells=len(comparison['cells']), strata=comparison.get('strata'), environment=result.get('environment'),
                          pin_scope=scope, old_pins=dict(comparison['old_pins']), new_pins=dict(comparison['new_pins']),
                          fused_engagement=(result.get('fused_engagement') or {}).get('summary'),
-                         action_key=None))
+                         engagement=engagement, action_key=None))
     missing = []
     for kind, families in REQUIRED_STRATA.items():
         for family, rates in families.items():
             have = strata.get(kind, {}).get(family, set())
             if not have or not rates <= have:
                 missing.append(f'{kind}:{family}@{sorted(rates) or "any"} (have {sorted(have)})')
+    # A moving encoder is proven through its fused stages only by an arm whose
+    # cells reached them; window/CHANNEL arms prove bytes on the paths around them.
+    engagement_missing = []
+    if encoder_moves:
+        for stage, (field, value) in FUSED_STAGES.items():
+            if not any(arm['engagement']['expects'][stage] and arm['engagement'][f'{stage}_fused'] > 0 for arm in arms):
+                engagement_missing.append(f'{stage}: no arm has a {field}={value} cell encoded with the fused {stage} running')
     # Two arms may re-encode the same cell (two prefixes of one row start
     # at the same experts); both are evidence, but a cell is counted once.
     unique, seen = [], set()
@@ -451,7 +532,7 @@ def assemble_bundle(args):
         unique.append(cell)
     duplicate_cells = len(cells) - len(unique)
     cells = unique
-    ok = not missing and len(cells) >= MIN_CELLS
+    ok = not missing and not engagement_missing and len(cells) >= MIN_CELLS
     bundle = dict(schema=BUNDLE_SCHEMA, assembled_unix=time.time(), assembled_by=getpass.getuser(), host=platform.node(),
                   pins={'old': pins['old'], 'new': pins['new']}, sources=pins.get('sources'), source_checks=pins['source_checks'],
                   fixture_id=fixture_record,
@@ -460,9 +541,11 @@ def assemble_bundle(args):
                   cross_tree_arms=sum(arm['pin_scope'] == 'cross-tree' for arm in arms),
                   pb_actions=list(args.action or []), cells=cells, cell_count=len(cells), duplicate_cells=duplicate_cells,
                   strata={k: {f: sorted(r) for f, r in fam.items()} for k, fam in strata.items()},
-                  strata_missing=missing, min_cells=MIN_CELLS, ok=ok and fixture_record['fixture_id_equal'])
+                  strata_missing=missing, min_cells=MIN_CELLS, engagement_required=encoder_moves,
+                  engagement_missing=engagement_missing, ok=ok and fixture_record['fixture_id_equal'])
     write_json(args.out, bundle)
-    print(json.dumps(dict(ok=bundle['ok'], cells=len(cells), strata=bundle['strata'], missing=missing, out=str(args.out))))
+    print(json.dumps(dict(ok=bundle['ok'], cells=len(cells), strata=bundle['strata'], missing=missing,
+                          engagement_missing=engagement_missing, out=str(args.out))))
     return 0 if bundle['ok'] else 1
 
 

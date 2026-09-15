@@ -34,6 +34,7 @@ import math
 import os
 import pickle
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -62,6 +63,12 @@ FUSED_PROBES = (
     ('tessera.tcq_fused', 'viterbi_columns_fused', 'fused'),
 )
 FUSED_ENV = ('TESSERA_LUT_FUSED', 'TESSERA_TCQ_FUSED', 'TESSERA_TCQ_GRAPH')
+# The stage-2 counters Tessera keeps itself: fused fits, tripwire fallbacks, nonfinite fallbacks.
+FUSED_STATS = ('tessera.lut_fused', 'STATS')
+# The encode entry points PrismaQuant calls on ``tessera.export`` (tessera_render
+# looks each up on the module at call time); the engagement summary is scoped to
+# the window from the first call's entry to the last call's exit.
+FUSED_ENCODE = ('tessera.export', ('encode_linear', 'encode_linears', 'encode_linear_planes', 'encode_linears_planes'))
 
 
 # ---------------------------------------------------------------------------
@@ -130,44 +137,115 @@ def import_prefix_helper():
     return helper, driver_modules()
 
 
-class FusedEngagement:
-    """Count what the tessera#486 fused encoder paths did in this process.
+def _count_difference(after, before):
+    """Per-probe outcome counts ``after - before``, keeping only outcomes that moved."""
+    moved = {}
+    for key, labels in after.items():
+        diff = {label: n - before.get(key, {}).get(label, 0) for label, n in labels.items()}
+        diff = {label: n for label, n in diff.items() if n}
+        if diff:
+            moved[key] = diff
+    return moved
 
-    Tessera publishes no counter for them, and an arm whose cells never took a
-    fused path proves nothing about the fused kernels. Each probe wraps one
-    module attribute and counts its outcomes: a refusal function by reason
-    (``admitted`` when it returned None), a fused function by ``ran`` or
-    ``fell_back``, and the reference swap passes by calls. The encoder looks
-    these up on their modules at call time, so the wrappers see every call;
-    they return what they wrap and read nothing from the tensors. A module the
-    producer does not have is recorded as absent.
+
+class FusedEngagement:
+    """Count what the tessera#486 fused encoder stages did inside this arm's encodes.
+
+    Stage 1 is the fused TCQ trellis, stage 2 the fused LUT swap passes. An arm
+    whose cells never took a fused stage proves nothing about the fused kernels.
+    Stage 1 has no Tessera counter, so each probe wraps one module attribute
+    and counts its outcomes: a refusal gate by reason (``admitted`` when it
+    returned None, integers in a reason masked so one reason is one class), a
+    fused function by ``ran`` or ``fell_back``, and the reference swap passes by
+    calls. The encoder imports the gates and fused functions from their modules
+    at call time, so the wrappers see every call; they return what they wrap
+    and read nothing from the tensors. Stage 2 also keeps
+    ``tessera.lut_fused.STATS`` (``fused``, ``tripped``, ``nonfinite``).
+
+    Fits that never reach a gate run the reference silently and nothing counts
+    them: a CPU matrix (``encoder_fixture_id``), ``swaps == 0``, a replaced
+    ``_lut_cost``, ``TESSERA_LUT_FUSED=0``. So the summary is scoped to the
+    encode window: the probe counts and STATS are read on entry to the first
+    call of a ``tessera.export`` encode entry point and on exit from the last
+    one, and the summary is their difference. A call nested in another encode
+    call does not open a window of its own. A module the producer does not
+    have is recorded as absent.
     """
 
     MAX_REASONS = 32
+    MAX_VERBATIM = 8
 
-    def __init__(self, probes=FUSED_PROBES):
+    def __init__(self, probes=FUSED_PROBES, stats=FUSED_STATS, encode=FUSED_ENCODE):
         self.probes = tuple(probes)
+        self.stats_source = stats
+        self.encode_source = encode
         self.installed = {}
         self.counts = {}
+        self.verbatim = {}
+        self.windows = []
+        self.first = None
+        self.last = None
+        self._depth = 0
         self._originals = []
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+
+    def _stats(self):
+        if self.stats_source is None:
+            return None
+        module_name, attr = self.stats_source
+        try:
+            stats = getattr(importlib.import_module(module_name), attr, None)
+        except ImportError:
+            return None
+        return None if not isinstance(stats, dict) else {k: int(v) for k, v in stats.items()}
+
+    def _snapshot(self):
+        with self._lock:
+            return json.loads(json.dumps(self.counts)), self._stats()
+
+    def _patch(self, module_name, attr, role, wrap):
+        key = f'{module_name}.{attr}'
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as error:
+            self.installed[key] = f'absent: {error}'
+            return
+        original = getattr(module, attr, None)
+        if original is None:
+            self.installed[key] = 'absent: no such attribute'
+            return
+        setattr(module, attr, wrap(key, original))
+        self._originals.append((module, attr, original))
+        self.installed[key] = role
 
     def install(self):
         for module_name, attr, role in self.probes:
-            key = f'{module_name}.{attr}'
-            try:
-                module = importlib.import_module(module_name)
-            except ModuleNotFoundError as error:
-                self.installed[key] = f'absent: {error}'
-                continue
-            original = getattr(module, attr, None)
-            if original is None:
-                self.installed[key] = 'absent: no such attribute'
-                continue
-            setattr(module, attr, self._wrap(key, role, original))
-            self._originals.append((module, attr, original))
-            self.installed[key] = role
+            self._patch(module_name, attr, role, functools.partial(self._wrap, role=role))
+        if self.encode_source is not None:
+            module_name, entries = self.encode_source
+            for attr in entries:
+                self._patch(module_name, attr, 'encode', self._window)
         return self
+
+    def _window(self, key, original):
+        def encode(*args, **kwargs):
+            with self._lock:
+                self._depth += 1
+                outermost = self._depth == 1
+                if outermost and self.first is None:
+                    self.first = self._snapshot()
+            started = time.time()
+            try:
+                return original(*args, **kwargs)
+            finally:
+                with self._lock:
+                    self._depth -= 1
+                    if outermost:
+                        batch = args[0] if args else None
+                        units = len(batch) if isinstance(batch, (list, tuple)) else 1
+                        self.windows.append(dict(entry=key, start_unix=started, end_unix=time.time(), units=units))
+                        self.last = self._snapshot()
+        return functools.wraps(original)(encode)
 
     def uninstall(self):
         for module, attr, original in reversed(self._originals):
@@ -181,11 +259,19 @@ class FusedEngagement:
                 label = 'other'
             entry[label] = entry.get(label, 0) + 1
 
-    def _wrap(self, key, role, original):
+    def _wrap(self, key, original, *, role):
         def probe(*args, **kwargs):
             value = original(*args, **kwargs)
             if role == 'refusal':
-                label = 'admitted' if value is None else str(value)[:200]
+                if value is None:
+                    label = 'admitted'
+                else:
+                    reason = str(value)[:400]
+                    label = re.sub(r'\d+', '<n>', reason)[:200]
+                    with self._lock:
+                        seen = self.verbatim.setdefault(key, {})
+                        if reason in seen or len(seen) < self.MAX_VERBATIM:
+                            seen[reason] = seen.get(reason, 0) + 1
             elif role == 'fused':
                 label = 'fell_back' if value is None else 'ran'
             else:
@@ -197,15 +283,47 @@ class FusedEngagement:
     def record(self):
         with self._lock:
             counts = json.loads(json.dumps(self.counts))
-        def ran(module):
-            return counts.get(f'{module}.' + ('swap_passes_fused' if module.endswith('lut_fused') else 'viterbi_columns_fused'), {}).get('ran', 0)
-        summary = dict(lut_fused_ran=ran('tessera.lut_fused'), tcq_fused_ran=ran('tessera.tcq_fused'),
-                       lut_reference_calls=counts.get('tessera.encode._lut_swap_passes_reference', {}).get('calls', 0),
-                       lut_refusals={k: v for k, v in counts.get('tessera.lut_fused.lut_swap_refusal', {}).items() if k != 'admitted'},
-                       tcq_refusals={k: v for k, v in counts.get('tessera.tcq_fused.tcq_fused_refusal', {}).items() if k != 'admitted'})
-        summary['engaged'] = bool(summary['lut_fused_ran'] or summary['tcq_fused_ran'])
-        return dict(probes=dict(self.installed), counts=counts, summary=summary,
-                    env={name: os.environ.get(name) for name in FUSED_ENV})
+            verbatim = json.loads(json.dumps(self.verbatim))
+            windows = [dict(window) for window in self.windows]
+            first, last = self.first, self.last
+        scoped = first is not None and last is not None
+        in_window = _count_difference(last[0], first[0]) if scoped else {}
+        before, after = (first[1], last[1]) if scoped else (None, None)
+        delta = None if before is None or after is None else {
+            k: after.get(k, 0) - before.get(k, 0) for k in sorted(set(before) | set(after))}
+
+        def outcome(name, label):
+            return in_window.get(name, {}).get(label, 0)
+
+        def refusals(name):
+            return {k: v for k, v in in_window.get(name, {}).items() if k != 'admitted'}
+        tcq_gate, lut_gate = 'tessera.tcq_fused.tcq_fused_refusal', 'tessera.lut_fused.lut_swap_refusal'
+        lut_fused = 'tessera.lut_fused.swap_passes_fused'
+        summary = dict(
+            encode_windows=len(windows), encode_units=sum(window['units'] for window in windows),
+            stage1_admitted=outcome(tcq_gate, 'admitted'), stage1_refusals=refusals(tcq_gate),
+            stage1_fused=outcome('tessera.tcq_fused.viterbi_columns_fused', 'ran'),
+            stage2_admitted=outcome(lut_gate, 'admitted'), stage2_refusals=refusals(lut_gate),
+            stage2_fused=None if delta is None else delta.get('fused', 0),
+            stage2_tripped=None if delta is None else delta.get('tripped', 0),
+            stage2_nonfinite=None if delta is None else delta.get('nonfinite', 0),
+            lut_reference_calls=outcome('tessera.encode._lut_swap_passes_reference', 'calls'))
+        summary['stage1_refused'] = sum(summary['stage1_refusals'].values())
+        summary['stage2_refused'] = sum(summary['stage2_refusals'].values())
+        # An admitted trellis call runs the fused trellis; the probe on
+        # swap_passes_fused and STATS count the same fits: one ``fused`` per
+        # run, one ``tripped`` or ``nonfinite`` per fallback.
+        summary['stage1_counts_agree'] = summary['stage1_admitted'] == summary['stage1_fused']
+        summary['stage2_counts_agree'] = None if delta is None else (
+            outcome(lut_fused, 'ran') == delta.get('fused', 0)
+            and outcome(lut_fused, 'fell_back') == delta.get('tripped', 0) + delta.get('nonfinite', 0))
+        summary['both_stages'] = bool(summary['stage1_fused'] and summary['stage2_fused'])
+        summary['engaged'] = bool(summary['stage1_fused'] or summary['stage2_fused'])
+        return dict(probes=dict(self.installed), counts=counts, counts_in_encode_window=in_window,
+                    refusals_verbatim=verbatim, encode_windows=windows,
+                    stats=dict(source='.'.join(self.stats_source) if self.stats_source else None,
+                               before_first_encode=before, after_last_encode=after, delta=delta),
+                    summary=summary, env={name: os.environ.get(name) for name in FUSED_ENV})
 
 
 def environment_record(*, with_pins):
@@ -536,6 +654,10 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
                     for side, blob, rec in (('produced', p_bytes, p_rec), ('stored', s_bytes, s_rec)):
                         if hashlib.sha256(blob).hexdigest() != rec['blob_sha256'] or len(blob) != rec['blob_bytes']:
                             problem(f'{side} wire record does not describe its file')
+                # The recipe the encoder recorded for this cell says which fused
+                # stages its encode could reach (window/TCQ body, CHANNEL/LUT16 plane).
+                recipe = p_rec['identity'].get('recipe') or {}
+                cell.update(recipe_body=recipe.get('body'), recipe_plane=recipe.get('plane'))
                 p_id, s_id = dict(p_rec['identity']), dict(s_rec['identity'])
                 if s_id.get('encoder_source_sha256') != old['encoder_source_sha256']:
                     problem('stored receipt seal is not the declared old producer pin')

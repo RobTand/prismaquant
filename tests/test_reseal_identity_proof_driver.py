@@ -106,31 +106,96 @@ def test_fused_engagement_counts_each_outcome_and_restores_the_module(monkeypatc
     module.reference = lambda: 'reference'
     monkeypatch.setitem(sys.modules, 'fake_fused_paths', module)
     originals = (module.refusal, module.fused, module.reference)
-    engagement = proof.FusedEngagement(probes=(
+    engagement = proof.FusedEngagement(stats=None, encode=None, probes=(
         ('fake_fused_paths', 'refusal', 'refusal'), ('fake_fused_paths', 'fused', 'fused'),
         ('fake_fused_paths', 'reference', 'reference'), ('fake_fused_paths', 'missing', 'fused'),
         ('no_such_fused_module_anywhere', 'refusal', 'refusal'))).install()
     assert module.refusal('cuda') is None and module.refusal('cpu') == 'targets are on cpu'
+    # One reason, two ranks: one class, both spellings kept verbatim.
+    assert module.refusal('rank 3') == 'targets are on rank 3' and module.refusal('rank 12') == 'targets are on rank 12'
     assert module.fused('tripwire') is None and module.fused('bytes') == 'bytes'
     assert module.reference() == 'reference' and module.reference() == 'reference'
     record = engagement.record()
-    assert record['counts'] == {'fake_fused_paths.refusal': {'admitted': 1, 'targets are on cpu': 1},
+    assert record['counts'] == {'fake_fused_paths.refusal': {'admitted': 1, 'targets are on cpu': 1,
+                                                             'targets are on rank <n>': 2},
                                 'fake_fused_paths.fused': {'fell_back': 1, 'ran': 1},
                                 'fake_fused_paths.reference': {'calls': 2}}
+    assert record['refusals_verbatim']['fake_fused_paths.refusal'] == {
+        'targets are on cpu': 1, 'targets are on rank 3': 1, 'targets are on rank 12': 1}
     assert record['probes']['fake_fused_paths.missing'].startswith('absent')
     assert record['probes']['no_such_fused_module_anywhere.refusal'].startswith('absent')
     engagement.uninstall()
     assert (module.refusal, module.fused, module.reference) == originals
 
 
-def test_the_default_probes_summarize_the_tessera_paths(monkeypatch):
+def _fake_tessera(monkeypatch):
+    """Stand-ins for tessera.tcq_fused, tessera.lut_fused and tessera.export under the names the summary reads.
+
+    ``encode_linear`` does per fit what tessera.encode does: ask each gate on
+    its module at call time and run the fused function when admitted.
+    """
+    tcq, lut, export = (types.ModuleType(name) for name in ('tessera.tcq_fused', 'tessera.lut_fused', 'tessera.export'))
+    lut.STATS = {'fused': 0, 'tripped': 0, 'nonfinite': 0}
+    tcq.tcq_fused_refusal = lambda device: None if device == 'cuda' else f'targets are on {device}'
+    tcq.viterbi_columns_fused = lambda device: 'trellis'
+    lut.lut_swap_refusal = lambda device: None if device == 'cuda' else 'torch 2.13.0+cu130: checked on 2.11.x only'
+
+    def swap_passes_fused(ok):
+        lut.STATS['fused' if ok else 'tripped'] += 1
+        return 'table' if ok else None
+    lut.swap_passes_fused = swap_passes_fused
+
+    def encode_linear(device):
+        if tcq.tcq_fused_refusal(device) is None:
+            tcq.viterbi_columns_fused(device)
+        if lut.lut_swap_refusal(device) is None:
+            lut.swap_passes_fused(True)
+        return device
+    export.encode_linear = encode_linear
+    export.encode_linears = lambda devices: [export.encode_linear(device) for device in devices]
+    for module in (tcq, lut, export):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    return tcq, lut, export
+
+
+def test_the_fused_stages_are_counted_inside_the_encode_window(monkeypatch):
+    """Gate answers and STATS before the first encode or after the last are not the arm's."""
     proof = importlib.import_module('experiments.reseal_identity_proof')
-    engagement = proof.FusedEngagement(probes=())
-    engagement.counts = {'tessera.lut_fused.swap_passes_fused': {'ran': 3, 'fell_back': 1},
-                         'tessera.lut_fused.lut_swap_refusal': {'admitted': 4, 'torch 2.13.0 is verified on 2.11.x only': 2},
-                         'tessera.encode._lut_swap_passes_reference': {'calls': 3}}
+    tcq, lut, export = _fake_tessera(monkeypatch)
+    originals = (tcq.tcq_fused_refusal, lut.swap_passes_fused, export.encode_linear, export.encode_linears)
+    probes = tuple(probe for probe in proof.FUSED_PROBES if probe[0] != 'tessera.encode')
+    lut.STATS['fused'] = 7  # fits from before this arm
+    engagement = proof.FusedEngagement(probes=probes).install()
+    assert engagement.installed['tessera.export.encode_linear_planes'].startswith('absent')
+    # Outside any encode: a CPU fixture matrix refused by both gates, and a stray fused fit.
+    tcq.tcq_fused_refusal('cpu'), lut.lut_swap_refusal('cpu'), lut.swap_passes_fused(True)
+    assert export.encode_linears(['cuda', 'cuda', 'cuda']) == ['cuda'] * 3
+    assert export.encode_linear('cuda') == 'cuda'
+    # After the last encode: a refusal and a tripped fit the arm did not encode.
+    tcq.tcq_fused_refusal('cpu'), lut.swap_passes_fused(False)
+    record = engagement.record()
+    summary = record['summary']
+    assert [(w['entry'], w['units']) for w in record['encode_windows']] == [
+        ('tessera.export.encode_linears', 3), ('tessera.export.encode_linear', 1)]
+    assert (summary['encode_windows'], summary['encode_units']) == (2, 4)
+    assert (summary['stage1_admitted'], summary['stage1_refused'], summary['stage1_fused']) == (4, 0, 4)
+    assert (summary['stage2_admitted'], summary['stage2_refused'], summary['stage2_fused']) == (4, 0, 4)
+    assert (summary['stage2_tripped'], summary['stage2_nonfinite']) == (0, 0)
+    assert summary['stage1_counts_agree'] and summary['stage2_counts_agree'] and summary['both_stages']
+    assert record['stats']['before_first_encode']['fused'] == 8 and record['stats']['after_last_encode']['fused'] == 12
+    # The process saw both CPU refusals and the trip; the window saw none of them.
+    assert record['counts']['tessera.tcq_fused.tcq_fused_refusal']['targets are on cpu'] == 2 and lut.STATS['tripped'] == 1
+    engagement.uninstall()
+    assert (tcq.tcq_fused_refusal, lut.swap_passes_fused, export.encode_linear, export.encode_linears) == originals
+    # A refusal inside the window is counted, with its reason.
+    engagement = proof.FusedEngagement(probes=probes).install()
+    export.encode_linears(['cuda', 'cpu'])
     summary = engagement.record()['summary']
-    assert summary['lut_fused_ran'] == 3 and summary['tcq_fused_ran'] == 0 and summary['engaged']
-    assert summary['lut_reference_calls'] == 3
-    assert summary['lut_refusals'] == {'torch 2.13.0 is verified on 2.11.x only': 2}
-    assert not proof.FusedEngagement(probes=()).record()['summary']['engaged']
+    engagement.uninstall()
+    assert (summary['stage1_admitted'], summary['stage1_refused']) == (1, 1)
+    assert summary['stage2_refusals'] == {'torch <n>.<n>.<n>+cu<n>: checked on <n>.<n>.x only': 1}
+    # No encode at all: nothing is scoped, and stage 2 cannot be read.
+    idle = proof.FusedEngagement(probes=probes).install()
+    summary = idle.record()['summary']
+    idle.uninstall()
+    assert summary['encode_windows'] == 0 and summary['stage2_fused'] is None and not summary['engaged']
