@@ -675,3 +675,66 @@ def test_tables_must_bind_one_canonical_capture(tmp_path, capsys):
     _recost(b, change)
     assert _run(a, b, tmp_path / "union") == 2
     assert "does not name its handoff's canonical capture" in capsys.readouterr().err
+
+
+def _migrate(root, **fields):
+    """A reseal record on a table's manifest and cost table, as the reseal tool writes both."""
+    record = {"schema": "prismaquant.identity_migration.v1", "proof_bundle_sha256": "p" * 64,
+              "old_pins": {"encoder_source_sha256": "0" * 64},
+              "new_pins": {"encoder_source_sha256": ENCODER}, **fields}
+    path = root / "cost.anchors.json"
+    manifest = json.loads(path.read_bytes())
+    manifest["identity_migration"] = [record]
+    path.write_bytes(_manifest_bytes(manifest))
+    _recost(root, lambda cost: cost["provenance"].__setitem__("identity_migration", [dict(record)]))
+    return record
+
+
+def test_tables_resealed_under_one_proof_carry_one_migration_record(tmp_path):
+    # The GLM r1024 and e2m1 tables were resealed by one proof bundle and differ
+    # only in clock, strata and tool commit; the union refused them as unequal.
+    a, b, _experts, _all_units = _census(tmp_path)
+    r1024 = _migrate(a, migrated_unix=2.0, row_strata=["dense:TESSERA_E4M3_K1"], tool_commit="x")
+    e2m1 = _migrate(b, migrated_unix=1.0, row_strata=["routed:TESSERA_E2M1_K2"], tool_commit="y")
+    out = tmp_path / "union"
+    assert _run(a, b, out) == 0
+    manifest = json.loads((out / "cost.anchors.json").read_bytes())
+    cost = pickle.loads((out / "cost.pkl").read_bytes())
+    assert manifest["identity_migration"] == [e2m1]
+    assert cost["provenance"]["identity_migration"] == [e2m1]
+    tables = cost["provenance"]["union"]["tables"]
+    assert tables["r1024"]["provenance"]["identity_migration"] == [r1024]
+    assert seal_roster(manifest)["identity_sha256"] == manifest["identity_sha256"]
+
+
+def test_migration_records_under_different_proofs_are_both_carried(tmp_path):
+    a, b, _experts, _all_units = _census(tmp_path)
+    first = _migrate(a)
+    second = _migrate(b, proof_bundle_sha256="q" * 64)
+    out = tmp_path / "union"
+    assert _run(a, b, out) == 0
+    manifest = json.loads((out / "cost.anchors.json").read_bytes())
+    assert manifest["identity_migration"] == [second, first]
+
+
+def test_a_migration_record_that_is_not_a_list_refuses(tmp_path, capsys):
+    a, b, _experts, _all_units = _census(tmp_path)
+    _migrate(a)
+    path = b / "cost.anchors.json"
+    manifest = json.loads(path.read_bytes())
+    manifest["identity_migration"] = {"not": "a list"}
+    path.write_bytes(_manifest_bytes(manifest))
+    out = tmp_path / "union"
+    assert _run(a, b, out) == 2
+    assert "e2m1: identity_migration is not a list of records" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_other_keys_beside_the_identity_must_still_be_equal(tmp_path, capsys):
+    a, b, _experts, _all_units = _census(tmp_path)
+    path = b / "cost.anchors.json"
+    manifest = json.loads(path.read_bytes())
+    manifest["operator_note"] = "only on e2m1"
+    path.write_bytes(_manifest_bytes(manifest))
+    assert _run(a, b, tmp_path / "union") == 2
+    assert "checkpoint manifest extra keys: tables r1024 and e2m1 differ" in capsys.readouterr().err
