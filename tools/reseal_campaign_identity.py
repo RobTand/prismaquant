@@ -31,6 +31,14 @@ refuses without a bundle whose pins equal the pins file's, and every row is
 rewritten atomically: staged beside the row, verified, then swapped in with
 the previous files retained.
 
+Coverage comes from the rows, not from a table.  Each row prices a set of
+(kind, family) strata, read from its sealed identity: routed or dense from
+the unit name, and the family of every format on the unit's menu.  Its unit
+shards must agree with that menu.  ``dry-run --proof`` and ``migrate`` refuse
+before any row is rewritten when a row prices a stratum that has no passing
+cell in the bundle, and the refusal names every such row and stratum.
+``REQUIRED_STRATA`` is only the floor a bundle must meet to be assembled.
+
 Pins file (``prismaquant.reseal_pins.v1``)::
 
     {"schema": "prismaquant.reseal_pins.v1",
@@ -69,9 +77,11 @@ UNIT_SCHEMA = 'prismaquant.cost_stage_checkpoint.unit.v1'
 STAGE = 'Tessera campaign'
 PIN_KEYS = ('prismaquant_source_sha256', 'encoder_source_sha256')
 LIVE_WORKSPACE_MARKER = 'first-proof-anchor-preparation-05/workspace/rows'
-# The cells a bundle must cover before a migration is allowed. E2M1 is priced
-# at one rate in this campaign (dense rows carry TESSERA_E2M1_K2_R896 only),
-# so it is required at any rate rather than at each band rate.
+# The floor every assembled bundle must cover, whatever rows it is later used
+# on. It does not decide which rows a bundle may rewrite: require_coverage
+# derives that from the rows themselves. E2M1 is priced at one rate in this
+# campaign (dense rows carry TESSERA_E2M1_K2_R896 only), so it is required at
+# any rate rather than at each band rate.
 REQUIRED_STRATA = {
     'dense': {'TESSERA_BF16_K1': {832, 960, 1088}, 'TESSERA_E4M3_K1': {832, 960, 1088}, 'TESSERA_E2M1_K2': set()},
     'routed': {'TESSERA_E4M3_K1': {832, 960, 1088}},
@@ -81,6 +91,69 @@ MIN_CELLS = 24
 
 class Refused(RuntimeError):
     """The tool will not proceed; the message says why."""
+
+
+# ---------------------------------------------------------------------------
+# strata: the (kind, family) cells a proof covers and a row prices
+# ---------------------------------------------------------------------------
+
+def unit_kind(qname):
+    """'routed' for a routed expert projection, otherwise 'dense'.
+
+    The one classifier for both sides of the coverage check: proof cells in
+    ``assemble_bundle`` and ``bundle_coverage``, and row units in
+    ``identity_strata``.  If the two sides classified differently, a covered
+    stratum would not be the stratum the row prices.
+    """
+    return 'routed' if '.experts.' in str(qname) else 'dense'
+
+
+def format_family(format_name):
+    """``TESSERA_E2M1_K2_R896`` -> ``TESSERA_E2M1_K2``; any other spelling is refused."""
+    family, sep, rate = str(format_name).rpartition('_R')
+    if not (sep and family and rate.isdigit()):
+        raise Refused(f'format {format_name!r} is not spelled FAMILY_R<rate>')
+    return family
+
+
+def strata_names(strata):
+    return sorted(f'{kind}:{family}' for kind, family in strata)
+
+
+def identity_strata(identity, *, where):
+    """(kind, family) for every menu format of every unit in a sealed identity."""
+    units = identity.get('units')
+    if not isinstance(units, dict) or not units:
+        raise Refused(f'{where}: the identity carries no units to derive strata from')
+    strata = set()
+    for qname, unit in units.items():
+        menu = unit.get('menu') if isinstance(unit, dict) else None
+        if not isinstance(menu, (list, tuple)) or not menu:
+            raise Refused(f'{where}: identity unit {qname} has no menu')
+        strata.update((unit_kind(qname), format_family(fmt)) for fmt in menu)
+    return strata
+
+
+def bundle_coverage(bundle, path):
+    """The (kind, family) strata a bundle proves; its strata must match its own cells."""
+    strata = bundle.get('strata')
+    if not isinstance(strata, dict):
+        raise Refused(f'{path}: the bundle carries no strata, so it cannot show which rows it covers')
+    declared = set()
+    for kind, families in strata.items():
+        if kind not in ('dense', 'routed') or not isinstance(families, dict):
+            raise Refused(f'{path}: strata[{kind!r}] is not a dense or routed family map')
+        declared.update((kind, family) for family, rates in families.items() if rates)
+    from_cells = set()
+    for cell in bundle.get('cells') or ():
+        kind, family = unit_kind(cell.get('qname')), format_family(cell.get('format_name'))
+        if (cell.get('kind'), cell.get('family')) != (kind, family):
+            raise Refused(f'{path}: cell {cell.get("qname")}@{cell.get("format_name")} is recorded as '
+                          f'{cell.get("kind")}:{cell.get("family")}, not {kind}:{family}')
+        from_cells.add((kind, family))
+    if declared != from_cells:
+        raise Refused(f'{path}: strata {strata_names(declared)} do not match the strata of its cells {strata_names(from_cells)}')
+    return declared
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +312,7 @@ def load_bundle(path, pins):
         actual = sha256_file(arm['result'])
         if actual != arm['result_sha256']:
             raise Refused(f'{path}: arm result {arm["result"]} changed since the bundle was assembled')
+    bundle['covered'] = bundle_coverage(bundle, path)
     bundle['bundle_sha256'] = sha256_file(path)
     bundle['path'] = str(Path(path).resolve())
     return bundle
@@ -290,7 +364,9 @@ def assemble_bundle(args):
         for cell in comparison['cells']:
             if not (cell.get('ok') and cell.get('byte_identical') and cell.get('dloss') == cell.get('stored_dloss')):
                 raise Refused(f'{path}: cell {cell.get("qname")}@{cell.get("format_name")} is not a passing cell')
-            kind = 'routed' if '.experts.' in cell['qname'] else 'dense'
+            kind = unit_kind(cell['qname'])
+            if format_family(cell['format_name']) != cell['family']:
+                raise Refused(f'{path}: cell {cell["qname"]}@{cell["format_name"]} records family {cell["family"]}')
             strata.setdefault(kind, {}).setdefault(cell['family'], set()).add(int(cell['body_rate_q256']))
             cells.append(dict(qname=cell['qname'], format_name=cell['format_name'], family=cell['family'], kind=kind,
                               body_rate_q256=cell['body_rate_q256'], blob_sha256=cell['blob_sha256'], blob_bytes=cell['blob_bytes'],
@@ -382,6 +458,30 @@ def classify_pins(identity, pins):
     return 'foreign', current
 
 
+def require_coverage(rows, pins, bundle):
+    """Refuse when a row to be rewritten prices a stratum the bundle does not prove.
+
+    Runs over every row before the first one is planned or rewritten, so a
+    refusal never leaves a workspace half migrated.  Reads manifests only.
+    Rows already at the new pins are not rewritten, so they are not checked.
+    """
+    covered = bundle['covered']
+    checked, uncovered = {}, []
+    for row in rows:
+        identity = json.loads((Path(row)/'cost.anchors.json').read_bytes()).get('identity') or {}
+        if classify_pins(identity, pins)[0] == 'migrated':
+            continue
+        strata = identity_strata(identity, where=row)
+        checked[str(row)] = strata_names(strata)
+        missing = strata - covered
+        if missing:
+            uncovered.append(f'{row} [{", ".join(strata_names(missing))}]')
+    if uncovered:
+        raise Refused(f'the proof bundle covers {strata_names(covered)}; {len(uncovered)} row(s) price strata it '
+                      f'does not: ' + '; '.join(uncovered))
+    return checked
+
+
 def tool_commit():
     try:
         out = subprocess.run(['git', '-C', str(Path(__file__).resolve().parent.parent), 'rev-parse', 'HEAD'],
@@ -427,8 +527,9 @@ def plan_row(row, pins, *, run_id, audit_states=None):
     if old_sha != manifest['identity_sha256']:
         raise Refused(f'{row}: stored identity_sha256 {manifest["identity_sha256"]} != recomputed {old_sha}; the digest reimplementation or the row is wrong')
     state, current = classify_pins(identity, pins)
+    strata = identity_strata(identity, where=row)
     plan = dict(row=str(row), kind=row_kind(row, cost_path, audit_states), journal_state=(audit_states or {}).get(row.name),
-                state=state, current_pins=current,
+                state=state, current_pins=current, strata=strata_names(strata),
                 old_identity_sha256=old_sha, run_id=run_id, manifest_bytes=len(manifest_raw),
                 manifest_reserialization_identical=(manifest_bytes(manifest) in (manifest_raw, manifest_raw.rstrip(b'\n'))),
                 edits=[], shard_count=0, shard_bytes=0, receipt_seals=0, cost_seals=0, bytes_to_write=0)
@@ -475,6 +576,17 @@ def plan_row(row, pins, *, run_id, audit_states=None):
         if sha256_bytes(payload) != envelope['payload_sha256']:
             raise Refused(f'{row}: shard {path.name} payload_sha256 does not describe its payload')
         state_obj = loads(payload)
+        # The strata come from the sealed menu; a shard that priced anything
+        # else would be rewritten under a stratum no proof was checked against.
+        menu = set((identity['units'].get(qname) or {}).get('menu') or ())
+        for anchor in state_obj.get('anchors') or ():
+            fmt = anchor.get('format_name')
+            if fmt not in menu or anchor.get('family') != format_family(fmt):
+                raise Refused(f'{row}: shard {path.name} anchor {qname}@{fmt} (family {anchor.get("family")}) '
+                              f"is not a format of the unit's sealed menu")
+        for fmt in state_obj.get('wire_records') or {}:
+            if fmt not in menu:
+                raise Refused(f"{row}: shard {path.name} receipt {qname}@{fmt} is not a format of the unit's sealed menu")
         seals = 0
         for fmt, record in (state_obj.get('wire_records') or {}).items():
             seal = record.get('identity', {}).get('encoder_source_sha256')
@@ -537,7 +649,8 @@ def migration_record(pins, bundle, plan, *, operator, run_id, when):
                 proof_bundle=bundle['path'], proof_bundle_sha256=bundle['bundle_sha256'],
                 proof_cells=bundle['cell_count'], proof_pb_actions=bundle.get('pb_actions'),
                 encoder_fixture_id=sorted(set((bundle['fixture_id'].get('ids') or {}).values())) or None,
-                shards=plan['shard_count'], receipt_seals=plan['receipt_seals'], cost_seals=plan['cost_seals'])
+                shards=plan['shard_count'], receipt_seals=plan['receipt_seals'], cost_seals=plan['cost_seals'],
+                row_strata=plan['strata'], proof_strata=strata_names(bundle['covered']))
 
 
 def migrate_row(row, plan, work, record, *, keep_previous):
@@ -731,12 +844,14 @@ def cmd_dry_run(args):
     run_id = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
     report = dict(mode='dry-run', pins={'old': pins['old'], 'new': pins['new']}, drop_settings=list(pins['drop_settings']), proof=(bundle or {}).get('path'),
                   checkpoint_audit=args.checkpoint_audit, rows=[])
+    if bundle is not None:
+        report['coverage'] = require_coverage(rows, pins, bundle)
     for row in rows:
         started = time.time()
         plan, _ = plan_row(row, pins, run_id=run_id, audit_states=audit_states)
         plan['plan_seconds'] = time.time()-started
         report['rows'].append(plan)
-        print(json.dumps(dict(row=plan['row'], kind=plan['kind'], journal_state=plan['journal_state'], state=plan['state'], shards=plan['shard_count'],
+        print(json.dumps(dict(row=plan['row'], kind=plan['kind'], journal_state=plan['journal_state'], state=plan['state'], strata=plan['strata'], shards=plan['shard_count'],
                               receipt_seals=plan['receipt_seals'], cost_seals=plan['cost_seals'], bytes_to_write=plan['bytes_to_write'],
                               old_identity_sha256=plan['old_identity_sha256'], new_identity_sha256=plan.get('new_identity_sha256'),
                               plan_seconds=round(plan['plan_seconds'], 2))))
@@ -759,6 +874,7 @@ def cmd_migrate(args):
     operator = args.operator or getpass.getuser()
     report = dict(mode='migrate', run_id=run_id, pins={'old': pins['old'], 'new': pins['new']}, drop_settings=list(pins['drop_settings']), proof=bundle['path'],
                   proof_bundle_sha256=bundle['bundle_sha256'], checkpoint_audit=args.checkpoint_audit, rows=[])
+    report['coverage'] = require_coverage(rows, pins, bundle)
     for row in rows:
         started = time.time()
         plan, work = plan_row(row, pins, run_id=run_id, audit_states=audit_states)
