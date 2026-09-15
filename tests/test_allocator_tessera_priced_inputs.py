@@ -26,6 +26,8 @@ from test_tessera_scope_endpoints import (  # noqa: E402
 
 from prismaquant import tessera_export_lane as export  # noqa: E402
 from prismaquant.nvfp4_activation_contract import (  # noqa: E402
+    ACTIVATION_SCALE_GROUPING_PER_UNIT,
+    ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
     input_global_scale_tensor,
 )
 
@@ -86,7 +88,13 @@ def test_the_allocation_carries_the_digest_and_the_priced_scales(
     assert metadata["tessera_hessian"]["supplied"] is True
     assert metadata["tessera_activation_static_scales"] == {
         "schema": export.PRICED_STATIC_SCALES_SCHEMA,
-        "units": {name: SCALE for name in UNITS}}
+        "units": {name: SCALE for name in UNITS},
+        # The allocation declares the semantics it priced (#624): a routed
+        # per-expert selection says per-unit, EXPLICITLY and unqualified, so
+        # the export gate has an answer instead of an absence.
+        "activation_scale_grouping": {
+            "schema": ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
+            "grouping": ACTIVATION_SCALE_GROUPING_PER_UNIT}}
     # The gate closes the loop: the campaign's own files bind and pass ...
     report = export.require_priced_export_inputs(
         layer, hessian_path=capture, input_scales_path=scales)

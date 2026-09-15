@@ -61,6 +61,110 @@ NVFP4_INPUT_GLOBAL_SCALE_POLICIES = frozenset({
 })
 
 # ---------------------------------------------------------------------------
+# Executed activation-scale grouping (RobTand/prismaquant#624)
+# ---------------------------------------------------------------------------
+# What a static ``input_global_scale`` MAPS onto is a second question beside
+# the policy that produced each value.  PrismaQuant prices one scale per unit,
+# so on the Tessera routed NVFP4 wire it prices one per EXPERT projection.
+# The routed stage it would execute on takes one activation scale per
+# ``(module, stage)`` -- the minimum ``input_global_scale`` of the group, w13
+# and w2 separately.  Scope of that statement: vLLM FLASHINFER_CUTLASS behind
+# Tessera #507's ``nvfp4_moe_route``, read from source and from the probe
+# receipt ``nvfp4_moe_oracle_probe_spark_a5424378.json``.  It is prose, and no
+# gate reads it; the design note
+# ``docs/design/routed_executed_scale_grouping_2026-09-14.md`` carries the
+# citations.
+#
+# ``per_unit.v1`` is the only grouping this producer prices or exports.  An
+# allocation that carries per-expert static scales says so EXPLICITLY, and the
+# export gate records it as not qualified.  The executed (collapsed) grouping
+# has no identity here yet on purpose: it needs rescored rows and an attested
+# runtime table, and naming it before either exists would invite a stamp with
+# nothing behind it (RobTand/prismaquant#624).
+ACTIVATION_SCALE_GROUPING_PER_UNIT = "per_unit.v1"
+ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA = (
+    "prismaquant.routed_executed_scale_grouping.v1"
+)
+
+
+def is_routed_expert_projection_name(name: str) -> bool:
+    """Whether ``name`` has the per-expert routed spelling ``<parent>.experts.<e>.<leaf>``.
+
+    A SHAPE predicate only, deliberately separate from
+    :func:`routed_expert_scale_group`: a name with this shape whose group cannot
+    be resolved is refused by the callers, never read as dense.
+    """
+
+    parts = str(name).split(".")
+    return len(parts) >= 4 and parts[-3] == "experts" and parts[-2].isdigit()
+
+
+def routed_expert_scale_group(
+    name: str,
+    *,
+    profile=None,
+) -> tuple[str, str, str] | None:
+    """``(group_key, module_prefix, stage)`` for one PER-EXPERT projection.
+
+    Membership is not restated: the name is respelled as the PACKED target
+    :func:`routed_moe_stage` already owns and that owner is asked, so the
+    profile hook, the leaf table and the stage map live in one place.
+
+    ``None`` for any name without the per-expert spelling (dense units, and the
+    native packed spelling ``<parent>.experts.<packed-parameter>``, which
+    already carries one scale for the whole stack), AND for a per-expert name
+    whose leaf, role or stage is unknown.  The second case is not "not routed":
+    callers test :func:`is_routed_expert_projection_name` first and refuse it
+    (#624).
+    """
+
+    if not is_routed_expert_projection_name(name):
+        return None
+    parts = str(name).split(".")
+    packed_leaf = _PACKED_LEAF_ROLES.get(parts[-1])
+    if packed_leaf is None:
+        return None
+    parsed = routed_moe_stage(
+        f"{'.'.join(parts[:-3])}.experts.{packed_leaf}", profile=profile)
+    if parsed is None:
+        return None
+    module, stage = parsed
+    return f"{module}::{stage}", module, stage
+
+
+def routed_static_scale_grouping(unit_names, *, profile=None) -> dict | None:
+    """The grouping declaration for a set of static-scale units, or ``None``.
+
+    ``None`` when no unit has the per-expert routed spelling: dense and native
+    packed scales are one per executed tensor already, and they carry no
+    declaration.  Otherwise ``per_unit.v1`` -- the only grouping the campaign
+    prices -- stated explicitly so the export gate reads an answer, not an
+    absence.  A per-expert name that does not resolve to a ``(module, stage)``
+    group raises: it cannot be declared anything.
+
+    The one producer of the declaration; the allocator
+    (``tessera_menu.priced_static_scales``) and selected-wire completion
+    (``tessera_materialization``) both call it (#624).
+    """
+
+    routed = False
+    for name in sorted(unit_names):
+        if not is_routed_expert_projection_name(name):
+            continue
+        if routed_expert_scale_group(name, profile=profile) is None:
+            raise ValueError(
+                f"{name}: per-expert routed spelling, but no routed-MoE "
+                "(module, stage) group resolves for it, so its executed "
+                "activation-scale grouping cannot be declared "
+                "(RobTand/prismaquant#624)")
+        routed = True
+    if not routed:
+        return None
+    return {"schema": ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
+            "grouping": ACTIVATION_SCALE_GROUPING_PER_UNIT}
+
+
+# ---------------------------------------------------------------------------
 # Routed-MoE stage attestation (ROADMAP K0.2)
 # ---------------------------------------------------------------------------
 # A packed FusedMoE module runs TWO activation-quantized stages against two
@@ -1444,6 +1548,7 @@ NVFP4_SERVED_ACTIVATION_CONTRACT = StaticActivationContract()
 
 
 __all__ = [
+    "ACTIVATION_SCALE_GROUPING_PER_UNIT",
     "ActivationScaleContractError",
     "ActivationScalePolicyMismatchError",
     "NVFP4_SERVED_ACTIVATION_CONTRACT",
@@ -1473,6 +1578,7 @@ __all__ = [
     "NVFP4_STAGE_CALIBRATION_SOURCES",
     "NVFP4_STAGE_W2",
     "NVFP4_STAGE_W13",
+    "ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA",
     "UNCALIBRATED_INPUT_GLOBAL_SCALE",
     "build_execution_contract",
     "build_routed_moe_stage_attestation",
@@ -1489,6 +1595,9 @@ __all__ = [
     "require_matching_input_global_scale",
     "resolve_input_global_scale_policy",
     "resolve_input_global_scale_value",
+    "is_routed_expert_projection_name",
+    "routed_expert_scale_group",
+    "routed_static_scale_grouping",
     "routed_moe_attested_module_names",
     "routed_moe_stage",
     "routed_moe_stages_sha256",

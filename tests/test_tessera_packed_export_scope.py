@@ -5,6 +5,7 @@ import pytest
 from prismaquant import tessera_campaign as campaign
 from prismaquant import tessera_export_lane as export
 from prismaquant import tessera_expert_projection as tep
+from prismaquant import nvfp4_activation_contract as nac
 from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from test_tessera_export_projection import (
     case, _scope, _save, _meta, _units, _context, DENSE, FMT, N, STACK,
@@ -116,7 +117,13 @@ def test_packed_static_scales_bind_each_source_member(case, tmp_path, defect):
         case.payload[name]['tessera_format'] = 'TESSERA_E2M1_K2_R896'
     values = {name: float(i + 1) for i, name in enumerate(sorted(_units()))}
     _meta(case)['tessera_activation_static_scales'] = {
-        'schema': export.PRICED_STATIC_SCALES_SCHEMA, 'units': values}
+        'schema': export.PRICED_STATIC_SCALES_SCHEMA, 'units': values,
+        # This selection is per-expert and per-unit by construction (#624); the
+        # export gate refuses a routed allocation whose semantics are unstated,
+        # so declare them here as the producer does.
+        'activation_scale_grouping': {
+            'schema': nac.ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
+            'grouping': nac.ACTIVATION_SCALE_GROUPING_PER_UNIT}}
     _save(case)
     tensors = {name + '.input_global_scale': torch.tensor(value)
                for name, value in values.items()}
