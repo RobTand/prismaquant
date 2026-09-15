@@ -1917,6 +1917,7 @@ def priced_static_scales(assignment: "Mapping[str, str]",
     out rather than given a default: the gate refuses it by name as unbound,
     which is the honest answer for a row that never said what priced it.
     """
+    from .nvfp4_activation_contract import routed_static_scale_grouping
     from .tessera_export_lane import PRICED_STATIC_SCALES_SCHEMA
 
     units: dict[str, float] = {}
@@ -1931,7 +1932,15 @@ def priced_static_scales(assignment: "Mapping[str, str]",
         if isinstance(scale, bool) or not isinstance(scale, (int, float)):
             continue
         units[name] = float(scale)
-    return {"schema": PRICED_STATIC_SCALES_SCHEMA, "units": units}
+    block = {"schema": PRICED_STATIC_SCALES_SCHEMA, "units": units}
+    # A selection with per-expert routed static scales declares the grouping
+    # they were priced under -- per_unit.v1, the only one the campaign prices --
+    # so the export gate reads an answer rather than an absence (#624).  Derived
+    # from the units the rows priced, not from a caller argument.
+    grouping = routed_static_scale_grouping(units)
+    if grouping is not None:
+        block["activation_scale_grouping"] = grouping
+    return block
 
 
 __all__ = list(__all__) + ["assert_uniform_hessian_identity",

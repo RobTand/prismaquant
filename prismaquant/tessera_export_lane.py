@@ -1352,6 +1352,9 @@ def require_priced_export_inputs(
     """
     from .footprint import _read_safetensors_header
     from .layer_config import load_assignment, read_layer_config_metadata
+    from .nvfp4_activation_contract import (
+        is_routed_expert_projection_name, routed_expert_scale_group,
+    )
     from .tessera_formats import (
         parse_tessera_format_name, route_static_activation_contract,
         tessera_serving_route, tessera_wire_recipe,
@@ -1614,7 +1617,83 @@ def require_priced_export_inputs(
                 report["input_global_scales"][name + ".input_global_scale"] = priced
         report["input_scales"] = str(input_scales_path)
         report["input_scales_bound_units"] = len(static_contract_units)
+        # Per-expert routed static scales are priced one per expert; the routed
+        # stage they would execute on takes one per (module, stage).  Such an
+        # allocation must declare which grouping its scales carry, and a
+        # per-expert name that resolves to no group is refused, never read as
+        # dense (#624).  Only the NVFP4 registry row carries a static contract,
+        # so A8/A16/E4M3 units never reach this; dense names never match.
+        routed_units = [name for name in static_contract_units
+                        if is_routed_expert_projection_name(name)]
+        ungrouped = [name for name in routed_units
+                     if routed_expert_scale_group(name) is None]
+        if ungrouped:
+            raise TesseraExportLaneError(
+                f"selected static-contract unit(s) {ungrouped[:5]}"
+                f"{'...' if len(ungrouped) > 5 else ''} have the per-expert "
+                "routed spelling but resolve to no routed-MoE (module, stage) "
+                "group, so the activation scale they would execute under is "
+                "unknown (RobTand/prismaquant#624).")
+        if routed_units:
+            _require_routed_scale_grouping_declaration(
+                priced_block.get("activation_scale_grouping"),
+                routed_units=routed_units, report=report)
     return report
+
+
+def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
+                                              report: dict) -> None:
+    """Refuse routed per-expert static scales unless they declare ``per_unit.v1``.
+
+    The campaign prices one static ``input_global_scale`` per expert
+    projection.  The routed stage these units would execute on takes one scale
+    per ``(module, stage)``: the minimum of the group, w13 and w2 separately.
+    That statement is scoped to vLLM FLASHINFER_CUTLASS behind Tessera #507's
+    ``nvfp4_moe_route`` (source read plus the probe receipt
+    ``nvfp4_moe_oracle_probe_spark_a5424378.json``); nothing here reads it.
+
+    * An ABSENT declaration is refused.  Omitting it is the silent
+      serving-equivalence claim #624 is about.
+    * ``per_unit.v1`` exports, and the report records it as not qualified.
+      The export CLI copies that onto the build anchor, so the ship record
+      says the artifact's A-side prices do not represent the executed scale.
+    * Anything else is refused.  The executed grouping needs rescored rows and
+      a runtime-attested table, and neither exists
+      (``docs/design/routed_executed_scale_grouping_2026-09-14.md``).
+    """
+    from .nvfp4_activation_contract import (
+        ACTIVATION_SCALE_GROUPING_PER_UNIT,
+        ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
+    )
+    where = "tessera_activation_static_scales.activation_scale_grouping"
+    if grouping is None:
+        raise TesseraExportLaneError(
+            f"{len(routed_units)} selected unit(s) are per-expert routed units "
+            "on the static NVFP4 activation contract (first: "
+            + routed_units[0] + ") and the allocation does not declare which "
+            "activation-scale grouping priced them. One input_global_scale per "
+            "expert is what the campaign prices; the routed stage takes one per "
+            "(module, stage). Re-allocate so the priced block carries "
+            f"{ACTIVATION_SCALE_GROUPING_PER_UNIT} (exported as not qualified; "
+            "RobTand/prismaquant#624)."
+        )
+    if not isinstance(grouping, Mapping):
+        raise TesseraExportLaneError(
+            f"{where} must be an object, got {type(grouping).__name__}")
+    if grouping.get("schema") != ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA:
+        raise TesseraExportLaneError(
+            f"{where} schema is {grouping.get('schema')!r}; this producer "
+            f"reads only {ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA!r}")
+    declared = grouping.get("grouping")
+    if declared != ACTIVATION_SCALE_GROUPING_PER_UNIT:
+        raise TesseraExportLaneError(
+            f"{where} declares grouping {declared!r}; this producer exports "
+            f"only {ACTIVATION_SCALE_GROUPING_PER_UNIT!r}. The executed "
+            "grouping needs rescored rows and a runtime-attested table, and "
+            "neither exists (RobTand/prismaquant#624).")
+    report["activation_scale_grouping"] = ACTIVATION_SCALE_GROUPING_PER_UNIT
+    report["activation_scale_grouping_qualified"] = False
+    report["activation_scale_grouping_routed_units"] = len(routed_units)
 
 
 def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str) -> dict:
@@ -1724,6 +1803,22 @@ def preflight(model_path: str | Path, *, target=None,
                    if priced_inputs.get('hessian_reference_binding') is not None else {}),
             },
         }
+        if priced_inputs.get("activation_scale_grouping") is not None:
+            # BESIDE priced_inputs, never inside it: Tessera's exporter reads
+            # that block as a closed key set and refuses any other key.  The
+            # build anchor is what `lane_shipcard open --build-json` stamps onto
+            # the ship record, so a per-expert routed A-side reaches the card
+            # as not qualified instead of dying in a transient report (#624).
+            from .nvfp4_activation_contract import (
+                ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
+            )
+            build["tessera_activation_scale_grouping"] = {
+                "schema": ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
+                "grouping": priced_inputs["activation_scale_grouping"],
+                "qualified": priced_inputs["activation_scale_grouping_qualified"],
+                "routed_units": priced_inputs[
+                    "activation_scale_grouping_routed_units"],
+            }
         if scope is not None:
             build["tessera_serving_scope"] = read_layer_config_metadata(
                 assignment_path)["tessera_serving_scope"]

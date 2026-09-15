@@ -339,6 +339,31 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
         units=names, calibration_identity=calibration))
 
 
+def _static_scale_grouping(scale_units, expanded):
+    """The activation-scale grouping declaration for the completed allocation (#624).
+
+    Scoped to the units the SELECTION puts on a static activation contract,
+    exactly the set the export gate checks, so an A8/A16 completion carries no
+    new key.  The campaign's scale table is per unit by construction, so the
+    declaration comes from the one producer,
+    :func:`~prismaquant.nvfp4_activation_contract.routed_static_scale_grouping`.
+    """
+    from .nvfp4_activation_contract import routed_static_scale_grouping
+    from .tessera_formats import (parse_tessera_format_name, route_static_activation_contract,
+                                  tessera_serving_route, tessera_wire_recipe)
+    selected = []
+    for name in scale_units:
+        fmt = expanded.get(name)
+        parsed = parse_tessera_format_name(fmt) if isinstance(fmt, str) else None
+        if parsed is None:
+            continue
+        family, rung = parsed
+        route = tessera_serving_route(family, tessera_wire_recipe(family, rung), rung)
+        if route_static_activation_contract(route) is not None:
+            selected.append(name)
+    return routed_static_scale_grouping(selected)
+
+
 def finalize(plan_path):
     """Publish only a fully verified packed allocation and its exact export inputs."""
     import torch
@@ -444,8 +469,11 @@ def finalize(plan_path):
     config = copy.deepcopy(request['layer_config'])
     meta = config['__prismaquant__']
     meta.update(tep.allocation_expert_projection_block(completed_cost, request['assignment']))
-    meta['tessera_activation_static_scales'] = dict(schema=export.PRICED_STATIC_SCALES_SCHEMA,
-                                                   units=dict(scales['units']))
+    static_block = dict(schema=export.PRICED_STATIC_SCALES_SCHEMA, units=dict(scales['units']))
+    grouping = _static_scale_grouping(scales['units'], expanded)
+    if grouping is not None:
+        static_block['activation_scale_grouping'] = grouping
+    meta['tessera_activation_static_scales'] = static_block
     if want_h:
         meta['tessera_hessian'] = {**meta['tessera_hessian'], 'capture_sha256': digest,
                                    'capture_path': str(capture)}

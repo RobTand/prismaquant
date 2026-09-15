@@ -1,7 +1,37 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-14 · `claude/a4-union-census-tables`. Stamps
+As of: 2026-09-14 · `claude/a4-routed-scale-guard-624`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-14, `claude/a4-routed-scale-guard-624`) for **the routed
+NVFP4 static activation-scale export guard** (#624). The campaign prices one
+static `input_global_scale` per unit, so on the Tessera routed NVFP4 wire it
+prices one per expert projection. The routed stage takes one scale per
+`(module, stage)`: the group minimum, with w13 and w2 separate. That statement
+is scoped to vLLM FLASHINFER_CUTLASS behind Tessera #507's `nvfp4_moe_route`,
+from source and the probe receipt `nvfp4_moe_oracle_probe_spark_a5424378.json`.
+No gate reads it. The guard:
+
+- `nvfp4_activation_contract.routed_static_scale_grouping` is the single
+  producer of the declaration. It returns `per_unit.v1` for a static-scale set
+  that contains a per-expert routed projection, and `None` for dense or native
+  packed units. It raises for a per-expert name that `routed_moe_stage` cannot
+  resolve to a group. `tessera_menu.priced_static_scales` (allocator, sampled
+  proposal) and `tessera_materialization` (selected-wire completion) both stamp
+  through it.
+- `tessera_export_lane.require_priced_export_inputs` refuses a selected
+  per-expert static-contract unit that resolves to no group. It also refuses
+  when the declaration is absent, malformed or anything but `per_unit.v1`.
+- An accepted export writes `tessera_activation_scale_grouping`
+  (`qualified: false`) on the build anchor. It sits beside the closed
+  `priced_inputs` block that Tessera's exporter reads.
+
+Only the NVFP4 registry row carries a static activation contract, so A8, A16
+and E4M3 units never reach the guard, and dense names never match it. No
+default, format menu, lane or sealed row moves. Rescoring routed cells under
+the executed grouping is design only
+(`docs/design/routed_executed_scale_grouping_2026-09-14.md`). Gate:
+`tests/test_routed_executed_scale_grouping.py`.
 
 Re-stamped (2026-09-14, `claude/a4-union-census-tables`) for **the census
 table union** (#623). `tools/union_tessera_census_tables.py` writes one
