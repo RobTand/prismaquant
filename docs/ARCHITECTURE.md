@@ -25,8 +25,11 @@ they move to finalize: the checkpoint manifest, the unit shards with their
 `input_scales.safetensors`, `capture-load-execution-<sha256>.json` and the cost
 payload. Wire blobs and render entries are keyed by unit and rung only
 (`_wire_path`) and carry no run identity, so they still land during the loop.
-The finalized files are byte for byte the load-all head's (gate:
-`tests/test_tessera_row_stream.py`). A row runs `--row-head load-all`, and prints
+The finalized files are the load-all head's, byte for byte once the wall-clock
+seconds two runs never share are set aside: the gate
+(`tests/test_tessera_row_stream.py`) pins the clock and compares bytes, and on
+GLM-5.3 row 0055 the two heads differ only in per-anchor `encode_seconds`,
+inside `cost.pkl` and the unit shards. A row runs `--row-head load-all`, and prints
 the dependency, when it needs the whole set first: a present checkpoint (a
 resume) or `--seed-checkpoint`, `--max-rounds` other than 1, no
 `--capture-load-policy`, or no `--export-hessian-reference-policy`. The
