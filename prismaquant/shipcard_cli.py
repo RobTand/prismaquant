@@ -29,6 +29,7 @@ from prismaquant.shipcard import (
     GOLD_SLOTS,
     OPTIONAL_SLOTS,
     ROUTE_CENSUS_SLOT,
+    ROUTE_TRACE_SLOT,
     UNIFORM_CONTROL_METRIC_KEYS,
     UNIFORM_CONTROL_SLOT,
     _verify_gold_record,
@@ -418,6 +419,69 @@ def _cmd_fill_route_census(args: argparse.Namespace) -> int:
     return 0
 
 
+#: `fill-route-trace` exit status when no usable observation exists.  Distinct
+#: from a refusal (1) and a usage error (2), so a wrapper cannot read "not
+#: verified" as either a pass or a disagreement.
+EXIT_NOT_VERIFIED = 3
+
+
+def _cmd_fill_route_trace(args: argparse.Namespace) -> int:
+    """Close `route.trace` from every rank's served route trace (#575)."""
+    from prismaquant.shipcard import make_route_trace_record
+    from prismaquant.tessera_route_trace_gate import (
+        RouteTraceNotVerified,
+        TesseraRouteTraceError,
+    )
+
+    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
+    card = load_shipcard(args.shipcard)
+    if ROUTE_TRACE_SLOT not in (card.get("slots") or {}):
+        print(f"[shipcard] REFUSED: {args.shipcard} has no {ROUTE_TRACE_SLOT} "
+              "slot; open a Tessera lane card first (python -m "
+              f"prismaquant.lane_shipcard open --lane tessera --artifact "
+              f"{model_dir})", file=sys.stderr)
+        return 2
+    try:
+        config_json = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
+    except (OSError, ValueError) as exc:
+        print(f"[shipcard] REFUSED: cannot read the artifact's config.json: "
+              f"{exc}", file=sys.stderr)
+        return 2
+    traces = []
+    for rank, path in enumerate(args.trace):
+        label = f"rank{rank}:{Path(path).name}"
+        try:
+            traces.append((label, Path(path).read_bytes().decode("utf-8")))
+        except FileNotFoundError:
+            traces.append((label, None))
+        except (OSError, ValueError) as exc:
+            print(f"[shipcard] NOT VERIFIED: cannot read {path}: {exc}",
+                  file=sys.stderr)
+            return EXIT_NOT_VERIFIED
+    try:
+        record = make_route_trace_record(
+            tool=args.tool or "fill-route-trace",
+            model_sha=compute_model_sha(model_dir),
+            traces=traces,
+            expected_ranks=args.expected_ranks,
+            config_json=config_json,
+            build=card.get("build"),
+            platform=args.platform,
+        )
+    except RouteTraceNotVerified as exc:
+        print("[shipcard] NOT VERIFIED -- route.trace stays unfilled and the "
+              f"card stays unpublishable: {exc}", file=sys.stderr)
+        return EXIT_NOT_VERIFIED
+    except TesseraRouteTraceError as exc:
+        print(f"[shipcard] REFUSED -- route.trace: {exc}", file=sys.stderr)
+        return 1
+    fill_slot(args.shipcard, ROUTE_TRACE_SLOT, record)
+    print(f"[shipcard] filled {ROUTE_TRACE_SLOT} from {len(traces)} rank "
+          f"trace(s) (passed={record['passed']})")
+    print(f"[shipcard]   {record['detail']}")
+    return 0
+
+
 def _confirm_artifact_name(model_dir: str, typed: str | None) -> str | None:
     """Re-typing the basename is the confirmation, as `publish_artifact` has it."""
     expected = Path(model_dir).resolve().name
@@ -601,6 +665,28 @@ def main(argv: list[str] | None = None) -> int:
     p_census.add_argument("--model-dir", default=None)
     p_census.add_argument("--tool", default=None)
     p_census.set_defaults(func=_cmd_fill_route_census)
+
+    p_trace = sub.add_parser(
+        "fill-route-trace",
+        help="close route.trace from every rank's TESSERA_ROUTE_TRACE file "
+             "(Tessera lane: priced-vs-served activation-contract gate). "
+             "Exit 0 agree, 1 refused, 2 usage, 3 not verified",
+    )
+    p_trace.add_argument("shipcard")
+    p_trace.add_argument(
+        "--trace", action="append", required=True,
+        help="one rank's tessera.route_trace/1 JSON, in rank order "
+             "(repeatable; a path that does not exist is a missing rank)")
+    p_trace.add_argument(
+        "--expected-ranks", type=int, required=True,
+        help="the serve's world size; fewer traces than this is NOT VERIFIED")
+    p_trace.add_argument(
+        "--platform", default=None,
+        help="serving platform to price on (default: the card's "
+             "tessera_serving_scope target; both, when present, must agree)")
+    p_trace.add_argument("--model-dir", default=None)
+    p_trace.add_argument("--tool", default=None)
+    p_trace.set_defaults(func=_cmd_fill_route_trace)
 
     args = ap.parse_args(argv)
     return int(args.func(args))

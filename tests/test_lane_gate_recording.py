@@ -274,7 +274,7 @@ def test_a_lane_can_add_a_requirement_and_can_never_subtract_one():
 
     tessera_card = {"lane": "tessera", "slots": {}}
     assert set(required_slots(tessera_card)) == set(REQUIRED_SLOTS) | {
-        "route.census"}
+        "route.census", "route.trace"}
 
     legacy_card = {"slots": {}}
     assert required_slots(legacy_card) == tuple(REQUIRED_SLOTS)
@@ -289,7 +289,7 @@ def test_opening_a_tessera_record_opens_the_gates_the_lane_declares(tmp_path):
     card = load_shipcard(path)
     assert card["lane"] == "tessera"
     assert set(card["slots"]) == set(REQUIRED_SLOTS) | {
-        "route.census", "uniform_control"}
+        "route.census", "route.trace", "uniform_control"}
     assert all(v is None for v in card["slots"].values())
 
 

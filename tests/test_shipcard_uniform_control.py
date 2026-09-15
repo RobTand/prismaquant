@@ -72,13 +72,21 @@ def _no_current_scoped_table(monkeypatch):
     (v8) the installed contract refuses them by name
     (`tests/test_tessera_route_receipt.py`), so the scaffold runs here as on a
     box with no `tessera` installed -- the `ModuleNotFoundError` leg.
+
+    `route.trace` (#575) reads the contract through its own loader, so it is
+    stood in separately with the one family `_artifact` prices, and `_built`
+    closes that slot with an agreeing trace (`_fill_trace`).
     """
     import prismaquant.tessera_route_receipt as receipt
+    import prismaquant.tessera_route_trace_gate as trace_gate
 
     def _absent():
         raise ModuleNotFoundError("No module named 'tessera'", name="tessera")
 
     monkeypatch.setattr(receipt, "_current_scoped_contract", _absent)
+    monkeypatch.setattr(trace_gate, "load_trace_contract", lambda: (
+        {"sm_121": {"TESSERA_BF16_K1": "bf16_unquantized"}},
+        {"TESSERA_BF16_K1": {"family": "TESSERA_BF16_K1", "grid": "BF16"}}))
 
 #: The receipt's own arms: allocated 0.3485 against the byte-matched uniform
 #: 0.1746, 1.9959908361970216x, control 65.1 ppm the fatter arm.
@@ -174,8 +182,14 @@ def _artifact(tmp_path, *, name="exported", rate_axis=True):
     model_dir.mkdir()
     config = {"model_type": "qwen3"}
     if rate_axis:
+        # One priced module, so `route.trace` (#575) has a price to compare
+        # the agreeing trace `_fill_trace` writes against.
         config["quantization_config"] = {
-            "quant_method": "tessera", "format": "mixed-precision"}
+            "quant_method": "tessera", "format": "mixed-precision",
+            "config_groups": {"group_0": {
+                "format": "TESSERA", "targets": ["model.layers.0.mlp.down_proj"],
+                "scheme": {"family": "TESSERA_BF16", "grid": "BF16",
+                           "structure": "dense"}}}}
     (model_dir / "config.json").write_text(json.dumps(config))
     # Distinct bytes per artifact: two directories with identical bytes ARE
     # one checkpoint, and the gate says so ("compared against itself").
@@ -357,6 +371,29 @@ def _fill_census(path, model_dir):
     return record
 
 
+def _fill_trace(path, model_dir):
+    """An agreeing route-trace receipt for the one module `_artifact` prices.
+
+    `route.trace` (#575) is required of every Tessera card, so `_built` means
+    every slot closed only once it is filled too.
+    """
+    from prismaquant.shipcard import ROUTE_TRACE_SLOT, make_route_trace_record
+
+    trace = {"schema": "tessera.route_trace/1", "entries": [{
+        "policy": "TESSERA_BF16:resident", "shape": "M1:N8:K8",
+        "symbol": "torch.mm", "decoder": "torch_window",
+        "contract": "bf16_unquantized", "kind": "dense",
+        "launches": 1, "modules": 1}]}
+    record = make_route_trace_record(
+        tool="test", model_sha=compute_model_sha(model_dir),
+        traces=[("rank0", trace)], expected_ranks=1,
+        config_json=(model_dir / "config.json").read_bytes().decode("utf-8"),
+        build=load_shipcard(path).get("build"), platform="sm_121")
+    assert record["passed"] is True
+    fill_slot(path, ROUTE_TRACE_SLOT, record)
+    return record
+
+
 def _built(tmp_path, *, candidate=_ALLOCATED_KL, control=_CONTROL_KL,
            measured=True, arm=None, rate_axis=True, key="kl_mean"):
     """An artifact with every base slot closed and one control verdict."""
@@ -370,6 +407,7 @@ def _built(tmp_path, *, candidate=_ALLOCATED_KL, control=_CONTROL_KL,
     )
     if rate_axis:
         _fill_census(path, model_dir)
+        _fill_trace(path, model_dir)
     return model_dir, path
 
 
@@ -789,6 +827,7 @@ def test_fill_control_closes_the_slot_from_two_measurements(tmp_path):
         "--tool", "test",
     ]) == 0
     _fill_census(path, model_dir)
+    _fill_trace(path, model_dir)
     assert _problems(model_dir, path) == []
     assert _publish(model_dir) == 0
 

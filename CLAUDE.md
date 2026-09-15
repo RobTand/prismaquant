@@ -317,10 +317,15 @@ within 1–2%. The decision-unit *framing* from CLADO is kept
     the producer preflight asserts every lane spec's `executes` list equals the
     pinned contract's table and refuses on mismatch, exactly as the R6 profile
     preflight already refuses producer/consumer profile drift. Second leg,
-    serve-side: `validate_native_export` compares the artifact's priced
-    `activation_contracts` histogram against the routes the serve actually
-    emitted (`emit_route` telemetry) and refuses on disagreement — the priced
-    contract and the served contract must be the same object. The test may not
+    serve-side: the priced contract and the served contract must be the same
+    object. On the Tessera lane the required `route.trace` shipcard slot
+    compares the module count the artifact prices under each activation
+    contract with what every rank of the serve dispatched (Tessera's
+    `TESSERA_ROUTE_TRACE` telemetry), refuses on disagreement, and reads a
+    missing rank trace as not verified (`tessera_route_trace_gate`, #575). The
+    trace names no modules, so that comparison is a histogram, not a
+    per-module map. The compressed-tensors lane has no route telemetry, so
+    this leg is open there; `validate_native_export` does not perform it. The test may not
     import the serving runtime (`AGENTS.md` principle 5 forbids vendoring it); the
     attestation travels in the contract file. **Corollary for prose:** a
     recorded blocker or capability claim inherits the scope of the artifact it

@@ -2680,6 +2680,16 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
     "${WORK_DIR}/exported/shipcard.json" --census '<raw-census.json>' \
     --layer-config "${WORK_DIR}/artifacts/layer_config.json" --model-dir "${WORK_DIR}/exported"
   printf '\n'
+  # Principle 14's serve-side leg (#575): the eager serve counts its own
+  # dispatches when every rank has TESSERA_ROUTE_TRACE set, and route.trace
+  # stays unfilled -- so the card stays unpublishable -- until every rank's
+  # trace agrees with the priced contracts. A missing rank exits 3.
+  echo "  Route trace: start the eager serve with TESSERA_ROUTE_TRACE=<routes-rank<N>.json> on every rank."
+  printf '  Close trace: '
+  printf ' %q' python3 -m prismaquant.shipcard_cli fill-route-trace \
+    "${WORK_DIR}/exported/shipcard.json" --trace '<routes-rank0.json>' \
+    --expected-ranks '<world-size>' --model-dir "${WORK_DIR}/exported"
+  printf '\n'
   echo "  Verify:      python -m prismaquant.shipcard_cli verify ${WORK_DIR}/exported/shipcard.json"
   exit 0
 fi
