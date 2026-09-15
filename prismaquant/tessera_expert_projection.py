@@ -473,13 +473,26 @@ def verify_expert_wire_record(record: Any, *, name: str, unit: Mapping[str, Any]
     campaign's wire directory with the recorded bytes.
     """
     record = check_expert_wire_receipt(record, name=name, unit=unit, q256=q256, grid=grid)
-    path = wire_dir / record["file"]
-    if path.is_symlink() or not path.is_file() or path.resolve().parent != wire_dir.resolve():
-        raise ExpertProjectionError(f"{name}: priced wire {path} is not in the wire directory")
+    path = locate_expert_wire(record, name=name, wire_dir=wire_dir)
     blob = path.read_bytes()
     if len(blob) != record["blob_bytes"] or hashlib.sha256(blob).hexdigest() != record["blob_sha256"]:
         raise ExpertProjectionError(f"{name}: priced wire {path} does not match its receipt")
-    return {key: record[key] for key in ("file", "blob_sha256", "blob_bytes", "identity")}
+    return record
+
+
+def locate_expert_wire(record: Mapping[str, Any], *, name: str, wire_dir: Path) -> Path:
+    """The receipt's blob path inside ``wire_dir`` with the recorded size, without reading it.
+
+    For a stage that hands the receipt on to a reader that hashes the bytes it
+    reads (the exporter's ``verify_cached_unit``); a stage that hands over the
+    bytes themselves uses :func:`verify_expert_wire_record`.
+    """
+    path = wire_dir / record["file"]
+    if path.is_symlink() or not path.is_file() or path.resolve().parent != wire_dir.resolve():
+        raise ExpertProjectionError(f"{name}: priced wire {path} is not in the wire directory")
+    if path.stat().st_size != record["blob_bytes"]:
+        raise ExpertProjectionError(f"{name}: priced wire {path} does not match its receipt")
+    return path
 
 
 def cached_units_manifest(source: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]],

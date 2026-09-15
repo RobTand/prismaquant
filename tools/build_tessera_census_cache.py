@@ -4,8 +4,10 @@
 Input is either an allocator ``layer_config.json`` (``--layer-config``) or a
 hand-written uniform control (``--uniform-format``), for which the layer
 config is written here with the allocator's own expert-projection block.
-No joint handoff is read, nothing is encoded, and every referenced blob is
-re-hashed.  Research wires only: this qualifies neither export nor serving.
+No joint handoff is read and nothing is encoded.  Every referenced blob is
+located and sized; its content is hashed where the exporter reads it
+(``verify_cached_unit``), not here, unless ``--hash-blobs`` asks for an audit
+pass.  Research wires only: this qualifies neither export nor serving.
 
 The exporter reads blobs from its manifest file's parent directory, so the
 manifest written to ``--out-dir`` is a record; an export copies it into the
@@ -72,6 +74,9 @@ def main(argv=None) -> int:
                              "for the Tessera planner; written only after the outside-roster "
                              "BF16 refusal has run, and refused if the path exists")
     parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--hash-blobs", action="store_true",
+                        help="also hash every selected blob here (a full read of the wire set); "
+                             "the exporter hashes each blob it reads either way")
     args = parser.parse_args(argv)
     started = time.monotonic()
     out = Path(args.out_dir)
@@ -128,7 +133,7 @@ def main(argv=None) -> int:
     manifest = census_selected_cached_units_manifest(
         assignment, metadata, cost, roster, census["unit_shapes"], records,
         input_schema=INPUT_SCHEMA, encoding_input_schema=ENCODING_INPUT_SCHEMA,
-        cache_schema=CACHE_SCHEMA, hash_workers=args.workers)
+        cache_schema=CACHE_SCHEMA, blob_workers=args.workers, hash_blobs=args.hash_blobs)
     wire_dir = Path(cost["provenance"]["wire_dir"]).resolve()
     CachedUnitBundle(manifest, wire_dir, set(manifest["units"]), manifest["source"])
     raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
@@ -136,7 +141,7 @@ def main(argv=None) -> int:
     summary = {
         "schema": "prismaquant.tessera_census_cache_build.v1",
         "status": "research_wires_only", "export_qualified": False, "serving_qualified": False,
-        "sha256": shas, "units": len(manifest["units"]),
+        "sha256": shas, "units": len(manifest["units"]), "hash_blobs": args.hash_blobs,
         "unselected_bf16": sorted(n for n, f in selected.items() if f == "BF16"),
         "outside_census_bf16_passthrough": outside,
         "plan_layer_config_sha256": shas.get("plan_layer_config"),

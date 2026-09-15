@@ -334,7 +334,7 @@ def test_selected_cache_closes_a_rung_from_each_table_under_the_union_wire_dir(t
     selected = census_selected_cached_units_manifest(
         assignment, metadata, cost, roster, {name: [2, 2] for name in all_units}, records,
         input_schema=INPUT_SCHEMA, encoding_input_schema=ENCODING_SCHEMA,
-        cache_schema="tessera.cached_units.v1", hash_workers=2)
+        cache_schema="tessera.cached_units.v1", blob_workers=2)
     assert set(selected["units"]) == set(all_units)
     wire_dir = out / "cache" / "wire"
     assert cost["provenance"]["wire_dir"] == str(wire_dir.resolve())
@@ -577,7 +577,7 @@ def test_whole_scope_table_b_duplicate_cells_agree_when_price_and_bytes_agree(tm
         assignment, config[LAYER_CONFIG_META_KEY], cost, roster,
         {name: [2, 2] for name in all_units}, records, input_schema=INPUT_SCHEMA,
         encoding_input_schema=ENCODING_SCHEMA, cache_schema="tessera.cached_units.v1",
-        hash_workers=2)
+        blob_workers=2)
     assert set(selected["units"]) == set(all_units)
 
 
