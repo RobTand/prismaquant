@@ -1,7 +1,28 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-15 · `claude/tp2-measurement-instruments`. Stamps
+As of: 2026-09-16 · `codex/pq-r3-prefill-assignment-reuse`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-16, `codex/pq-r3-prefill-assignment-reuse`) for the **prefill
+frontier's assignment publication** (§12, §4.5). `prefill_frontier._point_record`
+wrote `<assignment digest>.json` only when the path was absent and never read a
+file that was already there, so a leftover at that name -- an interrupted write,
+a hand edit, another table's sweep -- was reused while the point published THIS
+solve's dloss, attained prefill and digest beside it. The file is now published
+by the shared no-clobber primitive (`cost_stage_checkpoint.publish_new_bytes`, a
+hard-link creation), and a file already there is read and verified before it is
+reused: it must parse, carry this module's schema and digest, hold exactly this
+solve's assignment, and re-hash to the name it is filed under. Corrupt,
+truncated and different-assignment files are refused by name and never
+overwritten, and the loser of a publication race validates the winner rather
+than replacing it. Provenance is the one fact the name cannot carry: a
+re-measured table whose medians do not move resolves to the same path
+(`tests/test_prefill_frontier_dispersion.py` runs exactly that), so a file
+recording a different `table_id`/`table_sha256` is reused -- it IS the assignment
+-- and the point carries `assignment_file_provenance` naming the run that
+published it instead of adopting it as this run's; a file with no readable
+provenance is refused. No default, stage, format, lane, ship gate or allocator
+default changed.
 
 Re-stamped (2026-09-15, `claude/tp2-measurement-instruments`) for the **gold
 lane's multi-node instruments** (§2.3, §7.3). Three things a gold receipt did
@@ -9637,7 +9658,9 @@ that budget. The output, `prismaquant.prefill_frontier.v1`, carries the whole cu
 point `slo_ms`, `predicted_dloss`, `payload_bytes`, `achieved_bits`, `attained_prefill_ms`
 (fixed work included) and its `attained_prefill_ms_bootstrap` interval, `attained_decode_ms`
 and its twin, `device_memory_bytes`, `assignment_sha256` and
-`assignment_path`, `refusal_reason`, `nondominated` -- plus `saturation` (measured at the
+`assignment_path` (a content-addressed file verified before reuse, with
+`assignment_file_provenance` naming the run that published it), `refusal_reason`,
+`nondominated` -- plus `saturation` (measured at the
 table's upper bound and verified), `slo_axis` (table-derived bounds), `monotone_loss`, and
 provenance (table identity, context, cost digest, git commit, allocator argv, bootstrap
 draws/seed). The intervals resample each priced row's own samples
