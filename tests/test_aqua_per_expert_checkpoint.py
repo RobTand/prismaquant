@@ -354,3 +354,189 @@ def test_a_joint_row_is_never_stamped_with_the_aqua_a_side(monkeypatch):
         "one; stamping `act_dloss` on it invalidates the row")
     assert report["entries_merged"] == 0
     assert report["joint_rows_skipped"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The CLI contract around cells that are ALREADY joint-priced
+# ---------------------------------------------------------------------------
+# Root QA on the first version of this fix: `main` still refused when
+# `entries_merged == 0`, so a VALID artifact whose every owed cell is a joint
+# AURA row was rejected as a no-op -- and the stage still priced the A-side for
+# those cells before the merge threw that work away. Both are regressions of the
+# "eliminate unnecessary work" rule, and they are what these tests pin.
+#
+# The joint rows here are built by `make_joint_aura_entry`, which VALIDATES its
+# own row, so this exercises the real predicate rather than a monkeypatched one.
+
+def _joint_row(name, fmt, *, loss=1.0, shape=(_ROWS, _IN)):
+    """A real, validating joint AURA row for one (unit, format) cell."""
+    import math
+
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+    from prismaquant.joint_aura import (
+        arithmetic_identity, identity_sha256, make_joint_aura_entry,
+    )
+
+    content = {"config": {"fixture": True},
+               "weight_map": {"fixture.weight": "fixture.weight"},
+               "shards": [{"path": "/fixture/synthetic.safetensors", "size": 1,
+                           "sha256": "a" * 64}]}
+    source_model = {"schema": STREAMED_MODEL_IDENTITY_SCHEMA,
+                    "source": "synthetic", "resolved_commit": None,
+                    "content_sha256": canonical_json_sha256(
+                        content, where="pqr2 joint fixture"),
+                    **content}
+    arithmetic = arithmetic_identity(torch.float32)
+    bytes_ = shape[0] * shape[1] * 4
+    probe = {"schema": "prismaquant.joint_aura.probes.v2", "seed_base": 0,
+             "n_probes": 3, "calibration_sha256": "c" * 64,
+             "producer_source_sha256": "d" * 64, "source_model": source_model,
+             "distribution": "rademacher", "normalization": "global_kl_fisher",
+             "temperature": 1.0, "arithmetic": arithmetic}
+    operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": name,
+                "format": fmt, "probe_identity_sha256": identity_sha256(probe),
+                "source_weight": {"content_sha256": "a" * 64,
+                                  "shape": list(shape),
+                                  "dtype": "torch.float32",
+                                  "logical_bytes": bytes_},
+                "rendered_weight": {"content_sha256": "b" * 64,
+                                    "shape": list(shape),
+                                    "dtype": "torch.float32",
+                                    "logical_bytes": bytes_},
+                "activation": {"schema": "prismaquant.joint_aura.activation.v1",
+                               "quantizes_input": True,
+                               "activation_max_abs": None,
+                               "input_global_scale": None},
+                "arithmetic": arithmetic}
+    total = math.sqrt(2.0 * loss)
+    return make_joint_aura_entry(
+        operator_identity=operator, probe_identity=probe,
+        signed_components=[{"weight": total, "activation": 0.0, "mixed": 0.0,
+                            "total": total} for _ in range(3)])
+
+
+def _cli_fixture(tmp_path, costs, units):
+    """A card .npz, a --cost-in pkl and the argv `main` needs, on CPU."""
+    import pickle
+    import sys
+
+    model, _ = _per_expert_checkpoint(tmp_path)
+    card_path = tmp_path / "card.npz"
+    _card(units).to_npz(str(card_path))
+    cost_in = tmp_path / "cost-in.pkl"
+    cost_in.write_bytes(pickle.dumps({"costs": costs, "provenance": {}}))
+    cost_out = tmp_path / "cost-out.pkl"
+    argv = ["aqua-activation-cost", "--card", str(card_path),
+            "--model-path", str(model), "--cost-in", str(cost_in),
+            "--cost-out", str(cost_out), "--device", "cpu",
+            "--lane-executes-all-activation-grids"]
+    return cost_out, argv
+
+
+def test_the_cli_accepts_an_all_joint_artifact_without_pricing_anything(
+        tmp_path, monkeypatch):
+    """A fulfilled artifact is accepted, and it costs no checkpoint read.
+
+    Refusing it as a "no-op" was wrong: nothing was computed because nothing was
+    OWED. The `materialize_source_weight` trap is the proof that no A-side was
+    computed for it -- not a timing claim.
+    """
+    import pickle
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+
+    name = "model.layers.0.mlp.down_proj"
+    cost_out, argv = _cli_fixture(
+        tmp_path, {name: {"NVFP4": _joint_row(name, "NVFP4")}},
+        [_dense_unit(name)])
+
+    def _must_not_read(*_a, **_k):
+        raise AssertionError("an all-joint artifact must not read a weight")
+
+    monkeypatch.setattr(aqc, "materialize_source_weight", _must_not_read)
+    monkeypatch.setattr(sys, "argv", argv)
+    assert aqc.main() == 0
+
+    out = pickle.loads(cost_out.read_bytes())
+    assert "act_dloss" not in out["costs"][name]["NVFP4"]
+    prov = out["provenance"]["aqua_activation_cost"]
+    assert prov["joint_cells_already_priced"] == [[name, "NVFP4"]]
+    assert prov["cells_already_joint_priced"] == 1
+    assert prov["merge_report"]["joint_rows_skipped"] == 1
+    assert prov["merge_report"]["entries_merged"] == 0
+
+
+def test_a_mixed_artifact_prices_exactly_its_legacy_cells(tmp_path,
+                                                          monkeypatch):
+    """Per-CELL selection, not per-unit: the joint rung is left alone."""
+    import pickle
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+    from prismaquant.allocator_candidates import ACT_DLOSS_KEY
+
+    name = "model.layers.0.mlp.down_proj"
+    joint = _joint_row(name, "NVFP4")
+    cost_out, argv = _cli_fixture(
+        tmp_path,
+        {name: {"NVFP4": joint, "FP8_E4M3": {"predicted_dloss": 1.0}}},
+        [_dense_unit(name)])
+
+    monkeypatch.setattr(sys, "argv", argv)
+    assert aqc.main() == 0
+
+    out = pickle.loads(cost_out.read_bytes())["costs"][name]
+    assert ACT_DLOSS_KEY not in out["NVFP4"], (
+        "the joint rung already carries its activation term")
+    assert out["FP8_E4M3"][ACT_DLOSS_KEY] > 0.0, (
+        "the legacy cell still needs its A-side")
+    assert out["NVFP4"]["predicted_dloss"] == joint["predicted_dloss"]
+
+
+def test_a_malformed_joint_claim_refuses_before_any_pricing(tmp_path,
+                                                            monkeypatch):
+    """Joint evidence is VALIDATED, not trusted: a claim without a row raises."""
+    import pickle
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+    from prismaquant.joint_aura import JOINT_CURRENCY
+
+    name = "model.layers.0.mlp.down_proj"
+    cost_out, argv = _cli_fixture(
+        tmp_path, {name: {"NVFP4": {"cost_currency": JOINT_CURRENCY}}},
+        [_dense_unit(name)])
+
+    def _must_not_read(*_a, **_k):
+        raise AssertionError("refusal must precede pricing")
+
+    monkeypatch.setattr(aqc, "materialize_source_weight", _must_not_read)
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(ValueError, match="joint AURA"):
+        aqc.main()
+    assert not cost_out.exists()
+
+
+def test_the_silent_no_op_refusal_still_fires(tmp_path, monkeypatch):
+    """The case the refusal exists for: nothing priced and no joint coverage.
+
+    A card whose unit carries no `g_sq_sum` prices nothing, and this artifact
+    has no joint row either -- so `--cost-out` would be a byte-equivalent copy
+    of a weight-only table wearing the AQUA name.
+    """
+    import dataclasses
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+
+    name = "model.layers.0.mlp.down_proj"
+    unit = dataclasses.replace(_dense_unit(name), g_sq_sum=None)
+    cost_out, argv = _cli_fixture(
+        tmp_path, {name: {"NVFP4": {"predicted_dloss": 1.0}}}, [unit])
+
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="byte-equivalent copy"):
+        aqc.main()
+    assert not cost_out.exists()

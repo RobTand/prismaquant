@@ -130,10 +130,32 @@ executes that grid) lives in `required_activation_formats`, one definition
 shared by all three sources, with "leaves activations alone" and "this lane
 does not execute that grid" still reported separately because they are
 different correct answers. The all-or-nothing refusal for 0/N resolution is
-unchanged: no coverage threshold was invented, and a hole is still a report
-rather than a silent zero, with the fail-closed consequence carried where it
-already lived (`cost_entry_prices_unmeasured_activation_at_zero`). Which
-variance the A-side uses is likewise one authority now,
+unchanged: no coverage threshold was invented, and a hole is a REPORT, not a
+refusal.
+
+That last point is a real limitation and it is recorded here as one, because an
+earlier version of this stamp overstated it. Partial coverage is not
+fail-closed in general. The only existing mechanism that removes a
+badly-evidenced row is
+`allocator_candidates.cost_entry_prices_unmeasured_activation_at_zero`, and its
+predicate requires the row's price to be EXACTLY `0.0` -- the DP's global
+optimum, which the optimizer cannot trade off. A packed row carrying a POSITIVE
+weight-only `predicted_dloss` and no A-side is therefore still admitted by the
+DP; it is the "biased but tradeable" L1 surrogate that branch deliberately
+accepts, not a caught hole. So the honest statement of the contract is:
+
+  * a HOLE is reported per format and per unit, and the AQUA stage refuses only
+    when NOTHING at all could be priced (`0/N` resolution, or a merge that
+    writes no entry and had no joint coverage);
+  * the legacy default stays what it is -- `cost_entry_act_dloss` reads an
+    absent key as `0.0` so pre-AQUA artifacts remain bit-for-bit reproducible;
+  * for a CAMPAIGN, "this artifact has no A-side for a format the lane
+    executes" is not currently enforced anywhere, and closing it needs an
+    explicit requirement (refuse on holes, or a required-coverage declaration
+    per campaign) rather than a silent default. That is a policy decision, and
+    it is filed as a gap with the evidence rather than improvised here.
+
+Which variance the A-side uses is likewise one authority now,
 `format_cost_protocol.resolve_act_quant_variance`, so a caller that cannot hold
 the weight as one array cannot silently price a different estimator.
 
@@ -146,11 +168,15 @@ correctly, since stamping one would apply the activation term a second time.
 `merge_act_dloss` now skips a joint row instead of writing into it and reports
 the count as `joint_rows_skipped`; before this, a merge into an artifact that
 carried joint rows would not have double-counted, it would have INVALIDATED
-those rows. This is a sourced stage change with `tests/
-test_aqua_per_expert_checkpoint.py` covering the production entry end to end
-(no helper-only coverage); the served KL/PPL A/B at matched bpp remains the
-promotion gate for the AQUA arm as a whole, and the per-expert path inherits
-that gate rather than bypassing it.
+those rows. The stage is told those cells BEFORE pricing, per `(unit, format)`,
+on the same validated predicate the allocator uses: an all-joint artifact now
+reads no shard, builds no plugin and writes no `act_dloss`, and `main` accepts
+it as "already fulfilled" instead of refusing it as a no-op, while a mixed
+legacy/joint artifact prices exactly its legacy cells. This is a sourced stage
+change with `tests/test_aqua_per_expert_checkpoint.py` covering the production
+entry end to end (no helper-only coverage); the served KL/PPL A/B at matched bpp
+remains the promotion gate for the AQUA arm as a whole, and the per-expert path
+inherits that gate rather than bypassing it.
 
 Re-stamped (2026-09-16, `fix/joint-aqua-serving-scale-20260916`) for the
 **mount-instance-strict source-shard identity, in one place** (§4.10, joint

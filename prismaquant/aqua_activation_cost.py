@@ -549,6 +549,7 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                            act_dir: str | None = None,
                            profile=None,
                            executed_activation_formats=None,
+                           already_priced_cells=None,
                            ) -> tuple[dict, dict, dict]:
     """``{unit: {format: act_dloss}}`` plus a report of what could not be priced.
 
@@ -572,6 +573,15 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     exact BF16 bridge and quantizes no activations at all -- and cost the
     DSv4-Flash 92 GB body the majority of its codebook rung (K16 -> K12) buying
     FP8 promotions to escape a cost of zero.
+
+    ``already_priced_cells`` names the ``(unit, format)`` cells whose cost is
+    ALREADY in the artifact under a currency that carries its own activation
+    term -- a joint AURA row's signed residual. Nothing is built, read or
+    priced for them: computing an A-side there is work whose result the merge
+    discards (and would be refused), and excluding them before the shard read is
+    what makes an all-joint artifact cost nothing rather than a full pass. This
+    is a per-CELL selection, so a mixed artifact prices exactly the legacy cells
+    and leaves the joint ones alone.
     """
     if executed_activation_formats is None:
         raise SystemExit(
@@ -615,6 +625,7 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
 
     wanted = list(names) if names is not None else [u.topology.name
                                                    for u in card.units()]
+    already = frozenset(already_priced_cells or ())
     resolvable = [n for n in wanted if n in resolver]
     # A packed routed-expert unit whose checkpoint stores one 2-D tensor PER
     # expert has no single key for ``build_weight_resolver`` to return, so it
@@ -627,12 +638,30 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     #   * anything else     -> a HOLE for every format this lane executes,
     #                          reported per format like any other unpriced unit.
     #
-    # Missing evidence is never a zero (see the refusal below, which stays
-    # all-or-nothing: no coverage threshold is invented here).
+    # Missing evidence is never a zero HERE, but a hole is a REPORT and not a
+    # refusal: the refusal below stays all-or-nothing (no coverage threshold is
+    # invented), and a positive weight-only row with no A-side is still admitted
+    # downstream -- `cost_entry_prices_unmeasured_activation_at_zero` only
+    # removes rows priced at exactly 0.0. Requiring coverage for a campaign is
+    # an explicit policy decision, recorded in docs/ARCHITECTURE.md rather than
+    # improvised here.
     units: dict[str, object] = {}
     per_expert: dict[str, list[list[str]]] = {}
     unresolved: list[str] = []
+    needed_formats: dict[str, list[str]] = {}
+    already_priced: list[str] = []
     for name in wanted:
+        # (unit, format) cells the caller says already carry a price with their
+        # OWN activation term -- a joint AURA row's signed residual. They are
+        # dropped BEFORE anything is read or built: pricing one would be work
+        # whose result is discarded, and merging one is refused. This is the
+        # only place the selection happens, so a mixed artifact prices exactly
+        # the legacy cells and nothing else.
+        needed = [f for f in formats if (name, f) not in already]
+        if not needed:
+            already_priced.append(name)
+            continue
+        needed_formats[name] = needed
         if name in resolver:
             continue
         try:
@@ -648,9 +677,11 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
             unresolved.append(name)
         else:
             per_expert[name] = keys
+    resolvable = [n for n in resolvable if n in needed_formats]
     log(f"weight-key resolution: {len(resolvable)}/{len(wanted)} card units "
         f"found in the checkpoint, {len(per_expert)} reachable only through "
-        f"the per-expert layout, {len(unresolved)} unresolved")
+        f"the per-expert layout, {len(unresolved)} unresolved, "
+        f"{len(already_priced)} already carrying a joint A-side")
     # Refuse rather than write a no-op. "Nothing resolved" is never a valid
     # outcome for this stage, and the artifact it would otherwise produce is
     # indistinguishable from a real one -- same units, same formats, an A-side
@@ -658,7 +689,7 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     # unambiguous case is a refusal; no coverage threshold is invented here,
     # because any such number would be a heuristic (principle 2). Partial
     # coverage is already reported per-format through `holes`.
-    if wanted and not resolvable and not per_expert:
+    if wanted and not resolvable and not per_expert and not already_priced:
         raise SystemExit(
             f"REFUSE: 0 of {len(wanted)} card units resolve to a checkpoint "
             f"tensor, so there is nothing to price. This is a NAME-SPACE "
@@ -780,7 +811,8 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                 # and "this lane does not execute that grid" are both correctly
                 # free, but they are different answers and are reported apart.
                 required, na, ne_, unbuildable = required_activation_formats(
-                    formats, shape=(unit.out_features, unit.in_features),
+                    needed_formats[name],
+                    shape=(unit.out_features, unit.in_features),
                     device=device, executes_all=executes_all, patterns=patterns)
                 non_act |= na
                 not_executed |= ne_
@@ -828,7 +860,8 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                 keys = per_expert[name]
                 row = {}
                 required, na, ne_, unbuildable = required_activation_formats(
-                    formats, shape=(unit.out_features, unit.in_features),
+                    needed_formats[name],
+                    shape=(unit.out_features, unit.in_features),
                     device=device, executes_all=executes_all, patterns=patterns)
                 non_act |= na
                 not_executed |= ne_
@@ -877,7 +910,8 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                     holes[fmt].append(f"{name}: no card entry to classify")
                 continue
             required, na, ne_, unbuildable = required_activation_formats(
-                formats, shape=(unit.out_features, unit.in_features),
+                needed_formats[name],
+                shape=(unit.out_features, unit.in_features),
                 device=device, executes_all=executes_all, patterns=patterns)
             non_act |= na
             not_executed |= ne_
@@ -905,7 +939,8 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     return (table, {k: v for k, v in holes.items()},
             {"act_var_source": dict(var_source),
              "per_expert_units_priced": len(per_expert),
-             "units_unresolved": len(unresolved)})
+             "units_unresolved": len(unresolved),
+             "cells_already_joint_priced": len(already)})
 
 
 def merge_act_dloss(costs: dict, table: dict) -> dict:
@@ -923,24 +958,40 @@ def merge_act_dloss(costs: dict, table: dict) -> dict:
     (``cost_entry_predicted_dloss`` returns before that branch), so this stage
     must not stamp one on: the write would not double-count, it would INVALIDATE
     the row and stop the allocation.
+
+    A unit whose every cell is a joint row therefore ends with no ``act_dloss``
+    written and no table entry at all, which is a COVERED unit, not an unpriced
+    one: it is counted in ``joint_rows_skipped`` and left out of
+    ``units_without_act_price``. An all-joint artifact is a fulfilled artifact.
     """
     merged = 0
     unit_hits = 0
     missing_units = []
     joint_rows_skipped = 0
     for name, entry in costs.items():
-        row = table.get(name)
-        if not row:
-            missing_units.append(name)
-            continue
-        unit_hits += 1
-        for fmt, value in row.items():
-            if fmt in entry and isinstance(entry[fmt], dict):
-                if cost_entry_is_joint_aura(entry[fmt]):
-                    joint_rows_skipped += 1
+        row = table.get(name) or {}
+        if row:
+            unit_hits += 1
+        # Walk the ARTIFACT's rows, not only the ones this stage priced. A unit
+        # whose every cell was already joint-priced has no table entry at all,
+        # and a loop that started from `table` would call it "without an act
+        # price" -- losing both the skip count and the fact that the unit IS
+        # covered. Whether a row already carries the activation term is a
+        # property of the artifact, so it is read from the artifact.
+        joint_here = 0
+        if isinstance(entry, dict):
+            for fmt, cost_row in entry.items():
+                if not isinstance(cost_row, dict):
                     continue
-                entry[fmt][ACT_DLOSS_KEY] = float(value)
-                merged += 1
+                if cost_entry_is_joint_aura(cost_row):
+                    joint_rows_skipped += 1
+                    joint_here += 1
+                    continue
+                if fmt in row:
+                    cost_row[ACT_DLOSS_KEY] = float(row[fmt])
+                    merged += 1
+        if not row and not joint_here:
+            missing_units.append(name)
     return {"units_in_cost": len(costs), "units_merged": unit_hits,
             "entries_merged": merged,
             "joint_rows_skipped": joint_rows_skipped,
@@ -996,6 +1047,24 @@ def main() -> int:
                else sorted({f for r in costs.values() for f in r}))
     log(f"cost artifact: {len(costs)} units, formats {formats}")
 
+    # Validate the joint rows ONCE, here, and hand the stage the exact CELLS
+    # they already price. `cost_entry_is_joint_aura` is the same predicate the
+    # allocator and the merger use, and it RAISES on a row that claims a joint
+    # currency without carrying one -- so malformed joint evidence stops the run
+    # before any A-side is computed for a cell that should not get one. The
+    # selection is per (unit, format), so a mixed artifact prices exactly its
+    # legacy cells.
+    already: set[tuple[str, str]] = set()
+    for name, entry in costs.items():
+        if not isinstance(entry, dict):
+            continue
+        for fmt, row in entry.items():
+            if isinstance(row, dict) and cost_entry_is_joint_aura(row):
+                already.add((name, fmt))
+    if already:
+        log(f"joint AURA coverage: {len(already)} (unit, format) cells already "
+            f"carry their own activation term; no A-side is computed for them")
+
     # The architecture's declared name mapping. Optional by design: a model
     # whose checkpoint names match its module tree needs none, and a path that
     # no profile claims must not become a hard failure for those models. When
@@ -1029,12 +1098,17 @@ def main() -> int:
     table, holes, meta = activation_dloss_table(
         card, args.model_path, formats, device=args.device,
         names=[n for n in costs], act_dir=args.act_dir, profile=profile,
-        executed_activation_formats=executed)
+        executed_activation_formats=executed,
+        already_priced_cells=already)
     report = merge_act_dloss(costs, table)
     log(f"merge: {report}")
     # Belt and braces on the silent-no-op: resolution can succeed while every
     # price still comes back None (e.g. a scalar-only card with no g_sq_sum).
-    if not report["entries_merged"]:
+    # A THIRD case is legitimate and must not be confused with it: every owed
+    # cell was already joint-priced, so there was nothing to add and nothing was
+    # computed. That is a fulfilled artifact, reported as such, not a run that
+    # wrote the AQUA name onto an unchanged weight-only table.
+    if not report["entries_merged"] and not report["joint_rows_skipped"]:
         raise SystemExit(
             "REFUSE: the merge wrote 0 entries, so --cost-out would be a "
             "byte-equivalent copy of --cost-in carrying the AQUA name. Most "
@@ -1042,6 +1116,10 @@ def main() -> int:
             "a probe predating marginal emission); `activation_dloss` returns "
             "None for every unit in that case."
         )
+    if not report["entries_merged"]:
+        log(f"nothing to add: all {report['joint_rows_skipped']} joint cells "
+            f"already carry a priced activation term, so no A-side was "
+            f"computed; provenance records the joint coverage")
 
     prov = dict(blob.get("provenance") or {})
     prov["aqua_activation_cost"] = {
@@ -1051,6 +1129,7 @@ def main() -> int:
         "holes": {k: len(v) for k, v in holes.items()},
         "merge_report": report,
         "act_dir": os.path.abspath(args.act_dir) if args.act_dir else None,
+        "joint_cells_already_priced": [list(cell) for cell in sorted(already)],
         **meta,
     }
     blob["provenance"] = prov
