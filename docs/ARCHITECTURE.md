@@ -1,7 +1,35 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-15 · `claude/stream-row-head-640`. Stamps
+As of: 2026-09-15 · `claude/tp2-measurement-instruments`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-15, `claude/tp2-measurement-instruments`) for the **gold
+lane's multi-node instruments** (§2.3, §7.3). Three things a gold receipt did
+not say, and now does. **(1) Fidelity.** Each result carries a structured
+`measurement_fidelity` block naming its own estimator, because three
+instruments here produce a number called "KL" and they are not the same one:
+the TR3 scorer is full-vocabulary at every position, `measure_vllm_full_kl.py`
+is full-vocabulary at the window-final position under its default
+`--score-positions final` but **top-K (default 1024) plus one tail bucket** at
+every position under `all` — "full" in that file's name means all-POSITIONS —
+and `kl_tool.py` is top-20 on a different corpus. The block is derived from the
+run's own arguments (`tools/gold_measurement_fidelity.py`), so it cannot
+describe a different run than the one it travels with. **(2) Fabric.** The
+three NCCL selectors (`NCCL_IB_DISABLE`, `NCCL_SOCKET_IFNAME`, `NCCL_IB_HCA`)
+joined `SERVER_ENV_ALLOWLIST`, so a sockets arm and a RoCE arm no longer share
+a `performance_stack_fingerprint` — until now `tools/kl_ab.py` called them
+matched and printed a delta. The projection records only names that are SET, so
+a single-box run hashes exactly as before and every earlier receipt still
+replays its own fingerprint. It is recorded as a **request**, not an
+observation: NCCL's own `NET/Socket`/`NET/IB` line is the observation
+(principle 14). **(3) The peer.** `tools/gold_headless_peer.py` is the stock
+`vllm serve --headless` launcher for rank ≥ 1, carrying the driver module's
+namespace so a spawned worker's `__mp_main__` can unpickle callables the
+coordinator ships; without it rank 1 dies with `AttributeError` and **rank 0
+hangs forever with no timeout**. Its argv is derived from the coordinator's own
+engine kwargs (`gold_engine_options.headless_peer_argv`, which refuses a kwarg
+it cannot spell) and stamped on a multi-node receipt. Topology passthrough
+itself is unchanged — it landed with #434.
 
 Re-stamped (2026-09-15, `claude/stream-row-head-640`) for the **streaming row
 head** (§4.10, RobTand/prismaquant#640). **A selected-source Tessera campaign
@@ -7698,8 +7726,8 @@ Highest first. A claim is worth exactly the rung it was measured on.
 
 | # | Metric | Contract | Where |
 |---|---|---|---|
-| 1 | Served-artifact vLLM KL-vs-BF16 at matched bpp: exact full vocabulary where feasible; DSv4Flash all-position top-8192 support plus one tail bucket | n=8 × seqlen=512 | `tools/measure_vllm_full_kl.py`; DSv4 source builder `tools/build_streamed_full_kl_teacher.py` with the offline input from `tools/prepare_dsv4_wikitext_inputs.py` — invoked **manually**, never by the pipeline |
-| 2 | Direct WikiText PPL on the served artifact | pinned WikiText test revision; 8,192-token prefix in 16 non-overlapping 512-token windows; 8,176 scored positions | `tools/measure_vllm_wikitext_ppl.py` with that same offline input, contract `prismaquant.wikitext_ppl_calibration/1` — manual |
+| 1 | Served-artifact vLLM KL-vs-BF16 at matched bpp: exact full vocabulary where feasible; DSv4Flash all-position top-8192 support plus one tail bucket | n=8 × seqlen=512 | `tools/measure_vllm_full_kl.py`; DSv4 source builder `tools/build_streamed_full_kl_teacher.py` with the offline input from `tools/prepare_dsv4_wikitext_inputs.py` — invoked **manually**, never by the pipeline. Which estimator a given result used is not inferred from this row: every result carries its own `measurement_fidelity` block (`tools/gold_measurement_fidelity.py`) |
+| 2 | Direct WikiText PPL on the served artifact | pinned WikiText test revision; 8,192-token prefix in 16 non-overlapping 512-token windows; 8,176 scored positions | `tools/measure_vllm_wikitext_ppl.py` with that same offline input, contract `prismaquant.wikitext_ppl_calibration/1` — manual; the same `measurement_fidelity` block records the window geometry |
 | 3 | Mean NLL alongside PPL; KL-vs-BF16 (`/home/rob/dq-runs/kl_tool.py`) for IT/BOS-sensitive models where raw PPL is meaningless | — | §7.5 |
 | 4 | Downstream suite on materialized artifacts: GSM8K, IFEval, MMLU, **ToolEvalBench** (`--no-think --hardmode --parallel 1`) | — | tool-use fidelity is the deep reason KL matters: a small probability shift at a decision point flips a tool call |
 | 5 | Cheap last-token "hook KL" screens | — | **triage only**; never a selection or promotion metric |
@@ -14199,6 +14227,37 @@ the nonce-bound live-session check, which was the retired CB eager driver's patt
 gate's.
 
 ### 7.3 The gold lane (manual)
+
+**Topology, fabric and fidelity travel with the number.** Both in-process gold
+runners take the stock multi-node topology (`--tensor-parallel-size`,
+`--nnodes`, `--master-addr`, `--master-port`, the two `mp` backends) through
+`tools/gold_engine_options.py`; omitting them preserves the original TP1
+kwargs exactly, which is why existing single-box receipts remain reproducible
+(#434). Three fields make a multi-node number readable. `gold_engine_configuration`
+is the world size. `gold_fabric_request` is the collective fabric the run asked
+for — NCCL's three selectors, recorded as a **request**, since the observation
+is NCCL's own `NET/Socket`/`NET/IB` line and principle 14 forbids promoting one
+to the other; those names are also in `SERVER_ENV_ALLOWLIST`, so a sockets arm
+and a RoCE arm do not share a `performance_stack_fingerprint` and `tools/kl_ab.py`
+stops comparing them as matched. `measurement_fidelity` names the estimator
+(`full` vs `top_k_plus_tail` with its K and tail bucket, or PPL's window
+geometry), because "full KL" in this tool's name means all-POSITIONS, not
+all-columns, and a top-K result is a lower bound on the full-vocabulary
+divergence rather than an estimate of it.
+
+**Rank ≥ 1 is a stock headless serve, launched through `tools/gold_headless_peer.py`.**
+vLLM spawns its workers and a spawned worker re-imports the launching FILE as
+`__mp_main__`, so a driver that ships callables (`apply_model`,
+`collective_rpc` — the TR3 scorer does; these two gold tools do not) needs a
+peer whose `__main__` carries the driver's namespace. Under the stock console
+script rank 1 dies with `AttributeError` and rank 0 then **hangs forever with
+no timeout** (2026-09-14, GLM-5.3 4-layer stub, stopped by hand after 30
+minutes); both ranks also need `VLLM_ALLOW_INSECURE_SERIALIZATION=1`, which the
+launcher deliberately does not set for the operator. The peer's argv is derived
+from the coordinator's own engine kwargs by
+`gold_engine_options.headless_peer_argv`, which **refuses** a kwarg it has no
+published stock spelling for rather than dropping it, and a multi-node receipt
+stamps that argv so the launcher can be checked against the engine rank 0 built.
 
 **Served-artifact vLLM KL-vs-BF16** — `tools/measure_vllm_full_kl.py` retains the
 exact-full-vocabulary path for teachers that fit its ordinary vLLM two-pass

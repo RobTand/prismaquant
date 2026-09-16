@@ -21,12 +21,26 @@ from prismaquant_source_bootstrap import activate_prismaquant_source
 activate_prismaquant_source()
 
 try:  # package mode (`python -m tools.measure_vllm_wikitext_ppl`)
-    from .gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
+    from .gold_engine_options import (
+        add_gold_engine_arguments,
+        gold_engine_kwargs,
+        gold_fabric_request,
+        headless_peer_argv,
+        validate_gold_engine_arguments,
+    )
+    from .gold_measurement_fidelity import wikitext_ppl_fidelity
     from .dsv4_wikitext_inputs import load_wikitext_inputs, wikitext_model_identity
     from .serve_fingerprint import gold_producer_identity, self_manifest
     from .spec_decode_guard import refuse_if_spec_decode
 except ImportError:  # script mode (`python /repo/tools/measure_vllm_wikitext_ppl.py`)
-    from gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs, validate_gold_engine_arguments
+    from gold_engine_options import (  # type: ignore
+        add_gold_engine_arguments,
+        gold_engine_kwargs,
+        gold_fabric_request,
+        headless_peer_argv,
+        validate_gold_engine_arguments,
+    )
+    from gold_measurement_fidelity import wikitext_ppl_fidelity  # type: ignore
     from dsv4_wikitext_inputs import load_wikitext_inputs, wikitext_model_identity  # type: ignore
     from serve_fingerprint import (  # type: ignore
         gold_producer_identity,
@@ -36,6 +50,10 @@ except ImportError:  # script mode (`python /repo/tools/measure_vllm_wikitext_pp
 
 #: Set by `_load_llm`; `None` (could not inspect) is refused by the shipcard.
 _SPEC_DECODE_DETECTED: bool | None = None
+
+#: The exact kwargs this process built its `LLM` with, captured so a multi-node
+#: receipt can state the peer argv they imply. `None` until an engine is built.
+_ENGINE_KWARGS: dict | None = None
 
 WIKITEXT_DATASET = "wikitext"
 WIKITEXT_CONFIG = "wikitext-2-raw-v1"
@@ -109,12 +127,21 @@ def _provenance(args) -> dict:
     different `serve_fingerprint` is not a comparable delta (tools/kl_ab.py).
     """
     producer = gold_producer_identity("measure_vllm_wikitext_ppl")
+    topology = gold_engine_kwargs(args)
+    # See the twin comment in `measure_vllm_full_kl._provenance`: the fabric is
+    # an environment request, not an engine argument, and a PPL crossing two
+    # boxes is not readable without it.
+    extra = {
+        "measurement_tool": "measure_vllm_wikitext_ppl",
+        "producer_identity": producer,
+        "gold_engine_configuration": topology,
+        "gold_fabric_request": gold_fabric_request(),
+    }
+    if int(topology.get("nnodes", 1)) > 1 and _ENGINE_KWARGS is not None:
+        extra["headless_peer_argv"] = headless_peer_argv(
+            _ENGINE_KWARGS, node_rank=1)
     manifest = self_manifest(
-        extra={
-            "measurement_tool": "measure_vllm_wikitext_ppl",
-            "producer_identity": producer,
-            "gold_engine_configuration": gold_engine_kwargs(args),
-        },
+        extra=extra,
         image=_resolve_serve_image(args),
     )
     return {
@@ -372,6 +399,10 @@ def _load_llm(args) -> "LLM":
         # Mamba/DeltaNet hybrids need max_num_batched_tokens >= their
         # chunk-alignment floor (~2096); seqlen+1 alone can undershoot it.
         kwargs["max_num_batched_tokens"] = args.max_num_batched_tokens
+    # Captured before the engine exists, so a multi-node receipt states the
+    # peer argv these very kwargs imply rather than one retyped elsewhere.
+    global _ENGINE_KWARGS
+    _ENGINE_KWARGS = dict(kwargs)
     # Environment/bootstrap above must precede the first vLLM import.
     from vllm import LLM
 
@@ -564,6 +595,11 @@ def main() -> int:
         "calibration_contract": calibration_contract,
         "calibration_contract_sha256": _canonical_sha256(
             calibration_contract
+        ),
+        "measurement_fidelity": wikitext_ppl_fidelity(
+            n_tokens_scored=int(count),
+            seqlen=int(args.seqlen),
+            n_chunks=len(chunks),
         ),
         "elapsed_s": float(time.monotonic() - started),
         **_provenance(args),
