@@ -75,7 +75,7 @@ import time
 
 import numpy as np
 
-from .allocator_candidates import ACT_DLOSS_KEY
+from .allocator_candidates import ACT_DLOSS_KEY, cost_entry_is_joint_aura
 
 #: Return the CUDA pool to the OS once it has reserved this much. On GB10's
 #: UNIFIED memory a reserved CUDA block IS host RAM, so it competes with the
@@ -318,6 +318,232 @@ def resolve_executed_activation_formats(*, lane_id: str | None,
     return frozenset(contract.executes)
 
 
+def required_activation_formats(formats, *, shape, device, executes_all,
+                                patterns):
+    """``(required, non_act, not_executed, unbuildable)`` for one unit shape.
+
+    Whether this stage OWES an A-side price for a format is a conjunction, and
+    it is the same conjunction the dense path has always enforced:
+
+      * the format quantizes activations -- ``descriptor.quantizes_activations``,
+        a dtype-level fact, not the registry's claim about what any runtime
+        does; AND
+      * the named SERVING LANE executes that format's activation grid.
+
+    Factored out because this stage now has THREE weight sources -- one key, a
+    packed 3-D tensor, and one 2-D tensor per routed expert -- and a second copy
+    of this rule is how one of them quietly starts pricing a different lane.
+
+    ``required`` is ``[(fmt, plugin)]``. ``non_act`` and ``not_executed`` name
+    the formats that are correctly FREE, each for its own reason (leaves
+    activations alone / that lane never runs this grid); folding the two sets
+    together would make them indistinguishable in the report. ``unbuildable`` is
+    ``[(fmt, error)]`` -- a plugin that cannot be built at this shape is a HOLE,
+    never a free price.
+    """
+    from .format_cost_registry import RegistryFormatPlugin
+
+    non_act: set[str] = set()
+    not_executed: set[str] = set()
+    unbuildable: list[tuple[str, str]] = []
+    required: list[tuple[str, object]] = []
+    for fmt in formats:
+        try:
+            plugin = RegistryFormatPlugin.build(fmt, shape=shape, device=device)
+        except Exception as exc:
+            unbuildable.append((fmt, str(exc)))
+            continue
+        if not plugin.descriptor.quantizes_activations:
+            non_act.add(fmt)
+            continue
+        if not executes_all and not any(
+                fnmatch.fnmatchcase(fmt, pat) for pat in patterns):
+            not_executed.add(fmt)
+            continue
+        required.append((fmt, plugin))
+    return required, non_act, not_executed, unbuildable
+
+
+def _close_safetensor_handle(handle) -> None:
+    """Release one open shard's mmap.
+
+    ``safetensors.safe_open`` exposes no ``close()``; its context-manager exit
+    is the only way to drop the file. Resident mapped pages are the resource
+    being bounded here, so a missing exit must RAISE rather than silently leave
+    every shard of the checkpoint resident.
+    """
+    exit_ = getattr(handle, "__exit__", None)
+    if exit_ is None:
+        raise RuntimeError(
+            "the installed safetensors reader exposes no way to close a shard "
+            "handle; the per-expert bridge cannot bound resident mmap without "
+            "it")
+    exit_(None, None, None)
+
+
+class _CheckpointShardHandles:
+    """Bounded LRU of open shards, for key-major (not shard-major) reads.
+
+    The dense loop reads one shard at a time by construction, which is what
+    bounds resident mmap to that shard (measured 7.1 -> 48.2 GiB on this model
+    before it did). The per-expert bridge cannot be shard-major -- one packed
+    unit's keys are spread across the experts and the reduction is expert-major
+    -- so the SAME bound is kept by the same means: a closed handle releases its
+    faulted pages. ``capacity`` is explicit instead of an unbounded dict holding
+    every shard in the checkpoint at once.
+    """
+
+    def __init__(self, model_path: str, weight_map: dict, fp8_map=None,
+                 capacity: int = 2):
+        self._model_path = model_path
+        self._weight_map = weight_map
+        self._fp8_map = fp8_map
+        self._capacity = max(1, int(capacity))
+        self._open: collections.OrderedDict = collections.OrderedDict()
+        self._keys: dict[str, frozenset] = {}
+
+    def _handle(self, shard: str):
+        from safetensors import safe_open
+
+        handle = self._open.get(shard)
+        if handle is None:
+            handle = safe_open(os.path.join(self._model_path, shard),
+                               framework="pt", device="cpu")
+            self._open[shard] = handle
+            if self._fp8_map:
+                self._keys[shard] = frozenset(handle.keys())
+            while len(self._open) > self._capacity:
+                evicted_shard, evicted = self._open.popitem(last=False)
+                _close_safetensor_handle(evicted)
+                self._keys.pop(evicted_shard, None)
+        self._open.move_to_end(shard)
+        return handle
+
+    def __call__(self, key: str):
+        """The dense source weight at one checkpoint ``key``, materialized.
+
+        Reuses :func:`materialize_source_weight` -- the same declaration-driven
+        dispatch the dense path uses -- so a per-expert tensor out of a
+        quantized source is decoded by the streaming loader's own decoder rather
+        than cast from its wire bytes.
+        """
+        weight_shard = self._weight_map[key]
+        handle = self._handle(weight_shard)
+        weight = handle.get_tensor(key)
+        scale = None
+        entry = self._fp8_map.get(key) if self._fp8_map else None
+        if entry is not None:
+            scale_shard, scale_key = entry
+            scale_handle = self._handle(scale_shard)
+            scale = scale_handle.get_tensor(scale_key)
+        return materialize_source_weight(key[: -len(".weight")], weight, scale,
+                                         self._fp8_map)
+
+    def close(self) -> None:
+        for handle in self._open.values():
+            _close_safetensor_handle(handle)
+        self._open.clear()
+        self._keys.clear()
+
+
+# ---------------------------------------------------------------------------
+# Per-expert checkpoint layouts
+# ---------------------------------------------------------------------------
+# ``build_weight_resolver`` maps one card unit to ONE checkpoint key, which is
+# right for a packed routed-expert parameter stored as a bare 3-D tensor
+# (``...mlp.experts.gate_up_proj``).  GLM-5.3-Flash does not store it that way:
+# every expert is its own 2-D ``nn.Linear`` weight
+# (``...mlp.experts.{e}.gate_proj.weight``), and the fused gate/up pair is two
+# tensors, not one.  So the 84 packed units of a 45-layer GLM body resolve to
+# nothing -- 97% of the parameters -- and because ``cost_entry_act_dloss``
+# defaults to 0.0 the DP cannot tell "unmeasured" from "free".  On a lane whose
+# own attested contract says NVFP4 is "Real A4 on BOTH the dense and the
+# packed-expert route", that is the DSv4 mispricing with the sign flipped: it
+# makes the W4A4 rung look free exactly where it is not.
+#
+# The A-side math for packed units already exists and is tested
+# (``_activation_dloss_packed``); only the checkpoint layout does not reach it.
+# What follows is the bridge, and it STREAMS rather than stacking: the packed
+# sum
+#
+#     dLoss ~= 0.5 / T_global * sum_e sum_o g_sq[e,o] * sum_j W[e,o,j]^2 var[e,j]
+#
+# is separable over ``e``, so a [288, 4096, 4096] gate_up never has to exist --
+# it would be 19 GiB in float32, per format.  Each expert is promoted to
+# float32 one at a time and reduced with ``_weighted_row_sum``, the same kernel
+# and the same float64 accumulation the packed path uses, so this is the
+# production quantity computed in a different order, not a second estimator.
+
+def per_expert_weight_keys(unit_name: str, weight_map: dict, *,
+                           n_experts: int) -> list[list[str]] | None:
+    """Checkpoint keys for one packed unit, as ``[expert][sibling]``.
+
+    Returns ``None`` when the layout is not per-expert, so a caller can fall
+    back to the single-key resolver without a special case.
+    """
+    if ".mlp.experts." not in unit_name:
+        return None
+    stem, _, leaf = unit_name.rpartition(".mlp.experts.")
+    siblings = {"gate_up_proj": ("gate_proj", "up_proj"),
+                "down_proj": ("down_proj",)}.get(leaf)
+    if siblings is None:
+        return None
+    keys: list[list[str]] = []
+    for expert in range(n_experts):
+        row = [f"{stem}.mlp.experts.{expert}.{s}.weight" for s in siblings]
+        if any(k not in weight_map for k in row):
+            return None
+        keys.append(row)
+    return keys
+
+
+def packed_act_dloss_per_expert(unit, keys: list[list[str]], model_path: str,
+                                act_var, *, gain: float = 1.0,
+                                handles=None) -> float:
+    """``_activation_dloss_packed`` over a per-expert checkpoint, streamed.
+
+    ``keys[e]`` are the sibling tensors of expert ``e``, concatenated along the
+    output axis in the order vLLM fuses them (gate then up) -- the same order
+    ``expert_g_sq_sum``'s rows are indexed in, which is why the concatenation
+    may not be reordered.
+    """
+    import numpy as np
+    import torch
+
+    from .format_cost_protocol import _row_chunk, _weighted_row_sum
+
+    g_all = np.asarray(unit.expert_g_sq_sum, dtype=np.float64)
+    var = np.asarray(act_var, dtype=np.float64)
+    n_e = int(g_all.shape[0])
+    if len(keys) != n_e:
+        raise ValueError(f"{unit.topology.name}: {len(keys)} experts in the "
+                         f"checkpoint, {n_e} in the card")
+    if var.shape == (unit.in_features,):
+        var = np.broadcast_to(var, (n_e, unit.in_features))
+    elif var.shape != (n_e, unit.in_features):
+        raise ValueError(f"{unit.topology.name}: packed act_var shape "
+                         f"{var.shape}, expected {(n_e, unit.in_features)} "
+                         f"or {(unit.in_features,)}")
+
+    rows_per_chunk = _row_chunk(unit.in_features)
+    total = 0.0
+    for e, row in enumerate(keys):
+        parts = [handles(k) for k in row]
+        w_e = parts[0] if len(parts) == 1 else torch.cat(parts, dim=0)
+        if tuple(w_e.shape) != (unit.out_features, unit.in_features):
+            raise RuntimeError(
+                f"{unit.topology.name}: expert {e} materialized "
+                f"{tuple(w_e.shape)}, expected "
+                f"{(unit.out_features, unit.in_features)}")
+        w_e = w_e.to(torch.float32)
+        g_e, v_e = g_all[e], var[e]
+        for lo in range(0, unit.out_features, rows_per_chunk):
+            hi = min(lo + rows_per_chunk, unit.out_features)
+            total += _weighted_row_sum(w_e[lo:hi], v_e, g_e[lo:hi])
+        del parts, w_e
+    return 0.5 * (total / max(1, unit.n_tokens)) * float(gain)
+
+
 def activation_dloss_table(card, model_path: str, formats: list[str], *,
                            device: str = "cpu", names=None,
                            act_dir: str | None = None,
@@ -379,8 +605,9 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     import torch
     from safetensors import safe_open
 
-    from .format_cost_protocol import price_activation_only
-    from .format_cost_registry import RegistryFormatPlugin
+    from .format_cost_protocol import (
+        price_activation_only, resolve_act_quant_variance,
+    )
 
     with open(os.path.join(model_path, "model.safetensors.index.json")) as fh:
         weight_map = json.load(fh)["weight_map"]
@@ -389,8 +616,41 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     wanted = list(names) if names is not None else [u.topology.name
                                                    for u in card.units()]
     resolvable = [n for n in wanted if n in resolver]
+    # A packed routed-expert unit whose checkpoint stores one 2-D tensor PER
+    # expert has no single key for ``build_weight_resolver`` to return, so it
+    # lands outside ``resolvable``. Before this classification existed it landed
+    # outside the REPORT too -- no price, no hole -- and ``cost_entry_act_dloss``
+    # reads that absence as 0.0, i.e. as a free activation exactly where the
+    # served lane is W4A4. So classify, never drop:
+    #
+    #   * per-expert layout -> priced below by the streaming bridge;
+    #   * anything else     -> a HOLE for every format this lane executes,
+    #                          reported per format like any other unpriced unit.
+    #
+    # Missing evidence is never a zero (see the refusal below, which stays
+    # all-or-nothing: no coverage threshold is invented here).
+    units: dict[str, object] = {}
+    per_expert: dict[str, list[list[str]]] = {}
+    unresolved: list[str] = []
+    for name in wanted:
+        if name in resolver:
+            continue
+        try:
+            unit = card[name]
+        except (KeyError, TypeError, IndexError, AttributeError):
+            unit = None
+        units[name] = unit
+        n_experts = getattr(unit, "n_experts", None)
+        keys = (per_expert_weight_keys(name, weight_map,
+                                       n_experts=int(n_experts))
+                if isinstance(n_experts, int) and n_experts > 0 else None)
+        if keys is None:
+            unresolved.append(name)
+        else:
+            per_expert[name] = keys
     log(f"weight-key resolution: {len(resolvable)}/{len(wanted)} card units "
-        f"found in the checkpoint")
+        f"found in the checkpoint, {len(per_expert)} reachable only through "
+        f"the per-expert layout, {len(unresolved)} unresolved")
     # Refuse rather than write a no-op. "Nothing resolved" is never a valid
     # outcome for this stage, and the artifact it would otherwise produce is
     # indistinguishable from a real one -- same units, same formats, an A-side
@@ -398,7 +658,7 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     # unambiguous case is a refusal; no coverage threshold is invented here,
     # because any such number would be a heuristic (principle 2). Partial
     # coverage is already reported per-format through `holes`.
-    if wanted and not resolvable:
+    if wanted and not resolvable and not per_expert:
         raise SystemExit(
             f"REFUSE: 0 of {len(wanted)} card units resolve to a checkpoint "
             f"tensor, so there is nothing to price. This is a NAME-SPACE "
@@ -515,27 +775,18 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                                 and cand.shape[1] == unit.in_features):
                             x_cpu = cand
                 row: dict[str, float] = {}
-                for fmt in formats:
-                    try:
-                        plugin = RegistryFormatPlugin.build(
-                            fmt, shape=(unit.out_features, unit.in_features),
-                            device=device)
-                    except Exception as exc:
-                        holes[fmt].append(f"{name}: unbuildable ({exc})")
-                        continue
-                    if not plugin.descriptor.quantizes_activations:
-                        non_act.add(fmt)
-                        del plugin
-                        continue
-                    # The format quantizes activations; this lane may still not
-                    # execute that. Same outcome (no A-side), different reason,
-                    # so it is reported separately below rather than folded in.
-                    if not executes_all and not any(
-                            fnmatch.fnmatchcase(fmt, pat)
-                            for pat in patterns):
-                        not_executed.add(fmt)
-                        del plugin
-                        continue
+                # Which formats this lane OWES a price for, in one place shared
+                # with the per-expert bridge below -- "leaves activations alone"
+                # and "this lane does not execute that grid" are both correctly
+                # free, but they are different answers and are reported apart.
+                required, na, ne_, unbuildable = required_activation_formats(
+                    formats, shape=(unit.out_features, unit.in_features),
+                    device=device, executes_all=executes_all, patterns=patterns)
+                non_act |= na
+                not_executed |= ne_
+                for fmt, message in unbuildable:
+                    holes[fmt].append(f"{name}: unbuildable ({message})")
+                for fmt, plugin in required:
                     v = None
                     if x_cpu is not None:
                         v = measured_act_var(plugin.spec, x_cpu, device)
@@ -562,6 +813,79 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                 if done % 100 == 0:
                     log(f"  priced {done}/{len(resolvable)} "
                         f"({time.time() - t0:.0f}s)")
+    if per_expert:
+        # STREAMED, one expert at a time, through the SAME variance resolver and
+        # the same float64 row kernel the packed 3-D path uses -- the
+        # equivalence is pinned by tests/test_aqua_per_expert_checkpoint.py.
+        # Nothing here builds the [E, M, N] tensor: for GLM-5.3-Flash that is
+        # 19 GiB per format, and it is the reason the bridge exists.
+        log(f"pricing {len(per_expert)} per-expert packed units "
+            f"(streamed, one expert at a time)")
+        handle_cache = _CheckpointShardHandles(model_path, weight_map, fp8_map)
+        try:
+            for name in sorted(per_expert):
+                unit = units[name]
+                keys = per_expert[name]
+                row = {}
+                required, na, ne_, unbuildable = required_activation_formats(
+                    formats, shape=(unit.out_features, unit.in_features),
+                    device=device, executes_all=executes_all, patterns=patterns)
+                non_act |= na
+                not_executed |= ne_
+                for fmt, message in unbuildable:
+                    holes[fmt].append(f"{name}: unbuildable ({message})")
+                for fmt, plugin in required:
+                    var = resolve_act_quant_variance(unit, plugin)
+                    if var is None:
+                        # Same answer as the dense path's `price_activation_only`
+                        # returning None: a HOLE, never a free activation.
+                        holes[fmt].append(name)
+                        del plugin
+                        continue
+                    var_source["modelled_per_expert"] += 1
+                    try:
+                        a = packed_act_dloss_per_expert(
+                            unit, keys, model_path, var, handles=handle_cache)
+                    except Exception as exc:
+                        # A layout/roster/shape disagreement is a hole on THIS
+                        # unit, named, rather than a price invented for it.
+                        holes[fmt].append(f"{name}: {exc}")
+                        del plugin
+                        continue
+                    row[fmt] = float(a)
+                    del plugin
+                if row:
+                    table[name] = row
+                done += 1
+                if done % 100 == 0:
+                    log(f"  priced {done}/{len(wanted)} "
+                        f"({time.time() - t0:.0f}s)")
+        finally:
+            handle_cache.close()
+    if unresolved:
+        # Reported, never silently dropped. These units cannot be priced at all
+        # -- no single key and no per-expert roster -- so every format this lane
+        # executes is a HOLE for each of them. A unit whose card entry is
+        # missing entirely cannot even be classified per format, so it is named
+        # once here; either way the artifact says "unpriced", not "free".
+        log(f"unresolved units (no single checkpoint key, no per-expert "
+            f"roster): {len(unresolved)}")
+        for name in unresolved:
+            unit = units.get(name)
+            if unit is None:
+                for fmt in formats:
+                    holes[fmt].append(f"{name}: no card entry to classify")
+                continue
+            required, na, ne_, unbuildable = required_activation_formats(
+                formats, shape=(unit.out_features, unit.in_features),
+                device=device, executes_all=executes_all, patterns=patterns)
+            non_act |= na
+            not_executed |= ne_
+            for fmt, message in unbuildable:
+                holes[fmt].append(f"{name}: unbuildable ({message})")
+            for fmt, plugin in required:
+                holes[fmt].append(name)
+                del plugin
     log(f"A-side priced for {len(table)} units in {time.time() - t0:.0f}s")
     if var_source:
         log(f"act_var source: {dict(var_source)} (measured = real cached "
@@ -579,7 +903,9 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
             f"not be priced; those rows keep a weight-only cost. "
             f"e.g. {names_[:3]}")
     return (table, {k: v for k, v in holes.items()},
-            {"act_var_source": dict(var_source)})
+            {"act_var_source": dict(var_source),
+             "per_expert_units_priced": len(per_expert),
+             "units_unresolved": len(unresolved)})
 
 
 def merge_act_dloss(costs: dict, table: dict) -> dict:
@@ -588,10 +914,20 @@ def merge_act_dloss(costs: dict, table: dict) -> dict:
     Mutates ``costs`` in place. Rows with no priced A-side are left untouched
     rather than set to 0.0, so ``cost_entry_act_dloss``'s default and a genuine
     measured zero stay distinguishable in the artifact.
+
+    A JOINT AURA row is skipped, not written. Its one signed residual already
+    contains the weight, activation and mixed terms under a single downstream
+    Fisher, and ``validate_joint_aura_entry`` REFUSES any row carrying
+    ``act_dloss`` -- correctly, because that would apply the activation term a
+    second time. The allocator never adds ``cost_entry_act_dloss`` to a joint row
+    (``cost_entry_predicted_dloss`` returns before that branch), so this stage
+    must not stamp one on: the write would not double-count, it would INVALIDATE
+    the row and stop the allocation.
     """
     merged = 0
     unit_hits = 0
     missing_units = []
+    joint_rows_skipped = 0
     for name, entry in costs.items():
         row = table.get(name)
         if not row:
@@ -600,10 +936,14 @@ def merge_act_dloss(costs: dict, table: dict) -> dict:
         unit_hits += 1
         for fmt, value in row.items():
             if fmt in entry and isinstance(entry[fmt], dict):
+                if cost_entry_is_joint_aura(entry[fmt]):
+                    joint_rows_skipped += 1
+                    continue
                 entry[fmt][ACT_DLOSS_KEY] = float(value)
                 merged += 1
     return {"units_in_cost": len(costs), "units_merged": unit_hits,
             "entries_merged": merged,
+            "joint_rows_skipped": joint_rows_skipped,
             "units_without_act_price": len(missing_units),
             "examples_without_act_price": missing_units[:5]}
 
@@ -736,101 +1076,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-# ---------------------------------------------------------------------------
-# Per-expert checkpoint layouts
-# ---------------------------------------------------------------------------
-# ``build_weight_resolver`` maps one card unit to ONE checkpoint key, which is
-# right for a packed routed-expert parameter stored as a bare 3-D tensor
-# (``...mlp.experts.gate_up_proj``).  GLM-5.3-Flash does not store it that way:
-# every expert is its own 2-D ``nn.Linear`` weight
-# (``...mlp.experts.{e}.gate_proj.weight``), and the fused gate/up pair is two
-# tensors, not one.  So the 84 packed units of a 45-layer GLM body resolve to
-# nothing -- 97% of the parameters -- and because ``cost_entry_act_dloss``
-# defaults to 0.0 the DP cannot tell "unmeasured" from "free".  On a lane whose
-# own attested contract says NVFP4 is "Real A4 on BOTH the dense and the
-# packed-expert route", that is the DSv4 mispricing with the sign flipped: it
-# makes the W4A4 rung look free exactly where it is not.
-#
-# The A-side math for packed units already exists and is tested
-# (``_activation_dloss_packed``); only the checkpoint layout does not reach it.
-# What follows is the bridge, and it STREAMS rather than stacking: the packed
-# sum
-#
-#     dLoss ~= 0.5 / T_global * sum_e sum_o g_sq[e,o] * sum_j W[e,o,j]^2 var[e,j]
-#
-# is separable over ``e``, so a [288, 4096, 4096] gate_up never has to exist --
-# it would be 19 GiB in float32, per format.  Each expert is promoted to
-# float32 one at a time and reduced with ``_weighted_row_sum``, the same kernel
-# and the same float64 accumulation the packed path uses, so this is the
-# production quantity computed in a different order, not a second estimator.
-
-def per_expert_weight_keys(unit_name: str, weight_map: dict, *,
-                           n_experts: int) -> list[list[str]] | None:
-    """Checkpoint keys for one packed unit, as ``[expert][sibling]``.
-
-    Returns ``None`` when the layout is not per-expert, so a caller can fall
-    back to the single-key resolver without a special case.
-    """
-    if ".mlp.experts." not in unit_name:
-        return None
-    stem, _, leaf = unit_name.rpartition(".mlp.experts.")
-    siblings = {"gate_up_proj": ("gate_proj", "up_proj"),
-                "down_proj": ("down_proj",)}.get(leaf)
-    if siblings is None:
-        return None
-    keys: list[list[str]] = []
-    for expert in range(n_experts):
-        row = [f"{stem}.mlp.experts.{expert}.{s}.weight" for s in siblings]
-        if any(k not in weight_map for k in row):
-            return None
-        keys.append(row)
-    return keys
-
-
-def packed_act_dloss_per_expert(unit, keys: list[list[str]], model_path: str,
-                                act_var, *, gain: float = 1.0,
-                                handles=None) -> float:
-    """``_activation_dloss_packed`` over a per-expert checkpoint, streamed.
-
-    ``keys[e]`` are the sibling tensors of expert ``e``, concatenated along the
-    output axis in the order vLLM fuses them (gate then up) -- the same order
-    ``expert_g_sq_sum``'s rows are indexed in, which is why the concatenation
-    may not be reordered.
-    """
-    import numpy as np
-    import torch
-
-    from .format_cost_protocol import _row_chunk, _weighted_row_sum
-
-    g_all = np.asarray(unit.expert_g_sq_sum, dtype=np.float64)
-    var = np.asarray(act_var, dtype=np.float64)
-    n_e = int(g_all.shape[0])
-    if len(keys) != n_e:
-        raise ValueError(f"{unit.topology.name}: {len(keys)} experts in the "
-                         f"checkpoint, {n_e} in the card")
-    if var.shape == (unit.in_features,):
-        var = np.broadcast_to(var, (n_e, unit.in_features))
-    elif var.shape != (n_e, unit.in_features):
-        raise ValueError(f"{unit.topology.name}: packed act_var shape "
-                         f"{var.shape}, expected {(n_e, unit.in_features)} "
-                         f"or {(unit.in_features,)}")
-
-    rows_per_chunk = _row_chunk(unit.in_features)
-    total = 0.0
-    for e, row in enumerate(keys):
-        parts = [handles(k) for k in row]
-        w_e = parts[0] if len(parts) == 1 else torch.cat(parts, dim=0)
-        if tuple(w_e.shape) != (unit.out_features, unit.in_features):
-            raise RuntimeError(
-                f"{unit.topology.name}: expert {e} materialized "
-                f"{tuple(w_e.shape)}, expected "
-                f"{(unit.out_features, unit.in_features)}")
-        w_e = w_e.to(torch.float32)
-        g_e, v_e = g_all[e], var[e]
-        for lo in range(0, unit.out_features, rows_per_chunk):
-            hi = min(lo + rows_per_chunk, unit.out_features)
-            total += _weighted_row_sum(w_e[lo:hi], v_e, g_e[lo:hi])
-        del parts, w_e
-    return 0.5 * (total / max(1, unit.n_tokens)) * float(gain)
