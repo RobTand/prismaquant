@@ -12,7 +12,10 @@ solve's dloss, attained prefill and digest beside it. The file is now published
 by the shared no-clobber primitive (`cost_stage_checkpoint.publish_new_bytes`, a
 hard-link creation), and a file already there is read and verified before it is
 reused: it must parse, carry this module's schema and digest, hold exactly this
-solve's assignment, and re-hash to the name it is filed under. Corrupt,
+solve's assignment, re-hash to the name it is filed under, and claim
+`research_only` true -- the standing every point this module publishes carries,
+so a block that leaves the key out or sets it false is refused rather than
+adopted on the digest alone. Corrupt,
 truncated and different-assignment files are refused by name and never
 overwritten, and the loser of a publication race validates the winner rather
 than replacing it. Provenance is the one fact the name cannot carry: a

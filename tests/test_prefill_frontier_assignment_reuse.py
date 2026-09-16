@@ -126,6 +126,33 @@ def test_reuse_across_tables_is_recorded_rather_than_adopted(tmp_path):
     assert path.read_bytes() == written, "the first publisher's file is left alone"
 
 
+@pytest.mark.parametrize("stamp", [False, None], ids=["false", "missing"])
+def test_a_reused_file_that_is_not_research_only_is_refused(tmp_path, stamp):
+    """The standing the file claims is part of the binding, not decoration.
+
+    ``research_only`` is what every point this module publishes carries, and a
+    file that does not claim it is a different artifact that happens to hash the
+    same way. Reusing it would publish a research-only curve point whose
+    assignment file says otherwise, which is the same defect as reusing the
+    wrong assignment: the name is not evidence. Missing is refused with the
+    value, so a block that never carried the key cannot pass as True.
+    """
+    digest = _digest(ASSIGNMENT)
+    path = tmp_path / f"{digest}.json"
+    payload = _payload(ASSIGNMENT)
+    if stamp is None:
+        del payload[LAYER_CONFIG_META_KEY]["research_only"]
+    else:
+        payload[LAYER_CONFIG_META_KEY]["research_only"] = stamp
+    written = _encoded(payload)
+    path.write_bytes(written)
+
+    with pytest.raises(prefill_frontier.PrefillFrontierError) as caught:
+        _point(tmp_path)
+    assert "research_only" in str(caught.value), str(caught.value)
+    assert path.read_bytes() == written, "a refused reuse must not rewrite the file"
+
+
 def test_an_assignment_file_with_no_readable_provenance_is_refused(tmp_path):
     """``cannot tell which table published it`` is not ``reuse it anyway``."""
     digest = _digest(ASSIGNMENT)

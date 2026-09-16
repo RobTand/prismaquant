@@ -292,10 +292,16 @@ def _verify_reusable_assignment(path: Path, *, assignment: dict, digest: str,
 
     The path IS the assignment's identity, so a file found there is reusable
     only when it is that assignment: the bytes parse, the ``LAYER_CONFIG_META_KEY``
-    block states this module's schema and digest, the assignment recovered from
-    the file equals this solve's and re-hashes to the digest.  Anything else is
-    refused by name rather than reused, and is never overwritten -- the file may
-    be another writer's work in flight.
+    block states this module's schema and digest and ``research_only`` true, the
+    assignment recovered from the file equals this solve's and re-hashes to the
+    digest.  Anything else is refused by name rather than reused, and is never
+    overwritten -- the file may be another writer's work in flight.
+
+    ``research_only`` is checked because it is the standing the artifact claims,
+    and no point this module publishes may be carried by a file that does not
+    claim it: a reused file whose block is missing the key or sets it false is
+    refused, exactly as a wrong schema is, rather than adopted on the strength of
+    the digest alone.
 
     THE PROVENANCE THE FILE RECORDS IS RETURNED, NOT DEMANDED.  The digest covers
     the assignment alone, so two sweeps over tables with different bytes can
@@ -338,6 +344,11 @@ def _verify_reusable_assignment(path: Path, *, assignment: dict, digest: str,
     if meta.get("assignment_sha256") != digest:
         problems.append(
             f"recorded assignment_sha256 {meta.get('assignment_sha256')!r} != {digest}")
+    if meta.get("research_only") is not True:
+        problems.append(
+            f"research_only is {meta.get('research_only')!r}, not True, so the file does "
+            "not claim the research-only standing every point this module publishes "
+            "carries")
     stored = {key: value for key, value in payload.items() if key != LAYER_CONFIG_META_KEY}
     if stored != assignment:
         problems.append("the stored assignment differs from this solve's assignment")
@@ -366,9 +377,12 @@ def _publish_assignment(assignments_dir: Path, *, assignment: dict, digest: str,
 
     ``publish_new_bytes`` is a hard-link creation, so the file is either absent
     or complete; when it reports that one was already there, the loser of that
-    race reads what won and validates it rather than replacing it.  Only a file
-    that passes :func:`_verify_reusable_assignment` is returned, so the caller
-    cannot publish a digest and a path the bytes do not support.
+    race reads what won and validates it rather than replacing it.  When this
+    call created the file, the bytes behind the returned path are the payload it
+    just built for exactly this digest; when somebody else did, the bytes are
+    read back and must pass :func:`_verify_reusable_assignment` before the path
+    is returned.  No path reaches the caller without bytes this call either
+    wrote or read.
 
     Returns the path and the provenance the FILE records: this run's when this
     run published it, and the first publisher's when it was already there.
@@ -394,7 +408,9 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
 
     The assignment file is published through
     :func:`_publish_assignment`, so the ``assignment_sha256``/``assignment_path``
-    pair this returns is one whose bytes were read back and bound to this solve:
+    pair this returns is one whose bytes this solve wrote (a fresh publication,
+    whose payload is built from that digest's own assignment) or read back and
+    bound to it (a reuse, which is refused unless the file IS the assignment):
     the name is the digest, and a name is not evidence.
     """
     diag = record.get("diagnostics", {})
