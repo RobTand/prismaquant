@@ -178,6 +178,19 @@ entry end to end (no helper-only coverage); the served KL/PPL A/B at matched bpp
 remains the promotion gate for the AQUA arm as a whole, and the per-expert path
 inherits that gate rather than bypassing it.
 
+Two corrections to the paragraphs above, made after review of the first cut.
+"No shard" is the accurate bound and not "no read": `activation_dloss_table`
+still opens the checkpoint's small `model.safetensors.index.json` metadata index
+(and the scale map built from it) to resolve names, which an all-joint artifact
+cannot avoid without a metadata cache. And the selection is per REQUESTED cell,
+not per global format list: a format the artifact does not carry for a unit is
+not a cell of that unit, so `formats - joint` formed globally manufactures
+cells that nothing can consume, while a joint row for a *different* cell cannot
+fulfil a requested legacy one. `main` now takes the request as the cells the
+artifact actually carries, refuses a zero-priced run when any requested cell is
+unaccounted for, and accepts the all-joint case only when every requested cell
+is joint.
+
 Re-stamped (2026-09-16, `fix/joint-aqua-serving-scale-20260916`) for the
 **mount-instance-strict source-shard identity, in one place** (§4.10, joint
 prepare data manifest and `CaptureSourceAuthentication`). The cache that lets a

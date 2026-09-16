@@ -550,6 +550,7 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                            profile=None,
                            executed_activation_formats=None,
                            already_priced_cells=None,
+                           formats_by_name=None,
                            ) -> tuple[dict, dict, dict]:
     """``{unit: {format: act_dloss}}`` plus a report of what could not be priced.
 
@@ -582,6 +583,15 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     what makes an all-joint artifact cost nothing rather than a full pass. This
     is a per-CELL selection, so a mixed artifact prices exactly the legacy cells
     and leaves the joint ones alone.
+
+    ``formats_by_name`` is the other half of that selection and the reason the
+    first version of it was wrong: the REQUESTED formats are not global. A
+    format the artifact does not carry for a unit is not a cell of that unit --
+    nothing could ever be merged there -- so asking the global list "minus the
+    joint ones" manufactures cells that do not exist, prices them, and reports
+    the unit as needing work it does not need. The caller that owns the artifact
+    supplies each unit's own format list; a unit absent from the mapping has no
+    requested cell at all and is not counted as fulfilled by anything.
     """
     if executed_activation_formats is None:
         raise SystemExit(
@@ -650,14 +660,25 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     unresolved: list[str] = []
     needed_formats: dict[str, list[str]] = {}
     already_priced: list[str] = []
+    no_cells: list[str] = []
     for name in wanted:
+        # The REQUESTED cells of THIS unit. With `formats_by_name` supplied by
+        # the caller that owns the cost artifact, a format the artifact does not
+        # carry for this unit is not a cell: pricing it would be a price that
+        # nothing can consume. Without the mapping (the library call), the global
+        # list is what the caller asked for.
+        unit_formats = (list(formats_by_name.get(name, ()))
+                        if formats_by_name is not None else list(formats))
+        if not unit_formats:
+            no_cells.append(name)
+            continue
         # (unit, format) cells the caller says already carry a price with their
         # OWN activation term -- a joint AURA row's signed residual. They are
         # dropped BEFORE anything is read or built: pricing one would be work
         # whose result is discarded, and merging one is refused. This is the
         # only place the selection happens, so a mixed artifact prices exactly
         # the legacy cells and nothing else.
-        needed = [f for f in formats if (name, f) not in already]
+        needed = [f for f in unit_formats if (name, f) not in already]
         if not needed:
             already_priced.append(name)
             continue
@@ -689,7 +710,8 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     # unambiguous case is a refusal; no coverage threshold is invented here,
     # because any such number would be a heuristic (principle 2). Partial
     # coverage is already reported per-format through `holes`.
-    if wanted and not resolvable and not per_expert and not already_priced:
+    if (wanted and not resolvable and not per_expert and not already_priced
+            and not no_cells):
         raise SystemExit(
             f"REFUSE: 0 of {len(wanted)} card units resolve to a checkpoint "
             f"tensor, so there is nothing to price. This is a NAME-SPACE "
@@ -940,7 +962,8 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
             {"act_var_source": dict(var_source),
              "per_expert_units_priced": len(per_expert),
              "units_unresolved": len(unresolved),
-             "cells_already_joint_priced": len(already)})
+             "units_without_requested_cells": len(no_cells),
+             "units_fully_joint_priced": len(already_priced)})
 
 
 def merge_act_dloss(costs: dict, table: dict) -> dict:
@@ -1065,6 +1088,24 @@ def main() -> int:
         log(f"joint AURA coverage: {len(already)} (unit, format) cells already "
             f"carry their own activation term; no A-side is computed for them")
 
+    # The cells this run was actually ASKED to price: the requested formats that
+    # the artifact carries for that unit. A format the artifact does not carry is
+    # not a cell -- nothing could be merged there -- and, critically, a joint row
+    # for some OTHER cell does not fulfil it. `requested` is the denominator the
+    # acceptance below is stated against, so an unrelated joint rung can no
+    # longer licence a run that priced nothing.
+    formats_by_name: dict[str, list[str]] = {}
+    requested: set[tuple[str, str]] = set()
+    for name, entry in costs.items():
+        if not isinstance(entry, dict):
+            continue
+        present = [f for f in formats if isinstance(entry.get(f), dict)]
+        if present:
+            formats_by_name[name] = present
+            requested.update((name, f) for f in present)
+    log(f"requested cells: {len(requested)} (unit, format) pairs over "
+        f"{len(formats_by_name)} units")
+
     # The architecture's declared name mapping. Optional by design: a model
     # whose checkpoint names match its module tree needs none, and a path that
     # no profile claims must not become a hard failure for those models. When
@@ -1097,27 +1138,48 @@ def main() -> int:
     )
     table, holes, meta = activation_dloss_table(
         card, args.model_path, formats, device=args.device,
-        names=[n for n in costs], act_dir=args.act_dir, profile=profile,
+        names=[n for n in formats_by_name], act_dir=args.act_dir,
+        profile=profile,
         executed_activation_formats=executed,
-        already_priced_cells=already)
+        already_priced_cells=already,
+        formats_by_name=formats_by_name)
     report = merge_act_dloss(costs, table)
     log(f"merge: {report}")
-    # Belt and braces on the silent-no-op: resolution can succeed while every
-    # price still comes back None (e.g. a scalar-only card with no g_sq_sum).
-    # A THIRD case is legitimate and must not be confused with it: every owed
-    # cell was already joint-priced, so there was nothing to add and nothing was
-    # computed. That is a fulfilled artifact, reported as such, not a run that
-    # wrote the AQUA name onto an unchanged weight-only table.
-    if not report["entries_merged"] and not report["joint_rows_skipped"]:
+    # Acceptance is stated against the REQUESTED CELLS, not against whatever
+    # else the artifact happens to contain. `priced` is what this run actually
+    # added; `joint_requested` is the requested subset a joint row already
+    # covers; anything left has no A-side in the output.
+    priced_cells = {(name, fmt) for name, row in table.items()
+                    for fmt in row if fmt in costs.get(name, {})}
+    joint_requested = requested & already
+    unfulfilled = requested - priced_cells - already
+    if len(priced_cells) != report["entries_merged"]:
         raise SystemExit(
-            "REFUSE: the merge wrote 0 entries, so --cost-out would be a "
-            "byte-equivalent copy of --cost-in carrying the AQUA name. Most "
-            "likely the card has no `g_sq_sum` (a scalar-only card built from "
-            "a probe predating marginal emission); `activation_dloss` returns "
-            "None for every unit in that case."
+            f"REFUSE: internal accounting disagreement -- {len(priced_cells)} "
+            f"cells were priced but {report['entries_merged']} were merged; "
+            f"the merge is not writing what this stage computed.")
+    if unfulfilled:
+        # Reported, NOT refused: partial coverage is a hole set, and refusing it
+        # would invent a coverage threshold (see #655 for the campaign-level
+        # requirement this deliberately does not decide here).
+        log(f"coverage: {len(unfulfilled)} of {len(requested)} requested cells "
+            f"have no A-side in this output; they keep a weight-only cost")
+    # The silent no-op this refusal exists for: nothing was priced AND at least
+    # one requested cell is unaccounted for. An all-joint artifact is the other
+    # case -- every requested cell covered, nothing computed, nothing to add.
+    if not priced_cells and (unfulfilled or not requested):
+        raise SystemExit(
+            f"REFUSE: the merge wrote 0 entries and "
+            f"{len(unfulfilled)} of {len(requested)} requested (unit, format) "
+            f"cells have no A-side, so --cost-out would be a byte-equivalent "
+            f"copy of --cost-in carrying the AQUA name. Most likely the card "
+            f"has no `g_sq_sum` (a scalar-only card built from a probe "
+            f"predating marginal emission); `activation_dloss` returns None "
+            f"for every unit in that case. A joint AURA row for a DIFFERENT "
+            f"cell does not fulfil a requested legacy cell."
         )
-    if not report["entries_merged"]:
-        log(f"nothing to add: all {report['joint_rows_skipped']} joint cells "
+    if not priced_cells:
+        log(f"nothing to add: all {len(joint_requested)} requested cells "
             f"already carry a priced activation term, so no A-side was "
             f"computed; provenance records the joint coverage")
 
@@ -1129,7 +1191,11 @@ def main() -> int:
         "holes": {k: len(v) for k, v in holes.items()},
         "merge_report": report,
         "act_dir": os.path.abspath(args.act_dir) if args.act_dir else None,
-        "joint_cells_already_priced": [list(cell) for cell in sorted(already)],
+        "requested_cells": len(requested),
+        "priced_cells": len(priced_cells),
+        "cells_without_act_price": len(unfulfilled),
+        "joint_cells_already_priced": [
+            list(cell) for cell in sorted(joint_requested)],
         **meta,
     }
     blob["provenance"] = prov

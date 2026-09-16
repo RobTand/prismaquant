@@ -178,7 +178,7 @@ def _packed_unit(name="model.layers.0.mlp.experts.gate_up_proj", *,
     )
 
 
-def _per_expert_checkpoint(tmp_path, *, drop=None):
+def _per_expert_checkpoint(tmp_path, *, drop=None, extra_dense=()):
     """A real checkpoint: one dense key + one per-expert packed unit.
 
     ``drop=(expert, leaf)`` omits one sibling so an incomplete roster can be
@@ -197,6 +197,8 @@ def _per_expert_checkpoint(tmp_path, *, drop=None):
         weight_map[key] = "shard-00001.safetensors"
 
     _add("model.layers.0.mlp.down_proj.weight", (_ROWS, _IN))
+    for extra in extra_dense:
+        _add(f"{extra}.weight", (_ROWS, _IN))
     for e in range(E):
         for leaf in ("gate_proj", "up_proj"):
             if drop is not None and (e, leaf) == drop:
@@ -416,12 +418,11 @@ def _joint_row(name, fmt, *, loss=1.0, shape=(_ROWS, _IN)):
                             "total": total} for _ in range(3)])
 
 
-def _cli_fixture(tmp_path, costs, units):
+def _cli_fixture(tmp_path, costs, units, *, extra_dense=(), extra_argv=()):
     """A card .npz, a --cost-in pkl and the argv `main` needs, on CPU."""
     import pickle
-    import sys
 
-    model, _ = _per_expert_checkpoint(tmp_path)
+    model, _ = _per_expert_checkpoint(tmp_path, extra_dense=extra_dense)
     card_path = tmp_path / "card.npz"
     _card(units).to_npz(str(card_path))
     cost_in = tmp_path / "cost-in.pkl"
@@ -430,17 +431,21 @@ def _cli_fixture(tmp_path, costs, units):
     argv = ["aqua-activation-cost", "--card", str(card_path),
             "--model-path", str(model), "--cost-in", str(cost_in),
             "--cost-out", str(cost_out), "--device", "cpu",
-            "--lane-executes-all-activation-grids"]
+            "--lane-executes-all-activation-grids", *extra_argv]
     return cost_out, argv
 
 
 def test_the_cli_accepts_an_all_joint_artifact_without_pricing_anything(
         tmp_path, monkeypatch):
-    """A fulfilled artifact is accepted, and it costs no checkpoint read.
+    """A fulfilled artifact is accepted, and it costs no weight read.
 
     Refusing it as a "no-op" was wrong: nothing was computed because nothing was
     OWED. The `materialize_source_weight` trap is the proof that no A-side was
-    computed for it -- not a timing claim.
+    computed for it -- not a timing claim, and not a claim that the checkpoint is
+    untouched: `activation_dloss_table` still reads the small
+    `model.safetensors.index.json` metadata index (and the scale map built from
+    it) to resolve names. What is avoided is opening a shard, building a plugin
+    and reading a weight.
     """
     import pickle
     import sys
@@ -463,9 +468,71 @@ def test_the_cli_accepts_an_all_joint_artifact_without_pricing_anything(
     assert "act_dloss" not in out["costs"][name]["NVFP4"]
     prov = out["provenance"]["aqua_activation_cost"]
     assert prov["joint_cells_already_priced"] == [[name, "NVFP4"]]
-    assert prov["cells_already_joint_priced"] == 1
+    assert prov["units_fully_joint_priced"] == 1
+    assert prov["requested_cells"] == 1
+    assert prov["priced_cells"] == 0
+    assert prov["cells_without_act_price"] == 0
     assert prov["merge_report"]["joint_rows_skipped"] == 1
     assert prov["merge_report"]["entries_merged"] == 0
+
+
+def test_a_requested_format_the_artifact_lacks_is_not_a_cell(tmp_path,
+                                                            monkeypatch):
+    """QA on dc371: the requested set is PER UNIT, not the global list.
+
+    `--formats NVFP4,FP8_E4M3` on an artifact whose only cell for this unit is
+    the joint NVFP4 row must not manufacture an FP8 cell for it. The first
+    version formed `formats - joint` globally, so it opened the shard, built a
+    plugin and computed an A-side for a cell the artifact cannot carry -- and
+    then reported the unit as needing work. The trap proves no weight is read.
+    """
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+
+    name = "model.layers.0.mlp.down_proj"
+    cost_out, argv = _cli_fixture(
+        tmp_path, {name: {"NVFP4": _joint_row(name, "NVFP4")}},
+        [_dense_unit(name)], extra_argv=("--formats", "NVFP4,FP8_E4M3"))
+
+    def _must_not_read(*_a, **_k):
+        raise AssertionError(
+            "FP8_E4M3 is not a cell of this unit in this artifact")
+
+    monkeypatch.setattr(aqc, "materialize_source_weight", _must_not_read)
+    monkeypatch.setattr(sys, "argv", argv)
+    assert aqc.main() == 0
+    assert cost_out.exists()
+
+
+def test_an_unrelated_joint_cell_does_not_licence_a_zero_priced_run(
+        tmp_path, monkeypatch):
+    """QA on dc371: acceptance is per REQUESTED cell, not per artifact.
+
+    Unit A's NVFP4 row is joint; unit B's is an ordinary legacy row whose card
+    carries no `g_sq_sum`, so this run prices nothing. B is a requested cell
+    with no A-side, and A's joint rung says nothing about it -- the run must
+    still refuse rather than write a copy wearing the AQUA name.
+    """
+    import dataclasses
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+
+    joint_name = "model.layers.0.mlp.down_proj"
+    legacy_name = "model.layers.0.mlp.o_proj"
+    cost_out, argv = _cli_fixture(
+        tmp_path,
+        {joint_name: {"NVFP4": _joint_row(joint_name, "NVFP4")},
+         legacy_name: {"NVFP4": {"predicted_dloss": 1.0}}},
+        [_dense_unit(joint_name),
+         dataclasses.replace(_dense_unit(legacy_name), g_sq_sum=None)],
+        extra_dense=(legacy_name,))
+
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="requested"):
+        aqc.main()
+    assert not cost_out.exists()
 
 
 def test_a_mixed_artifact_prices_exactly_its_legacy_cells(tmp_path,
