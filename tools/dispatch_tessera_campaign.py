@@ -92,12 +92,18 @@ import sys
 from pathlib import Path
 
 if __package__:
-    from .tessera_campaign_container import validate_container
+    from .tessera_campaign_container import (
+        container_memory_budget_gb,
+        validate_container,
+    )
 else:
     # Direct script execution puts only tools/ on sys.path. Planning also
     # reads the shared calibration contract from the sibling package.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from tessera_campaign_container import validate_container
+    from tessera_campaign_container import (
+        container_memory_budget_gb,
+        validate_container,
+    )
 
 PBCAMPAIGN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbcampaign.py")
 
@@ -772,6 +778,297 @@ def verify_manifest_demands(spec: dict, census: dict, rows: list, *,
             f"{len(refusals)} of {len(rows)} rows declare a memory demand "
             "their own argv does not support:\n" + "\n".join(refusals))
     return records
+
+
+def parse_pbrun_demand(demand: str) -> "dict[str, int]":
+    """Parse pbrun's ``key=value,key=value`` demand spelling."""
+    if not isinstance(demand, str) or not demand.strip():
+        raise DemandRefused("--demand must be a non-empty pbrun demand string")
+    parsed: dict[str, int] = {}
+    for item in demand.split(","):
+        name, separator, value = item.partition("=")
+        if not separator or not name.strip():
+            raise DemandRefused(f"--demand {demand!r} is not key=value pairs")
+        try:
+            parsed[name.strip()] = int(value)
+        except ValueError:
+            raise DemandRefused(
+                f"--demand {demand!r} has a non-integer {name.strip()!r}"
+            ) from None
+    return parsed
+
+
+def joint_submission_memory_bound(spec: dict, plan: dict) -> dict:
+    """The combined physical bound the row's own policy states, in bytes.
+
+    A joint row has three numbers and they are not interchangeable. The
+    container cap bounds only what the cgroup charges -- on GB10 that is the
+    CPU side, measured at 16 GiB charged for a container that held 78.87 GiB
+    of model and 6 GiB of KV -- so the demand PrismaBuild reserves has to be
+    the combined physical demand, and the device envelope is a *subset* of it
+    rather than a second box.
+
+    The plan's ``aggregate_memory_bytes`` is that combined bound and is used
+    first. A plan written before it existed gets the same number derived from
+    the two bounds it does state, ``cpu_memory_gb`` (whose cgroup cap is what
+    the launcher passes as ``--memory``) plus ``max_gpu_bytes``. When neither
+    is derivable the record says so rather than inventing a bound.
+    """
+    gib = 1024 ** 3
+    aggregate = plan.get("aggregate_memory_bytes")
+    if (isinstance(aggregate, int) and not isinstance(aggregate, bool)
+            and aggregate > 0):
+        return {"bound_bytes": aggregate,
+                "bound_basis": "plan.aggregate_memory_bytes"}
+    cap_gb = container_memory_budget_gb(spec)
+    gpu_bytes = plan.get("max_gpu_bytes")
+    if (cap_gb is not None and isinstance(gpu_bytes, int)
+            and not isinstance(gpu_bytes, bool) and gpu_bytes > 0):
+        return {"bound_bytes": int(round(cap_gb * gib)) + gpu_bytes,
+                "bound_basis": "spec container cap + plan.max_gpu_bytes"}
+    return {"bound_bytes": None, "bound_basis": None}
+
+
+def verify_joint_submission_demand(spec: dict, plan: dict, demand: str, *,
+                                   label: str = "joint row") -> dict:
+    """Refuse a PrismaBuild reservation below the row's own physical bound.
+
+    Neither of the two mistakes is a warning: reserving the container cap
+    under-reserves the box by exactly the device envelope, and reserving
+    34 GiB while the row's guard is allowed to hold 80 GiB of device
+    residency beside it buys an admission the row then declines.
+
+    Reserving *more* than the bound is allowed and is what A2 does (114 GiB
+    for a 34 GiB cap beside an 80 GiB device envelope): the excess is
+    conservatism, and it is recorded rather than silently trimmed.
+    """
+    gib = 1024 ** 3
+    parsed = parse_pbrun_demand(demand)
+    reserved_gb = parsed.get("mem_gb")
+    if reserved_gb is None:
+        raise DemandRefused(
+            f"{label}: --demand {demand!r} reserves no mem_gb. A joint row's "
+            "device residency is not charged to its container cap, so the "
+            "reservation has to state the combined physical demand.")
+    record = {"row": label, "demand": demand, "reserved_mem_gb": reserved_gb,
+              **joint_submission_memory_bound(spec, plan)}
+    bound = record["bound_bytes"]
+    if bound is not None and reserved_gb * gib < bound:
+        raise DemandRefused(
+            f"{label}: --demand reserves {reserved_gb} GiB, below the "
+            f"{math.ceil(bound / gib)} GiB combined physical bound this row "
+            f"states ({record['bound_basis']}: {bound} B). The container cap "
+            "bounds the CPU side alone, so reserving it here under-reserves "
+            "the box by the device envelope; reserve the combined demand, or "
+            "lower the plan's own bound first.")
+    return record
+
+
+#: The scope a joint pass evaluates, and the two shapes it can take.  A
+#: campaign-scoped pass evaluates every unit and every window the campaign's
+#: census defines; a diagnostic pass evaluates an explicitly frozen window
+#: subset of that same roster.  The scope is *derived* from the census and
+#: campaign plan the joint plan binds by sha256 -- never from a tally the plan
+#: states about itself -- so a roster or window set narrowed without moving the
+#: declared count cannot read as complete.  Two rosters of equal length with
+#: different members are different scopes; so are two window sets of equal size
+#: with different membership.
+CAMPAIGN_SCOPE_SCHEMA = "prismaquant.tessera_joint_campaign_scope.v1"
+COMPLETE_CAMPAIGN_SCOPE = "complete_campaign"
+DIAGNOSTIC_SCOPE = "diagnostic_window_subset"
+CAMPAIGN_SCOPE_KINDS = (COMPLETE_CAMPAIGN_SCOPE, DIAGNOSTIC_SCOPE)
+
+CENSUS_SCHEMA = "prismaquant.tessera_campaign_census.v1"
+PANEL_SCHEMA = "prismaquant.tessera_joint_eval_panel.v1"
+PANEL_STATUS = "diagnostic_pilot"
+
+
+class ScopeRefused(RuntimeError):
+    """A joint row's evaluated scope is not the scope it is submitted for."""
+
+
+def _bound_json(plan: dict, key: str, *, label: str) -> dict:
+    """The JSON artifact a joint plan binds by path and sha256, re-checked."""
+    declared = (plan.get("inputs") or {}).get(key)
+    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
+            or not isinstance(declared.get("sha256"), str)):
+        raise ScopeRefused(f"{label}: joint plan inputs.{key} is not a bound artifact")
+    path = Path(declared["path"])
+    actual = _sha256_of(path)
+    if actual != declared["sha256"]:
+        raise ScopeRefused(
+            f"{label}: plan inputs.{key} is {path}, which hashes to {actual}, "
+            f"not the bound {declared['sha256']}")
+    return json.loads(path.read_text())
+
+
+def joint_campaign_scope(plan: dict, *, label: str = "joint row") -> dict:
+    """The exact roster and window identity one joint plan evaluates.
+
+    Read from the plan's own bound census and campaign plan.  A plan whose
+    census roster is not the campaign plan's roster, whose ``calib_seqlen`` is
+    not the census ``seqlen``, or whose declared unit/group tallies do not
+    equal the roster it actually bound refuses here -- the counts are checked
+    against the identity, not accepted in place of it.
+    """
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+
+    inputs = plan.get("inputs")
+    if not isinstance(inputs, dict):
+        raise ScopeRefused(f"{label}: the joint plan declares no inputs block")
+    census = _bound_json(plan, "census", label=label)
+    campaign = _bound_json(plan, "campaign_plan", label=label)
+    if census.get("schema") != CENSUS_SCHEMA:
+        raise ScopeRefused(
+            f"{label}: census schema is {census.get('schema')!r}, expected {CENSUS_SCHEMA}")
+    if Path(campaign["census"]).resolve() != Path(inputs["census"]["path"]).resolve():
+        raise ScopeRefused(
+            f"{label}: the campaign plan and the joint plan name different censuses")
+    roster = census.get("unit_shapes")
+    groups = census.get("anchor_groups")
+    if (not isinstance(roster, dict) or not roster
+            or not isinstance(groups, dict) or not groups):
+        raise ScopeRefused(f"{label}: the census carries no exact roster")
+    owners: set = set()
+    for row in campaign.get("rows") or []:
+        owners.update(row.get("members") or [])
+    if owners != set(roster):
+        raise ScopeRefused(
+            f"{label}: the census roster is not the campaign plan's roster "
+            f"({len(owners)} campaign members, {len(roster)} census units)")
+    # The census is the window authority: a plan that narrows its own
+    # ``n_calib_samples`` is a narrower scope, not the campaign's.
+    campaign_windows = census.get("nsamples")
+    seqlen = census.get("seqlen")
+    if (isinstance(campaign_windows, bool) or not isinstance(campaign_windows, int)
+            or campaign_windows <= 0 or not isinstance(seqlen, int) or seqlen <= 0):
+        raise ScopeRefused(
+            f"{label}: the census declares no window count or sequence length")
+    execution = plan.get("execution") or {}
+    if execution.get("calib_seqlen") != seqlen:
+        raise ScopeRefused(
+            f"{label}: plan calib_seqlen {execution.get('calib_seqlen')!r} is not "
+            f"the census seqlen {seqlen!r}")
+    evaluated = execution.get("n_calib_samples")
+    panel = plan.get("joint_eval")
+    if panel is None:
+        kind, selection = COMPLETE_CAMPAIGN_SCOPE, None
+        windows = evaluated
+    else:
+        kind = DIAGNOSTIC_SCOPE
+        if (not isinstance(panel, dict) or panel.get("schema") != PANEL_SCHEMA
+                or panel.get("status") != PANEL_STATUS):
+            raise ScopeRefused(
+                f"{label}: a narrow scope needs an explicit {PANEL_SCHEMA} "
+                f"panel with status {PANEL_STATUS!r}")
+        selected = panel.get("selection")
+        windows = selected.get("size") if isinstance(selected, dict) else None
+        if (isinstance(windows, bool) or not isinstance(windows, int)
+                or not 0 < windows < campaign_windows):
+            raise ScopeRefused(
+                f"{label}: a diagnostic scope selects a strict, sized subset of the "
+                f"{campaign_windows}-window campaign, got {windows!r}")
+        if panel.get("shape") != [windows, seqlen]:
+            raise ScopeRefused(
+                f"{label}: the diagnostic panel shape {panel.get('shape')!r} is not "
+                f"[{windows}, {seqlen}]")
+        selection = canonical_json_sha256(panel, where=f"{label} joint evaluation panel")
+    if isinstance(windows, bool) or not isinstance(windows, int) or windows <= 0:
+        raise ScopeRefused(f"{label}: the plan evaluates no windows")
+    if kind == COMPLETE_CAMPAIGN_SCOPE and windows != campaign_windows:
+        raise ScopeRefused(
+            f"{label}: a campaign-scoped plan evaluates all {campaign_windows} "
+            f"windows, got {windows}; freeze the subset as an explicit diagnostic panel")
+    declared = (inputs.get("required_source_units"),
+                inputs.get("required_campaign_groups"))
+    if declared != (len(roster), len(groups)):
+        raise ScopeRefused(
+            f"{label}: the plan declares {declared[0]!r}/{declared[1]!r} units/groups "
+            f"but bound {len(roster)}/{len(groups)}; a count is not the roster")
+    return {
+        "schema": CAMPAIGN_SCOPE_SCHEMA,
+        "kind": kind,
+        "source_roster_sha256": canonical_json_sha256(
+            sorted(roster), where=f"{label} source roster"),
+        "source_unit_count": len(roster),
+        "campaign_group_roster_sha256": canonical_json_sha256(
+            groups, where=f"{label} campaign group roster"),
+        "campaign_group_count": len(groups),
+        "window_count": windows,
+        "campaign_window_count": campaign_windows,
+        "calib_seqlen": seqlen,
+        "selection_sha256": selection,
+    }
+
+
+CAMPAIGN_IDENTITY_SCHEMA = "prismaquant.tessera_joint_campaign_identity.v1"
+
+#: The fields of the frozen campaign identity a submission has to reproduce.
+#: ``window_count`` is deliberately absent: the campaign identity names the
+#: campaign's own window total, and whether a plan evaluates all of it is the
+#: ``kind`` the caller requires, not a property of the campaign.
+CAMPAIGN_IDENTITY_FIELDS = (
+    "source_unit_count", "source_roster_sha256",
+    "campaign_group_count", "campaign_group_roster_sha256",
+    "campaign_window_count", "calib_seqlen")
+
+
+def campaign_identity(scope: dict) -> dict:
+    """The frozen identity of the campaign a scope belongs to.
+
+    Derived from a plan's bound census so that the pilot and the full
+    continuation can be held to one roster and one window total without either
+    of them restating it.  An operator seals this once and passes it to every
+    joint submission; the generic path never hardcodes the numbers.
+    """
+    record = {"schema": CAMPAIGN_IDENTITY_SCHEMA,
+              **{field: scope[field] for field in CAMPAIGN_IDENTITY_FIELDS}}
+    return record
+
+
+def verify_joint_campaign_scope(plan: dict, *, require_scope: str,
+                                campaign: dict, label: str = "joint row") -> dict:
+    """Refuse a joint submission whose scope is not the scope it claims.
+
+    ``require_scope`` is what the caller is submitting *for*, and a diagnostic
+    subset is not the campaign's score: asking for ``complete_campaign`` and
+    handing it a plan that evaluates 16 of 512 windows refuses here, before the
+    read set is built, rather than surfacing as a shortfall in the merged cost
+    after the GPU window has closed.
+
+    ``campaign`` is the frozen campaign identity the submission belongs to.  It
+    is required: a plan is self-consistent with whatever census it binds, so
+    without an identity that is fixed *outside* the plan a coherently narrowed
+    roster would still read as the whole campaign.  Every identity field is
+    compared exactly -- the counts are a convenience of the record, not the
+    acceptance.
+    """
+    if require_scope not in CAMPAIGN_SCOPE_KINDS:
+        raise ScopeRefused(
+            f"{label}: unknown required scope {require_scope!r}; expected one of "
+            f"{', '.join(CAMPAIGN_SCOPE_KINDS)}")
+    if not isinstance(campaign, dict) or campaign.get("schema") != CAMPAIGN_IDENTITY_SCHEMA:
+        raise ScopeRefused(
+            f"{label}: a joint submission must bind a {CAMPAIGN_IDENTITY_SCHEMA} "
+            "campaign identity; a plan's own census cannot show its own scope is "
+            "the campaign's")
+    scope = joint_campaign_scope(plan, label=label)
+    for field in CAMPAIGN_IDENTITY_FIELDS:
+        declared = campaign.get(field)
+        if declared != scope[field]:
+            raise ScopeRefused(
+                f"{label}: the plan's {field} is {scope[field]!r}, not the frozen "
+                f"campaign identity's {declared!r}; a roster of equal length with "
+                "different members is a different campaign")
+    if scope["kind"] != require_scope:
+        raise ScopeRefused(
+            f"{label}: this submission requires a {require_scope} scope, but the "
+            f"plan evaluates {scope['kind']} ({scope['window_count']} of "
+            f"{scope['campaign_window_count']} windows over "
+            f"{scope['source_unit_count']} units, selection "
+            f"{scope['selection_sha256']}). A diagnostic subset is its own "
+            "evidence; submit the campaign-scoped plan for the campaign's score.")
+    return scope
 
 
 def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
@@ -1743,7 +2040,7 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
 
 
 def _pbrun_argv(args, *, manifest: Path, inner: list[str],
-                progress_phases=()) -> list[str]:
+                progress_phases=(), gpu_memory_gb=None) -> list[str]:
     """The submission command, with ``--data-manifest`` before ``--detach``.
 
     Everything after ``--`` is the action; ``--data-manifest`` is an option of
@@ -1754,6 +2051,11 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     """
     spec = Path(args.spec).read_text()
     argv = ["python3", str(args.pbrun), "--demand", args.demand]
+    if gpu_memory_gb is not None:
+        # The device envelope is a *subset* of the unified reservation on
+        # GB10, not a second box: without this PB caps the GPU subset at the
+        # whole reservation and the plan's own device bound is not enforced.
+        argv += ["--gpu-memory-gb", str(gpu_memory_gb)]
     if args.cpus is not None:
         argv += ["--cpus", str(args.cpus)]
     if args.tag:
@@ -1793,7 +2095,7 @@ def _manifest_path(args, plan: dict, *, entry_point: str, command: str) -> Path:
 
 
 def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str],
-                       plan: dict, build) -> int:
+                       plan: dict, build, scope: dict | None = None) -> int:
     """Build the read set, write it, and run the chain-style pbrun command.
 
     Order matters for a dry run: the command shape is printed before the
@@ -1803,6 +2105,30 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     manifest_path = _manifest_path(args, plan, entry_point=entry_point,
                                    command=command)
     manifest = build()
+    if scope is not None:
+        # The scope is part of the submission's identity, not a comment beside
+        # it: the manifest's bytes are content-addressed into the action key, so
+        # a pinned read set that was acknowledged as a diagnostic subset cannot
+        # later be re-presented as the campaign's score.
+        manifest["annotations"]["campaign_scope"] = scope
+    # Derive what this row's own policy says it holds before reserving it, so
+    # a reservation below the container cap or below the combined physical
+    # bound is refused here rather than admitted and then declined by the row.
+    demand_record = verify_joint_submission_demand(
+        json.loads(Path(args.spec).read_text()), plan, args.demand,
+        label=f"{entry_point}:{command}")
+    gpu_memory_gb = None
+    gpu_bytes = plan.get("max_gpu_bytes")
+    if (isinstance(gpu_bytes, int) and not isinstance(gpu_bytes, bool)
+            and gpu_bytes > 0):
+        gpu_memory_gb = math.ceil(gpu_bytes / 1024 ** 3)
+    # ``source_identity_cache_host`` stays in the manifest as provenance -- the
+    # box whose manifest build adopted the cached full-source SHA -- and as a
+    # placement constraint, because that proof names a mount instance and not
+    # just a path. Reusing it from another mount is not authorized by anything
+    # this tree can verify (an NFSv4 client's statfs fsid is 0 here), so the row
+    # has to run where the proof was made rather than silently re-reading or
+    # silently trusting a device-free comparison.
     cache_host = manifest["annotations"].get("source_identity_cache_host")
     if cache_host is not None and args.tag != cache_host:
         raise RuntimeError(
@@ -1829,10 +2155,15 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
             inner = [*inner, "--prewarm-manifest", str(manifest_path),
                      "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
     argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
-                       progress_phases=phase_names)
+                       progress_phases=phase_names,
+                       gpu_memory_gb=gpu_memory_gb)
     summary = {
         "entry_point": f"{entry_point}:{command}",
         "data_manifest": str(manifest_path),
+        # What was reserved, and what the row's own plan says it holds. The
+        # difference is the conservatism, stated rather than implied.
+        "resource_demand": {**demand_record,
+                            "gpu_memory_gb": gpu_memory_gb},
         "manifest_bytes": len(blob),
         "decoded_manifest_bytes": len(decoded),
         "manifest_sha256": hashlib.sha256(blob).hexdigest(),
@@ -1848,6 +2179,8 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
            if key in manifest["annotations"]},
         "phases": manifest["annotations"]["phases"],
     }
+    if scope is not None:
+        summary["campaign_scope"] = scope
     if args.dry_run:
         print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
         print(json.dumps(summary, indent=1))
@@ -1872,6 +2205,18 @@ def cmd_submit_joint(args) -> int:
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    # The scope is derived from the plan's own bound census, and the caller has
+    # to state what it is submitting *for*. A 16-of-512 diagnostic plan handed
+    # to a campaign-scoped submission refuses here rather than after the GPU
+    # window has been spent producing a subset the campaign cannot score.
+    identity_path = Path(args.campaign_identity).resolve()
+    _bound_sha256(identity_path, args.campaign_identity_sha256,
+                  label="joint campaign identity")
+    campaign = json.loads(identity_path.read_text())
+    scope = verify_joint_campaign_scope(
+        plan, require_scope=args.require_scope, campaign=campaign,
+        label=f"joint {args.command}: {plan_path.name}")
+    scope = {**scope, "campaign_identity_sha256": _sha256_of(identity_path)}
     inner = ["python3", "-u", "-m", JOINT_ENTRY_POINT, args.command,
              "--plan", str(plan_path), "--plan-sha256", plan_sha256]
     prepared = None
@@ -1892,7 +2237,7 @@ def cmd_submit_joint(args) -> int:
         workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
     return _submit_gpu_action(
         args, entry_point=JOINT_ENTRY_POINT, command=args.command, inner=inner,
-        plan=plan,
+        plan=plan, scope=scope,
         build=lambda: producer.build_joint_pass_manifest(
             str(plan_path), command=args.command, produced_by=provenance,
             argv=inner, prepared=prepared))
@@ -2884,6 +3229,23 @@ def main(argv=None) -> int:
     joint.add_argument("--resume", action="store_true",
                        help="forwarded to the pass, which resumes from its "
                             "identity-bound checkpoints")
+    joint.add_argument("--require-scope", required=True,
+                       choices=CAMPAIGN_SCOPE_KINDS,
+                       help="what this submission is for. The scope itself is "
+                            "derived from the plan's bound census; this states "
+                            "the intent it has to match, so a diagnostic "
+                            "window subset cannot be submitted as the "
+                            "campaign's score")
+    joint.add_argument("--campaign-identity", required=True,
+                       help="the frozen "
+                            f"{CAMPAIGN_IDENTITY_SCHEMA} the plan's roster, "
+                            "group roster and window total have to reproduce "
+                            "exactly. A plan is self-consistent with whatever "
+                            "census it binds, so the campaign it belongs to has "
+                            "to come from outside the plan")
+    joint.add_argument("--campaign-identity-sha256", default=None,
+                       help="the digest the campaign identity is bound by; "
+                            "computed when omitted and checked when given")
     _add_submission_arguments(joint)
     joint.set_defaults(func=cmd_submit_joint)
 

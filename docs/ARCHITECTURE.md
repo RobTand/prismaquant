@@ -774,6 +774,30 @@ new request must rebuild its manifest from these source bytes. Gates:
 `tests/test_selected_source_authentication.py`,
 `tests/test_glm_joint_data_manifest_at_submit.py`, and the joint prepare tests.
 
+**A joint pass's scope is an identity, not a tally** (2026-09-16,
+`fix/joint-scope-identity-acceptance-20260916`). A joint plan is self-consistent
+with whatever census it binds, so a coherently narrowed roster verifies cleanly
+and is still not the campaign: `load_measured_anchor_input` refuses a plan whose
+journals do not cover *its own* cells, and its cells are its own census. The
+submission now states what it is for. `submit-joint` derives the scope from the
+plan's bound census and campaign plan -- the source roster, the campaign group
+roster, the sequence length and the window set -- and compares it field for
+field against a frozen `prismaquant.tessera_joint_campaign_identity.v1` that the
+caller names and binds by SHA-256. `--require-scope complete_campaign` demands a
+plan that evaluates every window of that identity; a plan carrying a
+`prismaquant.tessera_joint_eval_panel.v1` selection is a
+`diagnostic_window_subset` and is refused as the campaign's score. The derived
+scope is stamped into the submitted manifest's annotations, so the bytes
+PrismaBuild content-addresses carry the scope they were acknowledged under. The
+counts stay in the record and are checked against the identity rather than
+accepted in place of it. Gates: `tests/test_joint_campaign_scope.py` and
+`tests/test_glm_joint_data_manifest_at_submit.py`.
+
+Re-stamped (2026-09-16, `fix/joint-scope-identity-acceptance-20260916`) for the
+joint campaign-scope contract. No format menu, serving lane, allocator default or
+ship gate changes; `submit-joint` gains two required arguments, and the sealed
+joint plans' own bytes are untouched.
+
 Research acquisition bridge (2026-09-13, `codex/glm-full-domain-price-bridge-20260913`, #581):
 `tessera_full_domain_acquisition` joins the grammar-derived complete rate domain
 with the existing `adaptive_trellis_rate_surface` refiner. Missing outer
