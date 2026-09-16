@@ -14,47 +14,43 @@ per process, so one per rank. Each entry is one counter keyed by
 and ``modules``, where ``modules`` is the number of distinct module prefixes
 that dispatched under that key.
 
-Comparison granularity
-======================
+Qualification
+=============
 
-Two grades of observation exist, and the verdict says which one it was.
+One observation grade qualifies, and the verdict says two separate things:
+``granularity`` is what the trace IS, and ``exact_module_qualified`` is true
+only when the whole gate passed. **Only the exact grade can agree.**
 
-**Exact.** A trace whose header stamps ``identity_version: 1`` and whose every
-entry carries ``module_names`` -- the sorted real module prefixes that
-dispatched under that entry's key, the additive field Tessera #509 asks for --
-names each module and the activation contract it rode. The gate then compares
+**Exact** (Tessera #509). The header stamps ``identity_version: 1``, ``rank``,
+``world_size``, ``rank_source == "torch.distributed"``, a ``rank_conflict``
+field and the platform the process latched; every entry carries
+``module_names`` (the sorted real module prefixes it counted),
+``unnamed_modules`` and ``dispatches_without_prefix``. The gate then compares
 the price with the serve **per module**: every target ``config.json`` prices
 must appear, under exactly the contract it was priced on, on every rank. Two
 modules that swapped contracts are refused even though their histogram is
 unchanged, and one module counted under two keys in one forward is refused.
 
-The identity is versioned and only version 1 is read: a file that stamps
-another ``identity_version`` is refused rather than read as v1, because the
-fields of a future version are not these fields. The same header stamps
-``rank``/``world_size``/``platform`` -- the identity the path used to carry --
-and each entry states ``unnamed_modules`` and ``dispatches_without_prefix``
-beside ``module_names``, so that ``modules`` stays an honest count of unique
-served objects even where one has no stable name. The exact grade requires
-those two to be zero: a module the serve cannot name is a module this gate
-cannot compare, and a count is not a name. ``modules`` must equal
-``len(module_names) + unnamed_modules``, which keeps the count a fact about
-objects rather than about placeholders.
+Missing or unknown identity is NOT VERIFIED -- never a pass, and never a
+quiet downgrade to the counts. That covers a legacy file that names no
+modules, an absent ``identity_version``, a version this consumer does not read
+(1 is read exactly; a future one is not "at least v1"), entries that name some
+modules and not others, a null ``rank``/``world_size`` (a process that never
+joined a group), a ``rank_source`` that is absent or is not
+``torch.distributed``, an absent ``rank_conflict`` field, a ``""`` platform
+(the producer's "never latched a token"), and ``unnamed_modules`` above zero.
+A count is not a name, so none of these can be carried by the histogram
+instead.
 
-The ranks must be exactly ``0..world_size-1``, ``world_size`` must equal the
-number of traces supplied and the expected rank count, a ``rankN`` label must
-agree with the file's own ``rank``, and the platform the serve recorded must be
-the platform the price was derived for. ``rank`` and ``world_size`` are one
-fact and are stamped together; ``platform`` may stand alone. ``rank_source``
-and ``rank_conflict`` travel with them and are REPORTED, never gated: the
-producer observes a rank once and records a later disagreeing observation in
-``rank_conflict`` instead of adopting it, and an all-null rank with
-``rank_source: "unavailable"`` is a process that never joined a group, not a
-serve pretending to be rank 0. A ``""`` platform is the producer's "never
-latched a token" -- an unknown platform is not a different one, so it is
-reported and left out of the comparison.
+Conflicting identity is REFUSED: a non-null ``rank_conflict`` (the producer
+records a later disagreeing rank observation rather than adopting it), a
+stamped platform other than the one the price was derived for, a rank/world
+pair that contradicts the traces supplied or the ``rankN`` label, a
+``modules`` count that disagrees with ``len(module_names) + unnamed_modules``,
+a repeated name in one entry, and any per-module disagreement with the price.
 
 **Histogram.** A legacy trace names no modules. ``modules`` is then a count of
-a set whose members the trace does not emit, so the most it supports, exactly,
+a set whose members the file does not emit, so the most it supports, exactly,
 is a **module count per (route family, kind, activation contract), per token
 count M, per rank**:
 
@@ -81,21 +77,19 @@ payload family executes on the artifact's declared platform. Nothing here is
 a local table.
 
 The grade is one fact about the serve, not one per rank: a set in which some
-ranks name their modules and others do not is refused. Ranks that both name
-their modules are compared per module, so the exact grade is strictly stronger
-than the histogram it subsumes. A file that carries the new shape is never
-graded on the legacy counts alone: half-stamped identity -- a version without
-names, names without a version, a count that disagrees with the names, or an
-unnamed module -- is refused, so a new-shape trace cannot pass by way of the
-histogram that a legacy trace is honestly limited to.
+ranks name their modules and others do not cannot be read as either. It is
+compared as a histogram and, whatever it says, it cannot agree: the histogram
+is a diagnosis here, and a disagreement in it is still REFUSED loudly. Ranks
+that both name their modules are compared per module, so the exact grade is
+strictly stronger than the histogram it subsumes.
 
 What this does not see
 ======================
 
 * Which module rode which contract. Two modules that swapped contracts leave
-  the histogram unchanged. Tessera #509 closes this where the serve emits
-  ``module_names``; a legacy trace keeps the histogram grade, honestly, and is
-  never reported as per-module qualified (``exact_module_qualified`` is false).
+  the histogram unchanged. Tessera #509 closes this where the serve names its
+  modules; a legacy trace is a histogram diagnosis and is NOT VERIFIED, never
+  per-module qualified (``exact_module_qualified`` stays false).
 * The activation REPRESENTATION. ``contract`` is a name, not the quantizer
   rule the kernel applied, so a right name over a wrong representation passes
   (RobTand/prismaquant#567 is that shape).
@@ -107,10 +101,13 @@ What this does not see
   module that fell back is ABSENT from the trace; the count comparison is
   what makes that absence a refusal.
 
-Three outcomes, never two: ``agree``, ``refused`` (the observation disagrees
-with the price) and ``not_verified`` (no usable observation: a rank's trace
-is missing, unreadable, empty, of another schema, or compiled). A
-``not_verified`` verdict never closes the shipcard slot.
+Three outcomes, never two. ``agree`` needs the exact grade AND every module
+match. ``refused`` is a conflict: the observation disagrees with the price,
+with its own header, or with itself. ``not_verified`` is no qualifying
+observation: a rank's trace is missing, unreadable, empty, of another schema,
+compiled, legacy-only, or missing any part of the identity. Only ``agree``
+closes the shipcard slot; both other outcomes leave it unfilled, and
+``shipcard`` reads the status rather than a flag.
 
 Stdlib only, no torch and no ``tessera`` import at module scope: the
 shipcard replays this at publication.
@@ -148,6 +145,11 @@ HISTOGRAM = "histogram"
 #: version is refused rather than read as v1: its fields are not these fields.
 IDENTITY_VERSION = 1
 
+#: The only ``rank_source`` that binds a trace to a rank. The producer reports
+#: ``"unavailable"`` -- with a null rank -- for a process that never joined a
+#: group, which is an unknown rank rather than rank 0.
+RANK_SOURCE = "torch.distributed"
+
 #: The trace's ``kind`` against the artifact's ``scheme.structure``.
 TRACE_KIND_FOR_STRUCTURE = {"dense": "dense", "routed_moe": "moe"}
 
@@ -159,8 +161,10 @@ _ENTRY_STR_FIELDS = ("policy", "shape", "symbol", "decoder", "contract", "kind")
 _HEADER_FIELDS = ("rank", "world_size", "rank_source", "rank_conflict",
                   "platform", "identity_version")
 
-#: The producer's token for "this process never latched a platform".  An
-#: unknown platform is not a different one, so it is reported and not compared.
+#: The producer's token for "this process never latched a platform". It is
+#: what a census already reads as "this record does not say", and this gate
+#: cannot bind a serve to a platform it never named: NOT VERIFIED, not a
+#: comparison against the priced one.
 UNKNOWN_PLATFORM = ""
 
 #: The per-entry identity fields the #509 schema adds. All three travel
@@ -202,20 +206,24 @@ def _decode(payload: Any, *, where: str) -> Mapping[str, Any]:
 def parse_trace_header(payload: Any, *, where: str) -> dict[str, Any]:
     """The file header's additive identity stamps (#509).
 
-    ``rank``/``world_size``/``platform``, plus the ``identity_version`` that
-    says which entry schema the file speaks. A legacy file stamps none of them,
-    and the consumer then knows the trace is histogram-grade: nothing but the
-    path binds it to a rank. ``rank`` and ``world_size`` are one fact -- which
-    rank of how many -- so a file that stamps one without the other is refused
-    rather than half-bound; the ``stamped`` key says whether the pair was
-    present.
+    ``rank``/``world_size``/``rank_source``/``rank_conflict``/``platform``,
+    plus the ``identity_version`` that says which entry schema the file
+    speaks. A legacy file stamps none of them and the consumer then knows the
+    trace is a histogram diagnosis: nothing but the path binds it to a rank.
+
+    What is here only classifies a malformed or self-contradictory header
+    (REFUSED); whether the identity is COMPLETE -- present, readable, bound to
+    a real rank -- is decided by :func:`trace_identity`, which owns the
+    not-verified cases. ``present`` records which fields the file actually
+    carries, because an absent ``rank_conflict`` is not a null one.
 
     The version is read exactly: :data:`IDENTITY_VERSION` or nothing. A
-    different value is not "at least a version" -- its entry schema is not this
-    one -- so it is refused instead of read as v1.
+    different value is not "at least a version" -- its entry schema is not
+    this one -- so it can never qualify as v1.
     """
     document = _decode(payload, where=where)
     header: dict[str, Any] = {field: document.get(field) for field in _HEADER_FIELDS}
+    header["present"] = sorted(field for field in _HEADER_FIELDS if field in document)
     rank, world_size, platform = header["rank"], header["world_size"], header["platform"]
     version = header["identity_version"]
     for field in ("rank", "world_size"):
@@ -223,33 +231,18 @@ def parse_trace_header(payload: Any, *, where: str) -> dict[str, Any]:
         if value is not None and (type(value) is not int or value < 0):
             raise TesseraRouteTraceError(
                 f"{where}: header {field} must be a non-negative integer")
-    if (rank is None) != (world_size is None):
+    if rank is not None and world_size is not None and world_size < 1:
         raise TesseraRouteTraceError(
-            f"{where}: header stamps rank={rank!r} and world_size={world_size!r}; "
-            "rank and world_size are one fact and are stamped together (#509)")
-    if rank is not None:
-        if world_size < 1:
-            raise TesseraRouteTraceError(
-                f"{where}: header world_size must be a positive integer")
-        if rank >= world_size:
-            raise TesseraRouteTraceError(
-                f"{where}: header rank {rank} is not below world_size {world_size}")
+            f"{where}: header world_size must be a positive integer")
+    if rank is not None and world_size is not None and rank >= world_size:
+        raise TesseraRouteTraceError(
+            f"{where}: header rank {rank} is not below world_size {world_size}")
     if platform is not None and not isinstance(platform, str):
         raise TesseraRouteTraceError(
             f"{where}: header platform must be a string")
-    if version is not None and (type(version) is not int or version != IDENTITY_VERSION):
+    if version is not None and type(version) is not int:
         raise TesseraRouteTraceError(
-            f"{where}: header identity_version is {version!r}; this consumer "
-            f"reads exactly {IDENTITY_VERSION}, and a future version's fields "
-            "are not these fields (#509)")
-    # ``rank_source`` and ``rank_conflict`` are REPORTED, never gated.  The
-    # producer observes the rank once and keeps it -- the atexit flush runs
-    # after ``destroy_process_group()`` -- and records a later disagreeing
-    # observation in ``rank_conflict`` rather than adopting it, so a non-null
-    # conflict describes a serve whose counts belong to the identity the
-    # header already carries.  Neither field is required to be present or
-    # null, and neither decides the verdict.
-    header["stamped"] = rank is not None
+            f"{where}: header identity_version must be an integer")
     return header
 
 
@@ -262,15 +255,21 @@ def _identity_fields(
     They travel together, and the count stays a fact about objects:
     ``modules == len(module_names) + unnamed_modules``, which is what stops two
     prefix-less objects from collapsing into the placeholder "1".
+
+    A field that is missing while its siblings are present is MISSING
+    METADATA -- ``RouteTraceNotVerified``, never a quiet fall back to the
+    counts. A field that is present and contradicts the others, or itself, is
+    REFUSED.
     """
     present = [field for field in _IDENTITY_ENTRY_FIELDS if entry.get(field) is not None]
     if not present:
         return None, None, None
     if len(present) != len(_IDENTITY_ENTRY_FIELDS):
         missing = [field for field in _IDENTITY_ENTRY_FIELDS if field not in present]
-        raise TesseraRouteTraceError(
+        raise RouteTraceNotVerified(
             f"{at}: stamps {', '.join(present)} without {', '.join(missing)}; the "
-            "#509 identity fields travel together (#509)")
+            "#509 identity fields travel together, and a module count cannot "
+            "stand in for the names (#509)")
     names = entry["module_names"]
     if not isinstance(names, list):
         raise TesseraRouteTraceError(
@@ -384,32 +383,70 @@ def parse_route_trace(payload: Any, *, where: str) -> list[dict[str, Any]]:
 def trace_identity(
     entries: Sequence[Mapping[str, Any]], header: Mapping[str, Any], *, where: str,
 ) -> str:
-    """``EXACT`` when every entry names its modules, ``HISTOGRAM`` when none does.
+    """``EXACT`` when the identity is complete, ``HISTOGRAM`` when there is none.
 
-    Half-stamped identity is refused rather than read as whichever half looks
-    convenient: a version without names, names without a version, an entry
-    that names some of its modules and not others, or a module the serve could
-    not name. A file that carries the new shape is never graded on the legacy
-    counts alone (#509).
+    Everything in between is MISSING OR UNKNOWN identity, which is
+    ``RouteTraceNotVerified``: a version without names, names without a
+    version, an entry that names some of its modules and not others, a version
+    this consumer does not read, a rank that was never observed, a
+    ``rank_source`` that is not ``torch.distributed``, an absent
+    ``rank_conflict`` field, a platform the process never latched, or a module
+    the serve could not name. None of those can qualify, and none of them may
+    fall back to the legacy counts -- that is also why a legacy file
+    (``HISTOGRAM``) is a diagnosis and never an agreement.
+
+    A non-null ``rank_conflict`` is the one identity fact that is a CONFLICT
+    rather than a gap: the producer observed a later, disagreeing rank and
+    recorded it instead of adopting it, so the serve is not one identity.
     """
     declared = header["identity_version"]
     named = sum(1 for entry in entries if entry["module_names"] is not None)
     if declared is None and named == 0:
         return HISTOGRAM
     if declared is None:
-        raise TesseraRouteTraceError(
+        raise RouteTraceNotVerified(
             f"{where}: {named} of {len(entries)} entries name their modules but "
             "the header stamps no identity_version; this consumer will not guess "
             "which entry schema the file speaks (#509)")
+    if declared != IDENTITY_VERSION:
+        raise RouteTraceNotVerified(
+            f"{where}: header identity_version is {declared!r}; this consumer "
+            f"reads exactly {IDENTITY_VERSION}, and a later version's fields are "
+            "not these fields (#509)")
     if named != len(entries):
-        raise TesseraRouteTraceError(
+        raise RouteTraceNotVerified(
             f"{where}: identity_version {declared} but only {named} of "
             f"{len(entries)} entries name their modules; a file that names some "
             "modules and not others is not one observation (#509)")
+    if header["rank"] is None or header["world_size"] is None:
+        raise RouteTraceNotVerified(
+            f"{where}: the header stamps rank={header['rank']!r} "
+            f"world_size={header['world_size']!r} (rank_source="
+            f"{header['rank_source']!r}); a process that never joined a group "
+            "cannot bind a trace to a rank (#509)")
+    if header["rank_source"] != RANK_SOURCE:
+        raise RouteTraceNotVerified(
+            f"{where}: the header stamps rank_source={header['rank_source']!r}, "
+            f"not {RANK_SOURCE!r}; the rank it carries is not one this gate can "
+            "bind the trace to (#509)")
+    if "rank_conflict" not in header["present"]:
+        raise RouteTraceNotVerified(
+            f"{where}: the header carries no rank_conflict field, so the file "
+            "does not say whether a later rank observation disagreed (#509)")
+    if header["rank_conflict"] is not None:
+        raise TesseraRouteTraceError(
+            f"{where}: the serve recorded a later disagreeing rank identity "
+            f"({header['rank_conflict']}); its counts and its header are not one "
+            "identity, which is a conflict and not a missing field (#509)")
+    if header["platform"] in (None, UNKNOWN_PLATFORM):
+        raise RouteTraceNotVerified(
+            f"{where}: the header stamps platform={header['platform']!r}; the "
+            "process never latched a platform, so which platform executed these "
+            "routes is unknown (#509)")
     unnamed = sum(entry["unnamed_modules"] for entry in entries)
     prefixless = sum(entry["dispatches_without_prefix"] for entry in entries)
     if unnamed or prefixless:
-        raise TesseraRouteTraceError(
+        raise RouteTraceNotVerified(
             f"{where}: the serve reports {unnamed} module(s) with no stable "
             f"prefix and {prefixless} dispatch(es) without one; this gate compares "
             "per module and a count is not a name, so the legacy counts do not "
@@ -670,18 +707,28 @@ def compare_route_traces(
     verdict["header"] = headers
     verdict["served_by_rank"] = served_by_rank
 
-    # The header's own identity (#509). Ranks are stamped together, so a
-    # half-stamped set is a serve that does not say what it is.
-    stamped = sorted(label for label, header in headers.items() if header["stamped"])
-    unstamped = sorted(set(labels) - set(stamped))
-    if stamped and unstamped:
-        return _finish(REFUSED, (
-            "REFUSED: rank trace(s) " + ", ".join(unstamped) + " carry no "
-            "rank/world_size header while " + ", ".join(stamped) + " do; a serve "
-            "stamps its ranks together (#509)"))
-    if stamped:
-        stamped_ranks = sorted(headers[label]["rank"] for label in stamped)
-        world_sizes = sorted({headers[label]["world_size"] for label in stamped})
+    grade = set(grades.values())
+    if len(grade) > 1:
+        # A set in which some ranks carry an identity and others do not is
+        # incomplete, not in conflict: no per-module claim can be read from it,
+        # and the counts cannot be read in its place either.
+        return _finish(NOT_VERIFIED, (
+            "NOT VERIFIED: ranks do not carry the same identity: " + ", ".join(
+                f"{label} {'names its modules' if grades[label] == EXACT else 'names no modules'}"
+                for label in labels)
+            + "; a per-module comparison needs every rank to name its modules, "
+            "and the counts are not a substitute (#509)"))
+    grade = grade.pop()
+    verdict["granularity"] = EXACT_GRANULARITY if grade == EXACT else GRANULARITY
+    if grade == EXACT:
+        verdict["served_modules"] = served_modules
+
+    # The serve's own rank/world binding (#509). Every part of it has already
+    # been read per file; what is left is the set the ranks make together, and
+    # a set that contradicts the claim is a conflict rather than a gap.
+    if grade == EXACT:
+        stamped_ranks = sorted(headers[label]["rank"] for label in labels)
+        world_sizes = sorted({headers[label]["world_size"] for label in labels})
         if len(world_sizes) != 1:
             return _finish(REFUSED, (
                 "REFUSED: rank traces disagree on world_size: "
@@ -706,33 +753,15 @@ def compare_route_traces(
                     f"REFUSED: trace {label!r} is bound to rank "
                     f"{embedded.group(1)} but its own header stamps rank "
                     f"{headers[label]['rank']}"))
-        # ``""`` is the producer's "this process never latched a platform":
-        # an unknown platform is not a different one, so it is reported in the
-        # verdict and left out of the comparison.
-        platforms = sorted({headers[label]["platform"] for label in labels
-                            if headers[label]["platform"] not in (None, UNKNOWN_PLATFORM)})
+        platforms = sorted({headers[label]["platform"] for label in labels})
         if len(platforms) > 1:
             return _finish(REFUSED, (
                 "REFUSED: rank traces disagree on platform: " + repr(platforms)))
-        if platforms and platforms[0] != platform:
+        if platforms[0] != platform:
             return _finish(REFUSED, (
                 f"REFUSED: the serve recorded platform {platforms[0]!r} but the "
                 f"price is for {platform!r}; what a family executes is a "
                 "per-platform fact"))
-
-    grade = set(grades.values())
-    if len(grade) > 1:
-        return _finish(REFUSED, (
-            "REFUSED: ranks disagree on the observation grade: " + ", ".join(
-                f"{label} {'names its modules' if grades[label] == EXACT else 'names no modules'}"
-                for label in labels)
-            + "; a per-module comparison needs every rank to name its modules "
-            "(#509)"))
-    grade = grade.pop()
-    verdict["granularity"] = EXACT_GRANULARITY if grade == EXACT else GRANULARITY
-    verdict["exact_module_qualified"] = grade == EXACT
-    if grade == EXACT:
-        verdict["served_modules"] = served_modules
 
     first_label = labels[0]
     served = served_by_rank[first_label]["histogram"]
@@ -754,6 +783,9 @@ def compare_route_traces(
                     "REFUSED: the priced and served activation contracts differ "
                     "per module on platform " + repr(platform) + " (rank "
                     + label + "): " + "; ".join(difference)))
+        # Only now: every named module on every rank matched its price, so the
+        # per-module claim is what actually passed.
+        verdict["exact_module_qualified"] = True
         total = len(priced["owners"])
         return _finish(AGREE, (
             f"exact per-module: {total} named module(s) on every rank served "
@@ -766,11 +798,15 @@ def compare_route_traces(
             "REFUSED: the priced and served activation-contract histograms "
             "differ on platform " + repr(platform) + ": " + "; ".join(difference)))
     total = sum(served.values())
-    return _finish(AGREE, (
-        f"histogram grade (the trace names no modules): {total} module(s) on "
-        f"every rank served the activation contract they were priced on, across "
-        f"{len(labels)} rank(s): "
-        + ", ".join(f"{key}={count}" for key, count in served.items())))
+    # The histogram agrees, and it still cannot qualify: the trace names no
+    # modules, so nothing here says which module rode which contract.
+    return _finish(NOT_VERIFIED, (
+        f"NOT VERIFIED: the trace is histogram grade, not per-module: "
+        f"{total} module(s) on every rank match the priced activation-contract "
+        f"counts across {len(labels)} rank(s) ("
+        + ", ".join(f"{key}={count}" for key, count in served.items())
+        + "), but the file names no modules, so which module rode which "
+        "contract is not something it can support (#509)"))
 
 
 def load_trace_contract() -> tuple[dict[str, dict[str, "str | None"]], dict[str, dict[str, Any]]]:

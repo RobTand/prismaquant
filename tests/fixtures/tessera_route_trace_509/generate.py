@@ -15,7 +15,7 @@ synthetic document that quietly drifts from it.
     /home/rob/venvs/pq-cpu312-tessera-4c384e60/bin/python \
       tests/fixtures/tessera_route_trace_509/generate.py \
       --producer-src /home/rob/tmp/tessera-509-route-trace-identity/src \
-      --producer-commit e72d581 --out-dir tests/fixtures/tessera_route_trace_509
+      --producer-commit 8104dc6 --out-dir tests/fixtures/tessera_route_trace_509
 
 Two serves are emitted, each on two ranks at two token counts.  In
 ``routes-rank*.json`` every module rides the activation contract its price

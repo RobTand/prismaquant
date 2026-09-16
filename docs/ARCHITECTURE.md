@@ -16,28 +16,32 @@ objects with no stable prefix) and `dispatches_without_prefix`, with
 objects rather than of placeholders.
 
 - **The gate.** `tessera_route_trace_gate.compare_route_traces` keeps its
-  signature and adds `trace_identity`, which grades one trace `exact` or
-  `histogram`; the verdict adds `exact_module_qualified`, `granularity`,
-  `priced_owners`, `served_modules` and `header`. On the exact grade every
-  priced `config_groups` target must appear on every rank under exactly the
-  contract it was priced on, so a swap is REFUSED and named module by module.
-- **The version is read exactly.** Only `identity_version == 1` is read: a
-  later version is refused rather than read as v1, because a future version's
-  fields are not these fields. Half-stamped identity -- a version without
-  names, names without a version, a count that disagrees with the names -- is
-  refused, and `unnamed_modules`/`dispatches_without_prefix` must be zero,
-  because a count is not a name and the legacy counts do not stand in for one.
-- **The header identity.** The ranks must be exactly `0..world_size-1`,
-  `world_size` must equal the number of traces supplied and `--expected-ranks`,
-  a `rankN` label must agree with the file's own `rank`, and the stamped
-  platform must be the platform the price was derived for. `rank_source` and
-  `rank_conflict` are REPORTED, never gated: the producer observes a rank once
-  and records a later disagreeing observation in `rank_conflict` rather than
-  adopting it, and a `""` platform is "never latched a token", which is
-  unknown rather than different.
-- **Legacy traces** keep the histogram grade and report
-  `exact_module_qualified: false`; they are never restated as per-module. A set
-  of ranks that disagree about their grade is REFUSED.
+  signature and adds `trace_identity`, which decides whether one trace carries
+  a COMPLETE identity; the verdict adds `exact_module_qualified`,
+  `granularity`, `priced_owners`, `served_modules` and `header`. On the exact
+  grade every priced `config_groups` target must appear on every rank under
+  exactly the contract it was priced on, so a swap is REFUSED and named module
+  by module. `exact_module_qualified` is set only after that comparison passes,
+  never on the trace's shape alone.
+- **`agree` needs the exact grade AND every module.** Missing or unknown
+  identity is NOT VERIFIED, and a count is never accepted in its place: the
+  legacy histogram, an absent `identity_version`, a version other than 1 (read
+  exactly, never as "at least v1"), a null `rank`/`world_size`, a
+  `rank_source` that is not `torch.distributed`, an absent `rank_conflict`
+  field, a `""` platform, and a non-zero `unnamed_modules` all leave the slot
+  unfilled.
+- **Conflicting identity is REFUSED**: a non-null `rank_conflict` (the
+  producer records a later disagreeing rank observation rather than adopting
+  it), a stamped platform other than the one the price was derived for, a
+  rank/world set that contradicts the traces supplied or the `rankN` label, a
+  `modules` count that disagrees with `len(module_names) + unnamed_modules`,
+  and any per-module disagreement with the price.
+- **Legacy traces stay readable as a DIAGNOSIS.** A pre-#509 file is parsed
+  and its histogram compared as before, but that comparison now decides only
+  whether to refuse loudly: a disagreement is REFUSED, and an agreement is NOT
+  VERIFIED because the file names no modules. So a serve built before the
+  producer change can no longer close `route.trace` on counts alone, and no
+  caller can read a legacy verdict as a per-module pass.
 
 Not covered: the activation representation (RobTand/prismaquant#567), compiled
 forwards, and the compressed-tensors lane, which has no route telemetry. Gate:
@@ -45,7 +49,7 @@ forwards, and the compressed-tensors lane, which has no route telemetry. Gate:
 regressions before the change, and the real m44e1 TP2 traces unchanged on the
 legacy arm. The exact arm runs on
 `tests/fixtures/tessera_route_trace_509/`, written by Tessera's own telemetry
-at producer commit `e72d581` (see that directory's `PROVENANCE.md`), so the
+at producer commit `8104dc6` (see that directory's `PROVENANCE.md`), so the
 schema under test is the producer's.
 
 Re-stamped (2026-09-15, `claude/tp2-measurement-instruments`) for the **gold
@@ -210,14 +214,16 @@ replayed by `shipcard._verify_route_trace_record`).
   platform is `card.build.tessera_serving_scope.target.platform`, or
   `--platform`; when both are given they must agree.
 
-Agreement fills the slot. A difference exits 1 and names each contract with
-its priced and served counts. A missing, unreadable, empty, other-schema or
-compiled (`M*`) rank trace exits 3 as NOT VERIFIED and leaves the slot
-unfilled, so `tools/publish_artifact.py` refuses the card. `verify` replays the
-comparison from the carried traces and config text against the current
-packaged contract, and refuses carried config text that differs from the
-artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the trace
-and fill steps.
+Agreement fills the slot, and since #509 only an exactly-identified serve can
+agree (the stamp at the top of this file). A difference exits 1 and names each
+contract with its priced and served counts. A missing, unreadable, empty,
+other-schema or compiled (`M*`) rank trace, and equally a legacy histogram-grade
+trace or one whose identity is incomplete, exits 3 as NOT VERIFIED and leaves
+the slot unfilled, so `tools/publish_artifact.py` refuses the card. `verify`
+replays the comparison from the carried traces and config text against the
+current packaged contract, and refuses carried config text that differs from
+the artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the
+trace and fill steps.
 
 The comparison is a histogram where the trace names no modules (Tessera #509
 adds the per-module grade, stamped at the top of this file). Not covered: the

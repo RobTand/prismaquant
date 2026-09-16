@@ -9,7 +9,7 @@ than be absorbed by a fixture that drifted with it.
 | | |
 |---|---|
 | producer tree | `tessera-509-route-trace-identity` |
-| producer commit | `e72d581` — "route trace: freeze the first observed rank, never rewrite it to null" |
+| producer commit | `8104dc6` — "route trace: the header reads the latched platform, never probes for one" |
 | identity version | `1` (`tessera.serving.telemetry.IDENTITY_VERSION`) |
 | platform stamped | `sm_121` |
 | topology | `world_size = 2`, one file per rank, two token counts (M1, M178) |
@@ -24,7 +24,7 @@ producer's own `_RouteTrace`:
 /home/rob/venvs/pq-cpu312-tessera-4c384e60/bin/python \
   tests/fixtures/tessera_route_trace_509/generate.py \
   --producer-src /home/rob/tmp/tessera-509-route-trace-identity/src \
-  --producer-commit e72d581 \
+  --producer-commit 8104dc6 \
   --out-dir tests/fixtures/tessera_route_trace_509
 ```
 

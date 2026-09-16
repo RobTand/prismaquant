@@ -6,10 +6,10 @@
  "rank_source": "torch.distributed",
  "rank_conflict": null,
  "platform": "sm_121",
- "pid": 1564261,
- "started_utc": "2026-09-16T18:22:25.631985+00:00",
- "flushed_utc": "2026-09-16T18:22:25.632238+00:00",
- "flushes": 1,
+ "pid": 1589949,
+ "started_utc": "2026-09-16T18:31:34.012286+00:00",
+ "flushed_utc": "2026-09-16T18:31:34.012558+00:00",
+ "flushes": 0,
  "note": "launches counted per module per served dispatch; a shape of M* means the record was written while torch.compile was tracing, where one graph serves every M and a count is not a launch count.  Since identity_version 1 each entry also names the modules it counted (module_names, sorted).  module_names holds real prefixes ONLY: a layer with no usable prefix is unnamed, reported as the count unnamed_modules (with dispatches_without_prefix for how many dispatches came from them) and never given a made-up name.  'modules' is len(module_names) + unnamed_modules, which is the same number it carried before this version.  A complete per-module identity needs unnamed_modules == 0; otherwise the names present are exact and the rest are honestly unknown.",
  "entries": [
   {

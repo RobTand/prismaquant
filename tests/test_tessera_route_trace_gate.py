@@ -117,11 +117,19 @@ def test_the_real_artifact_prices_the_same_histogram():
     assert len(priced["owners"]) == 5
 
 
-def test_agreeing_traces_are_accepted():
+def test_a_legacy_traces_histogram_is_recorded_and_cannot_qualify():
+    """A pre-#509 file still reads as what it always was: a histogram.
+
+    Since #509 that is a DIAGNOSIS, not an agreement: the file names no
+    modules, so it cannot support a per-module claim, and the counts are not
+    accepted in the claim's place.
+    """
     verdict = _compare(_traces())
-    assert verdict["status"] == gate.AGREE, verdict["detail"]
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert verdict["detail"].startswith("NOT VERIFIED")
     assert verdict["served"] == verdict["priced"] == EXPECTED
     assert verdict["granularity"] == gate.GRANULARITY
+    assert verdict["exact_module_qualified"] is False
 
 
 def test_a_served_contract_that_differs_from_the_price_is_refused_naming_both():
@@ -216,7 +224,11 @@ def test_the_packaged_contract_prices_m44e1_as_served():
     verdict = gate.compare_route_traces(
         _traces(), expected_ranks=2, config=_config(), platform="sm_121",
         executes_by_platform=executes, formats=formats)
-    assert verdict["status"] == gate.AGREE, verdict["detail"]
+    # The real traces are pre-#509, so the price they match is the histogram:
+    # which module rode which contract is not something they carry.
+    assert verdict["served"] == verdict["priced"]
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert verdict["exact_module_qualified"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -269,20 +281,32 @@ def test_the_lane_declares_the_trace_gate_and_a_tessera_card_owes_it(tmp_path):
 
 def test_agreeing_traces_close_the_slot_and_verify_replays_them(tmp_path, contract):
     model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path)) == 0
+    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
     record = shipcard.load_shipcard(path)["slots"]["route.trace"]
     assert record["passed"] is True
     assert record["trace_verdict"]["served"] == EXPECTED
+    assert record["trace_verdict"]["exact_module_qualified"] is True
     assert _trace_problems(path, model_dir) == []
+
+
+def test_a_legacy_serve_cannot_close_the_slot_and_leaves_it_open(
+        tmp_path, contract, capsys):
+    """#509: the histogram is a diagnosis, and it does not fill the slot."""
+    model_dir, path = _artifact(tmp_path)
+    assert _fill(path, model_dir, _trace_files(tmp_path)) == EXIT_NOT_VERIFIED
+    err = capsys.readouterr().err
+    assert "NOT VERIFIED" in err and "histogram grade" in err
+    assert shipcard.load_shipcard(path)["slots"]["route.trace"] is None
+    assert _trace_problems(path, model_dir) == ["route.trace: UNFILLED"]
 
 
 def test_a_mutated_served_contract_refuses_at_fill_and_leaves_the_slot_open(
         tmp_path, contract, capsys):
     model_dir, path = _artifact(tmp_path)
-    traces = [(label, _served_moe_as_fp8(trace)) for label, trace in _traces()]
+    traces = _fixture_traces(SWAPPED_RANK_FILES)
     assert _fill(path, model_dir, _trace_files(tmp_path, traces)) == 1
     err = capsys.readouterr().err
-    assert "REFUSED" in err and NVFP4 in err and FP8 in err
+    assert "REFUSED" in err and "per module" in err
     assert shipcard.load_shipcard(path)["slots"]["route.trace"] is None
     assert _trace_problems(path, model_dir) == ["route.trace: UNFILLED"]
 
@@ -300,20 +324,21 @@ def test_a_missing_rank_trace_is_not_verified_and_leaves_the_slot_open(
 
 def test_verify_replays_the_carried_traces_not_the_passed_flag(tmp_path, contract):
     model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path)) == 0
+    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
     card = shipcard.load_shipcard(path)
     record = card["slots"]["route.trace"]
-    record["route_traces"][1]["trace"] = _served_moe_as_fp8(record["route_traces"][1]["trace"])
+    swapped = _fixture_traces(SWAPPED_RANK_FILES)[1][1]
+    record["route_traces"][1]["trace"] = swapped
     assert record["passed"] is True
     problems = [p for p in shipcard.verify(card, model_dir=model_dir)
                 if p.startswith("route.trace")]
-    assert any("ranks served different module histograms" in p for p in problems), problems
+    assert any("differ per module" in p for p in problems), problems
     assert any("differs from the replay" in p for p in problems), problems
 
 
 def test_verify_refuses_traces_compared_against_another_config(tmp_path, contract):
     model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path)) == 0
+    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
     card = shipcard.load_shipcard(path)
     config = json.loads(card["slots"]["route.trace"]["config_json"])
     config["quantization_config"]["config_groups"].popitem()
@@ -325,7 +350,7 @@ def test_verify_refuses_traces_compared_against_another_config(tmp_path, contrac
 
 def test_verify_refuses_when_no_contract_can_be_read(tmp_path, contract, monkeypatch):
     model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path)) == 0
+    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
 
     def _absent():
         raise gate.TesseraRouteTraceError("no packaged Tessera runtime contract")
@@ -352,7 +377,7 @@ def test_the_tessera_arm_prints_the_trace_step():
 # each module rode; the histogram cannot see a swap between two modules.
 #
 # ``tests/fixtures/tessera_route_trace_509`` is what Tessera's OWN telemetry
-# wrote at producer commit e72d581 (see that directory's ``PROVENANCE.md`` and
+# wrote at producer commit 8104dc6 (see that directory's ``PROVENANCE.md`` and
 # ``generate.py``), so the schema under test is the producer's and not one
 # invented here. The synthetic documents below exist only for inputs a real
 # producer never writes -- a malformed one, a half-stamped one -- and they
@@ -610,8 +635,9 @@ def test_a_module_the_serve_could_not_name_is_refused_not_counted():
         formats=formats)["histogram"]
 
     verdict = _compare_exact(traces, priced=priced)
-    assert verdict["status"] == gate.REFUSED
+    assert verdict["status"] == gate.NOT_VERIFIED
     assert "no stable prefix" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
 
 
 @pytest.mark.parametrize("damage", [
@@ -623,11 +649,21 @@ def test_a_module_the_serve_could_not_name_is_refused_not_counted():
         {k: v for k, v in entry.items() if k != "unnamed_modules"}
         for entry in trace["entries"]]}, id="partial-entry-identity"),
     pytest.param(lambda trace: {**trace, "identity_version": None}, id="version-absent"),
+    pytest.param(lambda trace: {k: v for k, v in trace.items()
+                                if k != "rank_source"}, id="rank-source-absent"),
+    pytest.param(lambda trace: {**trace, "rank_source": "unavailable"},
+                 id="rank-source-unknown"),
+    pytest.param(lambda trace: {k: v for k, v in trace.items()
+                                if k != "rank_conflict"}, id="rank-conflict-absent"),
+    pytest.param(lambda trace: {**trace, "rank": None, "world_size": None,
+                                "rank_source": "unavailable",
+                                "platform": ""}, id="nothing-observed"),
 ])
-def test_half_stamped_identity_is_refused_never_read_as_v1(damage):
+def test_missing_identity_is_not_verified_and_never_read_as_v1(damage):
     traces = [(label, damage(trace)) for label, trace in _exact_traces()]
     verdict = _compare_exact(traces)
-    assert verdict["status"] == gate.REFUSED, verdict["detail"]
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert verdict["detail"].startswith("NOT VERIFIED")
     assert verdict["exact_module_qualified"] is False
 
 
@@ -642,17 +678,17 @@ def test_identity_version_without_names_is_refused():
             entry["modules"] = 1
         traces.append((rank, {**trace, "entries": entries}))
     verdict = _compare_exact(traces)
-    assert verdict["status"] == gate.REFUSED, verdict["detail"]
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
     assert "names no modules" in verdict["detail"] or "name their modules" in verdict["detail"]
 
 
 def test_a_legacy_trace_stays_histogram_grade_and_is_never_exact_qualified():
     verdict = _compare(_traces())
-    assert verdict["status"] == gate.AGREE, verdict["detail"]
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
     assert verdict["granularity"] == gate.GRANULARITY
     assert verdict["exact_module_qualified"] is False
     assert verdict["served_modules"] is None
-    assert verdict["header"]["rank0"]["stamped"] is False
+    assert verdict["header"]["rank0"]["present"] == []
     assert "histogram grade" in verdict["detail"]
 
 
@@ -666,21 +702,22 @@ def _without_module_identity(trace):
     return stripped
 
 
-def test_ranks_that_disagree_on_the_grade_are_refused():
+def test_ranks_that_disagree_on_the_grade_are_not_verified():
     """One rank stamps its rank identity and names no module; the other names them."""
     exact = _exact_traces()
     traces = [exact[0], (exact[1][0], _without_module_identity(exact[1][1]))]
     verdict = _compare_exact(traces)
-    assert verdict["status"] == gate.REFUSED
-    assert "observation grade" in verdict["detail"], verdict["detail"]
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "same identity" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
 
 
-def test_a_legacy_file_among_exact_ones_is_refused_as_a_half_stamped_serve():
+def test_a_legacy_file_among_exact_ones_cannot_complete_the_identity():
     exact = _exact_traces()
     legacy = json.loads((FIXTURE / RANK_FILES[1]).read_text())
     verdict = _compare_exact([exact[0], (exact[1][0], legacy)])
-    assert verdict["status"] == gate.REFUSED
-    assert "stamps its ranks together" in verdict["detail"], verdict["detail"]
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "same identity" in verdict["detail"], verdict["detail"]
 
 
 @pytest.mark.parametrize("damage", [
@@ -690,14 +727,24 @@ def test_a_legacy_file_among_exact_ones_is_refused_as_a_half_stamped_serve():
                                  for label, trace in traces], id="duplicate-rank"),
     pytest.param(lambda traces: [(traces[0][0], {**traces[0][1], "platform": "gfx1201"}),
                                  traces[1]], id="platform"),
-    pytest.param(lambda traces: [(traces[0][0], traces[0][1]),
-                                 (traces[1][0], {k: v for k, v in traces[1][1].items()
-                                                 if k not in ("rank", "world_size")})],
-                 id="one-rank-unstamped"),
+    pytest.param(lambda traces: [(traces[0][0], {**traces[0][1],
+                                                 "rank_conflict": {"rank": 1, "world_size": 2,
+                                                                   "source": "torch.distributed"}}),
+                                 traces[1]], id="rank-conflict"),
 ])
 def test_a_header_that_does_not_match_the_serve_is_refused(damage):
     verdict = _compare_exact(damage(_exact_traces()))
     assert verdict["status"] == gate.REFUSED, verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_a_rank_that_never_joined_a_group_cannot_qualify():
+    """A null rank/world with ``rank_source: "unavailable"`` is unknown, not rank 0."""
+    traces = _exact_traces()
+    blank = {k: v for k, v in traces[1][1].items() if k not in ("rank", "world_size")}
+    verdict = _compare_exact([traces[0], (traces[1][0], blank)])
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
 
 
 def test_a_label_bound_to_another_rank_than_the_file_stamps_is_refused():
@@ -708,50 +755,53 @@ def test_a_label_bound_to_another_rank_than_the_file_stamps_is_refused():
     assert "bound to rank" in verdict["detail"], verdict["detail"]
 
 
-def test_exact_grade_traces_close_the_slot_and_verify_replays_them(tmp_path, contract):
-    model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
-    record = shipcard.load_shipcard(path)["slots"]["route.trace"]
-    assert record["passed"] is True
-    assert record["trace_verdict"]["exact_module_qualified"] is True
-    assert record["trace_verdict"]["granularity"] == gate.EXACT_GRANULARITY
-    assert _trace_problems(path, model_dir) == []
-
-
-def test_exact_grade_swapped_contracts_refuse_at_fill_and_leave_the_slot_open(
-        tmp_path, contract, capsys):
-    model_dir, path = _artifact(tmp_path)
-    traces = _fixture_traces(SWAPPED_RANK_FILES)
-    assert _fill(path, model_dir, _trace_files(tmp_path, traces)) == 1
-    err = capsys.readouterr().err
-    assert "REFUSED" in err and "per module" in err
-    assert shipcard.load_shipcard(path)["slots"]["route.trace"] is None
-    assert _trace_problems(path, model_dir) == ["route.trace: UNFILLED"]
-
-
-def test_a_recorded_rank_conflict_is_reported_and_never_gates_the_verdict():
-    """The producer reports a later disagreeing observation; we do not gate it."""
+def test_a_recorded_rank_conflict_is_refused_not_qualified():
+    """The producer records a later disagreeing rank; that identity is not one."""
     conflict = {"rank": 1, "world_size": 2, "source": "torch.distributed"}
     traces = []
     for label, payload in _fixture_traces():
         traces.append((label, {**payload, "rank_conflict": conflict}))
     verdict = _compare(traces)
-    assert verdict["status"] == gate.AGREE, verdict["detail"]
-    assert verdict["header"]["rank0"]["rank_conflict"] == conflict
-    assert verdict["header"]["rank1"]["rank_conflict"] == conflict
+    assert verdict["status"] == gate.REFUSED, verdict["detail"]
+    assert "disagreeing rank identity" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
 
 
-def test_a_rank_conflict_field_that_is_absent_is_not_a_defect():
+def test_a_missing_rank_conflict_field_is_not_verified():
+    """Absent is not null: the file has to say that no later rank disagreed."""
     traces = [(label, {k: v for k, v in payload.items() if k != "rank_conflict"})
               for label, payload in _fixture_traces()]
     verdict = _compare(traces)
-    assert verdict["status"] == gate.AGREE, verdict["detail"]
-    assert verdict["header"]["rank0"]["rank_conflict"] is None
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert "no rank_conflict field" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
 
 
-def test_the_producers_unknown_platform_is_reported_and_not_compared():
-    """``""`` is "never latched a token": an unknown platform is not another one."""
+def test_the_producers_unknown_platform_is_not_verified():
+    """``""`` is "never latched a token": unknown is not the platform priced for."""
     traces = [(label, {**payload, "platform": ""}) for label, payload in _fixture_traces()]
     verdict = _compare(traces)
-    assert verdict["status"] == gate.AGREE, verdict["detail"]
-    assert verdict["header"]["rank0"]["platform"] == ""
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert "never latched a platform" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_a_missing_rank_source_is_not_verified():
+    traces = [(label, {k: v for k, v in payload.items() if k != "rank_source"})
+              for label, payload in _fixture_traces()]
+    verdict = _compare(traces)
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert "rank_source" in verdict["detail"], verdict["detail"]
+
+
+def test_the_real_fixtures_qualify_only_when_every_module_map_matches():
+    """``exact_module_qualified`` is set after the comparison, not before it."""
+    verdict = _compare_fixture_509()
+    assert verdict["status"] == gate.AGREE
+    assert verdict["exact_module_qualified"] is True
+
+    traces = _fixture_traces(SWAPPED_RANK_FILES)
+    refused = _compare(traces)
+    assert refused["status"] == gate.REFUSED
+    assert refused["exact_module_qualified"] is False
+    assert refused["granularity"] == gate.EXACT_GRANULARITY

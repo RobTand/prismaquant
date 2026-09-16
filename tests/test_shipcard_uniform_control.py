@@ -372,18 +372,28 @@ def _fill_census(path, model_dir):
 
 
 def _fill_trace(path, model_dir):
-    """An agreeing route-trace receipt for the one module `_artifact` prices.
+    """A qualifying route-trace receipt for the one module `_artifact` prices.
 
     `route.trace` (#575) is required of every Tessera card, so `_built` means
-    every slot closed only once it is filled too.
+    every slot closed only once it is filled too. Since #509 only a trace that
+    carries the producer's identity header AND names its modules can close it,
+    so this fixture is the producer's shape (`identity_version: 1`, a real rank
+    with `rank_source: "torch.distributed"`, a present null `rank_conflict`,
+    the latched platform) and not the pre-#509 histogram-only document.
     """
     from prismaquant.shipcard import ROUTE_TRACE_SLOT, make_route_trace_record
 
-    trace = {"schema": "tessera.route_trace/1", "entries": [{
-        "policy": "TESSERA_BF16:resident", "shape": "M1:N8:K8",
-        "symbol": "torch.mm", "decoder": "torch_window",
-        "contract": "bf16_unquantized", "kind": "dense",
-        "launches": 1, "modules": 1}]}
+    target = "model.layers.0.mlp.down_proj"
+    trace = {
+        "schema": "tessera.route_trace/1", "identity_version": 1,
+        "rank": 0, "world_size": 1, "rank_source": "torch.distributed",
+        "rank_conflict": None, "platform": "sm_121",
+        "entries": [{
+            "policy": "TESSERA_BF16:resident", "shape": "M1:N8:K8",
+            "symbol": "torch.mm", "decoder": "torch_window",
+            "contract": "bf16_unquantized", "kind": "dense",
+            "launches": 1, "modules": 1, "module_names": [target],
+            "unnamed_modules": 0, "dispatches_without_prefix": 0}]}
     record = make_route_trace_record(
         tool="test", model_sha=compute_model_sha(model_dir),
         traces=[("rank0", trace)], expected_ranks=1,
