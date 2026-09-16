@@ -27,10 +27,8 @@ so they run on the fleet's CPU boxes:
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import json
-import pickle
 import shutil
 import sys
 from pathlib import Path
@@ -57,6 +55,10 @@ def _load_by_path(name: str, relative: str):
 
 replay = _load_by_path("joint_replay_frontier", "prismaquant/joint_replay_frontier.py")
 
+_canonical_sha256 = campaign_fixture.canonical_sha256
+_workspace_with_sealed_checkpoint = campaign_fixture.workspace_with_sealed_checkpoint
+_plant_journal = campaign_fixture.plant_journal
+
 U1, U2 = campaign_fixture.UNITS[0][0], campaign_fixture.UNITS[0][1]
 V1, V2 = campaign_fixture.UNITS[1][0], campaign_fixture.UNITS[1][1]
 PRODUCED_BY = campaign_fixture.PRODUCED_BY
@@ -80,73 +82,6 @@ def scratch(request):
 def shared_mount(scratch, monkeypatch):
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(scratch))
     return scratch
-
-
-def _canonical_sha256(value) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
-                         ensure_ascii=False, allow_nan=False).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _workspace_with_sealed_checkpoint(scratch):
-    """The campaign fixture, with the merged checkpoint's own seal."""
-    fixture = campaign_fixture._workspace(scratch)
-    checkpoint = Path(fixture["checkpoint"])
-    document = json.loads(checkpoint.read_text())
-    identity = {
-        "campaign_schema": "prismaquant.tessera_joint_cost.v1",
-        "currency": "fixture",
-        "units": sorted(fixture["names"]),
-        "prismaquant_source_sha256": "a" * 64,
-        "encoder_source_sha256": "b" * 64,
-    }
-    document["identity"] = identity
-    document["identity_sha256"] = _canonical_sha256(identity)
-    checkpoint.write_text(json.dumps(document))
-    return fixture, document["identity_sha256"]
-
-
-def _journal_dir(fixture):
-    """Where the preparing action keeps its qualification journal."""
-    return Path(fixture["output_root"]) / "prepare" / "qualification"
-
-
-def _plant_journal(fixture, completed, *, checkpoint_sha256, roster=None):
-    """A qualification journal as ``cost_stage_checkpoint`` writes one."""
-    journal = _journal_dir(fixture)
-    (journal / "units").mkdir(parents=True, exist_ok=True)
-    names = sorted(fixture["names"] if roster is None else roster)
-    identity = {
-        "schema": "prismaquant.joint_qualification_journal.v1",
-        "inputs": {"fixture": "inputs"},
-        "campaign_checkpoint_sha256": checkpoint_sha256,
-        "cells_sha256": "c" * 64,
-    }
-    identity_sha256 = _canonical_sha256(identity)
-    units = []
-    for name in names:
-        relative = f"units/{hashlib.sha256(name.encode()).hexdigest()}.pkl"
-        units.append({"qname": name, "file": relative})
-        if name not in completed:
-            continue
-        payload = pickle.dumps({"fixture": name}, protocol=pickle.HIGHEST_PROTOCOL)
-        envelope = {
-            "schema": replay.JOURNAL_UNIT_SCHEMA,
-            "stage": replay.QUALIFICATION_STAGE,
-            "qname": name,
-            "identity_sha256": identity_sha256,
-            "payload_sha256": hashlib.sha256(payload).hexdigest(),
-            "payload": payload,
-        }
-        (journal / relative).write_bytes(pickle.dumps(envelope))
-    (journal / "manifest.json").write_text(json.dumps({
-        "schema": replay.JOURNAL_MANIFEST_SCHEMA,
-        "stage": replay.QUALIFICATION_STAGE,
-        "identity_sha256": identity_sha256,
-        "identity": identity,
-        "units": units,
-    }))
-    return identity_sha256
 
 
 def _phase_paths(manifest, index):
@@ -278,15 +213,102 @@ def test_a_resume_with_no_journal_seals_an_empty_replay_block(scratch, shared_mo
             == [phase["name"] for phase in fresh["annotations"]["phases"]])
 
 
+def test_a_long_replay_block_is_split_into_bounded_parts(
+    scratch, shared_mount, monkeypatch,
+):
+    """One PB phase per unit would be a phase table as long as the journal.
+
+    The submission declares one progress phase per manifest phase and refuses
+    more than 2048 of them, while the census journal holds 36,423 units, so the
+    replay block is windowed by the walk's own byte budget.
+    """
+    fixture, checkpoint_sha256 = _workspace_with_sealed_checkpoint(scratch)
+    _plant_journal(fixture, set(fixture["names"]), checkpoint_sha256=checkpoint_sha256)
+    monkeypatch.setattr(glm_data_manifests._phase_module, "MAX_PHASE_BYTES", 1)
+    manifest = _prepare(fixture["plan"], RESUME_ARGV)
+    annotations = manifest["annotations"]
+
+    starts = annotations["replay_phase_start_units"]
+    assert set(starts) == set(fixture["names"])
+    # Every unit still starts a part, and the parts are consecutive: with a
+    # one-byte budget each unit starts its own.
+    assert [starts[name] for name in sorted(starts)] == [
+        replay.replay_phase_name(index) for index in range(len(starts))]
+    names = [phase["name"] for phase in annotations["phases"]]
+    assert [name for name in names if name.startswith("replay-")] == [
+        replay.replay_phase_name(index) for index in range(len(starts))]
+    assert set(annotations["phase_start_units"]) == set(fixture["names"])
+
+
+def test_a_fully_completed_resume_seals_no_unit_into_the_walk(
+    scratch, shared_mount,
+):
+    """Nothing is left to qualify: the walk declares only its own bytes."""
+    fixture, checkpoint_sha256 = _workspace_with_sealed_checkpoint(scratch)
+    _plant_journal(fixture, set(fixture["names"]), checkpoint_sha256=checkpoint_sha256)
+    manifest = _prepare(fixture["plan"], RESUME_ARGV)
+    annotations = manifest["annotations"]
+    assert annotations["replay_roster"] == sorted(fixture["names"])
+    starts = annotations["phase_start_units"]
+    assert set(starts) == set(fixture["names"])
+    assert all(replay.is_replay_phase(phase) for phase in starts.values())
+    # Layer 1 reads no bytes of its own once its units are replayed, so it has
+    # no walk phase; layer 0 keeps the one that declares its source extents.
+    names = [phase["name"] for phase in annotations["phases"]]
+    assert not any(name.startswith("layer-1") for name in names), names
+    fresh = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY,
+        argv=FRESH_ARGV)
+    assert manifest["total_bytes"] == fresh["total_bytes"]
+
+
 # --- the runtime-side refusals ---------------------------------------------
 
 
 def _sealed(**overrides):
     cells = {U1: list(campaign_fixture.MEASURED), U2: list(campaign_fixture.MEASURED)}
+    starts = {name: replay.replay_phase_name(0) for name in sorted(cells)}
     sealed = replay.seal_frontier(sorted(cells), cells,
+                                 phase_start_units=starts,
                                  journal_identity_sha256="e" * 64)
     sealed.update(overrides)
     return sealed, cells
+
+
+def test_a_replay_phase_table_is_a_contiguous_partition_of_the_roster():
+    cells = {name: list(campaign_fixture.MEASURED) for name in (U1, V1)}
+    good = {U1: replay.replay_phase_name(0), V1: replay.replay_phase_name(1)}
+    replay.seal_frontier(sorted(cells), cells, phase_start_units=good,
+                         journal_identity_sha256="e" * 64)
+    for broken in ({U1: replay.replay_phase_name(1), V1: replay.replay_phase_name(0)},
+                   {U1: replay.replay_phase_name(0), V1: replay.replay_phase_name(2)},
+                   {U1: "layer-0-part-0", V1: replay.replay_phase_name(1)},
+                   {U1: replay.replay_phase_name(0)}):
+        with pytest.raises(ValueError):
+            replay.seal_frontier(sorted(cells), cells, phase_start_units=broken,
+                                 journal_identity_sha256="e" * 64)
+
+
+def test_a_sealed_manifest_carries_its_part_contiguity_into_the_runtime():
+    sealed, cells = _sealed()
+    sealed[replay.PHASE_START_UNITS_KEY] = {U1: replay.replay_phase_name(0),
+                                            U2: replay.replay_phase_name(2)}
+    with pytest.raises(ValueError, match="skips a part"):
+        replay.sealed_from_annotations(sealed)
+    # A part cannot start after a later one has already begun: the runtime
+    # announces a part when it reaches its first unit, so such a table would
+    # release a prefix the action has not read.
+    three = {name: list(campaign_fixture.MEASURED) for name in (U1, V1, U2)}
+    sealed = replay.seal_frontier(
+        sorted(three), three,
+        phase_start_units={name: replay.replay_phase_name(0) for name in three},
+        journal_identity_sha256="e" * 64)
+    # In roster order (U1, U2, V1) the parts must never step backwards.
+    sealed[replay.PHASE_START_UNITS_KEY] = {U1: replay.replay_phase_name(0),
+                                            U2: replay.replay_phase_name(1),
+                                            V1: replay.replay_phase_name(0)}
+    with pytest.raises(ValueError, match="read order"):
+        replay.sealed_from_annotations(sealed)
 
 
 def test_the_sealed_frontier_round_trips_through_a_manifest():

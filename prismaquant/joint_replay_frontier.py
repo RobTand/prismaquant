@@ -74,12 +74,17 @@ REPLAY_PHASE_PREFIX = "replay-"
 
 
 def replay_phase_name(index: int) -> str:
-    """``replay-0007``: a phase name for the eighth replayed unit.
+    """``replay-0007``: a phase name for the replay block's eighth part.
 
     Indexed rather than qname-derived because a unit qname is a dotted module
     path, and a phase name is spelled into a command line and a sealed policy.
     The mapping from qname to phase is sealed beside it in
     ``replay_phase_start_units``, which is where a reader should look.
+
+    A *part*, not a unit: the submission declares one PB progress phase per
+    manifest phase and refuses more than 2048, while a journal can hold tens of
+    thousands of units, so the replay block is split by the same byte budget
+    the layer walk's parts use, and never inside a unit.
     """
     if type(index) is not int or index < 0:
         raise ValueError(f"replay phase index must be a non-negative int: {index!r}")
@@ -100,6 +105,12 @@ def replay_read_items(
     so the order is grouped by unit -- capture, then that unit's cells -- not
     two whole-roster passes. Items are ``(kind, qname, fmt)`` with ``fmt``
     ``None`` for the capture.
+
+    A unit's cells are read in the order the caller's mapping lists them, which
+    is the campaign's own cell order (``sorted(anchors)`` on both ends). The
+    order is *sealed*, not re-derived: two mappings over the same cells in
+    different orders are two different frontiers, and the digest has to tell
+    them apart or a reordered read set would pass its own check.
     """
     items: list[tuple[str, str, str | None]] = []
     for name in sorted(roster):
@@ -107,7 +118,7 @@ def replay_read_items(
         if cells is None:
             raise ValueError(f"replay roster names a unit with no cells: {name}")
         items.append((CAPTURE, name, None))
-        for fmt in sorted(cells):
+        for fmt in cells:
             items.append((WIRE, name, fmt))
             items.append((RENDER, name, fmt))
     return items
@@ -141,21 +152,42 @@ def seal_frontier(
     roster: Iterable[str],
     cells_by_unit: Mapping[str, Iterable[str]],
     *,
-    journal_identity_sha256: str,
+    phase_start_units: Mapping[str, str],
+    journal_identity_sha256: str | None,
 ) -> dict[str, object]:
     """The annotations that bind a resumed submission to one journal state.
 
     ``roster`` must already be the completed set read from the journal; this
     function does not decide it, it seals what the producer read and checks it
     is internally consistent (sorted, unique, every unit has cells).
+
+    ``cells_by_unit`` is the campaign's own cell order, per unit; it is part of
+    what is sealed, because the replay reads each unit's cells in that order.
+
+    ``phase_start_units`` maps every unit to the replay part it starts, in
+    roster order. The producer derives it from the bytes it declares, the same
+    way the layer walk derives ``layer-<L>-part-<P>``, so the phase table stays
+    bounded however long the journal is; the runtime announces a part when it
+    is about to read the first unit in it.
+
+    ``journal_identity_sha256`` is ``None`` for exactly one case: a resume
+    submitted before the pass ever journaled a unit. Nothing was on disk to
+    bind, so nothing is claimed -- the roster is empty, and the runtime's own
+    identity, which does not exist yet at submission, is left uncompared.
     """
     ordered = list(roster)
     if ordered != sorted(set(ordered)):
         raise ValueError("a replay roster is a sorted set of unit qnames")
-    if not isinstance(journal_identity_sha256, str) or len(journal_identity_sha256) != 64:
+    if journal_identity_sha256 is None:
+        if ordered:
+            raise ValueError(
+                "a sealed replay frontier with units in it needs the journal "
+                "identity sha256 those units were committed under")
+    elif (not isinstance(journal_identity_sha256, str)
+            or len(journal_identity_sha256) != 64):
         raise ValueError("a sealed replay frontier needs the journal identity sha256")
     items = replay_read_items(ordered, cells_by_unit)
-    starts = {name: replay_phase_name(index) for index, name in enumerate(ordered)}
+    starts = _parts(ordered, phase_start_units)
     return {
         ROSTER_KEY: ordered,
         ROSTER_SHA256_KEY: roster_sha256(ordered),
@@ -163,6 +195,38 @@ def seal_frontier(
         JOURNAL_IDENTITY_KEY: journal_identity_sha256,
         PHASE_START_UNITS_KEY: starts,
     }
+
+
+def _parts(roster: Sequence[str], phase_start_units: Mapping[str, str]) -> dict[str, str]:
+    """Validate a replay phase table: contiguous parts, in roster order.
+
+    The runtime announces a part when it reaches the first unit in it, so a
+    table whose parts interleave would announce a boundary over bytes that are
+    not consumed yet. Refusing anything but consecutive parts, over the roster
+    in order, is what lets an announced part mean "everything before it has
+    been read".
+    """
+    if not isinstance(phase_start_units, Mapping):
+        raise ValueError("a sealed replay phase table is an object")
+    starts = dict(phase_start_units)
+    if set(starts) != set(roster):
+        raise ValueError("a sealed replay phase table names exactly its roster")
+    last = -1
+    for name in roster:
+        phase = starts[name]
+        if not is_replay_phase(phase):
+            raise ValueError("a replayed unit starts in a replay phase")
+        index = int(phase[len(REPLAY_PHASE_PREFIX):])
+        if index < last:
+            raise ValueError(
+                "a sealed replay phase table is not in read order; a part "
+                "cannot start after an earlier part ends")
+        if index > last + 1:
+            raise ValueError(
+                "a sealed replay phase table skips a part; every part holds at "
+                "least one unit")
+        last = index
+    return starts
 
 
 def sealed_from_annotations(annotations: Mapping[str, object]) -> dict[str, object] | None:
@@ -191,10 +255,15 @@ def sealed_from_annotations(annotations: Mapping[str, object]) -> dict[str, obje
             or roster != sorted(set(roster))
             or any(not isinstance(name, str) for name in roster)):
         raise ValueError("a sealed replay roster is a sorted, unique list of qnames")
-    if not isinstance(starts, dict) or set(starts) != set(roster):
-        raise ValueError("a sealed replay phase table names exactly its roster")
-    if any(not is_replay_phase(phase) for phase in starts.values()):
-        raise ValueError("a replayed unit starts in a replay phase")
+    starts = _parts(roster, starts)
+    if annotations[JOURNAL_IDENTITY_KEY] is not None and (
+            not isinstance(annotations[JOURNAL_IDENTITY_KEY], str)
+            or len(annotations[JOURNAL_IDENTITY_KEY]) != 64):
+        raise ValueError("a sealed replay journal identity is a sha256 or null")
+    if annotations[JOURNAL_IDENTITY_KEY] is None and roster:
+        raise ValueError(
+            "a sealed replay frontier with units in it names the journal "
+            "identity those units were committed under")
     if roster_sha256(roster) != annotations[ROSTER_SHA256_KEY]:
         raise ValueError("the sealed replay roster does not hash to its own digest")
     return {
@@ -218,7 +287,8 @@ def require_replay_matches(
     Called by the preparing action before it reports anything. Every clause
     raises: a mismatch here means the sealed phase table describes reads this
     action is not going to make, and reporting it would release bytes that
-    nothing consumed.
+    nothing consumed. ``cells_by_unit`` is the cell order this action will
+    actually read, per unit.
     """
     roster = sealed[ROSTER_KEY]
     actual = sorted(completed)
@@ -230,6 +300,11 @@ def require_replay_matches(
             f"roster: {len(missing)} sealed unit(s) are gone and {len(extra)} "
             "appeared; refusing to report a consumed prefix for reads this "
             f"action will not make (gone: {missing[:3]}, new: {extra[:3]})")
+    if sealed[JOURNAL_IDENTITY_KEY] is None:
+        # Sealed before the pass journaled anything: the roster is empty (the
+        # check above would have named any unit that appeared since), so there
+        # is no identity to compare and nothing to replay.
+        return
     if sealed[JOURNAL_IDENTITY_KEY] != journal_identity_sha256:
         raise RuntimeError(
             "the qualification journal identity changed after submission "
