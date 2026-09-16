@@ -24,6 +24,17 @@ published it instead of adopting it as this run's; a file with no readable
 provenance is refused. No default, stage, format, lane, ship gate or allocator
 default changed.
 
+The same commit's second half is the **frontier document's own publication**
+(§12). `prefill_frontier.main` wrote the curve at `--output` with
+`Path.write_text`, which truncates the file and then fills it, so a sweep killed
+between those steps destroyed the curve it was replacing and left unparseable
+JSON at a path every consumer parses. The document is now written through
+`cost_stage_checkpoint.atomic_write_bytes` (staged beside the target, fsynced,
+`os.replace`d): replacement is the right shape for one name with one current
+value, and an interrupted run leaves the old curve or the new one. The
+publication is asserted through the CLI itself in
+`tests/test_prefill_frontier.py::test_the_document_is_published_through_the_atomic_writer`.
+
 Re-stamped (2026-09-15, `claude/tp2-measurement-instruments`) for the **gold
 lane's multi-node instruments** (§2.3, §7.3). Three things a gold receipt did
 not say, and now does. **(1) Fidelity.** Each result carries a structured

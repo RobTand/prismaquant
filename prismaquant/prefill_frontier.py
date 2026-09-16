@@ -71,7 +71,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .cost_stage_checkpoint import publish_new_bytes
+from .cost_stage_checkpoint import atomic_write_bytes, publish_new_bytes
 from .layer_config import LAYER_CONFIG_META_KEY
 from .measured_runtime_prices import identity_sha256
 
@@ -664,7 +664,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if document is None:
         raise SystemExit("[prefill-frontier] the allocator returned without running the sweep")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n")
+    # The document is one name with one current value, so it is REPLACED, and
+    # by the shared atomic writer rather than write_text: an interrupted sweep
+    # otherwise leaves a truncated curve where a complete one was, and every
+    # reader of the output path reads the half-file with nothing to tell it so.
+    atomic_write_bytes(
+        output, (json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8"))
     saturation = document["saturation"]
     print(f"[prefill-frontier] {document['n_feasible']}/{document['n_points']} feasible, "
           f"{document['n_nondominated']} nondominated, "
