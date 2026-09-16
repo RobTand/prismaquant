@@ -17,11 +17,46 @@ that dispatched under that key.
 Comparison granularity
 ======================
 
-The trace names no modules. ``modules`` is a count of a set whose members the
-trace does not emit, so a per-module comparison (this owner priced on X,
-served on Y) is not something the trace can support. What it does support,
-exactly, is a **module count per (route family, kind, activation contract),
-per token count M, per rank**:
+Two grades of observation exist, and the verdict says which one it was.
+
+**Exact.** A trace whose header stamps ``identity_version: 1`` and whose every
+entry carries ``module_names`` -- the sorted real module prefixes that
+dispatched under that entry's key, the additive field Tessera #509 asks for --
+names each module and the activation contract it rode. The gate then compares
+the price with the serve **per module**: every target ``config.json`` prices
+must appear, under exactly the contract it was priced on, on every rank. Two
+modules that swapped contracts are refused even though their histogram is
+unchanged, and one module counted under two keys in one forward is refused.
+
+The identity is versioned and only version 1 is read: a file that stamps
+another ``identity_version`` is refused rather than read as v1, because the
+fields of a future version are not these fields. The same header stamps
+``rank``/``world_size``/``platform`` -- the identity the path used to carry --
+and each entry states ``unnamed_modules`` and ``dispatches_without_prefix``
+beside ``module_names``, so that ``modules`` stays an honest count of unique
+served objects even where one has no stable name. The exact grade requires
+those two to be zero: a module the serve cannot name is a module this gate
+cannot compare, and a count is not a name. ``modules`` must equal
+``len(module_names) + unnamed_modules``, which keeps the count a fact about
+objects rather than about placeholders.
+
+The ranks must be exactly ``0..world_size-1``, ``world_size`` must equal the
+number of traces supplied and the expected rank count, a ``rankN`` label must
+agree with the file's own ``rank``, and the platform the serve recorded must be
+the platform the price was derived for. ``rank`` and ``world_size`` are one
+fact and are stamped together; ``platform`` may stand alone. ``rank_source``
+and ``rank_conflict`` travel with them and are REPORTED, never gated: the
+producer observes a rank once and records a later disagreeing observation in
+``rank_conflict`` instead of adopting it, and an all-null rank with
+``rank_source: "unavailable"`` is a process that never joined a group, not a
+serve pretending to be rank 0. A ``""`` platform is the producer's "never
+latched a token" -- an unknown platform is not a different one, so it is
+reported and left out of the comparison.
+
+**Histogram.** A legacy trace names no modules. ``modules`` is then a count of
+a set whose members the trace does not emit, so the most it supports, exactly,
+is a **module count per (route family, kind, activation contract), per token
+count M, per rank**:
 
 * ``shape`` is ``M{tokens}:N{rows}:K{cols}``. Within one M, entries with
   different N:K are different modules, and a dense forward (and a routed-MoE
@@ -45,12 +80,22 @@ contract's ``lane_eligibility.platforms[<platform>].executes`` says that
 payload family executes on the artifact's declared platform. Nothing here is
 a local table.
 
+The grade is one fact about the serve, not one per rank: a set in which some
+ranks name their modules and others do not is refused. Ranks that both name
+their modules are compared per module, so the exact grade is strictly stronger
+than the histogram it subsumes. A file that carries the new shape is never
+graded on the legacy counts alone: half-stamped identity -- a version without
+names, names without a version, a count that disagrees with the names, or an
+unnamed module -- is refused, so a new-shape trace cannot pass by way of the
+histogram that a legacy trace is honestly limited to.
+
 What this does not see
 ======================
 
 * Which module rode which contract. Two modules that swapped contracts leave
-  the histogram unchanged. Closing that needs the trace to emit its module
-  prefixes (filed against Tessera).
+  the histogram unchanged. Tessera #509 closes this where the serve emits
+  ``module_names``; a legacy trace keeps the histogram grade, honestly, and is
+  never reported as per-module qualified (``exact_module_qualified`` is false).
 * The activation REPRESENTATION. ``contract`` is a name, not the quantizer
   rule the kernel applied, so a right name over a wrong representation passes
   (RobTand/prismaquant#567 is that shape).
@@ -89,11 +134,39 @@ GRANULARITY = (
     "per token count M, per rank; the trace names no modules"
 )
 
+#: The granularity a trace that names its modules supports (Tessera #509).
+EXACT_GRANULARITY = (
+    "module name per (route family, kind, activation contract), "
+    "per token count M, per rank; the trace names its modules"
+)
+
+#: The two observation grades. ``EXACT`` is a trace that names its modules.
+EXACT = "exact"
+HISTOGRAM = "histogram"
+
+#: The only identity schema version this consumer reads (#509). A future
+#: version is refused rather than read as v1: its fields are not these fields.
+IDENTITY_VERSION = 1
+
 #: The trace's ``kind`` against the artifact's ``scheme.structure``.
 TRACE_KIND_FOR_STRUCTURE = {"dense": "dense", "routed_moe": "moe"}
 
 _SHAPE = re.compile(r"^M(\*|[0-9]+):N([0-9]+):K([0-9]+)$")
+_LABEL_RANK = re.compile(r"^rank([0-9]+)(?::|$)")
 _ENTRY_STR_FIELDS = ("policy", "shape", "symbol", "decoder", "contract", "kind")
+
+#: ``rank`` and ``world_size`` are one fact, so they are stamped together.
+_HEADER_FIELDS = ("rank", "world_size", "rank_source", "rank_conflict",
+                  "platform", "identity_version")
+
+#: The producer's token for "this process never latched a platform".  An
+#: unknown platform is not a different one, so it is reported and not compared.
+UNKNOWN_PLATFORM = ""
+
+#: The per-entry identity fields the #509 schema adds. All three travel
+#: together: the names, the objects that have no stable name, and the
+#: dispatches that arrived without one.
+_IDENTITY_ENTRY_FIELDS = ("module_names", "unnamed_modules", "dispatches_without_prefix")
 
 
 class TesseraRouteTraceError(ValueError):
@@ -108,13 +181,8 @@ def _key(family: str, kind: str, contract: str) -> str:
     return f"{family}/{kind}/{contract}"
 
 
-def parse_route_trace(payload: Any, *, where: str) -> list[dict[str, Any]]:
-    """Validate one rank's trace and return its entries in canonical form.
-
-    Raises :class:`RouteTraceNotVerified` when the file cannot serve as an
-    observation (wrong schema, no entries, compiled counts) and
-    :class:`TesseraRouteTraceError` when it claims to be one and is malformed.
-    """
+def _decode(payload: Any, *, where: str) -> Mapping[str, Any]:
+    """JSON-decode and schema-check one trace file."""
     if isinstance(payload, (bytes, str)):
         try:
             payload = json.loads(payload)
@@ -128,7 +196,122 @@ def parse_route_trace(payload: Any, *, where: str) -> list[dict[str, Any]]:
         raise RouteTraceNotVerified(
             f"{where}: schema {payload.get('schema')!r} is not "
             f"{ROUTE_TRACE_SCHEMA!r}")
-    entries = payload.get("entries")
+    return payload
+
+
+def parse_trace_header(payload: Any, *, where: str) -> dict[str, Any]:
+    """The file header's additive identity stamps (#509).
+
+    ``rank``/``world_size``/``platform``, plus the ``identity_version`` that
+    says which entry schema the file speaks. A legacy file stamps none of them,
+    and the consumer then knows the trace is histogram-grade: nothing but the
+    path binds it to a rank. ``rank`` and ``world_size`` are one fact -- which
+    rank of how many -- so a file that stamps one without the other is refused
+    rather than half-bound; the ``stamped`` key says whether the pair was
+    present.
+
+    The version is read exactly: :data:`IDENTITY_VERSION` or nothing. A
+    different value is not "at least a version" -- its entry schema is not this
+    one -- so it is refused instead of read as v1.
+    """
+    document = _decode(payload, where=where)
+    header: dict[str, Any] = {field: document.get(field) for field in _HEADER_FIELDS}
+    rank, world_size, platform = header["rank"], header["world_size"], header["platform"]
+    version = header["identity_version"]
+    for field in ("rank", "world_size"):
+        value = header[field]
+        if value is not None and (type(value) is not int or value < 0):
+            raise TesseraRouteTraceError(
+                f"{where}: header {field} must be a non-negative integer")
+    if (rank is None) != (world_size is None):
+        raise TesseraRouteTraceError(
+            f"{where}: header stamps rank={rank!r} and world_size={world_size!r}; "
+            "rank and world_size are one fact and are stamped together (#509)")
+    if rank is not None:
+        if world_size < 1:
+            raise TesseraRouteTraceError(
+                f"{where}: header world_size must be a positive integer")
+        if rank >= world_size:
+            raise TesseraRouteTraceError(
+                f"{where}: header rank {rank} is not below world_size {world_size}")
+    if platform is not None and not isinstance(platform, str):
+        raise TesseraRouteTraceError(
+            f"{where}: header platform must be a string")
+    if version is not None and (type(version) is not int or version != IDENTITY_VERSION):
+        raise TesseraRouteTraceError(
+            f"{where}: header identity_version is {version!r}; this consumer "
+            f"reads exactly {IDENTITY_VERSION}, and a future version's fields "
+            "are not these fields (#509)")
+    # ``rank_source`` and ``rank_conflict`` are REPORTED, never gated.  The
+    # producer observes the rank once and keeps it -- the atexit flush runs
+    # after ``destroy_process_group()`` -- and records a later disagreeing
+    # observation in ``rank_conflict`` rather than adopting it, so a non-null
+    # conflict describes a serve whose counts belong to the identity the
+    # header already carries.  Neither field is required to be present or
+    # null, and neither decides the verdict.
+    header["stamped"] = rank is not None
+    return header
+
+
+def _identity_fields(
+    entry: Mapping[str, Any], *, at: str,
+) -> tuple[tuple[str, ...] | None, int | None, int | None]:
+    """One entry's ``(module_names, unnamed_modules, dispatches_without_prefix)``.
+
+    A legacy entry carries none of them and returns ``(None, None, None)``.
+    They travel together, and the count stays a fact about objects:
+    ``modules == len(module_names) + unnamed_modules``, which is what stops two
+    prefix-less objects from collapsing into the placeholder "1".
+    """
+    present = [field for field in _IDENTITY_ENTRY_FIELDS if entry.get(field) is not None]
+    if not present:
+        return None, None, None
+    if len(present) != len(_IDENTITY_ENTRY_FIELDS):
+        missing = [field for field in _IDENTITY_ENTRY_FIELDS if field not in present]
+        raise TesseraRouteTraceError(
+            f"{at}: stamps {', '.join(present)} without {', '.join(missing)}; the "
+            "#509 identity fields travel together (#509)")
+    names = entry["module_names"]
+    if not isinstance(names, list):
+        raise TesseraRouteTraceError(
+            f"{at}: module_names must be a list of module prefixes")
+    for name in names:
+        if not isinstance(name, str) or not name:
+            raise TesseraRouteTraceError(
+                f"{at}: module_names entries must be non-empty strings")
+    if len(set(names)) != len(names):
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        raise TesseraRouteTraceError(
+            f"{at}: module_names repeats {repeated}; one entry names each of its "
+            "modules once")
+    counts: list[int] = []
+    for field in ("unnamed_modules", "dispatches_without_prefix"):
+        value = entry[field]
+        if type(value) is not int or value < 0:
+            raise TesseraRouteTraceError(
+                f"{at}: {field} must be a non-negative integer")
+        counts.append(value)
+    unnamed, prefixless = counts
+    if len(names) + unnamed != entry["modules"]:
+        raise TesseraRouteTraceError(
+            f"{at}: module_names names {len(names)} module(s) and unnamed_modules "
+            f"is {unnamed} but modules={entry['modules']}; the count is the number "
+            "of unique served objects (#509)")
+    return tuple(sorted(names)), unnamed, prefixless
+
+
+def parse_route_trace_document(
+    payload: Any, *, where: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """One rank's ``(entries, header)`` in canonical form.
+
+    Raises :class:`RouteTraceNotVerified` when the file cannot serve as an
+    observation (wrong schema, no entries, compiled counts) and
+    :class:`TesseraRouteTraceError` when it claims to be one and is malformed.
+    """
+    document = _decode(payload, where=where)
+    header = parse_trace_header(document, where=where)
+    entries = document.get("entries")
     if not isinstance(entries, list) or not entries:
         raise RouteTraceNotVerified(
             f"{where}: trace records no served dispatch; an empty trace is "
@@ -166,6 +349,8 @@ def parse_route_trace(payload: Any, *, where: str) -> list[dict[str, Any]]:
         if identity in seen:
             raise TesseraRouteTraceError(f"{at}: duplicate counter key {identity}")
         seen.add(identity)
+        module_names, unnamed_modules, dispatches_without_prefix = _identity_fields(
+            entry, at=at)
         parsed.append({
             "family": family,
             "residency": residency,
@@ -178,8 +363,101 @@ def parse_route_trace(payload: Any, *, where: str) -> list[dict[str, Any]]:
             "kind": entry["kind"],
             "launches": entry["launches"],
             "modules": entry["modules"],
+            "module_names": module_names,
+            "unnamed_modules": unnamed_modules,
+            "dispatches_without_prefix": dispatches_without_prefix,
         })
-    return parsed
+    return parsed, header
+
+
+def parse_route_trace(payload: Any, *, where: str) -> list[dict[str, Any]]:
+    """Validate one rank's trace and return its entries in canonical form.
+
+    Raises :class:`RouteTraceNotVerified` when the file cannot serve as an
+    observation (wrong schema, no entries, compiled counts) and
+    :class:`TesseraRouteTraceError` when it claims to be one and is malformed.
+    """
+    entries, _header = parse_route_trace_document(payload, where=where)
+    return entries
+
+
+def trace_identity(
+    entries: Sequence[Mapping[str, Any]], header: Mapping[str, Any], *, where: str,
+) -> str:
+    """``EXACT`` when every entry names its modules, ``HISTOGRAM`` when none does.
+
+    Half-stamped identity is refused rather than read as whichever half looks
+    convenient: a version without names, names without a version, an entry
+    that names some of its modules and not others, or a module the serve could
+    not name. A file that carries the new shape is never graded on the legacy
+    counts alone (#509).
+    """
+    declared = header["identity_version"]
+    named = sum(1 for entry in entries if entry["module_names"] is not None)
+    if declared is None and named == 0:
+        return HISTOGRAM
+    if declared is None:
+        raise TesseraRouteTraceError(
+            f"{where}: {named} of {len(entries)} entries name their modules but "
+            "the header stamps no identity_version; this consumer will not guess "
+            "which entry schema the file speaks (#509)")
+    if named != len(entries):
+        raise TesseraRouteTraceError(
+            f"{where}: identity_version {declared} but only {named} of "
+            f"{len(entries)} entries name their modules; a file that names some "
+            "modules and not others is not one observation (#509)")
+    unnamed = sum(entry["unnamed_modules"] for entry in entries)
+    prefixless = sum(entry["dispatches_without_prefix"] for entry in entries)
+    if unnamed or prefixless:
+        raise TesseraRouteTraceError(
+            f"{where}: the serve reports {unnamed} module(s) with no stable "
+            f"prefix and {prefixless} dispatch(es) without one; this gate compares "
+            "per module and a count is not a name, so the legacy counts do not "
+            "stand in for them (#509)")
+    return EXACT
+
+
+def exact_served_modules(
+    entries: Sequence[Mapping[str, Any]], *, where: str,
+) -> dict[str, str]:
+    """One rank's ``{module prefix: '<family>/<kind>/<contract>'}``.
+
+    Every token count must name the same modules under the same contracts, and
+    no module may ride two contracts in one forward: that is what makes the
+    comparison per module rather than per count.
+    """
+    by_m: dict[int, dict[str, str]] = {}
+    for entry in entries:
+        names = entry["module_names"]
+        if names is None:
+            raise TesseraRouteTraceError(
+                f"{where}: entry at M={entry['m']} names no modules")
+        key = _key(entry["family"], entry["kind"], entry["contract"])
+        named = by_m.setdefault(entry["m"], {})
+        for name in names:
+            if name in named:
+                raise TesseraRouteTraceError(
+                    f"{where}: module {name!r} dispatched under {named[name]} and "
+                    f"{key} in one forward (M={entry['m']}); one module holds one "
+                    "activation contract")
+            named[name] = key
+    reference_m = min(by_m)
+    reference = dict(sorted(by_m[reference_m].items()))
+    for m in sorted(by_m):
+        other = dict(sorted(by_m[m].items()))
+        if other == reference:
+            continue
+        differing = [name for name in sorted(set(reference) | set(other))
+                     if reference.get(name) != other.get(name)]
+        detail = ", ".join(
+            f"{name}: M={reference_m} {reference.get(name)}, M={m} {other.get(name)}"
+            for name in _sample(differing))
+        raise TesseraRouteTraceError(
+            f"{where}: the served modules differ between token counts: {detail}; "
+            "every forward dispatches every quantized module once, so a module "
+            "absent at one M or riding another contract at one M is a route "
+            "change inside the serve")
+    return reference
 
 
 def served_histogram(entries: Sequence[Mapping[str, Any]], *, where: str) -> dict[str, Any]:
@@ -291,6 +569,33 @@ def _histogram_difference(priced: Mapping[str, int], served: Mapping[str, int]) 
     return lines
 
 
+def _sample(names: Sequence[str], *, limit: int = 8) -> list[str]:
+    """At most ``limit`` names, so one bad shard cannot fill a receipt."""
+    if len(names) <= limit:
+        return list(names)
+    return [*names[:limit], f"({len(names) - limit} further module(s))"]
+
+
+def _module_difference(priced: Mapping[str, str], served: Mapping[str, str]) -> list[str]:
+    """``priced`` and ``served`` are ``{module prefix: contract key}``.
+
+    The whole point of the exact grade: a contract that moved from one module
+    to another leaves the counts alone and shows up here.
+    """
+    differing = [name for name in sorted(set(priced) | set(served))
+                 if priced.get(name) != served.get(name)]
+    lines = []
+    for name in _sample(differing):
+        want, got = priced.get(name), served.get(name)
+        if want is None:
+            lines.append(f"{name}: served {got} but the price names no such module")
+        elif got is None:
+            lines.append(f"{name}: priced {want}, served by no module")
+        else:
+            lines.append(f"{name}: priced {want} but served {got}")
+    return lines
+
+
 def compare_route_traces(
     traces: Sequence[tuple[str, Any]],
     *,
@@ -315,12 +620,16 @@ def compare_route_traces(
     verdict: dict[str, Any] = {
         "schema": VERDICT_SCHEMA,
         "granularity": GRANULARITY,
+        "exact_module_qualified": False,
         "platform": platform,
         "expected_ranks": expected_ranks,
         "ranks": [label for label, _payload in traces],
         "priced": priced["histogram"],
+        "priced_owners": priced["owners"],
         "served": None,
         "served_by_rank": {},
+        "served_modules": None,
+        "header": {},
     }
 
     def _finish(status: str, detail: str) -> dict[str, Any]:
@@ -341,16 +650,90 @@ def compare_route_traces(
             f"NOT VERIFIED: no route trace for rank(s) {missing}; a missing "
             "observation is not a pass"))
     served_by_rank: dict[str, Any] = {}
+    headers: dict[str, Any] = {}
+    grades: dict[str, str] = {}
+    served_modules: dict[str, Any] = {}
     try:
         for label, payload in traces:
-            entries = parse_route_trace(payload, where=f"trace[{label}]")
-            served_by_rank[label] = served_histogram(entries, where=f"trace[{label}]")
+            where = f"trace[{label}]"
+            entries, header = parse_route_trace_document(payload, where=where)
+            headers[label] = header
+            grades[label] = trace_identity(entries, header, where=where)
+            served_by_rank[label] = served_histogram(entries, where=where)
+            if grades[label] == EXACT:
+                served_modules[label] = exact_served_modules(entries, where=where)
     except RouteTraceNotVerified as exc:
         return _finish(NOT_VERIFIED, f"NOT VERIFIED: {exc}")
     except TesseraRouteTraceError as exc:
         verdict["served_by_rank"] = served_by_rank
         return _finish(REFUSED, f"REFUSED: {exc}")
+    verdict["header"] = headers
     verdict["served_by_rank"] = served_by_rank
+
+    # The header's own identity (#509). Ranks are stamped together, so a
+    # half-stamped set is a serve that does not say what it is.
+    stamped = sorted(label for label, header in headers.items() if header["stamped"])
+    unstamped = sorted(set(labels) - set(stamped))
+    if stamped and unstamped:
+        return _finish(REFUSED, (
+            "REFUSED: rank trace(s) " + ", ".join(unstamped) + " carry no "
+            "rank/world_size header while " + ", ".join(stamped) + " do; a serve "
+            "stamps its ranks together (#509)"))
+    if stamped:
+        stamped_ranks = sorted(headers[label]["rank"] for label in stamped)
+        world_sizes = sorted({headers[label]["world_size"] for label in stamped})
+        if len(world_sizes) != 1:
+            return _finish(REFUSED, (
+                "REFUSED: rank traces disagree on world_size: "
+                + repr(world_sizes)))
+        world_size = world_sizes[0]
+        if world_size != expected_ranks or world_size != len(traces):
+            return _finish(REFUSED, (
+                f"REFUSED: the traces stamp world_size={world_size} but "
+                f"{len(traces)} trace(s) were supplied for {expected_ranks} "
+                "expected rank(s); the observation and the claim are different "
+                "serves"))
+        if stamped_ranks != list(range(world_size)):
+            return _finish(REFUSED, (
+                f"REFUSED: the traces stamp ranks {stamped_ranks}, which is not "
+                f"every rank of world_size={world_size}"))
+        for label in labels:
+            embedded = _LABEL_RANK.match(label)
+            if embedded is None:
+                continue
+            if int(embedded.group(1)) != headers[label]["rank"]:
+                return _finish(REFUSED, (
+                    f"REFUSED: trace {label!r} is bound to rank "
+                    f"{embedded.group(1)} but its own header stamps rank "
+                    f"{headers[label]['rank']}"))
+        # ``""`` is the producer's "this process never latched a platform":
+        # an unknown platform is not a different one, so it is reported in the
+        # verdict and left out of the comparison.
+        platforms = sorted({headers[label]["platform"] for label in labels
+                            if headers[label]["platform"] not in (None, UNKNOWN_PLATFORM)})
+        if len(platforms) > 1:
+            return _finish(REFUSED, (
+                "REFUSED: rank traces disagree on platform: " + repr(platforms)))
+        if platforms and platforms[0] != platform:
+            return _finish(REFUSED, (
+                f"REFUSED: the serve recorded platform {platforms[0]!r} but the "
+                f"price is for {platform!r}; what a family executes is a "
+                "per-platform fact"))
+
+    grade = set(grades.values())
+    if len(grade) > 1:
+        return _finish(REFUSED, (
+            "REFUSED: ranks disagree on the observation grade: " + ", ".join(
+                f"{label} {'names its modules' if grades[label] == EXACT else 'names no modules'}"
+                for label in labels)
+            + "; a per-module comparison needs every rank to name its modules "
+            "(#509)"))
+    grade = grade.pop()
+    verdict["granularity"] = EXACT_GRANULARITY if grade == EXACT else GRANULARITY
+    verdict["exact_module_qualified"] = grade == EXACT
+    if grade == EXACT:
+        verdict["served_modules"] = served_modules
+
     first_label = labels[0]
     served = served_by_rank[first_label]["histogram"]
     verdict["served"] = served
@@ -362,6 +745,21 @@ def compare_route_traces(
         return _finish(REFUSED, (
             "REFUSED: ranks served different module histograms; tensor "
             "parallelism shards a module and never splits it: " + "; ".join(parts)))
+    if grade == EXACT:
+        for label in labels:
+            difference = _module_difference(
+                priced["owners"], served_modules[label])
+            if difference:
+                return _finish(REFUSED, (
+                    "REFUSED: the priced and served activation contracts differ "
+                    "per module on platform " + repr(platform) + " (rank "
+                    + label + "): " + "; ".join(difference)))
+        total = len(priced["owners"])
+        return _finish(AGREE, (
+            f"exact per-module: {total} named module(s) on every rank served "
+            f"the activation contract they were priced on, across "
+            f"{len(labels)} rank(s): "
+            + ", ".join(f"{key}={count}" for key, count in served.items())))
     difference = _histogram_difference(priced["histogram"], served)
     if difference:
         return _finish(REFUSED, (
@@ -369,8 +767,9 @@ def compare_route_traces(
             "differ on platform " + repr(platform) + ": " + "; ".join(difference)))
     total = sum(served.values())
     return _finish(AGREE, (
-        f"{total} module(s) on every rank served the activation contract they "
-        f"were priced on, across {len(labels)} rank(s): "
+        f"histogram grade (the trace names no modules): {total} module(s) on "
+        f"every rank served the activation contract they were priced on, across "
+        f"{len(labels)} rank(s): "
         + ", ".join(f"{key}={count}" for key, count in served.items())))
 
 
@@ -405,7 +804,9 @@ def resolve_platform(build: Mapping[str, Any] | None, requested: str | None) -> 
     """The platform to price on: the card's scoped target, or the caller's.
 
     Both, when present, must agree. Neither is a refusal: the trace carries no
-    platform, and what a family executes is a per-platform fact.
+    platform on a legacy file, and what a family executes is a per-platform
+    fact. A #509 file does stamp its platform, and
+    :func:`compare_route_traces` refuses one that differs from this answer.
     """
     scope = (build or {}).get("tessera_serving_scope")
     scoped = None

@@ -1,7 +1,52 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-15 · `claude/tp2-measurement-instruments`. Stamps
+As of: 2026-09-16 · `codex/509-pq-route-trace-gate`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-16, `codex/509-pq-route-trace-gate`) for **the exact
+per-module route-trace grade** (§7.1, §9.4; the Tessera lane's serve-side leg,
+RobTand/prismaquant#575 consuming RobTand/tessera#509). The leg compared module
+counts, so two modules that swapped activation contracts left the histogram
+unchanged and one module counted under two keys looked like two. A trace may
+now say which modules dispatched: the header stamps `identity_version: 1`
+beside `rank`, `world_size` and `platform`, and each entry carries
+`module_names` (the real stable module prefixes), `unnamed_modules` (unique
+objects with no stable prefix) and `dispatches_without_prefix`, with
+`modules == len(module_names) + unnamed_modules` so the count stays a count of
+objects rather than of placeholders.
+
+- **The gate.** `tessera_route_trace_gate.compare_route_traces` keeps its
+  signature and adds `trace_identity`, which grades one trace `exact` or
+  `histogram`; the verdict adds `exact_module_qualified`, `granularity`,
+  `priced_owners`, `served_modules` and `header`. On the exact grade every
+  priced `config_groups` target must appear on every rank under exactly the
+  contract it was priced on, so a swap is REFUSED and named module by module.
+- **The version is read exactly.** Only `identity_version == 1` is read: a
+  later version is refused rather than read as v1, because a future version's
+  fields are not these fields. Half-stamped identity -- a version without
+  names, names without a version, a count that disagrees with the names -- is
+  refused, and `unnamed_modules`/`dispatches_without_prefix` must be zero,
+  because a count is not a name and the legacy counts do not stand in for one.
+- **The header identity.** The ranks must be exactly `0..world_size-1`,
+  `world_size` must equal the number of traces supplied and `--expected-ranks`,
+  a `rankN` label must agree with the file's own `rank`, and the stamped
+  platform must be the platform the price was derived for. `rank_source` and
+  `rank_conflict` are REPORTED, never gated: the producer observes a rank once
+  and records a later disagreeing observation in `rank_conflict` rather than
+  adopting it, and a `""` platform is "never latched a token", which is
+  unknown rather than different.
+- **Legacy traces** keep the histogram grade and report
+  `exact_module_qualified: false`; they are never restated as per-module. A set
+  of ranks that disagree about their grade is REFUSED.
+
+Not covered: the activation representation (RobTand/prismaquant#567), compiled
+forwards, and the compressed-tensors lane, which has no route telemetry. Gate:
+`tests/test_tessera_route_trace_gate.py` -- failing on the new exact-grade
+regressions before the change, and the real m44e1 TP2 traces unchanged on the
+legacy arm. The exact arm runs on
+`tests/fixtures/tessera_route_trace_509/`, written by Tessera's own telemetry
+at producer commit `e72d581` (see that directory's `PROVENANCE.md`), so the
+schema under test is the producer's.
 
 Re-stamped (2026-09-15, `claude/tp2-measurement-instruments`) for the **gold
 lane's multi-node instruments** (§2.3, §7.3). Three things a gold receipt did
@@ -174,10 +219,10 @@ packaged contract, and refuses carried config text that differs from the
 artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the trace
 and fill steps.
 
-The comparison is a histogram because the trace names no modules; Tessera #509
-asks it to emit module prefixes, rank and platform. Not covered: which module
-rode which contract, the activation representation (#567), compiled forwards,
-and the compressed-tensors lane, which has no route telemetry. The
+The comparison is a histogram where the trace names no modules (Tessera #509
+adds the per-module grade, stamped at the top of this file). Not covered: the
+activation representation (#567), compiled forwards, and the
+compressed-tensors lane, which has no route telemetry. The
 `validate_native_export` claim in CLAUDE.md principle 14 is corrected: that
 script never performed this leg. Gate: `tests/test_tessera_route_trace_gate.py`,
 on the real m44e1 TP2 traces, shown failing before the fix.
