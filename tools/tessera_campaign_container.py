@@ -53,10 +53,15 @@ SAFE_PATH_ENV = "PYTHONSAFEPATH"
 #: ``tests/test_tessera_campaign_container.py``, which imports both and fails if
 #: they drift -- a second copy is only a defect when nothing compares them.
 #:
-#: The launcher SUPPLIES these rather than requiring the spec to restate them,
-#: and refuses a spec that declares a different value. A bounded row cannot
-#: start without them, and refusing a sealed spec for omitting one would turn a
-#: fixable launch into a re-seal.
+#: The launcher SUPPLIES these for a BOUNDED row rather than requiring the spec
+#: to restate them, and refuses a bounded spec that declares a different value.
+#: A bounded row cannot start without them, and refusing a sealed spec for
+#: omitting one would turn a fixable launch into a re-seal. They are the
+#: bounded path's environment and nothing else's: a legacy row that declares
+#: ``MIMALLOC_PURGE_DELAY=10`` on purpose keeps 10 in the container it starts.
+#: The launcher states which contract it is under from the row's own sealed
+#: environment (``main``), because that is the only marker the host-side
+#: adapter sees -- it is deliberately importable without ``prismaquant``.
 BOUNDED_CAPTURE_ENV = {
     "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
     "MIMALLOC_PURGE_DELAY": "0",
@@ -462,8 +467,14 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
         if mount.get("readonly", False):
             value += ",readonly"
         argv += ["--mount", value]
+    # The bounded capture defaults are the BOUNDED path's environment, so they
+    # are merged only for a row the caller says is bounded. Merging them for
+    # every row overrode a legacy spec's own declaration one layer below the
+    # row-env check that already keeps it: a legacy row sealed with
+    # ``MIMALLOC_PURGE_DELAY=10`` reached the container with ``0``.
+    bounded_defaults = BOUNDED_CAPTURE_ENV if bounded else {}
     forwarded = {SAFE_PATH_ENV: "1", **spec.get("env", {}),
-                 **BOUNDED_CAPTURE_ENV,
+                 **bounded_defaults,
                  **progress_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
@@ -499,11 +510,15 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     spec = json.loads(args.spec)
     # The spec the launcher forwards carries the bounded capture environment
-    # only for a bounded row, so the row's own env is what says which contract
+    # only for a bounded row (``dispatch_tessera_campaign._row_is_bounded``
+    # merges it), so the row's own env is the marker that says which contract
     # this is: a legacy spec that names a different purge delay is not held to
-    # a contract it never declared.
+    # a contract it never declared, and is not handed the bounded defaults
+    # either. Both readers of the marker -- the validation below and the
+    # argv built later -- are stated from this one value.
     forwarded_env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
-    validate_container(spec, bounded=all(name in forwarded_env for name in BOUNDED_CAPTURE_ENV))
+    bounded = all(name in forwarded_env for name in BOUNDED_CAPTURE_ENV)
+    validate_container(spec, bounded=bounded)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a container command is required")
@@ -531,7 +546,7 @@ def main(argv=None) -> int:
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id,
                             content_sha256=content_digest, with_gpu=with_gpu,
-                            environ=os.environ)
+                            environ=os.environ, bounded=bounded)
     os.execvp(docker[0], docker)
     return 1  # exec never returns
 

@@ -335,12 +335,17 @@ def test_the_two_bounded_capture_constants_cannot_drift():
 
 
 def test_the_launcher_supplies_the_bounded_capture_environment(tmp_path):
-    """A sealed spec that omits the names still gets a container that can start."""
+    """A sealed spec that omits the names still gets a container that can start.
+
+    ``bounded`` is the caller stating the row is bounded, which ``main`` derives
+    from the row's own sealed environment -- the only marker the host-side
+    adapter sees -- so this is the decision the launch path makes.
+    """
     data = _bounded_spec()
     assert "MIMALLOC_PURGE_DELAY" not in data["env"]
     argv = _runner().docker_command(
         data, ["python3", "-c", "pass"], cwd=str(tmp_path), uid=1, gid=1,
-        image_id="sha256:" + "a" * 64, with_gpu=False, environ={})
+        image_id="sha256:" + "a" * 64, with_gpu=False, environ={}, bounded=True)
     forwarded = [argv[index + 1] for index, value in enumerate(argv)
                  if value == "--env"]
     for name, expected in _runner().BOUNDED_CAPTURE_ENV.items():
@@ -350,6 +355,40 @@ def test_the_launcher_supplies_the_bounded_capture_environment(tmp_path):
     # this one: this delivery supplies the environment the bounded pass refuses
     # without, and the two land together. Asserting the cap here would make this
     # test fail on a tree that has neither, which is what it did.
+
+
+def test_only_a_bounded_row_is_handed_the_bounded_environment(tmp_path):
+    """A legacy spec's own value survives into the docker argv, not just the row.
+
+    ``data['env']`` is what dispatch seals, and
+    ``test_legacy_manifest_keeps_explicit_allocator_environment`` pins that a
+    legacy row keeps the ``MIMALLOC_PURGE_DELAY=10`` its class declares. The
+    launcher then merged ``BOUNDED_CAPTURE_ENV`` into the forwarded environment
+    of every row, so the container actually started with ``0`` and the sealed
+    declaration never reached the process that reads it. The defaults are the
+    bounded path's, so they are merged only for a bounded row -- and a bounded
+    spec that contradicts them is refused on that same path rather than
+    overridden.
+    """
+    runner = _runner()
+    legacy = spec()
+    legacy["env"] = {**legacy["env"], "MIMALLOC_PURGE_DELAY": "10"}
+    argv = runner.docker_command(
+        legacy, ["python3", "-c", "pass"], cwd=str(tmp_path), uid=1, gid=1,
+        image_id="sha256:" + "a" * 64, with_gpu=False, environ={})
+    forwarded = [argv[index + 1] for index, value in enumerate(argv)
+                 if value == "--env"]
+    assert "MIMALLOC_PURGE_DELAY=10" in forwarded, forwarded
+    assert "MIMALLOC_PURGE_DELAY=0" not in forwarded, forwarded
+    assert not [entry for entry in forwarded
+                if entry.startswith("PRISMAQUANT_RELEASE_SOURCE_PAGES=")]
+
+    with pytest.raises(RuntimeError,
+                       match="contradicts the bounded capture contract"):
+        runner.docker_command(
+            legacy, ["python3", "-c", "pass"], cwd=str(tmp_path), uid=1, gid=1,
+            image_id="sha256:" + "a" * 64, with_gpu=False, environ={},
+            bounded=True)
 
 
 def test_a_spec_that_contradicts_the_bounded_capture_contract_refuses():

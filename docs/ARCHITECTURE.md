@@ -63,7 +63,9 @@ so the process-level bound is the one above. The bounded capture environment
 producer image bakes in neither name and `require_bounded_capture_environment`
 runs at the pass's first bounded step, minutes into the loader, where a missing
 name is a dead pilot rather than a refusal; a spec that declares a contradicting
-value is refused rather than overridden. Gates:
+value is refused rather than overridden, and only a BOUNDED row is handed those
+defaults -- a legacy row keeps the environment it was sealed with, in the argv
+the container is actually started from. Gates:
 `tests/test_capture_memory_guard.py`, `tests/test_tessera_campaign_container.py`,
 `tests/test_tessera_joint_aura.py`, `tools/joint_prepare_startup_probe.py`. The
 container `--memory` cap the CPU budget is enforced by is
