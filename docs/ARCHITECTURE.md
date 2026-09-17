@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+As of: 2026-09-17 · `flash/aqua-render-conditioned-act-cost-main-20260917`. Stamps
+follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/aqua-render-conditioned-act-cost-main-20260917`) for the
+**render-conditioned activation term** (§3.x AURA A-side). The A-side error term was
+always evaluated on the source weight ``W``. ``PRISMAQUANT_AQUA_ACT_WEIGHT_BASIS``
+(or ``--act-weight-basis``) now optionally evaluates it on the format's own rendered
+``W_hat_f`` instead, which absorbs the ``dW dx`` contribution of the local error
+decomposition ``W_hat x_hat - W x = dW x + W_hat dx``. Two bases are offered and
+neither falls back to the other: ``rtn`` (the registry's in-process
+``quantize_dequantize``, no cache) and ``compensated`` (the GPTQ+JSO tensors from a
+``ProductionWeightCache``, requiring ``--production-cache`` and refusing without it;
+a (unit, format) the cache does not hold is a counted HOLE, never re-rendered on the
+other basis). Unset, the lever is a byte-identical no-op. What stays dropped on both
+bases: the cross-correlation between ``dW x`` and ``W_hat dx``, downstream nonlinear
+interaction, and the routing interaction on a routed MoE. Research lever: it chooses
+no formats and rewrites no allocation. Gates:
+`tests/test_aqua_render_conditioned_act_cost.py`, `tests/test_aqua_activation_cost.py`.
+
 As of: 2026-09-16 · `codex/509-pq-route-trace-gate`. Stamps
 follow, newest first, each recording its own branch and date.
 
