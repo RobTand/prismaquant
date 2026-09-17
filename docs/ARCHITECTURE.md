@@ -31,7 +31,9 @@ term is now charged to BOTH budgets: its PWC backing storage is the cgroup's and
 the tensor the verifier receives is a copy on the device, so the bound that
 named it once was counting one of the two. `enforce_device_envelope` calls
 `torch.cuda.set_per_process_memory_fraction` with the plan's budget over the
-device's own reported total and is applied at the top of the execution path for
+device's own reported total -- on the device's RESOLVED index, because the
+allocator api refuses the unspecified `cuda` the properties call accepts -- and
+is applied at the top of the execution path for
 `prepare` AND `run`, before a CUDA context, a streamer, a kernel or a tensor
 exists; the fraction bounds torch's caching allocator, not the CUDA context,
 NCCL or native driver allocations, and the CPU-only stage never reaches it.

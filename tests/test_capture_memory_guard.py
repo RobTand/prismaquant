@@ -142,28 +142,79 @@ def test_a_device_reservation_without_an_envelope_refuses(tmp_path, host):
     assert "needs a declared device envelope" in str(refused.value)
 
 
-def test_enforce_device_envelope_sets_the_allocator_fraction(monkeypatch):
-    """``max_gpu_bytes`` becomes a bound, not a comparison after the fact."""
-    seen = {}
+def _real_allocator_api(monkeypatch, *, total_memory=121 * GiB, current_device=0):
+    """A stub that REFUSES what the real allocator api refuses.
+
+    ``get_device_properties("cuda")`` accepts the unspecified device;
+    ``set_per_process_memory_fraction(f, "cuda")`` does not, and raises
+    ``Expected a torch.device with a specified index or an integer``. A stub
+    that accepted everything is exactly why the first version reached the real
+    fleet: it proved the call, not the contract.
+    """
+    seen = {"fractions": {}}
+
+    def set_fraction(fraction, device=None):
+        if isinstance(device, bool) or not isinstance(device, int):
+            raise ValueError(
+                "Expected a torch.device with a specified index or an integer, "
+                f"but got: {device}")
+        seen["fractions"][device] = fraction
+        seen["fraction"] = fraction
+        seen["device"] = device
+
+    def get_fraction(device=None):
+        if isinstance(device, bool) or not isinstance(device, int):
+            raise ValueError(
+                "Expected a torch.device with a specified index or an integer, "
+                f"but got: {device}")
+        return seen["fractions"][device]
 
     monkeypatch.setattr(
         torch.cuda, "get_device_properties",
-        lambda device: type("P", (), {"total_memory": 121 * GiB})())
-    monkeypatch.setattr(
-        torch.cuda, "set_per_process_memory_fraction",
-        lambda fraction, device=None: seen.update(fraction=fraction, device=device))
+        lambda device: type("P", (), {"total_memory": total_memory})())
+    monkeypatch.setattr(torch.cuda, "set_per_process_memory_fraction", set_fraction)
+    monkeypatch.setattr(torch.cuda, "get_per_process_memory_fraction", get_fraction,
+                        raising=False)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: current_device)
+    return seen
+
+
+def test_enforce_device_envelope_sets_the_allocator_fraction(monkeypatch):
+    """``max_gpu_bytes`` becomes a bound, not a comparison after the fact.
+
+    The device the caller names is the unspecified ``cuda``, which the
+    properties call resolves and the allocator call does not: the envelope is
+    therefore set on the resolved index and reads back through the same api.
+    """
+    seen = _real_allocator_api(monkeypatch)
 
     record = mm.enforce_device_envelope("cuda", 80 * GiB)
     assert record["enforced"] is True
     assert record["device_total_bytes"] == 121 * GiB
     assert record["device_envelope_bytes"] == 80 * GiB
+    assert record["allocator_device_index"] == 0
+    assert seen["device"] == 0
     assert seen["fraction"] == pytest.approx(80 / 121)
+    assert torch.cuda.get_per_process_memory_fraction(0) == pytest.approx(80 / 121)
+
+
+def test_the_allocator_index_is_the_one_the_fraction_is_set_on(monkeypatch):
+    """A named index is passed through; the unspecified form resolves."""
+    seen = _real_allocator_api(monkeypatch, current_device=3)
+    record = mm.enforce_device_envelope("cuda:3", 80 * GiB)
+    assert record["allocator_device_index"] == 3
+    assert seen["device"] == 3
+    # `cuda` with no index is the shape the plan uses, and it must resolve to
+    # the current device rather than reaching the api as `torch.device('cuda')`.
+    record = mm.enforce_device_envelope("cuda", 80 * GiB)
+    assert record["allocator_device_index"] == 3
+    assert mm.allocator_device("cuda") == 3
+    assert mm.allocator_device("cuda:1") == 1
+    assert mm.allocator_device("cpu").type == "cpu"
 
 
 def test_enforce_device_envelope_refuses_a_budget_that_bounds_nothing(monkeypatch):
-    monkeypatch.setattr(
-        torch.cuda, "get_device_properties",
-        lambda device: type("P", (), {"total_memory": 121 * GiB})())
+    _real_allocator_api(monkeypatch)
     for bad in (0, -1, None, True, 121 * GiB, 200 * GiB):
         with pytest.raises(RuntimeError):
             mm.enforce_device_envelope("cuda", bad)
@@ -382,16 +433,20 @@ def test_both_gpu_commands_are_capped_before_any_device_work(monkeypatch):
     """
     from prismaquant import gpu_guard, tessera_joint_aura
 
-    seen = {"calls": 0}
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path",
                         lambda *a, **k: torch.device("cuda"))
-    monkeypatch.setattr(
-        torch.cuda, "get_device_properties",
-        lambda device: type("P", (), {"total_memory": 121 * GiB})())
-    monkeypatch.setattr(
-        torch.cuda, "set_per_process_memory_fraction",
-        lambda fraction, device=None: seen.update(
-            calls=seen["calls"] + 1, fraction=fraction))
+    # The same real-api stub the envelope tests use: this path resolves the
+    # allocator's index, so a stub that accepts the unspecified device would
+    # hide the very failure the fleet hit.
+    seen = _real_allocator_api(monkeypatch)
+    seen["calls"] = 0
+    real_set = torch.cuda.set_per_process_memory_fraction
+
+    def counting_set(fraction, device=None):
+        seen["calls"] += 1
+        return real_set(fraction, device)
+
+    monkeypatch.setattr(torch.cuda, "set_per_process_memory_fraction", counting_set)
 
     for command in ("prepare", "run"):
         with pytest.raises(RuntimeError, match="device envelope"):
