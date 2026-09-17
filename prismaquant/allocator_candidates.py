@@ -1579,6 +1579,50 @@ def cost_entry_is_joint_aura(cost_entry: dict) -> bool:
     return validate_joint_aura_entry(cost_entry)
 
 
+class JointCellCoordinateError(ValueError):
+    """A joint row found under a key its own operator identity does not name.
+
+    Distinct from the ``ValueError`` ``validate_joint_aura_entry`` raises for a
+    malformed row, so a caller can turn the coordinate mismatch into its own
+    refusal while leaving malformed-evidence failures exactly as they were.
+    """
+
+
+def joint_row_binds_cell(cost_entry: dict, name: str, fmt: str, *, where: str) -> bool:
+    """Whether a joint A-side found at ``name@fmt`` was produced *for* that cell.
+
+    ``cost_entry_is_joint_aura`` validates a row *internally*: its currency, its
+    Fisher application count, and that its operator and probe digests match the
+    objects they name. Every one of those is true of a row correctly produced
+    for one Linear when it is read under another: the row is self-consistent,
+    and nothing in it was ever compared with the key it was found under. The
+    operator identity carries the coordinate the row was produced for, so a
+    coverage decision -- which reads keys -- has to compare the two. Without
+    that comparison a row copied, mis-merged or re-keyed onto another cell
+    reports an A-side nobody measured, and the cell it landed on keeps a
+    weight-only cost that reads as covered.
+
+    Returns False when the entry is not a joint row at all, so a caller can ask
+    about every row it holds. Raises ``JointCellCoordinateError`` on a joint row
+    whose operator identity does not name this cell: a known coordinate
+    mismatch is a refusal, never a row to skip quietly.
+    """
+    if not cost_entry_is_joint_aura(cost_entry):
+        return False
+    operator = cost_entry.get("joint_operator_identity")
+    produced = (f"{operator.get('qname')!r}@{operator.get('format')!r}"
+                if isinstance(operator, Mapping) else "no operator identity")
+    if (not isinstance(operator, Mapping) or operator.get("qname") != name
+            or operator.get("format") != fmt):
+        raise JointCellCoordinateError(
+            f"{where}: the joint A-side at {name}@{fmt} was produced for "
+            f"{produced}. A joint row carries the activation term of the "
+            "operator it measured, so it is only its own cell; a row copied, "
+            "mis-merged or re-keyed onto another (unit, format) is a refusal "
+            "rather than coverage.")
+    return True
+
+
 def cost_entry_is_anchored_aura_supersurrogate(cost_entry: dict) -> bool:
     """Whether one row was priced by the anchored-AURA campaign.
 

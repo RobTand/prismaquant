@@ -439,26 +439,51 @@ def price_activation_only(unit: SensitivityUnit, weight: np.ndarray,
     (nothing to price) or when the card cannot price them (a hole). Callers that
     need to tell those apart read ``descriptor.quantizes_activations``.
     """
+    var = resolve_act_quant_variance(unit, plugin, act_var=act_var)
+    if var is None:
+        return None
+    return activation_dloss(unit, weight, var, gain)
+
+
+def resolve_act_quant_variance(unit: SensitivityUnit, plugin: FormatCostPlugin,
+                               *, act_var: np.ndarray | None = None
+                               ) -> np.ndarray | None:
+    """WHICH variance the A-side uses, in one place for every weight source.
+
+    Split out of :func:`price_activation_only` so a caller that cannot hold the
+    unit's weight as one array -- the per-expert checkpoint bridge, whose weight
+    is one 2-D tensor per routed expert and only exists [E, M, N] after 19 GiB
+    of stacking -- still resolves the variance the SAME way. A second selection
+    rule would let two callers disagree about which estimator they priced, which
+    is the class of silent mispricing this stage exists to remove.
+
+    Variance sources, most faithful first:
+
+      1. ``act_var`` supplied by the caller -- measured through this format's
+         own quantizer on the layer's REAL cached input rows. Nothing is
+         assumed about the activation distribution at all.
+      2. the plugin's ``expert_activation_error_variance`` for a packed unit and
+         ``activation_error_variance`` otherwise -- the real quantizer, but over
+         independent per-channel Gaussians fitted to the card's
+         ``act_sq_sum``/``act_absmax``. Faithful marginals, no joint: it cannot
+         see how outliers co-occur ACROSS the 16 consecutive channels that share
+         one NVFP4 block scale. The per-expert estimator is a separate SOURCE,
+         not a fallback: routing makes a packed unit's activation distribution a
+         function of the expert, which the dense estimate cannot represent.
+      3. the analytic uniform-grid model -- assumes the grid shape too.
+
+    Measured on Qwen3.8-27B across 32 stratified units, (2) is close to
+    unbiased against (1) -- median real/synthetic 1.011 for NVFP4 and 1.003
+    for FP8_E4M3 -- but the per-unit spread is real (p10 0.83 / p90 1.15 on
+    NVFP4, and 0.45 on L0 down_proj), which is why (1) exists as an option
+    rather than a claim that (2) is good enough everywhere.
+
+    ``None`` is not zero: it means this unit's A-side could not be priced, and
+    every caller must report that as a hole rather than as a free activation.
+    """
     desc = plugin.descriptor
     if not desc.quantizes_activations:
         return None
-    # Variance sources, most faithful first:
-    #
-    #   1. ``act_var`` supplied by the caller -- measured through this format's
-    #      own quantizer on the layer's REAL cached input rows. Nothing is
-    #      assumed about the activation distribution at all.
-    #   2. the plugin's ``activation_error_variance`` -- the real quantizer, but
-    #      over independent per-channel Gaussians fitted to the card's
-    #      ``act_sq_sum``/``act_absmax``. Faithful marginals, no joint: it cannot
-    #      see how outliers co-occur ACROSS the 16 consecutive channels that
-    #      share one NVFP4 block scale.
-    #   3. the analytic uniform-grid model -- assumes the grid shape too.
-    #
-    # Measured on Qwen3.8-27B across 32 stratified units, (2) is close to
-    # unbiased against (1) -- median real/synthetic 1.011 for NVFP4 and 1.003
-    # for FP8_E4M3 -- but the per-unit spread is real (p10 0.83 / p90 1.15 on
-    # NVFP4, and 0.45 on L0 down_proj), which is why (1) exists as an option
-    # rather than a claim that (2) is good enough everywhere.
     var = act_var
     if var is None and unit.has_expert_activation_stats:
         # A packed unit needs a variance PER EXPERT; the dense measure would
@@ -473,9 +498,7 @@ def price_activation_only(unit: SensitivityUnit, weight: np.ndarray,
             var = measure(unit)
     if var is None:
         var = analytic_act_quant_variance(unit, desc)
-    if var is None:
-        return None
-    return activation_dloss(unit, weight, var, gain)
+    return var
 
 
 def uniform_act_quant_variance(unit: SensitivityUnit, act_bits: int,

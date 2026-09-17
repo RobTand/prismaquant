@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -76,6 +77,45 @@ GPU_RUNTIME_FLAGS = {
                  "--mount", "type=bind,src=/usr/lib/wsl/lib,dst=/usr/lib/wsl/lib,readonly"),
 }
 DEFAULT_GPU_RUNTIME = "nvidia"
+
+
+def container_memory_budget_gb(spec: dict) -> float | None:
+    """The cgroup memory cap this row runs under, or ``None`` when it declares none.
+
+    A joint row cannot be bounded without one. ``CaptureMemoryGuard`` refuses at
+    construction rather than running without a budget ("bounded capture requires
+    a finite cgroup memory budget") and holds its physical margin back from this
+    cap on every later check, so the cap is what makes the guard exist at all.
+    It is NOT the aggregate physical bound: on GB10 the cgroup does not charge
+    device memory (measured -- a 16 GiB ``HostConfig.Memory`` container held
+    78.87 GiB of model and 6 GiB of KV), so this cap bounds the CPU side and the
+    aggregate is ``cap + device envelope + external headroom``, carried by the
+    plan's ``aggregate_memory_bytes`` and checked against the box by
+    ``memory_management.require_aggregate_budget``.
+
+    TWO FIELDS, TWO MEANINGS. ``cpu_memory_gb`` is this cap: what the container's
+    cgroup may charge, which on GB10 is the CPU side. ``box_memory_gb`` is the
+    box's total unified capacity, the number ``dispatch_tessera_campaign``
+    refuses to derive a row's admission demand above -- and a PrismaBuild
+    reservation for a row that holds 80 GiB of device residency beside a 34 GiB
+    CPU cap has to be the combined physical demand, not the CPU cap. Reading the
+    cap out of ``box_memory_gb`` conflated those and would have either refused
+    the pilot or under-reserved the box.
+
+    ``box_memory_gb`` remains the fallback so a spec sealed before
+    ``cpu_memory_gb`` existed keeps the invocation it was sealed with. A spec
+    that declares neither keeps the previous behaviour, which is what every row
+    that ran before either field existed relies on.
+    """
+    raw = spec.get("cpu_memory_gb", spec.get("box_memory_gb"))
+    if raw is None:
+        return None
+    if (isinstance(raw, bool) or not isinstance(raw, (int, float))
+            or not math.isfinite(float(raw)) or raw <= 0):
+        raise RuntimeError(
+            "the container memory cap must be a positive number of GiB when a spec "
+            f"declares one, got {raw!r}")
+    return float(raw)
 
 
 def validate_container(spec: dict, *, bounded: bool = False) -> None:
@@ -391,6 +431,32 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
             "--user", f"{uid}:{gid}", "--workdir", "/workspace",
             "--entrypoint", "", "--mount",
             f"type=bind,src={cwd},dst=/workspace,readonly"]
+    budget_gb = container_memory_budget_gb(spec)
+    if budget_gb is not None:
+        # THE HARD, KERNEL-ENFORCED LIMIT -- on what the cgroup ACCOUNTS, which
+        # is not the same thing as "everything this row allocates".
+        #
+        # Without it ``CaptureMemoryGuard`` cannot even be constructed ("bounded
+        # capture requires a finite cgroup memory budget"), so a bounded capture
+        # row was refused rather than bounded. With it the guard refuses at
+        # ``cap - MARGIN_BYTES`` and on its host floor, and it also adds the
+        # whole CUDA reservation to the cgroup charge -- the conservative sum
+        # that covers a driver which does NOT charge device memory here.
+        #
+        # That sum is a refusal at the guard's CHECK POINTS, not a physical
+        # bound: between checks a large allocation can overshoot, and a cgroup
+        # cap a driver does not charge bounds the CPU side alone. So this cap is
+        # the CPU-accounted hard limit, and a row that needs an aggregate bound
+        # still needs its risky allocations preceded by ``check(reserve_bytes=..)``
+        # or a bounded CUDA allocator. See docs/ARCHITECTURE.md and
+        # docs/design note in the joint-aura-resume directory; do not read this
+        # line as "GPU + CPU is bounded by box_memory_gb".
+        #
+        # The value is the spec's own ``box_memory_gb``: the same declaration the
+        # demand derivation already refuses to exceed, so the number priced and
+        # the number enforced are one number. ``--memory-swap`` equal to the
+        # limit stops the container growing into swap instead of failing.
+        argv += ["--memory", f"{budget_gb:g}g", "--memory-swap", f"{budget_gb:g}g"]
     for mount in spec["container"].get("mounts", []):
         value = f"type=bind,src={mount['source']},dst={mount['target']}"
         if mount.get("readonly", False):

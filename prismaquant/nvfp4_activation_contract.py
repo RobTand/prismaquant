@@ -1877,6 +1877,20 @@ def _nvfp4_activation_qdq_registered_op(
     establish that layout (row padding in particular) before this leg is priced
     against a serve, so the priced contract is the operator's ELEMENT decisions
     plus this module's scale rule, not a guess about the plane.
+
+    AN EMPTY ACTIVATION IS ALLOCATED, NEVER LAUNCHED.  ``scaled_fp4_quant``
+    derives its launch grid from the token count, so a zero-row activation asks
+    for an empty grid: measured on the pinned image (2026-09-17, Tessera's
+    binding of the SAME registered operator) the call returns,
+    ``torch.cuda.synchronize()`` reports nothing, and the next CHECKED launch
+    anywhere in the process raises ``CUDA error: invalid argument`` -- the
+    error is sticky in the context, so an empty activation batch poisons an
+    unrelated later kernel.  Nothing here is the operator's own defect and
+    nothing here can fix it, so this leg does not reach it: an empty activation
+    has no code to quantise, and its dequantised answer is the empty tensor
+    itself, in the input's own shape, dtype and device.  The guards above run
+    FIRST, so an empty tensor with a bad last dim, a bad ``G`` or a non-CUDA
+    device is still refused by name.
     """
     if x.shape[-1] % FP4_GROUP_SIZE:
         raise ValueError(
@@ -1892,6 +1906,11 @@ def _nvfp4_activation_qdq_registered_op(
             f"is on {x.device.type}"
         )
     original_shape, original_dtype = x.shape, x.dtype
+    if x.numel() == 0:
+        # ``new_empty`` preserves this tensor's dtype and device by torch's own
+        # contract, which is the answer the non-empty path returns too
+        # (``... .to(original_dtype)``).
+        return x.new_empty(original_shape)
     rows = x.reshape(-1, x.shape[-1]).contiguous().to(torch.bfloat16)
     packed, _scale_plane = torch.ops._C.scaled_fp4_quant(
         rows,

@@ -92,12 +92,18 @@ import sys
 from pathlib import Path
 
 if __package__:
-    from .tessera_campaign_container import validate_container
+    from .tessera_campaign_container import (
+        container_memory_budget_gb,
+        validate_container,
+    )
 else:
     # Direct script execution puts only tools/ on sys.path. Planning also
     # reads the shared calibration contract from the sibling package.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from tessera_campaign_container import validate_container
+    from tessera_campaign_container import (
+        container_memory_budget_gb,
+        validate_container,
+    )
 
 PBCAMPAIGN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbcampaign.py")
 
@@ -777,6 +783,656 @@ def verify_manifest_demands(spec: dict, census: dict, rows: list, *,
             f"{len(refusals)} of {len(rows)} rows declare a memory demand "
             "their own argv does not support:\n" + "\n".join(refusals))
     return records
+
+
+def parse_pbrun_demand(demand: str) -> "dict[str, int]":
+    """Parse pbrun's ``key=value,key=value`` demand spelling."""
+    if not isinstance(demand, str) or not demand.strip():
+        raise DemandRefused("--demand must be a non-empty pbrun demand string")
+    parsed: dict[str, int] = {}
+    for item in demand.split(","):
+        name, separator, value = item.partition("=")
+        if not separator or not name.strip():
+            raise DemandRefused(f"--demand {demand!r} is not key=value pairs")
+        try:
+            parsed[name.strip()] = int(value)
+        except ValueError:
+            raise DemandRefused(
+                f"--demand {demand!r} has a non-integer {name.strip()!r}"
+            ) from None
+    return parsed
+
+
+def joint_submission_memory_bound(spec: dict, plan: dict) -> dict:
+    """The combined physical bound the row's own policy states, in bytes.
+
+    A joint row has three numbers and they are not interchangeable. The
+    container cap bounds only what the cgroup charges -- on GB10 that is the
+    CPU side, measured at 16 GiB charged for a container that held 78.87 GiB
+    of model and 6 GiB of KV -- so the demand PrismaBuild reserves has to be
+    the combined physical demand, and the device envelope is a *subset* of it
+    rather than a second box.
+
+    The plan's ``aggregate_memory_bytes`` is that combined bound and is used
+    first. A plan written before it existed gets the same number derived from
+    the two bounds it does state, ``cpu_memory_gb`` (whose cgroup cap is what
+    the launcher passes as ``--memory``) plus ``max_gpu_bytes``. When neither
+    is derivable the record says so rather than inventing a bound.
+    """
+    gib = 1024 ** 3
+    aggregate = plan.get("aggregate_memory_bytes")
+    if (isinstance(aggregate, int) and not isinstance(aggregate, bool)
+            and aggregate > 0):
+        return {"bound_bytes": aggregate,
+                "bound_basis": "plan.aggregate_memory_bytes"}
+    cap_gb = container_memory_budget_gb(spec)
+    gpu_bytes = plan.get("max_gpu_bytes")
+    if (cap_gb is not None and isinstance(gpu_bytes, int)
+            and not isinstance(gpu_bytes, bool) and gpu_bytes > 0):
+        return {"bound_bytes": int(round(cap_gb * gib)) + gpu_bytes,
+                "bound_basis": "spec container cap + plan.max_gpu_bytes"}
+    return {"bound_bytes": None, "bound_basis": None}
+
+
+def verify_joint_submission_demand(spec: dict, plan: dict, demand: str, *,
+                                   label: str = "joint row") -> dict:
+    """Refuse a PrismaBuild reservation below the row's own physical bound.
+
+    Neither of the two mistakes is a warning: reserving the container cap
+    under-reserves the box by exactly the device envelope, and reserving
+    34 GiB while the row's guard is allowed to hold 80 GiB of device
+    residency beside it buys an admission the row then declines.
+
+    Reserving *more* than the bound is allowed and is what A2 does (114 GiB
+    for a 34 GiB cap beside an 80 GiB device envelope): the excess is
+    conservatism, and it is recorded rather than silently trimmed.
+    """
+    gib = 1024 ** 3
+    parsed = parse_pbrun_demand(demand)
+    reserved_gb = parsed.get("mem_gb")
+    if reserved_gb is None:
+        raise DemandRefused(
+            f"{label}: --demand {demand!r} reserves no mem_gb. A joint row's "
+            "device residency is not charged to its container cap, so the "
+            "reservation has to state the combined physical demand.")
+    record = {"row": label, "demand": demand, "reserved_mem_gb": reserved_gb,
+              **joint_submission_memory_bound(spec, plan)}
+    bound = record["bound_bytes"]
+    if bound is not None and reserved_gb * gib < bound:
+        raise DemandRefused(
+            f"{label}: --demand reserves {reserved_gb} GiB, below the "
+            f"{math.ceil(bound / gib)} GiB combined physical bound this row "
+            f"states ({record['bound_basis']}: {bound} B). The container cap "
+            "bounds the CPU side alone, so reserving it here under-reserves "
+            "the box by the device envelope; reserve the combined demand, or "
+            "lower the plan's own bound first.")
+    return record
+
+
+#: The scope a joint pass evaluates, and the two shapes it can take.  A
+#: campaign-scoped pass evaluates every unit and every window the campaign's
+#: census defines; a diagnostic pass evaluates an explicitly frozen window
+#: subset of that same roster.  The scope is *derived* from the census and
+#: campaign plan the joint plan binds by sha256 -- never from a tally the plan
+#: states about itself -- so a roster or window set narrowed without moving the
+#: declared count cannot read as complete.  Two rosters of equal length with
+#: different members are different scopes; so are two window sets of equal size
+#: with different membership.
+CAMPAIGN_SCOPE_SCHEMA = "prismaquant.tessera_joint_campaign_scope.v1"
+COMPLETE_CAMPAIGN_SCOPE = "complete_campaign"
+DIAGNOSTIC_SCOPE = "diagnostic_window_subset"
+CAMPAIGN_SCOPE_KINDS = (COMPLETE_CAMPAIGN_SCOPE, DIAGNOSTIC_SCOPE)
+
+CENSUS_SCHEMA = "prismaquant.tessera_campaign_census.v1"
+PANEL_SCHEMA = "prismaquant.tessera_joint_eval_panel.v1"
+PANEL_STATUS = "diagnostic_pilot"
+
+
+class ScopeRefused(RuntimeError):
+    """A joint row's evaluated scope is not the scope it is submitted for."""
+
+
+def _bound_json(plan: dict, key: str, *, label: str) -> dict:
+    """The JSON artifact a joint plan binds by path and sha256, re-checked."""
+    declared = (plan.get("inputs") or {}).get(key)
+    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
+            or not isinstance(declared.get("sha256"), str)):
+        raise ScopeRefused(f"{label}: joint plan inputs.{key} is not a bound artifact")
+    path = Path(declared["path"])
+    actual = _sha256_of(path)
+    if actual != declared["sha256"]:
+        raise ScopeRefused(
+            f"{label}: plan inputs.{key} is {path}, which hashes to {actual}, "
+            f"not the bound {declared['sha256']}")
+    return json.loads(path.read_text())
+
+
+def _bound_digest(container: dict, key: str, *, label: str, where: str) -> str:
+    """One artifact a plan binds by path and sha256, re-checked, as its digest.
+
+    The same check ``_bound_json`` makes, for the artifacts a scope *names* but
+    never parses: the calibration tokens, the canonical capture manifest and the
+    merged campaign checkpoint are large or non-JSON, and a digest is all the
+    identity needs.  Omitting the check would let a plan bind a digest it does
+    not hold.
+    """
+    declared = (container or {}).get(key)
+    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
+            or not isinstance(declared.get("sha256"), str) or not declared["sha256"]):
+        raise ScopeRefused(f"{label}: {where} is not a bound artifact")
+    path = Path(declared["path"])
+    actual = _sha256_of(path)
+    if actual != declared["sha256"]:
+        raise ScopeRefused(
+            f"{label}: {where} is {path}, which hashes to {actual}, not the "
+            f"bound {declared['sha256']}")
+    return actual
+
+
+def _bound_pickle(container: dict, key: str, *, label: str, where: str) -> dict:
+    """The pickled artifact a plan binds by path and sha256, re-read and checked.
+
+    ``_bound_json``'s check and then the object itself, for the campaign cost
+    table: the plan's own record of which ``(unit, format)`` cells the campaign
+    priced.  The digest is what makes that record the plan's rather than the
+    caller's -- an edited table no longer hashes to what the plan declares --
+    and reading it is one sequential pass over a few hundred MiB, not the
+    multi-GiB candidate roster a per-cell re-derivation from the checkpoint
+    would need.
+    """
+    import pickle
+
+    declared = (container or {}).get(key)
+    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
+            or not isinstance(declared.get("sha256"), str) or not declared["sha256"]):
+        raise ScopeRefused(f"{label}: {where} is not a bound artifact")
+    path = Path(declared["path"])
+    actual = _sha256_of(path)
+    if actual != declared["sha256"]:
+        raise ScopeRefused(
+            f"{label}: {where} is {path}, which hashes to {actual}, not the "
+            f"bound {declared['sha256']}; the campaign cost table the plan names "
+            "is not the one on disk, so the cells it priced are not the plan's")
+    with path.open("rb") as handle:
+        blob = pickle.load(handle)
+    if not isinstance(blob, dict):
+        raise ScopeRefused(f"{label}: {where} ({path}) is not a cost payload")
+    return blob
+
+
+#: The census fields that identify the DRAW, not merely its size. ``nsamples``
+#: and ``seqlen`` say how many windows; these say which ones, over which corpus
+#: revision and which tokenizer ids, and they are exactly what
+#: ``tessera_campaign.require_census_draw`` holds a producer run to at encode
+#: time. Two censuses with the same roster and the same window count that differ
+#: here are two different calibrations, and a scope that did not bind them would
+#: let one stand in for the other.
+CENSUS_DRAW_FIELDS = ("model", "text_sha256", "fit_ids_sha256",
+                      "seed", "layer_stride")
+
+
+def _census_draw(census: dict, *, label: str) -> dict:
+    """The frozen draw a census was taken on, or a refusal naming the field."""
+    draw: dict = {}
+    for field in ("model", "text_sha256", "fit_ids_sha256"):
+        value = census.get(field)
+        if not isinstance(value, str) or not value:
+            raise ScopeRefused(
+                f"{label}: the census declares no {field}, so the calibration "
+                "draw it was taken on is unidentified; a roster and a window "
+                "count are not a draw")
+        draw[field] = value
+    for field in ("seed", "layer_stride"):
+        value = census.get(field)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ScopeRefused(
+                f"{label}: the census declares no integer {field}, so the "
+                "calibration draw it was taken on is unidentified")
+        draw[field] = value
+    return draw
+
+
+def joint_campaign_scope(plan: dict, *, label: str = "joint row") -> dict:
+    """The exact roster and window identity one joint plan evaluates.
+
+    Read from the plan's own bound census and campaign plan.  A plan whose
+    census roster is not the campaign plan's roster, whose ``calib_seqlen`` is
+    not the census ``seqlen``, or whose declared unit/group tallies do not
+    equal the roster it actually bound refuses here -- the counts are checked
+    against the identity, not accepted in place of it.
+    """
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+
+    inputs = plan.get("inputs")
+    if not isinstance(inputs, dict):
+        raise ScopeRefused(f"{label}: the joint plan declares no inputs block")
+    census = _bound_json(plan, "census", label=label)
+    campaign = _bound_json(plan, "campaign_plan", label=label)
+    if census.get("schema") != CENSUS_SCHEMA:
+        raise ScopeRefused(
+            f"{label}: census schema is {census.get('schema')!r}, expected {CENSUS_SCHEMA}")
+    if Path(campaign["census"]).resolve() != Path(inputs["census"]["path"]).resolve():
+        raise ScopeRefused(
+            f"{label}: the campaign plan and the joint plan name different censuses")
+    roster = census.get("unit_shapes")
+    groups = census.get("anchor_groups")
+    if (not isinstance(roster, dict) or not roster
+            or not isinstance(groups, dict) or not groups):
+        raise ScopeRefused(f"{label}: the census carries no exact roster")
+    owners: set = set()
+    for row in campaign.get("rows") or []:
+        owners.update(row.get("members") or [])
+    if owners != set(roster):
+        raise ScopeRefused(
+            f"{label}: the census roster is not the campaign plan's roster "
+            f"({len(owners)} campaign members, {len(roster)} census units)")
+    # The census is the window authority: a plan that narrows its own
+    # ``n_calib_samples`` is a narrower scope, not the campaign's.
+    campaign_windows = census.get("nsamples")
+    seqlen = census.get("seqlen")
+    if (isinstance(campaign_windows, bool) or not isinstance(campaign_windows, int)
+            or campaign_windows <= 0 or not isinstance(seqlen, int) or seqlen <= 0):
+        raise ScopeRefused(
+            f"{label}: the census declares no window count or sequence length")
+    execution = plan.get("execution") or {}
+    if execution.get("calib_seqlen") != seqlen:
+        raise ScopeRefused(
+            f"{label}: plan calib_seqlen {execution.get('calib_seqlen')!r} is not "
+            f"the census seqlen {seqlen!r}")
+    evaluated = execution.get("n_calib_samples")
+    panel = plan.get("joint_eval")
+    if panel is None:
+        kind, selection = COMPLETE_CAMPAIGN_SCOPE, None
+        windows = evaluated
+    else:
+        kind = DIAGNOSTIC_SCOPE
+        if (not isinstance(panel, dict) or panel.get("schema") != PANEL_SCHEMA
+                or panel.get("status") != PANEL_STATUS):
+            raise ScopeRefused(
+                f"{label}: a narrow scope needs an explicit {PANEL_SCHEMA} "
+                f"panel with status {PANEL_STATUS!r}")
+        selected = panel.get("selection")
+        windows = selected.get("size") if isinstance(selected, dict) else None
+        if (isinstance(windows, bool) or not isinstance(windows, int)
+                or not 0 < windows < campaign_windows):
+            raise ScopeRefused(
+                f"{label}: a diagnostic scope selects a strict, sized subset of the "
+                f"{campaign_windows}-window campaign, got {windows!r}")
+        if panel.get("shape") != [windows, seqlen]:
+            raise ScopeRefused(
+                f"{label}: the diagnostic panel shape {panel.get('shape')!r} is not "
+                f"[{windows}, {seqlen}]")
+        selection = canonical_json_sha256(panel, where=f"{label} joint evaluation panel")
+    if isinstance(windows, bool) or not isinstance(windows, int) or windows <= 0:
+        raise ScopeRefused(f"{label}: the plan evaluates no windows")
+    if kind == COMPLETE_CAMPAIGN_SCOPE and windows != campaign_windows:
+        raise ScopeRefused(
+            f"{label}: a campaign-scoped plan evaluates all {campaign_windows} "
+            f"windows, got {windows}; freeze the subset as an explicit diagnostic panel")
+    declared = (inputs.get("required_source_units"),
+                inputs.get("required_campaign_groups"))
+    if declared != (len(roster), len(groups)):
+        raise ScopeRefused(
+            f"{label}: the plan declares {declared[0]!r}/{declared[1]!r} units/groups "
+            f"but bound {len(roster)}/{len(groups)}; a count is not the roster")
+    # The draw and the capture are the other half of "the same calibration
+    # contract": the roster says which Linears were priced, this says over which
+    # windows, which corpus revision and which tokenizer ids, and which captured
+    # activations were read. Read from the plan's own bound artifacts, so a plan
+    # cannot restate one it does not hold.
+    calibration_sha256 = canonical_json_sha256({
+        "census_draw": _census_draw(census, label=label),
+        "window_count": campaign_windows,
+        "calib_seqlen": seqlen,
+        "calibration_input_sha256": _bound_digest(
+            plan, "calibration_input", label=label,
+            where="joint plan calibration_input"),
+        "canonical_capture_sha256": _bound_digest(
+            plan, "canonical_capture", label=label,
+            where="joint plan canonical_capture"),
+    }, where=f"{label} calibration identity")
+    # The candidate roster is `identity.units[unit].menu` inside the campaign's
+    # merged checkpoint, and the joint loader refuses any priced rung outside
+    # it. Binding that artifact binds the exact (unit, format) roster the pass
+    # is admitted against: a reduced or substituted menu is different bytes, so
+    # it is a different campaign. The bind costs ONE sequential read of the
+    # artifact per submission (``_bound_digest`` hashes it rather than trusting
+    # the plan's own number); what it avoids is parsing the identity into the
+    # graph, which is the memory the joint loader's streaming seal exists to
+    # remove.
+    campaign_checkpoint_sha256 = _bound_digest(
+        inputs, "merged_checkpoint", label=label,
+        where="joint plan inputs.merged_checkpoint")
+    return {
+        "schema": CAMPAIGN_SCOPE_SCHEMA,
+        "kind": kind,
+        "source_roster_sha256": canonical_json_sha256(
+            sorted(roster), where=f"{label} source roster"),
+        "source_unit_count": len(roster),
+        "campaign_group_roster_sha256": canonical_json_sha256(
+            groups, where=f"{label} campaign group roster"),
+        "campaign_group_count": len(groups),
+        "window_count": windows,
+        "campaign_window_count": campaign_windows,
+        "calib_seqlen": seqlen,
+        "selection_sha256": selection,
+        "calibration_sha256": calibration_sha256,
+        "campaign_checkpoint_sha256": campaign_checkpoint_sha256,
+    }
+
+
+CAMPAIGN_IDENTITY_SCHEMA = "prismaquant.tessera_joint_campaign_identity.v1"
+
+#: The fields of the frozen campaign identity a submission has to reproduce.
+#: ``window_count`` is deliberately absent: the campaign identity names the
+#: campaign's own window total, and whether a plan evaluates all of it is the
+#: ``kind`` the caller requires, not a property of the campaign.
+#: ``selection_sha256`` is absent for the same reason -- a diagnostic subset is
+#: a different ``kind`` of the same campaign, and its panel identity travels in
+#: the scope the submission is stamped with. ``calibration_sha256`` is NOT
+#: absent: the pilot and the full continuation read one draw and one capture, so
+#: both have to reproduce it, and it deliberately excludes the panel so that
+#: they can.
+CAMPAIGN_IDENTITY_FIELDS = (
+    "source_unit_count", "source_roster_sha256",
+    "campaign_group_count", "campaign_group_roster_sha256",
+    "campaign_window_count", "calib_seqlen",
+    "calibration_sha256", "campaign_checkpoint_sha256")
+
+
+def campaign_identity(scope: dict) -> dict:
+    """The frozen identity of the campaign a scope belongs to.
+
+    Derived from a plan's bound census so that the pilot and the full
+    continuation can be held to one roster and one window total without either
+    of them restating it.  An operator seals this once and passes it to every
+    joint submission; the generic path never hardcodes the numbers.
+    """
+    record = {"schema": CAMPAIGN_IDENTITY_SCHEMA,
+              **{field: scope[field] for field in CAMPAIGN_IDENTITY_FIELDS}}
+    return record
+
+
+def verify_joint_campaign_scope(plan: dict, *, require_scope: str,
+                                campaign: dict, label: str = "joint row") -> dict:
+    """Refuse a joint submission whose scope is not the scope it claims.
+
+    ``require_scope`` is what the caller is submitting *for*, and a diagnostic
+    subset is not the campaign's score: asking for ``complete_campaign`` and
+    handing it a plan that evaluates 16 of 512 windows refuses here, before the
+    read set is built, rather than surfacing as a shortfall in the merged cost
+    after the GPU window has closed.
+
+    ``campaign`` is the frozen campaign identity the submission belongs to.  It
+    is required: a plan is self-consistent with whatever census it binds, so
+    without an identity that is fixed *outside* the plan a coherently narrowed
+    roster would still read as the whole campaign.  Every identity field is
+    compared exactly -- the counts are a convenience of the record, not the
+    acceptance.
+    """
+    if require_scope not in CAMPAIGN_SCOPE_KINDS:
+        raise ScopeRefused(
+            f"{label}: unknown required scope {require_scope!r}; expected one of "
+            f"{', '.join(CAMPAIGN_SCOPE_KINDS)}")
+    if not isinstance(campaign, dict) or campaign.get("schema") != CAMPAIGN_IDENTITY_SCHEMA:
+        raise ScopeRefused(
+            f"{label}: a joint submission must bind a {CAMPAIGN_IDENTITY_SCHEMA} "
+            "campaign identity; a plan's own census cannot show its own scope is "
+            "the campaign's")
+    # A field the identity does not carry cannot be compared, and "absent"
+    # compares unequal to every value -- which is how an identity sealed before
+    # the calibration and candidate-roster binding would refuse the *right*
+    # plan with a message about the wrong thing. Name the re-seal instead.
+    absent = [field for field in CAMPAIGN_IDENTITY_FIELDS if field not in campaign]
+    if absent:
+        raise ScopeRefused(
+            f"{label}: the frozen campaign identity carries no "
+            f"{', '.join(absent)}; it predates binding the calibration draw, the "
+            "capture and the campaign's candidate roster, and must be re-sealed "
+            "from a campaign-scoped plan before it can stand for the campaign")
+    scope = joint_campaign_scope(plan, label=label)
+    for field in CAMPAIGN_IDENTITY_FIELDS:
+        declared = campaign.get(field)
+        if declared != scope[field]:
+            raise ScopeRefused(
+                f"{label}: the plan's {field} is {scope[field]!r}, not the frozen "
+                f"campaign identity's {declared!r}; a roster of equal length with "
+                "different members is a different campaign")
+    if scope["kind"] != require_scope:
+        raise ScopeRefused(
+            f"{label}: this submission requires a {require_scope} scope, but the "
+            f"plan evaluates {scope['kind']} ({scope['window_count']} of "
+            f"{scope['campaign_window_count']} windows over "
+            f"{scope['source_unit_count']} units, selection "
+            f"{scope['selection_sha256']}). A diagnostic subset is its own "
+            "evidence; submit the campaign-scoped plan for the campaign's score.")
+    return scope
+
+
+def _joint_row_binds_cell(row: dict, name: str, fmt: str, *, label: str) -> bool:
+    """Whether this row is a joint A-side **for this cell**.
+
+    The predicate itself is the shared one
+    (:func:`prismaquant.allocator_candidates.joint_row_binds_cell`) so that the
+    submission-time gate and the stage that computes coverage cannot drift; the
+    only thing added here is this tool's own refusal type and label.
+    """
+    from prismaquant.allocator_candidates import joint_row_binds_cell
+
+    try:
+        return joint_row_binds_cell(row, name, fmt, where=label)
+    except ValueError as error:
+        raise ScopeRefused(str(error)) from error
+
+
+def _bound_joint_cells(costs: dict, *, label: str) -> set:
+    """The ``(unit, format)`` cells whose own joint A-side is bound to them.
+
+    One walk, one answer, for both readers of "this artifact already carries an
+    activation term at this cell": the coverage roster below, and ``submit-aqua``
+    deciding whether a stage would add anything. A row that does not bind its own
+    key is a refusal here rather than a cell either reader may count, so the two
+    cannot disagree about which cells are covered.
+    """
+    bound: set = set()
+    for name, entry in costs.items():
+        if not isinstance(entry, dict):
+            continue
+        for fmt, row in entry.items():
+            if not isinstance(row, dict):
+                continue
+            if _joint_row_binds_cell(row, name, fmt, label=label):
+                bound.add((name, fmt))
+    return bound
+
+
+def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
+                         *, label: str = "aqua row",
+                         accept_joint_cells_outside_plan: bool = False,
+                         ) -> "tuple[dict, frozenset]":
+    """The exact ``(unit, format)`` roster AQUA is asked to price, from the plan.
+
+    Returns ``(record, cells)``. ``cells`` is the requested roster itself; the
+    record is the same thing as counts and a digest, so a submission can stamp
+    it without carrying hundreds of thousands of tuples in its summary.
+
+    The roster is the **plan's**, read from the cost table the plan binds at
+    ``inputs.merged_cost`` and re-checked against the sha256 it declares there.
+    That table is the campaign's own priced surface: the cells the allocation is
+    allowed to select from. ``--cost-in`` -- the weight-only or joint-merged
+    table the stage merges an A-side into -- has to reproduce it unit for unit.
+
+    Deriving the requested set from the artifact under test is the hole this
+    closes. The stage states its acceptance against the cells it is given, so a
+    table narrowed to the cells that already carry a price leaves the gate
+    holding a denominator that the narrowing moved: deleting one unit's cell
+    while another unit still carries that format leaves the unit roster exact
+    and the carried-format union exact, and if the remainder is joint-priced the
+    run reads as complete coverage while a planned cell has no A-side at all.
+    Binding to the plan's own table makes that case a refusal, and makes a cost
+    table edited after the plan was sealed a refusal of its own.
+
+    ``formats`` is the campaign's menu and has to be exactly the union of the
+    plan's cells. Naming a subset would move the denominator the same way: the
+    cells it left out are exactly the ones whose A-side would then go unchecked.
+
+    Extra cells are read the same way round. A cell the plan never priced that
+    is *not* already joint-priced would be priced by this stage, which makes the
+    gate stricter rather than narrower -- but it is still a row the campaign's
+    own table does not have, so it refuses.
+
+    A cell the plan never priced that already carries its own joint A-side is a
+    joint pass's addition. Being joint-priced is not by itself evidence that the
+    row belongs to *this* plan: the row is internally valid and its own cell is
+    the one it names, but nothing in it was compared with the plan's draw, its
+    capture or its candidate menu, so a pass over a wider roster would place
+    prices this campaign never priced beside the plan's own table and the
+    artifact would read as the plan's surface. It refuses, naming the re-seal
+    instead, unless the caller passes
+    ``accept_joint_cells_outside_plan`` -- which is how an operator reusing an
+    artifact sealed against an older roster keeps that reuse explicit and
+    recorded as unverified rather than silent. A row whose operator coordinate
+    is not the key it was found under is a refusal either way.
+    """
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+
+    census = _bound_json(plan, "census", label=label)
+    roster = census.get("unit_shapes")
+    if not isinstance(roster, dict) or not roster:
+        raise ScopeRefused(f"{label}: the plan's bound census carries no roster")
+    planned = _bound_pickle(
+        plan.get("inputs") or {}, "merged_cost", label=label,
+        where="joint plan inputs.merged_cost")
+    planned_costs = planned.get("costs")
+    if not isinstance(planned_costs, dict) or not planned_costs:
+        raise ScopeRefused(
+            f"{label}: the cost table the plan binds carries no 'costs' table, "
+            "so it does not say which cells the campaign priced")
+    costs = payload.get("costs")
+    if not isinstance(costs, dict) or not costs:
+        raise ScopeRefused(f"{label}: the cost artifact carries no 'costs' table")
+    # One walk, before anything is counted: every joint row has to be its own
+    # cell. A row that is not raises here, so no later reader sees a set with a
+    # row whose coordinate this function never checked.
+    bound_joints = _bound_joint_cells(costs, label=f"{label} cost artifact")
+    # The unit roster is checked on BOTH tables against the plan's bound census.
+    # A unit the plan priced and the artifact lacks would leave the campaign
+    # short an A-side while reading as complete; a unit the artifact carries
+    # that the plan never priced is not the campaign's cell at all.
+    for what, table in (("the cost table the plan binds", planned_costs),
+                        ("the cost artifact", costs)):
+        missing = sorted(set(roster) - set(table))
+        extra = sorted(set(table) - set(roster))
+        if missing or extra:
+            raise ScopeRefused(
+                f"{label}: {what} is not the plan's roster -- "
+                f"{len(missing)} unit(s) the plan priced are absent (e.g. "
+                f"{missing[:3]}) and {len(extra)} unit(s) it never priced are "
+                f"carried (e.g. {extra[:3]}).")
+    wanted = [str(item) for item in formats]
+    if len(set(wanted)) != len(wanted) or not wanted:
+        raise ScopeRefused(f"{label}: --formats must name each format once")
+
+    cells: set = set()
+    planned_formats: set = set()
+    units_missing: list = []
+    missing_total = 0
+    units_extra: list = []
+    extra_total = 0
+    joint_extra = 0
+    for name in sorted(roster):
+        planned_entry = planned_costs[name]
+        if not isinstance(planned_entry, dict):
+            raise ScopeRefused(
+                f"{label}: the cost table the plan binds has no per-format row "
+                f"for {name}")
+        entry = costs[name]
+        if not isinstance(entry, dict):
+            raise ScopeRefused(f"{label}: {name} has no per-format row")
+        expected = {fmt for fmt, row in planned_entry.items()
+                    if isinstance(row, dict)}
+        carried = {fmt for fmt, row in entry.items() if isinstance(row, dict)}
+        planned_formats |= expected
+        # The requested roster is the plan's cells, so it is the same digest for
+        # the same plan whether or not a joint pass has since added rows of its
+        # own.
+        cells.update((name, fmt) for fmt in expected)
+        gone = sorted(expected - carried)
+        if gone:
+            missing_total += len(gone)
+            units_missing.append(
+                # An empty entry is named as such rather than by one of the
+                # cells it lost: it is the shape a truncating write or a
+                # dropped merge produces, and the unit is present exactly as
+                # the roster demands.
+                f"{name}@<entry empty>" if not carried else f"{name}@{gone[0]}")
+        outside = carried - expected
+        invented = []
+        outside_joints = []
+        for fmt in sorted(outside):
+            if (name, fmt) in bound_joints:
+                outside_joints.append(fmt)
+                joint_extra += 1
+            else:
+                invented.append(fmt)
+        if outside_joints and not accept_joint_cells_outside_plan:
+            joints = ", ".join(f"{name}@{fmt}" for fmt in outside_joints[:5])
+            raise ScopeRefused(
+                f"{label}: the cost artifact carries {len(outside_joints)} "
+                f"joint-priced cell(s) the plan's own cost table never priced "
+                f"(e.g. {joints}). A joint row is bound to the coordinate it "
+                "names and to nothing else -- it is not compared with this "
+                "plan's draw, capture or candidate menu -- so a pass over a "
+                "wider roster would place this campaign's table beside prices "
+                "it never priced. Seal a requested roster that names them, or "
+                "pass --accept-joint-cells-outside-plan to reuse the artifact "
+                "as unverified.")
+        if invented:
+            extra_total += len(invented)
+            units_extra.append(f"{name}@{invented[0]}")
+    if missing_total or extra_total:
+        # Bounded, like every other refusal here: a campaign has tens of
+        # thousands of units, and naming each one floods the log the operator
+        # has to read. The totals are the contract; the sample is what makes
+        # them checkable.
+        missing_units, extra_units = len(units_missing), len(units_extra)
+        units_missing, units_extra = units_missing[:5], units_extra[:5]
+        raise ScopeRefused(
+            f"{label}: the cost artifact is not the plan's priced surface -- it "
+            f"does not carry {missing_total} planned (unit, format) cell(s) "
+            f"across {missing_units} unit(s) (e.g. "
+            f"{', '.join(units_missing) or 'none'}) and carries {extra_total} "
+            f"cell(s) the plan's cost table never priced across "
+            f"{extra_units} unit(s) (e.g. "
+            f"{', '.join(units_extra) or 'none'}). The stage states its "
+            "acceptance against the requested cells, so an artifact that drops "
+            "one unit's cell while another unit still carries that format would "
+            "narrow the denominator instead of filling the hole.")
+    unnamed = sorted(planned_formats - set(wanted))
+    absent = sorted(set(wanted) - planned_formats)
+    if unnamed or absent:
+        raise ScopeRefused(
+            f"{label}: --formats {sorted(wanted)} is not the menu the plan "
+            f"prices -- the plan's cost table holds {unnamed} that are unnamed "
+            f"and none of {absent}. The requested set is the denominator the "
+            "coverage gate reads, so it is bound to the plan's cells rather "
+            "than narrowed to the ones that already have a price.")
+    record = {"requested_cells": len(cells),
+              "requested_units": len(roster),
+              "formats": sorted(wanted),
+              # Joint rows a joint pass added beyond the plan's own table. They
+              # are not part of the requested roster, and they are accepted only
+              # when the caller asked for that reuse explicitly: the flag is
+              # recorded here so an artifact holding cells this campaign never
+              # priced carries that fact into every receipt that stamps this
+              # record rather than reading as the plan's own surface.
+              "joint_cells_outside_plan": joint_extra,
+              "joint_cells_outside_plan_accepted_unverified": bool(
+                  joint_extra and accept_joint_cells_outside_plan),
+              "roster_sha256": canonical_json_sha256(
+                  {"units": sorted(roster), "cells": sorted(cells)},
+                  where=f"{label} requested roster")}
+    return record, frozenset(cells)
 
 
 def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
@@ -1739,6 +2395,7 @@ PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
 
 JOINT_ENTRY_POINT = "prismaquant.tessera_joint_aura"
 ALLOCATION_ENTRY_POINT = "prismaquant.tessera_joint_allocation"
+AQUA_ENTRY_POINT = "prismaquant.aqua_activation_cost"
 EXPORT_ENTRY_POINT = "tessera.experiments.export_tessera_serving"
 
 
@@ -1765,7 +2422,7 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
 
 
 def _pbrun_argv(args, *, manifest: Path, inner: list[str],
-                progress_phases=()) -> list[str]:
+                progress_phases=(), gpu_memory_gb=None) -> list[str]:
     """The submission command, with ``--data-manifest`` before ``--detach``.
 
     Everything after ``--`` is the action; ``--data-manifest`` is an option of
@@ -1776,6 +2433,11 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     """
     spec = Path(args.spec).read_text()
     argv = ["python3", str(args.pbrun), "--demand", args.demand]
+    if gpu_memory_gb is not None:
+        # The device envelope is a *subset* of the unified reservation on
+        # GB10, not a second box: without this PB caps the GPU subset at the
+        # whole reservation and the plan's own device bound is not enforced.
+        argv += ["--gpu-memory-gb", str(gpu_memory_gb)]
     if args.cpus is not None:
         argv += ["--cpus", str(args.cpus)]
     if args.tag:
@@ -1815,7 +2477,7 @@ def _manifest_path(args, plan: dict, *, entry_point: str, command: str) -> Path:
 
 
 def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str],
-                       plan: dict, build) -> int:
+                       plan: dict, build, scope: dict | None = None) -> int:
     """Build the read set, write it, and run the chain-style pbrun command.
 
     Order matters for a dry run: the command shape is printed before the
@@ -1825,6 +2487,30 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     manifest_path = _manifest_path(args, plan, entry_point=entry_point,
                                    command=command)
     manifest = build()
+    if scope is not None:
+        # The scope is part of the submission's identity, not a comment beside
+        # it: the manifest's bytes are content-addressed into the action key, so
+        # a pinned read set that was acknowledged as a diagnostic subset cannot
+        # later be re-presented as the campaign's score.
+        manifest["annotations"]["campaign_scope"] = scope
+    # Derive what this row's own policy says it holds before reserving it, so
+    # a reservation below the container cap or below the combined physical
+    # bound is refused here rather than admitted and then declined by the row.
+    demand_record = verify_joint_submission_demand(
+        json.loads(Path(args.spec).read_text()), plan, args.demand,
+        label=f"{entry_point}:{command}")
+    gpu_memory_gb = None
+    gpu_bytes = plan.get("max_gpu_bytes")
+    if (isinstance(gpu_bytes, int) and not isinstance(gpu_bytes, bool)
+            and gpu_bytes > 0):
+        gpu_memory_gb = math.ceil(gpu_bytes / 1024 ** 3)
+    # ``source_identity_cache_host`` stays in the manifest as provenance -- the
+    # box whose manifest build adopted the cached full-source SHA -- and as a
+    # placement constraint, because that proof names a mount instance and not
+    # just a path. Reusing it from another mount is not authorized by anything
+    # this tree can verify (an NFSv4 client's statfs fsid is 0 here), so the row
+    # has to run where the proof was made rather than silently re-reading or
+    # silently trusting a device-free comparison.
     cache_host = manifest["annotations"].get("source_identity_cache_host")
     if cache_host is not None and args.tag != cache_host:
         raise RuntimeError(
@@ -1851,10 +2537,15 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
             inner = [*inner, "--prewarm-manifest", str(manifest_path),
                      "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
     argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
-                       progress_phases=phase_names)
+                       progress_phases=phase_names,
+                       gpu_memory_gb=gpu_memory_gb)
     summary = {
         "entry_point": f"{entry_point}:{command}",
         "data_manifest": str(manifest_path),
+        # What was reserved, and what the row's own plan says it holds. The
+        # difference is the conservatism, stated rather than implied.
+        "resource_demand": {**demand_record,
+                            "gpu_memory_gb": gpu_memory_gb},
         "manifest_bytes": len(blob),
         "decoded_manifest_bytes": len(decoded),
         "manifest_sha256": hashlib.sha256(blob).hexdigest(),
@@ -1870,6 +2561,8 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
            if key in manifest["annotations"]},
         "phases": manifest["annotations"]["phases"],
     }
+    if scope is not None:
+        summary["campaign_scope"] = scope
     if args.dry_run:
         print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
         print(json.dumps(summary, indent=1))
@@ -1894,6 +2587,18 @@ def cmd_submit_joint(args) -> int:
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    # The scope is derived from the plan's own bound census, and the caller has
+    # to state what it is submitting *for*. A 16-of-512 diagnostic plan handed
+    # to a campaign-scoped submission refuses here rather than after the GPU
+    # window has been spent producing a subset the campaign cannot score.
+    identity_path = Path(args.campaign_identity).resolve()
+    _bound_sha256(identity_path, args.campaign_identity_sha256,
+                  label="joint campaign identity")
+    campaign = json.loads(identity_path.read_text())
+    scope = verify_joint_campaign_scope(
+        plan, require_scope=args.require_scope, campaign=campaign,
+        label=f"joint {args.command}: {plan_path.name}")
+    scope = {**scope, "campaign_identity_sha256": _sha256_of(identity_path)}
     inner = ["python3", "-u", "-m", JOINT_ENTRY_POINT, args.command,
              "--plan", str(plan_path), "--plan-sha256", plan_sha256]
     prepared = None
@@ -1914,10 +2619,141 @@ def cmd_submit_joint(args) -> int:
         workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
     return _submit_gpu_action(
         args, entry_point=JOINT_ENTRY_POINT, command=args.command, inner=inner,
-        plan=plan,
+        plan=plan, scope=scope,
         build=lambda: producer.build_joint_pass_manifest(
             str(plan_path), command=args.command, produced_by=provenance,
             argv=inner, prepared=prepared))
+
+
+def cmd_submit_aqua(args) -> int:
+    """Submit the campaign's AQUA stage, with strict per-cell coverage.
+
+    The A-side is a stage of the same campaign, so it is submitted the same way
+    the joint pass is: the plan's bound census and the frozen campaign identity
+    decide the roster, the read set the action will consume is declared to
+    PrismaBuild before it is queued, and the reservation is checked against the
+    row's own physical bound rather than taken from habit.
+
+    Two things differ from the joint pass, and both are refusals rather than
+    options. ``--require-complete-coverage`` is mandatory: the campaign's
+    requested ``(unit, format)`` cells either carry their own activation term
+    or the run refuses, because a weight-only cell with a positive surrogate is
+    what silently buys 4-bit on a route the lane declares W4A4. And the
+    requested roster is the plan's, not the artifact's: the plan binds the
+    campaign's own cost table (``inputs.merged_cost``) by sha256, ``--cost-in``
+    has to reproduce that table's ``(unit, format)`` cells unit for unit, and
+    ``--formats`` has to name exactly the menu it prices. Any of those drifting
+    refuses here -- the stage's acceptance is stated against the cells it is
+    given, so a narrowed artifact would decide its own coverage.
+
+    A campaign whose cells are ALL already joint-priced is a fulfilled
+    artifact, not a nearly-empty run: nothing is submitted and the caller is
+    told which payload already carries the A-side.
+    """
+    producer = _manifest_producer()
+    plan_path = Path(args.plan).resolve()
+    plan = json.loads(plan_path.read_text())
+    plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    identity_path = Path(args.campaign_identity).resolve()
+    _bound_sha256(identity_path, args.campaign_identity_sha256,
+                  label="joint campaign identity")
+    campaign = json.loads(identity_path.read_text())
+    scope = verify_joint_campaign_scope(
+        plan, require_scope=args.require_scope, campaign=campaign,
+        label=f"aqua {args.require_scope}: {plan_path.name}")
+    scope = {**scope, "campaign_identity_sha256": _sha256_of(identity_path)}
+
+    cost_in = Path(args.cost_in).resolve()
+    cost_sha256 = _bound_sha256(cost_in, args.cost_in_sha256,
+                                label="aqua cost artifact")
+    cost_out = Path(args.cost_out).resolve()
+    if cost_out == cost_in:
+        raise RuntimeError(
+            f"--cost-out is --cost-in ({cost_in}); the stage writes a new "
+            "payload beside the weight-only one so that arm stays reproducible")
+    if cost_out.exists():
+        raise RuntimeError(
+            f"--cost-out {cost_out} already exists. The stage writes it with a "
+            "plain truncating write, so a path left by an interrupted run "
+            "cannot be told from a finished one; remove it or name another "
+            "path, and do not re-run against an artifact this tool did not "
+            "publish.")
+    card = Path(args.card).resolve()
+    card_sha256 = _bound_sha256(card, args.card_sha256,
+                                label="sensitivity card")
+    act_dir = str(Path(args.act_dir).resolve()) if args.act_dir else None
+    formats = [item.strip() for item in (args.formats or "").split(",")
+               if item.strip()]
+    if not formats:
+        raise RuntimeError(
+            "--formats is required: the campaign's menu is the requested set "
+            "the coverage gate is stated against, and it is not inferred from "
+            "the artifact's own keys")
+    with cost_in.open("rb") as handle:
+        payload = pickle.load(handle)
+    roster, requested = aqua_requested_cells(
+        plan, payload, formats, label=f"aqua: {plan_path.name}",
+        accept_joint_cells_outside_plan=args.accept_joint_cells_outside_plan)
+    costs = payload["costs"]
+    # The fulfilled-artifact shortcut reads the same bound set the roster above
+    # validated, so a joint row that names another cell can neither short-circuit
+    # this submission nor be reported as one of the campaign's priced cells.
+    joint_cells = _bound_joint_cells(costs, label=f"aqua: {plan_path.name}")
+    summary = {
+        "entry_point": f"{AQUA_ENTRY_POINT}:{args.require_scope}",
+        "plan": str(plan_path),
+        "plan_sha256": plan_sha256,
+        "campaign_scope": scope,
+        "cost_in": str(cost_in),
+        "cost_in_sha256": cost_sha256,
+        "cost_out": str(cost_out),
+        "card": str(card),
+        "card_sha256": card_sha256,
+        "act_dir": act_dir,
+        "requested_cells": roster["requested_cells"],
+        "requested_units": roster["requested_units"],
+        "requested_roster_sha256": roster["roster_sha256"],
+        # The whole record, not a hand-copied subset of it. The fulfilled-
+        # artifact shortcut below returns before the submission path that
+        # stamps the scope, so a summary that flattened only the counts would
+        # print a "satisfied" artifact that reused joint cells the plan never
+        # priced while saying nothing about them. Whatever the gate decided
+        # travels here, and the submitted path carries the same record into the
+        # sealed manifest's ``campaign_scope`` annotation.
+        "requested_roster": roster,
+        "joint_cells_already_priced": len(joint_cells & requested),
+    }
+    if requested <= joint_cells:
+        # The stage's own acceptance: every requested cell already carries its
+        # activation term, so its merge would add nothing and its read set is
+        # the model source it would stream for no result. Nothing is queued.
+        print(json.dumps({**summary, "submitted": False,
+                          "reason": (
+                              "every requested cell already carries a joint "
+                              "A-side; the AQUA requirement is satisfied by "
+                              "the artifact named by --cost-in, so no stage "
+                              "was queued and --cost-out was not written")},
+                         indent=1))
+        return 0
+    inner = ["python3", "-u", "-m", AQUA_ENTRY_POINT,
+             "--card", str(card), "--model-path", str(plan["model"]),
+             "--cost-in", str(cost_in), "--cost-out", str(cost_out),
+             "--formats", ",".join(formats), "--require-complete-coverage"]
+    if args.serving_lane:
+        inner += ["--serving-lane", args.serving_lane]
+    else:
+        inner += ["--lane-executes-all-activation-grids"]
+    if act_dir:
+        inner += ["--act-dir", act_dir]
+    provenance = producer.deterministic_entry_provenance(
+        AQUA_ENTRY_POINT, plan=str(plan_path), plan_sha256=plan_sha256,
+        workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
+    return _submit_gpu_action(
+        args, entry_point=AQUA_ENTRY_POINT, command="price",
+        inner=inner, plan=plan, scope={**scope, **roster},
+        build=lambda: producer.build_aqua_manifest(
+            str(plan_path), card=str(card), cost_in=str(cost_in),
+            act_dir=act_dir, produced_by=provenance, argv=inner))
 
 
 def cmd_submit_allocation(args) -> int:
@@ -2906,6 +3742,23 @@ def main(argv=None) -> int:
     joint.add_argument("--resume", action="store_true",
                        help="forwarded to the pass, which resumes from its "
                             "identity-bound checkpoints")
+    joint.add_argument("--require-scope", required=True,
+                       choices=CAMPAIGN_SCOPE_KINDS,
+                       help="what this submission is for. The scope itself is "
+                            "derived from the plan's bound census; this states "
+                            "the intent it has to match, so a diagnostic "
+                            "window subset cannot be submitted as the "
+                            "campaign's score")
+    joint.add_argument("--campaign-identity", required=True,
+                       help="the frozen "
+                            f"{CAMPAIGN_IDENTITY_SCHEMA} the plan's roster, "
+                            "group roster and window total have to reproduce "
+                            "exactly. A plan is self-consistent with whatever "
+                            "census it binds, so the campaign it belongs to has "
+                            "to come from outside the plan")
+    joint.add_argument("--campaign-identity-sha256", default=None,
+                       help="the digest the campaign identity is bound by; "
+                            "computed when omitted and checked when given")
     _add_submission_arguments(joint)
     joint.set_defaults(func=cmd_submit_joint)
 
@@ -2935,6 +3788,62 @@ def main(argv=None) -> int:
                         help="the export command itself, after --; it lives "
                              "in the Tessera tree and is not derived here")
     export.set_defaults(func=cmd_submit_export)
+
+    aqua = sub.add_parser(
+        "submit-aqua",
+        help="submit the campaign's AQUA stage with strict per-cell coverage")
+    aqua.add_argument("--plan", required=True,
+                      help="the same sealed joint plan the campaign runs from; "
+                           "its bound census decides the requested roster")
+    aqua.add_argument("--plan-sha256", default=None)
+    aqua.add_argument("--require-scope", required=True,
+                      choices=CAMPAIGN_SCOPE_KINDS,
+                      help="what this submission is for, checked against the "
+                           "plan's derived scope exactly as submit-joint does")
+    aqua.add_argument("--campaign-identity", required=True,
+                      help="the frozen campaign identity the plan's roster, "
+                           "group roster, draw, capture and candidate menu "
+                           "have to reproduce")
+    aqua.add_argument("--campaign-identity-sha256", default=None)
+    aqua.add_argument("--cost-in", required=True,
+                      help="the cost payload the A-side is merged into: the "
+                           "weight-only table, or the joint pass's merged "
+                           "table. Left untouched")
+    aqua.add_argument("--cost-in-sha256", default=None)
+    aqua.add_argument("--cost-out", required=True,
+                      help="where the merged table is written; it must not "
+                           "exist, so an interrupted write cannot be mistaken "
+                           "for a finished one")
+    aqua.add_argument("--card", required=True,
+                      help="the sensitivity card .npz the activation term is "
+                           "computed from")
+    aqua.add_argument("--card-sha256", default=None)
+    aqua.add_argument("--formats", required=True,
+                      help="the campaign's menu, comma-separated; it has to "
+                           "name exactly the formats the payload carries, "
+                           "because the stage states its acceptance against "
+                           "the requested cells")
+    aqua.add_argument("--act-dir", default=None,
+                      help="cached real activations, for measured pricing")
+    aqua.add_argument("--accept-joint-cells-outside-plan", action="store_true",
+                      help="accept joint-priced cells the plan's own cost table "
+                           "never priced, recording them as unverified. A joint "
+                           "row is bound to the coordinate it names and to "
+                           "nothing else, so by default such a cell refuses: "
+                           "sealing a requested roster that names it is the "
+                           "answer, and this flag is how an artifact sealed "
+                           "against an older roster keeps that reuse explicit")
+    lane = aqua.add_mutually_exclusive_group(required=True)
+    lane.add_argument("--serving-lane", default=None,
+                      help="lane id whose served_activation_quantization "
+                           "declares which formats' activation grid the "
+                           "runtime executes; there is no default")
+    lane.add_argument("--lane-executes-all-activation-grids",
+                      action="store_true",
+                      help="assert that the lane executes every format's "
+                           "activation grid fused")
+    _add_submission_arguments(aqua)
+    aqua.set_defaults(func=cmd_submit_aqua)
 
     merge = sub.add_parser("merge", help="one cost.pkl and journal from the rows")
     merge.add_argument("--workspace", required=True)

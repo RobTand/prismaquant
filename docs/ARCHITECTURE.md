@@ -1,7 +1,20 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/bounded-capture-guard-main`. Stamps
+As of: 2026-09-17 · `flash/nvfp4-empty-activation-guard-20260917`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/nvfp4-empty-activation-guard-20260917`) for the
+**empty activation batch** on the served static contract's registered-operator
+leg (§"Served activation quantiser"). `torch.ops._C.scaled_fp4_quant` derives
+its launch grid from the token count, so a zero-row activation asked for an
+empty grid and left `cudaErrorInvalidValue` sticky in the context: the call
+returned, `synchronize` reported nothing, and the next checked launch raised.
+The leg now runs its own guards and then allocates the input's own shape, dtype
+and device instead of launching. Measured on sparklina, sm_121, image
+`a5424378…`: pre-fix M = 0 raised `CUDA error: invalid argument` at the next
+checked launch, fixed M = 0 completed `next_launch` + `sync2` with an empty
+`(0, 1024)` bf16 output, and M = 1 was clean on both. No other quantizer path,
+contract field, cache rule or gate moves.
 
 Re-stamped (2026-09-17, `flash/bounded-capture-guard-main`) for **the
 bounded joint row holding two budgets, not one**. A bounded row is 21 GiB of
@@ -55,6 +68,39 @@ value is refused rather than overridden. Gates:
 `tests/test_tessera_joint_aura.py`, `tools/joint_prepare_startup_probe.py`. The
 container `--memory` cap the CPU budget is enforced by is
 RobTand/prismaquant#663's launcher change, not this one.
+
+Re-stamped (2026-09-17, `campaign/identity-and-coverage-main-20260916`) for
+**a joint AURA row being only its own cell**. The per-cell AQUA coverage
+requirement counts cells by their `(unit, format)` key, and
+`cost_entry_is_joint_aura` validates a row *internally*: its currency, its
+Fisher application count, and that its operator and probe digests match the
+objects they name. All of that is true of a row correctly produced for one
+Linear when it is read under another, so a valid row copied, mis-merged or
+re-keyed onto a different cell counted as that cell's activation term while the
+cell itself kept a weight-only cost -- and the fulfilled-artifact shortcut
+(`submit-aqua` queues nothing when every requested cell is already joint-priced)
+would report the campaign satisfied on it.
+`allocator_candidates.joint_row_binds_cell` is the shared predicate that
+compares the row's operator identity with the key it was found under; the
+dispatcher's requested-roster gate and the AQUA stage's own "already priced"
+set both read it, so the two cannot disagree about which cells carry an
+A-side. A joint row that does not name its own key is a refusal
+(`JointCellCoordinateError`, distinct from the malformed-row failure so
+instructions that turn one into a refusal leave the other alone), not a row to
+skip quietly.
+
+A joint-priced cell the plan's own bound cost table never priced refuses as
+well. Such a row is bound to the coordinate it names and to nothing else -- it
+was never compared with this campaign's draw, capture or candidate menu -- so
+an artifact from a pass over a wider roster would present prices this campaign
+never priced beside the plan's table.
+`submit-aqua --accept-joint-cells-outside-plan` is the explicit reuse path for
+an artifact sealed against an older roster, and the record it produces
+(`joint_cells_outside_plan_accepted_unverified`) travels in the skip summary and
+in the sealed manifest's `campaign_scope` annotation, so the reuse is recorded
+rather than silent. Gates: `tests/test_aqua_campaign_submit.py`,
+`tests/test_joint_aura_allocator_currency.py`,
+`tests/test_aqua_per_expert_checkpoint.py`.
 
 Re-stamped (2026-09-16, `campaign/aqua-campaign-caller-20260916`) for **the
 campaign's A-side being a submitted stage** (§11; #655). The stage existed and
@@ -222,6 +268,7 @@ legacy arm. The exact arm runs on
 `tests/fixtures/tessera_route_trace_509/`, written by Tessera's own telemetry
 at producer commit `8104dc6` (see that directory's `PROVENANCE.md`), so the
 schema under test is the producer's.
+
 As of: 2026-09-16 · `issue-607-sealed-arc-replay-frontier`. Stamps
 follow, newest first, each recording its own branch and date.
 
@@ -269,7 +316,6 @@ so both ends load `prismaquant/joint_replay_frontier.py` by path. Gates:
 resumed GPU subset has been run under a sealed frontier, so the ARC payoff
 and the resumed wall-clock are unmeasured here; this stamp records the
 contract.
-
 As of: 2026-09-16 · `flash/issue-654-stage-settings-provenance-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
 
@@ -346,6 +392,20 @@ JSON at a path every consumer parses. The document is now written through
 value, and an interrupted run leaves the old curve or the new one. The
 publication is asserted through the CLI itself in
 `tests/test_prefill_frontier.py::test_the_document_is_published_through_the_atomic_writer`.
+As of: 2026-09-15 · `flash/gold-engine-options-20260915`. Stamps
+follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-15, `flash/gold-engine-options-20260915`) for the **gold
+engine's explicit KV byte bound and MoE backend** (§7.3).
+`tools/gold_engine_options.py` now accepts `--kv-cache-memory-bytes` (a
+positive integer, validated before the engine loads or the peer is launched)
+and adds `flashinfer_cutlass` to the `--moe-backend` menu as an accepted
+selection. What a given image maps for its NVFP4 MoE oracle is that image's
+fact, not this repository's, so no required-backend claim is made here and no
+serving path is qualified by an argument test. Both travel through `gold_engine_kwargs` into
+`LLM(**kwargs)`, into the TR3 scorer's runtime binding and the two gold
+runners' manifests, and into `headless_peer_argv`; omitting either emits
+nothing, so existing TP1 receipts and their fingerprints are unchanged.
 
 Re-stamped (2026-09-15, `claude/tp2-measurement-instruments`) for the **gold
 lane's multi-node instruments** (§2.3, §7.3). Three things a gold receipt did
@@ -509,21 +569,19 @@ replayed by `shipcard._verify_route_trace_record`).
   platform is `card.build.tessera_serving_scope.target.platform`, or
   `--platform`; when both are given they must agree.
 
-Agreement fills the slot, and since #509 only an exactly-identified serve can
-agree (the stamp at the top of this file). A difference exits 1 and names each
-contract with its priced and served counts. A missing, unreadable, empty,
-other-schema or compiled (`M*`) rank trace, and equally a legacy histogram-grade
-trace or one whose identity is incomplete, exits 3 as NOT VERIFIED and leaves
-the slot unfilled, so `tools/publish_artifact.py` refuses the card. `verify`
-replays the comparison from the carried traces and config text against the
-current packaged contract, and refuses carried config text that differs from
-the artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the
-trace and fill steps.
+Agreement fills the slot. A difference exits 1 and names each contract with
+its priced and served counts. A missing, unreadable, empty, other-schema or
+compiled (`M*`) rank trace exits 3 as NOT VERIFIED and leaves the slot
+unfilled, so `tools/publish_artifact.py` refuses the card. `verify` replays the
+comparison from the carried traces and config text against the current
+packaged contract, and refuses carried config text that differs from the
+artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the trace
+and fill steps.
 
-The comparison is a histogram where the trace names no modules (Tessera #509
-adds the per-module grade, stamped at the top of this file). Not covered: the
-activation representation (#567), compiled forwards, and the
-compressed-tensors lane, which has no route telemetry. The
+The comparison is a histogram because the trace names no modules; Tessera #509
+asks it to emit module prefixes, rank and platform. Not covered: which module
+rode which contract, the activation representation (#567), compiled forwards,
+and the compressed-tensors lane, which has no route telemetry. The
 `validate_native_export` claim in CLAUDE.md principle 14 is corrected: that
 script never performed this leg. Gate: `tests/test_tessera_route_trace_gate.py`,
 on the real m44e1 TP2 traces, shown failing before the fix.
@@ -11665,9 +11723,10 @@ class by the gates above. Gate:
 `tests/test_campaign_row_classes.py`.
 
 The passes that run *after* the rows merge are submitted through the same
-producer. `submit-joint`, `submit-allocation` and `submit-export` build the
-read set with `experiments/glm_data_manifests.py`
-(`build_joint_pass_manifest`, `build_allocation_manifest`,
+producer. `submit-joint`, `submit-aqua`, `submit-allocation` and
+`submit-export` build the read set with `experiments/glm_data_manifests.py`
+(`build_joint_pass_manifest`, `build_aqua_manifest`,
+`build_allocation_manifest`,
 `build_export_manifest`), write it under `<output-root>/data-manifests/` --
 or under `--manifest-dir`, which a frozen output root needs -- and run the
 chain-style `pbrun` command with `--data-manifest` **before** `--detach`,
@@ -11715,6 +11774,20 @@ assignment leaves on the source precision, in the artifact's layer order, with
 `read_order_attested: false` and tensors outside the campaign roster --
 embeddings, norms, the LM head -- named as not declared.
 
+The AQUA manifest declares the A-side's own reads: the sensitivity card, the
+cost payload the merge writes into, the joint plan, the model's
+`config.json` and `model.safetensors.index.json`, and then, per layer, the
+coalesced source extents of the campaign's units -- the same per-unit weight
+bytes the joint pass declares for its model source, keyed by unit instead of by
+layer/part -- followed by the `--act-dir` cache it opens when measured pricing
+is asked for. Its `read_order_attested: false` says what the other two say for
+their own reasons: the stage iterates the artifact's units and streams each
+unit's weight in one pass, so the declared order is the model's layer order
+rather than the order the bytes are opened in. A unit the index cannot resolve
+is priced as a hole and contributes no byte, and the fallback path prices from
+the card, so the extents are a claim on the model source rather than a
+superset of it.
+
 `merge` unions the rows' disjoint Hessian
 captures into the object a whole-scope run writes (same `counts`, same
 provenance), **recomputes** its digest, re-stamps every row's
@@ -11744,6 +11817,15 @@ explicit `admissible` flag, keeps `row_memory_gb` for all of them, and records
 the declined ones under `inadmissible_rows` with the derived demand, the
 per-box multiplier, the box and the reason, which the run also prints. A spec
 that declares no box budget admits every row and says the check was not made.
+Two memory numbers live in a spec and they are not interchangeable:
+`box_memory_gb` is the box's total unified capacity this fit check reads, and
+`cpu_memory_gb` is the cap the container's own cgroup is given
+(`--memory`/`--memory-swap`, through the launcher). Reading the cap out of the
+capacity field bounds a 34 GiB CPU side at 114 GiB or refuses the pilot's own
+derived demand, and reserving the cap alone for a row that also holds device
+residency under-reserves the box by the device envelope; the plan's
+`aggregate_memory_bytes` is the combined physical number a reservation has to
+cover.
 Only a plan with **no** admissible row refuses, naming the widest demand and
 the box. The fit check precedes publication of every selection file and the
 manifest; a refusal leaves any previously published plan unchanged. One over-wide row is a demand to report
@@ -14603,7 +14685,13 @@ runners take the stock multi-node topology (`--tensor-parallel-size`,
 `--nnodes`, `--master-addr`, `--master-port`, the two `mp` backends) through
 `tools/gold_engine_options.py`; omitting them preserves the original TP1
 kwargs exactly, which is why existing single-box receipts remain reproducible
-(#434). Three fields make a multi-node number readable. `gold_engine_configuration`
+(#434). The same shared options carry two explicit selections: `--kv-cache-memory-bytes`, a positive integer byte bound
+per rank that reaches rank ≥ 1 through the peer argv (omitted means vLLM sizes
+KV from `--gpu-memory-utilization`), and `flashinfer_cutlass` in the
+`--moe-backend` menu as an accepted selection (the menu otherwise stays closed
+at `auto`/`triton`); which name an image maps is not asserted here.
+Both are validated before the engine loads, and an omitted argument emits
+nothing rather than a `None`. Three fields make a multi-node number readable. `gold_engine_configuration`
 is the world size. `gold_fabric_request` is the collective fabric the run asked
 for — NCCL's three selectors, recorded as a **request**, since the observation
 is NCCL's own `NET/Socket`/`NET/IB` line and principle 14 forbids promoting one
