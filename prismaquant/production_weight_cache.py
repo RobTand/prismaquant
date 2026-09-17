@@ -2128,9 +2128,36 @@ def _render_score_record(
         "input_global_scale_policy": (
             str(policy) if input_global_scale is not None else None
         ),
+        # ... and WHICH activation quantiser arithmetic priced it, with the build
+        # and image that arithmetic ran in.  A static-G row is scored through
+        # ``contract.quantize_dequantize``, which runs the registered served
+        # operator or this tree's Torch model depending on the process binding;
+        # a retained cost is only a cost of the arithmetic that produced it, so
+        # the identity travels with the record (RobTand/prismaquant#567).  None
+        # where no static G was priced: a dynamically scored row never touched
+        # this quantiser, and invalidating it would be the opposite error.
+        "served_quantizer": (
+            None if input_global_scale is None
+            else _scored_served_quantizer_record()
+        ),
         "out_features": int(rows),
         "in_features": int(cols),
     }
+
+
+def _scored_served_quantizer_record() -> "dict | None":
+    """The bound arithmetic's identity, or ``None`` when the process has none.
+
+    Read from the one binding (``nvfp4_activation_contract``), never resolved,
+    probed or imported here: the cache stamps what the run bound, and an
+    unstamped row is refused at reuse rather than filled in later.
+    """
+    from prismaquant.nvfp4_activation_contract import (
+        active_served_quantizer_identity,
+    )
+
+    identity = active_served_quantizer_identity()
+    return None if identity is None else identity.as_record()
 
 
 def _resolve_format_spec(fmt):
@@ -2340,6 +2367,7 @@ def _render_score_record_priced_scale(
         priced_value,
         max_abs_value,
         None if policy is None else str(policy),
+        record.get("served_quantizer"),
     )
 
 
@@ -2366,6 +2394,7 @@ def _check_resumed_render_score_policies(
     from prismaquant.nvfp4_activation_contract import (
         input_global_scale_from_max_abs,
         require_matching_input_global_scale,
+        require_matching_served_quantizer,
     )
 
     checked = 0
@@ -2377,8 +2406,14 @@ def _check_resumed_render_score_policies(
             record, key=key, where=where)
         if priced is None:
             continue
-        qname, priced_value, max_abs_value, priced_policy = priced
+        qname, priced_value, max_abs_value, priced_policy, priced_quantizer = priced
         checked += 1
+        # The second axis of the same question: the cost must have been priced
+        # by the arithmetic this run is bound to.  Weight-only and dynamically
+        # scored rows never reach here (``priced is None`` above), which is what
+        # keeps their caches reusable.
+        require_matching_served_quantizer(
+            priced_quantizer, qname=qname, consumer=where)
         require_matching_input_global_scale(
             priced_value,
             input_global_scale_from_max_abs(max_abs_value, policy=policy),
@@ -2412,6 +2447,9 @@ def production_cache_priced_input_global_scales(
     if not isinstance(records, Mapping):
         return {}
     priced_scales: dict[str, float] = {}
+    from prismaquant.nvfp4_activation_contract import (
+        require_matching_served_quantizer,
+    )
     for key in sorted(records):
         record = records[key]
         if not isinstance(record, Mapping):
@@ -2420,7 +2458,12 @@ def production_cache_priced_input_global_scales(
             record, key=str(key), where=where)
         if priced is None:
             continue
-        qname, priced_value, _max_abs, _policy = priced
+        qname, priced_value, _max_abs, _policy, priced_quantizer = priced
+        # The measurement side of the same refusal: a KL hook about to measure
+        # against these costs reads them through here, so the arithmetic check
+        # belongs on this path too, not only on resume.
+        require_matching_served_quantizer(
+            priced_quantizer, qname=qname, consumer=where)
         previous = priced_scales.get(qname)
         if previous is not None and previous != priced_value:
             raise RuntimeError(

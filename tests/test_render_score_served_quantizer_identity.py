@@ -1,0 +1,131 @@
+"""A retained activation-aware cost is only reusable under its own arithmetic.
+
+The render-score key is ``qname|FMT`` and the retained record carries the static
+G it was priced at; neither of those changes when the process binds a different
+activation quantiser.  A model-priced row and a registered-operator row are
+different objects -- the retained 84-group differential priced 24 of 172,032
+probed elements one E2M1 code apart -- so the reuse paths must compare the
+recorded arithmetic and its build, and refuse the mismatch.
+
+Rows that never touched the quantiser are the exemption, and it is a
+mathematical one: a weight-only or dynamically scored row has no static G, so
+its cost does not depend on which A-side arithmetic the run bound.
+
+These tests call the reuse validators directly with records in the shape
+``_render_score_record`` writes.  Building a served record through the writer
+needs a Tessera format, which needs the pinned ``tessera`` package; the
+validator is the surface under test and it is reachable without one.
+"""
+from __future__ import annotations
+
+import pytest
+
+from prismaquant import nvfp4_activation_contract as owner
+from prismaquant.production_weight_cache import (
+    _check_resumed_render_score_policies,
+    production_cache_priced_input_global_scales,
+)
+
+POLICY = owner.resolve_input_global_scale_policy()
+QNAME = "model.language_model.layers.10.mlp.experts::w13"
+
+
+def _registered_identity(**overrides) -> owner.ServedQuantizerIdentity:
+    fields = {"backend": owner.SERVED_QUANTIZER_BACKEND_REGISTERED_OP,
+              "op": owner.SERVED_QUANTIZER_OP, "platform": "sm_121",
+              "torch": "2.13.0+cu130", "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+              "vllm": "0.1.dev20073+g8e685d198", "image_content_sha256": "d" * 64}
+    fields.update(overrides)
+    return owner.ServedQuantizerIdentity(**fields)
+
+
+def _model_identity() -> owner.ServedQuantizerIdentity:
+    return owner.ServedQuantizerIdentity(
+        backend=owner.SERVED_QUANTIZER_BACKEND_MODEL)
+
+
+def _record(*, identity, max_abs: float = 1.6796875, static: bool = True):
+    record = {
+        "qname": QNAME, "format": "TESSERA_E2M1_K2_R896",
+        "activation_max_abs": max_abs,
+        "input_global_scale": (
+            owner.input_global_scale_from_max_abs(max_abs, policy=POLICY)
+            if static else None),
+        "input_global_scale_policy": POLICY if static else None,
+    }
+    if identity is not None:
+        record["served_quantizer"] = identity.as_record()
+    return {f"{QNAME}|TESSERA_E2M1_K2_R896": record}
+
+
+def _bind(identity) -> None:
+    owner._reset_served_quantizer_identity_for_tests()
+    owner.bind_served_quantizer_identity(identity=identity, require=False)
+
+
+def test_identical_identity_reuses_the_retained_cost():
+    identity = _registered_identity()
+    _bind(identity)
+
+    assert _check_resumed_render_score_policies(
+        _record(identity=identity), policy=POLICY, where="test") == 1
+
+
+def test_a_record_predating_the_stamp_cannot_be_reused_as_operator_pricing():
+    _bind(_registered_identity())
+
+    with pytest.raises(owner.ServedQuantizerUnboundError, match="no served-quantizer identity"):
+        _check_resumed_render_score_policies(
+            _record(identity=None), policy=POLICY, where="test")
+
+
+def test_a_model_priced_row_cannot_be_reused_as_operator_pricing():
+    _bind(_registered_identity())
+
+    with pytest.raises(owner.ServedQuantizerUnboundError, match="differing axes are backend"):
+        _check_resumed_render_score_policies(
+            _record(identity=_model_identity()), policy=POLICY, where="test")
+
+
+def test_a_different_build_of_the_same_operator_is_a_different_quantiser():
+    _bind(_registered_identity())
+    other_build = _registered_identity(
+        vllm="0.28.1rc1.dev397+gfd4a15126", image_content_sha256="e" * 64)
+
+    with pytest.raises(owner.ServedQuantizerUnboundError,
+                       match="differing axes are vllm, image_content_sha256"):
+        _check_resumed_render_score_policies(
+            _record(identity=other_build), policy=POLICY, where="test")
+
+
+def test_a_model_bound_run_still_reuses_its_own_rows():
+    _bind(_model_identity())
+
+    assert _check_resumed_render_score_policies(
+        _record(identity=_model_identity()), policy=POLICY, where="test") == 1
+
+
+def test_weight_only_rows_are_untouched_by_the_arithmetic_binding():
+    """No static G, no activation quantiser in the cost, no refusal."""
+    _bind(_registered_identity())
+
+    assert _check_resumed_render_score_policies(
+        _record(identity=None, static=False), policy=POLICY, where="test") == 0
+
+
+def test_the_measurement_side_refuses_the_same_mismatch():
+    """The KL hook reads costs through this path; a mismatch refuses there too."""
+    class _Cache:
+        metadata = {"render_scores": {"records": {}}}
+
+    _bind(_registered_identity())
+
+    with pytest.raises(owner.ServedQuantizerUnboundError, match="differing axes are backend"):
+        _Cache.metadata["render_scores"]["records"] = _record(
+            identity=_model_identity())
+        production_cache_priced_input_global_scales(_Cache(), where="test")
+
+    _Cache.metadata["render_scores"]["records"] = _record(
+        identity=_registered_identity())
+    assert production_cache_priced_input_global_scales(_Cache(), where="test") == {
+        QNAME: owner.input_global_scale_from_max_abs(1.6796875, policy=POLICY)}

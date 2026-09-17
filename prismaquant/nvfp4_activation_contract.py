@@ -47,6 +47,21 @@ FP4_E2M1_MAX = 6.0
 FP8_E4M3_MAX = 448.0
 FP4_GROUP_SIZE = 16
 
+#: The two arithmetic owners a priced activation row can have.  The name IS the
+#: identity a receipt carries: a row stamped ``registered_scaled_fp4_quant`` was
+#: priced by the vLLM operator a serve executes, one stamped
+#: ``prismaquant_model`` by this module's Torch re-implementation of the same
+#: rounding rule.  They are not interchangeable, and a served rung may only be
+#: priced by the first (RobTand/prismaquant#567).
+SERVED_QUANTIZER_BACKEND_MODEL = "prismaquant_model"
+SERVED_QUANTIZER_BACKEND_REGISTERED_OP = "registered_scaled_fp4_quant"
+#: The operator's registered name, spelled once.  Its home is the ``_C``
+#: namespace vLLM's extension registers into; nothing here imports Tessera.
+SERVED_QUANTIZER_OP = "scaled_fp4_quant"
+SERVED_QUANTIZER_IDENTITY_SCHEMA = (
+    "prismaquant.served_quantizer_identity.v1"
+)
+
 LEGACY_INPUT_GLOBAL_SCALE_POLICY = (
     "legacy_6_over_calibration_amax.v1"
 )
@@ -82,6 +97,15 @@ NVFP4_INPUT_GLOBAL_SCALE_POLICIES = frozenset({
 # runtime table, and naming it before either exists would invite a stamp with
 # nothing behind it (RobTand/prismaquant#624).
 ACTIVATION_SCALE_GROUPING_PER_UNIT = "per_unit.v1"
+#: The grouping a routed stage actually EXECUTES: one activation scale per
+#: ``(module, stage)``.  Named here only now, with a producer and a consumer,
+#: because #624 deliberately refused to name it while "it needs rescored rows
+#: and an attested runtime table, and naming it before either exists would
+#: invite a stamp with nothing behind it".  The producer is
+#: :func:`routed_executed_max_abs`; the consumer is the joint AURA activation
+#: leg, which must price the scale the kernel executes rather than the per-unit
+#: scale the campaign priced.
+ACTIVATION_SCALE_GROUPING_EXECUTED = "executed_group.v1"
 ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA = (
     "prismaquant.routed_executed_scale_grouping.v1"
 )
@@ -132,6 +156,139 @@ def routed_expert_scale_group(
     return f"{module}::{stage}", module, stage
 
 
+def grouping_member(declaration, qname):
+    """The declared executed group one unit belongs to, or ``None``."""
+    if not isinstance(declaration, Mapping):
+        return None
+    for key, entry in (declaration.get("groups") or {}).items():
+        if qname in entry.get("members", ()):
+            return str(key), entry
+    return None
+
+
+def executed_static_max_abs(*, spec, qname, unit_max_abs, grouping):
+    """``(effective_max_abs, provenance)`` for one unit's static A-scale.
+
+    The ONE resolution both the activation receipt and the arithmetic consult,
+    so a price and the quantizer it was measured through cannot disagree.
+
+    A spec with no static activation contract -- FP8/MX dynamic W8A8, or an
+    A16 identity row that reached the hook -- is returned unchanged with no
+    provenance: there is no static scale, and the reduction has nothing to say
+    about it.  This is a FORMAT decision, not a name-shape decision, which is
+    what keeps A8 clipping and A16 identity byte-identical.
+
+    A static-contract unit inside a declared group takes the group maximum --
+    the value the routed stage executes -- and returns provenance naming the
+    group, so a receipt can say which scale it used and which one the historical
+    wire was rendered under.  A static-contract unit NOT in any declared group
+    keeps its own per-unit maximum: that is the dense NVFP4 case, where the
+    per-unit scale IS the executed scale because there is no group to reduce.
+    """
+
+    contract = getattr(spec, "static_activation_contract", None)
+    if contract is None:
+        return unit_max_abs, None
+    found = grouping_member(grouping, qname)
+    if found is None:
+        # A routed per-expert unit whose contract is the SERVED static one has
+        # no per-expert scale the artifact can execute.  Reading the unit
+        # maximum here is exactly the defect: it silently reverts a rostered
+        # run to per-expert pricing.  Dense per-unit scales stay valid (there is
+        # no group to reduce), and a generic stock NVFP4 screen contract keeps
+        # its historical path, so only the measured-as-served routed case
+        # refuses.
+        if (getattr(contract, "measured_as_served", False)
+                and is_routed_expert_projection_name(qname)):
+            raise ValueError(
+                f"{qname}: the served static activation contract executes one "
+                "scale per (module, stage), so this unit requires a "
+                "roster-checked executed grouping declaration; pricing its own "
+                "per-unit maximum would use a scale the stage never executes")
+        return unit_max_abs, None
+    key, entry = found
+    if not (grouping or {}).get("roster_complete"):
+        raise ValueError(
+            f"{qname}: the executed grouping for group {key!r} is not marked "
+            "roster-complete, so its maximum is not authoritative")
+    # The consumer recomputes G from this maximum with
+    # ``require_input_global_scale(maximum)``, which resolves its policy from
+    # the ambient environment.  A declaration naming one policy while the
+    # active policy is another would let the producer stamp the right G and the
+    # consumer price a different one.  Fail closed here, at the ONE shared
+    # resolution both sides consult, before any residual exists.
+    declared = (grouping or {}).get("input_global_scale_policy")
+    if declared is None:
+        raise ValueError(
+            f"{qname}: the executed grouping for group {key!r} declares no "
+            "input_global_scale policy; a missing policy cannot be checked "
+            "against the active one")
+    if declared not in NVFP4_INPUT_GLOBAL_SCALE_POLICIES:
+        raise ValueError(
+            f"{qname}: the executed grouping declares unknown "
+            f"input_global_scale policy {declared!r}")
+    active = resolve_input_global_scale_policy()
+    if declared != active:
+        raise ValueError(
+            f"{qname}: the executed activation-scale grouping declares policy "
+            f"{declared!r} but the active calculation policy is {active!r}; "
+            "refusing to price a scale the receipt does not describe")
+    expected = contract.input_global_scale_from_max_abs(
+        float(entry["max_abs"]), policy=active)
+    if "input_global_scale" not in entry:
+        raise ValueError(
+            f"{qname}: the executed grouping for group {key!r} carries no "
+            "declared group scale to check against the active policy")
+    if float(entry["input_global_scale"]) != float(expected):
+        raise ValueError(
+            f"{qname}: the declared group scale {entry['input_global_scale']!r} "
+            f"is not the active policy's value {expected!r} for group maximum "
+            f"{entry['max_abs']!r}")
+    return float(entry["max_abs"]), {
+        "schema": ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
+        "grouping": ACTIVATION_SCALE_GROUPING_EXECUTED,
+        "group": key,
+        "module": entry.get("module"),
+        "stage": entry.get("stage"),
+        "group_max_abs": float(entry["max_abs"]),
+        "unit_max_abs": None if unit_max_abs is None else float(unit_max_abs),
+        "group_members": list(entry.get("members", ())),
+        "input_global_scale_policy": (
+            (grouping or {}).get("input_global_scale_policy")),
+        "source": "routed_executed_scale_grouping"
+                  + (".roster_checked" if (grouping or {}).get("roster_complete")
+                     else ".roster_unchecked"),
+    }
+
+
+def executed_static_max_abs_map(*, specs_by_qname, shared_max_abs, grouping):
+    """``{qname: effective_max_abs}`` for every static unit in ``specs_by_qname``.
+
+    Built once and handed to both the receipt and the arithmetic.  ``shared``
+    per-unit maxima stay the caller's own map: this returns a derived view and
+    mutates nothing.
+    """
+
+    out = {}
+    for qname, choices in specs_by_qname.items():
+        # A unit carries one spec per candidate format; the static contract is
+        # a property of the format, so the unit is static if ANY of its
+        # candidates is.  A unit whose candidates are all dynamic (A8) or
+        # identity (A16) stays out of the map and hears nothing from this.
+        pool = list(choices.values()) if isinstance(choices, Mapping) else [choices]
+        spec = next((item for item in pool
+                     if getattr(item, "static_activation_contract", None) is not None),
+                    None)
+        if spec is None:
+            continue
+        unit_max = shared_max_abs.get(qname)
+        effective, _provenance = executed_static_max_abs(
+            spec=spec, qname=qname, unit_max_abs=unit_max, grouping=grouping)
+        if effective is not None:
+            out[qname] = effective
+    return out
+
+
 def routed_static_scale_grouping(unit_names, *, profile=None) -> dict | None:
     """The grouping declaration for a set of static-scale units, or ``None``.
 
@@ -162,6 +319,180 @@ def routed_static_scale_grouping(unit_names, *, profile=None) -> dict | None:
         return None
     return {"schema": ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
             "grouping": ACTIVATION_SCALE_GROUPING_PER_UNIT}
+
+
+def routed_executed_max_abs(
+    max_abs: "Mapping[str, float]",
+    *,
+    profile=None,
+    expected_members=None,
+    policy=None,
+) -> "tuple[dict[str, float], dict | None]":
+    """Collapse per-expert routed maxima onto the groups the kernel EXECUTES.
+
+    ``(effective, declaration)``.  The routed stage takes one activation scale
+    per ``(module, stage)`` -- ``min_e G_e``, equivalently the largest ``amax``
+    of the group, w13 and w2 separately
+    (``tessera/serving/nvfp4_moe_route.py`` ``gs13 = 1 / input_small["w13"].max()``
+    and the same reduction in vLLM ``amax_for_moe_activation_quant``).  This
+    function is that reduction on the calibration side, so a joint price stops
+    reading each expert's own scale where the artifact cannot execute it.
+
+    Membership is not restated: each per-expert name is respelled as the PACKED
+    target :func:`routed_moe_stage` already owns, through
+    :func:`routed_expert_scale_group`, so gate_proj and up_proj of one expert
+    land in ONE ``w13`` group and down_proj lands in its ``w2`` group.  The
+    profile hook, the leaf table and the stage map stay in one place.
+
+    Dense names, and native packed names (``<parent>.experts.<packed-parameter>``
+    -- already one scale for the whole stack), pass through byte-identically.
+    ``declaration`` is ``None`` when nothing was routed, so a dense-only set
+    keeps emitting no declaration at all rather than an empty one.
+
+    Fails closed, in the order the checks bind:
+
+    * a value that is not a finite positive number: a static-scale maximum of
+      zero or NaN is not a maximum, and pricing it would divide by it;
+    * a per-expert routed name whose ``(module, stage)`` group does not
+      resolve: it cannot be grouped, and reading it as dense would price a
+      scale the stage never executes;
+    * a group whose members disagree about ``(module, stage)`` -- impossible
+      through this path, and refused rather than smoothed if it ever occurs.
+    """
+
+    import math
+
+    if not isinstance(max_abs, Mapping):
+        raise ValueError("executed activation-scale grouping needs a mapping")
+    values: dict[str, float] = {}
+    for name, raw in max_abs.items():
+        value = float(raw)
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                f"{name}: executed activation-scale grouping needs a finite "
+                f"positive maximum, got {raw!r}")
+        values[str(name)] = value
+    # The policy is bound HERE, explicitly, and used both for the arithmetic
+    # and for the stamp.  Resolving it per call site instead would let a
+    # declaration name one policy while the scale was computed under another.
+    canonical_policy = (resolve_input_global_scale_policy(policy)
+                        if policy is not None else None)
+    groups: dict[str, dict] = {}
+    for name in sorted(values):
+        parsed = routed_expert_scale_group(name, profile=profile)
+        if parsed is None:
+            if is_routed_expert_projection_name(name):
+                raise ValueError(
+                    f"{name}: per-expert routed spelling, but no routed-MoE "
+                    "(module, stage) group resolves for it, so the scale the "
+                    "kernel executes cannot be derived (RobTand/prismaquant#624)")
+            continue
+        group_key, module, stage = parsed
+        entry = groups.setdefault(group_key, {"module": module, "stage": stage,
+                                              "members": []})
+        if (entry["module"], entry["stage"]) != (module, stage):
+            raise ValueError(
+                f"{name}: group {group_key!r} already names "
+                f"{entry['module']!r}/{entry['stage']!r}, not {module!r}/{stage!r}")
+        entry["members"].append(name)
+    effective = dict(values)
+    if groups and canonical_policy is None:
+        raise ValueError(
+            "routed executed activation-scale grouping requires an explicit "
+            "input_global_scale policy; resolving it from the ambient "
+            "environment would let the stamp and the arithmetic disagree")
+    for group_key, entry in sorted(groups.items()):
+        members = sorted(entry["members"])
+        group_max = max(values[name] for name in members)
+        entry["members"] = members
+        entry["max_abs"] = float(group_max)
+        entry["input_global_scale"] = (
+            NVFP4_SERVED_ACTIVATION_CONTRACT.input_global_scale_from_max_abs(
+                group_max, policy=canonical_policy))
+        entry["spread_ratio"] = float(group_max / min(values[name] for name in members))
+        for name in members:
+            effective[name] = float(group_max)
+    if expected_members is not None:
+        # The authoritative full roster.  Grouping only the maxima that happen
+        # to be present would let one missing expert silently redefine a group:
+        # the survivor's value becomes the group maximum, the spread shrinks,
+        # and no gate notices.  Compare group membership against the roster
+        # rather than trusting the observed subset.
+        expected: dict[str, set] = {}
+        for name in sorted(str(item) for item in expected_members):
+            parsed = routed_expert_scale_group(name, profile=profile)
+            if parsed is None:
+                if is_routed_expert_projection_name(name):
+                    raise ValueError(
+                        f"{name}: roster member has the per-expert routed "
+                        "spelling but no (module, stage) group resolves for it")
+                continue
+            expected.setdefault(parsed[0], set()).add(name)
+        for group_key, members in sorted(expected.items()):
+            observed = set(groups.get(group_key, {}).get("members", ()))
+            missing = sorted(members - observed)
+            unexpected = sorted(observed - members)
+            if missing or unexpected:
+                raise ValueError(
+                    f"{group_key}: executed activation-scale group does not "
+                    f"match its roster (missing {missing}, unexpected "
+                    f"{unexpected}); grouping the observed maxima alone would "
+                    "redefine the group")
+        for group_key in sorted(set(groups) - set(expected)):
+            raise ValueError(
+                f"{group_key}: executed activation-scale group has no roster "
+                "members, so its group maximum is not authoritative")
+    if not groups:
+        return effective, None
+    return effective, {
+        "schema": ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
+        "grouping": ACTIVATION_SCALE_GROUPING_EXECUTED,
+        "groups": {key: dict(entry) for key, entry in sorted(groups.items())},
+        "member_count": sum(len(entry["members"]) for entry in groups.values()),
+        # Explicit, not inferred: the policy the scales were computed under, and
+        # the runtime whose reduction this is.  Neither is read from the live
+        # environment, so a replay cannot silently pick up a different one.
+        "input_global_scale_policy": canonical_policy,
+        "roster_complete": bool(expected_members is not None),
+        "source": ("tessera/serving/nvfp4_moe_route.py gs13 = 1 / "
+                   "input_small['w13'].max(), and vLLM "
+                   "amax_for_moe_activation_quant: one scale per (module, stage)"),
+    }
+
+
+def routed_executed_max_abs_for_census(
+    max_abs: "Mapping[str, float]",
+    *,
+    census,
+    profile=None,
+    policy=None,
+) -> "tuple[dict[str, float], dict | None]":
+    """The census-side entry to :func:`routed_executed_max_abs`, roster included.
+
+    A census names every unit it measured in ``unit_shapes``, and that set -- not
+    the maxima that happen to be present -- is what says whether an expert is
+    missing or merely zero. Grouping the observed maxima alone would let one
+    absent expert silently redefine its group: the survivor's value becomes the
+    group maximum, the spread shrinks, and no gate notices. So a static-scale
+    set that DOES contain a per-expert routed projection but carries no
+    authoritative roster refuses here instead of reducing over survivors, while
+    a dense-only census needs no roster and keeps emitting no declaration.
+
+    The requirement lives here, once, rather than at each caller: the joint
+    prepare pass and any plan-time derivation of the same declaration must agree
+    about when a grouping is admissible, and two copies of a fail-closed rule
+    are two chances to disagree.
+    """
+    roster = census.get("unit_shapes") if isinstance(census, Mapping) else None
+    effective, declaration = routed_executed_max_abs(
+        max_abs, profile=profile,
+        expected_members=(sorted(roster) if roster else None), policy=policy)
+    if declaration is not None and not roster:
+        raise ValueError(
+            "the executed activation-scale grouping needs the census's "
+            "authoritative unit roster (unit_shapes); the maxima present cannot "
+            "show that an expert is missing rather than unmeasured")
+    return effective, declaration
 
 
 # ---------------------------------------------------------------------------
@@ -1453,6 +1784,427 @@ def require_matching_input_global_scale(
     )
 
 
+def _nvfp4_dequantize_registered_codes(
+    codes: torch.Tensor,
+    stored_scale: torch.Tensor,
+    input_global_scale: float,
+) -> torch.Tensor:
+    """``rounded * used_scale`` for codes the operator produced.
+
+    Split out of the operator leg so the ARITHMETIC is testable without a GPU and
+    without a registered operator, and so there is exactly one place that can get
+    it wrong.  ``used_scale`` is ``stored_scale / G`` -- the contract's own rule
+    (:meth:`StaticActivationContract.quantize_dequantize`'s oracle computes the
+    same quotient at ``nvfp4_activation_qdq_served``).  Multiplying by the stored
+    scale alone would be ``G`` times too large; a test pins the quotient.
+    """
+    # The nibble view the operator's packed output yields is uint8, and
+    # ``index_select`` wants a long index: converting here is what keeps the
+    # leg usable on a real [M, K] activation instead of only on a fixture that
+    # already happened to hand it int64.
+    codes = codes.to(torch.long)
+    if codes.ndim < 2 or codes.shape[-1] % FP4_GROUP_SIZE:
+        raise ValueError(
+            "served quantiser codes must end in whole "
+            f"{FP4_GROUP_SIZE}-element groups, got {tuple(codes.shape)}"
+        )
+    expected = (*codes.shape[:-1], codes.shape[-1] // FP4_GROUP_SIZE)
+    if tuple(stored_scale.shape) != expected:
+        raise ValueError(
+            "served quantiser scale plane does not cover these codes: codes "
+            f"{tuple(codes.shape)} need a stored scale of {expected}, got "
+            f"{tuple(stored_scale.shape)}"
+        )
+    stored_scale = stored_scale.to(torch.float32)
+    used_scale = stored_scale / float(input_global_scale)
+    positive = _e2m1_positive_table(codes.device)
+    magnitude = positive.index_select(0, (codes & 0x7).reshape(-1)).reshape(codes.shape)
+    signed = torch.where((codes & 0x8).bool(), -magnitude, magnitude)
+    output = signed * used_scale.repeat_interleave(FP4_GROUP_SIZE, dim=-1)
+    # One group scale covers FP4_GROUP_SIZE elements, so BOTH the value and the
+    # zero-scale mask are repeated out to the element axis: a [M, K/16] mask
+    # cannot broadcast against a [M, K] output.
+    nonzero = (stored_scale != 0).repeat_interleave(FP4_GROUP_SIZE, dim=-1)
+    return torch.where(nonzero, output, torch.zeros_like(output))
+
+
+def _nvfp4_activation_qdq_registered_op(
+    x: torch.Tensor,
+    input_global_scale: float,
+) -> torch.Tensor:
+    """The served operator's own decisions, dequantised the contract's way.
+
+    The codes come from the operator, so the rounding decision is the runtime's
+    rather than this tree's.  The block scale is deliberately NOT read back out
+    of the operator's returned plane: that plane's 128x4 permutation is the
+    hardware's layout and this tree may not own a second copy of it.  The byte is
+    derived by :func:`nvfp4_group_stored_scale` -- the same function the
+    attestation gate compares against the published table, and the one the
+    retained 84-group differential measured identical on 10,752/10,752 blocks --
+    and the dequantisation is the contract's own ``rounded * used_scale`` with
+    ``used_scale = stored_scale / G``.
+
+    The returned plane's shape is not asserted here; a real BF16 capture has to
+    establish that layout (row padding in particular) before this leg is priced
+    against a serve, so the priced contract is the operator's ELEMENT decisions
+    plus this module's scale rule, not a guess about the plane.
+    """
+    if x.shape[-1] % FP4_GROUP_SIZE:
+        raise ValueError(
+            "the served NVFP4 quantiser needs a last dim divisible by "
+            f"{FP4_GROUP_SIZE}, got {tuple(x.shape)}"
+        )
+    g = float(input_global_scale)
+    if not math.isfinite(g) or g <= 0.0:
+        raise ValueError(f"input_global_scale must be finite and > 0, got {g!r}")
+    if x.device.type != "cuda":
+        raise ServedQuantizerUnboundError(
+            f"torch.ops._C.{SERVED_QUANTIZER_OP} is a CUDA operator; this tensor "
+            f"is on {x.device.type}"
+        )
+    original_shape, original_dtype = x.shape, x.dtype
+    rows = x.reshape(-1, x.shape[-1]).contiguous().to(torch.bfloat16)
+    groups = rows.reshape(-1, rows.shape[-1] // FP4_GROUP_SIZE, FP4_GROUP_SIZE)
+    packed, _scale_plane = torch.ops._C.scaled_fp4_quant(
+        rows,
+        torch.tensor([g], dtype=torch.float32, device=rows.device),
+        True,
+    )
+    stored = nvfp4_group_stored_scale(groups, g).float()
+    bytes_ = packed.view(torch.uint8).reshape(rows.shape[0], rows.shape[1] // 2)
+    codes = torch.stack((bytes_ & 0xF, bytes_ >> 4), dim=-1).reshape(rows.shape)
+    output = _nvfp4_dequantize_registered_codes(codes, stored, g)
+    return output.reshape(original_shape).to(original_dtype)
+
+
+@dataclass(frozen=True, slots=True)
+class ServedQuantizerIdentity:
+    """Which arithmetic priced a served activation row, and what it ran in.
+
+    Resolved ONCE per process/config (``resolve_served_quantizer_identity``) and
+    then carried as a frozen value, so a joint row's identity and the arithmetic
+    that produced it cannot be two different objects (principle 8), and no hot
+    path ever re-probes the environment or re-imports an extension to decide how
+    to quantise a tensor.
+
+    ``backend`` is the arithmetic; every other field is the provenance a reader
+    needs to tell one build of it from another: ``torch``/``torch_git`` are the
+    axes the joint-projection qualification also pins, ``vllm`` names the
+    extension's build, ``platform`` is the contract table's key, and
+    ``image_content_sha256`` is the launcher-stamped executing-image identity the
+    joint pass already refuses on (``joint_projection_backend.executing_image``).
+    """
+
+    backend: str
+    op: str | None = None
+    platform: str | None = None
+    torch: str | None = None
+    torch_git: str | None = None
+    vllm: str | None = None
+    image_content_sha256: str | None = None
+    schema: str = SERVED_QUANTIZER_IDENTITY_SCHEMA
+
+    def as_record(self) -> dict:
+        """The serialisable form a receipt and a row identity both carry."""
+        return {
+            "schema": self.schema,
+            "backend": self.backend,
+            "op": self.op,
+            "platform": self.platform,
+            "torch": self.torch,
+            "torch_git": self.torch_git,
+            "vllm": self.vllm,
+            "image_content_sha256": self.image_content_sha256,
+        }
+
+
+#: The identity this process resolved, and the one a run bound before pricing.
+#: One slot each, on purpose: resolution is a process/config question, not a
+#: per-tensor one, and a second answer would be a second identity.
+_RESOLVED_SERVED_QUANTIZER: ServedQuantizerIdentity | None = None
+_ACTIVE_SERVED_QUANTIZER: ServedQuantizerIdentity | None = None
+
+
+class ServedQuantizerUnboundError(RuntimeError):
+    """A rung whose measurement contract IS the served quantiser reached the
+    priced path with no registered-operator binding behind it.
+
+    Raised instead of silently pricing with this module's Torch model.  The two
+    are not equivalent objects: the model divides by the used scale where the
+    kernel takes its reciprocal through ``rcp.approx.ftz.f32``, and the retained
+    84-group differential priced 24 of 172,032 probed elements one E2M1 code
+    away from the kernel.  A caller that means to price under the model -- a
+    screen, a CPU test -- binds it explicitly; a rung that serves cannot fall
+    back into it by omission.
+    """
+
+
+def _served_quantizer_platform() -> str | None:
+    """``sm_<major><minor>``, the spelling ``native_platform`` builds."""
+    try:
+        if not torch.cuda.is_available():
+            return None
+        major, minor = torch.cuda.get_device_capability(None)
+    except Exception:  # pragma: no cover - reported as absent, never guessed
+        return None
+    return f"sm_{major}{minor}"
+
+
+def _register_served_quantizer_op() -> bool:
+    """Whether ``torch.ops._C.scaled_fp4_quant`` is callable after one import.
+
+    The import is the same one the pin's ``native_ops._load_native_ops`` makes
+    (``vllm._custom_ops`` registers the ``_C`` namespace) and it happens here and
+    nowhere else: no hot path imports, probes or hashes anything.
+    """
+    if callable(getattr(torch.ops._C, SERVED_QUANTIZER_OP, None)):
+        return True
+    import vllm._custom_ops  # noqa: F401  -- registers torch.ops._C
+
+    return callable(getattr(torch.ops._C, SERVED_QUANTIZER_OP, None))
+
+
+def resolve_served_quantizer_identity(
+    *,
+    require: bool,
+    context: str = "served activation quantizer",
+) -> ServedQuantizerIdentity:
+    """Resolve the served activation quantiser once for this process.
+
+    ``require=True`` is the priced seam: an operator this process cannot register
+    is then a REFUSAL, never a fallback to the Torch model.  ``require=False``
+    answers what is available (a screen, a CPU preflight, a plan reader) and is
+    recorded as such.
+
+    Cached in one slot: the answer is a property of the process, so asking twice
+    must not import twice, and a caller that wants a different answer is
+    declaring a different process.
+    """
+    global _RESOLVED_SERVED_QUANTIZER
+
+    resolved = _RESOLVED_SERVED_QUANTIZER
+    if resolved is None:
+        registered = False
+        try:
+            registered = _register_served_quantizer_op()
+        except Exception:
+            # A build with no extension, a CPU-only container, a missing
+            # libcuda: all the same answer to "what will price this tensor".
+            registered = False
+        try:
+            import vllm as _vllm
+
+            vllm_version = str(getattr(_vllm, "__version__", "")) or None
+        except Exception:
+            vllm_version = None
+        image = None
+        try:
+            from .joint_projection_backend import executing_image
+
+            image = executing_image()
+        except Exception:  # pragma: no cover - an unstamped launcher
+            image = None
+        resolved = ServedQuantizerIdentity(
+            backend=(SERVED_QUANTIZER_BACKEND_REGISTERED_OP if registered
+                     else SERVED_QUANTIZER_BACKEND_MODEL),
+            op=SERVED_QUANTIZER_OP if registered else None,
+            platform=_served_quantizer_platform(),
+            torch=str(torch.__version__),
+            torch_git=getattr(torch.version, "git_version", None),
+            vllm=vllm_version,
+            image_content_sha256=image,
+        )
+        _RESOLVED_SERVED_QUANTIZER = resolved
+
+    if require and resolved.backend != SERVED_QUANTIZER_BACKEND_REGISTERED_OP:
+        raise ServedQuantizerUnboundError(
+            f"{context}: this row is served by torch.ops._C.{SERVED_QUANTIZER_OP} "
+            "with a static global scale, and that operator is not registered in "
+            "this process, so the served arithmetic cannot be run here. "
+            "PrismaQuant's own Torch re-implementation of the same rule is NOT a "
+            "substitute: it divides by the used scale where the kernel takes "
+            "rcp.approx.ftz.f32, and the retained 84-group differential priced 24 "
+            "of 172,032 probed elements one E2M1 code away from the kernel "
+            "(RobTand/prismaquant#567). Price in an image that registers the "
+            "operator, or bind the model explicitly if this is a screen rather "
+            "than a price."
+        )
+    return resolved
+
+
+def bind_served_quantizer_identity(
+    *,
+    require: bool = True,
+    identity: ServedQuantizerIdentity | None = None,
+    context: str = "served activation quantizer",
+) -> ServedQuantizerIdentity:
+    """Bind the arithmetic this process prices with, before score or cache work.
+
+    ``identity=None`` resolves (and, with ``require=True``, requires the
+    registered operator).  An explicit ``identity`` is how a screen or a CPU test
+    declares the model deliberately -- it is a binding, not a fallback: nothing
+    here chooses for the caller, and nothing re-binds per tensor.
+    """
+    global _ACTIVE_SERVED_QUANTIZER
+
+    bound = (identity if identity is not None
+             else resolve_served_quantizer_identity(require=False, context=context))
+    _validate_served_quantizer_identity(bound, context=context)
+    # ``require`` is about the ARITHMETIC, not about how the identity arrived: a
+    # caller that demands the served operator cannot satisfy that demand by
+    # asserting the model.
+    if require and bound.backend != SERVED_QUANTIZER_BACKEND_REGISTERED_OP:
+        raise ServedQuantizerUnboundError(
+            f"{context}: the priced path requires the registered served "
+            f"quantiser torch.ops._C.{SERVED_QUANTIZER_OP}, and this process "
+            f"bound {bound.backend!r} instead"
+        )
+    # A process that has already priced under one arithmetic may not quietly
+    # price under another: rendered scores, cache rows and joint rows carry the
+    # identity they were produced under, so a second binding is a refusal rather
+    # than a silent re-stamp.  Tests and screens re-bind after an explicit
+    # ``_reset_served_quantizer_identity_for_tests``.
+    existing = _ACTIVE_SERVED_QUANTIZER
+    if existing is not None and existing != bound:
+        raise ServedQuantizerUnboundError(
+            f"{context}: this process already priced rows under "
+            f"{existing.backend!r} ({existing.op or 'no operator'}, image "
+            f"{existing.image_content_sha256 or 'unstamped'}) and cannot be "
+            f"re-bound to {bound.backend!r} afterwards; rows produced under the "
+            "first binding would be read as rows of the second"
+        )
+    _ACTIVE_SERVED_QUANTIZER = bound
+    return bound
+
+
+def _validate_served_quantizer_identity(
+    identity: ServedQuantizerIdentity,
+    *,
+    context: str,
+) -> None:
+    """Refuse an identity that cannot stand behind the provenance it claims.
+
+    A served row's identity is what a reader uses to tell one build of the
+    operator from another, so a registered-operator binding that does not name
+    the operator, the platform it ran on or the build it ran in is not a weaker
+    identity -- it is an unusable one, and it is refused here rather than
+    published (RobTand/prismaquant#567).
+    """
+    if identity.schema != SERVED_QUANTIZER_IDENTITY_SCHEMA:
+        raise ServedQuantizerUnboundError(
+            f"{context}: unknown served-quantizer identity schema "
+            f"{identity.schema!r}")
+    if identity.backend == SERVED_QUANTIZER_BACKEND_MODEL:
+        return
+    if identity.backend != SERVED_QUANTIZER_BACKEND_REGISTERED_OP:
+        raise ServedQuantizerUnboundError(
+            f"{context}: unknown served-quantizer backend {identity.backend!r}; "
+            f"the known ones are {SERVED_QUANTIZER_BACKEND_REGISTERED_OP!r} and "
+            f"{SERVED_QUANTIZER_BACKEND_MODEL!r}"
+        )
+    missing = [name for name, value in (
+        ("op", identity.op), ("platform", identity.platform),
+        ("torch", identity.torch), ("vllm", identity.vllm),
+        ("image_content_sha256", identity.image_content_sha256),
+    ) if not value]
+    if identity.op != SERVED_QUANTIZER_OP:
+        raise ServedQuantizerUnboundError(
+            f"{context}: a served binding must name "
+            f"{SERVED_QUANTIZER_OP!r}, got {identity.op!r}")
+    if missing:
+        raise ServedQuantizerUnboundError(
+            f"{context}: a served binding is missing {', '.join(missing)}; an "
+            "identity that cannot name the build, the platform and the image it "
+            "ran in does not attest which arithmetic priced the row"
+        )
+
+
+def active_served_quantizer_identity() -> ServedQuantizerIdentity | None:
+    """The bound identity, or ``None`` when nothing has bound one yet."""
+    return _ACTIVE_SERVED_QUANTIZER
+
+
+#: The identity axes that decide whether a retained activation-aware cost may be
+#: reused.  They are the arithmetic (``backend``, ``op``) and the build that
+#: arithmetic ran in (``platform``, ``torch``, ``torch_git``, ``vllm``, the
+#: launcher-stamped ``image_content_sha256``).  A different build of the same
+#: operator is a different quantiser to price against: the producer build and
+#: the serving build are already known to differ (§ the closure note), and the
+#: published table could not tell them apart.
+SERVED_QUANTIZER_REUSE_AXES = (
+    "backend", "op", "platform", "torch", "torch_git", "vllm",
+    "image_content_sha256",
+)
+
+
+def require_matching_served_quantizer(
+    recorded: "Mapping[str, object] | None",
+    *,
+    qname: str,
+    consumer: str,
+) -> None:
+    """Refuse to reuse an activation-aware cost under another arithmetic.
+
+    The render-score key is ``qname|FMT`` and the retained record carries the
+    static G it was priced at; neither changes when the *arithmetic* changes.
+    A model-priced row and a registered-operator row are different objects --
+    the retained 84-group differential priced 24 of 172,032 probed elements one
+    E2M1 code apart -- so a cache filled under one is refused for the other
+    rather than silently contributing its cost (RobTand/prismaquant#567).
+
+    ``recorded`` is the identity the row was priced under, or ``None`` when the
+    record carries none (a row written before the stamp existed, or one priced
+    with nothing bound).  Callers pass it only for rows that carry a static G:
+    a weight-only or dynamically scored row has no activation quantiser in its
+    cost, and stays reusable, which is what keeps the exemption mathematically
+    honest rather than convenient.
+    """
+    current = _ACTIVE_SERVED_QUANTIZER
+    if current is None:
+        raise ServedQuantizerUnboundError(
+            f"{consumer}: {qname!r} carries an activation-aware cost, but this "
+            "process has bound no activation quantizer, so there is nothing the "
+            "retained cost can be checked against"
+        )
+    if not isinstance(recorded, Mapping):
+        if current.backend == SERVED_QUANTIZER_BACKEND_REGISTERED_OP:
+            raise ServedQuantizerUnboundError(
+                f"{consumer}: {qname!r} carries an activation-aware cost with no "
+                "served-quantizer identity recorded, so it cannot be reused as "
+                "registered-operator pricing: a record that predates the stamp "
+                "was priced by this tree's Torch model, and the two disagree by "
+                "one E2M1 code on the midpoint cases the 84-group differential "
+                "measured. Re-render the affected scores under a fresh "
+                "--cache-dir, or price under the model explicitly "
+                "(RobTand/prismaquant#567)."
+            )
+        return
+    differing = [
+        axis for axis in SERVED_QUANTIZER_REUSE_AXES
+        if str(recorded.get(axis)) != str(getattr(current, axis))
+    ]
+    if differing:
+        raise ServedQuantizerUnboundError(
+            f"{consumer}: {qname!r} was priced under "
+            f"{recorded.get('backend')!r} (op {recorded.get('op')!r}, build "
+            f"{recorded.get('vllm') or 'unnamed'}, image "
+            f"{str(recorded.get('image_content_sha256') or 'unstamped')[:12]}) "
+            f"and this run prices under {current.backend!r} (op {current.op!r}, "
+            f"build {current.vllm or 'unnamed'}, image "
+            f"{str(current.image_content_sha256 or 'unstamped')[:12]}). The "
+            f"differing axes are {', '.join(differing)}; a cost priced by one "
+            "build of the quantiser is not a cost of another. Re-render the "
+            "affected scores under a fresh --cache-dir"
+        )
+
+
+def _reset_served_quantizer_identity_for_tests() -> None:
+    """Drop both slots so a test can observe resolution from a clean process."""
+    global _RESOLVED_SERVED_QUANTIZER, _ACTIVE_SERVED_QUANTIZER
+    _RESOLVED_SERVED_QUANTIZER = None
+    _ACTIVE_SERVED_QUANTIZER = None
+
+
 @dataclass(frozen=True)
 class StaticActivationContract:
     """What a spec's activations execute as under a STATIC per-unit scale.
@@ -1486,6 +2238,11 @@ class StaticActivationContract:
     execution: str = NVFP4_ACTIVATION_EXECUTION
     group_size: int = FP4_GROUP_SIZE
     measured_as_served: bool = False
+    #: The arithmetic a ``measured_as_served`` row was priced by, frozen before
+    #: any score or cache work (``bind_served_quantizer_identity``).  ``None``
+    #: means "this process has not said", which is a refusal for a served rung,
+    #: not an invitation to pick one by capability.
+    served_quantizer: ServedQuantizerIdentity | None = None
 
     def input_global_scale_from_max_abs(
         self,
@@ -1536,8 +2293,36 @@ class StaticActivationContract:
         x: torch.Tensor,
         input_global_scale: float,
     ) -> torch.Tensor:
-        """The served oracle at G.  No pre-clip: the clamp lives in G."""
-        return nvfp4_activation_qdq_served(x, input_global_scale)
+        """The served arithmetic at G.  No pre-clip: the clamp lives in G.
+
+        Which arithmetic that is comes from the binding, never from import
+        order or GPU visibility: a registered-operator binding runs the operator
+        the serve runs, an explicit model binding runs this module's oracle, and
+        a served rung with no binding refuses rather than pricing a model of the
+        server.
+        """
+        identity = self.served_quantizer or _ACTIVE_SERVED_QUANTIZER
+        if identity is None:
+            if self.measured_as_served:
+                raise ServedQuantizerUnboundError(
+                    "a contract whose measurement IS the served quantiser reached the "
+                    f"priced path with no binding: bind torch.ops._C.{SERVED_QUANTIZER_OP} "
+                    f"({SERVED_QUANTIZER_BACKEND_REGISTERED_OP}), or bind "
+                    f"{SERVED_QUANTIZER_BACKEND_MODEL!r} "
+                    "explicitly to price under the model on purpose "
+                    "(RobTand/prismaquant#567)."
+                )
+            return nvfp4_activation_qdq_served(x, input_global_scale)
+        if identity.backend == SERVED_QUANTIZER_BACKEND_REGISTERED_OP:
+            return _nvfp4_activation_qdq_registered_op(x, input_global_scale)
+        if identity.backend == SERVED_QUANTIZER_BACKEND_MODEL:
+            return nvfp4_activation_qdq_served(x, input_global_scale)
+        # An unrecognised backend is never a reason to price with the model.
+        raise ServedQuantizerUnboundError(
+            "unknown served-quantizer backend "
+            f"{identity.backend!r}; refusing to price with any arithmetic this "
+            "process did not bind"
+        )
 
 
 # The one served static-scale contract there is today, as stock ``NVFP4``
@@ -1549,10 +2334,20 @@ NVFP4_SERVED_ACTIVATION_CONTRACT = StaticActivationContract()
 
 __all__ = [
     "ACTIVATION_SCALE_GROUPING_PER_UNIT",
+    "ACTIVATION_SCALE_GROUPING_EXECUTED",
     "ActivationScaleContractError",
     "ActivationScalePolicyMismatchError",
     "NVFP4_SERVED_ACTIVATION_CONTRACT",
     "StaticActivationContract",
+    "ServedQuantizerIdentity",
+    "ServedQuantizerUnboundError",
+    "SERVED_QUANTIZER_BACKEND_MODEL",
+    "SERVED_QUANTIZER_BACKEND_REGISTERED_OP",
+    "SERVED_QUANTIZER_IDENTITY_SCHEMA",
+    "SERVED_QUANTIZER_OP",
+    "active_served_quantizer_identity",
+    "bind_served_quantizer_identity",
+    "resolve_served_quantizer_identity",
     "CALIBRATION_SOURCE_PACKED_EXPERT_RENDER",
     "CALIBRATION_SOURCE_PARENT_MODULE_CACHE",
     "CALIBRATION_SOURCE_SUPPLEMENTAL_MAX_ABS",
@@ -1597,6 +2392,11 @@ __all__ = [
     "resolve_input_global_scale_value",
     "is_routed_expert_projection_name",
     "routed_expert_scale_group",
+    "routed_executed_max_abs",
+    "routed_executed_max_abs_for_census",
+    "grouping_member",
+    "executed_static_max_abs",
+    "executed_static_max_abs_map",
     "routed_static_scale_grouping",
     "routed_moe_attested_module_names",
     "routed_moe_stage",
