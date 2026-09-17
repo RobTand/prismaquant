@@ -19,11 +19,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 from prismaquant import native_receipt_table as emitter
 from prismaquant.measured_runtime_prices import (
@@ -420,18 +422,16 @@ def test_the_allocator_refuses_a_scalar_device_budget_for_a_per_rank_table(tmp_p
     assert not (tmp_path / "layer.json").exists()
 
 
-def _one_token_phases():
+def _one_token_phases(*, hidden=4, top_k=2):
     """The routed fixture's phases at the token scope the v2 intake prices.
 
     The routed fixture prices two-token phases; the native intake has always
     required batch size one and a one-token decode, which is what the
     producer's own request carries. Same tensors, one row.
     """
-    import torch
-
-    raw_ids = torch.tensor([[0, 2]], dtype=torch.int64)
-    raw_weights = torch.tensor([[.498046875, .5]], dtype=torch.bfloat16)
-    values = {"input": torch.ones(1, 4, dtype=torch.bfloat16), "topk_ids": raw_ids.int(),
+    raw_ids = torch.ones(1, top_k, dtype=torch.int64)
+    raw_weights = torch.full((1, top_k), 1.0 / top_k, dtype=torch.bfloat16)
+    values = {"input": torch.ones(1, hidden, dtype=torch.bfloat16), "topk_ids": raw_ids.int(),
               "topk_weights": raw_weights.float(), "source_topk_ids": raw_ids,
               "source_topk_weights": raw_weights}
     transport = {name: {"source": tensor_id(values["source_" + name]), "supplied": tensor_id(values[name]),
@@ -442,10 +442,22 @@ def _one_token_phases():
             for phase in ("prefill", "decode")}
 
 
-def _sealed_cell(joined_cell):
+def _fake_identity(name, dims, dtype="torch.bfloat16"):
+    """A tensor identity without the tensor: the contract reads the record.
+
+    A GLM roster's rank-local widths are 1024x4096 over 864 members, and the
+    contract compares published identities, so allocating those bytes would
+    cost the runner tens of GiB to prove a name.
+    """
+    itemsize = 4 if dtype == "torch.float32" else 2
+    return {"content_sha256": hashlib.sha256(name.encode()).hexdigest(), "shape": list(dims),
+            "dtype": dtype, "logical_bytes": itemsize * math.prod(dims)}
+
+
+def _sealed_cell(joined_cell, *, phases=None):
     """The routed cell as the native intake prices it: one token, sealed wires."""
     inputs, preflight, rows = (copy.deepcopy(part) for part in joined_cell)
-    phases = _one_token_phases()
+    phases = _one_token_phases() if phases is None else phases
     inputs["phases"] = phases
     inputs["routing_capture"]["phases"] = phases
     inputs["routing_capture_sha256"] = identity_sha256(inputs["routing_capture"])
@@ -460,13 +472,16 @@ def _sealed_cell(joined_cell):
     return inputs, preflight, rows
 
 
-def _one_token_route(receipt, _panel):
+def _one_token_route(route_shape):
     """What the receipt's own phases report the runtime dispatched, at one token."""
-    for phase in ("prefill", "decode"):
-        receipt["phases"][phase]["route"]["shape"] = "M1:N6:K4"
+    def mutate(receipt, _panel):
+        for phase in ("prefill", "decode"):
+            receipt["phases"][phase]["route"]["shape"] = route_shape
+    return mutate
 
 
-def _routed_gate(joined_cell, tmp_path, *, world_size=1, samples=None, tensor_parallel=None):
+def _routed_gate(joined_cell, tmp_path, *, world_size=1, samples=None, tensor_parallel=None,
+                 phases=None, route_shape="M1:N6:K4"):
     """An emitted routed row, plus the two inputs the loader's gate reads.
 
     The relation here is the minimum the intake gate consults for a native row:
@@ -475,9 +490,9 @@ def _routed_gate(joined_cell, tmp_path, *, world_size=1, samples=None, tensor_pa
     relation is a complete device account is `load_runtime_relation`'s verdict,
     reported by the loader rather than re-derived here.
     """
-    cell = _sealed_cell(joined_cell)
+    cell = _sealed_cell(joined_cell, phases=phases)
     spec, panel, cost, receipts = _write(cell, tmp_path, world_size=world_size, samples=samples,
-                                         receipt_mutation=_one_token_route)
+                                         receipt_mutation=_one_token_route(route_shape))
     item = emitter.bind_native_receipt(spec, cost_payload=cost, cost_sha256="4" * 64,
                                        manifest_dir=tmp_path, table_dir=tmp_path)
     context = parse_runtime_context({
@@ -575,3 +590,200 @@ def test_the_intake_gate_refuses_a_peer_receipt_whose_bytes_moved(joined, tmp_pa
     path.write_text(json.dumps(receipt, sort_keys=True))
     with pytest.raises(RuntimePriceError):
         admit_native_rows(_gate_table(item, context, tmp_path), relation)
+
+
+# --------------------------------------------------------------------------
+# The main objective's own geometry: GLM-5.3-Flash, 288 experts, top-8, TP2
+# --------------------------------------------------------------------------
+GLM_UNIT = "model.language_model.layers.3.mlp.experts"
+GLM_EXPERTS = 288
+GLM_HIDDEN = 4096
+GLM_INTERMEDIATE = 2048
+GLM_TP = 2
+GLM_MEMBERS = GLM_EXPERTS * len(("w1", "w3", "w2"))
+
+
+def _glm_shape():
+    """The captured GLM-5.3-Flash routed stack, at its served TP2 cut."""
+    return {"geometry_version": 1, "geometry_id": "glm53_next_routed_stack_v1",
+            "source_id": "glm5_next", "n_routed_experts": GLM_EXPERTS, "top_k": 8,
+            "hidden_size": GLM_HIDDEN, "intermediate_size": GLM_INTERMEDIATE, "shared_experts": 1,
+            "n_group": 1, "topk_group": 1, "topk_method": "noaux_tc", "scoring_func": "sigmoid",
+            "norm_topk_prob": True, "routed_scaling_factor": 2.5, "swiglu_limit": 10.0,
+            "gated": True, "tensor_parallel": GLM_TP,
+            "tensor_parallel_cut_axis": "intermediate"}
+
+
+def _glm_routing():
+    """`noaux_tc` selection with its live FP32 correction bias, and the clamp."""
+    return {"activation": "silu", "scoring_func": "sigmoid", "renormalize": True,
+            "routed_scaling_factor": 2.5, "apply_router_weight_on_input": False,
+            "expert_map": None, "input_dtype": "torch.bfloat16",
+            "topk_weights_dtype": "torch.float32", "topk_ids_dtype": "torch.int32",
+            "device": "cuda:0", "weights_contract": "post_renormalization_and_routed_scaling",
+            "swiglu_limit": 10.0, "n_group": 1, "topk_group": 1, "topk_method": "noaux_tc",
+            "source_protocol": {"router_class": "Glm5NextTopKRouter",
+                                "router_source_sha256": "a" * 64, "scoring_func": "sigmoid",
+                                "topk_method": "noaux_tc", "normalization_epsilon": 1e-6,
+                                "correction_bias": {"content_sha256": "b" * 64,
+                                                    "dtype": "torch.float32"},
+                                "expert_bias_affects": "selection_only", "norm_topk_prob": True}}
+
+
+def _glm_cell():
+    """One whole GLM routed owner at TP2, in the producer's own input shape."""
+    from prismaquant import native_moe_panel as panel
+    from prismaquant.joint_aura import arithmetic_identity, make_joint_aura_entry
+
+    shape, routing = _glm_shape(), _glm_routing()
+    width = panel.rank_local_intermediate(shape)
+    activation = {"schema": "prismaquant.joint_aura.activation.v1", "quantizes_input": True,
+                  "activation_max_abs": None, "input_global_scale": None, "clip_enabled": False}
+    members = []
+    for expert in range(GLM_EXPERTS):
+        for role in panel.ROLES:
+            unit = f"{GLM_UNIT}.{expert}.{role}"
+            dims = [GLM_HIDDEN, width] if role == "w2" else [width, GLM_HIDDEN]
+            weight = _fake_identity(unit, dims)
+            members.append({"unit": unit, "expert": expert, "role": role, "format": FORMAT,
+                            "shape": dims, "source_weight": weight, "rendered_weight": weight,
+                            "activation": copy.deepcopy(activation),
+                            "wire": {"blob_sha256": "3" * 64, "blob_bytes": 42,
+                                     "record": {"unit": unit}}})
+    source = {"files": {"fixture.safetensors": "8" * 64}, "config_sha256": "9" * 64,
+              "auxiliary_sha256": {"config.json": "9" * 64},
+              "tensors": {member["unit"] + ".weight": "fixture.safetensors" for member in members}}
+    config = {"model_type": "glm5_next", "fixture": True}
+    source_execution = {"schema": "prismaquant.joint_aura.source_execution.v1", "modules": {
+        "": {"attention": "eager", "experts": "grouped_mm"},
+        GLM_UNIT: {"attention": "eager", "experts": "grouped_mm"}}}
+    value = {"config": config, "weight_map": {name: name for name in source["tensors"]},
+             "checkpoint_weight_map": source["tensors"],
+             "shards": [{"path": "/fixture/fixture.safetensors", "size": 1, "sha256": "8" * 64}]}
+    model = {"schema": "prismaquant.streamed_model.identity.v1", "source": "/fixture",
+             "resolved_commit": None, "content_sha256": identity_sha256(value), **value}
+    arithmetic = arithmetic_identity(torch.bfloat16)
+    probe = {"schema": "prismaquant.joint_aura.probes.v2", "source_model": model,
+             "calibration_sha256": "1" * 64, "calibration_shape": [1, 2],
+             "calibration_dtype": "torch.int64", "producer_source_sha256": "2" * 64,
+             "n_probes": 3, "seed_base": 7, "token_scope": "causal", "distribution": "rademacher",
+             "normalization": "global_kl_fisher", "temperature": 1.0, "arithmetic": arithmetic,
+             "source_execution": copy.deepcopy(source_execution)}
+    rows = {}
+    for member in members:
+        joint = {"schema": "prismaquant.joint_aura.operator.v2", "qname": member["unit"],
+                 "format": FORMAT,
+                 **{key: member[key] for key in ("source_weight", "rendered_weight", "activation")},
+                 "arithmetic": arithmetic, "probe_identity_sha256": identity_sha256(probe)}
+        rows[member["unit"]] = make_joint_aura_entry(
+            operator_identity=joint, probe_identity=probe,
+            signed_components=[{"weight": value, "activation": 0.0, "mixed": 0.0, "total": value}
+                               for value in (.1, -.2, .3)])
+    phases = _one_token_phases(hidden=GLM_HIDDEN, top_k=shape["top_k"])
+    tensor_fields = {key: phases["prefill"][key] for key in ("input", "topk_ids", "topk_weights")}
+    calibration = {"schema": "prismaquant.calibration_input.v1", "calibration_sha256": "1" * 64,
+                   "shape": [1, 2], "dtype": "torch.int64"}
+    capture = {"schema": "prismaquant.routed_boundary_capture.v1", "unit": GLM_UNIT, "shape": shape,
+        "routing": copy.deepcopy(routing), "calibration_sha256": "1" * 64,
+        "calibration_shape": [1, 2], "calibration_dtype": "torch.int64",
+        "producer_source": source, "runtime_config": config,
+        "source_execution": copy.deepcopy(source_execution), "capture_source_sha256": "c" * 64,
+        "phases": phases,
+        "model_load_contract": {"schema": "prismaquant.pretrained_initialization.v1",
+                                "scope": "checkpoint_missing_state", "status": "completed",
+                                "transformers_version": "fixture-transformers"},
+        "attention_implementation": "eager",
+        "capture_runtime": {"torch": "fixture-torch", "cuda": "fixture-cuda",
+                            "transformers": "fixture-transformers"}}
+    inputs = {"schema": panel.INPUT_SCHEMA, "unit": GLM_UNIT, "format": FORMAT, "shape": shape,
+        "members": members, "profile_role_order": list(panel.ROLES),
+        "routing": copy.deepcopy(routing),
+        "execution": panel.owner_execution(shape, format_name=FORMAT),
+        "calibration": calibration, "routing_capture": capture,
+        "routing_capture_sha256": identity_sha256(capture),
+        "runtime_image": "fixture/image@sha256:" + "a" * 64, "serving_config_sha256": "b" * 64,
+        "numerics": {"atol": .015625, "rtol": .015625}, "phases": phases,
+        "probe_request": {
+            **{key: probe[key] for key in ("n_probes", "seed_base", "token_scope", "temperature",
+                                           "distribution", "normalization")},
+            "source_model": "/fixture", "source_shards": source["files"],
+            "source_config_sha256": source["config_sha256"],
+            "source_auxiliary_sha256": source["auxiliary_sha256"]}}
+    native_members = [{**{key: member[key] for key in ("unit", "expert", "role", "format", "shape",
+                                                       "source_weight", "rendered_weight")},
+                       "wire_sha256": member["wire"]["blob_sha256"],
+                       "wire_record_sha256": identity_sha256(member["wire"]["record"])}
+                      for member in members]
+    native = {"members": native_members, "shape": shape, "routing": copy.deepcopy(routing),
+        "profile_role_order": list(panel.ROLES),
+        "routing_capture_sha256": inputs["routing_capture_sha256"], "serving_config_sha256": "b" * 64,
+        "native_tensors": {"fixture": tensor_fields["input"]}, "scheme": {"fixture": True},
+        "config": {"fixture": "actual MoE config"},
+        "phases": {phase: {"transport": copy.deepcopy(phases[phase]["transport"])}
+                   for phase in phases},
+        "declared_route": {"kind": "moe", "policy": "TESSERA_FP8:resident",
+            "symbol": "vllm.fused_moe.modular_kernel:fixture", "decoder": "torch_materialize_stock",
+            "contract": "fp8_per_token_dynamic"}}
+    native["config_sha256"] = identity_sha256(native["config"])
+    runtime = {"schema": "tessera.native_moe_runtime.v1", "execution": dict(inputs["execution"]),
+        "image": inputs["runtime_image"], "resource_collector": {"library_sha256": "5" * 64}}
+    workspace = {"schema": "tessera.native_moe_workspace.v1", "owner": "vllm.WorkspaceManager",
+        "num_ubatches": 1, "num_lanes": 1, "locked": True,
+        "slots": [{"index": 0, "shape": [64], "dtype": "torch.uint8", "device": "cuda:0",
+                   "storage_bytes": 64, "logical_bytes": 64, "stride": [1], "storage_offset": 0}],
+        "resident_bytes": 64}
+    preflight = {"schema": "tessera.native_moe_preflight.v1", "status": "untimed_preparation",
+        "operator": native, "runtime": runtime, "runtime_sha256": identity_sha256(runtime),
+        "workspace": workspace, "workspace_sha256": identity_sha256(workspace),
+        "native_tensors_sha256": identity_sha256(native["native_tensors"]),
+        "scheme_sha256": identity_sha256(native["scheme"])}
+    return inputs, preflight, rows
+
+
+GLM_ROUTE_SHAPE = f"M1:N{2 * GLM_INTERMEDIATE}:K{GLM_HIDDEN}"
+
+
+def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
+    """The main objective's geometry: 288 experts, top-8, TP2, one atomic row.
+
+    Nothing here is a measurement -- the receipts are synthetic CPU fixtures --
+    but the row is built and admitted exactly as a real one would be: two rank
+    receipts carrying the shared original container, one row whose members are
+    the rank-local shapes the served route reads (1024x4096, not 2048x4096), and
+    the loader's own gate re-deriving every rank's bytes.
+    """
+    cell = _glm_cell()
+    phases = _one_token_phases(hidden=GLM_HIDDEN, top_k=8)
+    item, context, relation, panel, _receipts = _routed_gate(
+        cell, tmp_path, world_size=GLM_TP, samples=[FAST, SLOW], phases=phases,
+        route_shape=GLM_ROUTE_SHAPE)
+    row, resources = item["row"], item["row"]["resources"]
+    assert len(row["binding"]["member_formats"]) == GLM_MEMBERS
+    assert row["binding"]["member_shapes"][f"{GLM_UNIT}.0.w1"] == [1024, GLM_HIDDEN], (
+        "the priced member is the rank-local one, not the TP1 width")
+    assert row["binding"]["member_shapes"][f"{GLM_UNIT}.0.w2"] == [GLM_HIDDEN, 1024]
+    assert resources["schema"] == RANK_RESOURCES_SCHEMA and resources["world_size"] == GLM_TP
+    assert resources["wire_bytes"] == WIRE_BYTES * GLM_MEMBERS, (
+        "one canonical whole-module container, charged once for the owner")
+    assert resources["prefill_ms"] == 5.0, "one whole-owner interval, bounded by its slowest rank"
+    assert resources["rank_medians_ms"]["prefill"] == [2.0, 5.0]
+    assert row["prefill"]["receipt_path"].endswith("routed.receipt.1.json")
+    table = _gate_table(item, context, tmp_path)
+    admit_native_rows(table, relation)
+    (admitted,) = table.rows
+    assert isinstance(admitted.resources, RuntimeRankResources)
+    assert admitted.resources.world_size == GLM_TP and len(admitted.resources.ranks) == GLM_TP
+    assert panel["execution"]["tensor_parallel"] == GLM_TP
+
+
+def test_a_glm_owner_is_refused_a_single_rank_vector_for_a_two_rank_world(joined, tmp_path):
+    """288 experts do not change the rule: one rank's bound is not the world's."""
+    cell = _glm_cell()
+    phases = _one_token_phases(hidden=GLM_HIDDEN, top_k=8)
+    item, _context, _relation, _panel, receipts = _routed_gate(
+        cell, tmp_path, world_size=GLM_TP, phases=phases, route_shape=GLM_ROUTE_SHAPE)
+    collapsed = copy.deepcopy(item["row"]["resources"])
+    collapsed["ranks"] = collapsed["ranks"][:1]
+    with pytest.raises(RuntimePriceError, match="exactly one record per rank"):
+        parse_row_resources(collapsed, tensor_parallel=GLM_TP, where="glm row")
+    assert len(receipts) == GLM_TP

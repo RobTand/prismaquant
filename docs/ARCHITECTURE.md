@@ -8,6 +8,15 @@ Re-stamped (2026-09-16, `flash/prefill-receipt-alloc-bridge-20260916`) for the
 RobTand/prismaquant#658, #237). A tensor-parallel routed owner has no scalar
 answer to "how many device bytes does this row cost": each rank holds its own
 share, so a rank sum and a rank maximum are both numbers no device ever held.
+The main objective's own geometry is priced end to end: GLM-5.3-Flash's routed
+stack (288 experts, top-8 `noaux_tc` selection with the live FP32 correction
+bias, `norm_topk_prob`, routed scale 2.5, SwiGLU clamp 10.0, served TP2) reached
+this bridge by porting the versioned geometry work (`native_moe_panel`'s
+`GLM_SOURCE_GEOMETRY`/`validate_glm_geometry`, `rank_local_intermediate` = the
+intermediate axis cut, so a TP2 rank-local member is 1024x4096 where TP1 is
+2048x4096). A geometry is a versioned object rather than a widened constant: the
+LFM shape keeps its exact field set and its exact refusal text, and a GLM field
+set arriving through the LFM door is refused rather than read with LFM's rules.
 The producer's whole-owner receipt carries, per rank, `resources.rank`,
 `resources.world_size`, the bounds it gathered from its peers (`resources.peers`
 as `{rank, world_size, bound_sha256}`) and its own `resources.self.bound_sha256`
@@ -63,12 +72,18 @@ published as `None` (the per-rank totals travel instead), so the ranked device
 axis still refuses today for two named reasons -- the fixed whole-engine charge
 per rank has no admitted value, and the runtime-global workspace has no
 versioned cross-row composition rule. Gates: `tests/test_runtime_rank_resources.py`,
-`tests/test_native_receipt_table_routed.py`, plus the existing dense emitter,
-admission-split, fixed-resource, solver and prefill-frontier suites. **Not
-claimed:** no GPU qualification, no real TP2 receipt pair, no measured row and
-no producer for the admitted per-rank fixed charge -- the CPU receipts are
-synthetic and say so, and the producer's own two-rank CPU run is its own
-evidence, not this stamp's.
+`tests/test_native_receipt_table_routed.py` (which prices the GLM-288 owner at
+TP2 from two rank receipts, including its rank-local 1024x4096 member shapes and
+the single canonical container charge) and `tests/test_native_moe_glm_geometry.py`,
+plus the existing dense emitter, admission-split, fixed-resource, solver and
+prefill-frontier suites. **Not claimed:** no GPU qualification, no real TP2
+receipt pair, no measured row and no producer for the admitted per-rank fixed
+charge -- the CPU receipts for both geometries are synthetic and say so, and the
+producer's own two-rank CPU run is its own evidence, not this stamp's. A full
+`allocator.main` run over a GLM *cost model* (the whole-owner serving unit and
+its member cost rows) is likewise not assembled here: what is exercised through
+the allocator's own CLI is the ranked row spelling, and through the loader's own
+gate, the routed row itself.
 
 Re-stamped (2026-09-17, `flash/tessera-cached-manifest-publication-main-20260917`)
 for the **content-addressed selected-wire manifest** (§7.3). `write_cached_expert_units`
