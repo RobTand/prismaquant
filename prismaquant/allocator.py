@@ -2321,6 +2321,22 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         except (ValueError, OSError) as exc:
             raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
 
+    # A table whose rows price themselves per rank has one resource vector per
+    # serving unit rather than one number. Nothing below may reduce it: the
+    # device axis is refused by name here, at the boundary, before a solve can
+    # compare a rank sum or rank maximum to a single box's budget.
+    ranked_runtime_rows = (
+        measured_runtime_table is not None
+        and any(getattr(row.resources, "ranks", None) is not None
+                for row in measured_runtime_table.rows))
+    if ranked_runtime_rows and args.serve_device_budget_bytes is not None:
+        raise SystemExit(
+            "[alloc] ERROR: measured runtime: this table prices per-rank resources, and "
+            "--serve-device-budget-bytes is one box's budget; a rank sum or rank maximum is "
+            "not that box's number. Per-rank admission is "
+            "measured_runtime_prices.admit_rank_budgets, and it refuses until a per-rank "
+            "fixed charge is admitted")
+
     # Which fixed whole-engine terms this run may read. Resolved once, here, so
     # a scope a table cannot satisfy refuses on the command line rather than
     # inside a solve. The default path is untouched: it still reads the fixed

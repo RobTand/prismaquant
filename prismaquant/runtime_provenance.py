@@ -10,13 +10,14 @@ from dataclasses import dataclass
 import hashlib
 import io
 import json
+import statistics
 import tarfile
 from pathlib import Path
 from typing import Mapping
 
 from .measured_runtime_prices import (
     OFF_STEP_FIELD, RuntimePriceError, _integer, _object,
-    _sha, _string, identity_sha256,
+    _sha, _string, identity_sha256, RankResources, RuntimeRankResources,
 )
 
 SCHEMA = "prismaquant.runtime_provenance_relation.v1"
@@ -724,7 +725,14 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
             priced = menu.get((unit, row.get("format")))
             if priced is None:
                 continue
-            if unit not in resident:
+            if isinstance(priced.resources, RuntimeRankResources):
+                # The recomputed partition is one scalar per unit. A per-rank
+                # row has one value per rank, and the reduction that would make
+                # the two comparable is the reduction this table refuses.
+                refusals.append(
+                    f"unit {unit!r} prices its resources per rank, and the recomputed "
+                    "candidate_resident is one scalar per unit")
+            elif unit not in resident:
                 refusals.append(f"the partition charges unit {unit!r} no resident bytes")
             elif resident[unit] != priced.resources.resident_bytes:
                 refusals.append(f"this table declares {unit!r} resident bytes "
@@ -743,6 +751,244 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
     return refusals
 
 
+#: The latency scope a whole-owner receipt must declare for its samples to
+#: price one apply of the module rather than a local matmul: the producer's own
+#: spelling, checked here rather than summarized.
+LATENCY_SCOPE_KIND = "one_whole_owner_apply"
+#: Both halves of that claim, and the second half is the one that decides it:
+#: the runtime's *declaration* (``runtime.collective``: which reduction, at
+#: which callsite, required by this owner, never skipped) and the *count* of
+#: calls at that callsite during each priced phase
+#: (``collective_calls_per_phase``). The producer counts calls at the runner's
+#: own imported symbol and derives ``includes_output_collective`` from that
+#: count, so a declaration alone -- "the timed region includes a collective" --
+#: is not evidence that one ran, and is refused here.
+_LATENCY_SCOPE_FIELDS = ("kind", "per_rank", "includes_output_collective", "collective_callsite",
+                         "collective_calls_per_phase", "collective_evidence", "collective",
+                         "never")
+PHASES = ("prefill", "decode")
+#: The runtime's own final reduction, which a tensor-parallel owner's timed
+#: region must contain. The producer refuses a config that skips it; this side
+#: refuses a receipt that does not say so.
+RUNTIME_COLLECTIVE_OP = "tensor_model_parallel_all_reduce"
+#: The module whose attribute the producer's probe wraps, and the runner method
+#: that calls it. The callsite string is spelled from that module rather than
+#: from an import path a reader may remember, and it is pinned here too: a
+#: receipt may not name a callsite other than the one this contract counts.
+RUNTIME_COLLECTIVE_MODULE = "vllm.model_executor.layers.fused_moe.runner.moe_runner"
+RUNTIME_COLLECTIVE_METHOD = "_maybe_reduce_final_output"
+RUNTIME_COLLECTIVE_SITE = f"{RUNTIME_COLLECTIVE_MODULE}:{RUNTIME_COLLECTIVE_METHOD}"
+_COLLECTIVE_FIELDS = ("op", "site", "required_by_this_owner",
+                      "runtime_declares_skip_final_all_reduce", "world_size")
+#: One rank's resource identity as the producer publishes it: the record's own
+#: digest plus the rank and world it belongs to. ``peers`` is that same record
+#: for every other rank, gathered before the timed region.
+_RANK_IDENTITY_FIELDS = ("rank", "world_size", "bound_sha256")
+
+
+def routed_rank_bound(resources):
+    """The digest a routed owner's own resource record carries.
+
+    The producer computes it over ``receipt["resources"]`` *before* its roster
+    is attached, so the record it describes has no ``self`` key and holds the
+    ``peers: None`` the producer had written at that moment. Recomputing it
+    here is what makes a rank's claim checkable by the rank that gathered it
+    and by this consumer, which holds both records and may not take either
+    rank's word for the other's bytes.
+    """
+    record = {key: value for key, value in resources.items() if key != "self"}
+    record["peers"] = None
+    return identity_sha256(record)
+
+
+def _check_routed_scope(receipt, *, world_size, where):
+    """The producer's own statement that these samples price one whole apply.
+
+    The claim is accepted on the runtime's *counted* reduction, not on its
+    declared configuration: ``collective_calls_per_phase`` is the number of
+    times the runner's own reduction ran during each priced phase, and it must
+    be exactly what this world needs -- once per phase at a world above one,
+    never at a world of one. The declaration says which reduction and where, so
+    a count of calls to *something else* cannot stand in for it.
+    """
+    scope = receipt.get("latency_scope")
+    if not isinstance(scope, Mapping) or set(scope) != set(_LATENCY_SCOPE_FIELDS):
+        raise RuntimePriceError(
+            f"{where}: the routed receipt declares no whole-owner latency scope")
+    if scope["kind"] != LATENCY_SCOPE_KIND or scope["per_rank"] is not True:
+        raise RuntimePriceError(
+            f"{where}: routed latency scope is {scope['kind']!r} per_rank "
+            f"{scope['per_rank']!r}, not one whole-owner apply measured per rank")
+    runtime = receipt.get("runtime")
+    collective = runtime.get("collective") if isinstance(runtime, Mapping) else None
+    if not isinstance(collective, Mapping) or set(collective) != set(_COLLECTIVE_FIELDS):
+        raise RuntimePriceError(f"{where}: the routed runtime declares no output collective")
+    required = world_size > 1
+    if (collective["op"] != RUNTIME_COLLECTIVE_OP
+            or collective["site"] != RUNTIME_COLLECTIVE_SITE
+            or collective["runtime_declares_skip_final_all_reduce"] is not False
+            or type(collective["required_by_this_owner"]) is not bool
+            or collective["required_by_this_owner"] != required
+            or type(collective["world_size"]) is not int or collective["world_size"] != world_size):
+        raise RuntimePriceError(
+            f"{where}: the routed runtime's collective is not this world's own final "
+            "all-reduce inside the timed region")
+    counts = scope["collective_calls_per_phase"]
+    if not isinstance(counts, Mapping) or set(counts) != set(PHASES):
+        raise RuntimePriceError(
+            f"{where}: a whole-owner latency scope counts the runtime's own reduction once per "
+            f"priced phase ({list(PHASES)}), and this one counts "
+            f"{sorted(counts) if isinstance(counts, Mapping) else counts!r}")
+    expected_calls = 1 if required else 0
+    for phase in PHASES:
+        count = counts[phase]
+        if type(count) is not int or count != expected_calls:
+            raise RuntimePriceError(
+                f"{where}: {phase} priced the runtime's own output reduction {count!r} time(s), "
+                f"and this owner needs exactly {expected_calls} at world size {world_size}")
+    # The runtime's own `site` was pinned to this same constant above, so what
+    # this binds is the site the calls were COUNTED at.
+    _equal(scope["collective_callsite"], RUNTIME_COLLECTIVE_SITE,
+           f"{where} latency scope callsite")
+    # Read off the counted calls rather than off the declaration or the world:
+    # "these samples include the output collective" is true when every priced
+    # phase counted one, and false at a world of one, where nothing was reduced.
+    observed_inclusion = all(counts[phase] == 1 for phase in PHASES)
+    _equal(scope["includes_output_collective"], observed_inclusion,
+           f"{where} latency scope includes_output_collective")
+    _string(scope["collective_evidence"], f"{where} collective evidence")
+    _equal(scope["collective"], collective["op"], f"{where} latency scope collective")
+    _string(scope["never"], f"{where} latency scope never")
+
+
+def _check_routed_rank_identity(receipt, *, rank, world_size, bounds, where):
+    """One rank's record, checked against the ranks that gathered it."""
+    resources = receipt.get("resources")
+    if not isinstance(resources, Mapping):
+        raise RuntimePriceError(f"{where}: the routed receipt records no resources")
+    for key in ("rank", "world_size", "peers", "self"):
+        if key not in resources:
+            raise RuntimePriceError(
+                f"{where}: a whole-owner resource claim at a world above one carries every "
+                f"rank's own bound, and this record has no {key!r}")
+    _equal(resources["rank"], rank, f"{where} resource rank")
+    _equal(resources["world_size"], world_size, f"{where} resource world size")
+    identity = resources["self"]
+    if not isinstance(identity, Mapping) or set(identity) != set(_RANK_IDENTITY_FIELDS):
+        raise RuntimePriceError(f"{where}: this rank's resource identity is not a rank record")
+    _equal(identity, {"rank": rank, "world_size": world_size,
+                      "bound_sha256": routed_rank_bound(resources)},
+           f"{where} own resource identity")
+    peers = resources["peers"]
+    if not isinstance(peers, (list, tuple)):
+        raise RuntimePriceError(f"{where}: a gathered peer roster must be an explicit list")
+    for entry in peers:
+        if not isinstance(entry, Mapping) or set(entry) != set(_RANK_IDENTITY_FIELDS):
+            raise RuntimePriceError(f"{where}: a gathered peer record is not a rank identity")
+    expected = [{"rank": other, "world_size": world_size, "bound_sha256": bounds[other]}
+                for other in sorted(bounds) if other != rank]
+    _equal(list(peers), expected, f"{where} gathered peer bounds")
+
+
+def routed_owner_rank_resources(panel, ranks, *, where):
+    """The per-rank resource vector one whole routed owner apply prices.
+
+    ``ranks`` is one ``(rank, receipt, observation)`` per rank of the world the
+    owner declares, and the observations are what
+    ``native_moe_panel.consume_moe_receipt`` already admitted for each rank's
+    own receipt. Nothing here reads a producer summary: each rank's bytes come
+    from that rank's own observed ledger, each rank's own resource digest is
+    recomputed, and every other rank's digest is checked against the one this
+    rank's receipt gathered before it was allowed to time anything.
+
+    The timing is one whole-owner apply per rank, each including the runtime's
+    own final all-reduce, and the row prices the slowest rank's median while
+    retaining every rank's. That is a maximum over ranks of one interval, not a
+    sum of leaf timings and not a world-wide average.
+    """
+    world_size = _native_world_size(panel)
+    roster = sorted(ranks, key=lambda item: item[0])
+    covered = [rank for rank, _receipt, _observation in roster]
+    if covered != list(range(world_size)):
+        raise RuntimePriceError(
+            f"{where}: a routed owner row needs every rank's own receipt, ranks 0..{world_size - 1} "
+            f"once each and in order, and its receipts name {covered}")
+    bounds = {}
+    records, medians = [], {"prefill": [], "decode": []}
+    for rank, receipt, observation in roster:
+        rank_where = f"{where} rank {rank}"
+        _check_routed_scope(receipt, world_size=world_size, where=rank_where)
+        resources = receipt["resources"]
+        bounds[rank] = routed_rank_bound(resources)
+    for rank, receipt, observation in roster:
+        rank_where = f"{where} rank {rank}"
+        _check_routed_rank_identity(receipt, rank=rank, world_size=world_size, bounds=bounds,
+                                   where=rank_where)
+        scratch, activation = [], []
+        for phase in ("prefill", "decode"):
+            actual = observation["phases"][phase]
+            if actual["peak_scratch_bytes"] is None:
+                raise RuntimePriceError(f"{rank_where}: the routed row has an incomplete "
+                                        "resource ledger")
+            samples = actual["measurement"]["samples_ms"]
+            if not isinstance(samples, (list, tuple)) or not samples:
+                raise RuntimePriceError(f"{rank_where}: native {phase} measurement carries "
+                                        "no samples")
+            medians[phase].append(float(statistics.median(samples)))
+            scratch.append(actual["peak_scratch_bytes"])
+            activation.append(actual["input_bytes"])
+        records.append(RankResources(
+            rank=rank,
+            resident_bytes=_integer(observation["resident_bytes"], f"{rank_where} resident bytes"),
+            peak_scratch_bytes=max(scratch), activation_bytes=max(activation),
+            workspace_resident_bytes=_integer(observation["workspace_resident_bytes"],
+                                              f"{rank_where} workspace resident bytes"),
+            workspace_sha256=_sha(observation["workspace_sha256"], f"{rank_where} workspace"),
+            bound_sha256=bounds[rank]))
+    # The wire extent belongs to the module, not to a rank: the producer frames
+    # one canonical whole-module container and shards it locally, so every rank
+    # holds a view of the same artifact. It is counted once, from the frozen
+    # panel's own member wire records, and the digest binds those identities --
+    # summing one rank's view per rank would double count the same bytes.
+    wire_records = [member["wire"]["record"] for member in panel["members"]]
+    wire_bytes = sum(_integer(member["wire"]["blob_bytes"], f"{where} member wire bytes")
+                     for member in panel["members"])
+    vector = RuntimeRankResources(
+        prefill_ms=max(medians["prefill"]), decode_ms=max(medians["decode"]),
+        world_size=world_size, rank_medians_ms=medians, wire_bytes=wire_bytes,
+        wire_sha256=identity_sha256(wire_records), ranks=tuple(records))
+    return vector.as_dict()
+
+
+def routed_slowest_rank(vector, phase):
+    """Which rank's median a routed row priced, and the samples to cite.
+
+    Ties go to the lowest rank so one table always cites the same receipt for
+    the same numbers.
+    """
+    medians = vector["rank_medians_ms"][phase]
+    return medians.index(max(medians))
+
+
+def _native_world_size(panel):
+    """The world a native panel was measured in, from its own two records.
+
+    ``runtime.execution.tensor_parallel`` is the box's world; a routed owner's
+    ``execution.tensor_parallel`` is the world its priced member shapes were cut
+    for. They are different facts, and a panel stating two different worlds is
+    refused rather than resolved in whichever direction a reader checks first.
+    """
+    runtime = panel["runtime"]
+    execution = runtime.get("execution") if isinstance(runtime, Mapping) else None
+    if not isinstance(execution, Mapping) or "tensor_parallel" not in execution:
+        raise RuntimePriceError("native runtime record names no execution world size")
+    world = execution["tensor_parallel"]
+    owner = panel.get("execution")
+    if isinstance(owner, Mapping) and "tensor_parallel" in owner:
+        _equal(owner["tensor_parallel"], world, "native owner/runtime world size")
+    return world
+
+
 def admit_native_rows(table, relation):
     """Reuse exact same-panel producer gates before accepting v2 table rows."""
     from .native_moe_panel import consume_moe_receipt
@@ -753,7 +999,14 @@ def admit_native_rows(table, relation):
         raise RuntimePriceError("native receipt bindings must be an explicit list")
     by_key = {}
     for item in bindings:
-        _object(item, ("unit", "format", "run_id", "panel", "receipt", "memory_trace"), "native receipt binding")
+        # A dense or single-device row prices one process, so it has no peer
+        # roster and keeps the binding shape it has always had. A ranked row
+        # carries every other rank's receipt, and a ranked row without one is
+        # refused rather than priced from the one rank that happened to write.
+        fields = ("unit", "format", "run_id", "panel", "receipt", "memory_trace")
+        if "peer_receipts" in item:
+            fields += ("peer_receipts",)
+        _object(item, fields, "native receipt binding")
         key = item["unit"], item["format"]
         if key in by_key:
             raise RuntimePriceError("duplicate native row receipt binding")
@@ -772,6 +1025,10 @@ def admit_native_rows(table, relation):
         _equal(panel["cost_sha256"], table.cost_sha256, "native panel cost payload")
         _equal(panel["source_sha256"], table.context.source_sha256, "native source model")
         _equal(panel["calibration_sha256"], table.context.calibration_sha256, "native calibration")
+        # The priced world is a coordinate of the row, not a label: member
+        # shapes, per-rank bytes and the timing that includes the collectives
+        # all belong to the world the panel was measured in.
+        _equal(_native_world_size(panel), table.context.tensor_parallel, "native panel world size")
         if table.context.batch_size != 1:
             raise RuntimePriceError("native panel admission currently requires batch size one")
         if panel["schema"] == "tessera.native_moe_panel.v1":
@@ -780,45 +1037,86 @@ def admit_native_rows(table, relation):
             wire_records = [member["wire"]["record"] for member in panel["members"]]
             consume = consume_moe_receipt
             expected_binding = panel["runtime_binding"]
+            # A world above one is priced from every rank's own receipt, so the
+            # binding roster is read as a roster: each peer entry's receipt is
+            # rehashed, must carry the same frozen panel, and must declare the
+            # rank the roster places it at.
+            roster = [(receipt["resources"]["rank"], receipt_path, receipt, trace_path,
+                       binding["receipt"]["sha256"])]
+            for peer in binding.get("peer_receipts", ()):
+                _object(peer, ("rank", "receipt", "memory_trace"), "native peer receipt binding")
+                peer_path, peer_receipt = reader.json(peer["receipt"], "native peer receipt")
+                peer_trace, _ = reader.bytes(peer["memory_trace"], "native peer memory trace")
+                _equal(peer_receipt["panel"], panel, "native peer receipt panel")
+                _equal(peer_receipt["resources"]["rank"], peer["rank"], "native peer receipt rank")
+                roster.append((peer["rank"], peer_path, peer_receipt, peer_trace,
+                               peer["receipt"]["sha256"]))
+            roster.sort(key=lambda entry: entry[0])
         elif panel["schema"] == "tessera.native_dense_panel.v1":
             _equal(run["raw"]["schema"], "tessera.native_dense_runtime.v1", "native dense runtime scope")
             wire_records = [panel["wire"]["record"]]
             consume = consume_native_receipt
+            roster = [(0, receipt_path, receipt, trace_path, binding["receipt"]["sha256"])]
             expected_binding = {"member_formats": {panel["unit"]: panel["format"]},
                 "member_operator_identity_sha256": {panel["unit"]: panel["joint_operator_identity_sha256"]},
                 "member_shapes": {panel["unit"]: panel["shape"]},
                 "operator_route": operator_route_identity(panel["phases"]["prefill"]["expected_route"])}
         else:
             raise RuntimePriceError("unsupported native producer panel")
+        cited_paths = {rank: path for rank, path, _receipt, _trace, _sha in roster}
+        cited_paths_sha256 = {rank: sha for rank, _path, _receipt, _trace, sha in roster}
         for record in wire_records:
             _equal(record["identity"]["encoder_source_sha256"],
                    run["common"]["producer_source_tree_sha256"], "original wire producer source-tree seal")
-        try:
-            observation = consume(receipt_path, expected_sha256=binding["receipt"]["sha256"],
-                                  expected_panel=panel, memory_trace_path=trace_path)
-        except (ValueError, KeyError, TypeError) as exc:
-            raise RuntimePriceError(f"native producer admission refused: {exc}") from exc
+        observations = {}
+        for rank, rank_path, _rank_receipt, rank_trace, rank_sha256 in roster:
+            try:
+                observations[rank] = consume(rank_path, expected_sha256=rank_sha256,
+                                             expected_panel=panel, memory_trace_path=rank_trace)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise RuntimePriceError(f"native producer admission refused: {exc}") from exc
+        observation = observations[roster[0][0]]
         _equal(observation["unit"], row.unit, "native row unit")
         _equal(observation["format"], row.fmt, "native row format")
         _equal(expected_binding, row.binding.as_dict(), "native row operator binding")
-        _equal(observation["serialized_unit_bytes"], row.resources.serialized_bytes, "native serialized bytes")
-        _equal(observation["resident_bytes"], row.resources.resident_bytes, "native resident bytes")
+        ranked = isinstance(row.resources, RuntimeRankResources)
+        if ranked:
+            # The row's per-rank vector is re-derived here from every rank's own
+            # receipt, not re-read from the row: the emitter used this same
+            # function to fill it, so what this compares is two emissions of one
+            # implementation rather than a number that travelled and was trusted.
+            _equal(row.resources.as_dict(),
+                   routed_owner_rank_resources(
+                       panel,
+                       [(rank, rank_receipt, observations[rank])
+                        for rank, _path, rank_receipt, _trace, _sha in roster],
+                       where=f"native row {row.unit}"),
+                   "native row per-rank resources")
+        else:
+            _equal(observation["serialized_unit_bytes"], row.resources.serialized_bytes, "native serialized bytes")
+            _equal(observation["resident_bytes"], row.resources.resident_bytes, "native resident bytes")
         scratch, activation = [], []
         for phase, measurement in (("prefill", row.prefill), ("decode", row.decode)):
             if measurement is None:
                 raise RuntimePriceError("native v2 row lacks a complete measured phase")
-            actual = observation["phases"][phase]
+            # The row cites the receipt its own samples came from: at a world
+            # above one that is the slowest rank's, because that is the median
+            # the row priced.
+            cited = roster[0][0] if not ranked else routed_slowest_rank(
+                row.resources.as_dict(), phase)
+            actual = observations[cited]["phases"][phase]
             if actual["peak_scratch_bytes"] is None:
                 raise RuntimePriceError("native row has an incomplete resource ledger")
             expected_path, _ = reader.bytes({"path": measurement.receipt_path, "sha256": measurement.receipt_sha256}, "table native phase receipt")
-            _equal(expected_path.resolve(), receipt_path.resolve(), "native phase receipt path")
-            _equal(measurement.receipt_sha256, binding["receipt"]["sha256"], "native phase receipt bytes")
+            _equal(expected_path.resolve(), cited_paths[cited].resolve(), "native phase receipt path")
+            _equal(measurement.receipt_sha256, cited_paths_sha256[cited], "native phase receipt bytes")
             for key in ("method", "samples_ms", "warmup_iterations"):
                 _equal(actual["measurement"][key], measurement.as_dict()[key], "native phase samples")
             _equal(panel["phases"][phase]["m"], table.context.prompt_tokens if phase == "prefill" else 1, "native phase token scope")
             scratch.append(actual["peak_scratch_bytes"]); activation.append(actual["input_bytes"])
-        _equal(row.resources.peak_scratch_bytes, max(scratch), "native maximum phase scratch")
-        _equal(row.resources.activation_bytes, max(activation), "native maximum phase input residency")
+        if not ranked:
+            _equal(row.resources.peak_scratch_bytes, max(scratch), "native maximum phase scratch")
+            _equal(row.resources.activation_bytes, max(activation), "native maximum phase input residency")
 
 
 def admit_runtime_provenance(table):

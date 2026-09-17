@@ -44,6 +44,62 @@ RESOURCE_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes", "resident_byte
 OFF_STEP_FIELD = "non_step_transient_peak_bytes"
 RESOURCE_FIELDS_WITH_OFF_STEP = RESOURCE_FIELDS + (OFF_STEP_FIELD,)
 
+#: The per-rank spelling of a row's resources, for a serving unit measured
+#: under tensor parallelism. One ranked MoE owner has no single scalar answer
+#: to "how many device bytes does this row cost": the ranks hold different
+#: halves of the same stack, so a rank sum and a rank maximum are both numbers
+#: no device ever held. The scalar fields above keep their meaning exactly, and
+#: a row whose price is per-rank says so on its face rather than shipping one
+#: of those two reductions under an existing name.
+#:
+#: ``prefill_ms``/``decode_ms`` stay ONE whole-owner measurement in both
+#: spellings. The tensor-parallel world's collective cost is inside that
+#: number; a rank record carries no timing, because a per-rank timing would
+#: invite a sum of ranks where a whole-owner apply was measured once.
+RANK_RESOURCES_SCHEMA = "prismaquant.runtime_rank_resources.v1"
+#: One rank's own record. Every axis is required: an undefined axis is an
+#: absence of evidence and never an implied zero, which is the whole reason
+#: this spelling exists next to the scalar one.
+RANK_FIELDS = ("rank", "resident_bytes", "peak_scratch_bytes",
+               "activation_bytes", "workspace_resident_bytes", "workspace_sha256",
+               "bound_sha256")
+RANK_VECTOR_FIELDS = ("schema", "world_size", "timing_rule", "prefill_ms", "decode_ms",
+                      "rank_medians_ms", "wire_bytes", "wire_sha256", "ranks")
+#: The one timing rule this spelling carries. A routed owner apply at a world
+#: above one was timed once on every rank, each including the runtime's own
+#: final all-reduce, so the world's own step cannot be faster than its slowest
+#: rank: the priced number is that rank's median, and every rank's median is
+#: retained beside it. It is never a sum of leaf timings and never a mean.
+RANK_TIMING_RULE = "slowest_rank_median_of_one_whole_owner_apply"
+#: The versioned input a per-rank device budget arrives under. Two things are
+#: declared together because either alone is a number nobody can check: the
+#: budget each rank has, and the fixed whole-engine charge that has to be added
+#: to each rank before a comparison means anything.
+RANK_DEVICE_BOUNDS_SCHEMA = "prismaquant.runtime_rank_device_bounds.v1"
+RANK_DEVICE_BOUNDS_FIELDS = ("schema", "world_size", "provenance", "budgets_per_rank",
+                             "charge_per_rank", "evidence")
+#: ``pending_measurement``: the charge is not known, so no device total may be
+#: published and no rank may be admitted -- but the campaign's rank dimensions
+#: still price, because a common unknown constant cannot reorder them.
+#: ``recomputed_full_engine_partition``: the charge came from a per-rank
+#: partition this consumer recomputed, and the axis admits.
+RANK_DEVICE_PROVENANCE = ("pending_measurement", "recomputed_full_engine_partition")
+_RANK_DEVICE_EVIDENCE_FIELDS = ("full_engine_report", "per_rank_partition")
+#: Terms that add across sequentially priced units, per rank. The wire extent
+#: is deliberately absent: one artifact is one charge, counted once by
+#: ``RuntimeRankResources.wire_bytes``, not once per rank that holds a copy of
+#: the same container.
+RANK_ADDITIVE_TERMS = ("resident_bytes", "workspace_resident_bytes")
+#: Terms that are independent per-rank maxima across those same units.
+RANK_PEAK_TERMS = ("peak_scratch_bytes", "activation_bytes")
+#: Terms a ranked consumer may not publish a device total without. The
+#: runtime-global workspace has no versioned cross-row composition rule (the
+#: routed producer says as much about its own observation), and the fixed
+#: terms come from the full-engine gate, which today refuses every v2 table.
+RANK_WITHHELD_TERMS = ("workspace_resident_bytes", "fixed_resident_bytes",
+                       "fixed_activation_bytes", "fixed_scratch_bytes",
+                       "fixed_kv_bytes", OFF_STEP_FIELD)
+
 
 class RuntimePriceError(DispatchTableError):
     """Missing, malformed, stale, or mismatched measured proposal evidence."""
@@ -241,6 +297,192 @@ class RuntimeResources:
 
 
 @dataclass(frozen=True)
+class RankResources:
+    """One rank's own share of a priced row; nothing here is a reduction.
+
+    ``resident_bytes`` is what that rank holds; the module's *wire extent* is
+    one canonical owner charge on the vector (``wire_bytes``), because the
+    producer frames one whole-module container per rank and shards it locally --
+    the same bytes, not one artifact per rank;
+    ``peak_scratch_bytes`` and ``activation_bytes`` are that rank's own peaks
+    over the row's measured phases, not a maximum taken over its peers.
+    ``workspace_resident_bytes``/``workspace_sha256`` are the rank's *runtime
+    workspace* -- persistent engine state the row did not allocate itself --
+    carried with its frozen identity so no consumer has to guess whether two
+    rows are describing the same allocation.
+    """
+
+    rank: int
+    resident_bytes: int
+    peak_scratch_bytes: int
+    activation_bytes: int
+    workspace_resident_bytes: int
+    workspace_sha256: str
+    #: The digest this rank's own resource record carried before its roster was
+    #: attached (``runtime_provenance.routed_rank_bound``). Carried so two
+    #: ranks' records can be checked against each other's observation of them.
+    bound_sha256: str
+
+    def __post_init__(self):
+        _integer(self.rank, "per-rank resource rank")
+        for name in RANK_ADDITIVE_TERMS + RANK_PEAK_TERMS:
+            _integer(getattr(self, name), name)
+        _sha(self.workspace_sha256, "workspace_sha256")
+        _sha(self.bound_sha256, "bound_sha256")
+
+    def as_dict(self) -> dict:
+        return {name: getattr(self, name)
+                for name in ("rank",) + RANK_ADDITIVE_TERMS + RANK_PEAK_TERMS
+                + ("workspace_sha256", "bound_sha256")}
+
+    @classmethod
+    def from_dict(cls, payload: Mapping, *, where: str = "per-rank resources") -> "RankResources":
+        return cls(**_object(payload, RANK_FIELDS, where))
+
+
+@dataclass(frozen=True)
+class RuntimeRankResources:
+    """A row's per-rank resource vector, with one whole-owner timing pair.
+
+    ``world_size`` must equal the table context's ``tensor_parallel``: a vector
+    covering fewer ranks than the priced world is exactly the imbalance this
+    spelling exists to expose, and a vector covering more is pricing a box the
+    row was not measured on. The rank roster must be ``0..world_size-1`` once
+    each and in order, so a missing rank is a refusal rather than a hole a
+    later sum would quietly close.
+    """
+
+    prefill_ms: float
+    decode_ms: float | None
+    world_size: int
+    #: ``{"prefill": [...], "decode": [...]}``, one median per rank in rank
+    #: order. ``prefill_ms``/``decode_ms`` are the slowest rank's entry.
+    rank_medians_ms: Mapping[str, tuple[float, ...]]
+    #: The module's wire extent, counted ONCE for the whole owner: the producer
+    #: frames one canonical whole-module container and shards it locally, so
+    #: every rank holds a view of the same artifact rather than an artifact of
+    #: its own. ``wire_sha256`` binds the ordered member wire identities the
+    #: extent was summed from, so two ranks cannot disagree about the bytes.
+    wire_bytes: int
+    wire_sha256: str
+    ranks: tuple[RankResources, ...]
+
+    def __post_init__(self):
+        _number(self.prefill_ms, "prefill_ms")
+        if self.decode_ms is not None:
+            _number(self.decode_ms, "decode_ms")
+        _integer(self.wire_bytes, "wire_bytes")
+        _sha(self.wire_sha256, "wire_sha256")
+        _integer(self.world_size, "world_size", 1)
+        if not isinstance(self.ranks, tuple) or len(self.ranks) != self.world_size:
+            size = len(self.ranks) if isinstance(self.ranks, (tuple, list)) else "no"
+            raise RuntimePriceError(
+                f"per-rank resources must carry exactly one record per rank: world_size "
+                f"{self.world_size} against {size} records")
+        for entry in self.ranks:
+            if not isinstance(entry, RankResources):
+                raise RuntimePriceError("per-rank resources must be RankResources records")
+        covered = tuple(entry.rank for entry in self.ranks)
+        if covered != tuple(range(self.world_size)):
+            raise RuntimePriceError(
+                f"per-rank resources must cover ranks 0..{self.world_size - 1} once each and "
+                f"in order, and they cover {list(covered)}")
+        if (not isinstance(self.rank_medians_ms, Mapping)
+                or set(self.rank_medians_ms) != {"prefill", "decode"}):
+            raise RuntimePriceError(
+                "per-rank resources carry one prefill and one decode median for every rank")
+        medians = {}
+        for phase in ("prefill", "decode"):
+            values = self.rank_medians_ms[phase]
+            if (not isinstance(values, (tuple, list)) or len(values) != self.world_size):
+                raise RuntimePriceError(
+                    f"per-rank {phase} medians must name every rank of this world")
+            if phase == "decode" and self.decode_ms is None:
+                # A row that measured no decode carries no rank median either:
+                # an explicit absence, never a zero a reader could price.
+                if any(value is not None for value in values):
+                    raise RuntimePriceError(
+                        "a per-rank row with no priced decode carries no rank decode median")
+                medians[phase] = tuple(None for _ in values)
+            else:
+                medians[phase] = tuple(_number(value, f"rank {phase} median") for value in values)
+        object.__setattr__(self, "rank_medians_ms", MappingProxyType(medians))
+        for phase, priced in (("prefill", self.prefill_ms), ("decode", self.decode_ms)):
+            if priced is not None and priced != max(medians[phase]):
+                raise RuntimePriceError(
+                    f"a per-rank row prices the slowest rank's {phase} median, and this row "
+                    f"prices {priced} against {max(medians[phase])}")
+
+    def rank(self, index: int) -> RankResources:
+        if type(index) is not int or not 0 <= index < self.world_size:
+            raise RuntimePriceError(f"rank {index!r} is outside this row's world of {self.world_size}")
+        return self.ranks[index]
+
+    def as_dict(self) -> dict:
+        return {"schema": RANK_RESOURCES_SCHEMA, "world_size": self.world_size,
+                "timing_rule": RANK_TIMING_RULE,
+                "prefill_ms": self.prefill_ms, "decode_ms": self.decode_ms,
+                "rank_medians_ms": {phase: list(values)
+                                    for phase, values in self.rank_medians_ms.items()},
+                "wire_bytes": self.wire_bytes, "wire_sha256": self.wire_sha256,
+                "ranks": [entry.as_dict() for entry in self.ranks]}
+
+    @classmethod
+    def from_dict(cls, payload: Mapping, *, tensor_parallel: int,
+                  where: str = "row resources") -> "RuntimeRankResources":
+        fields = _object(payload, RANK_VECTOR_FIELDS, where)
+        if fields["schema"] != RANK_RESOURCES_SCHEMA:
+            raise RuntimePriceError(
+                f"{where}: unknown per-rank resource schema {fields['schema']!r}")
+        if fields["timing_rule"] != RANK_TIMING_RULE:
+            raise RuntimePriceError(
+                f"{where}: unknown per-rank timing rule {fields['timing_rule']!r}; a rank whose "
+                "timing rule is not this one priced something else")
+        if fields["world_size"] != tensor_parallel:
+            raise RuntimePriceError(
+                f"{where}: per-rank resources cover a world of {fields['world_size']!r} where "
+                f"this table's context declares tensor_parallel {tensor_parallel}")
+        ranks = fields["ranks"]
+        if not isinstance(ranks, (list, tuple)):
+            raise RuntimePriceError(f"{where}: per-rank resources must be an explicit ordered list")
+        medians = fields["rank_medians_ms"]
+        if not isinstance(medians, Mapping):
+            raise RuntimePriceError(f"{where}: per-rank medians must be an explicit mapping")
+        return cls(fields["prefill_ms"], fields["decode_ms"], fields["world_size"],
+                   {phase: medians[phase] for phase in ("prefill", "decode") if phase in medians},
+                   fields["wire_bytes"], fields["wire_sha256"],
+                   tuple(RankResources.from_dict(entry, where=f"{where} rank record")
+                         for entry in ranks))
+
+
+def parse_row_resources(payload: Any, *, tensor_parallel: int,
+                        where: str = "row resources") -> RuntimeResources | RuntimeRankResources:
+    """A row's resources in the one spelling its world size licenses.
+
+    A tensor-parallel table prices every row per rank, so a scalar row under
+    such a context is refused rather than reinterpreted: whichever reduction a
+    producer applied to get one number per axis, the consumer did not agree to
+    it. Conversely the scalar spelling keeps its v2 meaning exactly, so a table
+    emitted before this field existed re-reads byte-identically.
+    """
+    if isinstance(payload, Mapping) and "schema" in payload:
+        return RuntimeRankResources.from_dict(payload, tensor_parallel=tensor_parallel, where=where)
+    if tensor_parallel > 1:
+        raise RuntimePriceError(
+            f"{where}: a tensor-parallel table prices every row with "
+            f"{RANK_RESOURCES_SCHEMA} per-rank resources and this row carries the scalar "
+            "spelling; a rank sum or rank maximum written into the scalar byte fields is a "
+            "number no device held")
+    resources = RuntimeResources.from_dict(payload)
+    if resources.kv_bytes:
+        raise RuntimePriceError("KV belongs to fixed_resources, not per-unit rows")
+    if resources.non_step_transient_peak_bytes is not None:
+        raise RuntimePriceError("the off-step transient peak is one whole-engine obligation, "
+                                "not a per-unit row price")
+    return resources
+
+
+@dataclass(frozen=True)
 class RuntimeBinding:
     """Bind whole-unit timings to exact candidate members and joint operators.
 
@@ -352,7 +594,10 @@ class MeasuredRuntimeRow:
     unit: str
     fmt: str
     binding: RuntimeBinding
-    resources: RuntimeResources
+    #: One row's price in the spelling its world size licenses: the scalar v2
+    #: fields, or the per-rank vector for a unit measured under tensor
+    #: parallelism (``parse_row_resources``).
+    resources: RuntimeResources | RuntimeRankResources
     prefill: OperatorMeasurement
     decode: OperatorMeasurement | None
 
@@ -471,16 +716,12 @@ def parse_measured_runtime_table(payload: Mapping, *, expected_context: RuntimeC
         binding = RuntimeBinding.from_dict(raw["binding"])
         if binding.operator_route != context.operator_route(unit, fmt):
             raise RuntimePriceError(f"operator route mismatch for {key}")
-        resources = RuntimeResources.from_dict(raw["resources"])
+        resources = parse_row_resources(raw["resources"], tensor_parallel=context.tensor_parallel,
+                                        where=f"runtime row {key} resources")
         prefill = OperatorMeasurement.from_dict(raw["prefill"])
         decode = OperatorMeasurement.from_dict(raw["decode"]) if raw["decode"] is not None else None
         if resources.prefill_ms != prefill.median_ms or resources.decode_ms != (decode.median_ms if decode else None):
             raise RuntimePriceError(f"{key}: resource times must equal medians of measured operator samples")
-        if resources.kv_bytes:
-            raise RuntimePriceError("KV belongs to fixed_resources, not per-unit rows")
-        if resources.non_step_transient_peak_bytes is not None:
-            raise RuntimePriceError("the off-step transient peak is one whole-engine obligation, "
-                                    "not a per-unit row price")
         rows.append(MeasuredRuntimeRow(unit, fmt, binding, resources, prefill, decode))
     provenance, receipt_bindings = None, ()
     if is_provenance:
@@ -491,12 +732,28 @@ def parse_measured_runtime_table(payload: Mapping, *, expected_context: RuntimeC
             raise RuntimePriceError("native receipt bindings must be a list")
         frozen = []
         for item in payload["native_receipt_bindings"]:
-            _object(item, ("unit", "format", "run_id", "panel", "receipt", "memory_trace"), "native receipt binding")
+            fields = ["unit", "format", "run_id", "panel", "receipt", "memory_trace"]
+            if "peer_receipts" in item:
+                fields.append("peer_receipts")
+            _object(item, tuple(fields), "native receipt binding")
             binding = {key: _string(item[key], "native receipt " + key) for key in ("unit", "format", "run_id")}
             for key in ("panel", "receipt", "memory_trace"):
                 ref = _object(item[key], ("path", "sha256"), "native " + key + " artifact")
                 binding[key] = MappingProxyType({"path": _string(ref["path"], key + " path"),
                                                  "sha256": _sha(ref["sha256"], key + " digest")})
+            if "peer_receipts" in item:
+                if not isinstance(item["peer_receipts"], list):
+                    raise RuntimePriceError("native peer receipts must be a list")
+                peers = []
+                for peer in item["peer_receipts"]:
+                    _object(peer, ("rank", "receipt", "memory_trace"), "native peer receipt binding")
+                    entry = {"rank": _integer(peer["rank"], "native peer receipt rank")}
+                    for key in ("receipt", "memory_trace"):
+                        ref = _object(peer[key], ("path", "sha256"), "native peer " + key + " artifact")
+                        entry[key] = MappingProxyType({"path": _string(ref["path"], key + " path"),
+                                                       "sha256": _sha(ref["sha256"], key + " digest")})
+                    peers.append(MappingProxyType(entry))
+                binding["peer_receipts"] = tuple(peers)
             frozen.append(MappingProxyType(binding))
         receipt_bindings = tuple(frozen)
     return MeasuredRuntimeTable(_string(payload["table_id"], "table_id"), context, cost_sha256,
@@ -616,6 +873,12 @@ def shape_only_fixed_resources(table: MeasuredRuntimeTable) -> tuple[RuntimeReso
                 f"carries no timing or serialized partition, so this table's fixed {field} "
                 f"({value}) has no evidence")
     withheld = sorted([*FIXED_TERM_FIELDS.values(), OFF_STEP_FIELD])
+    # Rows that price themselves per rank withhold a second set of terms, on
+    # their own axis: the rank vector is published per rank, and no scalar
+    # device number may be built from it while the fixed charge and the
+    # runtime-global workspace have no versioned value.
+    ranked_rows = [row for row in getattr(table, "rows", ())
+                   if isinstance(getattr(row, "resources", None), RuntimeRankResources)]
     stamp = {
         "scope": SHAPE_ONLY_SCOPE,
         "fixed_resources_admitted": False,
@@ -629,6 +892,12 @@ def shape_only_fixed_resources(table: MeasuredRuntimeTable) -> tuple[RuntimeReso
         "read_terms_reason": ("the report schema carries no observation for these fields at "
                               "all; the gate refuses them only when a table declares one "
                               "nonzero, and that check is re-run here"),
+        "per_rank_rows": len(ranked_rows),
+        "withheld_row_terms": [] if not ranked_rows else list(RANK_WITHHELD_TERMS),
+        "withheld_row_reason": (None if not ranked_rows else
+                                "these rows carry one value per rank, so no scalar device "
+                                "total is published for them; see "
+                                "measured_runtime_prices.compose_rank_totals"),
         "certifies_placement": False,
     }
     return replace(fixed, **{field: 0 for field in FIXED_TERM_FIELDS.values()},
@@ -662,7 +931,272 @@ def build_runtime_resources(table: MeasuredRuntimeTable, candidates: Mapping[str
             members = candidate.member_formats if getattr(candidate, "member_formats", None) is not None else {unit: candidate.fmt}
             if dict(binding.member_formats) != members:
                 raise RuntimePriceError(f"whole serving-unit member formats mismatch for {key}")
-            if type(candidate.memory_bytes) is not int or row.resources.serialized_bytes != candidate.memory_bytes:
+            if type(candidate.memory_bytes) is not int:
+                raise RuntimePriceError(f"serialized byte mismatch for {key}")
+            if isinstance(row.resources, RuntimeRankResources):
+                # One artifact, one charge: the vector carries the module's
+                # canonical wire extent, counted once. Summing a per-rank view
+                # of the same container would double count the artifact.
+                if row.resources.wire_bytes != candidate.memory_bytes:
+                    raise RuntimePriceError(
+                        f"whole-unit wire byte mismatch for {key}: the candidate prices "
+                        f"{candidate.memory_bytes} bytes where the owner's canonical wire "
+                        f"extent is {row.resources.wire_bytes}")
+            elif row.resources.serialized_bytes != candidate.memory_bytes:
                 raise RuntimePriceError(f"serialized byte mismatch for {key}")
             result[key] = row.resources
     return result
+
+
+#: The per-rank totals one expanded assignment composes to. Its own schema
+#: because it is its own object: an operator-side vector, indexed by rank,
+#: carrying no scalar reduction and no device total.
+RANK_TOTALS_SCHEMA = "prismaquant.runtime_rank_totals.v1"
+RANK_TOTALS_WITHHELD_REASON = (
+    "a device total needs the fixed whole-engine charge and the runtime-global workspace, "
+    "and neither has a versioned value at this schema version: the fixed terms come from "
+    "runtime_provenance.admit_fixed_resources, which refuses every v2 table today, and the "
+    "routed producer publishes its workspace as shared persistent runtime state with no "
+    "cross-row composition rule")
+
+
+@dataclass(frozen=True)
+class RankTotals:
+    """One expanded assignment's operator terms, indexed by rank.
+
+    ``serialized_bytes``/``resident_bytes``/``workspace_resident_bytes`` add
+    across the assignment's priced rows; ``peak_scratch_bytes`` and
+    ``activation_bytes`` are independent per-rank maxima over those rows. Every
+    tuple is published whole: a consumer that wants one number still has to
+    choose the reduction, and this object never chooses it for them.
+    """
+
+    world_size: int
+    #: One canonical wire extent for the whole assignment: each priced unit's
+    #: artifact counted once, never once per rank.
+    wire_bytes: int
+    resident_bytes: tuple[int, ...]
+    peak_scratch_bytes: tuple[int, ...]
+    activation_bytes: tuple[int, ...]
+    workspace_resident_bytes: tuple[int, ...]
+
+    def as_dict(self) -> dict:
+        return {"schema": RANK_TOTALS_SCHEMA, "world_size": self.world_size,
+                "wire_bytes": self.wire_bytes,
+                "ranks": [{"rank": rank,
+                           "resident_bytes": self.resident_bytes[rank],
+                           "peak_scratch_bytes": self.peak_scratch_bytes[rank],
+                           "activation_bytes": self.activation_bytes[rank],
+                           "workspace_resident_bytes": self.workspace_resident_bytes[rank]}
+                          for rank in range(self.world_size)],
+                "withheld_terms": list(RANK_WITHHELD_TERMS),
+                "withheld_reason": RANK_TOTALS_WITHHELD_REASON}
+
+
+def compose_rank_totals(resources) -> RankTotals:
+    """Compose priced rows into per-rank terms without reducing over ranks.
+
+    Accepts the scalar spelling only where it means what it says: a table whose
+    world is one has one rank, and its scalar row *is* that rank's record. A
+    scalar row in a world of more than one is refused by
+    :func:`parse_row_resources` before it ever reaches here, so the two
+    spellings cannot be mixed into a reduction by this function.
+    """
+    rows = list(resources)
+    if not rows:
+        raise RuntimePriceError("per-rank totals require at least one priced row")
+    ranked = [row for row in rows if isinstance(row, RuntimeRankResources)]
+    if ranked:
+        world = ranked[0].world_size
+        if any(row.world_size != world for row in ranked):
+            raise RuntimePriceError(
+                "priced rows disagree about their world size, so no per-rank total covers one box")
+        if world != 1 and any(not isinstance(row, RuntimeRankResources) for row in rows):
+            raise RuntimePriceError(
+                f"a world of {world} prices every row per rank, and this assignment mixes a "
+                "scalar row into it")
+    else:
+        world = 1
+    wire_bytes = 0
+    resident = [0] * world
+    scratch = [0] * world
+    activation = [0] * world
+    workspace = [0] * world
+    for row in rows:
+        if isinstance(row, RuntimeRankResources):
+            wire_bytes += row.wire_bytes
+            for rank, entry in enumerate(row.ranks):
+                resident[rank] += entry.resident_bytes
+                scratch[rank] = max(scratch[rank], entry.peak_scratch_bytes)
+                activation[rank] = max(activation[rank], entry.activation_bytes)
+                workspace[rank] += entry.workspace_resident_bytes
+        else:
+            wire_bytes += row.serialized_bytes
+            resident[0] += row.resident_bytes
+            scratch[0] = max(scratch[0], row.peak_scratch_bytes)
+            activation[0] = max(activation[0], row.activation_bytes)
+    return RankTotals(world, wire_bytes, tuple(resident), tuple(scratch),
+                      tuple(activation), tuple(workspace))
+
+
+def _rank_vector(value, world: int, where: str) -> tuple[int, ...]:
+    if not isinstance(value, (list, tuple)) or len(value) != world:
+        size = len(value) if isinstance(value, (list, tuple)) else "no"
+        raise RuntimePriceError(
+            f"{where}: a per-rank charge must carry exactly one record per rank: world size "
+            f"{world} against {size} records")
+    return tuple(_integer(entry, f"{where} rank record") for entry in value)
+
+
+def admit_rank_budgets(totals: RankTotals, *, budgets_per_rank, charge_per_rank,
+                       charge_refusal: str | None,
+                       where: str = "per-rank device budget") -> tuple[int, ...]:
+    """Admit every rank against its own budget, or name the ranks that fail.
+
+    The check is per rank and the numbers it compares are that rank's own: a
+    world where one rank fits and its peer does not is refused, and it is
+    refused whether or not the two ranks' *sum* or *mean* would have passed --
+    those two reductions are exactly what this function exists to keep out of a
+    placement decision.
+
+    A device total also needs the fixed whole-engine charge per rank, so a
+    caller with no admitted charge is refused by name (``charge_refusal`` is
+    the gate's own refusal text, passed through verbatim) rather than handed a
+    total that silently omits it. Returns the admitted per-rank totals.
+    """
+    world = totals.world_size
+    budgets = _rank_vector(budgets_per_rank, world, where)
+    refuses = []
+    if charge_per_rank is None:
+        refuses.append(
+            "no admitted per-rank fixed charge prices the fixed source parameters, router, KV "
+            "or activation transient, and a device total without it is a number with a charge "
+            f"missing from it: {charge_refusal or 'the loader performed no admission'}")
+        charge = (0,) * world
+    else:
+        charge = _rank_vector(charge_per_rank, world, where)
+    withheld = [name for name, vector in
+                (("workspace_resident_bytes", totals.workspace_resident_bytes),)
+                if any(entry for entry in vector)]
+    if withheld:
+        refuses.append(
+            f"this assignment holds {' and '.join(withheld)} per rank, and that term has no "
+            "versioned cross-row composition rule; the device total would be missing it")
+    totals_per_rank = tuple(totals.resident_bytes[rank] + totals.activation_bytes[rank]
+                            + totals.peak_scratch_bytes[rank] + charge[rank]
+                            for rank in range(world))
+    over = [(rank, totals_per_rank[rank], budgets[rank]) for rank in range(world)
+            if totals_per_rank[rank] > budgets[rank]]
+    for rank, total, budget in over:
+        refuses.append(
+            f"rank {rank} needs {total} device bytes where its own budget is {budget}")
+    if refuses:
+        raise RuntimePriceError(f"{where}: " + "; ".join(refuses))
+    return totals_per_rank
+
+
+@dataclass(frozen=True)
+class RankDeviceBounds:
+    """One per-rank device budget, with the fixed charge it may be read against.
+
+    A rank budget is only a constraint once the fixed whole-engine charge per
+    rank is known: without it, an assignment could be admitted against the
+    operator terms alone and then OOM on the fixed source parameters, router,
+    KV or activation transient nobody charged. So the two arrive together, and
+    the provenance decides what may be done with them:
+
+    * ``pending_measurement`` -- the charge has no value yet. The rank
+      *dimensions* still price (a common unknown constant added to every
+      candidate cannot reorder them), but no device total is published and no
+      rank is admitted. This is the state of every table today.
+    * ``recomputed_full_engine_partition`` -- the charge came from a per-rank
+      full-engine partition this consumer recomputed, and a rank may be
+      admitted against ``budgets_per_rank``.
+
+    A declared zero charge is refused outright: it is indistinguishable from
+    forgetting a term, and ``None`` is how this contract spells "not measured".
+    """
+
+    world_size: int
+    provenance: str
+    budgets_per_rank: tuple[int, ...]
+    charge_per_rank: tuple[int, ...] | None
+    evidence: Mapping | None
+
+    def __post_init__(self):
+        _integer(self.world_size, "world_size", 1)
+        if self.provenance not in RANK_DEVICE_PROVENANCE:
+            raise RuntimePriceError(
+                f"rank device bounds provenance {self.provenance!r} is not one of "
+                f"{list(RANK_DEVICE_PROVENANCE)}")
+        budgets = _rank_vector(self.budgets_per_rank, self.world_size, "rank device budgets")
+        for index, budget in enumerate(budgets):
+            if budget < 1:
+                raise RuntimePriceError(
+                    f"rank device budgets must be positive, and rank {index}'s is {budget}")
+        if self.provenance == "pending_measurement":
+            if self.charge_per_rank is not None or self.evidence is not None:
+                raise RuntimePriceError(
+                    "a pending per-rank charge carries no value and no evidence; declaring one "
+                    "is claiming a measurement this contract says does not exist")
+            charge = None
+        else:
+            if self.charge_per_rank is None:
+                raise RuntimePriceError("an admitted per-rank charge carries one value per rank")
+            charge = _rank_vector(self.charge_per_rank, self.world_size, "rank fixed charge")
+            for index, value in enumerate(charge):
+                if value < 1:
+                    raise RuntimePriceError(
+                        "a zero per-rank fixed charge is not evidence; supply the recomputed "
+                        f"partition or leave the axis pending (rank {index} declared {value})")
+            if (not isinstance(self.evidence, Mapping)
+                    or set(self.evidence) != set(_RANK_DEVICE_EVIDENCE_FIELDS)
+                    or self.evidence["per_rank_partition"] is not True):
+                raise RuntimePriceError(
+                    "an admitted per-rank charge references the recomputed full-engine "
+                    "partition it came from")
+        object.__setattr__(self, "budgets_per_rank", budgets)
+        object.__setattr__(self, "charge_per_rank", charge)
+        if self.evidence is not None:
+            object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
+
+    @property
+    def admits_ranks(self) -> bool:
+        return self.charge_per_rank is not None
+
+    def per_rank_headroom(self) -> tuple[int, ...]:
+        """Each rank's own remaining device budget, or a refusal while pending."""
+        if not self.admits_ranks:
+            raise RuntimePriceError(
+                "per-rank headroom is unknown: the fixed whole-engine charge per rank is "
+                "pending measurement, and subtracting nothing is not subtracting zero")
+        return tuple(budget - charge for budget, charge
+                     in zip(self.budgets_per_rank, self.charge_per_rank))
+
+    def as_dict(self) -> dict:
+        return {"schema": RANK_DEVICE_BOUNDS_SCHEMA, "world_size": self.world_size,
+                "provenance": self.provenance,
+                "budgets_per_rank": list(self.budgets_per_rank),
+                "charge_per_rank": (None if self.charge_per_rank is None
+                                    else list(self.charge_per_rank)),
+                "evidence": None if self.evidence is None else dict(self.evidence)}
+
+    @classmethod
+    def from_dict(cls, payload: Mapping, *, where: str = "rank device bounds") -> "RankDeviceBounds":
+        fields = _object(payload, RANK_DEVICE_BOUNDS_FIELDS, where)
+        if fields["schema"] != RANK_DEVICE_BOUNDS_SCHEMA:
+            raise RuntimePriceError(f"{where}: unknown rank device bounds schema "
+                                    f"{fields['schema']!r}")
+        return cls(fields["world_size"], fields["provenance"], tuple(fields["budgets_per_rank"]),
+                   None if fields["charge_per_rank"] is None else tuple(fields["charge_per_rank"]),
+                   fields["evidence"])
+
+
+def pending_rank_device_bounds(world_size: int, budgets_per_rank=None) -> RankDeviceBounds:
+    """The bounds a campaign has today: budgets declared, fixed charge pending.
+
+    Exists so a caller states the pending state once, in one object, instead of
+    passing ``None`` around where a zero could be read as a charge.
+    """
+    budgets = budgets_per_rank if budgets_per_rank is not None else (1,) * world_size
+    return RankDeviceBounds(world_size, "pending_measurement", tuple(budgets), None, None)

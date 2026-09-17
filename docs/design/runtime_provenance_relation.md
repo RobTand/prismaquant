@@ -74,6 +74,23 @@ resource bounds, repeated prefill/decode samples, warmups, whole-unit member
 binding, exact cost/source/calibration identities and token scope. Both phases
 are required; the present native intake supports batch size one.
 
+A **whole routed MoE owner at a world above one** carries one receipt per rank.
+Its binding adds `peer_receipts` (`{rank, receipt, memory_trace}` per other
+rank), and the row prices `prismaquant.runtime_rank_resources.v1`: one resource
+record per rank plus `world_size`, `rank_medians_ms` and one whole-owner timing
+pair (`slowest_rank_median_of_one_whole_owner_apply`). Admission re-derives the
+whole vector from the roster with
+`runtime_provenance.routed_owner_rank_resources`, so every rank's digest is
+recomputed and cross-checked against the bounds its peers gathered before the
+timed region. The samples themselves are admitted on the producer's count of
+its own reduction, not on its declaration: `latency_scope` carries
+`collective_calls_per_phase` (one per priced phase at a world above one, none at
+a world of one), the counted `collective_callsite` is bound to the site the
+runtime's runner reduces at, and `includes_output_collective` must agree with
+those counts -- a receipt that priced a partial sum is refused. A dense or
+single-device row keeps the scalar spelling and the binding shape it has always
+had.
+
 `admit_fixed_resources` recomputes the partition and admits only on agreement,
 so it still refuses every current fixed-resource claim -- by name rather than
 unconditionally. A `complete` status, opaque hashed proof, whole-engine peak, or

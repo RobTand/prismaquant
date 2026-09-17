@@ -859,20 +859,40 @@ def evaluate_measured_assignment(
     decode_rows = [fixed_resources.decode_ms] + [row.decode_ms for row in selected]
     decode = (math.fsum(decode_rows)
               if all(value is not None for value in decode_rows) else None)
-    resident = fixed_resources.resident_bytes + sum(row.resident_bytes for row in selected)
-    activation = fixed_resources.activation_bytes + max(
-        (row.activation_bytes for row in selected), default=0)
-    scratch = fixed_resources.peak_scratch_bytes + max(
-        (row.peak_scratch_bytes for row in selected), default=0)
-    kv = fixed_resources.kv_bytes + slos.kv_bytes
-    if fixed_resource_scope is None:
-        device = resident + activation + scratch + kv + slos.peak_scratch_bytes
-    else:
+    # Rows that price themselves per rank get per-rank totals and no device
+    # number: resident adds per rank while activation and scratch are separate
+    # per-rank maxima, and a consumer that wanted one number would have to
+    # choose a reduction over ranks that no device ever held.
+    from .measured_runtime_prices import (
+        RuntimeRankResources, compose_rank_totals,
+    )
+    ranked = [row for row in selected if isinstance(row, RuntimeRankResources)]
+    per_rank = None
+    if ranked:
         if slos.device_budget_bytes is not None:
             raise ServeConstraintError(
-                f"the {fixed_resource_scope} fixed-resource scope withholds the fixed device "
-                "terms, so it can evaluate no device budget")
+                "this assignment prices whole routed owners per rank, and a scalar device budget "
+                "prices one box; a rank sum or rank maximum is not that box's number. Per-rank "
+                "admission is measured_runtime_prices.admit_rank_budgets, which refuses while no "
+                "per-rank fixed charge is admitted")
+        per_rank = compose_rank_totals(selected)
+        resident = activation = scratch = kv = None
         device = None
+    else:
+        resident = fixed_resources.resident_bytes + sum(row.resident_bytes for row in selected)
+        activation = fixed_resources.activation_bytes + max(
+            (row.activation_bytes for row in selected), default=0)
+        scratch = fixed_resources.peak_scratch_bytes + max(
+            (row.peak_scratch_bytes for row in selected), default=0)
+        kv = fixed_resources.kv_bytes + slos.kv_bytes
+        if fixed_resource_scope is None:
+            device = resident + activation + scratch + kv + slos.peak_scratch_bytes
+        else:
+            if slos.device_budget_bytes is not None:
+                raise ServeConstraintError(
+                    f"the {fixed_resource_scope} fixed-resource scope withholds the fixed device "
+                    "terms, so it can evaluate no device budget")
+            device = None
     caveats = (
         "Sum of measured operator medians under the declared runtime/workload; "
         "this prediction cannot certify p95 TTFT, p95 ITL or an end-to-end SLO.",
@@ -916,14 +936,20 @@ def evaluate_measured_assignment(
                   # dispersion (measured_runtime_prices.bootstrap_sum) needs
                   # exactly this key.
                   "priced_rows": [list(key) for key in selected_keys],
-                  "memory": {"resident_bytes": resident, "activation_bytes": activation,
-                             "peak_scratch_bytes": scratch, "kv_bytes": kv,
-                             "operator_scratch_reserve_bytes": slos.peak_scratch_bytes,
-                             "serialized_bytes": fixed_resources.serialized_bytes
-                             + sum(row.serialized_bytes for row in selected),
-                             "scope": ("whole_model" if fixed_resource_scope is None else
-                                       f"candidate_only: the fixed device terms are withheld "
-                                       f"under the {fixed_resource_scope} scope")}},
+                  "memory": ({"operator_rank_totals": per_rank.as_dict(),
+                              "scope": ("per rank: this assignment's rows carry one value per "
+                                        "rank, so no scalar device total is published, and the "
+                                        "fixed whole-engine terms are priced by "
+                                        "runtime_provenance.admit_fixed_resources")}
+                             if per_rank is not None else
+                             {"resident_bytes": resident, "activation_bytes": activation,
+                              "peak_scratch_bytes": scratch, "kv_bytes": kv,
+                              "operator_scratch_reserve_bytes": slos.peak_scratch_bytes,
+                              "serialized_bytes": fixed_resources.serialized_bytes
+                              + sum(row.serialized_bytes for row in selected),
+                              "scope": ("whole_model" if fixed_resource_scope is None else
+                                        f"candidate_only: the fixed device terms are withheld "
+                                        f"under the {fixed_resource_scope} scope")})},
         provenance={"aggregation_model": "measured_whole_operator_sum",
                     "solver_contract": "exact_discrete_runtime_frontier_then_expanded_assignment_check",
                     "global_optimality_claimed": False,
@@ -933,6 +959,10 @@ def evaluate_measured_assignment(
                     "certifies_end_to_end_slo": False,
                     "certifies_p95": False,
                     "fixed_resource_scope": fixed_resource_scope,
+                    # Per-rank pricing is not a smaller version of scalar
+                    # pricing; say on the verdict which one produced it.
+                    "per_rank_resources": per_rank is not None,
+                    "device_memory_total_published": per_rank is None,
                     "measured_runtime_table": dict(table_identity),
                     "slos": slos.as_dict(), "caveats": list(caveats)},
     )

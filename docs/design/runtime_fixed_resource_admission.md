@@ -101,6 +101,53 @@ physical host memory, or if TP2 is required, a versioned resource-vector and
 solver/feasibility change is a prerequisite; neither rank sums nor rank maxima
 can silently be written into v2 scalar fields.
 
+## Per-rank resource vectors (implemented 2026-09-16, admission still closed)
+
+That prerequisite now exists in the tree; this section is the contract it
+implements, and it changes nothing about the admission this document is about.
+
+**Producer side (one receipt per rank).** A whole routed owner is one apply
+measured on every rank of its world. Each rank's receipt declares
+`resources.rank`, `resources.world_size`, the bounds it gathered from its peers
+(`resources.peers`, each `{rank, world_size, bound_sha256}`) and its own
+`resources.self.bound_sha256`, computed over its resource record before the
+roster was attached. `latency_scope` names what the samples price
+(`kind: one_whole_owner_apply`, `per_rank: true`) and
+`runtime.collective` names the runtime's own final all-reduce that the timed
+region contains; what makes that a claim rather than a declaration is
+`latency_scope.collective_calls_per_phase`, the count of calls at that callsite
+inside each priced apply. It must be exactly what the world needs (once per
+phase above a world of one, never at a world of one) and
+`includes_output_collective` is read against it, so a receipt that priced the
+quant method's partial sum without the runner's reduction is refused by name.
+A receipt is one rank's: a consumer may not price its own rank's bound as the
+world's, and the producer publishes no world total for one to be read from.
+
+**Consumer side (one row per whole owner).**
+`runtime_provenance.routed_owner_rank_resources` takes the rank *roster* and
+recomputes every number: each rank's digest is recomputed from its own record
+and checked against that rank's `self`, and against every other rank's gathered
+copy of it. The row's resource object is
+`prismaquant.runtime_rank_resources.v1` -- one record per rank
+(`rank`, `resident_bytes`, `peak_scratch_bytes`, `activation_bytes`,
+`workspace_resident_bytes`, `workspace_sha256`, `bound_sha256`) plus
+`world_size`, `rank_medians_ms`, the module's one canonical wire extent
+(`wire_bytes` beside `wire_sha256`, charged once rather than once per rank that
+views the same container) and one priced timing pair whose rule is named:
+`slowest_rank_median_of_one_whole_owner_apply`. Coverage is exact (ranks
+`0..world_size-1`, once each), a scalar row under a TP>1 context is refused, and
+an unknown timing rule is refused.
+
+**Composition and admission.** `compose_rank_totals` adds the extensive terms
+and takes per-rank maxima for the transients, publishing a tuple per rank so no
+consumer is handed a reduction it did not ask for. `admit_rank_budgets` checks
+each rank against its own budget and names every rank that fails -- an
+imbalanced world whose sum or mean would have passed is refused. A device total
+additionally requires an admitted per-rank fixed charge and a versioned
+composition for the runtime-global workspace; both are owed, so the ranked
+device axis refuses today, by name, and publishes no device number rather than a
+sum with a term missing from it.
+
 ## Minimal envelope to freeze after observer qualification
 
 All names below describe a proposed contract, not a currently accepted schema.

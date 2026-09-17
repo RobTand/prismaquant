@@ -1,7 +1,74 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/tessera-cached-manifest-publication-main-20260917`. Stamps
+As of: 2026-09-16 · `flash/prefill-receipt-alloc-bridge-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-16, `flash/prefill-receipt-alloc-bridge-20260916`) for the
+**per-rank resource vector a whole routed MoE owner prices** (§4.10/§4.11;
+RobTand/prismaquant#658, #237). A tensor-parallel routed owner has no scalar
+answer to "how many device bytes does this row cost": each rank holds its own
+share, so a rank sum and a rank maximum are both numbers no device ever held.
+The producer's whole-owner receipt carries, per rank, `resources.rank`,
+`resources.world_size`, the bounds it gathered from its peers (`resources.peers`
+as `{rank, world_size, bound_sha256}`) and its own `resources.self.bound_sha256`
+computed before the timed region, beside `latency_scope`
+(`kind: one_whole_owner_apply`, `per_rank: true`) and `runtime.collective` --
+the runtime's own final `tensor_model_parallel_all_reduce` at
+`vllm.model_executor.layers.fused_moe.runner.moe_runner:_maybe_reduce_final_output`,
+required by this owner and never skipped.
+
+- **The timed region is accepted on the COUNT, not on the declaration.**
+  `latency_scope.collective_calls_per_phase` is how many times that callsite ran
+  inside each priced apply; the consumer requires exactly what the world needs
+  (once per phase at a world above one, never at a world of one), binds the
+  counted callsite to the site it pins, and reads
+  `includes_output_collective` against those counts rather than against the
+  config's intent. A receipt whose samples priced a partial sum -- the TP2 arm
+  that called the quant method without the runner's own reduction -- is refused
+  by name.
+- **The consumer's minimum complete path is closed on CPU.** The rank *roster*
+  is re-derived, never summarized: `runtime_provenance.routed_owner_rank_resources`
+  recomputes each rank's own resource digest, checks every other rank's against
+  the copy that rank gathered, and builds
+  `prismaquant.runtime_rank_resources.v1` -- one record per rank plus one
+  whole-owner timing pair, `slowest_rank_median_of_one_whole_owner_apply`, with
+  every rank's median kept beside it (never a sum of leaf timings, never a world
+  mean). The whole module's wire extent is charged **once**, from the frozen
+  panel's own member wire records: the producer frames one canonical container
+  and shards it locally, so one rank's view summed per rank would double-count
+  the same bytes. `native_receipt_table` binds such a row from a roster
+  (`peer_receipts`), and `measured_runtime_prices` composes per-rank terms
+  (additive weights, per-rank peak maxima) and admits each rank against its own
+  budget (`compose_rank_totals`, `admit_rank_budgets`), refusing an imbalanced
+  world whose sum or mean would have passed.
+- **The rank dimensions are in the search, not after it.**
+  `solve_runtime_frontier` carries three coordinates per rank (summed
+  residency, per-rank scratch peak, per-rank activation peak) in its dominance
+  vector and filters each rank against its own budget inside the fold, so an
+  alternative a rank's budget would have accepted cannot be pruned before that
+  budget is read. Per-rank budgets arrive as one versioned object
+  (`prismaquant.runtime_rank_device_bounds.v1`) beside the fixed whole-engine
+  charge per rank, whose provenance is either
+  `recomputed_full_engine_partition` (an axis that admits) or
+  `pending_measurement` (an axis that prices the rank dimensions -- a common
+  unknown charge cannot reorder them -- and admits no rank); a declared zero
+  charge is refused rather than read as a charge. Scalar v2 rows keep their
+  meaning byte for byte; a scalar row under a TP>1 context is refused by name,
+  and so is a ranked row meeting a scalar device budget.
+
+No default, stage, format, lane, pin or ship gate changed, and **debt D37 is
+unchanged in substance**: no v2 table prices a device budget. A ranked row is
+priced as one atomic member-assignment row and its predicted device total is
+published as `None` (the per-rank totals travel instead), so the ranked device
+axis still refuses today for two named reasons -- the fixed whole-engine charge
+per rank has no admitted value, and the runtime-global workspace has no
+versioned cross-row composition rule. Gates: `tests/test_runtime_rank_resources.py`,
+`tests/test_native_receipt_table_routed.py`, plus the existing dense emitter,
+admission-split, fixed-resource, solver and prefill-frontier suites. **Not
+claimed:** no GPU qualification, no real TP2 receipt pair, no measured row and
+no producer for the admitted per-rank fixed charge -- the CPU receipts are
+synthetic and say so, and the producer's own two-rank CPU run is its own
+evidence, not this stamp's.
 
 Re-stamped (2026-09-17, `flash/tessera-cached-manifest-publication-main-20260917`)
 for the **content-addressed selected-wire manifest** (§7.3). `write_cached_expert_units`
