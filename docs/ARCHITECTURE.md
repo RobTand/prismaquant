@@ -1,7 +1,53 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/478-offstep-owner-mirror-20260917`.
+As of: 2026-09-17 · `flash/anchor-slot-encoder-working-set-20260917`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/anchor-slot-encoder-working-set-20260917`)
+for the per-slot anchor-batch charge in `autoscale.selected_anchor_resources`
+(#639). The plan charged 0.1875 GiB an anchor-batch slot on the GLM-5.3 E2M1
+census shapes while a three-width sweep on those shapes measured 0.4302 GiB a
+slot (row-0055 layer 20, 192 units at widths 8/16/32,
+`torch.cuda.max_memory_allocated` 3.535 / 6.970 / 13.853 GiB, producer
+`a4c92094`, sparky). The gap was a genuine under-count, not two quantities:
+`compatible_batch_weight_bytes` charged sixteen bytes a weight element, of
+which eight were the traceable PrismaQuant-side copies and eight were a
+stated-but-underivable stand-in for the producer. The producer is now charged
+by its own allocating lines at the pinned commit, like every other term here.
+`compatible_batch_weight_bytes` keeps the eight bytes an element it always
+meant. `encoder_working_set_bytes` is the seven FP32 `[rows, cols]` tensors
+`tessera.encode._encode_unit_steps` holds together inside the LDLQ pass
+(`scale`, the `"scale"` trellis weighting, `base`, `ldlq_target`, `recon`,
+`targets` and the growing `residual`), twenty-eight bytes an element.
+`encoder_code_plane_bytes` is the three int64 `[steps, cols]` planes and the
+uint8 one that `_encode_unit_steps` allocates and the returned `EncodedUnit`
+retains, twenty-five bytes an element at the `arity`-1 bound on
+`steps = rows // arity`. All three scale with the anchor batch width because
+`encode_units` advances one generator per unit in lock step, so every unit of
+the batch holds its working set at once -- which the producer's own docstring
+states as "Memory is B times one unit's working set". The resident and
+streaming phases take the same three terms. The per-slot charge on the
+measured shapes goes from 0.1875 GiB to 0.5391 GiB, which covers the measured
+0.4302 GiB.
+
+**What that charge does not attribute**, because a bound that hides a residual
+is the defect this stamp is fixing. The code-plane term is the one bound here
+rather than an allocation: a plan built from argv does not know the grid, and
+the grid that was measured is `TESSERA_E2M1_K2_R896`, a `tuple_grid(E2M1, 2)`,
+so the census pays half of the twenty-five bytes. On the measured shapes and
+grid the enumerated concurrent terms come to about 0.395 GiB a slot against
+that measured 0.4302 GiB, so roughly four and a half bytes an element of the
+producer's peak has no line named for it -- `encode_units`' docstring ends
+"plus the joined call's own buffers", and the `_TCQPlan` state and the LUT
+plane's candidate tables are not enumerated. The shipped 0.5391 GiB covers the
+measurement through the `arity`-1 bound and through PrismaQuant-side copies
+the batch path builds only after the producer releases its working set, not
+through a term that means the residual. Enumerate the joined call before
+tightening either.
+
+A campaign row's demand rises by about 2.8 GiB at width 8 as a result. No
+pipeline default, format menu, stage graph, serving lane or ship gate changes.
+Gates: `tests/test_tessera_selected_source.py`.
 
 Re-stamped (2026-09-17, `flash/478-offstep-owner-mirror-20260917`) for **an
 owner class being required exactly where a composition term reads one**
@@ -3155,10 +3201,11 @@ device copy at the loader's own `_capture_storage_bytes` arithmetic, the
 factorization transient is two FP32 copies of the widest Hessian across the
 producer's sequential seal and factorise stages, and the encoder memo is sized
 by the capacity the plan publishes rather than by the anchor batch width, so
-the charge and the memo's construction have one owner. Two terms are stated as
-gaps and left unchanged: the export archive's pickle-and-directory metadata,
-whose size follows pickle framing rather than any shape or dtype, and the
-producer's own working set inside `encode_linear`.
+the charge and the memo's construction have one owner. Two terms were stated
+as gaps and left unchanged here: the export archive's pickle-and-directory
+metadata, whose size follows pickle framing rather than any shape or dtype,
+and the producer's own working set inside `encode_linear`. The second of
+those was closed on 2026-09-17; see the #639 stamp at the top of this file.
 The plan states deltas; `CaptureMemoryGuard` reads absolute process bytes.
 The guard now records its first reading as a measured baseline and reports
 `peak_checkpoint` and a per-phase-prefix peak map, the selected row stamps
