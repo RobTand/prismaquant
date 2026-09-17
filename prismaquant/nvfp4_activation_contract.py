@@ -1837,6 +1837,26 @@ def _nvfp4_dequantize_registered_codes(
     return torch.where(nonzero, output, torch.zeros_like(output))
 
 
+def _nvfp4_registered_stored_plane(
+    rows: torch.Tensor,
+    input_global_scale: float,
+) -> torch.Tensor:
+    """The kernel's own block-scale derivation for the operator leg.
+
+    The operator is handed bf16 rows, but the block scale it stores is
+    ``e4m3(amax / 6 * G)`` computed in FP32: the amax is taken over the values
+    the operator saw, and the scale arithmetic keeps full precision.  Deriving
+    it in bf16 instead rounds the scale itself -- ``keepdim`` amax of a bf16
+    tensor stays bf16, and a Python float operand does not promote it -- which
+    moves the stored UE4M3 byte on some blocks and moves the dequantised value
+    with it (measured on the retained 84 groups: 2 of 128 probe rows in one
+    group, 47 -> 46).  One place owns the derivation so the priced scale rule
+    and the kernel's are the same object.
+    """
+    groups = rows.reshape(-1, rows.shape[-1] // FP4_GROUP_SIZE, FP4_GROUP_SIZE)
+    return nvfp4_group_stored_scale(groups.float(), input_global_scale).float()
+
+
 def _nvfp4_activation_qdq_registered_op(
     x: torch.Tensor,
     input_global_scale: float,
@@ -1873,13 +1893,12 @@ def _nvfp4_activation_qdq_registered_op(
         )
     original_shape, original_dtype = x.shape, x.dtype
     rows = x.reshape(-1, x.shape[-1]).contiguous().to(torch.bfloat16)
-    groups = rows.reshape(-1, rows.shape[-1] // FP4_GROUP_SIZE, FP4_GROUP_SIZE)
     packed, _scale_plane = torch.ops._C.scaled_fp4_quant(
         rows,
         torch.tensor([g], dtype=torch.float32, device=rows.device),
         True,
     )
-    stored = nvfp4_group_stored_scale(groups, g).float()
+    stored = _nvfp4_registered_stored_plane(rows, g)
     bytes_ = packed.view(torch.uint8).reshape(rows.shape[0], rows.shape[1] // 2)
     codes = torch.stack((bytes_ & 0xF, bytes_ >> 4), dim=-1).reshape(rows.shape)
     output = _nvfp4_dequantize_registered_codes(codes, stored, g)

@@ -297,3 +297,31 @@ def test_the_identity_carries_the_axes_a_reader_needs(monkeypatch):
     assert record["torch"] == str(torch.__version__)
     assert set(record) == {"schema", "backend", "op", "platform", "torch",
                            "torch_git", "vllm", "image_content_sha256"}
+
+
+def test_the_operator_leg_derives_the_block_scale_in_fp32():
+    """The stored UE4M3 byte is ``amax / 6 * G`` in fp32, not in the rows' bf16.
+
+    Measured on the retained 84 groups: ``amax = 0.76171875`` at
+    ``G = 3.5720930099487305`` stores byte 47 (0.46875) in fp32 -- which is the
+    byte the kernel's own plane carries -- while the same arithmetic in bf16
+    stores byte 46 (0.4375), because ``amax / 6 * G`` passes through a bf16
+    rounding to 0.453125, exactly the e4m3 tie that rounds to even.  The
+    operator leg must therefore take the fp32 derivation; the rows' own dtype is
+    what moved the dequantised value.
+    """
+    g = 3.5720930099487305
+    rows = torch.full((1, owner.FP4_GROUP_SIZE), 0.76171875, dtype=torch.bfloat16)
+    grouped = rows.reshape(-1, 1, owner.FP4_GROUP_SIZE)
+
+    bf16_plane = owner.nvfp4_group_stored_scale(grouped, g)
+    fp32_plane = owner.nvfp4_group_stored_scale(grouped.float(), g)
+    assert int(bf16_plane.view(torch.uint8).reshape(-1)[0]) == 46
+    assert int(fp32_plane.view(torch.uint8).reshape(-1)[0]) == 47
+
+    plane = owner._nvfp4_registered_stored_plane(rows, g)
+
+    assert plane.shape == (1, 1, 1)
+    assert plane.dtype == torch.float32
+    assert torch.equal(plane, fp32_plane.float())
+    assert not torch.equal(plane, bf16_plane.float())
