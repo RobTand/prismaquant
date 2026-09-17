@@ -102,8 +102,12 @@ def run_arm(layout, *, legacy: bool, max_render_bytes: int,
 
     weights = {(name, fmt): str(path) for keys in layout for name, fmt, path in keys}
     paths = [path for keys in layout for _, _, path in keys]
+    import hashlib
+    import torch
+
     cache = ProductionWeightCache(weights=dict(weights), levers={})
     cache.enable_lru(max_render_bytes)
+    digests = {}
     counters = Counters()
     restore = instrument(counters, paths)
     if legacy:
@@ -138,15 +142,24 @@ def run_arm(layout, *, legacy: bool, max_render_bytes: int,
                     for key in window:
                         borrowed = cache.get_resident(*key)
                         assert borrowed is not None
+                        # What the consumer is handed, hashed exactly as it is
+                        # handed over: the schedule must change residency, never
+                        # a byte.
+                        digests['@'.join(key)] = hashlib.sha256(
+                            borrowed.contiguous().view(torch.uint8).numpy().tobytes()
+                        ).hexdigest()
                         borrowed = None
         elapsed = time.perf_counter() - started
     finally:
         restore()
         if legacy:
             cache._window_archive_memo = original_memo
+    roster = hashlib.sha256('\n'.join(
+        f'{key} {digests[key]}' for key in sorted(digests)).encode()).hexdigest()
     return {'seconds': elapsed, 'quanta': counters.quanta,
             'archive_reads': counters.archive_reads,
-            'render_file_opens': counters.file_opens}
+            'render_file_opens': counters.file_opens,
+            'borrowed_roster_sha256': roster}
 
 
 def main() -> int:
@@ -200,10 +213,18 @@ def main() -> int:
             'quanta': sample['quanta'],
             'archive_reads': sample['archive_reads'],
             'render_file_opens': sample['render_file_opens'],
+            'borrowed_roster_sha256': sample['borrowed_roster_sha256'],
+            'roster_stable_across_repeats': len({row['borrowed_roster_sha256']
+                                                 for row in rows
+                                                 if row['arm'] == arm}) == 1,
         }
     if not args.only:
         summary['ratio_median_seconds'] = (summary['legacy']['median_seconds']
                                            / summary['current']['median_seconds'])
+        # The claim the schedule must NOT change: identical bytes to the consumer.
+        summary['borrowed_roster_identical'] = (
+            summary['legacy']['borrowed_roster_sha256']
+            == summary['current']['borrowed_roster_sha256'])
     summary['inputs'] = {'units': args.units, 'renders': args.renders,
                          'render_bytes': args.render_bytes, 'root': str(root),
                          'repeats': args.repeats, **shared}
