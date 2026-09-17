@@ -71,7 +71,21 @@ optional `diagnosis`: stamped whole into the provenance widths as
 comes from `format_is_producer_eligible`; a caller that passes no diagnosis
 gets the line it had, byte for byte. Gate:
 `tests/test_tessera_menu_attested_count.py` (four new cases; red before the
-change on PB `b78f6e856954`, 8 passed after on `e8a9b9783f68`).
+change on PB `b78f6e856954`, 8 passed after on `e8a9b9783f68`). The cause rides
+on the fatal `require_producer_formats` refusal as well as on the menu line
+above it (`tessera_menu.tessera_refusal_cause`), because the ERROR is the line
+an operator greps for and a list of refused names with no cause is the
+confession log principle 9 warns about.
+
+**Known limit, and it is the one that nearly published a wrong answer here.**
+`unattested_diagnosis` reads any non-`None` context as "scope supplied", so a
+scope whose `runtime_image` matches no cell -- the routed-MoE
+`eugr/spark-vllm@sha256:0afec8d4…` against dense units, where the dense sm_121
+cells name `vllm/vllm-openai@sha256:61fc8a89…` -- reports the whole menu as
+refused *by the contract*. That is not wrong (the contract did answer: no cell
+matched), but it reads like a coverage gap when it is a mismatched coordinate.
+`RouteAdmission.requires_serving_context` stays true on those admissions and
+could separate the two; owed, not taken here.
 
 Re-stamped (2026-09-17, `flash/joint-aura-head-progress-678`) for **the joint
 prepare head phase reporting the units it resolves** (#678). The measured

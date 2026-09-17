@@ -137,3 +137,22 @@ def test_report_without_a_diagnosis_is_byte_identical(monkeypatch):
                                       diagnosis=None)
     assert plain == explicit
     assert "serving scope" not in plain[1]
+
+
+def test_the_fatal_refusal_carries_the_cause_too():
+    # The menu line prints one line above the SystemExit an operator greps for,
+    # so the cause rides on both. Same structured answer, rendered twice.
+    diagnosis = {"awaiting_serving_scope": ["TESSERA_E4M3_K1_R1006"],
+                 "unattested_by_contract": [],
+                 "contract_attested_rungs": ["TESSERA_E4M3_K1_R1024"],
+                 "contract_attested_but_unpriced": ["TESSERA_E4M3_K1_R1024"],
+                 "serving_scope_supplied": False}
+    cause = menu.tessera_refusal_cause(diagnosis)
+    assert cause.startswith("; ")
+    assert "no Tessera serving scope was supplied" in cause
+    assert "--tessera-platform" in cause
+    assert "the pinned contract attests TESSERA_E4M3_K1_R1024" in cause
+    # No Tessera rungs refused -> nothing appended, so a non-Tessera menu
+    # refusal reads exactly as it did.
+    assert menu.tessera_refusal_cause(None) == ""
+    assert menu.tessera_refusal_cause({}) == ""

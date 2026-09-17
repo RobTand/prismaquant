@@ -1757,6 +1757,29 @@ def unattested_diagnosis(refused, *, priced=(), context_by_unit=None) -> dict:
     }
 
 
+def tessera_refusal_cause(diagnosis) -> str:
+    """One sentence a fatal refusal can carry, or ``""``.
+
+    :func:`menu_width_report` prints the diagnosis on the menu line, which is
+    the line *above* the one that ends the run. An operator reads the ERROR,
+    so the cause travels on the ERROR as well; the two are the same structured
+    answer rendered twice, never two separate claims.
+    """
+    if not diagnosis:
+        return ""
+    parts = []
+    awaiting = diagnosis.get("awaiting_serving_scope") or []
+    if awaiting:
+        parts.append(
+            f"{len(awaiting)} of them are unattested only because no Tessera serving "
+            "scope was supplied -- pass --tessera-platform, --tessera-runtime-image, "
+            "--tessera-execution-mode and --tessera-residency")
+    attested = diagnosis.get("contract_attested_rungs") or []
+    if attested:
+        parts.append("the pinned contract attests " + ", ".join(attested))
+    return ("; " + "; ".join(parts)) if parts else ""
+
+
 def menu_width_report(priced, admitted, dropped, explicit_refused, mode, *, diagnosis=None) -> tuple[dict, str]:
     """The provenance widths and the one log line for a Tessera menu.
 

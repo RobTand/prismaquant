@@ -101,6 +101,7 @@ from .tessera_menu import (
     menu_width_report,
     partition_attested,
     surrogate_selection_caveat,
+    tessera_refusal_cause,
     unattested_diagnosis,
 )
 from .allocator_solver import (
@@ -2810,6 +2811,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         **({"context_by_unit": tessera_context_by_unit}
            if tessera_context_by_unit is not None else {}))
     tessera_menu_widths: dict = {}
+    tessera_diagnosis: dict | None = None
     if priced_tessera:
         kept = [n for n in fmt_names if n.startswith("TESSERA_")]
         # The count is the admission predicate's, not the caller's: an
@@ -2824,13 +2826,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # scope, and which rungs it attests instead -- so the report reads
         # them rather than leaving the reader to guess. It admits nothing:
         # `admitted` above is already the predicate's answer.
-        diagnosis = (unattested_diagnosis(
+        tessera_diagnosis = (unattested_diagnosis(
             list(unattested) + list(explicit_unattested), priced=priced_tessera,
             context_by_unit=tessera_context_by_unit)
             if (unattested or explicit_unattested) else None)
         widths, line = menu_width_report(
             priced_tessera, admitted, unattested, explicit_unattested, menu_mode(),
-            diagnosis=diagnosis)
+            diagnosis=tessera_diagnosis)
         if kept:
             tessera_menu_widths = widths
         print(line, flush=True)
@@ -2864,6 +2866,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "the pinned decoder accepts and "
                 "PRISMAQUANT_TESSERA_MENU=research over the whole realisable "
                 "axis -- both for research runs that do not export."
+                # "attests none of them" is only true if the contract was asked
+                # under a scope it can answer; say which case this is.
+                + tessera_refusal_cause(tessera_diagnosis)
             )
     try:
         specs = fr.require_producer_formats(
@@ -2872,8 +2877,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                if tessera_context_by_unit is not None else {}),
         )
     except ValueError as exc:
+        # The fatal line is the one an operator greps for, so the diagnosis
+        # rides on it too rather than only on the menu line above it: a list of
+        # refused names with no cause is the confession log P9 warns about.
         raise SystemExit(
-            f"[alloc] ERROR: {exc}"
+            f"[alloc] ERROR: {exc}" + tessera_refusal_cause(tessera_diagnosis)
         ) from None
     cb_serialization_context = None
     cb_col_weights = None
