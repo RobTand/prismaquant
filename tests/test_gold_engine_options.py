@@ -16,7 +16,7 @@ def _args(**overrides):
                   tensor_parallel_size=2, nnodes=2, node_rank=0,
                   master_addr="192.0.2.1", master_port=29501,
                   distributed_executor_backend="mp", data_parallel_backend="mp",
-                  moe_backend="triton")
+                  moe_backend="triton", kv_cache_memory_bytes=None)
     fields.update(overrides)
     return types.SimpleNamespace(**fields)
 
@@ -67,6 +67,84 @@ def test_public_cli_accepts_declared_two_node_topology(monkeypatch, runner):
         module.main()
 
 
+def test_the_explicit_kv_bound_and_cutlass_are_shared_engine_options():
+    """A4's serve flags must travel through the shared options rather than
+    being retyped at a call site: the pinned runtime rejects `triton` for its
+    routed experts and needs an explicit positive KV byte bound."""
+    from tools.gold_engine_options import gold_engine_kwargs
+
+    result = gold_engine_kwargs(_args(kv_cache_memory_bytes=4294967296,
+                                      moe_backend="flashinfer_cutlass"))
+    assert result["kv_cache_memory_bytes"] == 4294967296
+    assert result["moe_backend"] == "flashinfer_cutlass"
+
+
+def test_an_omitted_kv_bound_is_absent_and_not_none():
+    """Omission preserves the original kwargs: vLLM sizes KV from
+    `gpu_memory_utilization` and must not be handed a `None` bound."""
+    from tools.gold_engine_options import gold_engine_kwargs
+
+    omitted = gold_engine_kwargs(_args())
+    assert "kv_cache_memory_bytes" not in omitted
+    assert omitted["moe_backend"] == "triton"
+
+
+@pytest.mark.parametrize("runner", RUNNERS)
+def test_explicit_kv_bound_and_cutlass_reach_the_engine_and_the_peer(monkeypatch, runner):
+    from tools.gold_engine_options import headless_peer_argv
+
+    module = importlib.import_module(runner)
+    seen = {}
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(LLM=lambda **kw: seen.update(kw)))
+    monkeypatch.setattr(module, "refuse_if_spec_decode", lambda **kw: False)
+    args = _args(kv_cache_memory_bytes=4294967296, moe_backend="flashinfer_cutlass")
+    if runner.endswith("full_kl"):
+        module._load_llm(args, max_model_len=513)
+    else:
+        module._load_llm(args)
+    assert seen["kv_cache_memory_bytes"] == 4294967296
+    assert seen["moe_backend"] == "flashinfer_cutlass"
+    peer = headless_peer_argv(seen, node_rank=1)
+    assert peer[peer.index("--kv-cache-memory-bytes") + 1] == "4294967296"
+    assert peer[peer.index("--moe-backend") + 1] == "flashinfer_cutlass"
+
+
+@pytest.mark.parametrize("runner", RUNNERS)
+def test_public_cli_accepts_the_explicit_kv_bound_and_cutlass(monkeypatch, runner):
+    module = importlib.import_module(runner)
+    class ReachedImageValidation(Exception):
+        pass
+    def image(args):
+        assert args.kv_cache_memory_bytes == 4294967296
+        assert args.moe_backend == "flashinfer_cutlass"
+        raise ReachedImageValidation
+    monkeypatch.setattr(module, "_resolve_serve_image", image)
+    argv = [runner, "--model", "artifact", "--output", "result.json",
+            "--moe-backend", "flashinfer_cutlass",
+            "--kv-cache-memory-bytes", "4294967296"]
+    if runner.endswith("full_kl"):
+        argv += ["--mode", "teacher"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(ReachedImageValidation):
+        module.main()
+
+
+@pytest.mark.parametrize("runner", RUNNERS)
+def test_public_cli_refuses_a_nonpositive_kv_bound(monkeypatch, runner):
+    module = importlib.import_module(runner)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("an invalid KV bound reached model/image work")
+    monkeypatch.setattr(module, "_resolve_serve_image", forbidden)
+    argv = [runner, "--model", "artifact", "--output", "result.json",
+            "--kv-cache-memory-bytes", "0"]
+    if runner.endswith("full_kl"):
+        argv += ["--mode", "teacher"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+
+
 @pytest.mark.parametrize("runner", RUNNERS)
 def test_default_llm_options_preserve_single_node_behavior(monkeypatch, runner):
     module = importlib.import_module(runner)
@@ -97,7 +175,10 @@ def test_default_llm_options_preserve_single_node_behavior(monkeypatch, runner):
     {"master_port": 0}, {"master_port": 65536}, {"master_port": True},
     {"master_port": None}, {"distributed_executor_backend": None},
     {"data_parallel_backend": None}, {"distributed_executor_backend": "ray"},
-    {"moe_backend": "unknown"},
+    {"moe_backend": "unknown"}, {"moe_backend": "cutlass"},
+    {"kv_cache_memory_bytes": 0}, {"kv_cache_memory_bytes": -1},
+    {"kv_cache_memory_bytes": True}, {"kv_cache_memory_bytes": 4096.0},
+    {"kv_cache_memory_bytes": "4096"},
 ])
 def test_incomplete_or_incompatible_topology_refuses_before_engine(fields):
     from tools.gold_engine_options import gold_engine_kwargs
@@ -261,6 +342,20 @@ def test_a_boolean_engine_kwarg_that_is_false_is_stated_not_omitted():
          "enable_chunked_prefill": False}, node_rank=1)
     assert "--no-enable-prefix-caching" in argv
     assert "--no-enable-chunked-prefill" in argv
+
+
+def test_peer_argv_spells_the_kv_bound_and_states_its_omission():
+    """The peer must carry the same explicit KV byte bound as rank 0, and a
+    run that declared none must not invent one for the peer."""
+    from tools.gold_engine_options import headless_peer_argv
+
+    argv = headless_peer_argv(
+        {"model": "/m", "kv_cache_memory_bytes": 4294967296,
+         "moe_backend": "flashinfer_cutlass"}, node_rank=1)
+    assert argv[argv.index("--kv-cache-memory-bytes") + 1] == "4294967296"
+    assert argv[argv.index("--moe-backend") + 1] == "flashinfer_cutlass"
+    assert "--kv-cache-memory-bytes" not in headless_peer_argv(
+        {"model": "/m"}, node_rank=1)
 
 
 @pytest.mark.parametrize("runner", RUNNERS)
