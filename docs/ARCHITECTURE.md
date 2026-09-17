@@ -1,7 +1,41 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/joint-aura-head-progress-678`.
+As of: 2026-09-17 · `flash/693-resident-window-budget`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/693-resident-window-budget`) for **a PWC
+resident quantum whose width is the bytes its caller admits, not the loader
+count** (#693). `plan_resident_windows` closed a quantum at `len(window) ==
+max_workers` as well as at the resident cap, so the width of a quantum was a
+function of the CPU count. On the GLM-5.3 complete-512 joint panel that split
+every five-render unit into a four-key quantum holding 67,108,864 bytes of the
+536,870,912 it was admitted for -- 12.5% -- plus a one-key quantum that read a
+single 16.8 MB file on a single thread from cold NFS at 28.6 MB/s, and paid a
+second load-then-verify barrier for it (live receipts in the running prepare's
+`qualified_layer` telemetry). The cap was redundant as well as costly:
+`prefetch` bounds its own pool at `max_workers` whatever key count it is
+handed, so the only thing the key cap bounded was the width. A quantum now
+closes on the resident cap and on a new explicit `max_load_buffer_bytes`
+serialized cap, which `resident_window` already enforced after planning and
+now also splits on, so its `len(windows) != 1` invariant holds for any key set
+the two budgets admit. `prepare_cache` passes `max_resident_bytes=
+max_render_bytes` with `max_load_buffer_bytes=policy['max_load_buffer_bytes']`
+instead of the `min()` of the two, which charged the serialized cap against
+residency. The derivation is the guard's own: the
+`before_joint_qualification_unit` reservation already prices this unit's
+residency at `max_render_bytes` and its serialized buffers at
+`policy['max_load_buffer_bytes']` as separate terms, and no term it charges
+scales with a quantum's key count -- the capture payload is per unit and the
+wire reader is one lookahead, hence its fixed `2 *
+max_wire_read_bytes`. A full-width quantum therefore spends bytes the unit was
+already admitted or refused for, and the planner still splits before it can
+exceed either budget. `_retained_window_preflight` keeps its own
+`len(quantum) == max_workers` rule, which bounds a load quantum inside one
+retained lifetime and is a different contract. No default, stage, format,
+lane, pin, plugin contract, ship gate or published byte changes. Gates:
+`tests/test_pwc_resident_windows.py`,
+`tests/test_joint_qualification_windows.py`,
+`tests/test_joint_retained_window_plan.py`.
 
 Re-stamped (2026-09-17, `flash/joint-aura-head-progress-678`) for **the joint
 prepare head phase reporting the units it resolves** (#678). The measured
