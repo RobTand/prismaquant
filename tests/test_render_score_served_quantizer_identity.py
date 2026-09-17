@@ -171,3 +171,44 @@ def test_the_writer_stamps_the_arithmetic_the_contract_actually_priced_with(monk
     _bind(explicit)
     assert _check_resumed_render_score_policies(
         {f"{QNAME}|NVFP4": record}, policy=POLICY, where="test") == 1
+
+
+def _registry_with(monkeypatch, contract):
+    from prismaquant import format_registry as fr
+
+    monkeypatch.setattr(fr, "canonical_format_name", lambda name: name)
+    monkeypatch.setattr(fr, "get_format", lambda name: object())
+    monkeypatch.setattr(pwc, "_static_activation_contract_of", lambda spec: contract)
+
+
+def test_a_contract_bound_build_reuses_through_the_real_read(monkeypatch):
+    """A correctly stamped contract-bound row must not be refused by the run's
+    OWN binding: the reader resolves the contract the row was priced through."""
+    explicit = _model_identity()
+    _bind(_registered_identity())          # the process prices with something else
+    _registry_with(monkeypatch, owner.StaticActivationContract(
+        measured_as_served=True, served_quantizer=explicit))
+    records = _record(identity=explicit)
+    records[f"{QNAME}|TESSERA_E2M1_K2_R896"]["format"] = "NVFP4"
+
+    assert _check_resumed_render_score_policies(
+        records, policy=POLICY, where="test") == 1
+
+    class _Cache:
+        metadata = {"render_scores": {"records": records}}
+
+    assert production_cache_priced_input_global_scales(_Cache(), where="test") == {
+        QNAME: owner.input_global_scale_from_max_abs(1.6796875, policy=POLICY)}
+
+
+def test_the_real_read_still_rejects_another_build(monkeypatch):
+    """The same path, with a contract-bound row stamped for a different build."""
+    explicit = _model_identity()
+    _bind(_model_identity())
+    _registry_with(monkeypatch, owner.StaticActivationContract(
+        measured_as_served=True, served_quantizer=explicit))
+    records = _record(identity=_registered_identity())
+    records[f"{QNAME}|TESSERA_E2M1_K2_R896"]["format"] = "NVFP4"
+
+    with pytest.raises(owner.ServedQuantizerUnboundError, match="differing axes are backend"):
+        _check_resumed_render_score_policies(records, policy=POLICY, where="test")

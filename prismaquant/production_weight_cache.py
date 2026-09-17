@@ -2374,6 +2374,35 @@ def _render_score_record_priced_scale(
     )
 
 
+def _render_score_read_contract(record: Mapping[str, object]):
+    """The contract a retained render score was priced through, or ``None``.
+
+    A row's arithmetic is the CONTRACT's -- an explicit binding on the contract
+    beats the process's -- so a reader that compared every retained cost against
+    the process binding alone would refuse a row that was correctly stamped for
+    a contract-bound build.  The record names its format, and the registry is
+    the one owner of which contract that format carries, so the read resolves
+    the same object the write priced through rather than a second expectation.
+
+    ``None`` (unknown format, no contract, or a registry that cannot answer) is
+    not an error here: the caller falls back to the process binding, which is
+    what a row with no contract-bound arithmetic was priced under.
+    """
+    fmt = record.get("format")
+    if not isinstance(fmt, str) or not fmt:
+        return None
+    try:
+        from prismaquant import format_registry as fr
+
+        spec = fr.get_format(fr.canonical_format_name(fmt))
+    except Exception:
+        return None
+    try:
+        return _static_activation_contract_of(spec)
+    except Exception:
+        return None
+
+
 def _check_resumed_render_score_policies(
     records: Mapping[str, Mapping[str, object]],
     *,
@@ -2416,7 +2445,8 @@ def _check_resumed_render_score_policies(
         # scored rows never reach here (``priced is None`` above), which is what
         # keeps their caches reusable.
         require_matching_served_quantizer(
-            priced_quantizer, qname=qname, consumer=where)
+            priced_quantizer, qname=qname, consumer=where,
+            contract=_render_score_read_contract(record))
         require_matching_input_global_scale(
             priced_value,
             input_global_scale_from_max_abs(max_abs_value, policy=policy),
@@ -2466,7 +2496,8 @@ def production_cache_priced_input_global_scales(
         # against these costs reads them through here, so the arithmetic check
         # belongs on this path too, not only on resume.
         require_matching_served_quantizer(
-            priced_quantizer, qname=qname, consumer=where)
+            priced_quantizer, qname=qname, consumer=where,
+            contract=_render_score_read_contract(record))
         previous = priced_scales.get(qname)
         if previous is not None and previous != priced_value:
             raise RuntimeError(
