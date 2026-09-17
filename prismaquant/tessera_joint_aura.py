@@ -27,6 +27,7 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256_normalized,
     prepare_journal, unit_path, write_unit,
 )
+from .interned_json import load_json_file
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -324,6 +325,15 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     ``prepare_cache`` using actual source weights and the original capture.
     Interpolated menu rows are deliberately excluded rather than converted.
 
+    The merged checkpoint is read by ``interned_json.load_json_file``: the
+    standard library's own reader, plus one ``object_pairs_hook`` that makes the
+    identity block's 205,243,544 menu-name occurrences cost one ``str`` per
+    distinct name instead of 12.4 GiB. Values, refusals, exact types and the
+    canonical seal are the stdlib decoder's, and the seal below is recomputed
+    from the parsed graph (``tests/test_interned_json.py``). Measured on the
+    real campaign: 13.812 GiB parse peak, 15.830 GiB for this whole metadata
+    intake, inside the 21 GiB CPU envelope.
+
     A prepared COST run uses metadata intake with existing renders required.
     Its wire identities describe PREPARE's authenticated bytes; COST consumes
     no wire bodies. PWC verifies each consumed render against PREPARE's SHA.
@@ -421,7 +431,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _same(provenance.get("campaign_fanout", {}).get("rows"),
           {row["row_id"]: sorted(row["groups"]) for row in rows}, "complete merged fanout")
 
-    manifest = json.loads(paths["merged_checkpoint"].read_text())
+    manifest = load_json_file(paths["merged_checkpoint"])
     _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
     _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
     identity = manifest["identity"]
