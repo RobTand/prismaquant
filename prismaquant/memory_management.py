@@ -61,6 +61,22 @@ class GPUMemoryBudgetExceeded(RuntimeError):
     """Raised when cache eviction cannot bring CUDA memory under budget."""
 
 
+def allocator_device(device):
+    """The device the CUDA ALLOCATOR api accepts for ``device``.
+
+    ``get_device_properties`` resolves the unspecified ``cuda`` to the current
+    device, and ``set_per_process_memory_fraction`` does not: it raises
+    ``ValueError: Expected a torch.device with a specified index or an integer,
+    but got: cuda``. The envelope is therefore taken against whatever device
+    the caller named and the fraction is SET on that device's resolved index,
+    which is what makes the two calls describe the same device.
+    """
+    device = torch.device(device)
+    if device.type != "cuda":
+        return device
+    return device.index if device.index is not None else torch.cuda.current_device()
+
+
 def enforce_device_envelope(device, device_bytes, *, where="joint capture"):
     """Cap this process's CUDA allocator at ``device_bytes``.
 
@@ -106,9 +122,16 @@ def enforce_device_envelope(device, device_bytes, *, where="joint capture"):
             f"device's total memory {total}, so it bounds nothing; lower the "
             "plan's max_gpu_bytes or run where the device is larger")
     fraction = device_bytes / total
-    torch.cuda.set_per_process_memory_fraction(fraction, device)
+    # The allocator api refuses the unspecified form, so the index is resolved
+    # once and reported: a receipt that says which device the fraction was set
+    # on is what lets an operator check it against the device it was sized for.
+    allocator_index = allocator_device(device)
+    torch.cuda.set_per_process_memory_fraction(fraction, allocator_index)
     return {"enforced": True, "fraction": fraction, "device_total_bytes": total,
-            "device_envelope_bytes": int(device_bytes), "device": str(device)}
+            "device_envelope_bytes": int(device_bytes), "device": str(device),
+            "allocator_device_index": (allocator_index
+                                       if isinstance(allocator_index, int)
+                                       else None)}
 
 
 class CaptureMemoryGuard:
