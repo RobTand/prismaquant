@@ -507,3 +507,6 @@ def test_a_fresh_directory_under_the_full_range_policy_prices_at_that_policy(
         )
         assert record["input_global_scale"] == pytest.approx(
             448.0 * 6.0 / record["activation_max_abs"], rel=1e-6)
+
+
+from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)
