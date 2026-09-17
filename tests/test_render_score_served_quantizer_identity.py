@@ -20,11 +20,16 @@ from __future__ import annotations
 
 import pytest
 
+import torch
+
 from prismaquant import nvfp4_activation_contract as owner
+from prismaquant import production_weight_cache as pwc
 from prismaquant.production_weight_cache import (
+    _render_score_record,
     _check_resumed_render_score_policies,
     production_cache_priced_input_global_scales,
 )
+from prismaquant import format_registry as fr
 
 POLICY = owner.resolve_input_global_scale_policy()
 QNAME = "model.language_model.layers.10.mlp.experts::w13"
@@ -129,3 +134,38 @@ def test_the_measurement_side_refuses_the_same_mismatch():
         identity=_registered_identity())
     assert production_cache_priced_input_global_scales(_Cache(), where="test") == {
         QNAME: owner.input_global_scale_from_max_abs(1.6796875, policy=POLICY)}
+
+
+def test_the_writer_stamps_the_arithmetic_the_contract_actually_priced_with(monkeypatch):
+    """A row's stamp and a row's arithmetic are ONE answer.
+
+    The contract here carries an explicit binding (build B) while the process is
+    bound to another (build A).  ``quantize_dequantize`` prices with the
+    contract's, so the record must say build B -- a writer that read the process
+    binding would publish a row that lies about how it was produced, and a later
+    reuse would then accept or refuse it on the wrong grounds.
+    """
+    from prismaquant import format_registry as fr
+
+    explicit = _registered_identity(vllm="build-B", image_content_sha256="f" * 64)
+    process = _registered_identity()
+    _bind(process)
+    contract = owner.StaticActivationContract(
+        measured_as_served=True, served_quantizer=explicit)
+    monkeypatch.setattr(fr, "canonical_format_name", lambda name: name)
+    monkeypatch.setattr(fr, "get_format", lambda name: object())
+    monkeypatch.setattr(pwc, "_static_activation_contract_of", lambda spec: contract)
+
+    record = pwc._render_score_record(
+        qname=QNAME, fmt="NVFP4", render_format="NVFP4",
+        reference_weight=torch.zeros(2, 16, dtype=torch.bfloat16),
+        rendered_weight=torch.zeros(2, 16, dtype=torch.bfloat16),
+        activations=torch.zeros(1, 16, dtype=torch.bfloat16),
+        activation_max_abs=1.0)
+
+    assert record["served_quantizer"]["vllm"] == "build-B"
+    assert record["served_quantizer"] == explicit.as_record()
+    # ... and a run bound to that same arithmetic reuses it.
+    _bind(explicit)
+    assert _check_resumed_render_score_policies(
+        {f"{QNAME}|NVFP4": record}, policy=POLICY, where="test") == 1

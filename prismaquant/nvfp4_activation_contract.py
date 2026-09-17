@@ -2124,6 +2124,26 @@ def active_served_quantizer_identity() -> ServedQuantizerIdentity | None:
     return _ACTIVE_SERVED_QUANTIZER
 
 
+def effective_served_quantizer_identity(contract=None) -> ServedQuantizerIdentity | None:
+    """The ONE answer to "which arithmetic is this row priced with".
+
+    A contract may carry its own binding (an explicit, frozen choice) and the
+    process may carry another (the run's binding).  The explicit one wins -- and
+    it has to win in exactly one place, because three callers must agree:
+
+    * :meth:`StaticActivationContract.quantize_dequantize`, which runs the
+      arithmetic;
+    * the render-score writer, which stamps which arithmetic priced the row; and
+    * :func:`require_matching_served_quantizer`, which decides on reuse.
+
+    When they asked separately they could disagree -- a contract explicitly
+    bound to one arithmetic pricing while the record stamped the other (or
+    nothing), which is a row that lies about how it was produced.
+    """
+    bound = getattr(contract, "served_quantizer", None)
+    return bound if bound is not None else _ACTIVE_SERVED_QUANTIZER
+
+
 #: The identity axes that decide whether a retained activation-aware cost may be
 #: reused.  They are the arithmetic (``backend``, ``op``) and the build that
 #: arithmetic ran in (``platform``, ``torch``, ``torch_git``, ``vllm``, the
@@ -2142,6 +2162,7 @@ def require_matching_served_quantizer(
     *,
     qname: str,
     consumer: str,
+    contract=None,
 ) -> None:
     """Refuse to reuse an activation-aware cost under another arithmetic.
 
@@ -2159,7 +2180,7 @@ def require_matching_served_quantizer(
     cost, and stays reusable, which is what keeps the exemption mathematically
     honest rather than convenient.
     """
-    current = _ACTIVE_SERVED_QUANTIZER
+    current = effective_served_quantizer_identity(contract)
     if current is None:
         raise ServedQuantizerUnboundError(
             f"{consumer}: {qname!r} carries an activation-aware cost, but this "
@@ -2179,9 +2200,20 @@ def require_matching_served_quantizer(
                 "(RobTand/prismaquant#567)."
             )
         return
+    # The stamp's own vocabulary is checked before its values: a record written
+    # by another schema is a different claim, not a weaker one.
+    if recorded.get("schema") != SERVED_QUANTIZER_IDENTITY_SCHEMA:
+        raise ServedQuantizerUnboundError(
+            f"{consumer}: {qname!r} carries a served-quantizer identity of "
+            f"schema {recorded.get('schema')!r}; this reader transcribes "
+            f"{SERVED_QUANTIZER_IDENTITY_SCHEMA!r} and will not compare fields "
+            "it may be misreading"
+        )
+    # Compared as written, never through ``str``: ``None`` and the STRING
+    # ``'None'`` are different claims about the operator.
     differing = [
         axis for axis in SERVED_QUANTIZER_REUSE_AXES
-        if str(recorded.get(axis)) != str(getattr(current, axis))
+        if recorded.get(axis) != getattr(current, axis)
     ]
     if differing:
         raise ServedQuantizerUnboundError(
@@ -2301,7 +2333,7 @@ class StaticActivationContract:
         a served rung with no binding refuses rather than pricing a model of the
         server.
         """
-        identity = self.served_quantizer or _ACTIVE_SERVED_QUANTIZER
+        identity = effective_served_quantizer_identity(self)
         if identity is None:
             if self.measured_as_served:
                 raise ServedQuantizerUnboundError(

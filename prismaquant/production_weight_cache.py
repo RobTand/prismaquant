@@ -2138,25 +2138,28 @@ def _render_score_record(
         # this quantiser, and invalidating it would be the opposite error.
         "served_quantizer": (
             None if input_global_scale is None
-            else _scored_served_quantizer_record()
+            else _scored_served_quantizer_record(contract)
         ),
         "out_features": int(rows),
         "in_features": int(cols),
     }
 
 
-def _scored_served_quantizer_record() -> "dict | None":
-    """The bound arithmetic's identity, or ``None`` when the process has none.
+def _scored_served_quantizer_record(contract) -> "dict | None":
+    """The identity of the arithmetic THIS row was priced with.
 
-    Read from the one binding (``nvfp4_activation_contract``), never resolved,
-    probed or imported here: the cache stamps what the run bound, and an
-    unstamped row is refused at reuse rather than filled in later.
+    Read through the one effective-identity accessor, so the arithmetic the row
+    ran (``contract.quantize_dequantize``) and the arithmetic it is stamped with
+    cannot be two answers: a contract carrying its own explicit binding stamps
+    that, not the process's.  Never resolved, probed or imported here -- the
+    cache records what priced the row, and an unstamped row is refused at reuse
+    rather than filled in later.
     """
     from prismaquant.nvfp4_activation_contract import (
-        active_served_quantizer_identity,
+        effective_served_quantizer_identity,
     )
 
-    identity = active_served_quantizer_identity()
+    identity = effective_served_quantizer_identity(contract)
     return None if identity is None else identity.as_record()
 
 
@@ -2325,7 +2328,7 @@ def _render_score_record_priced_scale(
     *,
     key: str,
     where: str,
-) -> tuple[str, float, float, str | None] | None:
+) -> tuple[str, float, float, str | None, object] | None:
     """``(qname, priced_G, max_abs, priced_policy)`` for a served-contract row.
 
     ``None`` for a row that carries no static G -- one scored under a dynamic
