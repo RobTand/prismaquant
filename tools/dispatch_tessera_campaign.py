@@ -1816,7 +1816,11 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
             else decoded)
     phase_names = ()
     if entry_point == JOINT_ENTRY_POINT and command == "prepare":
-        if (not args.resume and manifest["annotations"].get("phase_start_units")
+        # A resumed submission seals the order it will actually read -- the
+        # qualification journal's units in their replay parts, then the layer
+        # walk over the rest -- so its phase table is as true as a fresh one
+        # and the action can be given it (RobTand/prismaquant#607).
+        if (manifest["annotations"].get("phase_start_units")
                 and manifest["annotations"].get("source_authentication_mode") ==
                     "verified_streamed_identity_cache"):
             phase_names = tuple(row["name"] for row in manifest["annotations"]["phases"])

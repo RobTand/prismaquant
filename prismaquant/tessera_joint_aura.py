@@ -734,22 +734,42 @@ def _qualification_file_sha(path):
     return digest
 
 
-def _qualification_replay(data, manifest, completed):
-    """A journal envelope alone does not authenticate files that remain live."""
+def _qualification_replay(data, manifest, completed, *, sealed=None, committed=0):
+    """A journal envelope alone does not authenticate files that remain live.
+
+    The roster is walked in the order sealed at submission, one complete unit
+    at a time: its X/H capture, then each measured rung's wire and render. That
+    is the order the data manifest declares for these bytes and the reason the
+    resumed pass can announce a consumed prefix at all (RobTand/prismaquant#607).
+    ``sealed`` is the submission's own read order and phase table, checked
+    against this journal before the first read, so a part is announced exactly
+    when the action reaches its first unit -- with the bytes in front of it
+    already read -- and the count advances only after a unit's own reads finish.
+    """
     from .perturbed_x_cache import activation_cache_filename
+    from .joint_replay_frontier import (
+        PHASE_START_UNITS_KEY, ROSTER_KEY)
 
     # The immutable manifest seals the full roster. Only a unit whose
     # qualification is actually skipped needs its X/H bytes re-authenticated
     # here; unfinished units pass the usual verified capture loader later.
     root = Path(data.payload['provenance']['calibration_cache']['path']).parent
-    for name in sorted(completed):
+    order = sorted(completed) if sealed is None else list(sealed[ROSTER_KEY])
+    starts = None if sealed is None else sealed[PHASE_START_UNITS_KEY]
+    verified = {}
+    current = "head"
+    for index, name in enumerate(order):
+        if starts is not None and starts[name] != current:
+            # The previous part is read to its end, so everything in front of
+            # this one has been consumed: PB releases only that prefix.
+            current = starts[name]
+            _pb_commit(committed + index, current, unit=name)
         entry = manifest['entries'][name]
         expected = str(Path('inputs') / activation_cache_filename(name))
         _same(entry.get('path'), expected, f'{name}: canonical X/H entry')
         _same(_qualification_file_sha(root / expected), entry['sha256'],
               f'{name}: canonical X/H bytes changed')
-    verified = {}
-    for name, state in sorted(completed.items()):
+        state = completed[name]
         rows = state.get('verified_cells')
         _require(isinstance(rows, dict) and set(rows) == set(data.formats_by_qname[name]) - {'BF16'},
                  f'{name}: incomplete qualification journal cells')
@@ -774,6 +794,10 @@ def _qualification_replay(data, manifest, completed):
                   f'{name}@{fmt}: upstream render bytes changed')
             cell['render_file_sha256'] = record['render_file_sha256']
             verified[name, fmt] = record
+        if starts is not None:
+            # The unit is durable at this point; the count is what renews the
+            # watchdog's allowance while a part is still being re-read.
+            _pb_commit(committed + index + 1, current, unit=name)
     return verified
 
 
@@ -804,7 +828,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                   source_capture_compatibility=None, source_authentication=None,
                   qualification_guard=None, qualification_journal=None,
                   qualification_resume=False, qualification_identity=None,
-                  prewarm_phase_starts=None):
+                  prewarm_phase_starts=None, sealed_replay=None,
+                  prewarm_phases=None):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
@@ -815,6 +840,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     from contextlib import nullcontext
     from . import tessera_calibration_cache as cc, tessera_hessian as th, tessera_campaign as tc
     from .joint_aura import activation_identity, prefetch_joint_cache
+    from .joint_prewarm_phases import phase_name
     from .production_weight_cache import ProductionWeightCache
     from .routed_experts import PackedExpertProjection, refresh_packed_expert_projections
     from . import format_registry as fr
@@ -877,8 +903,32 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             qualification_journal, stage=QUALIFICATION_STAGE,
             resume=qualification_resume, identity=identity,
             qnames=sorted(data.formats_by_qname))
+        if sealed_replay is not None:
+            from .joint_replay_frontier import ROSTER_KEY, require_replay_matches
+            _require(prewarm_phase_starts is not None,
+                     "a sealed replay frontier travels with its sealed phase table")
+            # Before a single replayed byte is read: a journal, checkpoint or
+            # unit set that moved after submission describes reads this action
+            # will not make, and PB would release bytes nothing consumed.
+            require_replay_matches(
+                sealed_replay, completed=completed,
+                cells_by_unit={name: [fmt for fmt in data.formats_by_qname.get(name, ())
+                                      if fmt != "BF16"]
+                               for name in sealed_replay[ROSTER_KEY]},
+                journal_identity_sha256=journal_sha)
+        else:
+            # No sealed phases, no phase is reported, so a resume that reports
+            # nothing stays as honest as it was before #607. A resume that
+            # *does* carry a sealed phase table has to carry the frontier those
+            # phases were derived from.
+            _require(prewarm_phase_starts is None or not completed,
+                     "a resumed pass was submitted with sealed phases but "
+                     "without its sealed replay frontier; re-submit so the "
+                     "read order and the journal identity are bound before "
+                     "the run reads anything")
         if completed:
-            replayed = _qualification_replay(data, manifest, completed)
+            replayed = _qualification_replay(data, manifest, completed,
+                                             sealed=sealed_replay)
         else:
             replayed = {}
     _require(prewarm_phase_starts is None or journal is not None,
@@ -903,6 +953,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     if prewarm_phase_starts is not None:
         _same(set(prewarm_phase_starts), set(targets),
               "sealed prewarm phase/qualification roster")
+        _require(prewarm_phases is not None,
+                 "sealed prewarm phases require the manifest's own phase names")
     layers = defaultdict(list)
     for name in targets:
         layers[runner.layer_index_for_qname(name)].append(name)
@@ -913,21 +965,48 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     verified, telemetry = replayed if completed else {}, []
     committed_units = len(completed)
     current_prewarm_phase = "head"
+
+    def layer_phase(layer, walk_names):
+        """The sealed phase this layer's reads belong to, or ``None``.
+
+        Installing a layer and scheduling its prefetch is what reads the phase
+        it declares: the source extents of this layer and of the ones the
+        prefetch window opens. That phase is ``phase_name(layer, 0)``, and a
+        layer whose units are ALL replayed still has one -- but no unit starts
+        in it, so the unit table alone cannot name it. When the manifest does
+        not declare it, nothing is read for this layer that a phase describes
+        and a unit-driven lookup is the right answer instead.
+        """
+        if prewarm_phases is not None:
+            candidate = phase_name(layer, 0)
+            if candidate in prewarm_phases:
+                return candidate
+        if walk_names:
+            return prewarm_phase_starts[walk_names[0]]
+        return None
+
     if prewarm_phase_starts is not None:
-        first = next((sorted(layers[layer])[0] for layer in range(runner.num_layers)
-                      if layers.get(layer)), None)
-        _require(first is not None, "sealed prewarm plan has no qualification units")
-        current_prewarm_phase = prewarm_phase_starts[first]
-        _pb_commit(committed_units, current_prewarm_phase, unit=first)
+        # A replayed unit was announced by its replay phase inside
+        # ``_qualification_replay``, before the walk. Layer 0's phase comes
+        # first here because the prefetch window this walk opens before any
+        # install reads exactly the source extents that phase declares -- even
+        # when every one of the layer's own units is already qualified.
+        first = [name for name in sorted(layers.get(0, ())) if name not in completed]
+        phase = layer_phase(0, first)
+        if phase is not None:
+            current_prewarm_phase = phase
+            _pb_commit(committed_units, phase, unit=first[0] if first else None)
     for depth in range(min(runner.num_layers, runner.prefetch_lookahead + 1)):
         runner.context.schedule_prefetch(depth)
     for layer in range(runner.num_layers):
         names = sorted(layers.get(layer, ()))
-        if prewarm_phase_starts is not None and names:
-            phase = prewarm_phase_starts.get(names[0])
-            _require(phase is not None, f"{names[0]} has no sealed prewarm phase")
-            if phase != current_prewarm_phase:
-                _pb_commit(committed_units, phase, unit=names[0])
+        walk_names = [name for name in names if name not in completed]
+        if prewarm_phase_starts is not None:
+            phase = layer_phase(layer, walk_names)
+            if phase is not None and phase != current_prewarm_phase:
+                # The previous phase is read to its end, so everything in front
+                # of this one has been consumed: PB releases only that prefix.
+                _pb_commit(committed_units, phase, unit=walk_names[0] if walk_names else None)
                 current_prewarm_phase = phase
         runner.context.install(layer, require_prefetched=runner.require_prefetched_residency)
         runner.context.schedule_prefetch(layer + runner.prefetch_lookahead)
@@ -942,6 +1021,17 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
             capture_windows = [names] if policy is None else [(name,) for name in names]
             layer_stats = []
             for unit_names in capture_windows:
+                if len(unit_names) == 1 and unit_names[0] in completed:
+                    # Replayed before the walk: its bytes are authenticated and
+                    # its replay phase was announced there, so this unit draws
+                    # no transition here.
+                    name = unit_names[0]
+                    layer_stats.extend(completed[name]['prefetch'])
+                    if capture_load_execution is not None:
+                        partial = completed[name].get('capture_load_execution')
+                        _require(isinstance(partial, dict), f'{name}: missing capture load execution')
+                        cc.merge_load_execution(capture_load_execution, partial)
+                    continue
                 if prewarm_phase_starts is not None:
                     phase = prewarm_phase_starts.get(unit_names[0])
                     _require(phase is not None, f"{unit_names[0]} has no sealed prewarm phase")
@@ -951,14 +1041,6 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                         # only the preceding manifest prefix.
                         _pb_commit(committed_units, phase, unit=unit_names[0])
                         current_prewarm_phase = phase
-                if len(unit_names) == 1 and unit_names[0] in completed:
-                    name = unit_names[0]
-                    layer_stats.extend(completed[name]['prefetch'])
-                    if capture_load_execution is not None:
-                        partial = completed[name].get('capture_load_execution')
-                        _require(isinstance(partial, dict), f'{name}: missing capture load execution')
-                        cc.merge_load_execution(capture_load_execution, partial)
-                    continue
                 stats_start = len(layer_stats)
                 acts = hessians = calibration_source = source_weight = None
                 resident = rendered = bound_unit = None
@@ -1350,11 +1432,13 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     root = Path(config["output_root"]) / command
     root.mkdir(parents=True, exist_ok=True)
     prewarm_phase_starts = None
+    sealed_replay = None
+    prewarm_phases = None
     if prewarm_manifest is not None:
         _require(command == "prepare" and config.get("qualification_window") is not None,
                  "sealed prewarm phases require windowed preparation")
-        from .joint_prewarm_phases import load_prepare_frontier
-        prewarm_phase_starts = load_prepare_frontier(
+        from .joint_prewarm_phases import load_prepare_read_set
+        prewarm_phase_starts, sealed_replay, prewarm_phases = load_prepare_read_set(
             prewarm_manifest["path"], prewarm_manifest["sha256"], plan_sha256)
     cost_schedule = None
     if cost_read_manifest is not None:
@@ -1504,6 +1588,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                                                          config.get('qualification_window') is not None else None),
                                   qualification_resume=resume,
                                   prewarm_phase_starts=prewarm_phase_starts,
+                                  sealed_replay=sealed_replay,
+                                  prewarm_phases=prewarm_phases,
                                   qualification_identity={
                                       'plan_sha256': plan_sha256,
                                       'source_model_identity': source,

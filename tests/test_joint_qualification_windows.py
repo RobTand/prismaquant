@@ -1,6 +1,7 @@
 """Qualification bounds preserve the canonical per-unit and render checks."""
 from contextlib import contextmanager
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import weakref
@@ -35,10 +36,20 @@ def test_policy_is_detached_and_legacy_none_is_preserved():
         bridge.normalize_qualification_window({**config, 'extra': 1})
 
 
-def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None):
+def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None,
+            layer_of=(0, 0)):
+    """A two-unit joint preparation.
+
+    ``layer_of`` says which layer each unit belongs to, in unit order, so a
+    case can put a fully-qualified unit in an earlier layer than one still to
+    qualify. The default keeps both units in layer 0, which is what the
+    single-layer cases below hold.
+    """
     from prismaquant import tessera_calibration_cache as cc, tessera_campaign as tc
     from prismaquant import tessera_hessian as th, joint_aura
-    names = ['model.layers.0.a', 'model.layers.0.b']
+    names = [f'model.layers.{layer}.{suffix}'
+             for layer, suffix in zip(layer_of, ('a', 'b'))]
+    assert len(names) == len(set(names)), 'layer_of must name two distinct units'
     formats = ['TESSERA_E4M3_K1_R1024', 'TESSERA_E4M3_K1_R768']
     modules = {name: torch.nn.Linear(4, 4, bias=False, dtype=torch.bfloat16) for name in names}
     cells = {}
@@ -79,9 +90,10 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None):
         install=lambda layer, **kw: events.append(('install', layer)),
         unload=lambda layer: events.append(('unload', layer)),
         settle_prefetched_layers=lambda indices: events.append(('settled', tuple(indices))))
-    runner = SimpleNamespace(model=torch.nn.Module(), context=context, num_layers=1, prefetch_lookahead=1,
+    runner = SimpleNamespace(model=torch.nn.Module(), context=context,
+        num_layers=max(layer_of) + 1, prefetch_lookahead=1,
         require_prefetched_residency=True, profile=object(), device='cpu',
-        layer_index_for_qname=lambda name: 0)
+        layer_index_for_qname=lambda name: layer_of[names.index(name)])
     monkeypatch.setattr(bridge, '_bound', lambda record, label: tmp_path / 'capture.json')
     monkeypatch.setattr(cc, 'require_capture_contract', lambda *args, **kw:
                         {'identity': expected, 'entries': capture_entries})
@@ -307,3 +319,275 @@ def test_qualification_replay_refuses_changed_upstream(tmp_path, monkeypatch, ch
     with pytest.raises((ValueError, RuntimeError), match='mismatch|changed|regular'):
         bridge.prepare_cache(runner, data, **options, qualification_resume=True)
     assert not any(row[0] == 'capture' for row in events)
+
+
+def _passing_verify(cell, source, rendered, **kwargs):
+    return {'source_weight': {'sha256': 's' * 64},
+            'rendered_weight': {'sha256': 'r' * 64},
+            'encoding_identity_sha256': 'e' * 64,
+            'render_file_sha256': cell['render_file_sha256'],
+            'wire_sha256': cell['record']['blob_sha256'],
+            'render_origin': cell['render_origin'],
+            'render_comparison': bridge.RENDER_COMPARISON_BY_ORIGIN[cell['render_origin']]}
+
+
+def _first_pass(tmp_path, monkeypatch, *, fail_unit, layer_of=(0, 0)):
+    """Run once and leave whatever journal that run wrote.
+
+    ``fail_unit=None`` completes the pass, so the journal holds every unit; a
+    unit name stops the pass on that unit, so the journal holds the units
+    before it.
+    """
+    runner, data, capture, events, _live, _observed = fixture(
+        tmp_path, monkeypatch, fail_unit=fail_unit, layer_of=layer_of)
+    journal = tmp_path / 'qualification'
+    options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,
+                   qualification_window=policy(), qualification_journal=journal,
+                   qualification_identity={'plan_sha256': 'p' * 64})
+    if fail_unit is None:
+        bridge.prepare_cache(runner, data, **options)
+    else:
+        with pytest.raises(RuntimeError, match='intentional verification failure'):
+            bridge.prepare_cache(runner, data, **options)
+    events.clear()
+    return runner, data, options, journal, events
+
+
+def _sealed_over(journal, data, roster, *, phase_of=None, identity_sha256='JOURNAL'):
+    """The frontier a submission seals over ``roster`` (#607).
+
+    Bytes and per-unit cells are the runtime's own view of them, which is what
+    the submission's producer derives from the same checkpoint.
+    """
+    from prismaquant import joint_replay_frontier as replay
+
+    names = sorted(roster)
+    cells = {name: [fmt for fmt in data.formats_by_qname[name] if fmt != 'BF16']
+             for name in names}
+    starts = ({name: replay.replay_phase_name(0) for name in names}
+              if phase_of is None else dict(phase_of))
+    if identity_sha256 == 'JOURNAL':
+        identity_sha256 = json.loads(
+            (journal / 'manifest.json').read_text())['identity_sha256']
+    return replay.seal_frontier(names, cells, phase_start_units=starts,
+                                journal_identity_sha256=identity_sha256)
+
+
+def test_a_sealed_replay_frontier_announces_only_the_phases_it_reads(
+    tmp_path, monkeypatch,
+):
+    runner, data, options, journal, events = _first_pass(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.b')
+    sealed = _sealed_over(journal, data, ['model.layers.0.a'])
+    from prismaquant import joint_replay_frontier as replay
+    starts = {**sealed[replay.PHASE_START_UNITS_KEY],
+              'model.layers.0.b': 'layer-0-part-0'}
+    monkeypatch.setattr(bridge, 'verify_anchor_render', _passing_verify)
+    progress = []
+    monkeypatch.setattr(bridge, '_pb_commit',
+                        lambda units, phase, unit=None:
+                        progress.append((units, phase, unit)))
+    cache = bridge.prepare_cache(runner, data, **options, qualification_resume=True,
+                                 prewarm_phase_starts=starts, sealed_replay=sealed,
+                                 prewarm_phases=('head', 'replay-0000',
+                                                 'layer-0-part-0'))
+    assert set(cache.metadata['verified_cells']) == set(data.cells)
+    # The journal's unit is re-authenticated, not re-qualified.
+    assert [row for row in events if row[0] == 'capture'] == [
+        ('capture', 'model.layers.0.b')]
+    # Its replay phase is announced inside the replay, once its own bytes are
+    # on the end of a completed read. The walk then names only the unit it
+    # still has to qualify -- never the replayed unit's own phase again.
+    assert progress == [(0, 'replay-0000', 'model.layers.0.a'),
+                        (1, 'replay-0000', 'model.layers.0.a'),
+                        (1, 'layer-0-part-0', 'model.layers.0.b'),
+                        (2, 'layer-0-part-0', 'model.layers.0.b')]
+
+
+def test_a_sealed_replay_frontier_refuses_a_journal_that_moved(tmp_path, monkeypatch):
+    from prismaquant import joint_replay_frontier as replay
+
+    runner, data, options, journal, events = _first_pass(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.b')
+    sealed = _sealed_over(journal, data, ['model.layers.0.a'],
+                          identity_sha256='e' * 64)
+    starts = {**sealed[replay.PHASE_START_UNITS_KEY],
+              'model.layers.0.b': 'layer-0-part-0'}
+    roster = sealed[replay.ROSTER_KEY]
+    with pytest.raises(RuntimeError, match='journal identity changed'):
+        bridge.prepare_cache(runner, data, **options, qualification_resume=True,
+                             prewarm_phase_starts=starts, sealed_replay=sealed,
+                             prewarm_phases=('head', 'replay-0000', 'layer-0-part-0'))
+    # Refused before the first replayed byte, not after reporting a prefix.
+    assert not any(row[0] == 'capture' for row in events)
+
+
+def test_sealed_phases_without_a_replay_frontier_are_refused(tmp_path, monkeypatch):
+    runner, data, options, journal, events = _first_pass(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.b')
+    from prismaquant import joint_replay_frontier as replay
+    sealed = _sealed_over(journal, data, ['model.layers.0.a'])
+    starts = {**sealed[replay.PHASE_START_UNITS_KEY],
+              'model.layers.0.b': 'layer-0-part-0'}
+    with pytest.raises(ValueError, match='sealed replay frontier'):
+        bridge.prepare_cache(runner, data, **options, qualification_resume=True,
+                             prewarm_phase_starts=starts,
+                             prewarm_phases=('head', 'replay-0000', 'layer-0-part-0'))
+    assert not any(row[0] == 'capture' for row in events)
+
+
+def test_a_fully_completed_resume_verifies_and_publishes(tmp_path, monkeypatch):
+    """Every unit is journaled: nothing is re-qualified and nothing errors."""
+    from prismaquant import joint_replay_frontier as replay
+
+    runner, data, options, journal, events = _first_pass(
+        tmp_path, monkeypatch, fail_unit=None)
+    sealed = _sealed_over(journal, data, data.formats_by_qname)
+    progress = []
+    monkeypatch.setattr(bridge, '_pb_commit',
+                        lambda units, phase, unit=None:
+                        progress.append((units, phase, unit)))
+    cache = bridge.prepare_cache(
+        runner, data, **options, qualification_resume=True,
+        prewarm_phase_starts=sealed[replay.PHASE_START_UNITS_KEY],
+        sealed_replay=sealed,
+        prewarm_phases=('head', 'replay-0000', 'layer-0-part-0'))
+    # The replay re-reads and verifies every unit, so the walk has nothing left
+    # to qualify: no capture is loaded again and no unit draws a phase of its
+    # own.
+    assert set(cache.metadata['verified_cells']) == set(data.cells)
+    assert not any(row[0] == 'capture' for row in events)
+    assert len(cache.metadata['prefetch'][0]['windows']) == 4
+    # One announcement per part plus one count update per durable unit; both
+    # units sit in the same part, so only the first draws a transition. The
+    # layer's own phase is still announced (unitless) before the walk reads the
+    # source extents it declares.
+    assert progress == [(0, 'replay-0000', 'model.layers.0.a'),
+                        (1, 'replay-0000', 'model.layers.0.a'),
+                        (2, 'replay-0000', 'model.layers.0.b'),
+                        (2, 'layer-0-part-0', None)]
+
+
+def test_an_empty_sealed_frontier_is_accepted_and_a_later_unit_is_refused(
+    tmp_path, monkeypatch,
+):
+    """A resume submitted before anything was journaled seals an empty roster."""
+    runner, data, options, journal, events = _first_pass(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.a')
+    empty = _sealed_over(journal, data, [], identity_sha256=None)
+    starts = {name: 'layer-0-part-0' for name in data.formats_by_qname}
+    monkeypatch.setattr(bridge, 'verify_anchor_render', _passing_verify)
+    progress = []
+    monkeypatch.setattr(bridge, '_pb_commit',
+                        lambda units, phase, unit=None:
+                        progress.append((units, phase, unit)))
+    cache = bridge.prepare_cache(
+        runner, data, **options, qualification_resume=True,
+        prewarm_phase_starts=starts, sealed_replay=empty,
+        prewarm_phases=('head', 'layer-0-part-0'))
+    assert set(cache.metadata['verified_cells']) == set(data.cells)
+    # Nothing was replayed, so the walk is the fresh order.
+    assert progress == [(0, 'layer-0-part-0', 'model.layers.0.a'),
+                        (1, 'layer-0-part-0', 'model.layers.0.a'),
+                        (2, 'layer-0-part-0', 'model.layers.0.b')]
+
+    # The same frontier over a journal that has since gained a unit is refused
+    # before that unit is announced: the empty roster bound nothing on disk.
+    (tmp_path / 'second').mkdir()
+    runner, data, options, journal, events = _first_pass(
+        tmp_path / 'second', monkeypatch, fail_unit='model.layers.0.b')
+    with pytest.raises(RuntimeError, match='no longer holds the sealed replay roster'):
+        bridge.prepare_cache(
+            runner, data, **options, qualification_resume=True,
+            prewarm_phase_starts=starts, sealed_replay=empty,
+            prewarm_phases=('head', 'layer-0-part-0'))
+    assert not any(row[0] == 'capture' for row in events)
+
+
+def test_a_source_only_layer_phase_is_announced_before_its_reads(
+    tmp_path, monkeypatch,
+):
+    """A resumed layer with no unit left still reads its source extents.
+
+    Announcing it late would hand PB a prefix one phase too far: the bytes
+    ``layer-0-part-0`` declares are read by the prefetch window this walk opens
+    before ``install(0)``, and they must not be released before that read.
+    """
+    runner, data, options, journal, _events = _first_pass(
+        tmp_path, monkeypatch, fail_unit='model.layers.1.b', layer_of=(0, 1))
+
+    order = []
+    runner.context.install = lambda layer, **kw: order.append(('install', layer))
+    runner.context.schedule_prefetch = lambda depth: order.append(('prefetch', depth))
+    runner.context.unload = lambda layer: order.append(('unload', layer))
+    monkeypatch.setattr(bridge, '_pb_commit',
+                        lambda units, phase, unit=None:
+                        order.append(('announce', units, phase, unit)))
+    monkeypatch.setattr(bridge, 'verify_anchor_render', _passing_verify)
+
+    sealed = _sealed_over(journal, data, ['model.layers.0.a'])
+    from prismaquant import joint_replay_frontier as replay
+    starts = {**sealed[replay.PHASE_START_UNITS_KEY],
+              'model.layers.1.b': 'layer-1-part-0'}
+    bridge.prepare_cache(
+        runner, data, **options, qualification_resume=True,
+        prewarm_phase_starts=starts, sealed_replay=sealed,
+        prewarm_phases=('head', 'replay-0000', 'layer-0-part-0', 'layer-1-part-0'))
+
+    # Layer 0 has no unit left to qualify, so its phase carries only source
+    # extents: still announced, before the reads it describes, and with no
+    # committed unit invented for it.
+    assert order == [
+        ('announce', 0, 'replay-0000', 'model.layers.0.a'),
+        ('announce', 1, 'replay-0000', 'model.layers.0.a'),
+        ('announce', 1, 'layer-0-part-0', None),
+        ('prefetch', 0),
+        ('prefetch', 1),
+        ('install', 0),
+        ('prefetch', 1),
+        ('unload', 0),
+        ('announce', 1, 'layer-1-part-0', 'model.layers.1.b'),
+        ('install', 1),
+        ('prefetch', 2),
+        ('announce', 2, 'layer-1-part-0', 'model.layers.1.b'),
+        ('unload', 1),
+    ]
+
+
+def test_a_fully_completed_resume_announces_every_declared_source_phase(
+    tmp_path, monkeypatch,
+):
+    """Every layer the walk still reads announces its own phase, in order."""
+    runner, data, options, journal, _events = _first_pass(
+        tmp_path, monkeypatch, fail_unit=None, layer_of=(0, 1))
+
+    order = []
+    runner.context.install = lambda layer, **kw: order.append(('install', layer))
+    runner.context.schedule_prefetch = lambda depth: order.append(('prefetch', depth))
+    runner.context.unload = lambda layer: order.append(('unload', layer))
+    monkeypatch.setattr(bridge, '_pb_commit',
+                        lambda units, phase, unit=None:
+                        order.append(('announce', units, phase, unit)))
+
+    sealed = _sealed_over(journal, data, data.formats_by_qname)
+    from prismaquant import joint_replay_frontier as replay
+    bridge.prepare_cache(
+        runner, data, **options, qualification_resume=True,
+        prewarm_phase_starts=sealed[replay.PHASE_START_UNITS_KEY],
+        sealed_replay=sealed,
+        prewarm_phases=('head', 'replay-0000', 'layer-0-part-0'))
+
+    assert order == [
+        ('announce', 0, 'replay-0000', 'model.layers.0.a'),
+        ('announce', 1, 'replay-0000', 'model.layers.0.a'),
+        ('announce', 2, 'replay-0000', 'model.layers.1.b'),
+        ('announce', 2, 'layer-0-part-0', None),
+        ('prefetch', 0),
+        ('prefetch', 1),
+        ('install', 0),
+        ('prefetch', 1),
+        ('unload', 0),
+        ('install', 1),
+        ('prefetch', 2),
+        ('unload', 1),
+    ]

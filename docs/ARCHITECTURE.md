@@ -51,6 +51,54 @@ legacy arm. The exact arm runs on
 `tests/fixtures/tessera_route_trace_509/`, written by Tessera's own telemetry
 at producer commit `8104dc6` (see that directory's `PROVENANCE.md`), so the
 schema under test is the producer's.
+As of: 2026-09-16 · `issue-607-sealed-arc-replay-frontier`. Stamps
+follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-16, `issue-607-sealed-arc-replay-frontier`) for the
+**resumed windowed `prepare`'s read order** (§4.10, RobTand/prismaquant#607).
+A fresh windowed prepare reads the layer/part order its data manifest
+declares, so the phases it seals are true. A resumed one reads two blocks:
+`_qualification_replay` re-authenticates every unit the qualification journal
+already holds -- its X/H capture, then each measured rung's wire and render --
+and only then does the layer walk qualify the units the journal does not hold.
+Those are two different orders over the same bytes, so the resumed path sealed
+no phases at all -- and `submit-joint prepare --resume` therefore declined to
+declare any, and never even handed the action its data manifest -- so the
+storage role charged the whole manifest against the ARC budget and the row
+stayed cold. The submission now seals the replay roster, its exact read order
+and the qualification journal's identity beside the phase table
+(`joint_replay_frontier.seal_frontier`), and the submit path carries that
+manifest and its phase table into the admitted action on a resume as it
+already did on a fresh pass. The sealed table is the resumed order -- the
+`head`, then the replay block, then the layer/part phases over the units still
+to qualify -- and the replay block is windowed by the walk's own byte budget
+(`MAX_PHASE_BYTES`), so a part never splits a unit and the table stays bounded
+however long the journal is: one phase per replayed unit would be as many
+phases as the journal holds -- 36,423 units on this census -- against the 2048
+a submission declares. The preparing
+action announces a part when it reaches its first unit, advances the count
+only after a unit's own reads finish, and refuses a journal, checkpoint or
+unit set that moved after submission rather than reporting a prefix it did
+not read (`joint_replay_frontier.require_replay_matches`,
+`tessera_joint_aura.prepare_cache`). The walk's own phase announces by layer,
+not by unit: installing a layer and opening its prefetch window is what reads
+the source extents `layer-<L>-part-0` declares, so the action announces
+`phase_name(layer, 0)` from the manifest's own phase list before those reads
+-- even for a layer whose units are **all** replayed, which has no unit to
+name its phase and would otherwise stay unannounced (and its extents
+unreleased) until the next transition. A resume submitted before the pass ever
+journaled a unit seals an empty roster and no identity; a resume that finds
+every unit already qualified verifies them, reads no capture, and publishes
+its completion; and one carrying sealed phases without that frontier is
+refused. The manifest producer runs in a CPU environment with no GPU image,
+so both ends load `prismaquant/joint_replay_frontier.py` by path. Gates:
+`tests/test_joint_replay_frontier_607.py`,
+`tests/test_joint_qualification_windows.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`. **Not claimed:** no
+resumed GPU subset has been run under a sealed frontier, so the ARC payoff
+and the resumed wall-clock are unmeasured here; this stamp records the
+contract.
+
 As of: 2026-09-16 · `flash/issue-654-stage-settings-provenance-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
 
@@ -1351,7 +1399,12 @@ earlier the same morning, against fewer shards.
 A whole-set warm is not available at that ratio, so the manifest carries the
 consumption order: a `head` phase, then bounded `layer-<L>-part-<P>` phases
 for windowed preparation, and the prewarm loop windows on
-`annotations.phases`. Each part starts at a complete unit. The head is not
+`annotations.phases`. Each part starts at a complete unit. A **resumed**
+windowed preparation re-reads the units its qualification journal already
+holds before the walk, so its phase table is that resumed order instead --
+`head`, then `replay-<NNNN>` parts bounded by the same byte budget over the
+replayed units, then the layer/part phases of the units still to qualify (the
+2026-09-16 stamp above, #607). The head is not
 small on this census: 97,302 of its 197,990 measured cells are rungs the
 campaign adopted rather than encoded, and `load_measured_anchor_input`
 decodes a shard for each of them from its wire before the first layer
