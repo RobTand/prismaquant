@@ -581,6 +581,11 @@ def _record_unverified_reuse(
     whose projection was actually compared. A verified record already stored
     for the stage is left untouched. Returns an error string when the
     admission could not be persisted.
+
+    ``tessera-plan`` never reaches this function by construction:
+    ``check_stage_settings`` refuses an unrecorded plan outright, because a
+    translated plan needs an allocation-content binding and an admission is
+    not one.
     """
     try:
         if manifest_path.exists():
@@ -660,14 +665,28 @@ def check_stage_settings(
             legacy = stored.get("legacy")
             if isinstance(legacy, Mapping) and set(legacy) == set(declared):
                 prev = dict(legacy)
-        if prev is None and stage == "tessera-plan":
-            return 2, [
-                f"[pipeline] ERROR: {stage}: {artifact_path} has no recorded "
-                "allocation content binding"
-                + ("" if stored is None else " for this stage")
-                + "; refusing silent reuse. Rebuild the plan from the current "
-                "allocation.",
-            ]
+        if stage == "tessera-plan":
+            # Tessera's gate is an allocation-content BINDING, never an
+            # admission. A plan has already been translated, so nothing
+            # recorded after the fact can bind the old plan to a new
+            # allocation. That refuses both an unrecorded stage and one that
+            # carries an unverified-reuse marker -- the marker says the
+            # artifact's identity is unknown, which is not a binding either.
+            if prev is None:
+                return 2, [
+                    f"[pipeline] ERROR: {stage}: {artifact_path} has no recorded "
+                    "allocation content binding"
+                    + ("" if stored is None else " for this stage")
+                    + "; refusing silent reuse. Rebuild the plan from the current "
+                    "allocation.",
+                ]
+            if _unverified_reuse_record(prev) is not None:
+                return 2, [
+                    f"[pipeline] ERROR: {stage}: {artifact_path} carries only an "
+                    "unverified-reuse admission, not an allocation content "
+                    "binding; refusing silent reuse. Rebuild the plan from the "
+                    "current allocation.",
+                ]
         if prev is not None:
             admitted = _unverified_reuse_record(prev)
             if admitted is not None:

@@ -349,6 +349,47 @@ def test_tessera_plan_still_refuses_and_files_no_admission(tmp_path):
     )
 
 
+def test_tessera_plan_refuses_an_unverified_admission_not_only_a_missing_one(
+        tmp_path):
+    """An admission is not a binding (root review of c45784cb, #654).
+
+    The first cut of the legacy allowance let a stage entry that holds only the
+    unverified marker take the generic "still UNVERIFIED, reuse continues" path
+    before the plan gate could see it. Tessera's gate has to refuse on the
+    marker itself: the marker says the artifact's identity is *unknown*, and a
+    translated plan needs a real allocation-content binding, so reusing it
+    would allocate against a binding nobody ever checked. Reached through
+    `check_stage_settings` so the ordering, not just the helper, is pinned.
+    """
+    plan = tmp_path / "tessera_plan.json"
+    plan.write_text("old translated plan")
+    manifest = tmp_path / "tessera_plan.json.settings.json"
+    manifest.write_text(json.dumps({
+        "schema": pipeline.STAGE_MANIFEST_SCHEMA,
+        "stages": {
+            "tessera-plan": {
+                MARKER: {
+                    "settings_identity": "unknown",
+                    "attests_this_artifact": False,
+                    "artifact": str(plan),
+                    "reason": "hand-written marker",
+                    "observed_current_request": {},
+                    "first_observed_unix": 0,
+                }
+            }
+        },
+    }))
+    before = manifest.read_text()
+
+    code, messages = pipeline.check_stage_settings(
+        plan, "tessera-plan", _document(**_full_settings()))
+    assert code == 2, messages
+    assert "unverified-reuse admission" in "\n".join(messages)
+    assert manifest.read_text() == before, (
+        "the refusal rewrote the manifest instead of leaving it alone"
+    )
+
+
 def test_the_marker_cannot_collide_with_a_declared_manifest_key():
     declared = {mk for keys in pipeline.STAGE_SETTINGS_KEYS.values()
                 for mk, _source in keys}

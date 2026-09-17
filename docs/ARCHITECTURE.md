@@ -5,11 +5,14 @@ follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-16, `flash/issue-654-stage-settings-provenance-20260916`)
 for the **stage-settings guard's legacy-reuse admission** (§3.4;
-RobTand/prismaquant#654). Two of the guard's branches wrote *today's* projection
-into `<artifact>.settings.json` for an artifact they had compared nothing
-against: one when the manifest did not exist at all, one when it existed but
-had never recorded the stage. From that first resumed run a pre-guard
-`cost_aura.pkl` measured under other probes, seed, dataset or menu was
+RobTand/prismaquant#654). Neither of the guard's unrecorded-stage branches
+compared anything to the artifact, and they failed differently. When the
+manifest did not exist at all the guard warned and returned 0 **recording
+nothing** — the artifact stayed reusable, its identity was known to nobody, and
+no later run could tell the difference between "never examined" and "examined
+and agreed". When the manifest existed but had never recorded the stage the
+guard appended *today's* projection to it: from that first resumed run a
+pre-guard `cost_aura.pkl` measured under other probes, seed, dataset or menu was
 indistinguishable in the manifest from one this run had verified, and
 `run-pipeline.sh` then reused it while the allocator read it as this run's
 number. Rob's decision (2026-09-16) is that old data stays reusable while the
@@ -24,14 +27,17 @@ projection is now confined to the absent-artifact (fresh production) path, and
 a refused mismatch files nothing at all. The marker is deliberately a key no
 manifest key can be, so a reader that predates this change compares it, finds a
 diff, and exits 2 rather than stamping the artifact into its own record. The
-Tessera plan's allocation-content binding (refuse rather than record) is
-unchanged, and so is every known-and-matching reuse.
+Tessera plan's allocation-content binding still refuses rather than records,
+and now refuses an admission marker as firmly as an unrecorded stage: a
+translated plan needs a real binding, and the marker says the identity is
+unknown. Every known-and-matching reuse is unchanged.
 `cost_table_reusable()` still reuses a table with no `provenance['cost_mode']`
 and now says plainly that the reuse is unverified and that the current mode is
 never stamped onto it. Gates: `tests/test_stage_settings_guard.py` pins the
 pre-fix restamp, reuse-stays-unknown across retries and changed requests, a
-recorded mismatch still refusing, and Tessera still refusing without filing an
-admission; `tests/test_wave3_selection_and_provenance.py::test_cost_table_reuse_is_unverified_legacy_and_never_restamped`
+recorded mismatch still refusing, Tessera still refusing without filing an
+admission, and Tessera refusing a manifest that already carries one;
+`tests/test_wave3_selection_and_provenance.py::test_cost_table_reuse_is_unverified_legacy_and_never_restamped`
 executes the real shell predicate against real pickles and checks the table's
 bytes are left alone. No default, stage, format, lane, ship gate or allocator
 default changed.
