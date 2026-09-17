@@ -1229,14 +1229,22 @@ def main() -> int:
         # not an A-side price, and an unmeasured A-side on an
         # activation-quantizing cell is what silently buys 4-bit.
         examples = ", ".join(f"{name}@{fmt}" for name, fmt in sorted(uncovered)[:5])
+        # Bounded, like `examples`: a full campaign has tens of thousands of
+        # exempt cells, and naming every one of them in a refusal floods the
+        # log the operator has to read. The count is the contract; the sample
+        # is what makes it checkable.
+        exempt_sample = ", ".join(sorted(
+            f"{name}@{fmt}" for name, fmt in exempt_cells)[:5])
         raise SystemExit(
             f"REFUSE: --require-complete-coverage: {len(uncovered)} of "
             f"{len(requested)} requested (unit, format) cells that this lane "
             f"OWES an activation-side price have none in --cost-out, so their "
-            f"cost would be weight-only (examples: {examples}). Free by "
-            f"contract AT ITS OWN SHAPE and therefore excluded: "
-            f"{sorted(f'{n}@{f}' for n, f in exempt_cells) or 'none'}. Price "
-            f"them, joint-price them, or drop the requirement for this arm.")
+            f"cost would be weight-only (examples: {examples}). "
+            f"{len(exempt_cells)} cell(s) are free by contract AT THEIR OWN "
+            f"SHAPE and therefore excluded"
+            + (f" (e.g. {exempt_sample})" if exempt_sample else "") +
+            ". Price them, joint-price them, or drop the requirement for this "
+            "arm.")
     # The silent no-op this refusal exists for: nothing was priced AND at least
     # one requested cell is unaccounted for. An all-joint artifact is the other
     # case -- every requested cell covered, nothing computed, nothing to add.

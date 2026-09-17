@@ -801,5 +801,8 @@ def test_a_name_seen_free_at_one_shape_does_not_exempt_another_shape(
     examples = message.split("examples: ", 1)[1].split(")", 1)[0]
     assert f"{odd}@BF16" in examples, "the unbuildable cell is not exempt"
     assert f"{even}@BF16" not in examples, "the passthrough cell is exempt"
+    # The exempt side is a COUNT plus a bounded sample: on a full campaign it is
+    # tens of thousands of cells and naming them all floods the log.
+    assert "1 cell(s) are free by contract AT THEIR OWN SHAPE" in message
     assert f"{even}@BF16" in message, "and it is named as the exemption it is"
     assert not cost_out.exists()
