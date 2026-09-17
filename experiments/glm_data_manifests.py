@@ -1087,12 +1087,26 @@ def _joint_source_identity_cache_for_manifest(plan: dict, schedule: dict):
         path = row["path"]
         fingerprint = by_path[path]
         stat = os.stat(to_pool(path))
+        # The proof is mount-instance strict: ``device`` is compared with the
+        # four stat fields, because those four identify an object *within* a
+        # filesystem and not across filesystems (see docs/ARCHITECTURE.md
+        # §"source identity"). A host that reaches the same bytes through
+        # another mount instance therefore refuses here, and the manifest's
+        # ``source_identity_cache_host`` keeps that as a placement constraint
+        # rather than a hint. The refusal names both sides, so a reader can
+        # tell "another mount" from "another object" without re-statting.
         if (row.get("sha256") != source_files.get(os.path.basename(path))
                 or any(fingerprint.get(key) != getattr(stat, attribute)
                        for key, attribute in (('device', 'st_dev'), ('inode', 'st_ino'),
                                               ('size', 'st_size'), ('mtime_ns', 'st_mtime_ns'),
                                               ('ctime_ns', 'st_ctime_ns')))):
-            raise SystemExit(f"joint source identity cache no longer proves {path}")
+            raise SystemExit(
+                f"joint source identity cache no longer proves {path}: "
+                f"recorded device {fingerprint.get('device')!r} with "
+                f"inode {fingerprint.get('inode')!r}, size "
+                f"{fingerprint.get('size')!r}; this mount instance reports "
+                f"device {int(stat.st_dev)} with inode {int(stat.st_ino)}, "
+                f"size {int(stat.st_size)}")
     return cache
 
 
