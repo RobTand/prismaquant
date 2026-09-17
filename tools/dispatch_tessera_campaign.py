@@ -2445,10 +2445,17 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     argv += ["--priority", str(args.priority)]
     if args.timeout_s is not None:
         argv += ["--timeout-s", str(args.timeout_s)]
+    head_grace = getattr(args, "head_grace_s", None) or 1800
     for name in progress_phases:
         # The allowance bounds an uncommitted unit, not an arbitrary number of
         # logging lines. The first allowance also covers model construction.
-        argv += ["--progress-phase", f"{name}={1800 if name == 'head' else 900}"]
+        # A RESUME walks the whole cell roster through _resolve_render_origin
+        # and commits nothing, because the producer only reports a cell it had
+        # to synthesize and every render already exists (#678). That pass is
+        # real work and it is measurable, so its allowance is a caller input
+        # sized from the observed rate rather than the fresh-run constant.
+        argv += ["--progress-phase",
+                 f"{name}={head_grace if name == 'head' else 900}"]
     argv += ["--data-manifest", str(manifest), "--detach", "--",
              "python3", "-m", "tools.tessera_campaign_container"]
     argv += list(args.container_arg or [])
@@ -3739,6 +3746,11 @@ def main(argv=None) -> int:
     joint.add_argument("--prepared", default=None,
                        help="the prepared completion the run command consumes")
     joint.add_argument("--prepared-sha256", default=None)
+    joint.add_argument("--head-grace-s", type=int, default=None,
+                       help="stall allowance in seconds for the 'head' phase; "
+                            "the default 1800 is sized for a fresh run, and a "
+                            "resume's cell-roster pass commits nothing while it "
+                            "runs (#678), so size this from the observed rate")
     joint.add_argument("--resume", action="store_true",
                        help="forwarded to the pass, which resumes from its "
                             "identity-bound checkpoints")

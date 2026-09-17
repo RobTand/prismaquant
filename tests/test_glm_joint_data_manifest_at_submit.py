@@ -1510,3 +1510,56 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases(scratch):
     # Written under the test's own scratch directory, never into the frozen
     # campaign tree.
     (scratch / "joint.prepare.json").write_bytes(encoded)
+
+
+@pytest.mark.parametrize("head_grace", [None, 5400])
+def test_the_head_allowance_is_a_caller_input_and_the_others_are_not(
+    scratch, shared_mount, capsys, monkeypatch, head_grace,
+):
+    """A resume's head phase commits nothing, so its allowance is sized by hand.
+
+    ``load_measured_anchor_input`` reports a cell only when it had to
+    synthesize the render (RobTand/prismaquant#678), so a resume -- where every
+    render is already durable -- walks the whole roster in silence. The fresh
+    run's 1800 s is the wrong number for that pass and the right one for a
+    fresh one, which is exactly what makes it the caller's to state. Only the
+    head moves; every other phase keeps the constant it always had.
+    """
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    original = glm_data_manifests.build_joint_pass_manifest
+
+    def verified(*args, **kwargs):
+        manifest = original(*args, **kwargs)
+        manifest["annotations"]["source_authentication_mode"] = (
+            "verified_streamed_identity_cache")
+        return manifest
+
+    monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+
+    assert dispatch.main([
+        "submit-joint", "prepare",
+        "--plan", str(fixture["plan"]),
+        *_scope_args(fixture),
+        "--spec", str(spec),
+        "--demand", "gpu=1,mem_gb=104",
+        "--cpus", "6",
+        "--tag", "gb10",
+        "--priority", "-10",
+        "--manifest-dir", str(scratch / "manifests"),
+        *(() if head_grace is None else ("--head-grace-s", str(head_grace))),
+        "--dry-run",
+    ]) == 0
+
+    command = next(line for line in capsys.readouterr().out.splitlines()
+                   if line.startswith("[dry-run] "))[len("[dry-run] "):]
+    argv = shlex.split(command)
+    phases = [argv[index + 1] for index, token in enumerate(argv)
+              if token == "--progress-phase"]
+    assert phases, "the joint submission declares progress phases"
+    assert phases[0] == f"head={1800 if head_grace is None else head_grace}"
+    assert all(phase.endswith("=900") for phase in phases[1:])

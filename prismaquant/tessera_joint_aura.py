@@ -967,9 +967,27 @@ def _qualification_replay(data, manifest, completed, *, sealed=None, committed=0
             required = {'source_weight', 'rendered_weight', 'encoding_identity_sha256',
                         'wire_sha256', 'render_file_sha256', 'render_origin',
                         'render_comparison', 'activation'}
-            _require(isinstance(record, dict) and set(record) == required and
-                     isinstance(record['activation'], dict),
+            # ``_verify_cell`` adds these two *only* when the encoder source
+            # seal was substituted, and says so at its own return. They are
+            # extra attestation, never a substitute for a required field, so
+            # the check is "every required field is present and nothing
+            # unknown is" -- not set equality, which refused every receipt the
+            # writer produced under an encoder-reuse allowlist.
+            optional = {'current_encoding_identity_sha256', 'encoder_source_reuse'}
+            _require(isinstance(record, dict) and required <= set(record)
+                     and set(record) <= required | optional
+                     and isinstance(record['activation'], dict),
                      f'{name}@{fmt}: incomplete qualification receipt')
+            # The writer emits the pair together or not at all, and the
+            # journalled record is bound to THIS run's intake, not merely
+            # shape-checked: a journal written under one allowlist entry must
+            # not be replayed under another.
+            _same('encoder_source_reuse' in record,
+                  'current_encoding_identity_sha256' in record,
+                  f'{name}@{fmt}: half a reuse receipt')
+            _same(record.get('encoder_source_reuse'),
+                  getattr(data, 'encoder_source_reuse', None),
+                  f'{name}@{fmt}: journalled encoder reuse')
             _same(record.get('render_origin'), cell['render_origin'],
                   f'{name}@{fmt}: journal render origin')
             _same(record.get('render_comparison'), RENDER_COMPARISON_BY_ORIGIN[cell['render_origin']],
