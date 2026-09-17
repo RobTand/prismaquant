@@ -49,3 +49,91 @@ def test_research_mode_is_labelled_admitted_not_attested(monkeypatch):
     assert widths["research_admitted_rungs"] == 2
     assert "PRISMAQUANT_TESSERA_MENU=research" in line
     assert "attested by the pinned runtime" not in line.split("(not attested")[0]
+
+
+# --------------------------------------------------------------------------- #
+# A refusal that cannot name its own cause (RobTand/prismaquant#572)
+# --------------------------------------------------------------------------- #
+#
+# "0 of 16 priced rungs are attested" was read three ways at once -- the
+# contract lists none of them, no serving scope was supplied, or the menu mode
+# is too strict -- and answering it took a full investigation. The two the
+# contract can tell apart are already structured on ``RouteAdmission``
+# (``requires_serving_context``) and in the packaged contract
+# (``attested_rungs_q256``); the report just never read them.
+
+
+class _Admission:
+    def __init__(self, requires_serving_context):
+        self.requires_serving_context = requires_serving_context
+
+
+def test_diagnosis_names_a_missing_serving_scope(monkeypatch):
+    monkeypatch.setattr(menu, "route_admission",
+                        lambda name, **_kw: _Admission(True))
+    monkeypatch.setattr(menu, "contract_attested_rung_names",
+                        lambda: ("TESSERA_E4M3_K1_R1024",))
+    refused = [ATTESTED, UNATTESTED]
+    diagnosis = menu.unattested_diagnosis(refused, priced=refused)
+    assert diagnosis["serving_scope_supplied"] is False
+    assert diagnosis["awaiting_serving_scope"] == sorted(refused)
+    assert diagnosis["unattested_by_contract"] == []
+    assert diagnosis["contract_attested_rungs"] == ["TESSERA_E4M3_K1_R1024"]
+    _, line = menu.menu_width_report(refused, [], [], refused, menu.MENU_ATTESTED,
+                                     diagnosis=diagnosis)
+    assert "no Tessera serving scope was supplied" in line
+    assert "--tessera-platform" in line
+
+
+def test_diagnosis_separates_a_real_coverage_gap(monkeypatch):
+    # A scope WAS supplied, so what comes back is the contract's own verdict,
+    # and the useful thing to print beside it is what the runtime does attest.
+    monkeypatch.setattr(menu, "route_admission",
+                        lambda name, **_kw: _Admission(True))
+    monkeypatch.setattr(menu, "contract_attested_rung_names",
+                        lambda: ("TESSERA_BF16_K1_R1792", "TESSERA_E4M3_K1_R1024"))
+
+    class _Ctx:
+        def key(self):
+            return "sm_121/dense"
+
+    diagnosis = menu.unattested_diagnosis([UNATTESTED], priced=[UNATTESTED, ATTESTED],
+                                          context_by_unit={"u": _Ctx()})
+    assert diagnosis["serving_scope_supplied"] is True
+    assert diagnosis["awaiting_serving_scope"] == []
+    assert diagnosis["unattested_by_contract"] == [UNATTESTED]
+    assert diagnosis["contract_attested_but_unpriced"] == ["TESSERA_BF16_K1_R1792"]
+    _, line = menu.menu_width_report([UNATTESTED, ATTESTED], [ATTESTED], [], [UNATTESTED],
+                                     menu.MENU_ATTESTED, diagnosis=diagnosis)
+    assert "no Tessera serving scope was supplied" not in line
+    assert "the pinned contract attests" in line
+    assert "TESSERA_BF16_K1_R1792" in line
+
+
+def test_contract_attested_rung_names_are_read_from_the_packaged_contract(monkeypatch):
+    # Principle 14: the names are DERIVED from the table the runtime publishes,
+    # never typed here. A family the contract publishes with no attested rung
+    # contributes nothing rather than its whole reader range.
+    formats = {
+        "TESSERA_E2M1_K2": {"name_pattern": "TESSERA_E2M1_K2_R{k}",
+                            "attested_rungs_q256": [896],
+                            "reader_rate_range_q256": [896, 896]},
+        "TESSERA_BF16_K1": {"name_pattern": "TESSERA_BF16_K1_R{k}",
+                            "attested_rungs_q256": [],
+                            "reader_rate_range_q256": [256, 4096]},
+    }
+    from prismaquant import tessera_render
+    monkeypatch.setattr(tessera_render, "_pinned_serving_table",
+                        lambda: ({}, formats))
+    assert menu.contract_attested_rung_names() == ("TESSERA_E2M1_K2_R896",)
+
+
+def test_report_without_a_diagnosis_is_byte_identical(monkeypatch):
+    _admits_only_r1024(monkeypatch)
+    kept = [ATTESTED, UNATTESTED]
+    admitted, refused = menu.partition_attested(kept)
+    plain = menu.menu_width_report(kept, admitted, [], refused, menu.MENU_ATTESTED)
+    explicit = menu.menu_width_report(kept, admitted, [], refused, menu.MENU_ATTESTED,
+                                      diagnosis=None)
+    assert plain == explicit
+    assert "serving scope" not in plain[1]

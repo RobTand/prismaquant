@@ -101,6 +101,7 @@ from .tessera_menu import (
     menu_width_report,
     partition_attested,
     surrogate_selection_caveat,
+    unattested_diagnosis,
 )
 from .allocator_solver import (
     Candidate,
@@ -2817,8 +2818,19 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         admitted, explicit_unattested = partition_attested(
             kept, **({"context_by_unit": tessera_context_by_unit}
                      if tessera_context_by_unit is not None else {}))
+        # A refusal that cannot name its own cause costs an investigation
+        # (#572: "0 of 16" was read three ways at once). Both causes the
+        # contract can tell apart are structured -- whether it needs a serving
+        # scope, and which rungs it attests instead -- so the report reads
+        # them rather than leaving the reader to guess. It admits nothing:
+        # `admitted` above is already the predicate's answer.
+        diagnosis = (unattested_diagnosis(
+            list(unattested) + list(explicit_unattested), priced=priced_tessera,
+            context_by_unit=tessera_context_by_unit)
+            if (unattested or explicit_unattested) else None)
         widths, line = menu_width_report(
-            priced_tessera, admitted, unattested, explicit_unattested, menu_mode())
+            priced_tessera, admitted, unattested, explicit_unattested, menu_mode(),
+            diagnosis=diagnosis)
         if kept:
             tessera_menu_widths = widths
         print(line, flush=True)
