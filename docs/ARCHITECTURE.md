@@ -3,6 +3,23 @@
 As of: 2026-09-17 · `flash/693-resident-window-budget`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-17, `flash/693-resident-window-budget`) for **the COST read
+seam planning on both of its byte budgets** (#693). `resident_candidates`
+planned each quantum against `min(max_render_resident_bytes,
+max_load_buffer_bytes)`, which charged the serialized cap against residency,
+and its comment said that minimum was the conservative choice. It is not one
+any more: the planner closes a quantum on each budget separately, so the
+minimum only narrowed a quantum below the bytes the operator policy admits.
+`run` reaches every render through this seam, and on the GLM-5.3 complete-512
+operator policy -- `max_render_resident_bytes` and `max_load_buffer_bytes` both
+536,870,912, `prefetch_workers` 4 -- a quantum held four 16.78 MB renders, 12.5%
+of its residency budget. The guard immediately below is reserved on the same
+two terms plus the candidate and workspace reserves, so what a quantum may hold
+is what was priced for it, and raising residency from the minimum to
+`max_render_resident_bytes` makes that reservation larger or equal, never
+smaller. No default, stage, format, lane, pin, plugin contract, ship gate or
+published byte changes. Gates: `tests/test_joint_operator_windows.py`.
+
 Re-stamped (2026-09-17, `flash/693-resident-window-budget`) for **one archive
 scan per file per window lifetime** (#693). A window's preflight reaches the
 same key three times before anything is read -- the caller's plan, the

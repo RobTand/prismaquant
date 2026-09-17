@@ -61,13 +61,18 @@ def check_operator_allocation(guard, label, *, reserve_bytes):
 @contextmanager
 def resident_candidates(cache, keys, policy, *, guard=None):
     """Use PWC's finite windows; borrowed renders must not escape the yield."""
-    # The serialized buffer cap can be smaller than the resident cap. Planning
-    # conservatively against their minimum avoids admitting an oversized read.
-    cap = min(policy['max_render_resident_bytes'], policy['max_load_buffer_bytes'])
+    # TWO BUDGETS, PLANNED AS TWO. The serialized buffer cap can be smaller than
+    # the resident cap, and the planner now closes a quantum on each of them, so
+    # planning against their minimum no longer buys safety -- it only charged the
+    # buffer cap against residency and made a quantum narrower than the bytes
+    # this policy admits (#693). The guard below is reserved on the same two
+    # terms, so what a quantum may hold is what was priced for it.
+    cap = policy['max_render_resident_bytes']
     requested = {}
     for key in keys:
         requested.setdefault(cache.resolve_key(*key), []).append(key)
     windows = cache.plan_resident_windows(keys, max_resident_bytes=cap,
+                                         max_load_buffer_bytes=policy['max_load_buffer_bytes'],
                                          max_workers=policy['prefetch_workers'])
     # This context supplies an iterator; each PWC context owns exactly one
     # quantum until the consumer advances or closes the iterator.
