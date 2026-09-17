@@ -563,10 +563,13 @@ def test_the_submitted_summary_carries_the_unverified_reuse(
     assert submit_aqua(campaign, "--dry-run",
                        "--accept-joint-cells-outside-plan") == 0
     printed = capsys.readouterr().out
-    command = next(line for line in printed.splitlines()
-                   if line.startswith("[dry-run] "))
+    lines = printed.splitlines()
+    command = next(line for line in lines if line.startswith("[dry-run] "))
     assert "--require-complete-coverage" in command
-    summary = json.loads(printed[printed.index("{"):])
+    # The command line comes first and is not JSON; the summary is everything
+    # else, which is also what a caller piping this output reads.
+    summary = json.loads("\n".join(line for line in lines
+                                   if not line.startswith("[dry-run] ")))
     roster = summary["requested_roster"]
     assert roster["joint_cells_outside_plan"] == 1
     assert roster["joint_cells_outside_plan_accepted_unverified"] is True
