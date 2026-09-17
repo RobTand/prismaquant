@@ -51,14 +51,30 @@ def add_gold_engine_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--master-port", type=int, default=None)
     group.add_argument("--distributed-executor-backend", choices=("mp",), default=None)
     group.add_argument("--data-parallel-backend", choices=("mp",), default=None)
-    group.add_argument("--moe-backend", choices=("auto", "triton"), default=None)
+    group.add_argument("--moe-backend",
+                       choices=("auto", "triton", "flashinfer_cutlass"), default=None,
+                       help="explicit stock-vLLM MoE backend; the menu carries "
+                            "the names this tool will pass through, not a claim "
+                            "that a serving path requires one")
+    group.add_argument("--kv-cache-memory-bytes", type=int, default=None,
+                       help="explicit KV cache byte bound per rank; omitted means vLLM "
+                            "sizes KV from --gpu-memory-utilization")
 
 
 def gold_engine_kwargs(args: argparse.Namespace) -> dict:
-    """Validate before loading; omission preserves the original TP1 kwargs."""
+    """Validate before loading; omission preserves the original TP1 kwargs.
+
+    The explicit positive KV byte bound and the widened backend menu are
+    selections this tool will pass through and validate; whether a given serving
+    path needs one is not decided here and is not qualified by this validation.
+    Every absent option stays absent rather than being stated as `None`, so an
+    omitted-argument run produces exactly the kwargs it produced before they
+    existed.
+    """
     result = {"tensor_parallel_size": getattr(args, "tensor_parallel_size", 1)}
     for name in ("nnodes", "node_rank", "master_addr", "master_port",
-                 "distributed_executor_backend", "data_parallel_backend", "moe_backend"):
+                 "distributed_executor_backend", "data_parallel_backend", "moe_backend",
+                 "kv_cache_memory_bytes"):
         value = getattr(args, name, None)
         if value is not None:
             result[name] = value
@@ -80,8 +96,13 @@ def gold_engine_kwargs(args: argparse.Namespace) -> dict:
     for name in ("distributed_executor_backend", "data_parallel_backend"):
         if name in result and result[name] != "mp":
             raise ValueError(f"{name} must be mp when explicitly selected")
-    if "moe_backend" in result and result["moe_backend"] not in ("auto", "triton"):
-        raise ValueError("moe_backend must be auto or triton")
+    if "moe_backend" in result and result["moe_backend"] not in (
+            "auto", "triton", "flashinfer_cutlass"):
+        raise ValueError("moe_backend must be auto, triton or flashinfer_cutlass")
+    if "kv_cache_memory_bytes" in result and (
+            type(result["kv_cache_memory_bytes"]) is not int
+            or result["kv_cache_memory_bytes"] <= 0):
+        raise ValueError("kv_cache_memory_bytes must be a positive integer byte bound")
     if nodes > 1:
         required = ("master_addr", "master_port", "distributed_executor_backend", "data_parallel_backend")
         missing = [name for name in required if name not in result]
@@ -157,6 +178,7 @@ _PEER_FLAG_SPELLING = {
     "moe_backend": "--moe-backend",
     "dtype": "--dtype",
     "kv_cache_dtype": "--kv-cache-dtype",
+    "kv_cache_memory_bytes": "--kv-cache-memory-bytes",
     "max_model_len": "--max-model-len",
     "max_num_seqs": "--max-num-seqs",
     "max_num_batched_tokens": "--max-num-batched-tokens",

@@ -3,6 +3,8 @@ import copy
 import hashlib
 import io
 import json
+import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -493,6 +495,43 @@ def test_scorer_engine_kwargs_carry_glm53_nope_runtime_selection():
     assert kwargs["kernel_config"] == {"enable_flashinfer_autotune": False}
     assert kwargs["enforce_eager"] is True
     assert kwargs["moe_backend"] == "triton"
+
+
+def test_scorer_engine_kwargs_carry_the_explicit_kv_bound_and_moe_backend():
+    from types import SimpleNamespace as S
+    args = S(kv_cache_dtype="fp8_ds_mla", gpu_memory_utilization=.25,
+             attention_backend="CUSTOM",
+             kernel_config='{"enable_flashinfer_autotune": false}', quantization=None)
+    kwargs = served.scorer_engine_kwargs(args, model="candidate", topology={
+        "tensor_parallel_size": 2, "nnodes": 2,
+        "moe_backend": "flashinfer_cutlass", "kv_cache_memory_bytes": 4294967296})
+    assert kwargs["moe_backend"] == "flashinfer_cutlass"
+    assert kwargs["kv_cache_memory_bytes"] == 4294967296
+
+
+def test_scorer_cli_accepts_the_explicit_kv_bound_and_cutlass(monkeypatch):
+    """The tr3 scorer takes the same shared options as the two gold runners:
+    run.sh passes --kv-cache-memory-bytes and MOE_BACKEND=flashinfer_cutlass
+    straight through to its parser, and they must reach the engine kwargs."""
+    from tools.gold_engine_options import gold_engine_kwargs
+    parsed = {}
+    monkeypatch.setattr(served, "measure", lambda args: parsed.update(vars(args)))
+    argv = ["measure_glm_tr3_vllm.py", "--model", "candidate",
+            "--candidate-digest-cache", "cache", "--panel", "panel",
+            "--arrays-root", "arrays", "--teacher", "teacher.json",
+            "--teacher-sha256", "a" * 64,
+            "--serve-image", "image@sha256:" + "b" * 64,
+            "--output", "result.json",
+            "--kv-cache-dtype", "fp8_ds_mla",
+            "--expected-kv-cache-dtype", "fp8_ds_mla",
+            "--qualify-hook",
+            "--moe-backend", "flashinfer_cutlass",
+            "--kv-cache-memory-bytes", "4294967296"]
+    monkeypatch.setattr(sys, "argv", argv)
+    served.main()
+    topology = gold_engine_kwargs(types.SimpleNamespace(**parsed))
+    assert topology["moe_backend"] == "flashinfer_cutlass"
+    assert topology["kv_cache_memory_bytes"] == 4294967296
 
 
 def test_worker_observation_refuses_promotion_hidden_from_coordinator():
