@@ -24,8 +24,10 @@ from types import SimpleNamespace
 
 from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, atomic_write_bytes, canonical_json_sha256,
+    canonical_json_sha256_normalized,
     prepare_journal, unit_path, write_unit,
 )
+from .interned_json import load_json_file
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -323,6 +325,15 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     ``prepare_cache`` using actual source weights and the original capture.
     Interpolated menu rows are deliberately excluded rather than converted.
 
+    The merged checkpoint is read by ``interned_json.load_json_file``: the
+    standard library's own reader, plus one ``object_pairs_hook`` that makes the
+    identity block's 205,243,544 menu-name occurrences cost one ``str`` per
+    distinct name instead of 12.4 GiB. Values, refusals, exact types and the
+    canonical seal are the stdlib decoder's, and the seal below is recomputed
+    from the parsed graph (``tests/test_interned_json.py``). Measured on the
+    real campaign: 13.812 GiB parse peak, 15.830 GiB for this whole metadata
+    intake, inside the 21 GiB CPU envelope.
+
     A prepared COST run uses metadata intake with existing renders required.
     Its wire identities describe PREPARE's authenticated bytes; COST consumes
     no wire bodies. PWC verifies each consumed render against PREPARE's SHA.
@@ -420,11 +431,18 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _same(provenance.get("campaign_fanout", {}).get("rows"),
           {row["row_id"]: sorted(row["groups"]) for row in rows}, "complete merged fanout")
 
-    manifest = json.loads(paths["merged_checkpoint"].read_text())
+    manifest = load_json_file(paths["merged_checkpoint"])
     _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
     _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
     identity = manifest["identity"]
-    seal = canonical_json_sha256(identity, where="joint anchor input")
+    # The checkpoint is parsed from JSON, so its identity is already normalized
+    # (string keys, dict/list containers, JSON scalars) and the seal can stream
+    # the canonical bytes into the digest. The generic helper normalizes first,
+    # which holds the encoded text, a second full graph and the second encoded
+    # text at once; on a checkpoint this size that is the difference between
+    # fitting a bounded envelope and being killed by it. Same digest -- held by
+    # tests/test_canonical_json_normalized.py.
+    seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
     _same(seal, manifest.get("identity_sha256"), "campaign checkpoint seal")
     _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
     _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
