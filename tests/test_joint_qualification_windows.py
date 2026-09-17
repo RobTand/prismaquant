@@ -191,7 +191,16 @@ def test_wire_read_ahead_reserves_current_and_pending_blobs(tmp_path, monkeypatc
     units = [amount for where, amount in reserved
              if where.startswith('before_joint_qualification_unit:')]
     assert len(units) == 2
-    assert units == [2 * 128 + 10000 + 10000 + 10000 + 2 * maximum] * 2
+    # The reservation the guard is handed is the CPU side plus the device side,
+    # and this stub guard is not split-aware, so it sees their sum:
+    #   CPU    capture 128 (the payload) + render 10000 (PWC backing storages)
+    #          + load buffers 10000 + wire read-ahead 2 * maximum
+    #   device capture 128 (X/H on the device) + render 10000 (the copy the
+    #          verifier receives) + workspace 10000
+    # The render is the term that appears on BOTH sides: its backing storages
+    # are the cgroup's and the tensor handed to the verifier is a copy of them
+    # on the device, so the old single number was counting one of the two.
+    assert units == [2 * 128 + 4 * 10000 + 2 * maximum] * 2
 
 
 def test_prepared_metadata_counts_a_synthesized_rung_apart(tmp_path, monkeypatch):

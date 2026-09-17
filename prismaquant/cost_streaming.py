@@ -18,6 +18,7 @@ from typing import Any, Iterator
 
 import torch
 
+from prismaquant.memory_management import reserve_allocation
 from prismaquant.layer_streaming import (
     _call_layer,
     _compute_attention_mask,
@@ -528,7 +529,17 @@ class StreamedCausalLM:
                         if value.is_meta or tuple(value.shape) != shape or value.dtype != dtype:
                             raise RuntimeError(f"selected source has wrong resident tensor: {name}")
                         if resource_check is not None:
-                            resource_check(f"before_selected_source_copy:{name}", reserve_bytes=nbytes)
+                            # Where this copy lands decides whose budget it is:
+                            # the ``host`` arm materializes on the CPU, and the
+                            # other arm clones the resident tensor on whatever
+                            # device it already lives on. Charging a device
+                            # clone to the cgroup cap is the same conflation as
+                            # the capture path's, one call site over.
+                            reserve_allocation(
+                                resource_check,
+                                f"before_selected_source_copy:{name}",
+                                cpu_bytes=nbytes if host else 0,
+                                device_bytes=0 if host else nbytes)
                         if host:
                             copy = torch.empty(shape, dtype=dtype, device="cpu")
                             copy.copy_(value.detach())

@@ -145,7 +145,12 @@ def test_per_unit_guard_calls_keep_the_serial_order_and_bracket_their_reads(rost
         assert inner and max(inner) < charge, (name, inner, charge)
     # The consumer's own charge is at least the serial reservation; readers
     # that are still live add theirs on top, which is the point of the sum.
-    floor = {name: 2*cc._capture_storage_bytes(name, roster[1], roster[2]['max_act_rows'])
+    # One unit is ONE allocation on this CPU arm: `_validate_tensors` hands
+    # back the payload's own tensors and `.to` on the same device and dtype
+    # returns the same tensor, so the second copy the old single number
+    # charged for does not exist. On a device arm the same total arrives as
+    # `reserve_bytes` plus `reserve_device_bytes`.
+    floor = {name: cc._capture_storage_bytes(name, roster[1], roster[2]['max_act_rows'])
              for name in UNITS}
     for label, reserve in observed:
         if label.startswith('before_capture_prefetch:'):

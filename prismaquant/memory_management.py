@@ -14,8 +14,101 @@ import torch
 _BUDGET_EVICTORS: "weakref.WeakSet[object]" = weakref.WeakSet()
 
 
+#: The floor a bounded row must keep available on the host, whatever else it
+#: reserves. A row is bounded on the box it runs on, so a guard that let the
+#: host be driven into reclaim to satisfy one allocation would be bounding the
+#: cgroup rather than the box.
+MIN_HOST_FLOOR_BYTES = 3*1024**3
+
+#: The floor the bounded capture path uses, above the minimum on purpose: the
+#: joint campaign's own declared ``min_free_gib``, which is the floor the cost
+#: pass already refuses to allocate below. It is an inherited DECLARATION, not
+#: a measurement of this path -- no receipt here establishes the streaming
+#: loader's real host working set -- so a plan that declares a different floor
+#: (or a receipt that measures one) is what moves it, and nothing re-derives it.
+DEFAULT_HOST_FLOOR_BYTES = 8*1024**3
+
+#: The attribute a memory-guard callback carries when it can hold the CPU and
+#: device sides of a future allocation apart. A callback without it keeps the
+#: conservative single-budget arithmetic it was written against.
+SEPARATE_RESERVATIONS = "separates_cpu_and_device_reservations"
+
+
+def reserve_allocation(resource_check, label, *, cpu_bytes=0, device_bytes=0):
+    """Charge one future allocation to the budget it actually belongs to.
+
+    A reader that is about to hold a payload in this process AND move tensors to
+    the device has one ``resource_check`` call and two budgets. Under a split
+    guard the two are enforced by different things -- the cgroup cap by the
+    kernel, the device envelope by the CUDA allocator -- so a caller that adds
+    them into one number charges the device residency to the CPU cap, which is
+    how a row holding 80 GiB of device residency beside a 21 GiB CPU cap refuses
+    at its first unit.
+
+    A callback that does not declare ``SEPARATE_RESERVATIONS`` -- every caller
+    that has not been taught the split -- gets the SUM through ``reserve_bytes``
+    exactly as before, so legacy arithmetic does not change.
+    """
+    if resource_check is None:
+        return
+    if getattr(resource_check, SEPARATE_RESERVATIONS, False):
+        return resource_check(label, reserve_bytes=cpu_bytes,
+                              reserve_device_bytes=device_bytes)
+    return resource_check(label, reserve_bytes=cpu_bytes + device_bytes)
+
+
 class GPUMemoryBudgetExceeded(RuntimeError):
     """Raised when cache eviction cannot bring CUDA memory under budget."""
+
+
+def enforce_device_envelope(device, device_bytes, *, where="joint capture"):
+    """Cap this process's CUDA allocator at ``device_bytes``.
+
+    ``max_gpu_bytes`` was a POST-HOC check: the pass allocated, then compared
+    ``torch.cuda.max_memory_allocated`` with the declared budget and refused
+    after the fact. That is a report, not a bound -- on a unified-memory GB10 the
+    device and the host are one pool, so an overshoot is charged to the box's
+    DRAM and can take the host down with it before the comparison is ever
+    reached.
+
+    ``torch.cuda.set_per_process_memory_fraction`` is the enforcement that
+    already exists for exactly this: the caching allocator refuses to hand out
+    more than the fraction of total device memory it names, and it fails with an
+    OOM inside the row instead of on the box. The fraction is derived from the
+    declared budget and the device's own reported total, so the plan's number is
+    what is enforced and no second constant is introduced.
+
+    WHAT THIS DOES NOT COVER, because the fraction belongs to the caching
+    allocator: the CUDA context, NCCL and the rest of the runtime's own
+    allocations, and any native or driver allocation made outside torch's
+    allocator, are not counted against the fraction and the driver can still
+    hand them out. On a unified-memory device they come from the same physical
+    pool as everything else, so this bounds THIS PROCESS'S TORCH allocations
+    rather than claiming nothing else can oversubscribe the device.
+
+    Returns the record to stamp: the fraction, the device total it was taken
+    against, and the budget. Refuses a budget that is not a positive number of
+    bytes, or one at or above the device's total, because a fraction of 1.0 is
+    the unbounded case wearing the same interface.
+    """
+    device = torch.device(device)
+    if device.type != "cuda":
+        return {"enforced": False, "reason": f"{device.type} device has no CUDA allocator"}
+    if (isinstance(device_bytes, bool) or not isinstance(device_bytes, int)
+            or device_bytes <= 0):
+        raise RuntimeError(
+            f"{where}: the device envelope must be a positive number of bytes, "
+            f"got {device_bytes!r}")
+    total = int(torch.cuda.get_device_properties(device).total_memory)
+    if device_bytes >= total:
+        raise RuntimeError(
+            f"{where}: the device envelope {device_bytes} is not below the "
+            f"device's total memory {total}, so it bounds nothing; lower the "
+            "plan's max_gpu_bytes or run where the device is larger")
+    fraction = device_bytes / total
+    torch.cuda.set_per_process_memory_fraction(fraction, device)
+    return {"enforced": True, "fraction": fraction, "device_total_bytes": total,
+            "device_envelope_bytes": int(device_bytes), "device": str(device)}
 
 
 class CaptureMemoryGuard:
@@ -48,8 +141,49 @@ class CaptureMemoryGuard:
     MARGIN_BYTES = 2*1024**3
 
     def __init__(self, device, *, cgroup_root=Path('/sys/fs/cgroup'),
-                 membership=Path('/proc/self/cgroup')):
+                 membership=Path('/proc/self/cgroup'),
+                 device_bytes: "int | None" = None,
+                 host_floor_bytes: int = DEFAULT_HOST_FLOOR_BYTES):
+        """``device_bytes`` splits the guard; without it, nothing changes.
+
+        THE SPLIT. A bounded row holds two budgets that are enforced by two
+        different things, and a guard that adds them into one number against the
+        smaller of the two refuses every row that holds a large device
+        residency beside a small CPU cap -- which is the shape of this campaign
+        (21 GiB cgroup cap, 80 GiB device envelope, 101 GiB aggregate
+        reservation). So when a caller states the device envelope, ``check``
+        holds:
+
+          * the cgroup's own accounted bytes against ``cap - MARGIN_BYTES``,
+            which is the CPU side the kernel enforces with ``--memory``;
+          * ``torch.cuda.memory_reserved`` against ``device_bytes``, which is
+            the device side (and ``enforce_device_envelope`` is what makes that
+            a bound rather than a report);
+          * the host's available memory against ``host_floor_bytes``.
+
+        The aggregate the caller reserved from PrismaBuild is the SUM of the two
+        budgets -- 21 GiB + 80 GiB = 101 GiB for this campaign -- and it is not a
+        third quantity for this guard to derive, because on GB10 the cgroup does
+        not charge device memory. The host floor is NOT part of that sum: it is
+        memory the box has to keep free, and on a unified-memory box it is what
+        the job can still draw on rather than something reserved from it.
+
+        WITHOUT ``device_bytes`` the guard keeps its original conservative
+        predicate: ``memory.current`` plus the whole CUDA reservation against
+        ``cap - MARGIN_BYTES``. Every existing caller is in that mode, and its
+        arithmetic is unchanged.
+        """
         self.device = torch.device(device)
+        if type(host_floor_bytes) is not int or host_floor_bytes < MIN_HOST_FLOOR_BYTES:
+            raise RuntimeError(
+                f'capture guard host floor must be at least {MIN_HOST_FLOOR_BYTES} '
+                f'bytes, got {host_floor_bytes!r}')
+        if device_bytes is not None and (
+                type(device_bytes) is not int or device_bytes <= 0):
+            raise RuntimeError(
+                f'capture guard device envelope must be a positive number of '
+                f'bytes when declared, got {device_bytes!r}')
+        self.device_bytes = device_bytes
         root = Path(cgroup_root)
         entries = [line.split(':', 2)[2] for line in Path(membership).read_text().splitlines()
                    if line.startswith('0::')]
@@ -73,24 +207,69 @@ class CaptureMemoryGuard:
         if not limits:
             raise RuntimeError('bounded capture requires a finite cgroup memory budget')
         self.cap_bytes, self.scope = min(limits, key=lambda pair: pair[0])
+        self.cpu_cap_bytes = self.cap_bytes
         self.margin_bytes = self.MARGIN_BYTES
-        self.host_floor_bytes = 8*1024**3
+        self.host_floor_bytes = host_floor_bytes
         if self.cap_bytes <= self.margin_bytes:
             raise RuntimeError('capture budget cannot hold its physical safety margin')
         self.failure = None
         self.peak_bytes = 0
+        self.peak_cpu_bytes = 0
+        self.peak_device_bytes = 0
         self.peak_checkpoint = None
         self.peak_by_checkpoint_prefix = {}
         self.baseline = None
         self.min_available_bytes = None
         self.last = None
+        # ``check`` is an INSTANCE ATTRIBUTE holding a closure, not the method:
+        # the callers hand ``guard.check`` to a reader as a ``resource_check``
+        # callable, and a capability has to travel with THAT object. A bound
+        # method carries no attributes of its own, so a property on the class
+        # is invisible to ``getattr(guard.check, ...)`` and every split caller
+        # would silently fall back to the conservative sum.
+        def check(label, *, reserve_bytes=0, reserve_device_bytes=0):
+            return self._check(label, reserve_bytes=reserve_bytes,
+                               reserve_device_bytes=reserve_device_bytes)
+        check.separates_cpu_and_device_reservations = self.device_bytes is not None
+        check.__name__ = "check"
+        check.__qualname__ = f"{type(self).__name__}.check"
+        check.__doc__ = ("Refuse the moment either budget or the host floor is "
+                         "exceeded; see CaptureMemoryGuard._check.")
+        self.check = check
 
-    def check(self, label, *, reserve_bytes=0):
+    @property
+    def separate_reservations(self) -> bool:
+        """Whether this guard can hold the two budgets apart.
+
+        True only with a declared device envelope: without one, a device
+        reservation has no budget of its own and :meth:`_check` refuses to take
+        one, so a caller routing through :func:`reserve_allocation` gets the
+        conservative sum exactly as every caller did before the split.
+        """
+        return self.device_bytes is not None
+
+    def _check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
+        """Refuse the moment either budget or the host floor is exceeded.
+
+        ``reserve_bytes`` is a future allocation charged to the cgroup -- the
+        CPU side. ``reserve_device_bytes`` is one charged to the device
+        envelope, and is only meaningful where the caller declared one; without
+        a declared envelope the whole conservative sum is charged to the cgroup
+        cap exactly as before.
+        """
         if self.failure is not None:
             raise RuntimeError(self.failure)
         try:
             if type(reserve_bytes) is not int or reserve_bytes < 0:
                 raise ValueError('capture future allocation reservation must be nonnegative bytes')
+            if type(reserve_device_bytes) is not int or reserve_device_bytes < 0:
+                raise ValueError(
+                    'capture future device allocation reservation must be nonnegative bytes')
+            if reserve_device_bytes and self.device_bytes is None:
+                raise ValueError(
+                    'a device reservation needs a declared device envelope; without '
+                    'one the guard charges CUDA to the cgroup cap and cannot tell '
+                    'the two budgets apart')
             raw = (self.scope/'memory.max').read_text().strip()
             cap = self.cap_bytes if raw == 'max' else min(self.cap_bytes, int(raw))
             current = int((self.scope/'memory.current').read_text())
@@ -105,8 +284,34 @@ class CaptureMemoryGuard:
                 cuda_reserved_bytes=reserved,
                 conservative_cgroup_plus_cuda_reserved_bytes=current+reserved,
                 host_mem_available_bytes=available, cap_bytes=cap,
+                cpu_cap_bytes=self.cpu_cap_bytes,
                 future_allocation_bytes=reserve_bytes,
+                future_device_allocation_bytes=reserve_device_bytes,
                 refusal_threshold_bytes=cap-self.margin_bytes)
+            if self.device_bytes is None:
+                # The un-split guard: CPU and device charged to one budget, which
+                # is the conservative answer when the caller has not said which
+                # budget the device residency belongs to.
+                self.last['enforced'] = 'cgroup-plus-cuda-reserved'
+                over_budget = current+reserved+reserve_bytes > cap-self.margin_bytes
+                over_device = False
+                host_need = self.host_floor_bytes+reserve_bytes
+            else:
+                # The split guard: the kernel's own CPU budget, the device's own
+                # envelope, and the host floor are three separate refusals. The
+                # aggregate is their sum and travels in the receipt, but adding
+                # them here is what refused every row holding a large device
+                # residency beside a small CPU cap.
+                self.last.update(enforced='split-cpu-device-host',
+                    device_envelope_bytes=self.device_bytes,
+                    aggregate_envelope_bytes=self.cpu_cap_bytes+self.device_bytes,
+                    device_refusal_threshold_bytes=self.device_bytes,
+                    host_floor_bytes=self.host_floor_bytes,
+                    cpu_refusal_threshold_bytes=cap-self.margin_bytes)
+                over_budget = current+reserve_bytes > cap-self.margin_bytes
+                over_device = reserved+reserve_device_bytes > self.device_bytes
+                host_need = (self.host_floor_bytes+reserve_bytes
+                             +reserve_device_bytes)
             if self.baseline is None:
                 # The FIRST reading is what this process already held before
                 # any planned phase became resident: the interpreter, torch,
@@ -122,6 +327,8 @@ class CaptureMemoryGuard:
             if current+reserved > self.peak_bytes:
                 self.peak_bytes = current+reserved
                 self.peak_checkpoint = str(label)
+            self.peak_cpu_bytes = max(self.peak_cpu_bytes, current)
+            self.peak_device_bytes = max(self.peak_device_bytes, reserved)
             # Labels carry a per-unit suffix after ':'; the prefixes are the
             # bounded set of phase names, so this attributes a peak to the
             # phase that held it without growing with the roster.
@@ -130,8 +337,18 @@ class CaptureMemoryGuard:
                 self.peak_by_checkpoint_prefix.get(prefix, 0), current+reserved)
             self.min_available_bytes = (available if self.min_available_bytes is None
                                        else min(self.min_available_bytes, available))
-            if (current+reserved+reserve_bytes > cap-self.margin_bytes or
-                    available < self.host_floor_bytes+reserve_bytes):
+            if over_budget:
+                raise RuntimeError(
+                    f'capture CPU memory refusal: the cgroup has '
+                    f'{current} bytes charged and {reserve_bytes} more is '
+                    f'requested against a {cap}-byte cap less a '
+                    f'{self.margin_bytes}-byte margin')
+            if over_device:
+                raise RuntimeError(
+                    f'capture device memory refusal: {reserved} bytes are '
+                    f'reserved on {self.device} and {reserve_device_bytes} more '
+                    f'is requested against a {self.device_bytes}-byte envelope')
+            if available < host_need:
                 raise RuntimeError(f'capture physical memory refusal: {self.last}')
         except Exception as error:
             self.failure = str(error)
