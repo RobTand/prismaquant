@@ -1764,6 +1764,12 @@ def tessera_refusal_cause(diagnosis) -> str:
     the line *above* the one that ends the run. An operator reads the ERROR,
     so the cause travels on the ERROR as well; the two are the same structured
     answer rendered twice, never two separate claims.
+
+    It says the verdict was taken without a scope, never that a scope would
+    change it. On the only real table a scope moves 0 of 16 to 1 of 16, so
+    "unattested only because no scope was supplied" would be false for fifteen
+    of them -- and a line whose whole job is to name a cause accurately may not
+    be the thing that misleads.
     """
     if not diagnosis:
         return ""
@@ -1771,9 +1777,10 @@ def tessera_refusal_cause(diagnosis) -> str:
     awaiting = diagnosis.get("awaiting_serving_scope") or []
     if awaiting:
         parts.append(
-            f"{len(awaiting)} of them are unattested only because no Tessera serving "
-            "scope was supplied -- pass --tessera-platform, --tessera-runtime-image, "
-            "--tessera-execution-mode and --tessera-residency")
+            f"{len(awaiting)} of them were judged with no Tessera serving scope supplied, "
+            "so that verdict is not the contract's -- pass --tessera-platform, "
+            "--tessera-runtime-image, --tessera-execution-mode and --tessera-residency, "
+            "which may or may not attest them")
     attested = diagnosis.get("contract_attested_rungs") or []
     if attested:
         parts.append("the pinned contract attests " + ", ".join(attested))
