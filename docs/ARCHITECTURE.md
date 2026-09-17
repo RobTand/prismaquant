@@ -16,6 +16,157 @@ checked launch, fixed M = 0 completed `next_launch` + `sync2` with an empty
 `(0, 1024)` bf16 output, and M = 1 was clean on both. No other quantizer path,
 contract field, cache rule or gate moves.
 
+Re-stamped (2026-09-17, `campaign/identity-and-coverage-main-20260916`) for
+**a joint AURA row being only its own cell**. The per-cell AQUA coverage
+requirement counts cells by their `(unit, format)` key, and
+`cost_entry_is_joint_aura` validates a row *internally*: its currency, its
+Fisher application count, and that its operator and probe digests match the
+objects they name. All of that is true of a row correctly produced for one
+Linear when it is read under another, so a valid row copied, mis-merged or
+re-keyed onto a different cell counted as that cell's activation term while the
+cell itself kept a weight-only cost -- and the fulfilled-artifact shortcut
+(`submit-aqua` queues nothing when every requested cell is already joint-priced)
+would report the campaign satisfied on it.
+`allocator_candidates.joint_row_binds_cell` is the shared predicate that
+compares the row's operator identity with the key it was found under; the
+dispatcher's requested-roster gate and the AQUA stage's own "already priced"
+set both read it, so the two cannot disagree about which cells carry an
+A-side. A joint row that does not name its own key is a refusal
+(`JointCellCoordinateError`, distinct from the malformed-row failure so
+instructions that turn one into a refusal leave the other alone), not a row to
+skip quietly.
+
+A joint-priced cell the plan's own bound cost table never priced refuses as
+well. Such a row is bound to the coordinate it names and to nothing else -- it
+was never compared with this campaign's draw, capture or candidate menu -- so
+an artifact from a pass over a wider roster would present prices this campaign
+never priced beside the plan's table.
+`submit-aqua --accept-joint-cells-outside-plan` is the explicit reuse path for
+an artifact sealed against an older roster, and the record it produces
+(`joint_cells_outside_plan_accepted_unverified`) travels in the skip summary and
+in the sealed manifest's `campaign_scope` annotation, so the reuse is recorded
+rather than silent. Gates: `tests/test_aqua_campaign_submit.py`,
+`tests/test_joint_aura_allocator_currency.py`,
+`tests/test_aqua_per_expert_checkpoint.py`.
+
+Re-stamped (2026-09-16, `campaign/aqua-campaign-caller-20260916`) for **the
+campaign's A-side being a submitted stage** (§11; #655). The stage existed and
+enforced its own coverage, but nothing in this repository invoked it: the
+campaign's A-side was an operator command, so "the campaign requires complete
+activation coverage" was a sentence in a handover rather than a gate any run
+had to pass. `tools/dispatch_tessera_campaign.py submit-aqua` is that caller,
+built the way the other post-campaign passes are: the same sealed plan, the
+same frozen campaign identity and the same `--require-scope` check as
+`submit-joint`, a read set declared to PrismaBuild before the action is queued
+(`glm_data_manifests.build_aqua_manifest`), and a reservation checked against
+the plan's own physical bound rather than taken from habit.
+`--require-complete-coverage` is not a flag on this submission -- it is passed
+unconditionally, so no invocation of the campaign's A-side can leave the gate
+off. The requested roster is the plan's **cells**, not the artifact's: the plan
+binds the campaign's own cost table (`inputs.merged_cost`) by path and sha256,
+`--cost-in` has to reproduce that table's `(unit, format)` cells unit for unit,
+and `--formats` has to name exactly the menu that table prices. Deriving the
+requested set from the artifact under test is the hole the binding closes,
+because the stage states acceptance against the cells it is given: a table
+narrowed to the cells that already carry a price leaves every unit present and
+every format still carried somewhere, so a unit-roster check and a
+carried-format union check both pass, and an all-joint remainder then reads as
+complete while a planned cell has no A-side at all. A unit whose entry survived
+the roster but lost every cell refuses, a cost table edited after the plan was
+sealed refuses on the plan's own digest, and a cell the plan never priced
+refuses unless it already carries its own joint A-side -- a joint pass's
+addition, which cannot hide a hole because it brings the price the hole is
+about -- and is reported as `joint_cells_outside_plan` rather than silently
+accepted. The roster is read per
+`(unit, format)` rather than as units times formats -- on the real campaign the
+dense targets carry their whole menu (515 rungs) while the routed experts carry
+only their measured rungs, which is the plan's decision and not a hole. The
+bind costs one sequential read of the cost table per submission; it does not
+re-read the multi-GiB candidate roster, and `--formats` still refuses a subset
+of the menu, since naming one would move the coverage denominator instead of
+filling it. A payload whose requested cells already all carry a joint A-side is
+**not** submitted: the requirement is satisfied by that artifact, and queuing a
+stage to add nothing is redundant GPU work. The stage is still refused at run
+time on cells that are joint-priced but unfulfilled, so the caller cannot
+launder a partially covered artifact into a green invocation. Gates:
+`tests/test_aqua_campaign_submit.py`, `tests/test_aqua_activation_cost.py`,
+`tests/test_aqua_per_expert_checkpoint.py`.
+
+Re-stamped (2026-09-16, `campaign/identity-and-coverage-pr-20260916`) for **the
+container cap being its own spec field** (§3.4, §11). `box_memory_gb` carried
+two meanings at once: the box's total unified budget a row's derived demand
+refuses to exceed, and -- once the launcher set a cgroup cap -- the
+container's own cap. On GB10 those are 114 GiB and 34 GiB, so one of the two
+had to break. `cpu_memory_gb` is now the cap, `box_memory_gb` keeps the
+capacity meaning, and `container_memory_budget_gb` reads the cap from the new
+field and falls back to the old one only for a spec sealed before it existed.
+`docker_command` passes it as `--memory` with `--memory-swap` equal to it, so a
+bounded capture row is bounded by the kernel instead of being refused at
+`CaptureMemoryGuard` construction, and a row that would spill past its budget
+fails rather than swapping. The cap is a hard limit on what the cgroup
+**accounts** -- on GB10 the CPU side, measured at 16 GiB charged for a
+container holding 78.87 GiB of model -- not an aggregate GPU + CPU bound; the
+aggregate is the plan's `aggregate_memory_bytes`, and the sum the guard checks
+at its check points is a conservative refusal, not a physical bound. Gates:
+`tests/test_tessera_campaign_container.py`.
+
+Re-stamped (2026-09-16, `campaign/identity-and-coverage-pr-20260916`) for **the
+campaign scope being an identity, and the A-side coverage being per cell**
+(#655, 474544 gaps). Two rosters of equal length are not one campaign, and two
+censuses with equal window counts are not one calibration, so
+`joint_campaign_scope` now derives a `prismaquant.tessera_joint_campaign_scope.v1`
+identity from the plan's *bound* artifacts: the exact unit and group roster from
+the census and the campaign plan, the calibration draw (`model`,
+`text_sha256`, `fit_ids_sha256`, `seed`, `layer_stride`), the window count and
+sequence length, the digests of the bound calibration input, canonical capture
+and merged checkpoint -- whose `identity.units[*].menu` is the per-unit
+candidate roster the loader admits rungs against -- and the selection digest of
+a diagnostic panel when the plan evaluates a subset. `submit-joint` requires
+both `--require-scope` and `--campaign-identity`, and every identity field is
+compared exactly against the frozen campaign's, because a plan is
+self-consistent with whatever census it binds. A census that names no draw
+refuses, and an identity sealed before these fields existed refuses by name and
+must be re-sealed. The checkpoint bind costs one sequential read per
+submission: it hashes the artifact rather than trusting the plan's own number,
+and it does not parse the 6.8 GB identity into a graph. On the A side,
+`aqua_activation_cost --require-complete-coverage` refuses unless every
+requested `(unit, format)` cell this lane OWES a price has one -- a joint AURA
+row, or an A-side computed and merged by this stage. Cells free by contract at
+their own shape (activation-identity formats, grids the lane never executes)
+are subtracted **per cell** and reported apart; an unbuildable cell stays a
+hole; a positive weight-only cell with no A-side is refused, because a tradeable
+surrogate is not a price; joint cells are never priced twice and an unrelated
+joint rung cannot cover a requested legacy cell. Off by default outside the
+campaign: the hole is still counted and reported for a research arm. Gates:
+`tests/test_joint_campaign_scope.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`,
+`tests/test_aqua_per_expert_checkpoint.py`.
+
+Re-stamped (2026-09-16, `campaign/identity-and-coverage-pr-20260916`) for **the
+per-expert checkpoint reaching the A-side** (§11). `activation_dloss_table`
+built its resolver from the checkpoint's
+`model.safetensors.index.json`, which maps one card unit to ONE key. GLM-5.3-
+Flash does not store its packed routed experts that way: every expert is its
+own 2-D `nn.Linear` weight and the fused gate/up pair is two tensors, so 84
+packed units of a 45-layer body -- 97% of the parameters -- resolved to
+nothing and were filtered out before the shard loop that prices, leaving
+`cost_entry_act_dloss`'s `0.0` default to be read as a free 4-bit activation on
+the route the lane declares W4A4. The stage now classifies every name it cannot
+resolve from one key instead of dropping it: one key (dense trunk, or a packed
+`[E, M, N]` tensor), a per-expert layout priced by `packed_act_dloss_per_expert`
+(streaming one expert at a time through the same kernel and float64
+accumulation as the stacked path, pinned equal by
+`tests/test_aqua_per_expert_checkpoint.py`, because materializing
+`[288, 4096, 4096]` would be 19 GiB in float32 per format), or "unresolved",
+which is recorded as a HOLE for every format whose activation grid the named
+lane executes. `required_activation_formats` is the one definition of which
+formats are owed a price, shared by all three sources. On the loader side,
+`load_measured_anchor_input` refuses a checkpoint whose recorded seal is not
+the identity it read. The streaming spelling of that seal and its goldens are
+the parser PR's (`canonical_json_sha256_normalized`, #661), not this branch's:
+this branch reads the generic helper, and the two digests are equal by
+contract. Gates: `tests/test_aqua_per_expert_checkpoint.py`.
+
 Re-stamped (2026-09-16, `codex/509-pq-route-trace-gate`) for **the exact
 per-module route-trace grade** (§7.1, §9.4; the Tessera lane's serve-side leg,
 RobTand/prismaquant#575 consuming RobTand/tessera#509). The leg compared module
@@ -64,6 +215,7 @@ legacy arm. The exact arm runs on
 `tests/fixtures/tessera_route_trace_509/`, written by Tessera's own telemetry
 at producer commit `8104dc6` (see that directory's `PROVENANCE.md`), so the
 schema under test is the producer's.
+
 As of: 2026-09-16 · `issue-607-sealed-arc-replay-frontier`. Stamps
 follow, newest first, each recording its own branch and date.
 
@@ -111,7 +263,6 @@ so both ends load `prismaquant/joint_replay_frontier.py` by path. Gates:
 resumed GPU subset has been run under a sealed frontier, so the ARC payoff
 and the resumed wall-clock are unmeasured here; this stamp records the
 contract.
-
 As of: 2026-09-16 · `flash/issue-654-stage-settings-provenance-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
 
@@ -365,21 +516,19 @@ replayed by `shipcard._verify_route_trace_record`).
   platform is `card.build.tessera_serving_scope.target.platform`, or
   `--platform`; when both are given they must agree.
 
-Agreement fills the slot, and since #509 only an exactly-identified serve can
-agree (the stamp at the top of this file). A difference exits 1 and names each
-contract with its priced and served counts. A missing, unreadable, empty,
-other-schema or compiled (`M*`) rank trace, and equally a legacy histogram-grade
-trace or one whose identity is incomplete, exits 3 as NOT VERIFIED and leaves
-the slot unfilled, so `tools/publish_artifact.py` refuses the card. `verify`
-replays the comparison from the carried traces and config text against the
-current packaged contract, and refuses carried config text that differs from
-the artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the
-trace and fill steps.
+Agreement fills the slot. A difference exits 1 and names each contract with
+its priced and served counts. A missing, unreadable, empty, other-schema or
+compiled (`M*`) rank trace exits 3 as NOT VERIFIED and leaves the slot
+unfilled, so `tools/publish_artifact.py` refuses the card. `verify` replays the
+comparison from the carried traces and config text against the current
+packaged contract, and refuses carried config text that differs from the
+artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the trace
+and fill steps.
 
-The comparison is a histogram where the trace names no modules (Tessera #509
-adds the per-module grade, stamped at the top of this file). Not covered: the
-activation representation (#567), compiled forwards, and the
-compressed-tensors lane, which has no route telemetry. The
+The comparison is a histogram because the trace names no modules; Tessera #509
+asks it to emit module prefixes, rank and platform. Not covered: which module
+rode which contract, the activation representation (#567), compiled forwards,
+and the compressed-tensors lane, which has no route telemetry. The
 `validate_native_export` claim in CLAUDE.md principle 14 is corrected: that
 script never performed this leg. Gate: `tests/test_tessera_route_trace_gate.py`,
 on the real m44e1 TP2 traces, shown failing before the fix.
@@ -11521,9 +11670,10 @@ class by the gates above. Gate:
 `tests/test_campaign_row_classes.py`.
 
 The passes that run *after* the rows merge are submitted through the same
-producer. `submit-joint`, `submit-allocation` and `submit-export` build the
-read set with `experiments/glm_data_manifests.py`
-(`build_joint_pass_manifest`, `build_allocation_manifest`,
+producer. `submit-joint`, `submit-aqua`, `submit-allocation` and
+`submit-export` build the read set with `experiments/glm_data_manifests.py`
+(`build_joint_pass_manifest`, `build_aqua_manifest`,
+`build_allocation_manifest`,
 `build_export_manifest`), write it under `<output-root>/data-manifests/` --
 or under `--manifest-dir`, which a frozen output root needs -- and run the
 chain-style `pbrun` command with `--data-manifest` **before** `--detach`,
@@ -11571,6 +11721,20 @@ assignment leaves on the source precision, in the artifact's layer order, with
 `read_order_attested: false` and tensors outside the campaign roster --
 embeddings, norms, the LM head -- named as not declared.
 
+The AQUA manifest declares the A-side's own reads: the sensitivity card, the
+cost payload the merge writes into, the joint plan, the model's
+`config.json` and `model.safetensors.index.json`, and then, per layer, the
+coalesced source extents of the campaign's units -- the same per-unit weight
+bytes the joint pass declares for its model source, keyed by unit instead of by
+layer/part -- followed by the `--act-dir` cache it opens when measured pricing
+is asked for. Its `read_order_attested: false` says what the other two say for
+their own reasons: the stage iterates the artifact's units and streams each
+unit's weight in one pass, so the declared order is the model's layer order
+rather than the order the bytes are opened in. A unit the index cannot resolve
+is priced as a hole and contributes no byte, and the fallback path prices from
+the card, so the extents are a claim on the model source rather than a
+superset of it.
+
 `merge` unions the rows' disjoint Hessian
 captures into the object a whole-scope run writes (same `counts`, same
 provenance), **recomputes** its digest, re-stamps every row's
@@ -11600,6 +11764,15 @@ explicit `admissible` flag, keeps `row_memory_gb` for all of them, and records
 the declined ones under `inadmissible_rows` with the derived demand, the
 per-box multiplier, the box and the reason, which the run also prints. A spec
 that declares no box budget admits every row and says the check was not made.
+Two memory numbers live in a spec and they are not interchangeable:
+`box_memory_gb` is the box's total unified capacity this fit check reads, and
+`cpu_memory_gb` is the cap the container's own cgroup is given
+(`--memory`/`--memory-swap`, through the launcher). Reading the cap out of the
+capacity field bounds a 34 GiB CPU side at 114 GiB or refuses the pilot's own
+derived demand, and reserving the cap alone for a row that also holds device
+residency under-reserves the box by the device envelope; the plan's
+`aggregate_memory_bytes` is the combined physical number a reservation has to
+cover.
 Only a plan with **no** admissible row refuses, naming the widest demand and
 the box. The fit check precedes publication of every selection file and the
 manifest; a refusal leaves any previously published plan unchanged. One over-wide row is a demand to report

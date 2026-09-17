@@ -75,6 +75,38 @@ def test_joint_table_binds_row_coordinates(measured_payload):
         require_run_currency(payload)
 
 
+def test_a_joint_row_is_only_its_own_cell(measured_payload):
+    """The currency check binds a table; this binds one row to its own key.
+
+    A coverage decision reads keys, and every internal check a joint row
+    carries is true of it under any key: the row is self-consistent and its
+    operator identity names the cell it was produced for. That name is the
+    only thing that says the row is not this cell's A-side, so it is what the
+    predicate compares -- under a donated unit, under a donated format, both
+    with a row that is otherwise valid.
+    """
+    name, row = _first(measured_payload)
+    assert ac.joint_row_binds_cell(row, name, "FP8_E4M3", where="test") is True
+
+    other = next(unit for unit in sorted(measured_payload["costs"])
+                 if unit != name)
+    # The mismatch is its own error class, not the one a malformed row raises:
+    # a caller that turns it into a refusal must not also swallow the
+    # malformed-evidence failures `validate_joint_aura_entry` reports.
+    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
+        ac.joint_row_binds_cell(row, other, "FP8_E4M3", where="test")
+    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
+        ac.joint_row_binds_cell(row, name, "NVFP4A16", where="test")
+    assert issubclass(ac.JointCellCoordinateError, ValueError)
+
+
+def test_a_row_that_is_not_joint_is_not_this_predicate(measured_payload):
+    """Callers ask about every row they hold, so a plain row answers False."""
+    name, _ = _first(measured_payload)
+    assert ac.joint_row_binds_cell(
+        {"predicted_dloss": 0.1}, name, "FP8_E4M3", where="test") is False
+
+
 def test_joint_table_refuses_unaligned_probe_population(measured_payload):
     payload = copy.deepcopy(measured_payload)
     _, row = _first(payload)

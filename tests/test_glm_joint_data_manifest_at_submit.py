@@ -149,16 +149,30 @@ def _workspace(scratch: Path) -> dict:
         rows.append({"row_id": row_id, "dir": str(row_dir),
                      "units": str(units_file), "members": UNITS[layer],
                      "groups": [f"g:{layer}"]})
+    census = workspace / "census.json"
+    census.write_text(json.dumps({
+        "schema": "prismaquant.tessera_campaign_census.v1",
+        "model": str(model),
+        # The draw, not just the window count: the campaign scope binds which
+        # corpus revision and tokenizer ids the calibration windows came from.
+        "text_sha256": "a" * 64, "fit_ids_sha256": "b" * 64,
+        "seed": 0, "layer_stride": 1,
+        "nsamples": 512, "seqlen": 512,
+        "unit_shapes": {name: [16, 16] for name in names},
+        # The scope a joint pass evaluates is its roster and its window set;
+        # this fixture's census is the authority for both.
+        "anchor_groups": {f"g:{layer}": UNITS[layer] for layer in sorted(UNITS)},
+    }))
     campaign_plan = workspace / "plan.json"
     campaign_plan.write_text(json.dumps({
+        "schema": "prismaquant.tessera_campaign_plan.v1",
         "model": str(model),
+        "census": str(census),
         "calibration_cache": {"path": str(capture_manifest)},
         "rows": rows,
     }))
     receipts = workspace / "receipts.json"
     receipts.write_text(json.dumps({"rows": len(rows)}))
-    census = workspace / "census.json"
-    census.write_text(json.dumps({"unit_shapes": {name: [16, 16] for name in names}}))
 
     wire_dir = workspace / "merged" / "cache" / "wire"
     wire_dir.mkdir(parents=True)
@@ -200,31 +214,58 @@ def _workspace(scratch: Path) -> dict:
     backend = scratch / "projection.so"
     backend.write_bytes(b"e" * 2048)
 
+    def digest(path):
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
     output_root = scratch / "joint-01"
     plan = scratch / "plan.inputs-resolved.json"
     plan.write_text(json.dumps({
         "schema": glm_data_manifests.JOINT_PLAN_SCHEMA,
         "model": str(model),
         "output_root": str(output_root),
-        "calibration_input": {"path": str(calibration), "sha256": None},
-        "canonical_capture": {"path": str(capture_manifest), "sha256": None},
-        "source_capture_compatibility": {"path": str(compatibility), "sha256": None},
-        "execution": {"projection_backend": {
-            "binary": {"path": str(backend), "sha256": None}, "name": "f"}},
+        "calibration_input": {"path": str(calibration), "sha256": digest(calibration)},
+        "canonical_capture": {"path": str(capture_manifest),
+                              "sha256": digest(capture_manifest)},
+        "source_capture_compatibility": {"path": str(compatibility),
+                                         "sha256": digest(compatibility)},
+        "execution": {"calib_seqlen": 512, "n_calib_samples": 512,
+                      "projection_backend": {
+                          "binary": {"path": str(backend), "sha256": digest(backend)},
+                          "name": "f"}},
         "qualification_window": {"max_load_buffer_bytes": 1},
         "source_prefetch": {"max_cache_slots": 2, "prefetch_lookahead": 1},
         "inputs": {
-            "campaign_plan": {"path": str(campaign_plan), "sha256": None},
-            "census": {"path": str(census), "sha256": None},
-            "campaign_receipts": {"path": str(receipts), "sha256": None},
-            "merged_cost": {"path": str(cost), "sha256": None},
-            "merged_checkpoint": {"path": str(checkpoint), "sha256": None},
+            "campaign_plan": {"path": str(campaign_plan),
+                              "sha256": digest(campaign_plan)},
+            "census": {"path": str(census), "sha256": digest(census)},
+            "campaign_receipts": {"path": str(receipts),
+                                  "sha256": digest(receipts)},
+            "merged_cost": {"path": str(cost), "sha256": digest(cost)},
+            "merged_checkpoint": {"path": str(checkpoint),
+                                  "sha256": digest(checkpoint)},
+            "required_source_units": len(names),
+            "required_campaign_groups": len(UNITS),
         },
     }))
+    # The campaign identity is fixed outside the plan: a joint submission names
+    # the campaign it belongs to, and the plan's own bound census cannot show
+    # that by itself.
+    import dispatch_tessera_campaign as dispatch
+    scope = dispatch.joint_campaign_scope(json.loads(plan.read_text()))
+    campaign_identity = scratch / "campaign-identity.json"
+    campaign_identity.write_text(json.dumps(dispatch.campaign_identity(scope),
+                                            sort_keys=True))
     return {"plan": plan, "workspace": workspace, "wire_dir": wire_dir,
             "checkpoint": checkpoint, "parts": parts, "names": names,
             "shard": shard, "captures": captures, "model": model,
-            "output_root": output_root}
+            "output_root": output_root, "scope": scope,
+            "campaign_identity": campaign_identity}
+
+
+def _scope_args(fixture, require_scope="complete_campaign"):
+    """The two arguments every joint submission now states explicitly."""
+    return ["--require-scope", require_scope,
+            "--campaign-identity", str(fixture["campaign_identity"])]
 
 
 @pytest.fixture()
@@ -267,7 +308,14 @@ def workspace_with_sealed_checkpoint(scratch):
     The journal identity names the campaign checkpoint it was qualified
     against, and the checkpoint names its own seal, so a journal that was
     written against another merge is recognisable as one.
+
+    Sealing the checkpoint changes its bytes, so the plan is re-bound to the
+    sealed file and the campaign identity re-derived from that plan: the plan
+    has to bind the artifact it reads, and a submission that carried the
+    pre-seal digest would declare a roster the pass does not hold.
     """
+    import dispatch_tessera_campaign as dispatch
+
     fixture = _workspace(scratch)
     checkpoint = Path(fixture["checkpoint"])
     document = json.loads(checkpoint.read_text())
@@ -281,6 +329,15 @@ def workspace_with_sealed_checkpoint(scratch):
     document["identity"] = identity
     document["identity_sha256"] = canonical_sha256(identity)
     checkpoint.write_text(json.dumps(document))
+    plan_path = Path(fixture["plan"])
+    plan = json.loads(plan_path.read_text())
+    plan["inputs"]["merged_checkpoint"]["sha256"] = hashlib.sha256(
+        checkpoint.read_bytes()).hexdigest()
+    plan_path.write_text(json.dumps(plan))
+    fixture["scope"] = dispatch.joint_campaign_scope(
+        json.loads(plan_path.read_text()))
+    Path(fixture["campaign_identity"]).write_text(json.dumps(
+        dispatch.campaign_identity(fixture["scope"]), sort_keys=True))
     return fixture, document["identity_sha256"]
 
 
@@ -667,6 +724,86 @@ def test_prepare_manifest_uses_exact_cached_source_sha_and_refuses_mutation(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
 
+def test_a_cache_written_through_another_mount_refuses_and_names_the_mount(
+    scratch, shared_mount,
+):
+    """Reuse needs the same mount instance, and the refusal says which.
+
+    Measured on 2026-09-16: the same ZFS dataset reaches the two Sparks
+    through two NFS mounts (``10.100.98.3`` and ``10.100.99.3``, both owned by
+    dl380g10) and dl380g10 itself locally -- device 64, 58 and 54 with an
+    identical inode. Those four stat fields identify an object within a
+    filesystem; a ZFS clone can present different bytes under the same number,
+    size, mtime and ctime. So the proof keeps the device, and a submission
+    from another mount instance is refused with the two device numbers rather
+    than reusing a SHA nothing binds there.
+    """
+    fixture = _workspace(scratch)
+    source = fixture["shard"]
+    stat = source.stat()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    capture_manifest = fixture["captures"] / "capture_manifest.json"
+    capture = json.loads(capture_manifest.read_text())
+    capture["identity"] = {"source_files": {source.name: digest}}
+    capture_manifest.write_text(json.dumps(capture))
+    cache = scratch / "source-identity.json"
+    cache.write_text(json.dumps({
+        "schema": "prismaquant.streamed_model.identity_cache.v1",
+        "source": str(fixture["model"]),
+        "identity": {"shards": [{"path": str(source), "sha256": digest}]},
+        "fingerprints": [{"path": str(source), "device": stat.st_dev + 1,
+                          "inode": stat.st_ino, "size": stat.st_size,
+                          "mtime_ns": stat.st_mtime_ns,
+                          "ctime_ns": stat.st_ctime_ns}],
+    }))
+    plan = json.loads(fixture["plan"].read_text())
+    plan["source_identity_cache"] = {
+        "path": str(cache),
+        "sha256": hashlib.sha256(cache.read_bytes()).hexdigest()}
+    fixture["plan"].write_text(json.dumps(plan))
+
+    with pytest.raises(SystemExit, match="no longer proves") as refusal:
+        glm_data_manifests.build_joint_pass_manifest(
+            str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    message = str(refusal.value)
+    assert str(stat.st_dev + 1) in message and str(stat.st_dev) in message
+
+    # And the same-mount cache is still adopted, so the strictness costs
+    # nothing where the proof does hold.
+    plan = json.loads(fixture["plan"].read_text())
+    cache.write_text(json.dumps({
+        "schema": "prismaquant.streamed_model.identity_cache.v1",
+        "source": str(fixture["model"]),
+        "identity": {"shards": [{"path": str(source), "sha256": digest}]},
+        "fingerprints": [{"path": str(source), "device": stat.st_dev,
+                          "inode": stat.st_ino, "size": stat.st_size,
+                          "mtime_ns": stat.st_mtime_ns,
+                          "ctime_ns": stat.st_ctime_ns}],
+    }))
+    plan["source_identity_cache"] = {
+        "path": str(cache),
+        "sha256": hashlib.sha256(cache.read_bytes()).hexdigest()}
+    fixture["plan"].write_text(json.dumps(plan))
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+    assert manifest["annotations"]["source_authentication_mode"] == (
+        "verified_streamed_identity_cache")
+    assert manifest["annotations"]["counts"].get("source_authentication", 0) == 0
+
+    # The mutation proof is untouched by any of this: the same cache still
+    # refuses a same-size rewrite whose ctime moved.
+    before = source.stat()
+    with source.open("r+b") as handle:
+        handle.seek(-1, 2)
+        last = handle.read(1)
+        handle.seek(-1, 2)
+        handle.write(bytes([last[0] ^ 1]))
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    with pytest.raises(SystemExit, match="no longer proves"):
+        glm_data_manifests.build_joint_pass_manifest(
+            str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
+
+
 def test_a_rung_the_campaign_never_measured_contributes_no_wire(
     scratch, shared_mount,
 ):
@@ -876,6 +1013,7 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
     code = dispatch.main([
         "submit-joint", "prepare",
         "--plan", str(fixture["plan"]),
+        *_scope_args(fixture),
         "--spec", str(spec),
         "--demand", "gpu=1,mem_gb=104",
         "--cpus", "6",
@@ -928,6 +1066,7 @@ def test_fresh_verified_prepare_seals_the_same_phases_and_manifest_digest(
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
     monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     assert dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
+                          *_scope_args(fixture),
                           "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
                           "--manifest-dir", str(scratch / "manifests"),
                           "--dry-run"]) == 0
@@ -975,6 +1114,7 @@ def test_a_resumed_prepare_seals_its_order_and_the_submission_carries_it(
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
     monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     assert dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
+                          *_scope_args(fixture),
                           "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
                           "--resume", "--manifest-dir", str(scratch / "manifests"),
                           "--dry-run"]) == 0
@@ -1009,6 +1149,14 @@ def test_a_resumed_prepare_seals_its_order_and_the_submission_carries_it(
 def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
     scratch, shared_mount, monkeypatch,
 ):
+    """The proof names a mount instance, so placement follows it.
+
+    ``source_identity_cache_host`` is provenance *and* a constraint: nothing
+    this tree can check binds the cached SHA to a second mount instance (an
+    NFSv4 client's statfs fsid is 0 here), so the row runs where the proof was
+    made instead of silently re-reading the checkpoint or silently trusting a
+    device-free comparison.
+    """
     import dispatch_tessera_campaign as dispatch
 
     fixture = _workspace(scratch)
@@ -1026,9 +1174,53 @@ def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
     with pytest.raises(RuntimeError, match="proof is local"):
         dispatch.main([
             "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            *_scope_args(fixture),
             "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
             "--cpus", "6", "--tag", "gb10", "--dry-run",
         ])
+    # The same submission is accepted when it names the proof's mount.
+    assert dispatch.main([
+        "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+        *_scope_args(fixture),
+        "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+        "--cpus", "6", "--tag", socket.gethostname(), "--dry-run",
+    ]) == 0
+
+
+def test_a_diagnostic_subset_is_not_submittable_as_the_campaign(
+    scratch, shared_mount, monkeypatch,
+):
+    """The scope a submission declares is the scope it has to be running."""
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    plan = json.loads(Path(fixture["plan"]).read_text())
+    plan["joint_eval"] = {
+        "schema": "prismaquant.tessera_joint_eval_panel.v1",
+        "status": "diagnostic_pilot",
+        "selection": {"size": 16}, "shape": [16, 512],
+    }
+    pilot = scratch / "plan.pilot.json"
+    pilot.write_text(json.dumps(plan))
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+
+    def submit(launch_plan, require_scope):
+        return dispatch.main([
+            "submit-joint", "prepare", "--plan", str(launch_plan),
+            "--require-scope", require_scope,
+            "--campaign-identity", str(fixture["campaign_identity"]),
+            "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+            "--cpus", "6", "--tag", "gb10", "--dry-run",
+        ])
+
+    # The full campaign's score cannot be produced by 16 of its 512 windows.
+    with pytest.raises(dispatch.ScopeRefused,
+                       match="requires a complete_campaign scope"):
+        submit(pilot, "complete_campaign")
+    # Submitted for what it is, it resolves.
+    assert submit(pilot, "diagnostic_window_subset") == 0
 
 
 def test_joint_submit_writes_one_deterministic_gzip_manifest(
@@ -1052,6 +1244,7 @@ def test_joint_submit_writes_one_deterministic_gzip_manifest(
 
     monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
     args = ["submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            *_scope_args(fixture),
             "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
             "--cpus", "6", "--tag", "gb10", "--manifest-dir", str(directory)]
     assert dispatch.main(args) == 0
@@ -1062,6 +1255,62 @@ def test_joint_submit_writes_one_deterministic_gzip_manifest(
     assert submitted[0][submitted[0].index("--data-manifest") + 1] == str(path)
     assert dispatch.main(args) == 0
     assert path.read_bytes() == first
+
+
+def test_a_joint_reservation_under_the_plans_own_bound_is_refused(
+    scratch, shared_mount, capsys, monkeypatch,
+):
+    """A2: cap 34, device envelope 80, and the reservation is 114.
+
+    The container cap bounds the CPU side alone -- measured, a 16 GiB cap held
+    78.87 GiB of model and 6 GiB of KV -- so reserving the cap under-reserves
+    the box by the device envelope, and PB would admit a row its own guard
+    then declines.
+    """
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    gpu_bytes, aggregate_bytes = 80 * 1024 ** 3, 114 * 1024 ** 3
+    plan = json.loads(fixture["plan"].read_text())
+    plan["max_gpu_bytes"] = gpu_bytes
+    plan["aggregate_memory_bytes"] = aggregate_bytes
+    fixture["plan"].write_text(json.dumps(plan))
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({
+        "model": str(fixture["model"]), "campaign_argv": [],
+        "cwd": "/workspace", "python": "python3", "env": {},
+        "container": {"image": "x"},
+        "cpu_memory_gb": 34, "box_memory_gb": 114}))
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+
+    def submit(demand):
+        return dispatch.main([
+            "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            *_scope_args(fixture),
+            "--spec", str(spec), "--demand", demand,
+            "--cpus", "6", "--tag", "gb10", "--dry-run",
+        ])
+
+    with pytest.raises(dispatch.DemandRefused, match="combined physical bound"):
+        submit("gpu=1,mem_gb=34")  # the cap charged as if it were the box
+    with pytest.raises(dispatch.DemandRefused, match="combined physical bound"):
+        submit("gpu=1,mem_gb=113")
+    with pytest.raises(dispatch.DemandRefused, match="reserves no mem_gb"):
+        submit("gpu=1")
+
+    assert submit("gpu=1,mem_gb=114") == 0
+    printed = capsys.readouterr().out
+    # The device envelope reaches PB as a *subset* cap, not as a second box.
+    assert "--gpu-memory-gb 80" in printed
+    assert "--demand gpu=1,mem_gb=114" in printed
+    summary = json.loads(printed[printed.index("{\n"):])
+    assert summary["resource_demand"] == {
+        "row": "prismaquant.tessera_joint_aura:prepare",
+        "demand": "gpu=1,mem_gb=114", "reserved_mem_gb": 114,
+        "bound_bytes": aggregate_bytes,
+        "bound_basis": "plan.aggregate_memory_bytes",
+        "gpu_memory_gb": 80,
+    }
 
 
 def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
@@ -1076,6 +1325,7 @@ def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
 
     dispatch.main([
         "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+        *_scope_args(fixture),
         "--spec", str(spec), "--demand", "gpu=1,mem_gb=104", "--cpus", "6",
         "--tag", "gb10", "--timeout-s", "86400",
         "--manifest-dir", str(scratch / "manifests"), "--dry-run",
@@ -1142,6 +1392,7 @@ def test_a_read_set_over_the_prismabuild_ceiling_is_refused_at_submit(
     with pytest.raises(SystemExit) as refusal:
         dispatch.main([
             "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            *_scope_args(fixture),
             "--spec", str(spec), "--demand", "gpu=1,mem_gb=104", "--cpus", "6",
             "--tag", "gb10", "--timeout-s", "86400",
             "--manifest-dir", str(scratch / "manifests"), "--dry-run",
@@ -1216,8 +1467,9 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases(scratch):
         cached = json.loads(source_cache.read_text())
         first = cached["fingerprints"][0]
         if first["device"] != Path(first["path"]).stat().st_dev:
-            pytest.skip("the full-source SHA cache is local to another mount "
-                        "device; this host cannot submit its reuse request")
+            pytest.skip("the full-source SHA cache was written through another "
+                        "mount instance; this host cannot submit its reuse "
+                        "request")
 
     manifest = glm_data_manifests.build_joint_pass_manifest(
         str(plan), command="prepare",
