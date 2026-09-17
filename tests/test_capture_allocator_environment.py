@@ -48,3 +48,21 @@ def test_legacy_manifest_keeps_explicit_allocator_environment():
     data['env']['MIMALLOC_PURGE_DELAY'] = '10'
     row = dispatch._row(data, ['--streaming-capture-policy', 'legacy'], mem_gb=104, timeout_s=60)
     assert row['env'] == data['env']
+
+
+def test_a_capture_policy_flag_with_no_value_is_not_bounded_and_does_not_crash():
+    """A malformed argv must not turn the bounded check into an ``IndexError``.
+
+    ``--streaming-capture-policy`` takes a value, and an argv that ends on the
+    flag has none to read. Reading the next element blindly crashed the
+    predicate instead of answering "not bounded", and one predicate has two
+    readers -- the row builder and container validation -- so the crash was
+    reachable from both. A crash is not the refusal a malformed flag deserves:
+    the launcher refuses it by name once the row actually runs.
+    """
+    data = spec()
+    data['env']['MIMALLOC_PURGE_DELAY'] = '10'
+    assert dispatch._row_is_bounded(['--streaming-capture-policy']) is False
+    row = dispatch._row(data, ['--streaming-capture-policy'], mem_gb=104, timeout_s=60)
+    # Not a bounded row, so the legacy purge delay the manifest states survives.
+    assert row['env']['MIMALLOC_PURGE_DELAY'] == '10'

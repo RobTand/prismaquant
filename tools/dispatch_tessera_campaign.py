@@ -860,9 +860,15 @@ def _row_is_bounded(argv: list[str]) -> bool:
     bounded row and is not refused for a contract it does not fall under.
     """
     policy_flag = '--streaming-capture-policy'
-    bounded = (policy_flag + '=shared-inputs-bounded-v1' in argv or
-               (policy_flag in argv and
-                argv[argv.index(policy_flag) + 1] == 'shared-inputs-bounded-v1'))
+    # ``--streaming-capture-policy`` takes a value, and a malformed argv that
+    # ends on the flag has no next element: reading it blindly raised
+    # IndexError, which is a crash rather than the refusal a malformed flag
+    # deserves. A flag with no value is not the bounded policy.
+    index = argv.index(policy_flag) if policy_flag in argv else None
+    named = (argv[index + 1] if index is not None and index + 1 < len(argv)
+             else None)
+    bounded = (policy_flag + '=shared-inputs-bounded-v1' in argv
+               or named == 'shared-inputs-bounded-v1')
     return bounded or all(flag in argv for flag in
         ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
 
