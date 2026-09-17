@@ -2449,12 +2449,13 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     head_grace = getattr(args, "head_grace_s", None) or 1800
     for name in progress_phases:
         # The allowance bounds an uncommitted unit, not an arbitrary number of
-        # logging lines. The first allowance also covers model construction.
-        # A RESUME walks the whole cell roster through _resolve_render_origin
-        # and commits nothing, because the producer only reports a cell it had
-        # to synthesize and every render already exists (#678). That pass is
-        # real work and it is measurable, so its allowance is a caller input
-        # sized from the observed rate rather than the fresh-run constant.
+        # logging lines. The head walk reports one unit per resolved anchor
+        # roster entry since #678, so the allowance no longer has to cover a
+        # silent pass over the whole roster. It still covers what stays
+        # unreported inside `head`: whole-source authentication and streamed
+        # model construction. Their cost is a property of the plan and the
+        # box, so the allowance stays a caller input rather than a constant
+        # sized from one run.
         argv += ["--progress-phase",
                  f"{name}={head_grace if name == 'head' else 900}"]
     argv += ["--data-manifest", str(manifest), "--detach", "--",

@@ -254,6 +254,11 @@ class MeasuredAnchorInput:
     # How many shards THIS read synthesized. Distinct from the per-origin
     # census, which counts what is on disk however it got there.
     synthesized_now: int = 0
+    # The cumulative count this read last reported to PrismaBuild, and zero
+    # when it reported nothing. The later stages continue from it rather than
+    # restarting, because a counter that goes backwards renews no allowance
+    # (RobTand/prismaquant#678).
+    progress_committed: int = 0
     # ``None`` when the checkpoint's recorded encoder source seal is the
     # installed package's own. Otherwise the explicit record that this read
     # verifies wire identities against a historical seal the plan named, with
@@ -319,6 +324,13 @@ def _render_mirror_path(render, mirror_root):
     """
     render = Path(render)
     return Path(mirror_root) / render.resolve().relative_to(Path(render.root))
+
+
+#: The phase the standalone synthesis stage declares (``--progress
+#: synthesize=<stall>``), and therefore the default a bare intake reports
+#: under. ``execute`` overrides it with the joint prepare's own ``head``:
+#: this loader spells no phase its caller has not declared.
+SYNTHESIS_PHASE = "synthesize"
 
 
 def _pb_commit(units, phase, unit=None):
@@ -439,7 +451,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                synthesis_device="cpu", unit_scope=None,
                                render_mirror_root=None, log_every=100,
                                require_existing_renders=False,
-                               historical_encoder_reuse=None):
+                               historical_encoder_reuse=None,
+                               progress_phase=SYNTHESIS_PHASE):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -494,6 +507,20 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     measured rate rather than rounded -- 100 shards is ~38 s there and ~16 s
     on the GPU, inside the two minutes a silent phase is a defect after.
 
+    ``progress_phase`` is the PrismaBuild phase this walk reports under, or
+    ``None`` to report nothing. The count is **units resolved**, committed
+    after each unit's journal shard has been read and authenticated and every
+    one of its cells has a proven render origin -- not only after a shard this
+    walk had to write. A resume writes nothing, so the old synthesis-only
+    report left the whole walk silent and the watchdog reaped an action that
+    was demonstrably working (RobTand/prismaquant#678); the same silence hit a
+    retried synthesis row whose range was already complete. The unit is the
+    boundary every other loop in this file commits on -- the journal shard,
+    the replay part -- so the run's counter has one currency throughout, and
+    this census reports 36,423 times rather than 197,990. The caller names the
+    phase because only it knows what its submission declared: a name outside
+    the declared set grants no continuation.
+
     ``historical_encoder_reuse`` is the plan's explicit allowance for a
     recorded encoder source seal the installed package cannot re-derive. The
     checkpoint's recorded digest is compared against the installed package's
@@ -517,6 +544,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _require(type(file_hash_workers) is int and file_hash_workers > 0,
              "positive file_hash_workers required")
     _require(type(log_every) is int and log_every >= 0, "non-negative log_every required")
+    _require(progress_phase is None or (type(progress_phase) is str and progress_phase),
+             "progress_phase must be a declared phase name or None")
     _require(type(require_existing_renders) is bool, "require_existing_renders must be boolean")
     # Hashing only part of a roster does not verify that roster, so the two
     # options are refused together rather than quietly producing a record
@@ -604,7 +633,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         _require(type(low) is int and type(high) is int and 0 <= low < high <= len(roster),
                  f"unit scope {unit_scope} is outside the {len(roster)}-unit census roster")
         roster = roster[low:high]
-    synthesized, started = 0, time.time()
+    resolved, synthesized, started = 0, 0, time.time()
     for name in roster:
         state = _load_unit(unit_path(parts, name), stage=STAGE, qname=name, identity_sha256=seal)
         _require(isinstance(state, dict) and set(state) - {"unservable"} == {"anchors", "wire_records"},
@@ -668,19 +697,23 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                   else {"campaign_render": str(render.resolve())})}
             if not present:
                 synthesized += 1
-                # After the shard is durable, never on entering the loop.
-                _pb_commit(synthesized, "synthesize", unit=f"{name}@{fmt}")
                 if log_every and synthesized % log_every == 0:
                     elapsed = max(time.time() - started, 1e-9)
                     print(f"tessera_joint_aura: synthesized {synthesized} renders "
                           f"in {elapsed:.0f}s ({synthesized / elapsed:.2f} cells/s), "
                           f"at {name}@{fmt}", flush=True)
         formats[name] = (*sorted(anchors), "BF16")
+        resolved += 1
+        # After the unit's shards are durable and its origins proven, never on
+        # entering the loop.
+        if progress_phase is not None:
+            _pb_commit(resolved, progress_phase, unit=name)
     if log_every and synthesized:
         elapsed = max(time.time() - started, 1e-9)
         print(f"tessera_joint_aura: synthesized {synthesized} renders in {elapsed:.0f}s "
               f"({synthesized / elapsed:.2f} cells/s) on {synthesis_device}", flush=True)
     scoped = dict(unit_scope=unit_scope, synthesized_now=synthesized,
+                  progress_committed=(0 if progress_phase is None else resolved),
                   render_mirror_root=None if render_mirror_root is None else str(render_mirror_root))
     if not verify_payloads:
         return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
@@ -933,8 +966,19 @@ def _qualification_replay(data, manifest, completed, *, sealed=None, committed=0
     against this journal before the first read, so a part is announced exactly
     when the action reaches its first unit -- with the bytes in front of it
     already read -- and the count advances only after a unit's own reads finish.
+
+    ``committed`` is where the run's counter already stands -- the head walk's
+    resolved units -- because a count that restarts at zero here would go
+    backwards and renew no allowance (RobTand/prismaquant#678).
+
+    Without ``sealed`` this walk reports nothing, and that is not an oversight
+    it can repair: ``prepare_cache`` refuses a resumed pass that carries sealed
+    phases without its sealed frontier, so an unsealed replay only happens when
+    the submission declared no phases at all -- there is no name to report
+    under and no watchdog listening.
     """
     from .perturbed_x_cache import activation_cache_filename
+    from .joint_prewarm_phases import HEAD_PHASE
     from .joint_replay_frontier import (
         PHASE_START_UNITS_KEY, ROSTER_KEY)
 
@@ -945,7 +989,7 @@ def _qualification_replay(data, manifest, completed, *, sealed=None, committed=0
     order = sorted(completed) if sealed is None else list(sealed[ROSTER_KEY])
     starts = None if sealed is None else sealed[PHASE_START_UNITS_KEY]
     verified = {}
-    current = "head"
+    current = HEAD_PHASE
     for index, name in enumerate(order):
         if starts is not None and starts[name] != current:
             # The previous part is read to its end, so everything in front of
@@ -1035,24 +1079,31 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                   qualification_guard=None, qualification_journal=None,
                   qualification_resume=False, qualification_identity=None,
                   prewarm_phase_starts=None, sealed_replay=None,
-                  prewarm_phases=None):
+                  prewarm_phases=None, progress_base=0):
     """Qualify original per-layer inputs and return the existing PWC object.
 
     Only the original calibration/PWC/source prefetch mechanisms own tensors.
     PWC's LRU records absolute donor paths so compact/release stays reversible
     even though the merged renders have more than one original directory.
+
+    ``progress_base`` is the cumulative count the caller's earlier stages have
+    already reported -- the measured anchor intake's resolved units. Replay and
+    the layer walk continue from it, so the run's counter is monotone across
+    every phase it declares (RobTand/prismaquant#678).
     """
     import torch
     from contextlib import nullcontext
     from . import tessera_calibration_cache as cc, tessera_hessian as th, tessera_campaign as tc
     from .joint_aura import activation_identity, prefetch_joint_cache
-    from .joint_prewarm_phases import phase_name
+    from .joint_prewarm_phases import HEAD_PHASE, phase_name
     from .memory_management import reserve_allocation
     from .production_weight_cache import ProductionWeightCache
     from .routed_experts import PackedExpertProjection, refresh_packed_expert_projections
     from . import format_registry as fr
 
     _require(type(max_render_bytes) is int and max_render_bytes > 0, "positive PWC residency budget required")
+    _require(type(progress_base) is int and progress_base >= 0,
+             "progress_base must be the non-negative count the run already reported")
     policy = normalize_qualification_window(qualification_window)
     from .perturbed_x_cache import normalize_verified_activation_load
     capture_load_policy = normalize_verified_activation_load(capture_load_policy)
@@ -1135,7 +1186,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                      "the run reads anything")
         if completed:
             replayed = _qualification_replay(data, manifest, completed,
-                                             sealed=sealed_replay)
+                                             sealed=sealed_replay,
+                                             committed=progress_base)
         else:
             replayed = {}
     _require(prewarm_phase_starts is None or journal is not None,
@@ -1170,8 +1222,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     renders = {name: tuple(fmt for fmt in fmts if fmt != "BF16")
                for name, fmts in data.formats_by_qname.items()}
     verified, telemetry = replayed if completed else {}, []
-    committed_units = len(completed)
-    current_prewarm_phase = "head"
+    committed_units = progress_base + len(completed)
+    current_prewarm_phase = HEAD_PHASE
 
     def layer_phase(layer, walk_names):
         """The sealed phase this layer's reads belong to, or ``None``.
@@ -1697,6 +1749,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache
     from .gpu_guard import require_cuda_hot_path
+    from .joint_prewarm_phases import HEAD_PHASE
     from .tessera_reader import load_declared_reader
 
     require_cuda_hot_path("tessera_joint_aura", "cuda")
@@ -1820,8 +1873,13 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         # above), so any shard it still has to synthesize decodes on that
         # device rather than on one CPU core beside an idle GPU. The standalone
         # ``synthesize`` stage normally leaves nothing to do here.
+        # The head walk reports under the one phase every joint prepare
+        # manifest declares. A COST run's counter belongs to its own read
+        # schedule, so intake there reports nothing rather than under a name
+        # that schedule did not declare.
         data = load_measured_anchor_input(config["inputs"], reader=reader,
             synthesis_device="cuda",
+            progress_phase=(HEAD_PHASE if command == "prepare" else None),
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
             **({} if config.get("historical_encoder_reuse") is None else
                {"historical_encoder_reuse": config["historical_encoder_reuse"]}),
@@ -1912,6 +1970,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                                   prewarm_phase_starts=prewarm_phase_starts,
                                   sealed_replay=sealed_replay,
                                   prewarm_phases=prewarm_phases,
+                                  progress_base=data.progress_committed,
                                   qualification_identity={
                                       'plan_sha256': plan_sha256,
                                       'source_model_identity': source,
