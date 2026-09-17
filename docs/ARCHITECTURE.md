@@ -1,7 +1,45 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-16 · `campaign/aqua-campaign-caller-20260916`. Stamps
+As of: 2026-09-16 · `campaign/joint-prepare-pilot-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-16, `campaign/joint-prepare-pilot-20260916`) for **the
+bounded row holding two budgets, not one**. A bounded joint row is 21 GiB of
+enforced CPU cap (the spec's `cpu_memory_gb`, passed as `docker --memory` and
+`--memory-swap`), 80 GiB of device envelope (the plan's `max_gpu_bytes`) and a
+101 GiB aggregate PrismaBuild reservation, which is their sum. `CaptureMemoryGuard`
+added the entire CUDA reservation to the cgroup charge and compared the sum with
+the smallest limit it could see, so a row holding 80 GiB of device residency
+beside a 21 GiB CPU cap refused at construction -- its own arithmetic, not a
+physical bound, rejected every row of this shape. The guard now takes an
+optional `device_bytes` envelope and, when one is declared, holds three
+separate refusals: the cgroup's accounted bytes against `cap - MARGIN_BYTES`,
+`torch.cuda.memory_reserved` against the envelope, and the host's available
+memory against `host_floor_bytes` (minimum `MIN_HOST_FLOOR_BYTES`, 3 GiB; the
+bounded capture path uses 8 GiB). Without `device_bytes` the conservative
+unchanged predicate stays, so every existing caller keeps its arithmetic. The
+device side is enforced, not reported:
+`memory_management.enforce_device_envelope` calls
+`torch.cuda.set_per_process_memory_fraction` with the plan's budget over the
+device's own reported total, and the joint prepare path calls it before the
+streamed runner is built, so `max_gpu_bytes` bounds the allocator instead of
+being compared with `max_memory_allocated` after the window has closed.
+PrismaBuild's own `--gpu-memory-gb` is admission accounting against device
+capacity -- verified by inspection, not assumed: no PrismaBuild runtime path
+sets `PYTORCH_CUDA_ALLOC_CONF`, `set_per_process_memory_fraction` or an MPS
+limit in the action's environment -- so the process-level bound is the one
+above and is not a second cap over an existing one. The bounded capture
+environment (`PRISMAQUANT_RELEASE_SOURCE_PAGES=1`, `MIMALLOC_PURGE_DELAY=0`) is
+supplied by `tools/tessera_campaign_container.py` the way `PYTHONSAFEPATH` is,
+because the producer image bakes in neither name and
+`require_bounded_capture_environment` runs at the pass's first bounded step --
+minutes into the loader, where a missing name is a dead pilot rather than a
+refusal. The launcher's copy is compared against
+`prismaquant.autoscale.BOUNDED_CAPTURE_ENV` by test, and a spec that declares a
+contradicting value is refused rather than overridden. Gates:
+`tests/test_capture_memory_guard.py`,
+`tests/test_tessera_campaign_container.py`,
+`tools/joint_prepare_startup_probe.py`.
 
 Re-stamped (2026-09-16, `campaign/aqua-campaign-caller-20260916`) for **the
 campaign's A-side being a submitted stage** (§11; #655). The stage existed and

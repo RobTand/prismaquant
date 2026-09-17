@@ -1558,9 +1558,21 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         if command == "prepare":
             if config.get("qualification_window") is not None:
                 from .autoscale import require_bounded_capture_environment
-                from .memory_management import CaptureMemoryGuard
+                from .memory_management import (
+                    CaptureMemoryGuard, enforce_device_envelope)
                 require_bounded_capture_environment(os.environ)
-                qualification_guard = CaptureMemoryGuard("cuda")
+                # TWO BUDGETS, TWO ENFORCEMENTS. The cgroup cap the spec declares
+                # is a CPU-accounted hard limit; the plan's ``max_gpu_bytes`` is
+                # the device envelope, and until this call it was only compared
+                # with ``max_memory_allocated`` after the run. The guard holds
+                # the first, this cap holds the second, and the aggregate the
+                # submission reserved from PrismaBuild is their sum -- so a row
+                # that holds 80 GiB of device residency beside a 21 GiB CPU cap
+                # is bounded rather than refused by its own arithmetic.
+                result["device_envelope"] = enforce_device_envelope(
+                    "cuda", config["max_gpu_bytes"], where="joint prepare")
+                qualification_guard = CaptureMemoryGuard(
+                    "cuda", device_bytes=config["max_gpu_bytes"])
                 qualification_guard.check("before_joint_source_authentication")
             source_authentication = _prepare_source_owner(
                 config, data, resource_check=(None if qualification_guard is None

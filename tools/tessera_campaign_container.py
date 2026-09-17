@@ -37,6 +37,32 @@ TOKEN_ENV = "PRISMABUILD_ACTION_PROGRESS_TOKEN"
 SAFE_PATH_ENV = "PYTHONSAFEPATH"
 
 
+#: The environment a bounded capture row's process must have been started with,
+#: per ``prismaquant/autoscale.py``: torch wheels may statically link mimalloc,
+#: whose delayed purge otherwise retains completed H/X after every owner is
+#: gone, and the release-source-pages policy is the other half of the same
+#: bounded phase plan. ``prismaquant.tessera_joint_aura`` calls
+#: ``require_bounded_capture_environment`` at its first bounded step, which is
+#: well into the loader on this campaign -- so a spec that omits a name is not a
+#: late refusal, it is a dead pilot.
+#:
+#: Carried here for the same reason as ``PATH_ENV`` and ``SAFE_PATH_ENV``:
+#: importing ``prismaquant`` on the worker to read the contract runs the
+#: package's production initialisation before the qualified container starts
+#: (#601), and this adapter is host-side. The two constants are held together by
+#: ``tests/test_tessera_campaign_container.py``, which imports both and fails if
+#: they drift -- a second copy is only a defect when nothing compares them.
+#:
+#: The launcher SUPPLIES these rather than requiring the spec to restate them,
+#: and refuses a spec that declares a different value. A bounded row cannot
+#: start without them, and refusing a sealed spec for omitting one would turn a
+#: fixable launch into a re-seal.
+BOUNDED_CAPTURE_ENV = {
+    "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
+    "MIMALLOC_PURGE_DELAY": "0",
+}
+
+
 #: How a container reaches the GPU it was admitted for, per GPU runtime.
 #:
 #: ``--gpus all`` is the NVIDIA container runtime's flag and nothing else's. A
@@ -156,6 +182,17 @@ def validate_container(spec: dict) -> None:
         raise RuntimeError('actual container content is supplied by the inspected launcher')
     if SAFE_PATH_ENV in env:
         raise RuntimeError('the import guard is supplied by the launcher, not by a spec')
+    for name, expected in BOUNDED_CAPTURE_ENV.items():
+        # Declaring it is optional -- the launcher supplies it -- but a spec may
+        # not weaken it, and the refusal names the field so a reader of the spec
+        # does not have to diff the container's environment to find out.
+        if name in env and env[name] != expected:
+            raise RuntimeError(
+                f"spec env {name}={env[name]!r} contradicts the bounded capture "
+                f"contract ({name}={expected!r}); the launcher would have to "
+                "override the spec to run the row, and a bounded row that starts "
+                "with the wrong value is refused by the pass long after the "
+                "loader has read the model")
 
 
 def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
@@ -417,6 +454,7 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
             value += ",readonly"
         argv += ["--mount", value]
     forwarded = {SAFE_PATH_ENV: "1", **spec.get("env", {}),
+                 **BOUNDED_CAPTURE_ENV,
                  **progress_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
