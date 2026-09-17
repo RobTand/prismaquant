@@ -1,7 +1,40 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-16 · `campaign/aqua-campaign-caller-20260916`. Stamps
+As of: 2026-09-17 · `campaign/identity-and-coverage-main-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `campaign/identity-and-coverage-main-20260916`) for
+**a joint AURA row being only its own cell**. The per-cell AQUA coverage
+requirement counts cells by their `(unit, format)` key, and
+`cost_entry_is_joint_aura` validates a row *internally*: its currency, its
+Fisher application count, and that its operator and probe digests match the
+objects they name. All of that is true of a row correctly produced for one
+Linear when it is read under another, so a valid row copied, mis-merged or
+re-keyed onto a different cell counted as that cell's activation term while the
+cell itself kept a weight-only cost -- and the fulfilled-artifact shortcut
+(`submit-aqua` queues nothing when every requested cell is already joint-priced)
+would report the campaign satisfied on it.
+`allocator_candidates.joint_row_binds_cell` is the shared predicate that
+compares the row's operator identity with the key it was found under; the
+dispatcher's requested-roster gate and the AQUA stage's own "already priced"
+set both read it, so the two cannot disagree about which cells carry an
+A-side. A joint row that does not name its own key is a refusal
+(`JointCellCoordinateError`, distinct from the malformed-row failure so
+instructions that turn one into a refusal leave the other alone), not a row to
+skip quietly.
+
+A joint-priced cell the plan's own bound cost table never priced refuses as
+well. Such a row is bound to the coordinate it names and to nothing else -- it
+was never compared with this campaign's draw, capture or candidate menu -- so
+an artifact from a pass over a wider roster would present prices this campaign
+never priced beside the plan's table.
+`submit-aqua --accept-joint-cells-outside-plan` is the explicit reuse path for
+an artifact sealed against an older roster, and the record it produces
+(`joint_cells_outside_plan_accepted_unverified`) travels in the skip summary and
+in the sealed manifest's `campaign_scope` annotation, so the reuse is recorded
+rather than silent. Gates: `tests/test_aqua_campaign_submit.py`,
+`tests/test_joint_aura_allocator_currency.py`,
+`tests/test_aqua_per_expert_checkpoint.py`.
 
 Re-stamped (2026-09-16, `campaign/aqua-campaign-caller-20260916`) for **the
 campaign's A-side being a submitted stage** (§11; #655). The stage existed and

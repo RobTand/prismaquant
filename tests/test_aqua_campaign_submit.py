@@ -25,6 +25,13 @@ What these tests pin:
 * a payload whose every requested cell is already joint-priced is not
   submitted at all: the requirement is satisfied by that artifact, and queuing
   a stage to add nothing is redundant GPU work;
+* a joint row is only its own cell. A row carries the activation term of the
+  operator it measured, so a valid row donated from another unit or another
+  rung refuses instead of reporting coverage for the cell it landed on -- and
+  a joint-priced cell the plan's own table never priced refuses too, because
+  a row bound to its own coordinate is still not bound to *this* campaign's
+  draw, capture and candidate menu. Reusing such an artifact is explicit,
+  ``--accept-joint-cells-outside-plan``, and recorded as unverified;
 * the declared read set is the model's own unit extents plus the card, the
   payload and the plan -- the same shared-mount bytes the stage opens;
 * ``--cost-out`` may not already exist, because the stage writes it with a
@@ -87,6 +94,31 @@ def _cost_payload(names: list, *, formats=MEASURED) -> dict:
     return {"provenance": {},
             "costs": {name: {fmt: {"predicted_dloss": 0.1, "output_mse": 0.2}
                              for fmt in formats} for name in names}}
+
+
+def _joint_row(name: str, fmt: str, *, produced_for=None) -> dict:
+    """A joint-shaped row whose operator identity names a cell.
+
+    ``cost_entry_is_joint_aura`` is stubbed in these tests -- the real
+    predicate is exercised against a measured joint table in
+    ``test_joint_aura_allocator_currency`` -- so what this row has to carry is
+    the coordinate the coverage decision compares. ``produced_for`` is how a
+    test donates a row: it is the cell the row claims, which is not the cell it
+    will be found under.
+    """
+    qname, format_name = produced_for or (name, fmt)
+    return {"predicted_dloss": 0.1,
+            "joint_operator_identity": {"qname": qname, "format": format_name}}
+
+
+@pytest.fixture()
+def joint_row_is_joint(monkeypatch):
+    """The stub: anything carrying a joint operator identity is a joint row."""
+    from prismaquant import allocator_candidates
+
+    monkeypatch.setattr(allocator_candidates, "cost_entry_is_joint_aura",
+                        lambda entry: "joint_operator_identity" in entry)
+    return allocator_candidates
 
 
 def _workspace(scratch: Path) -> dict:
@@ -399,18 +431,148 @@ def test_formats_must_name_the_menu_the_payload_carries(campaign):
     assert MEASURED[1] in message
 
 
-def test_an_all_joint_payload_is_not_submitted(campaign, capsys, monkeypatch):
-    """A fulfilled artifact is the answer, not a GPU window that adds nothing."""
-    from prismaquant import allocator_candidates
+def test_a_joint_row_donated_from_another_unit_refuses(campaign, joint_row_is_joint):
+    """A valid row under the wrong key is not this cell's A-side.
 
-    monkeypatch.setattr(allocator_candidates, "cost_entry_is_joint_aura",
-                        lambda entry: True)
+    Every internal check passes: the row is a joint row and its operator
+    identity names a real cell. It names a *different* cell, which is exactly
+    what a copied, mis-merged or re-keyed row looks like, and the cell it
+    landed on would otherwise be reported as covered while carrying no
+    activation term of its own.
+    """
+    names = campaign["names"]
+    payload = _cost_payload(names)
+    payload["costs"][names[0]][MEASURED[0]] = _joint_row(
+        names[0], MEASURED[0], produced_for=(names[1], MEASURED[0]))
+    campaign["cost_in"].write_bytes(pickle.dumps(payload))
+    with pytest.raises(RuntimeError) as refused:
+        submit_aqua(campaign, "--dry-run")
+    message = str(refused.value)
+    assert "produced for" in message
+    assert names[1] in message
+
+
+def test_a_joint_row_donated_from_another_rung_refuses(campaign, joint_row_is_joint):
+    """The same, one rung over: the coordinate is the pair, not the unit."""
+    names = campaign["names"]
+    payload = _cost_payload(names)
+    payload["costs"][names[0]][MEASURED[0]] = _joint_row(
+        names[0], MEASURED[0], produced_for=(names[0], MEASURED[1]))
+    campaign["cost_in"].write_bytes(pickle.dumps(payload))
+    with pytest.raises(RuntimeError) as refused:
+        submit_aqua(campaign, "--dry-run")
+    assert MEASURED[1] in str(refused.value)
+
+
+def test_a_joint_cell_the_plan_never_priced_refuses_or_is_recorded_unverified(
+        campaign, joint_row_is_joint):
+    """Self-consistent is not the same as bound to *this* plan.
+
+    The row names its own cell, so it cannot hide a hole -- but nothing in it
+    was compared with the plan's draw, capture or candidate menu. An artifact
+    from a pass over a wider roster would therefore present prices this
+    campaign never priced beside the plan's own table. By default that
+    refuses; the explicit flag reuses it and says so in the record.
+    """
+    import dispatch_tessera_campaign as dispatch
+
+    names = campaign["names"]
+    payload = _cost_payload(names)
+    payload["costs"][names[0]]["FP8_UNPLANNED"] = _joint_row(
+        names[0], "FP8_UNPLANNED")
+    campaign["cost_in"].write_bytes(pickle.dumps(payload))
+    with pytest.raises(RuntimeError) as refused:
+        submit_aqua(campaign, "--dry-run")
+    message = str(refused.value)
+    assert "never priced" in message and "FP8_UNPLANNED" in message
+
+    record, cells = dispatch.aqua_requested_cells(
+        json.loads(campaign["plan"].read_text()), payload, list(MEASURED),
+        accept_joint_cells_outside_plan=True)
+    assert record["joint_cells_outside_plan"] == 1
+    assert record["joint_cells_outside_plan_accepted_unverified"] is True
+    # The unplanned cell is not part of the requested roster either way.
+    assert not any(fmt == "FP8_UNPLANNED" for _, fmt in cells)
+    # And the flag is what makes the submission reach a stage at all.
+    assert submit_aqua(campaign, "--dry-run",
+                       "--accept-joint-cells-outside-plan") == 0
+
+
+def test_an_all_joint_payload_is_not_submitted(campaign, capsys, joint_row_is_joint):
+    """A fulfilled artifact is the answer, not a GPU window that adds nothing."""
+    names = campaign["names"]
+    campaign["cost_in"].write_bytes(pickle.dumps({
+        "provenance": {},
+        "costs": {name: {fmt: _joint_row(name, fmt) for fmt in MEASURED}
+                  for name in names}}))
     assert submit_aqua(campaign, "--dry-run") == 0
     printed = capsys.readouterr().out
     assert "[dry-run]" not in printed
     summary = json.loads(printed)
     assert summary["submitted"] is False
     assert "joint A-side" in summary["reason"]
+    # The record, not a flattened subset: a caller reading only the counts
+    # cannot tell an artifact the plan priced from one carrying more.
+    assert summary["requested_roster"]["joint_cells_outside_plan"] == 0
+    assert summary["requested_roster"]["joint_cells_outside_plan_accepted_unverified"] is False
+
+
+def test_the_shortcut_cannot_report_a_satisfied_artifact_that_reused_extras(
+        campaign, capsys, joint_row_is_joint):
+    """Every requested cell joint AND an unplanned joint cell, explicitly kept.
+
+    This is the case the shortcut must not launder: the run is genuinely
+    fulfilled *and* the artifact holds a joint-priced cell the plan never
+    priced, reused only because the caller asked for that. The skip summary has
+    to say both, because it is the only record the operator sees -- no stage is
+    queued, so there is no receipt to read afterwards.
+    """
+    names = campaign["names"]
+    costs = {name: {fmt: _joint_row(name, fmt) for fmt in MEASURED}
+             for name in names}
+    costs[names[0]]["FP8_UNPLANNED"] = _joint_row(names[0], "FP8_UNPLANNED")
+    campaign["cost_in"].write_bytes(pickle.dumps({"provenance": {},
+                                                  "costs": costs}))
+    assert submit_aqua(campaign, "--dry-run",
+                       "--accept-joint-cells-outside-plan") == 0
+    printed = capsys.readouterr().out
+    assert "[dry-run]" not in printed
+    summary = json.loads(printed)
+    assert summary["submitted"] is False
+    assert summary["joint_cells_already_priced"] == len(MEASURED) * len(names)
+    roster = summary["requested_roster"]
+    assert roster["joint_cells_outside_plan"] == 1
+    assert roster["joint_cells_outside_plan_accepted_unverified"] is True
+
+
+def test_the_submitted_summary_carries_the_unverified_reuse(
+        campaign, capsys, joint_row_is_joint):
+    """The stage path states it too: a submission is not a quieter record.
+
+    Here one requested cell is still weight-only, so a stage IS queued -- and
+    the reuse decision has to be visible on that path as well, in the same
+    record (which the submission also folds into the sealed manifest's
+    ``campaign_scope`` annotation, so it enters the action key).
+    """
+    names = campaign["names"]
+    payload = _cost_payload(names)
+    payload["costs"][names[0]][MEASURED[0]] = _joint_row(names[0], MEASURED[0])
+    payload["costs"][names[0]]["FP8_UNPLANNED"] = _joint_row(
+        names[0], "FP8_UNPLANNED")
+    campaign["cost_in"].write_bytes(pickle.dumps(payload))
+    assert submit_aqua(campaign, "--dry-run",
+                       "--accept-joint-cells-outside-plan") == 0
+    printed = capsys.readouterr().out
+    command = next(line for line in printed.splitlines()
+                   if line.startswith("[dry-run] "))
+    assert "--require-complete-coverage" in command
+    summary = json.loads(printed[printed.index("{"):])
+    roster = summary["requested_roster"]
+    assert roster["joint_cells_outside_plan"] == 1
+    assert roster["joint_cells_outside_plan_accepted_unverified"] is True
+    assert summary["campaign_scope"]["joint_cells_outside_plan"] == 1
+    assert (summary["campaign_scope"]
+            ["joint_cells_outside_plan_accepted_unverified"] is True)
 
 
 def test_an_existing_cost_out_refuses(campaign):

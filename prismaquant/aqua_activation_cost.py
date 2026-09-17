@@ -75,7 +75,8 @@ import time
 
 import numpy as np
 
-from .allocator_candidates import ACT_DLOSS_KEY, cost_entry_is_joint_aura
+from .allocator_candidates import (
+    ACT_DLOSS_KEY, cost_entry_is_joint_aura, joint_row_binds_cell)
 
 #: Return the CUDA pool to the OS once it has reserved this much. On GB10's
 #: UNIFIED memory a reserved CUDA block IS host RAM, so it competes with the
@@ -1117,10 +1118,15 @@ def main() -> int:
     log(f"cost artifact: {len(costs)} units, formats {formats}")
 
     # Validate the joint rows ONCE, here, and hand the stage the exact CELLS
-    # they already price. `cost_entry_is_joint_aura` is the same predicate the
-    # allocator and the merger use, and it RAISES on a row that claims a joint
-    # currency without carrying one -- so malformed joint evidence stops the run
-    # before any A-side is computed for a cell that should not get one. The
+    # they already price. `joint_row_binds_cell` is `cost_entry_is_joint_aura`
+    # plus the one comparison the internal check cannot make: the row's own
+    # operator coordinate against the key it was found under. Both halves are
+    # needed here for the same reason. The internal check RAISES on a row that
+    # claims a joint currency without carrying one, so malformed joint evidence
+    # stops the run before an A-side is computed for a cell that should not get
+    # one; the coordinate check is what keeps a *valid* row produced for another
+    # Linear from being read as this cell's A-side, which would leave the cell
+    # weight-only while the coverage set below said it was covered. The
     # selection is per (unit, format), so a mixed artifact prices exactly its
     # legacy cells.
     already: set[tuple[str, str]] = set()
@@ -1128,7 +1134,14 @@ def main() -> int:
         if not isinstance(entry, dict):
             continue
         for fmt, row in entry.items():
-            if isinstance(row, dict) and cost_entry_is_joint_aura(row):
+            if not isinstance(row, dict):
+                continue
+            try:
+                binds = joint_row_binds_cell(
+                    row, name, fmt, where=f"{args.cost_in}: {name}@{fmt}")
+            except ValueError as error:
+                raise SystemExit(f"REFUSE: {error}") from error
+            if binds:
                 already.add((name, fmt))
     if already:
         log(f"joint AURA coverage: {len(already)} (unit, format) cells already "

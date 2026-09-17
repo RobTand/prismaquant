@@ -1204,8 +1204,47 @@ def verify_joint_campaign_scope(plan: dict, *, require_scope: str,
     return scope
 
 
+def _joint_row_binds_cell(row: dict, name: str, fmt: str, *, label: str) -> bool:
+    """Whether this row is a joint A-side **for this cell**.
+
+    The predicate itself is the shared one
+    (:func:`prismaquant.allocator_candidates.joint_row_binds_cell`) so that the
+    submission-time gate and the stage that computes coverage cannot drift; the
+    only thing added here is this tool's own refusal type and label.
+    """
+    from prismaquant.allocator_candidates import joint_row_binds_cell
+
+    try:
+        return joint_row_binds_cell(row, name, fmt, where=label)
+    except ValueError as error:
+        raise ScopeRefused(str(error)) from error
+
+
+def _bound_joint_cells(costs: dict, *, label: str) -> set:
+    """The ``(unit, format)`` cells whose own joint A-side is bound to them.
+
+    One walk, one answer, for both readers of "this artifact already carries an
+    activation term at this cell": the coverage roster below, and ``submit-aqua``
+    deciding whether a stage would add anything. A row that does not bind its own
+    key is a refusal here rather than a cell either reader may count, so the two
+    cannot disagree about which cells are covered.
+    """
+    bound: set = set()
+    for name, entry in costs.items():
+        if not isinstance(entry, dict):
+            continue
+        for fmt, row in entry.items():
+            if not isinstance(row, dict):
+                continue
+            if _joint_row_binds_cell(row, name, fmt, label=label):
+                bound.add((name, fmt))
+    return bound
+
+
 def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
-                         *, label: str = "aqua row") -> "tuple[dict, frozenset]":
+                         *, label: str = "aqua row",
+                         accept_joint_cells_outside_plan: bool = False,
+                         ) -> "tuple[dict, frozenset]":
     """The exact ``(unit, format)`` roster AQUA is asked to price, from the plan.
 
     Returns ``(record, cells)``. ``cells`` is the requested roster itself; the
@@ -1235,13 +1274,22 @@ def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
     Extra cells are read the same way round. A cell the plan never priced that
     is *not* already joint-priced would be priced by this stage, which makes the
     gate stricter rather than narrower -- but it is still a row the campaign's
-    own table does not have, so it refuses. A cell the plan never priced that
-    already carries its own joint A-side is a joint pass's addition: it cannot
-    hide a hole, because it brings the price the hole is about.
+    own table does not have, so it refuses.
+
+    A cell the plan never priced that already carries its own joint A-side is a
+    joint pass's addition. Being joint-priced is not by itself evidence that the
+    row belongs to *this* plan: the row is internally valid and its own cell is
+    the one it names, but nothing in it was compared with the plan's draw, its
+    capture or its candidate menu, so a pass over a wider roster would place
+    prices this campaign never priced beside the plan's own table and the
+    artifact would read as the plan's surface. It refuses, naming the re-seal
+    instead, unless the caller passes
+    ``accept_joint_cells_outside_plan`` -- which is how an operator reusing an
+    artifact sealed against an older roster keeps that reuse explicit and
+    recorded as unverified rather than silent. A row whose operator coordinate
+    is not the key it was found under is a refusal either way.
     """
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-
-    from prismaquant.allocator_candidates import cost_entry_is_joint_aura
 
     census = _bound_json(plan, "census", label=label)
     roster = census.get("unit_shapes")
@@ -1258,6 +1306,10 @@ def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
     costs = payload.get("costs")
     if not isinstance(costs, dict) or not costs:
         raise ScopeRefused(f"{label}: the cost artifact carries no 'costs' table")
+    # One walk, before anything is counted: every joint row has to be its own
+    # cell. A row that is not raises here, so no later reader sees a set with a
+    # row whose coordinate this function never checked.
+    bound_joints = _bound_joint_cells(costs, label=f"{label} cost artifact")
     # The unit roster is checked on BOTH tables against the plan's bound census.
     # A unit the plan priced and the artifact lacks would leave the campaign
     # short an A-side while reading as complete; a unit the artifact carries
@@ -1311,11 +1363,25 @@ def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
                 f"{name}@<entry empty>" if not carried else f"{name}@{gone[0]}")
         outside = carried - expected
         invented = []
+        outside_joints = []
         for fmt in sorted(outside):
-            if cost_entry_is_joint_aura(entry[fmt]):
+            if (name, fmt) in bound_joints:
+                outside_joints.append(fmt)
                 joint_extra += 1
             else:
                 invented.append(fmt)
+        if outside_joints and not accept_joint_cells_outside_plan:
+            joints = ", ".join(f"{name}@{fmt}" for fmt in outside_joints[:5])
+            raise ScopeRefused(
+                f"{label}: the cost artifact carries {len(outside_joints)} "
+                f"joint-priced cell(s) the plan's own cost table never priced "
+                f"(e.g. {joints}). A joint row is bound to the coordinate it "
+                "names and to nothing else -- it is not compared with this "
+                "plan's draw, capture or candidate menu -- so a pass over a "
+                "wider roster would place this campaign's table beside prices "
+                "it never priced. Seal a requested roster that names them, or "
+                "pass --accept-joint-cells-outside-plan to reuse the artifact "
+                "as unverified.")
         if invented:
             extra_total += len(invented)
             units_extra.append(f"{name}@{invented[0]}")
@@ -1350,10 +1416,14 @@ def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
               "requested_units": len(roster),
               "formats": sorted(wanted),
               # Joint rows a joint pass added beyond the plan's own table. They
-              # are not part of the requested roster -- they carry their own
-              # A-side -- and are reported so that an artifact with more cells
-              # than the plan priced is visible rather than silently accepted.
+              # are not part of the requested roster, and they are accepted only
+              # when the caller asked for that reuse explicitly: the flag is
+              # recorded here so an artifact holding cells this campaign never
+              # priced carries that fact into every receipt that stamps this
+              # record rather than reading as the plan's own surface.
               "joint_cells_outside_plan": joint_extra,
+              "joint_cells_outside_plan_accepted_unverified": bool(
+                  joint_extra and accept_joint_cells_outside_plan),
               "roster_sha256": canonical_json_sha256(
                   {"units": sorted(roster), "cells": sorted(cells)},
                   where=f"{label} requested roster")}
@@ -2558,8 +2628,6 @@ def cmd_submit_aqua(args) -> int:
     artifact, not a nearly-empty run: nothing is submitted and the caller is
     told which payload already carries the A-side.
     """
-    from prismaquant.allocator_candidates import cost_entry_is_joint_aura
-
     producer = _manifest_producer()
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
@@ -2602,12 +2670,13 @@ def cmd_submit_aqua(args) -> int:
     with cost_in.open("rb") as handle:
         payload = pickle.load(handle)
     roster, requested = aqua_requested_cells(
-        plan, payload, formats, label=f"aqua: {plan_path.name}")
+        plan, payload, formats, label=f"aqua: {plan_path.name}",
+        accept_joint_cells_outside_plan=args.accept_joint_cells_outside_plan)
     costs = payload["costs"]
-    joint_cells = {(name, fmt) for name, entry in costs.items()
-                   if isinstance(entry, dict)
-                   for fmt, row in entry.items()
-                   if isinstance(row, dict) and cost_entry_is_joint_aura(row)}
+    # The fulfilled-artifact shortcut reads the same bound set the roster above
+    # validated, so a joint row that names another cell can neither short-circuit
+    # this submission nor be reported as one of the campaign's priced cells.
+    joint_cells = _bound_joint_cells(costs, label=f"aqua: {plan_path.name}")
     summary = {
         "entry_point": f"{AQUA_ENTRY_POINT}:{args.require_scope}",
         "plan": str(plan_path),
@@ -2622,6 +2691,14 @@ def cmd_submit_aqua(args) -> int:
         "requested_cells": roster["requested_cells"],
         "requested_units": roster["requested_units"],
         "requested_roster_sha256": roster["roster_sha256"],
+        # The whole record, not a hand-copied subset of it. The fulfilled-
+        # artifact shortcut below returns before the submission path that
+        # stamps the scope, so a summary that flattened only the counts would
+        # print a "satisfied" artifact that reused joint cells the plan never
+        # priced while saying nothing about them. Whatever the gate decided
+        # travels here, and the submitted path carries the same record into the
+        # sealed manifest's ``campaign_scope`` annotation.
+        "requested_roster": roster,
         "joint_cells_already_priced": len(joint_cells & requested),
     }
     if requested <= joint_cells:
@@ -3726,6 +3803,14 @@ def main(argv=None) -> int:
                            "the requested cells")
     aqua.add_argument("--act-dir", default=None,
                       help="cached real activations, for measured pricing")
+    aqua.add_argument("--accept-joint-cells-outside-plan", action="store_true",
+                      help="accept joint-priced cells the plan's own cost table "
+                           "never priced, recording them as unverified. A joint "
+                           "row is bound to the coordinate it names and to "
+                           "nothing else, so by default such a cell refuses: "
+                           "sealing a requested roster that names it is the "
+                           "answer, and this flag is how an artifact sealed "
+                           "against an older roster keeps that reuse explicit")
     lane = aqua.add_mutually_exclusive_group(required=True)
     lane.add_argument("--serving-lane", default=None,
                       help="lane id whose served_activation_quantization "
