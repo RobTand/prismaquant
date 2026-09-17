@@ -1173,6 +1173,72 @@ def verify_joint_campaign_scope(plan: dict, *, require_scope: str,
     return scope
 
 
+def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
+                         *, label: str = "aqua row") -> dict:
+    """The exact ``(unit, format)`` roster AQUA is asked to price, from the plan.
+
+    The stage decides what a run *requested* from the cost artifact it merges
+    into: every ``(unit, format)`` cell the payload carries for the named
+    formats. That is only the campaign's roster if the payload's units are the
+    campaign's units, so this refuses a payload that has drifted either way --
+    a unit the plan priced and the payload lacks would leave the campaign short
+    an A-side while reading as complete, and a unit the payload carries that the
+    plan never priced is not the campaign's cell at all.
+
+    ``formats`` is the campaign's menu and has to be exactly what the payload
+    carries. Naming a subset is the hole-hiding move this exists to refuse: the
+    stage states its acceptance against the requested cells, so a narrowed
+    ``--formats`` would move the denominator instead of filling it.
+    """
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+
+    census = _bound_json(plan, "census", label=label)
+    roster = census.get("unit_shapes")
+    if not isinstance(roster, dict) or not roster:
+        raise ScopeRefused(f"{label}: the plan's bound census carries no roster")
+    costs = payload.get("costs")
+    if not isinstance(costs, dict) or not costs:
+        raise ScopeRefused(f"{label}: the cost artifact carries no 'costs' table")
+    missing = sorted(set(roster) - set(costs))
+    extra = sorted(set(costs) - set(roster))
+    if missing or extra:
+        raise ScopeRefused(
+            f"{label}: the cost artifact is not the plan's roster -- "
+            f"{len(missing)} unit(s) the plan priced are absent (e.g. "
+            f"{missing[:3]}) and {len(extra)} unit(s) it never priced are "
+            f"carried (e.g. {extra[:3]}). AQUA's acceptance is stated against "
+            "the cells the artifact holds, so a drifted artifact decides its "
+            "own coverage.")
+    wanted = [str(item) for item in formats]
+    if len(set(wanted)) != len(wanted) or not wanted:
+        raise ScopeRefused(f"{label}: --formats must name each format once")
+    present: dict = {}
+    cells = set()
+    for name in sorted(roster):
+        entry = costs[name]
+        if not isinstance(entry, dict):
+            raise ScopeRefused(f"{label}: {name} has no per-format row")
+        carried = {fmt for fmt, row in entry.items() if isinstance(row, dict)}
+        present[name] = carried
+        cells.update((name, fmt) for fmt in carried)
+    carried_formats = {fmt for row in present.values() for fmt in row}
+    unnamed = sorted(carried_formats - set(wanted))
+    absent = sorted(set(wanted) - carried_formats)
+    if unnamed or absent:
+        raise ScopeRefused(
+            f"{label}: --formats {sorted(wanted)} is not the menu this artifact "
+            f"carries -- it holds {unnamed} that are unnamed and none of "
+            f"{absent}. The requested set is the denominator the coverage gate "
+            "reads, so it is bound to the artifact's own cells rather than "
+            "narrowed to the ones that already have a price.")
+    return {"requested_cells": len(cells),
+            "requested_units": len(roster),
+            "formats": sorted(wanted),
+            "roster_sha256": canonical_json_sha256(
+                {"units": sorted(roster), "cells": sorted(cells)},
+                where=f"{label} requested roster")}
+
+
 def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
                           budget) -> "tuple[list[str], list[dict]]":
     """Split the planned rows into the ones a box holds and the ones it does not.
@@ -2116,6 +2182,7 @@ PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
 
 JOINT_ENTRY_POINT = "prismaquant.tessera_joint_aura"
 ALLOCATION_ENTRY_POINT = "prismaquant.tessera_joint_allocation"
+AQUA_ENTRY_POINT = "prismaquant.aqua_activation_cost"
 EXPORT_ENTRY_POINT = "tessera.experiments.export_tessera_serving"
 
 
@@ -2343,6 +2410,131 @@ def cmd_submit_joint(args) -> int:
         build=lambda: producer.build_joint_pass_manifest(
             str(plan_path), command=args.command, produced_by=provenance,
             argv=inner, prepared=prepared))
+
+
+def cmd_submit_aqua(args) -> int:
+    """Submit the campaign's AQUA stage, with strict per-cell coverage.
+
+    The A-side is a stage of the same campaign, so it is submitted the same way
+    the joint pass is: the plan's bound census and the frozen campaign identity
+    decide the roster, the read set the action will consume is declared to
+    PrismaBuild before it is queued, and the reservation is checked against the
+    row's own physical bound rather than taken from habit.
+
+    Two things differ from the joint pass, and both are refusals rather than
+    options. ``--require-complete-coverage`` is mandatory: the campaign's
+    requested ``(unit, format)`` cells either carry their own activation term
+    or the run refuses, because a weight-only cell with a positive surrogate is
+    what silently buys 4-bit on a route the lane declares W4A4. And the
+    requested roster is the plan's, not the artifact's: a cost payload whose
+    units have drifted from the plan's roster, or a ``--formats`` that does not
+    name exactly the menu the payload carries, refuses here -- the stage's
+    acceptance is stated against the cells the artifact holds, so a narrowed
+    artifact would decide its own coverage.
+
+    A campaign whose cells are ALL already joint-priced is a fulfilled
+    artifact, not a nearly-empty run: nothing is submitted and the caller is
+    told which payload already carries the A-side.
+    """
+    from prismaquant.allocator_candidates import cost_entry_is_joint_aura
+
+    producer = _manifest_producer()
+    plan_path = Path(args.plan).resolve()
+    plan = json.loads(plan_path.read_text())
+    plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
+    identity_path = Path(args.campaign_identity).resolve()
+    _bound_sha256(identity_path, args.campaign_identity_sha256,
+                  label="joint campaign identity")
+    campaign = json.loads(identity_path.read_text())
+    scope = verify_joint_campaign_scope(
+        plan, require_scope=args.require_scope, campaign=campaign,
+        label=f"aqua {args.require_scope}: {plan_path.name}")
+    scope = {**scope, "campaign_identity_sha256": _sha256_of(identity_path)}
+
+    cost_in = Path(args.cost_in).resolve()
+    cost_sha256 = _bound_sha256(cost_in, args.cost_in_sha256,
+                                label="aqua cost artifact")
+    cost_out = Path(args.cost_out).resolve()
+    if cost_out == cost_in:
+        raise RuntimeError(
+            f"--cost-out is --cost-in ({cost_in}); the stage writes a new "
+            "payload beside the weight-only one so that arm stays reproducible")
+    if cost_out.exists():
+        raise RuntimeError(
+            f"--cost-out {cost_out} already exists. The stage writes it with a "
+            "plain truncating write, so a path left by an interrupted run "
+            "cannot be told from a finished one; remove it or name another "
+            "path, and do not re-run against an artifact this tool did not "
+            "publish.")
+    card = Path(args.card).resolve()
+    card_sha256 = _bound_sha256(card, args.card_sha256,
+                                label="sensitivity card")
+    act_dir = str(Path(args.act_dir).resolve()) if args.act_dir else None
+    formats = [item.strip() for item in (args.formats or "").split(",")
+               if item.strip()]
+    if not formats:
+        raise RuntimeError(
+            "--formats is required: the campaign's menu is the requested set "
+            "the coverage gate is stated against, and it is not inferred from "
+            "the artifact's own keys")
+    with cost_in.open("rb") as handle:
+        payload = pickle.load(handle)
+    roster = aqua_requested_cells(plan, payload, formats,
+                                  label=f"aqua: {plan_path.name}")
+    costs = payload["costs"]
+    joint_cells = {(name, fmt) for name, entry in costs.items()
+                   if isinstance(entry, dict)
+                   for fmt, row in entry.items()
+                   if isinstance(row, dict) and cost_entry_is_joint_aura(row)}
+    requested = {(name, fmt) for name in costs
+                 for fmt in formats if isinstance(costs[name].get(fmt), dict)}
+    summary = {
+        "entry_point": f"{AQUA_ENTRY_POINT}:{args.require_scope}",
+        "plan": str(plan_path),
+        "plan_sha256": plan_sha256,
+        "campaign_scope": scope,
+        "cost_in": str(cost_in),
+        "cost_in_sha256": cost_sha256,
+        "cost_out": str(cost_out),
+        "card": str(card),
+        "card_sha256": card_sha256,
+        "act_dir": act_dir,
+        "requested_cells": roster["requested_cells"],
+        "requested_units": roster["requested_units"],
+        "requested_roster_sha256": roster["roster_sha256"],
+        "joint_cells_already_priced": len(joint_cells & requested),
+    }
+    if requested <= joint_cells:
+        # The stage's own acceptance: every requested cell already carries its
+        # activation term, so its merge would add nothing and its read set is
+        # the model source it would stream for no result. Nothing is queued.
+        print(json.dumps({**summary, "submitted": False,
+                          "reason": (
+                              "every requested cell already carries a joint "
+                              "A-side; the AQUA requirement is satisfied by "
+                              "the artifact named by --cost-in, so no stage "
+                              "was queued and --cost-out was not written")},
+                         indent=1))
+        return 0
+    inner = ["python3", "-u", "-m", AQUA_ENTRY_POINT,
+             "--card", str(card), "--model-path", str(plan["model"]),
+             "--cost-in", str(cost_in), "--cost-out", str(cost_out),
+             "--formats", ",".join(formats), "--require-complete-coverage"]
+    if args.serving_lane:
+        inner += ["--serving-lane", args.serving_lane]
+    else:
+        inner += ["--lane-executes-all-activation-grids"]
+    if act_dir:
+        inner += ["--act-dir", act_dir]
+    provenance = producer.deterministic_entry_provenance(
+        AQUA_ENTRY_POINT, plan=str(plan_path), plan_sha256=plan_sha256,
+        workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
+    return _submit_gpu_action(
+        args, entry_point=AQUA_ENTRY_POINT, command="price",
+        inner=inner, plan=plan, scope={**scope, **roster},
+        build=lambda: producer.build_aqua_manifest(
+            str(plan_path), card=str(card), cost_in=str(cost_in),
+            act_dir=act_dir, produced_by=provenance, argv=inner))
 
 
 def cmd_submit_allocation(args) -> int:
@@ -3377,6 +3569,54 @@ def main(argv=None) -> int:
                         help="the export command itself, after --; it lives "
                              "in the Tessera tree and is not derived here")
     export.set_defaults(func=cmd_submit_export)
+
+    aqua = sub.add_parser(
+        "submit-aqua",
+        help="submit the campaign's AQUA stage with strict per-cell coverage")
+    aqua.add_argument("--plan", required=True,
+                      help="the same sealed joint plan the campaign runs from; "
+                           "its bound census decides the requested roster")
+    aqua.add_argument("--plan-sha256", default=None)
+    aqua.add_argument("--require-scope", required=True,
+                      choices=CAMPAIGN_SCOPE_KINDS,
+                      help="what this submission is for, checked against the "
+                           "plan's derived scope exactly as submit-joint does")
+    aqua.add_argument("--campaign-identity", required=True,
+                      help="the frozen campaign identity the plan's roster, "
+                           "group roster, draw, capture and candidate menu "
+                           "have to reproduce")
+    aqua.add_argument("--campaign-identity-sha256", default=None)
+    aqua.add_argument("--cost-in", required=True,
+                      help="the cost payload the A-side is merged into: the "
+                           "weight-only table, or the joint pass's merged "
+                           "table. Left untouched")
+    aqua.add_argument("--cost-in-sha256", default=None)
+    aqua.add_argument("--cost-out", required=True,
+                      help="where the merged table is written; it must not "
+                           "exist, so an interrupted write cannot be mistaken "
+                           "for a finished one")
+    aqua.add_argument("--card", required=True,
+                      help="the sensitivity card .npz the activation term is "
+                           "computed from")
+    aqua.add_argument("--card-sha256", default=None)
+    aqua.add_argument("--formats", required=True,
+                      help="the campaign's menu, comma-separated; it has to "
+                           "name exactly the formats the payload carries, "
+                           "because the stage states its acceptance against "
+                           "the requested cells")
+    aqua.add_argument("--act-dir", default=None,
+                      help="cached real activations, for measured pricing")
+    lane = aqua.add_mutually_exclusive_group(required=True)
+    lane.add_argument("--serving-lane", default=None,
+                      help="lane id whose served_activation_quantization "
+                           "declares which formats' activation grid the "
+                           "runtime executes; there is no default")
+    lane.add_argument("--lane-executes-all-activation-grids",
+                      action="store_true",
+                      help="assert that the lane executes every format's "
+                           "activation grid fused")
+    _add_submission_arguments(aqua)
+    aqua.set_defaults(func=cmd_submit_aqua)
 
     merge = sub.add_parser("merge", help="one cost.pkl and journal from the rows")
     merge.add_argument("--workspace", required=True)

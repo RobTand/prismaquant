@@ -1,7 +1,108 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-16 · `codex/509-pq-route-trace-gate`. Stamps
+As of: 2026-09-16 · `campaign/aqua-campaign-caller-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-16, `campaign/aqua-campaign-caller-20260916`) for **the
+campaign's A-side being a submitted stage** (§11; #655). The stage existed and
+enforced its own coverage, but nothing in this repository invoked it: the
+campaign's A-side was an operator command, so "the campaign requires complete
+activation coverage" was a sentence in a handover rather than a gate any run
+had to pass. `tools/dispatch_tessera_campaign.py submit-aqua` is that caller,
+built the way the other post-campaign passes are: the same sealed plan, the
+same frozen campaign identity and the same `--require-scope` check as
+`submit-joint`, a read set declared to PrismaBuild before the action is queued
+(`glm_data_manifests.build_aqua_manifest`), and a reservation checked against
+the plan's own physical bound rather than taken from habit.
+`--require-complete-coverage` is not a flag on this submission -- it is passed
+unconditionally, so no invocation of the campaign's A-side can leave the gate
+off. The requested roster is the plan's: the payload's units have to be exactly
+the plan's bound census roster (a drifted artifact would otherwise decide its
+own coverage, because the stage states acceptance against the cells the
+artifact holds) and `--formats` has to name exactly the menu the payload
+carries, since naming a subset would move the coverage denominator instead of
+filling it. A payload whose requested cells already all carry a joint A-side is
+**not** submitted: the requirement is satisfied by that artifact, and queuing a
+stage to add nothing is redundant GPU work. The stage is still refused at run
+time on cells that are joint-priced but unfulfilled, so the caller cannot
+launder a partially covered artifact into a green invocation. Gates:
+`tests/test_aqua_campaign_submit.py`, `tests/test_aqua_activation_cost.py`,
+`tests/test_aqua_per_expert_checkpoint.py`.
+
+Re-stamped (2026-09-16, `campaign/identity-and-coverage-pr-20260916`) for **the
+container cap being its own spec field** (§3.4, §11). `box_memory_gb` carried
+two meanings at once: the box's total unified budget a row's derived demand
+refuses to exceed, and -- once the launcher set a cgroup cap -- the
+container's own cap. On GB10 those are 114 GiB and 34 GiB, so one of the two
+had to break. `cpu_memory_gb` is now the cap, `box_memory_gb` keeps the
+capacity meaning, and `container_memory_budget_gb` reads the cap from the new
+field and falls back to the old one only for a spec sealed before it existed.
+`docker_command` passes it as `--memory` with `--memory-swap` equal to it, so a
+bounded capture row is bounded by the kernel instead of being refused at
+`CaptureMemoryGuard` construction, and a row that would spill past its budget
+fails rather than swapping. The cap is a hard limit on what the cgroup
+**accounts** -- on GB10 the CPU side, measured at 16 GiB charged for a
+container holding 78.87 GiB of model -- not an aggregate GPU + CPU bound; the
+aggregate is the plan's `aggregate_memory_bytes`, and the sum the guard checks
+at its check points is a conservative refusal, not a physical bound. Gates:
+`tests/test_tessera_campaign_container.py`.
+
+Re-stamped (2026-09-16, `campaign/identity-and-coverage-pr-20260916`) for **the
+campaign scope being an identity, and the A-side coverage being per cell**
+(#655, 474544 gaps). Two rosters of equal length are not one campaign, and two
+censuses with equal window counts are not one calibration, so
+`joint_campaign_scope` now derives a `prismaquant.tessera_joint_campaign_scope.v1`
+identity from the plan's *bound* artifacts: the exact unit and group roster from
+the census and the campaign plan, the calibration draw (`model`,
+`text_sha256`, `fit_ids_sha256`, `seed`, `layer_stride`), the window count and
+sequence length, the digests of the bound calibration input, canonical capture
+and merged checkpoint -- whose `identity.units[*].menu` is the per-unit
+candidate roster the loader admits rungs against -- and the selection digest of
+a diagnostic panel when the plan evaluates a subset. `submit-joint` requires
+both `--require-scope` and `--campaign-identity`, and every identity field is
+compared exactly against the frozen campaign's, because a plan is
+self-consistent with whatever census it binds. A census that names no draw
+refuses, and an identity sealed before these fields existed refuses by name and
+must be re-sealed. The checkpoint bind costs one sequential read per
+submission: it hashes the artifact rather than trusting the plan's own number,
+and it does not parse the 6.8 GB identity into a graph. On the A side,
+`aqua_activation_cost --require-complete-coverage` refuses unless every
+requested `(unit, format)` cell this lane OWES a price has one -- a joint AURA
+row, or an A-side computed and merged by this stage. Cells free by contract at
+their own shape (activation-identity formats, grids the lane never executes)
+are subtracted **per cell** and reported apart; an unbuildable cell stays a
+hole; a positive weight-only cell with no A-side is refused, because a tradeable
+surrogate is not a price; joint cells are never priced twice and an unrelated
+joint rung cannot cover a requested legacy cell. Off by default outside the
+campaign: the hole is still counted and reported for a research arm. Gates:
+`tests/test_joint_campaign_scope.py`,
+`tests/test_glm_joint_data_manifest_at_submit.py`,
+`tests/test_aqua_per_expert_checkpoint.py`.
+
+Re-stamped (2026-09-16, `campaign/identity-and-coverage-pr-20260916`) for **the
+per-expert checkpoint reaching the A-side** (§11). `activation_dloss_table`
+built its resolver from the checkpoint's
+`model.safetensors.index.json`, which maps one card unit to ONE key. GLM-5.3-
+Flash does not store its packed routed experts that way: every expert is its
+own 2-D `nn.Linear` weight and the fused gate/up pair is two tensors, so 84
+packed units of a 45-layer body -- 97% of the parameters -- resolved to
+nothing and were filtered out before the shard loop that prices, leaving
+`cost_entry_act_dloss`'s `0.0` default to be read as a free 4-bit activation on
+the route the lane declares W4A4. The stage now classifies every name it cannot
+resolve from one key instead of dropping it: one key (dense trunk, or a packed
+`[E, M, N]` tensor), a per-expert layout priced by `packed_act_dloss_per_expert`
+(streaming one expert at a time through the same kernel and float64
+accumulation as the stacked path, pinned equal by
+`tests/test_aqua_per_expert_checkpoint.py`, because materializing
+`[288, 4096, 4096]` would be 19 GiB in float32 per format), or "unresolved",
+which is recorded as a HOLE for every format whose activation grid the named
+lane executes. `required_activation_formats` is the one definition of which
+formats are owed a price, shared by all three sources. On the loader side,
+`load_measured_anchor_input` refuses a checkpoint whose recorded seal is not
+the identity it read. The streaming spelling of that seal and its goldens are
+the parser PR's (`canonical_json_sha256_normalized`, #661), not this branch's:
+this branch reads the generic helper, and the two digests are equal by
+contract. Gates: `tests/test_aqua_per_expert_checkpoint.py`.
 
 Re-stamped (2026-09-16, `codex/509-pq-route-trace-gate`) for **the exact
 per-module route-trace grade** (§7.1, §9.4; the Tessera lane's serve-side leg,
@@ -51,6 +152,7 @@ legacy arm. The exact arm runs on
 `tests/fixtures/tessera_route_trace_509/`, written by Tessera's own telemetry
 at producer commit `8104dc6` (see that directory's `PROVENANCE.md`), so the
 schema under test is the producer's.
+
 As of: 2026-09-16 · `issue-607-sealed-arc-replay-frontier`. Stamps
 follow, newest first, each recording its own branch and date.
 
@@ -98,243 +200,82 @@ so both ends load `prismaquant/joint_replay_frontier.py` by path. Gates:
 resumed GPU subset has been run under a sealed frontier, so the ARC payoff
 and the resumed wall-clock are unmeasured here; this stamp records the
 contract.
-
 As of: 2026-09-16 · `flash/issue-654-stage-settings-provenance-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
 
-Re-stamped (2026-09-16, `fix/pqr2-per-expert-aqua-bridge-20260916`) for **the
-per-expert checkpoint bridge reaching the AQUA stage, and the two ways an
-unpriced A-side could still have read as free** (PQ-R2, §"AQUA-AURA").
-`activation_dloss_table` builds its resolver from the checkpoint's
-`model.safetensors.index.json`, which maps one card unit to ONE key. GLM-5.3-
-Flash does not store its packed routed-experts that way: every expert is its
-own 2-D `nn.Linear` weight and the fused gate/up pair is two tensors, so the 84
-packed units of a 45-layer body -- 97% of the parameters -- resolved to
-NOTHING. They were filtered out before the shard loop that prices, and before
-the `holes` report, so the artifact said nothing about them at all and
-`cost_entry_act_dloss`'s `0.0` default was read as a free 4-bit activation on
-exactly the route the lane's own contract declares W4A4.
+Re-stamped (2026-09-16, `flash/issue-654-stage-settings-provenance-20260916`)
+for the **stage-settings guard's legacy-reuse admission** (§3.4;
+RobTand/prismaquant#654). Neither of the guard's unrecorded-stage branches
+compared anything to the artifact, and they failed differently. When the
+manifest did not exist at all the guard warned and returned 0 **recording
+nothing** — the artifact stayed reusable, its identity was known to nobody, and
+no later run could tell the difference between "never examined" and "examined
+and agreed". When the manifest existed but had never recorded the stage the
+guard appended *today's* projection to it: from that first resumed run a
+pre-guard `cost_aura.pkl` measured under other probes, seed, dataset or menu was
+indistinguishable in the manifest from one this run had verified, and
+`run-pipeline.sh` then reused it while the allocator read it as this run's
+number. Rob's decision (2026-09-16) is that old data stays reusable while the
+pipeline is in flux; what may not happen is the laundering. A stage with no
+recorded projection now files an **admission** instead: `_unverified_settings`
+holding `settings_identity: unknown`, `attests_this_artifact: false`, the
+reason, and this run's request under `observed_current_request` -- the request,
+never the artifact's settings and never production proof. Repeated checks read
+that admission back and stay unknown, so a retry, a changed request, or a
+second stage owning the same path can never upgrade it to verified. Recording a
+projection is now confined to the absent-artifact (fresh production) path, and
+a refused mismatch files nothing at all. The marker is deliberately a key no
+manifest key can be, so a reader that predates this change compares it, finds a
+diff, and exits 2 rather than stamping the artifact into its own record. The
+Tessera plan's allocation-content binding still refuses rather than records,
+and now refuses an admission marker as firmly as an unrecorded stage: a
+translated plan needs a real binding, and the marker says the identity is
+unknown. Every known-and-matching reuse is unchanged.
+`cost_table_reusable()` still reuses a table with no `provenance['cost_mode']`
+and now says plainly that the reuse is unverified and that the current mode is
+never stamped onto it. Gates: `tests/test_stage_settings_guard.py` pins the
+pre-fix restamp, reuse-stays-unknown across retries and changed requests, a
+recorded mismatch still refusing, Tessera still refusing without filing an
+admission, and Tessera refusing a manifest that already carries one;
+`tests/test_wave3_selection_and_provenance.py::test_cost_table_reuse_is_unverified_legacy_and_never_restamped`
+executes the real shell predicate against real pickles and checks the table's
+bytes are left alone. No default, stage, format, lane, ship gate or allocator
+default changed.
 
-The stage now classifies every name it cannot resolve from one key instead of
-dropping it. Three weight sources reach the SAME `price_activation_only`
-arithmetic: one key (dense trunk, or a packed `[E, M, N]` tensor); a per-expert
-layout, priced by `packed_act_dloss_per_expert`, which streams one expert at a
-time through `_weighted_row_sum` -- the same kernel and the same float64
-accumulation as the stacked path, pinned equal by
-`tests/test_aqua_per_expert_checkpoint.py` -- because materializing the
-`[288, 4096, 4096]` gate_up would be 19 GiB in float32 per format; and
-"unresolved", which cannot be priced at all and is recorded as a HOLE for every
-format whose activation grid the named lane executes. The rule for which
-formats are owed a price (the format quantizes activations AND the lane
-executes that grid) lives in `required_activation_formats`, one definition
-shared by all three sources, with "leaves activations alone" and "this lane
-does not execute that grid" still reported separately because they are
-different correct answers. The all-or-nothing refusal for 0/N resolution is
-unchanged: no coverage threshold was invented, and a hole is a REPORT, not a
-refusal.
+Re-stamped (2026-09-16, `codex/pq-r3-prefill-assignment-reuse`) for the **prefill
+frontier's assignment publication** (§12, §4.5). `prefill_frontier._point_record`
+wrote `<assignment digest>.json` only when the path was absent and never read a
+file that was already there, so a leftover at that name -- an interrupted write,
+a hand edit, another table's sweep -- was reused while the point published THIS
+solve's dloss, attained prefill and digest beside it. The file is now published
+by the shared no-clobber primitive (`cost_stage_checkpoint.publish_new_bytes`, a
+hard-link creation), and a file already there is read and verified before it is
+reused: it must parse, carry this module's schema and digest, hold exactly this
+solve's assignment, re-hash to the name it is filed under, and claim
+`research_only` true -- the standing every point this module publishes carries,
+so a block that leaves the key out or sets it false is refused rather than
+adopted on the digest alone. Corrupt,
+truncated and different-assignment files are refused by name and never
+overwritten, and the loser of a publication race validates the winner rather
+than replacing it. Provenance is the one fact the name cannot carry: a
+re-measured table whose medians do not move resolves to the same path
+(`tests/test_prefill_frontier_dispersion.py` runs exactly that), so a file
+recording a different `table_id`/`table_sha256` is reused -- it IS the assignment
+-- and the point carries `assignment_file_provenance` naming the run that
+published it instead of adopting it as this run's; a file with no readable
+provenance is refused. No default, stage, format, lane, ship gate or allocator
+default changed.
 
-That last point is a real limitation and it is recorded here as one, because an
-earlier version of this stamp overstated it. Partial coverage is not
-fail-closed in general. The only existing mechanism that removes a
-badly-evidenced row is
-`allocator_candidates.cost_entry_prices_unmeasured_activation_at_zero`, and its
-predicate requires the row's price to be EXACTLY `0.0` -- the DP's global
-optimum, which the optimizer cannot trade off. A packed row carrying a POSITIVE
-weight-only `predicted_dloss` and no A-side is therefore still admitted by the
-DP; it is the "biased but tradeable" L1 surrogate that branch deliberately
-accepts, not a caught hole. So the honest statement of the contract is:
-
-  * a HOLE is reported per format and per unit, and the AQUA stage refuses only
-    when NOTHING at all could be priced (`0/N` resolution, or a merge that
-    writes no entry and had no joint coverage);
-  * the legacy default stays what it is -- `cost_entry_act_dloss` reads an
-    absent key as `0.0` so pre-AQUA artifacts remain bit-for-bit reproducible;
-  * for a CAMPAIGN, "this artifact has no A-side for a format the lane
-    executes" is now an explicit requirement the campaign declares, not a
-    default: `--require-complete-coverage` refuses unless every requested
-    `(unit, format)` cell this lane OWES a price has one. A cell is covered
-    when it is joint-priced or priced and merged here; it is free BY CONTRACT,
-    and therefore not a hole, when the format quantizes no activations at THAT
-    unit's shape (BF16 and the other passthroughs) or its activation grid is one
-    this lane never executes. The exemption is recorded and read PER
-    `(unit, format)` (`coverage_exempt_cells`, with the reason), because a
-    format name can be a passthrough at one shape and UNBUILDABLE at another's:
-    a name-level union of the exemptions would let the gate pass on an artifact
-    the stage itself reported a hole in. A format the registry cannot build for
-    a unit's shape is in neither set and stays a hole, and the two readable
-    summaries (`activation_identity_formats`, `not_executed_formats`) are
-    descriptive only. Off by default, so a research arm may still carry holes
-    deliberately and pre-AQUA artifacts are untouched; the flag is one explicit
-    opt-in, with no production default promoted (issue #655 is the campaign-level
-    requirement this states).
-
-Which variance the A-side uses is likewise one authority now,
-`format_cost_protocol.resolve_act_quant_variance`, so a caller that cannot hold
-the weight as one array cannot silently price a different estimator.
-
-The bridge also keeps the joint currency honest, which is the part that is not
-about pricing. A joint AURA row's one signed residual already contains the
-weight, activation and mixed terms under a single downstream Fisher, and
-`validate_joint_aura_entry` REFUSES any row that carries `act_dloss` --
-correctly, since stamping one would apply the activation term a second time.
-`cost_entry_predicted_dloss` returns before the A-side branch for such a row.
-`merge_act_dloss` now skips a joint row instead of writing into it and reports
-the count as `joint_rows_skipped`; before this, a merge into an artifact that
-carried joint rows would not have double-counted, it would have INVALIDATED
-those rows. The stage is told those cells BEFORE pricing, per `(unit, format)`,
-on the same validated predicate the allocator uses: an all-joint artifact now
-reads no shard, builds no plugin and writes no `act_dloss`, and `main` accepts
-it as "already fulfilled" instead of refusing it as a no-op, while a mixed
-legacy/joint artifact prices exactly its legacy cells. This is a sourced stage
-change with `tests/test_aqua_per_expert_checkpoint.py` covering the production
-entry end to end (no helper-only coverage); the served KL/PPL A/B at matched bpp
-remains the promotion gate for the AQUA arm as a whole, and the per-expert path
-inherits that gate rather than bypassing it.
-
-Two corrections to the paragraphs above, made after review of the first cut.
-"No shard" is the accurate bound and not "no read": `activation_dloss_table`
-still opens the checkpoint's small `model.safetensors.index.json` metadata index
-(and the scale map built from it) to resolve names, which an all-joint artifact
-cannot avoid without a metadata cache. And the selection is per REQUESTED cell,
-not per global format list: a format the artifact does not carry for a unit is
-not a cell of that unit, so `formats - joint` formed globally manufactures
-cells that nothing can consume, while a joint row for a *different* cell cannot
-fulfil a requested legacy one. `main` now takes the request as the cells the
-artifact actually carries, refuses a zero-priced run when any requested cell is
-unaccounted for, and accepts the all-joint case only when every requested cell
-is joint.
-
-Re-stamped (2026-09-16, `fix/joint-aqua-serving-scale-20260916`) for the
-**mount-instance-strict source-shard identity, in one place** (§4.10, joint
-prepare data manifest and `CaptureSourceAuthentication`). The cache that lets a
-joint prepare reuse 642.65 GB of already-computed shard SHA-256 is shared, and
-the comparison that gated it required `st_dev` through three separate copies of
-one tuple. `prismaquant/source_identity_stats.py` is now the single definition:
-`device`, `inode`, `size`, `mtime_ns` and `ctime_ns` must all match, a record
-that omits any of them matches nothing, and every record must carry a non-empty
-path that two fingerprint records have to agree on -- a live `os.stat_result`
-carries none, so it is only ever compared against a record for a path the
-caller resolved. An ordered list therefore binds its roster and not only its
-members. The device stays *in* the proof deliberately: the other four fields
-identify an object within a filesystem, and on ZFS the object number is
-per-dataset, so a clone or a snapshot rollback can present different bytes
-under the same number, size, mtime and ctime. Dropping it would have made the
-proof portable by weakening it.
-
-The scope of that is stated as narrowly as it holds. `st_dev` identifies the
-device -- the filesystem -- *in the current host's namespace*: two hosts that
-mount the same storage give it two numbers, which is why the same dataset
-refuses reuse across the Sparks, and a same-device snapshot rollback that
-restores an object number, size, mtime and ctime together is not excluded by
-these fields at all. Such a rollback *invalidates the guard's assumption*
-rather than being caught by it: the cached digest then describes the
-pre-rollback bytes and is reused for different ones, and the agreement between
-the cache's recorded per-shard SHA-256 and the canonical capture manifest's
-`source_files` digest cannot detect it because both were written before the
-rollback and neither reads the file now. Catching it needs a trusted immutable
-generation binding -- a server-published dataset or snapshot generation id
-recorded with the proof -- or a re-authentication of the bytes when a rollback
-is suspected. The stat comparison decides whether the cached SHA may be reused
-without reading the file; it does not make the bytes trustworthy in an
-adversarial sense.
-
-What the measured cross-mount facts do and do not license is recorded here so
-the next reading is not a guess. Read-only, 2026-09-16: the same
-`/mnt/shared` GLM-5.3-Flash-BF16 shard reports `device` 64 through sparky's NFS
-client, 58 through sparklina's, and 54 on dl380g10, with an identical `st_ino`
-(1368), size, mtime and ctime; the cache's recorded per-shard SHA-256 equals
-the canonical capture manifest's `identity.source_files` digest for all 120
-shards. Those are *recorded fields agreeing*, not a fresh hash of the shards --
-no hundreds of GB were re-read to state it. The three views are one storage:
-sparky mounts `10.100.98.3:/storage_pool/shared`, sparklina mounts
-`10.100.99.3:/storage_pool/shared`, and dl380g10 owns both addresses and serves
-that ZFS dataset locally, which is why one object has three device numbers.
-That is evidence for a human; it is not a binding the code can check. An NFSv4
-client's `statfs` fsid is `0` on both clients, the server's local fsid is
-per-dataset, and the sealed cache carries no portable handle. Reuse across
-mount instances therefore stays refused, and the pilot carries an explicit
-same-host dependency: `source_identity_cache_host` names the box whose build
-adopted the proof and `submit-joint` refuses any other `--tag`. Making this
-portable needs a server-generated handle -- an NFSv4 filehandle or a
-server-published dataset id -- recorded at cache-write time; it cannot be
-retrofitted to a cache that lacks one, and it is not simulated from a pathname.
-The host-local path-bearing `content_sha256` of §4.1 is untouched and no cache
-bytes, plan seal or anchor identity move.
-
-Re-stamped (2026-09-16, `fix/joint-aqua-serving-scale-20260916`) for the
-**executed routed activation-scale grouping** (§8 static activation contract,
-RobTand/prismaquant#624, #628). The joint AURA activation leg priced every
-routed member as its own Linear and read each expert's own calibrated maximum,
-while the routed NVFP4 stage executes one activation scale per
-`(module, stage)` - `gs13 = 1 / input_small["w13"].max()` in
-`tessera/serving/nvfp4_moe_route.py`, and the same `a_scale.max()` reduction in
-vLLM's `amax_for_moe_activation_quant`. `nvfp4_activation_contract
-.routed_executed_max_abs` is now the calibration-side producer of that
-reduction, and it extends the #626 abstraction rather than re-deriving it: each
-per-expert name is respelled as the packed target `routed_moe_stage` already
-owns, through `routed_expert_scale_group`, so `gate_proj` and `up_proj` of one
-expert share one `w13` group and `down_proj` takes its `w2` group. Dense names
-and the native packed spelling pass through byte-identically and carry no
-declaration, which says only that the routed grouping has nothing to say about
-them: a dense NVFP4 Linear does carry a static scale, and it is the per-unit
-scale because there is no `(module, stage)` group to reduce over. The scope is
-the STATIC contract only: A8, A16 and E4M3 members carry no static scale, and
-their served contracts, including the shared calibration map that also drives
-the dynamic activation clip, are unchanged. The census-side entry
-`routed_executed_max_abs_for_census` owns the authoritative-roster rule
-(`census['unit_shapes']`) in one place, so the joint pass and any plan-time
-derivation of the same declaration cannot admit different groupings.
-`require_joint_activation_scale`
-replaces the joint-scale == anchor-scale equality with a typed relationship:
-strict equality outside the declaration, exact group maximum and group scale
-inside it, and a refusal when a per-unit anchor sits below its own group
-minimum or a routed static unit carries no declaration. No anchor, wire or
-historical row is rewritten, and no qualified export claim moves.
-
-Re-stamped (2026-09-16, `issue-607-sealed-arc-replay-frontier`) for the
-**resumed windowed `prepare`'s read order** (§4.10, RobTand/prismaquant#607).
-A fresh windowed prepare reads the layer/part order its data manifest
-declares, so the phases it seals are true. A resumed one reads two blocks:
-`_qualification_replay` re-authenticates every unit the qualification journal
-already holds -- its X/H capture, then each measured rung's wire and render --
-and only then does the layer walk qualify the units the journal does not hold.
-Those are two different orders over the same bytes, so the resumed path sealed
-no phases at all -- and `submit-joint prepare --resume` therefore declined to
-declare any, and never even handed the action its data manifest -- so the
-storage role charged the whole manifest against the ARC budget and the row
-stayed cold. The submission now seals the replay roster, its exact read order
-and the qualification journal's identity beside the phase table
-(`joint_replay_frontier.seal_frontier`), and the submit path carries that
-manifest and its phase table into the admitted action on a resume as it
-already did on a fresh pass. The sealed table is the resumed order -- the
-`head`, then the replay block, then the layer/part phases over the units still
-to qualify -- and the replay block is windowed by the walk's own byte budget
-(`MAX_PHASE_BYTES`), so a part never splits a unit and the table stays bounded
-however long the journal is: one phase per replayed unit would be as many
-phases as the journal holds -- 36,423 units on this census -- against the 2048
-a submission declares. The preparing
-action announces a part when it reaches its first unit, advances the count
-only after a unit's own reads finish, and refuses a journal, checkpoint or
-unit set that moved after submission rather than reporting a prefix it did
-not read (`joint_replay_frontier.require_replay_matches`,
-`tessera_joint_aura.prepare_cache`). The walk's own phase announces by layer,
-not by unit: installing a layer and opening its prefetch window is what reads
-the source extents `layer-<L>-part-0` declares, so the action announces
-`phase_name(layer, 0)` from the manifest's own phase list before those reads
--- even for a layer whose units are **all** replayed, which has no unit to
-name its phase and would otherwise stay unannounced (and its extents
-unreleased) until the next transition. A resume submitted before the pass ever
-journaled a unit seals an empty roster and no identity; a resume that finds
-every unit already qualified verifies them, reads no capture, and publishes
-its completion; and one carrying sealed phases without that frontier is
-refused. The manifest producer runs in a CPU environment with no GPU image,
-so both ends load `prismaquant/joint_replay_frontier.py` by path. Gates:
-`tests/test_joint_replay_frontier_607.py`,
-`tests/test_joint_qualification_windows.py`,
-`tests/test_glm_joint_data_manifest_at_submit.py`. **Not claimed:** no
-resumed GPU subset has been run under a sealed frontier, so the ARC payoff
-and the resumed wall-clock are unmeasured here; this stamp records the
-contract.
+The same commit's second half is the **frontier document's own publication**
+(§12). `prefill_frontier.main` wrote the curve at `--output` with
+`Path.write_text`, which truncates the file and then fills it, so a sweep killed
+between those steps destroyed the curve it was replacing and left unparseable
+JSON at a path every consumer parses. The document is now written through
+`cost_stage_checkpoint.atomic_write_bytes` (staged beside the target, fsynced,
+`os.replace`d): replacement is the right shape for one name with one current
+value, and an interrupted run leaves the old curve or the new one. The
+publication is asserted through the CLI itself in
+`tests/test_prefill_frontier.py::test_the_document_is_published_through_the_atomic_writer`.
 
 Re-stamped (2026-09-15, `claude/tp2-measurement-instruments`) for the **gold
 lane's multi-node instruments** (§2.3, §7.3). Three things a gold receipt did
@@ -498,21 +439,19 @@ replayed by `shipcard._verify_route_trace_record`).
   platform is `card.build.tessera_serving_scope.target.platform`, or
   `--platform`; when both are given they must agree.
 
-Agreement fills the slot, and since #509 only an exactly-identified serve can
-agree (the stamp at the top of this file). A difference exits 1 and names each
-contract with its priced and served counts. A missing, unreadable, empty,
-other-schema or compiled (`M*`) rank trace, and equally a legacy histogram-grade
-trace or one whose identity is incomplete, exits 3 as NOT VERIFIED and leaves
-the slot unfilled, so `tools/publish_artifact.py` refuses the card. `verify`
-replays the comparison from the carried traces and config text against the
-current packaged contract, and refuses carried config text that differs from
-the artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the
-trace and fill steps.
+Agreement fills the slot. A difference exits 1 and names each contract with
+its priced and served counts. A missing, unreadable, empty, other-schema or
+compiled (`M*`) rank trace exits 3 as NOT VERIFIED and leaves the slot
+unfilled, so `tools/publish_artifact.py` refuses the card. `verify` replays the
+comparison from the carried traces and config text against the current
+packaged contract, and refuses carried config text that differs from the
+artifact's `config.json`. The Tessera arm of `run-pipeline.sh` prints the trace
+and fill steps.
 
-The comparison is a histogram where the trace names no modules (Tessera #509
-adds the per-module grade, stamped at the top of this file). Not covered: the
-activation representation (#567), compiled forwards, and the
-compressed-tensors lane, which has no route telemetry. The
+The comparison is a histogram because the trace names no modules; Tessera #509
+asks it to emit module prefixes, rank and platform. Not covered: which module
+rode which contract, the activation representation (#567), compiled forwards,
+and the compressed-tensors lane, which has no route telemetry. The
 `validate_native_export` claim in CLAUDE.md principle 14 is corrected: that
 script never performed this leg. Gate: `tests/test_tessera_route_trace_gate.py`,
 on the real m44e1 TP2 traces, shown failing before the fix.
@@ -918,47 +857,13 @@ because the loader reads tensors after authenticating their shard.
 An optional plan binding `source_identity_cache: {path, sha256}` seeds the
 existing per-pass `source-identity.json` slot in a new output root, with an
 exact checksum and conflict refusal; it does not create a weight or activation
-cache. That proof is mount-instance strict, and the one definition of it is
-`prismaquant/source_identity_stats.py`: the recorded `device`, `inode`, `size`,
-`mtime_ns` and `ctime_ns` must all match; every record must carry a non-empty
-path, and two fingerprint records must agree on it (a live `os.stat_result`
-carries none, so it is only compared against a record for a path the caller
-resolved). An ordered list therefore binds its roster and not only its members.
-The four stat fields identify an object within a filesystem, and on ZFS the
-object number is per-dataset, so a clone or a snapshot rollback can present
-different bytes under the same number, size, mtime and ctime; `st_dev`
-identifies the device in the current host's namespace and is what says the
-proof was made through this mount here. It is a reuse guard, not a tamper
-proof: a same-device rollback that restores those fields together invalidates
-the guard's assumption instead of being caught by it -- the cached digest then
-describes the pre-rollback bytes -- and comparing the cache's recorded SHA to
-the canonical capture manifest's cannot detect it, since neither record reads
-the file now. That needs a trusted immutable generation binding (a
-server-published dataset or snapshot generation id recorded with the proof) or
-a re-authentication of the bytes when a rollback is suspected. A record
-missing any compared field, a record with no path, and a moved shard all
-refuse.
-
-The cross-mount measurements of 2026-09-16 are evidence, not a licence.
-Read-only: the same `/mnt/shared` GLM-5.3-Flash-BF16 shard reports `device` 64
-through sparky's NFS client, 58 through sparklina's and 54 on dl380g10, with an
-identical `st_ino` (1368), size, mtime and ctime; the cache's recorded
-per-shard SHA-256 equals the canonical capture manifest's
-`identity.source_files` digest for all 120 shards. Those are recorded fields
-agreeing, not a fresh hash of the shards -- nothing here re-read the checkpoint
-to say so. The three views are one storage -- sparky mounts
-`10.100.98.3:/storage_pool/shared`, sparklina mounts
-`10.100.99.3:/storage_pool/shared`, and dl380g10 owns both addresses and serves
-that ZFS dataset locally -- but nothing this tree can check binds a cached SHA
-to a second mount instance: an NFSv4 client's `statfs` fsid is `0` here, and
-the sealed cache carries no portable handle. Reuse across mount instances is
-therefore refused, and the pilot carries an explicit same-host dependency:
-`source_identity_cache_host` names the box whose build adopted the proof and
-`submit-joint` refuses any other `--tag`. A portable proof needs a
-server-generated handle (an NFSv4 filehandle, or a server-published dataset
-id) recorded at cache-write time. The streamed identity's path-bearing
-`content_sha256` stays host-local as documented in §4.1 and is not what is
-compared here.
+cache. A cache proven on another host's NFS mount is not portable merely
+because the paths and SHA rows match: the current six-field fingerprint includes
+the host-local `st_dev`. Manifest construction and owner adoption therefore
+refuse it on a different mount device. A reuse request has a real host-local
+dependency until a separately qualified cross-host source proof exists; the
+manifest names its proof host, and `submit-joint` refuses a broader placement
+tag before publication.
 The full joint manifest exceeds the old 64 MiB plain-JSON limit;
 `submit-joint` now writes one deterministic `.json.gz` member. The deployed PB
 reader admits up to 64 MiB stored / 512 MiB expanded and seals those
@@ -3338,75 +3243,6 @@ the cgroup charge conservatively, preserves a 2 GiB margin and 8 GiB host
 available-memory floor, and reserves upcoming growth before allocation.
 It checks bounded source-hash reads, source projection checks, original
 forwards, output materialization, writes and sealing. A refusal latches.
-**That finite cgroup budget is supplied by the launcher, and it is a limit on
-what the cgroup ACCOUNTS.** `tools/tessera_campaign_container.py::docker_command`
-passes the spec's `box_memory_gb` as `--memory` with `--memory-swap` equal to it,
-so the cap is the row's own declared box budget rather than a second number and
-the container fails instead of spilling into swap. Two bounds must not be
-confused. The **hard** one is this cgroup limit: kernel-enforced on CPU-charged
-bytes, with no check to be between. The **soft** ones are the guard's checks:
-they are enforced where they run, they add the entire CUDA reservation
-conservatively so they are correct even when a driver does not charge device
-memory here, and they reserve upcoming growth only when the caller passes
-`reserve_bytes`. A cgroup cap the driver does not charge bounds the CPU side
-alone, so `box_memory_gb` is NOT by itself an aggregate GPU + CPU bound.
-
-**On GB10 it is measured not to charge device memory.** The f7 serve's
-`HostConfig.Memory = HostConfig.MemorySwap = 16 GiB`
-(`/mnt/shared/astra-native-a4/native-full/attempts/f7/evidence/*.inspect.json`)
-held 78.87 GiB of loaded model and 6 GiB of KV (`rank0.log`), which a 16 GiB cap
-cannot contain unless device memory is outside the charge. The aggregate rule is
-therefore `C + G + external headroom <= physical - reserve`, with `C` the cgroup
-cap, `G` what a bounded allocator may hold, and the non-allocator reserve
-(context, NCCL, non-Torch device allocations) held back explicitly by
-`memory_management.apply_cuda_allocator_fraction`. A joint row applies that
-fraction from its plan's `max_gpu_bytes` before the first streamed model is
-built, and passes the plan's declared buffers as `reserve_bytes` at the checks
-that precede its source reads. Which paths have which is audited per command,
-not assumed from this paragraph.
-
-**Three numbers, three fields, and they are not interchangeable.**
-`cpu_memory_gb` is the container's cgroup cap -- what the cgroup may charge,
-which on GB10 is the CPU side, and what `docker_command` passes as
-`--memory`/`--memory-swap`. `box_memory_gb` is the box's total unified budget,
-the number `dispatch_tessera_campaign` refuses to derive a row's admission
-demand above. The PrismaBuild reservation is a third thing again: the combined
-physical demand (`--demand gpu=1,mem_gb=…`), because a row holding 80 GiB of
-device residency beside a 34 GiB CPU cap does not fit in 34 GiB of box.
-`container_memory_budget_gb` reads the cap from `cpu_memory_gb` and falls back to
-`box_memory_gb` only for specs sealed before the field existed; reading the cap
-out of the capacity field is what conflated them, and it would either refuse the
-pilot or under-reserve the box.
-`submit-joint` now derives those three numbers instead of trusting the command
-line with them: the reservation must reach the combined physical bound the
-plan's own guard enforces (`plan.aggregate_memory_bytes`, or
-`cpu_memory_gb + plan.max_gpu_bytes` for a plan written before it existed), and
-a `--demand` below that bound is refused rather than admitted and then declined
-by the row. The plan's device envelope is passed on as `--gpu-memory-gb`, the
-*subset* cap on GB10, so a reservation of the unified pool does not silently
-raise the device bound the plan declared. A plan that states neither number
-keeps the previous behaviour and the submission records the absent basis rather
-than inventing one. For A2 that resolves to `--demand gpu=1,mem_gb=114`,
-`--gpu-memory-gb 80` and a container cap of 34 GiB.
-
-**The two bounds are enforced by two mechanisms, not one number.** The plan
-carries the aggregate as `aggregate_memory_bytes`, and
-`memory_management.require_aggregate_budget` validates it against the machine
-rather than against another declaration: the declared device budget must fit
-inside the aggregate, the aggregate plus the 3 GiB physical reserve and 2 GiB
-external headroom must fit in `MemTotal`, and the reserves must leave room for
-the budget itself. Each refusal names its terms. At run time
-`CaptureMemoryGuard(aggregate_budget_bytes=…)` checks the conservative sum
-(cgroup charge + the whole CUDA reservation + `reserve_bytes`) against that
-aggregate, while its construction-required cgroup budget still bounds the
-charged CPU side -- so a row holding 80 GiB of device residency beside a 34 GiB
-cap is not refused for being larger than its cap. `source_prefetch`'s automatic
-pool sizes from the smaller of host `MemAvailable` and
-`memory_management.cgroup_headroom_bytes()`, so a 34 GiB row does not size a
-prefetch pool from the box's 116 GiB of free memory and then get killed by its
-own cap. Both are bounds the row states and the tooling derives; neither is a
-second memory manager.
-
 Completed source-hash pages and byte-verified projection payload pages receive
 kernel advice through their existing readers; completed capture files are
 advised only after durability and unchanged-file checks. Kernel advice never
@@ -7797,21 +7633,6 @@ mirror image. Corollary for the empirical branch: `expert_empirical_cost.py`
 must stay **activation-blind**, or the two paths double-count the expert
 A-side.
 
-**The checkpoint's expert LAYOUT reaches that arithmetic as of 2026-09-16
-(PQ-R2).** A card carrying per-expert marginals is not enough on its own: the
-stage reads the weight from the checkpoint, and `build_weight_resolver` maps a
-card unit to ONE key, so a model that stores each expert as its own 2-D tensor
-with the fused gate/up pair split in two resolved NONE of its packed units.
-Those units were then dropped before pricing and before the hole report —
-silently, because `cost_entry_act_dloss` defaults to `0.0`. The bridge is
-`per_expert_weight_keys` + `packed_act_dloss_per_expert` (streamed, one expert
-at a time), reached from `activation_dloss_table` itself; an unresolved name is
-now a hole for every executed activation grid rather than silence; and the
-variance authority is shared with the stacked path
-(`resolve_act_quant_variance`), so the bridge cannot price a second estimator.
-The details, including the joint-row exemption in `merge_act_dloss`, are in the
-2026-09-16 re-stamp above.
-
 **The selecting gate measures the same term (2026-08-20).**
 `PerturbedActivationCache` emulated activation quantization with a module
 `forward_pre_hook`, which on a packed-experts module sees only the module input
@@ -8961,13 +8782,28 @@ Contract:
 | artifact absent | record this stage's projection, build |
 | recorded projection matches | reuse |
 | recorded projection differs | **`exit 2`**, naming every differing key and the stale file |
-| no record for this stage (pre-guard artifact) | **WARN**, record, guard from then on |
+| no record for this stage (pre-guard artifact) | **WARN**, reuse, and file the admission that the artifact's settings identity is **UNKNOWN** — never today's projection |
 
 The manifest is `<artifact>.settings.json`, keyed by stage, so two stages can legitimately own
 one path — under `COST_MODE=aura` + `validated-surrogate` the AURA dW cache and the frontier
 cache **are the same file** (principle 8's one-render identity), and both key sets coexist.
 Pre-R5 flat manifests are read as a `legacy` block and still guard the stage whose key set they
 match, so no live `WORK_DIR` is invalidated by the upgrade.
+
+**The fourth row records an admission, not a setting.** Legacy reuse is the contract
+(Rob, 2026-09-16: old data stays reusable while the pipeline is in flux), and the artifact
+predates the guard, so its identity cannot be recovered from the bytes — the one thing the
+manifest must not do is *claim* one. `stages[stage]` therefore holds a single reserved key,
+`_unverified_settings` (`pipeline.UNVERIFIED_SETTINGS_KEY`), carrying `settings_identity:
+unknown`, `attests_this_artifact: false`, the reason, `first_observed_unix`, and the run's
+request under `observed_current_request` — the request, never the artifact's settings and never
+production proof. Every later check reads the admission back and reaches the same conclusion:
+a retry, a request that changed, or a second stage on the same path can never promote it to a
+verified record, and only the absent-artifact row writes a projection. Because the marker is not
+shaped like a manifest key, a reader that predates it finds a diff and exits 2 rather than
+stamping. A refused mismatch files nothing, and the `tessera-plan` carve-out is untouched: an old
+plan still refuses, because an allocation binding guessed after translation is a fiction rather
+than an admission.
 
 **Coverage is now every skip-if-exists artifact** — **16 call sites over 16 declared
 artifacts**: `probe`, `base-cost`, `render-cost-cache`, `render-cost`, `aura-dw-cache`,
@@ -8998,7 +8834,9 @@ estimator. Every producer (`incremental_measure_quant_cost`, `production_render_
 `aura_cost`, `expert_empirical_cost`, and the inline sidecar-backfill finalize) now stamps
 `provenance["cost_mode"]` from `--cost-mode`, and `cost_table_reusable()` (`669`) makes reuse of
 the *allocator's* table conditional on it matching. A mismatch **rebuilds** with a loud line
-naming both modes; an unstamped (pre-R2) table warns and is reused, never invalidated. Under
+naming both modes; an unstamped (pre-R2) table warns and is reused, never invalidated — and never
+restamped, so the table keeps no `cost_mode` this run invented and the artifact's own stage guard
+files the same unverified admission (§3.4). Under
 `COST_MODE=local` the baseline *is* the allocator table so it carries the same gate; under the
 other modes `cost_baseline.pkl` is mode-agnostic on purpose and is shared across mode changes.
 This is re-vet **R2 precondition (i)** — the prerequisite to flipping the `COST_MODE` default,
@@ -10095,7 +9933,9 @@ that budget. The output, `prismaquant.prefill_frontier.v1`, carries the whole cu
 point `slo_ms`, `predicted_dloss`, `payload_bytes`, `achieved_bits`, `attained_prefill_ms`
 (fixed work included) and its `attained_prefill_ms_bootstrap` interval, `attained_decode_ms`
 and its twin, `device_memory_bytes`, `assignment_sha256` and
-`assignment_path`, `refusal_reason`, `nondominated` -- plus `saturation` (measured at the
+`assignment_path` (a content-addressed file verified before reuse, with
+`assignment_file_provenance` naming the run that published it), `refusal_reason`,
+`nondominated` -- plus `saturation` (measured at the
 table's upper bound and verified), `slo_axis` (table-derived bounds), `monotone_loss`, and
 provenance (table identity, context, cost digest, git commit, allocator argv, bootstrap
 draws/seed). The intervals resample each priced row's own samples
@@ -11753,9 +11593,10 @@ class by the gates above. Gate:
 `tests/test_campaign_row_classes.py`.
 
 The passes that run *after* the rows merge are submitted through the same
-producer. `submit-joint`, `submit-allocation` and `submit-export` build the
-read set with `experiments/glm_data_manifests.py`
-(`build_joint_pass_manifest`, `build_allocation_manifest`,
+producer. `submit-joint`, `submit-aqua`, `submit-allocation` and
+`submit-export` build the read set with `experiments/glm_data_manifests.py`
+(`build_joint_pass_manifest`, `build_aqua_manifest`,
+`build_allocation_manifest`,
 `build_export_manifest`), write it under `<output-root>/data-manifests/` --
 or under `--manifest-dir`, which a frozen output root needs -- and run the
 chain-style `pbrun` command with `--data-manifest` **before** `--detach`,
@@ -11803,6 +11644,20 @@ assignment leaves on the source precision, in the artifact's layer order, with
 `read_order_attested: false` and tensors outside the campaign roster --
 embeddings, norms, the LM head -- named as not declared.
 
+The AQUA manifest declares the A-side's own reads: the sensitivity card, the
+cost payload the merge writes into, the joint plan, the model's
+`config.json` and `model.safetensors.index.json`, and then, per layer, the
+coalesced source extents of the campaign's units -- the same per-unit weight
+bytes the joint pass declares for its model source, keyed by unit instead of by
+layer/part -- followed by the `--act-dir` cache it opens when measured pricing
+is asked for. Its `read_order_attested: false` says what the other two say for
+their own reasons: the stage iterates the artifact's units and streams each
+unit's weight in one pass, so the declared order is the model's layer order
+rather than the order the bytes are opened in. A unit the index cannot resolve
+is priced as a hole and contributes no byte, and the fallback path prices from
+the card, so the extents are a claim on the model source rather than a
+superset of it.
+
 `merge` unions the rows' disjoint Hessian
 captures into the object a whole-scope run writes (same `counts`, same
 provenance), **recomputes** its digest, re-stamps every row's
@@ -11832,6 +11687,15 @@ explicit `admissible` flag, keeps `row_memory_gb` for all of them, and records
 the declined ones under `inadmissible_rows` with the derived demand, the
 per-box multiplier, the box and the reason, which the run also prints. A spec
 that declares no box budget admits every row and says the check was not made.
+Two memory numbers live in a spec and they are not interchangeable:
+`box_memory_gb` is the box's total unified capacity this fit check reads, and
+`cpu_memory_gb` is the cap the container's own cgroup is given
+(`--memory`/`--memory-swap`, through the launcher). Reading the cap out of the
+capacity field bounds a 34 GiB CPU side at 114 GiB or refuses the pilot's own
+derived demand, and reserving the cap alone for a row that also holds device
+residency under-reserves the box by the device envelope; the plan's
+`aggregate_memory_bytes` is the combined physical number a reservation has to
+cover.
 Only a plan with **no** admissible row refuses, naming the widest demand and
 the box. The fit check precedes publication of every selection file and the
 manifest; a refusal leaves any previously published plan unchanged. One over-wide row is a demand to report

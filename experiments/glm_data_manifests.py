@@ -429,6 +429,7 @@ LAYER_CONFIG_META_KEY = "__prismaquant__"
 
 JOINT_ENTRY_POINT = "prismaquant.tessera_joint_aura"
 ALLOCATION_ENTRY_POINT = "prismaquant.tessera_joint_allocation"
+AQUA_ENTRY_POINT = "prismaquant.aqua_activation_cost"
 EXPORT_ENTRY_POINT = "tessera.experiments.export_tessera_serving"
 
 #: ``prismaquant.cost_streaming.layer_index_for_qname`` without the runner:
@@ -1964,6 +1965,118 @@ def build_export_manifest(plan, *, assignment, allocation_cost, produced_by,
         "argv": None if argv is None else [str(item) for item in argv],
     }
     return _finish(track, produced_by, annotations, where=EXPORT_ENTRY_POINT)
+
+
+def cached_activation_paths(act_dir: str, names) -> list:
+    """The cached-activation files the AQUA stage opens for ``names``.
+
+    The stage's own --act-dir layout is one file per unit,
+    ``prismaquant.aqua_activation_cost.cached_act_path``. A unit whose file is
+    not there is priced from the model's Gaussian fit instead, so a missing
+    file is not a hole and declares no byte; what is declared is what the stage
+    would open.
+    """
+    out = []
+    for name in sorted(names):
+        path = os.path.join(act_dir, str(name).replace(".", "__") + ".pt")
+        if os.path.isfile(to_pool(path)):
+            out.append(path)
+    return out
+
+
+def build_aqua_manifest(plan, *, card, cost_in, act_dir, produced_by, argv=None):
+    """The AQUA stage's read set, for the campaign's requested (unit, format) roster.
+
+    ``prismaquant.aqua_activation_cost`` walks the units the cost payload
+    carries, resolves each one's weight through the model's own
+    ``model.safetensors.index.json`` and streams that tensor to compute the
+    activation-side term, then merges the result into the payload. So it reads
+    the sensitivity card, the payload it merges into, the joint plan, the
+    model's index and semantic config, and the source byte extents of every
+    requested unit's weight -- the same extents the joint pass declares for its
+    model source, keyed by unit rather than by layer/part. When measured
+    pricing is asked for, the ``--act-dir`` cache is read too.
+
+    What is *not* attested here is the read order. The stage iterates the
+    artifact's units and streams per unit; the declared order is the model's
+    layer order, which is the shape the prewarm loop windows on, not the order
+    the stage opens the bytes in. Tensors outside the campaign roster --
+    embeddings, norms, the LM head -- are never resolved by this stage and are
+    not declared. A unit the index cannot resolve is priced as a hole and
+    contributes no byte, so the extents are a lower-bound-or-equal claim on the
+    model source and never a superset of it: the fallback path prices from the
+    card, not from another tensor.
+    """
+    plan_path = os.path.abspath(plan)
+    card = os.path.abspath(card)
+    cost_in = os.path.abspath(cost_in)
+    act_dir = os.path.abspath(act_dir) if act_dir else None
+    plan_payload = _read_json(plan_path, "joint plan")
+    if plan_payload.get("schema") != JOINT_PLAN_SCHEMA:
+        raise SystemExit(
+            f"{plan_path}: schema is {plan_payload.get('schema')!r}, expected "
+            f"{JOINT_PLAN_SCHEMA}")
+    inputs = plan_payload["inputs"]
+    campaign_plan_path = _bound(inputs["campaign_plan"], "plan inputs.campaign_plan")
+    roster = _campaign_roster(campaign_plan_path)
+    model = os.path.abspath(str(plan_payload["model"]))
+
+    track = _Phases()
+    track.begin("head")
+    track.add(card, 0, _required_size(card, "sensitivity card"), "head")
+    track.add(cost_in, 0, _required_size(cost_in, "cost payload"), "head")
+    track.add(plan_path, 0, _required_size(plan_path, "joint plan"), "head")
+    for name in ("config.json", "model.safetensors.index.json"):
+        path = os.path.join(model, name)
+        track.add(path, 0, _required_size(path, name), "head")
+
+    campaign = Campaign(os.path.dirname(campaign_plan_path))
+    layer_of = _layer_index_of(roster)
+    by_layer = {}
+    for name in roster:
+        by_layer.setdefault(layer_of[name], []).append(name)
+    for layer in sorted(by_layer):
+        track.begin(f"layer-{layer}")
+        for path, offset, length in campaign.weight_extents_for(
+                sorted(by_layer[layer])):
+            track.add(path, offset, length, "source_extents")
+    track.end()
+
+    cached = []
+    if act_dir is not None:
+        cached = cached_activation_paths(act_dir, roster)
+        track.begin("activations")
+        for path in cached:
+            track.add(path, 0, _required_size(path, "cached activation"),
+                      "activations")
+        track.end()
+
+    annotations = {
+        "entry_point": AQUA_ENTRY_POINT,
+        "plan": plan_path,
+        "plan_sha256": sha256_file(plan_path),
+        "card": card,
+        "cost_in": cost_in,
+        "act_dir": act_dir,
+        "model": model,
+        "layers": sorted(by_layer),
+        "units": len(roster),
+        "cached_activations": len(cached),
+        "sha256_present": False,
+        "sha256_absent_reason": SHA256_ABSENT_REASON,
+        "read_order_attested": False,
+        "read_order_reason": (
+            "the stage iterates the cost artifact's units and streams each "
+            "unit's weight in one pass; the declared order is the model's "
+            "layer order, and the merge writes the payload a byte at a time "
+            "rather than in a read order this manifest could seal"),
+        "counts": track.counts,
+        "bytes": track.bytes,
+        "reread_bytes_by_phase": track.reread,
+        "phases": track.phases,
+        "argv": None if argv is None else [str(item) for item in argv],
+    }
+    return _finish(track, produced_by, annotations, where=AQUA_ENTRY_POINT)
 
 
 def deterministic_entry_provenance(entry_point: str, *, plan: str,
