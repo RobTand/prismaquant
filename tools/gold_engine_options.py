@@ -53,8 +53,9 @@ def add_gold_engine_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--data-parallel-backend", choices=("mp",), default=None)
     group.add_argument("--moe-backend",
                        choices=("auto", "triton", "flashinfer_cutlass"), default=None,
-                       help="explicit stock-vLLM MoE backend; the pinned Spark A4 "
-                            "serve contract selects flashinfer_cutlass")
+                       help="explicit stock-vLLM MoE backend; the menu carries "
+                            "the names this tool will pass through, not a claim "
+                            "that a serving path requires one")
     group.add_argument("--kv-cache-memory-bytes", type=int, default=None,
                        help="explicit KV cache byte bound per rank; omitted means vLLM "
                             "sizes KV from --gpu-memory-utilization")
@@ -63,10 +64,12 @@ def add_gold_engine_arguments(parser: argparse.ArgumentParser) -> None:
 def gold_engine_kwargs(args: argparse.Namespace) -> dict:
     """Validate before loading; omission preserves the original TP1 kwargs.
 
-    The explicit positive KV byte bound and `flashinfer_cutlass` are the two
-    options the pinned Spark serve contract needs; every absent option stays
-    absent rather than being stated as `None`, so an omitted-argument run
-    produces exactly the kwargs it produced before they existed.
+    The explicit positive KV byte bound and the widened backend menu are
+    selections this tool will pass through and validate; whether a given serving
+    path needs one is not decided here and is not qualified by this validation.
+    Every absent option stays absent rather than being stated as `None`, so an
+    omitted-argument run produces exactly the kwargs it produced before they
+    existed.
     """
     result = {"tensor_parallel_size": getattr(args, "tensor_parallel_size", 1)}
     for name in ("nnodes", "node_rank", "master_addr", "master_port",

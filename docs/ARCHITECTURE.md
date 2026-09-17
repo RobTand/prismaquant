@@ -182,9 +182,10 @@ Re-stamped (2026-09-15, `flash/gold-engine-options-20260915`) for the **gold
 engine's explicit KV byte bound and MoE backend** (§7.3).
 `tools/gold_engine_options.py` now accepts `--kv-cache-memory-bytes` (a
 positive integer, validated before the engine loads or the peer is launched)
-and adds `flashinfer_cutlass` to the `--moe-backend` menu, because the pinned
-Spark image's NVFP4 MoE oracle maps that exact name (`map_nvfp4_backend`) and
-the A4 serve flags require it. Both travel through `gold_engine_kwargs` into
+and adds `flashinfer_cutlass` to the `--moe-backend` menu as an accepted
+selection. What a given image maps for its NVFP4 MoE oracle is that image's
+fact, not this repository's, so no required-backend claim is made here and no
+serving path is qualified by an argument test. Both travel through `gold_engine_kwargs` into
 `LLM(**kwargs)`, into the TR3 scorer's runtime binding and the two gold
 runners' manifests, and into `headless_peer_argv`; omitting either emits
 nothing, so existing TP1 receipts and their fingerprints are unchanged.
@@ -14445,12 +14446,11 @@ runners take the stock multi-node topology (`--tensor-parallel-size`,
 `--nnodes`, `--master-addr`, `--master-port`, the two `mp` backends) through
 `tools/gold_engine_options.py`; omitting them preserves the original TP1
 kwargs exactly, which is why existing single-box receipts remain reproducible
-(#434). The same shared options carry the two explicit selections the pinned
-Spark runtime needs: `--kv-cache-memory-bytes`, a positive integer byte bound
+(#434). The same shared options carry two explicit selections: `--kv-cache-memory-bytes`, a positive integer byte bound
 per rank that reaches rank ≥ 1 through the peer argv (omitted means vLLM sizes
 KV from `--gpu-memory-utilization`), and `flashinfer_cutlass` in the
-`--moe-backend` menu, one of the names the pinned image's NVFP4 MoE oracle maps
-(`map_nvfp4_backend`); the menu stays otherwise closed at `auto`/`triton`.
+`--moe-backend` menu as an accepted selection (the menu otherwise stays closed
+at `auto`/`triton`); which name an image maps is not asserted here.
 Both are validated before the engine loads, and an omitted argument emits
 nothing rather than a `None`. Three fields make a multi-node number readable. `gold_engine_configuration`
 is the world size. `gold_fabric_request` is the collective fabric the run asked

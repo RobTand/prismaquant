@@ -69,8 +69,10 @@ def test_public_cli_accepts_declared_two_node_topology(monkeypatch, runner):
 
 def test_the_explicit_kv_bound_and_cutlass_are_shared_engine_options():
     """A4's serve flags must travel through the shared options rather than
-    being retyped at a call site: the pinned runtime rejects `triton` for its
-    routed experts and needs an explicit positive KV byte bound."""
+    being retyped at a call site: the explicit positive KV byte bound and the
+    widened backend menu are selections this tool validates and records. Which
+    backend name a given image maps for its NVFP4 MoE oracle is that image's
+    fact, not this repository's, so no requirement is asserted here."""
     from tools.gold_engine_options import gold_engine_kwargs
 
     result = gold_engine_kwargs(_args(kv_cache_memory_bytes=4294967296,
