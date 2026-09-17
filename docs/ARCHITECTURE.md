@@ -263,8 +263,47 @@ so both ends load `prismaquant/joint_replay_frontier.py` by path. Gates:
 resumed GPU subset has been run under a sealed frontier, so the ARC payoff
 and the resumed wall-clock are unmeasured here; this stamp records the
 contract.
-As of: 2026-09-16 · `flash/issue-654-stage-settings-provenance-20260916`. Stamps
+As of: 2026-09-17 · `campaign/historical-encoder-reuse-20260917`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `campaign/historical-encoder-reuse-20260917`) for the
+**historical encoder seal reuse** the full-512 joint PREPARE needs
+(`prismaquant.tessera_joint_aura.historical_encoder_reuse.v1`). The producer's
+`encoder_source_sha256` hashes every python/cuda/cpp file of the installed
+Tessera package, the branches a campaign never measured included, so a
+checkpoint priced under an older package fails a newer package's own seal even
+when every byte its encoder read is identical. That is exactly what stopped
+PREPARE action `feaba365378d`: its first planned cell
+(`model.language_model.layers.0.mlp.down_proj@TESSERA_BF16_K1_R1024`) records
+`0833671bbddbc3fb7186bdbed0a905ef248c23ffdf1aeee0c083322680d20f6b` while the
+pinned package derives
+`f7cba4410921f983ca1248fb8bb821a142eba19a5470bf719743e3afffe83e27`, and
+`verify_cached_unit` refused the pair after 763 s, before any layer was
+qualified. The plan now carries an explicit, closed block: one versioned schema
+plus a non-empty allowlist of **named** 64-hex seals, each with its own reason,
+evidence, recording time and author. There is no wildcard, prefix, empty-list,
+duplicate or extra-field spelling, and a seal equal to the installed package's
+own needs no entry at all.
+
+`load_measured_anchor_input` compares the checkpoint's recorded seal against
+the installed package's own **once**, inside the checkpoint-identity gates and
+before the per-cell walk resolves a single render origin or decodes a wire;
+anything else is refused there rather than after the metadata intake.
+`verify_anchor_render` then substitutes exactly one identity field, the encoder
+source seal, and only after checking the identity it just derived from the
+streamed source weight and H against the seal the reuse record observed, so a
+record written under another package is refused rather than applied. Every
+other field -- source weight, H, calibration, recipe, unit, encoder fixture and
+wire blob -- stays strictly equal, and the wire record keeps its own bytes and
+its own seal: nothing is restamped. The receipt carries both digests
+(`encoding_identity_sha256` over the identity actually compared,
+`current_encoding_identity_sha256` over the one this package derives) beside
+the `unverified_encoder_reuse` status and the allowlist entry that admitted it,
+and the prepared completion, `results.json`, the standalone synthesis receipt
+and the run's prepared cross-check carry the same record, so a reused seal can
+never read as a re-derived one. No format, default, wire, ship gate or serving
+lane changes, and a plan without the block behaves exactly as before. Gate:
+`tests/test_tessera_joint_encoder_reuse.py`, `tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-16, `flash/issue-654-stage-settings-provenance-20260916`)
 for the **stage-settings guard's legacy-reuse admission** (§3.4;
