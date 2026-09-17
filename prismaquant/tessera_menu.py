@@ -1680,7 +1680,114 @@ def partition_attested(names, *, context_by_unit=None) -> tuple[list[str], list[
     return admitted, refused
 
 
-def menu_width_report(priced, admitted, dropped, explicit_refused, mode) -> tuple[dict, str]:
+def contract_attested_rung_names() -> tuple[str, ...]:
+    """Every rung name the pinned contract attests, in its own spelling.
+
+    DERIVED, never typed (principle 14): each published format row carries the
+    ``name_pattern`` the runtime addresses its rungs by and the
+    ``attested_rungs_q256`` it attests, so the name this returns is the
+    contract's own and not a second spelling of it.
+
+    This is **not** an admission. A rung being in this set says the contract
+    attests it somewhere; whether it is attested for the caller's platform,
+    image, execution mode, residency and structure is
+    :func:`route_admission`'s answer and stays :func:`route_admission`'s
+    answer. What the set is for is the other half of a refusal: an allocator
+    that refuses every priced rung should say what the runtime *does* serve,
+    because that names the measurement the operator is missing.
+
+    A family the contract publishes with no attested rung contributes nothing
+    -- absence is absence, not its whole reader range.
+    """
+    from .tessera_render import _pinned_serving_table
+
+    _table, formats = _pinned_serving_table()
+    names: list[str] = []
+    for entry in (formats or {}).values():
+        pattern = str(entry.get("name_pattern", ""))
+        if "{k}" not in pattern:
+            continue
+        for rung in entry.get("attested_rungs_q256") or ():
+            names.append(pattern.replace("{k}", str(int(rung))))
+    return tuple(sorted(set(names)))
+
+
+def unattested_diagnosis(refused, *, priced=(), context_by_unit=None) -> dict:
+    """Why the pinned runtime did not attest these rungs. DERIVED, structured.
+
+    "0 of 16 priced rungs are attested" has two causes that need opposite
+    fixes, and until RobTand/prismaquant#572 the report told them apart for
+    nobody: either the run supplied no serving scope, in which case a scoped
+    contract declines to answer at all and the count is not its verdict; or a
+    scope was supplied and the count *is* the verdict, in which case what is
+    missing is runtime qualification for those rates.
+
+    Both are already structured. ``RouteAdmission.requires_serving_context``
+    says the contract needs a scope, and ``attested_rungs_q256`` says what it
+    attests instead. Nothing here parses a ``detail`` string, and nothing here
+    admits anything: the same predicate refused these names before this
+    function ran, and refuses them after it.
+    """
+    contexts = [context for context in (context_by_unit or {}).values()
+                if context is not None]
+    supplied = bool(contexts)
+    awaiting: list[str] = []
+    unattested: list[str] = []
+    for name in sorted({str(name) for name in refused if str(name).startswith("TESSERA_")}):
+        if supplied:
+            # A scope was supplied, so the contract answered. Whatever these
+            # rungs need, it is not more scope.
+            unattested.append(name)
+            continue
+        try:
+            admission = route_admission(name)
+        except TesseraMenuError:
+            unattested.append(name)
+            continue
+        (awaiting if getattr(admission, "requires_serving_context", False)
+         else unattested).append(name)
+    attested = list(contract_attested_rung_names())
+    priced_names = {str(name) for name in priced}
+    return {
+        "serving_scope_supplied": supplied,
+        "awaiting_serving_scope": awaiting,
+        "unattested_by_contract": unattested,
+        "contract_attested_rungs": attested,
+        "contract_attested_but_unpriced": [n for n in attested if n not in priced_names],
+    }
+
+
+def tessera_refusal_cause(diagnosis) -> str:
+    """One sentence a fatal refusal can carry, or ``""``.
+
+    :func:`menu_width_report` prints the diagnosis on the menu line, which is
+    the line *above* the one that ends the run. An operator reads the ERROR,
+    so the cause travels on the ERROR as well; the two are the same structured
+    answer rendered twice, never two separate claims.
+
+    It says the verdict was taken without a scope, never that a scope would
+    change it. On the only real table a scope moves 0 of 16 to 1 of 16, so
+    "unattested only because no scope was supplied" would be false for fifteen
+    of them -- and a line whose whole job is to name a cause accurately may not
+    be the thing that misleads.
+    """
+    if not diagnosis:
+        return ""
+    parts = []
+    awaiting = diagnosis.get("awaiting_serving_scope") or []
+    if awaiting:
+        parts.append(
+            f"{len(awaiting)} of them were judged with no Tessera serving scope supplied, "
+            "so that verdict is not the contract's -- pass --tessera-platform, "
+            "--tessera-runtime-image, --tessera-execution-mode and --tessera-residency, "
+            "which may or may not attest them")
+    attested = diagnosis.get("contract_attested_rungs") or []
+    if attested:
+        parts.append("the pinned contract attests " + ", ".join(attested))
+    return ("; " + "; ".join(parts)) if parts else ""
+
+
+def menu_width_report(priced, admitted, dropped, explicit_refused, mode, *, diagnosis=None) -> tuple[dict, str]:
     """The provenance widths and the one log line for a Tessera menu.
 
     ``attested_rungs`` counts what the admission predicate admitted, not what
@@ -1694,6 +1801,13 @@ def menu_width_report(priced, admitted, dropped, explicit_refused, mode) -> tupl
     receipt, so folding it into ``attested_rungs`` would put a producer-side
     assertion in the field a reader takes for an attestation (P14). One count
     is non-zero per run, and ``menu_mode`` says which.
+
+    ``diagnosis`` is :func:`unattested_diagnosis`'s structured answer. It is
+    optional so a caller with no serving scope to report keeps the line it had
+    byte for byte; when present it is stamped whole into ``widths`` -- a log
+    line is not a property of the artifact (P12) -- and summarised on the
+    line. It changes no count: every number above still comes from the
+    admission predicate.
     """
     research = mode == MENU_RESEARCH
     readable = mode == MENU_READABLE
@@ -1719,6 +1833,22 @@ def menu_width_report(priced, admitted, dropped, explicit_refused, mode) -> tupl
             + (f" ({len(explicit_refused)} explicitly named rungs are unattested; "
                "the eligibility gate refuses them below)" if explicit_refused else "")
             + (f"; sample: {list(admitted)[:4]}" if admitted else ""))
+    if diagnosis:
+        widths["unattested_diagnosis"] = dict(diagnosis)
+        awaiting = diagnosis.get("awaiting_serving_scope") or []
+        if awaiting:
+            line += ("; no Tessera serving scope was supplied and the pinned contract "
+                     f"requires one for {len(awaiting)} of them, so this count is NOT the "
+                     "contract's verdict -- pass --tessera-platform, "
+                     "--tessera-runtime-image, --tessera-execution-mode and "
+                     "--tessera-residency")
+        attested = diagnosis.get("contract_attested_rungs") or []
+        if attested:
+            line += f"; the pinned contract attests {', '.join(attested)}"
+        unpriced = diagnosis.get("contract_attested_but_unpriced") or []
+        if unpriced:
+            line += (f" ({len(unpriced)} of them unpriced by this table: "
+                     f"{', '.join(unpriced)})")
     return widths, line
 
 
