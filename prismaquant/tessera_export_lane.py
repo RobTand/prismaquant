@@ -737,9 +737,9 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
                      for name in selected_routed}}
 
 
-#: The bundle's name inside the campaign's wire directory.  One name: the
-#: driver reads the path back from the build anchor rather than guessing it.
-CACHED_EXPERT_UNITS_FILENAME = "cached_expert_units.json"
+#: Content-addressed bundles share the existing campaign wire directory; the
+#: driver reads the selected path from the build anchor rather than guessing.
+CACHED_EXPERT_UNITS_PREFIX = "cached_expert_units"
 
 
 def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapping[str, Any],
@@ -869,6 +869,9 @@ def write_cached_expert_units(projection: Mapping[str, Any]) -> Path:
     the schema is the producer's constant, imported rather than restated, and
     a checkout whose producer has no such API cannot bundle (refused by name).
     """
+    import hashlib
+
+    from .cluster_campaign import CampaignContractError, _atomic_write_new_bytes
     from .tessera_expert_projection import ExpertProjectionError, cached_units_manifest
 
     try:
@@ -884,11 +887,21 @@ def write_cached_expert_units(projection: Mapping[str, Any]) -> Path:
                                          schema=CACHE_SCHEMA)
     except ExpertProjectionError as exc:
         raise TesseraExportLaneError(f"expert projection: {exc}") from exc
-    destination = Path(projection["wire_dir"]) / CACHED_EXPERT_UNITS_FILENAME
-    temporary = destination.with_name(destination.name + ".tmp")
-    temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-                         encoding="utf-8")
-    temporary.replace(destination)
+    encoded = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    digest = hashlib.sha256(encoded).hexdigest()
+    destination = Path(projection["wire_dir"]) / f"{CACHED_EXPERT_UNITS_PREFIX}.{digest}.json"
+    try:
+        _atomic_write_new_bytes(destination, encoded)
+    except CampaignContractError as exc:
+        # Another allocation can publish this same immutable content. Reuse
+        # only its exact bytes; a conflicting entry is never overwritten.
+        try:
+            if destination.is_symlink() or not destination.is_file() or destination.read_bytes() != encoded:
+                raise TesseraExportLaneError(
+                    f"cached-unit manifest conflicts with its content address: {destination}") from exc
+        except OSError as read_error:
+            raise TesseraExportLaneError(
+                f"cannot verify existing cached-unit manifest: {destination}") from read_error
     return destination
 
 
