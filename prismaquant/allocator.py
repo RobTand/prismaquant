@@ -2189,6 +2189,22 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     help="Hard constraint: resident weight bytes + "
                          "--serve-kv-bytes + --serve-peak-scratch-bytes must "
                          "be <= this.")
+    ap.add_argument("--rank-device-budget-bytes", default=None,
+                    help="Comma-separated per-rank device budgets, one per rank "
+                         "of the world a per-rank measured runtime table prices. "
+                         "A per-rank table has no scalar device total: each rank "
+                         "is admitted against its own budget plus its own "
+                         "recomputed fixed charge, which is read from the sealed "
+                         "partition named by --measured-runtime-rank-partition. "
+                         "Mutually exclusive with --serve-device-budget-bytes.")
+    ap.add_argument("--measured-runtime-rank-partition", default=None,
+                    help="Path to a sealed "
+                         "prismaquant.full_engine_rank_partition.v1 document. Each "
+                         "rank row references that rank's own full-engine capture, "
+                         "whose four fixed terms this run recomputes itself; the "
+                         "charge that reaches the search is that recomputation, "
+                         "never a number read out of the document. Required "
+                         "before a per-rank device budget can admit anything.")
     ap.add_argument("--serve-kv-bytes", type=int, default=0,
                     help="Operator-supplied KV-cache bytes for the device "
                          "memory constraint (not modelled by the allocator).")
@@ -2336,6 +2352,77 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "not that box's number. Per-rank admission is "
             "measured_runtime_prices.admit_rank_budgets, and it refuses until a per-rank "
             "fixed charge is admitted")
+
+    # ---- Per-rank device admission (the one path a ranked table may take) ----
+    # A per-rank table has no scalar device total, so the axis is admitted here
+    # or nowhere: each rank gets its own budget and its own recomputed fixed
+    # charge, and the search filters every rank against its own number inside
+    # the fold. The charge is read from a sealed per-rank partition this run
+    # recomputes itself; a number written into a document is a claim, and the
+    # recomputation is what decides.
+    rank_budgets = None
+    if args.rank_device_budget_bytes is not None:
+        parts = [part.strip() for part in args.rank_device_budget_bytes.split(",")]
+        if not parts or any(not part for part in parts):
+            raise SystemExit(
+                "[alloc] ERROR: --rank-device-budget-bytes is a comma-separated vector with "
+                "exactly one positive integer per rank")
+        try:
+            rank_budgets = tuple(int(part) for part in parts)
+        except ValueError:
+            raise SystemExit(
+                "[alloc] ERROR: --rank-device-budget-bytes takes integers, one per rank") from None
+        if any(budget <= 0 for budget in rank_budgets):
+            raise SystemExit(
+                "[alloc] ERROR: --rank-device-budget-bytes takes positive integers, one per rank")
+    if (args.measured_runtime_rank_partition is None) != (rank_budgets is None):
+        raise SystemExit(
+            "[alloc] ERROR: --rank-device-budget-bytes and --measured-runtime-rank-partition "
+            "are declared together: a budget vector with no recomputed per-rank charge has "
+            "nothing to admit against, and a recomputed charge with no budget decides no rank")
+    rank_devices = None
+    if rank_budgets is not None:
+        if measured_runtime_table is None:
+            raise SystemExit(
+                "[alloc] ERROR: --rank-device-budget-bytes prices a per-rank measured runtime "
+                "table; pass --measured-runtime-table and --measured-runtime-context")
+        if args.serve_device_budget_bytes is not None:
+            ap.error("--rank-device-budget-bytes and --serve-device-budget-bytes are mutually "
+                     "exclusive: one box's budget is not a rank sum or a rank maximum")
+        if not ranked_runtime_rows:
+            raise SystemExit(
+                "[alloc] ERROR: --rank-device-budget-bytes prices a table whose rows carry one "
+                "value per rank, and this table's rows are scalar")
+        from .runtime_provenance import recompute_rank_fixed_charge
+        from .measured_runtime_prices import RankDeviceBounds
+        partition_path = Path(args.measured_runtime_rank_partition)
+        try:
+            partition_bytes = partition_path.read_bytes()
+        except OSError as exc:
+            raise SystemExit(
+                f"[alloc] ERROR: rank partition: cannot read {partition_path}: {exc}") from None
+        reference = {"path": str(partition_path),
+                     "sha256": hashlib.sha256(partition_bytes).hexdigest()}
+        try:
+            # The rank reports must name the bytes this table was priced
+            # against: its own source model and runtime manifest. The remaining
+            # world coordinates (assignment, unit roster, configuration,
+            # workload) are joined across the ranks by the recomputation itself.
+            charge = recompute_rank_fixed_charge(
+                reference, root=partition_path.parent,
+                expected_run_identity={
+                    "model_sha256": measured_runtime_table.context.source_sha256,
+                    "runtime_manifest_sha256": measured_runtime_table.context.runtime_sha256})
+            rank_devices = RankDeviceBounds.recomputed(
+                world_size=charge.world_size, budgets_per_rank=rank_budgets,
+                charge_per_rank=charge.charge_per_rank, recomputation=charge)
+        except (ValueError, OSError) as exc:
+            raise SystemExit(f"[alloc] ERROR: per-rank device bounds: {exc}") from None
+        print("[alloc] per-rank device admission ACTIVE (research): "
+              f"{rank_devices.world_size} ranks, recomputed fixed charge per rank "
+              f"{list(rank_devices.charge_per_rank)}. Each rank is filtered against its own "
+              "budget inside the exact search; no scalar device total is published.",
+              flush=True)
 
     # Which fixed whole-engine terms this run may read. Resolved once, here, so
     # a scope a table cannot satisfy refuses on the command line rather than
@@ -3814,13 +3901,16 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     measured_option_assignments = {}
     if measured_runtime_table is not None:
         from dataclasses import replace
-        from .measured_runtime_prices import RuntimeBinding, build_runtime_resources
+        from .measured_runtime_prices import (
+            RuntimeBinding, build_runtime_resources, rank_local_member_shapes,
+            reconcile_serving_unit_rows,
+        )
         from .joint_aura import validate_joint_aura_entry
         try:
             if dict(measured_runtime_table.fixed_assignment) != fixed_format_assignment:
                 raise ValueError("measured table fixed auxiliary assignment differs "
                                  "from allocator fixed formats/source visual overrides")
-            expected_bindings = {}
+            prepared = {}
             for unit, options in sorted(candidates.items()):
                 for option in options:
                     if option.serialized_sidecar_identity is not None:
@@ -3849,12 +3939,42 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                         shapes[name] = _shape_from_stats(entry)
                         if tuple(row["joint_operator_identity"]["source_weight"]["shape"]) != shapes[name]:
                             raise ValueError(f"{name}:{fmt}: joint AURA shape differs from probe stats")
-                    expected_bindings[(unit, option.fmt)] = RuntimeBinding(
+                    prepared[(unit, option.fmt)] = (members, identities, shapes)
+            # A whole-owner row is named by the unit its producer observed,
+            # which for a packed serving unit is the owner's own module name
+            # rather than the aggregated DP name. Reconcile the two by the
+            # row's own member roster before anything reads a key.
+            original_row_keys = {row.key for row in measured_runtime_table.rows}
+            measured_runtime_table = reconcile_serving_unit_rows(
+                measured_runtime_table, menu_members=measured_option_assignments)
+            rows_by_key = {row.key: row for row in measured_runtime_table.rows}
+            expected_bindings = {}
+            for key, (members, identities, shapes) in prepared.items():
+                row = rows_by_key.get(key)
+                # A reconciled row carries the route its producer observed; the
+                # reconciliation already checked that this table's context
+                # names that same route for the row's own unit. Every other
+                # row's route is the context's own declaration for the DP unit,
+                # so a binding that disagrees still refuses.
+                operator_route = (
+                    row.binding.operator_route
+                    if row is not None and key not in original_row_keys
+                    else measured_runtime_table.context.operator_route(*key))
+                # The joint operator identity above binds the probe's FULL
+                # source geometry, and that is the quality identity. The
+                # binding is the runtime's own: a routed member is cut on its
+                # intermediate axis by this table's `tensor_parallel`, so the
+                # two are different fields and agree only at a world of one.
+                # Comparing them as one would demand a TP2 row carry a TP1
+                # shape, which is the mismatch a synthetic full-shape row hides.
+                local_shapes = rank_local_member_shapes(
+                    shapes, tensor_parallel=measured_runtime_table.context.tensor_parallel,
+                    where=f"{key[0]}@{key[1]}")
+                expected_bindings[key] = RuntimeBinding(
                         member_formats=members,
                         member_operator_identity_sha256=identities,
-                        member_shapes=shapes,
-                        operator_route=measured_runtime_table.context.operator_route(unit, option.fmt),
-                    )
+                        member_shapes=local_shapes,
+                        operator_route=operator_route)
             measured_runtime_resources = build_runtime_resources(
                 measured_runtime_table,
                 {unit: [replace(option, member_formats=measured_option_assignments[(unit, option.fmt)])
@@ -4069,6 +4189,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     max_device_bytes=serve_slos.device_budget_bytes,
                     fixed_device_bytes=fixed_device,
                     fixed_non_step_peak_bytes=fixed.non_step_transient_peak_bytes,
+                    rank_devices=rank_devices,
                     diagnostics=diag)
             except RuntimeFrontierLimitError as exc:
                 # Inside a sweep one grid point over the exact-search bound is

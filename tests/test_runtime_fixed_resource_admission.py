@@ -381,11 +381,13 @@ def test_the_gate_names_what_the_producer_still_owes(tmp_path):
     reasons = refusals(tmp_path)
     owed = ["the capture observes no timing_captures, so the fixed prefill and decode charge "
             "has no evidence",
-            "the capture observes no worker_startup_records, so the fixed resident and "
-            "activation charge has no evidence",
-            "the capture observes no kv_observations, so the fixed KV charge has no evidence",
             "the capture observes no owner_views, so the fixed member roster and each "
             "candidate's retained weights has no evidence",
+            # The startup and cache domains close on observation shapes this
+            # schema defines; this capture carries neither, so the gate names
+            # the open domain rather than an observation nothing can read.
+            "domain worker_startup is not closed, so every term depending on it stays null",
+            "domain cache_capacity is not closed, so every term depending on it stays null",
             "the native-row and full-engine transient charge boundary is not versioned, so no "
             "candidate activation or scratch term may be compared to a priced row",
             "the partition names no fixed member, so this table's fixed_assignment binds to no "
@@ -396,10 +398,11 @@ def test_the_gate_names_what_the_producer_still_owes(tmp_path):
 
 def test_the_gate_names_the_placement_obligation_it_cannot_recompute(tmp_path):
     """A placement has to satisfy `max(scalar_budget_bytes,
-    non_step_transient_peak_bytes)`. At this schema version `fixed_resident`
-    depends on `worker_startup`, which never closes, so the budget side is null
-    on every report the producer can emit and the obligation is null with it.
-    The gate says so rather than admitting against the half it does have."""
+    non_step_transient_peak_bytes)`. `fixed_resident` depends on
+    `worker_startup`, which closes only on a startup observation this capture
+    does not carry, so the budget side is null here and the obligation is null
+    with it. The gate says so rather than admitting against the half it does
+    have."""
     assert ("no placement obligation is recomputable, so this table's fixed resources are "
             "admitted against no device extent") in refusals(tmp_path)
 

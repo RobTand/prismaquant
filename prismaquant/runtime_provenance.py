@@ -478,16 +478,30 @@ UNOBSERVED_FIXED_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes")
 
 #: A sealed per-rank partition of a full-engine capture: the one document an
 #: admitted per-rank fixed charge is read from. It asserts no charge of its own
-#: -- it carries the observed per-rank terms, and the consumer recomputes the
-#: charge from them *and* checks that they sum, term by term, to the whole-engine
-#: terms the sealed report recomputes independently. A partition may therefore
-#: move bytes BETWEEN ranks (which is what charging each rank its own share
-#: means) but never invent bytes the whole capture does not hold.
+#: -- each rank row references **that rank's own sealed capture** (whose run
+#: identity names the rank, the world and the runtime), and the consumer
+#: recomputes that rank's four fixed terms from it. The declared terms are a
+#: claim to check against that recomputation, never a source: a partition that
+#: merely redistributes a world total between ranks is refused term by term,
+#: because the numbers it would redistribute do not come from either rank's own
+#: evidence. The whole-engine report reference is an **optional** cross-check
+#: (that the per-rank terms still sum to the world's own recomputed terms), and
+#: it is never a substitute for the per-rank evidence.
 RANK_PARTITION_SCHEMA = "prismaquant.full_engine_rank_partition.v1"
-RANK_PARTITION_RULE = "sealed_per_rank_terms_summing_to_the_recomputed_whole_engine_terms"
-_RANK_PARTITION_FIELDS = ("schema", "world_size", "capture_sha256", "rule",
-                          "full_engine_report", "ranks")
-_RANK_PARTITION_RANK_FIELDS = ("rank", "terms")
+RANK_PARTITION_RULE = (
+    "sealed_per_rank_captures_recomputed_terms_with_optional_whole_engine_cross_check")
+_RANK_PARTITION_FIELDS = ("schema", "world_size", "rule", "full_engine_report", "ranks")
+_RANK_PARTITION_RANK_FIELDS = ("rank", "world_size", "runtime_manifest_sha256",
+                               "capture_sha256", "report", "terms")
+#: Identity coordinates that belong to a *world*, not to one rank of it. Two
+#: ranks of one world must name the same source model, the same measured
+#: assignment, the same canonical unit roster, the same serving configuration,
+#: the same runtime manifest and the same workload: a shared runtime digest
+#: alone would let rank 0 observe a small model and rank 1 a different one under
+#: one world number, and the charge would then price neither.
+WORLD_IDENTITY_FIELDS = ("assignment_sha256", "canonical_units_sha256",
+                         "configuration_sha256", "model_sha256",
+                         "runtime_manifest_sha256", "workload_sha256")
 
 
 @dataclass(frozen=True)
@@ -506,22 +520,43 @@ class RankFixedCharge:
     partition_sha256: str
 
 
-def recompute_rank_fixed_charge(reference, *, root, where="rank fixed charge") -> RankFixedCharge:
-    """Each rank's fixed whole-engine charge, recomputed from a sealed partition.
+def recompute_rank_fixed_charge(reference, *, root, expected_run_identity=None,
+                                where="rank fixed charge") -> RankFixedCharge:
+    """Each rank's fixed charge, recomputed from **that rank's own** capture.
 
-    Two sealed documents are read, and neither is trusted about the other's
-    numbers: the per-rank partition (this rank's observed terms, digest-checked)
-    and the full-engine resource report it belongs to (whose whole-engine terms
-    this consumer recomputes itself). The charge is the sum of each rank's own
-    terms, admitted only when every term is recomputable on both sides and the
-    per-rank sums equal the whole-engine values -- so a partition can allocate
-    the fixed charge across ranks, which is the placement question, but cannot
-    create it. An axis the report cannot recompute refuses by name instead of
-    being charged as zero.
+    Every rank row references its own sealed full-engine report, whose run
+    identity names the rank, the world and the runtime manifest, and this
+    consumer recomputes that rank's four fixed terms from that report's own
+    observations. The terms the partition declares are a claim to check against
+    the recomputation, not a source of it: an arbitrary redistribution of one
+    world total between ranks -- which is what summing a scalar report and
+    splitting it lets through -- is refused term by term, because neither
+    rank's own report recomputes the number that rank was handed.
+
+    The whole-engine report is optional and is only a cross-check: when the
+    partition carries one, the per-rank terms must still sum, term by term, to
+    the world's own recomputed terms, so a partition may allocate the fixed
+    charge across ranks but may never create it. It is never a substitute for
+    the per-rank evidence, which is why it is not required.
+
+    Every rank's report must also name the *same world*: the source model, the
+    measured assignment, the canonical unit roster, the serving configuration,
+    the runtime manifest and the workload are world coordinates, and a shared
+    runtime digest alone would let rank 0 observe a small model and rank 1 a
+    different one under one world number. ``expected_run_identity`` additionally
+    binds those coordinates to the consumer's own independently supplied ones --
+    the table's context, where the existing scalar gate passes the relation's --
+    so a charge measured on other bytes cannot price this table.
+
+    A term no rank's capture can recompute refuses by name instead of being
+    charged as zero.
     """
-    from .full_engine_resource_report import consume_full_engine_resource_report
+    from .full_engine_resource_report import (
+        consume_full_engine_resource_report, read_full_engine_resource_report,
+    )
 
-    reader = ArtifactReader(Path(root))
+    root = Path(root)
+    reader = ArtifactReader(root)
     _, document = reader.json(reference, where)
     fields = _object(document, _RANK_PARTITION_FIELDS, where)
     if fields["schema"] != RANK_PARTITION_SCHEMA:
@@ -532,57 +567,91 @@ def recompute_rank_fixed_charge(reference, *, root, where="rank fixed charge") -
             f"{where}: per-rank partition rule {fields['rule']!r} is not "
             f"{RANK_PARTITION_RULE!r}")
     world = _integer(fields["world_size"], where + " world size", 1)
-    capture = _sha(fields["capture_sha256"], where + " capture digest")
-    _, report = reader.json(fields["full_engine_report"], where + " full-engine report")
-    partition = report.get("partition") if isinstance(report, Mapping) else None
-    _equal(partition.get("capture_sha256") if isinstance(partition, Mapping) else None, capture,
-           f"{where} capture identity")
-    verdict = consume_full_engine_resource_report(dict(fields["full_engine_report"]), root=Path(root))
-    # The whole-engine side is checked first, because it decides whether a
-    # per-rank partition of this capture is evidence at all: a term the report
-    # cannot recompute has no per-rank value to compare against, and charging it
-    # from the partition alone would be charging an unobserved axis.
-    for term in FIXED_TERM_FIELDS:
-        whole = verdict.recomputed_terms.get(term)
-        if type(whole) is not int:
-            refusals = "; ".join(verdict.refusals)
-            raise RuntimePriceError(
-                f"{where}: the sealed full-engine report recomputes no {term}, so a per-rank "
-                f"partition of it is not evidence"
-                + (f" ({refusals})" if refusals else ""))
     rows = fields["ranks"]
     if not isinstance(rows, list) or len(rows) != world:
         size = len(rows) if isinstance(rows, list) else "no"
         raise RuntimePriceError(
             f"{where}: a per-rank partition carries one record per rank: world size {world} "
             f"against {size} records")
-    per_rank, sums = [], {term: 0 for term in FIXED_TERM_FIELDS}
+    per_rank, sums, runtime = [], {term: 0 for term in FIXED_TERM_FIELDS}, None
+    world_identity: dict = {}
     for expected_rank, row in enumerate(rows):
         row_where = f"{where} rank {expected_rank}"
         row = _object(row, _RANK_PARTITION_RANK_FIELDS, row_where)
         _equal(row["rank"], expected_rank, row_where + " rank")
+        _equal(row["world_size"], world, row_where + " world size")
+        row_runtime = _sha(row["runtime_manifest_sha256"], row_where + " runtime manifest")
+        if runtime is None:
+            runtime = row_runtime
+        elif row_runtime != runtime:
+            raise RuntimePriceError(
+                f"{where}: ranks disagree about the runtime manifest they were measured "
+                "under, so they are not one world's ranks")
+        capture = _sha(row["capture_sha256"], row_where + " capture digest")
+        report = read_full_engine_resource_report(row["report"], root=root)
+        run = report["identity"]["run"]
+        # The report must be *this rank's* own capture of *this* world's
+        # runtime. A rank row that references a peer's report, a scalar report,
+        # or a capture of another runtime refuses here rather than having its
+        # declared terms read.
+        _equal(run.get("rank"), expected_rank, row_where + " report rank")
+        _equal(run.get("world_size"), world, row_where + " report world size")
+        _equal(run["runtime_manifest_sha256"], runtime, row_where + " report runtime manifest")
+        _equal(report["identity"]["capture_sha256"], capture, row_where + " report capture digest")
+        # ...and of *one* world: every world coordinate is joined across ranks,
+        # so two ranks cannot be two different models, assignments, unit
+        # rosters, configurations or workloads wearing one world number.
+        for key in WORLD_IDENTITY_FIELDS:
+            first = world_identity.setdefault(key, run[key])
+            if run[key] != first:
+                raise RuntimePriceError(
+                    f"{where}: rank {expected_rank} names {key} {run[key]} where rank 0 names "
+                    f"{first}; the ranks of one world observe one model, assignment, unit "
+                    "roster, configuration, runtime and workload")
+        for key, expected in (expected_run_identity or {}).items():
+            _equal(run.get(key), expected, f"{row_where} report {key}")
+        verdict = consume_full_engine_resource_report(row["report"], root=root)
         terms = _object(row["terms"], tuple(FIXED_TERM_FIELDS), row_where + " terms")
         resolved = {}
         for term in FIXED_TERM_FIELDS:
+            recomputed = verdict.recomputed_terms.get(term)
+            if type(recomputed) is not int:
+                refusals = "; ".join(verdict.refusals)
+                raise RuntimePriceError(
+                    f"{row_where}: this rank's own sealed report recomputes no {term}, so a "
+                    f"per-rank fixed charge has no evidence for it"
+                    + (f" ({refusals})" if refusals else ""))
             value = terms[term]
             if type(value) is not int or value < 0:
                 raise RuntimePriceError(
                     f"{row_where}: {term} is {value!r}; an absent or non-integer term is a "
                     "missing charge rather than a zero one")
-            resolved[term] = value
-            sums[term] += value
+            if value != recomputed:
+                raise RuntimePriceError(
+                    f"{row_where}: the partition declares {term} {value} where this rank's own "
+                    f"sealed report recomputes {recomputed}; a partition allocates the charge "
+                    "across ranks from each rank's own capture and may not restate it")
+            resolved[term] = recomputed
+            sums[term] += recomputed
         per_rank.append(resolved)
-    for term in FIXED_TERM_FIELDS:
-        whole = verdict.recomputed_terms[term]
-        if sums[term] != whole:
-            raise RuntimePriceError(
-                f"{where}: the per-rank {term} sums to {sums[term]} where the sealed report "
-                f"recomputes {whole}; a partition allocates the charge across ranks and may "
-                "not create it")
+    whole_reference = fields["full_engine_report"]
+    if whole_reference is not None:
+        whole = consume_full_engine_resource_report(whole_reference, root=root)
+        for term in FIXED_TERM_FIELDS:
+            recomputed = whole.recomputed_terms.get(term)
+            if type(recomputed) is not int:
+                raise RuntimePriceError(
+                    f"{where}: the sealed whole-engine report cross-check recomputes no {term}, "
+                    "so it cannot check the per-rank partition's own terms")
+            if sums[term] != recomputed:
+                raise RuntimePriceError(
+                    f"{where}: the per-rank {term} sums to {sums[term]} where the sealed "
+                    f"whole-engine report recomputes {recomputed}; a partition allocates the "
+                    "charge across ranks and may not create it")
     return RankFixedCharge(world_size=world,
                            charge_per_rank=tuple(sum(terms.values()) for terms in per_rank),
                            per_rank_terms=tuple(per_rank),
-                           evidence={"full_engine_report": dict(fields["full_engine_report"]),
+                           evidence={"full_engine_report": whole_reference,
                                      "per_rank_partition": True},
                            partition_sha256=_sha(reference["sha256"], where + " partition digest"))
 
@@ -625,10 +694,11 @@ def recompute_fixed_resources(reference, *, root):
 #: What each observation the report names but leaves null costs this
 #: admission. The absence is read from the report rather than assumed here, so
 #: a capture that does supply one drops its entry and the terms it feeds become
-#: reachable once their domain also closes.
+#: reachable once their domain also closes. ``worker_startup_records`` and
+#: ``kv_observations`` are deliberately absent: their shapes are defined now
+#: (``full_engine_resource_report``), so the domains they close are the refusal
+#: a capture without them receives, not a missing producer field.
 OWED_EVIDENCE = {
-    "worker_startup_records": "the fixed resident and activation charge",
-    "kv_observations": "the fixed KV charge",
     "owner_views": "the fixed member roster and each candidate's retained weights",
     "timing_captures": "the fixed prefill and decode charge",
     "observer_qualification": "the observer impact any timing charge needs",

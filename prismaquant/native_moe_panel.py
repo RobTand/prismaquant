@@ -90,7 +90,16 @@ GLM_SHAPE_FIELDS = {"geometry_version", "geometry_id", "source_id", "n_routed_ex
                     "top_k", "hidden_size", "intermediate_size", "shared_experts", "n_group",
                     "topk_group", "topk_method", "scoring_func", "norm_topk_prob",
                     "routed_scaling_factor", "swiglu_limit", "gated", "tensor_parallel",
-                    "tensor_parallel_cut_axis"}
+                    "tensor_parallel_cut_axis", "tensor_parallel_rank"}
+#: The producer's canonical wire spelling for each role this consumer prices,
+#: pinned from Tessera's ``MOE_SHARD_PROJECTIONS``. The serving package is not
+#: importable from here (AGENTS.md principle 5), so the table is restated and
+#: CHECKED: a member whose name is neither this spelling nor the role spelling
+#: is refused, and the producer keeps the source spelling because its wire
+#: record's own ``identity.unit`` is checked against it -- renaming a member on
+#: this side would make that record unverifiable against the bytes it names.
+ROLE_PROJECTIONS = {"w1": "gate_proj", "w3": "up_proj", "w2": "down_proj"}
+
 
 def owner_format(shape, format_name):
     """The one format a whole routed owner holds, validated as Tessera-shaped.
@@ -125,17 +134,19 @@ def owner_execution(shape, *, format_name):
 
 
 def _shape_for_roster(shape):
-    """The member roster's own view: expert count, rank-local width, one format.
+    """The member roster's own view: expert count, this rank's width, one format.
 
     The view is what the roster reads, and it normalizes the two geometries'
     own spellings -- ``experts`` for LFM, ``n_routed_experts`` for GLM -- into
     the single ``experts`` the roster walks, so no caller has to know which
     geometry it holds to count members. The format comes from the caller's
     shape (a prepared owner's) and defaults to this module's constant only when
-    none was declared.
+    none was declared. ``rank_local_intermediate`` is the width THIS rank's
+    cut of a member carries; the member record's own geometry is the container,
+    which is ``intermediate_size`` and stays untouched here.
     """
     glm = geometry_family(shape) == "glm53_next_routed_stack_v1"
-    width = rank_local_intermediate(shape) if glm else shape["intermediate_size"]
+    width = member_intermediate_width(shape)
     return {**shape, "experts": shape["n_routed_experts"] if glm else shape["experts"],
             "rank_local_intermediate": width,
             "format": shape.get("format", FORMAT)}
@@ -219,6 +230,13 @@ def validate_glm_geometry(shape):
         raise ValueError(
             f"GLM routed owner tensor_parallel {shape['tensor_parallel']!r} is outside "
             f"the supported cuts {SUPPORTED_TP_SIZES}")
+    rank = shape["tensor_parallel_rank"]
+    if type(rank) is not int or rank < 0:
+        raise ValueError("GLM routed owner tensor_parallel_rank is not a rank index")
+    if rank >= shape["tensor_parallel"]:
+        raise ValueError(
+            f"GLM routed owner tensor_parallel_rank {rank!r} is not inside a world of "
+            f"{shape['tensor_parallel']!r}")
     if shape["tensor_parallel_cut_axis"] != GLM_TP_CUT_AXIS:
         raise ValueError(
             "GLM routed owner declares a tensor-parallel cut this consumer does not "
@@ -231,6 +249,97 @@ def validate_glm_geometry(shape):
 def rank_local_intermediate(shape):
     """The intermediate width one rank of this owner materializes."""
     return shape["intermediate_size"] // shape["tensor_parallel"]
+
+
+def member_intermediate_width(shape):
+    """The intermediate width THIS rank's cut of the owner carries.
+
+    One home for the cut arithmetic: the roster's own view, the render check
+    and the gate/up pack all read it, so none of them can disagree about how
+    wide this rank's members are. An LFM owner has no cut and its member width
+    is the declared one.
+    """
+    if geometry_family(shape) == "glm53_next_routed_stack_v1":
+        return rank_local_intermediate(shape)
+    return shape["intermediate_size"]
+
+
+def container_member_shape(shape, role):
+    """The WHOLE container one expert role frames: the module's own geometry.
+
+    A Tessera checkpoint holds one whole unit per role whatever world serves it
+    -- the artifact is tensor-parallel agnostic -- so this is the geometry the
+    wire's own identity names and the geometry every rank's cut is taken from.
+    The rank-local reading is :func:`rank_local_member_shape`.
+    """
+    if role == "w2":
+        return [shape["hidden_size"], shape["intermediate_size"]]
+    return [shape["intermediate_size"], shape["hidden_size"]]
+
+
+def rank_local_member_shape(shape, role):
+    """This rank's own cut of one member role, in the container's coordinates."""
+    width = member_intermediate_width(shape)
+    if role == "w2":
+        return [shape["hidden_size"], width]
+    return [width, shape["hidden_size"]]
+
+
+def member_window(shape, role):
+    """``(rows, cols, axis)``: this rank's own window of the whole container.
+
+    Rows for the column-parallel gate/up members, columns for the row-parallel
+    down member -- ``tensor_parallel_cut_axis`` applied to one member, which is
+    the range the loader makes at this world size. ``axis`` is the wire
+    cutter's own spelling (``"row"``/``"column"``), and a world of one holds
+    the container whole.
+    """
+    rows, cols = container_member_shape(shape, role)
+    if geometry_family(shape) != "glm53_next_routed_stack_v1":
+        return (0, rows), (0, cols), ("column" if role == "w2" else "row")
+    world, rank = shape["tensor_parallel"], shape["tensor_parallel_rank"]
+    width = shape["intermediate_size"] // world
+    lo, hi = rank * width, (rank + 1) * width
+    if role == "w2":
+        return (0, rows), (lo, hi), "column"
+    return (lo, hi), (0, cols), "row"
+
+
+def decoded_rank_member(blob, shape, role, *, device, where):
+    """The original wire's own decode, cut to THIS rank's window.
+
+    The artifact holds the WHOLE module, so what this rank must hold is the cut
+    the loader itself makes. Above a world of one that cut goes through the
+    wire format's own cutter -- ``tessera.layout.can_shard``/``slice_unit``,
+    the producer-neutral primitive the loader calls -- never through an import
+    of the serving route (AGENTS.md principle 5) and never by slicing encoded
+    planes here. A row cut of a trellis unit carries the state its first
+    surviving row starts from; the cutter computes that state, this module
+    does not. Comparing the whole container against a rank-local render would
+    compare two widths and pass only at a world of one.
+    """
+    import torch
+    from tessera import unit_artifact
+    if geometry_family(shape) != "glm53_next_routed_stack_v1":
+        decoded = unit_artifact.read_unit_artifact(blob, device=str(device))
+        return decoded.to(torch.bfloat16)
+    rows, cols, axis = member_window(shape, role)
+    world = shape["tensor_parallel"]
+    if world == 1:
+        decoded = unit_artifact.read_unit_artifact(blob, device=str(device))
+        return decoded.to(torch.bfloat16)
+    from tessera.layout import can_shard, slice_unit
+    parsed = unit_artifact.parse_unit_artifact(blob, str(device))
+    if can_shard(parsed, world, axis) is not True:
+        raise ValueError(
+            f"{where}: this rank's {axis} cut of a {world}-way world is not a cut this "
+            "wire format admits")
+    cut = slice_unit(parsed, rows=rows, cols=cols)
+    # The forests are the parent's: ALPHABET and DESCENDANT are whole-unit and
+    # travel across a cut untouched, and the cut keeps the parent's rates per
+    # surviving column, so the shard decodes against the table it was written
+    # from -- bit for bit the parent's own window.
+    return unit_artifact.reconstruct_unit(cut, parsed.forests, parsed.code).to(torch.bfloat16)
 
 
 def validate_routing(routing):
@@ -366,6 +475,21 @@ def geometry_family(shape):
     return "lfm2_moe_routed_stack_v1"
 
 
+def _member_unit_names(unit, expert, role):
+    """Every spelling of one member this consumer admits, the source one first.
+
+    The source checkpoint spells the expert projections ``gate_proj``/
+    ``up_proj``/``down_proj``; this consumer's role vocabulary spells the same
+    three ``w1``/``w3``/``w2``. Both name one member, and the producer keeps the
+    source spelling because its wire record's own ``identity.unit`` is checked
+    against the member's unit -- so both are admitted here rather than one being
+    renamed into the other.
+    """
+    canonical = f"{unit}.{expert}.{role}"
+    projection = ROLE_PROJECTIONS.get(role)
+    return (canonical,) if projection is None else (canonical, f"{unit}.{expert}.{projection}")
+
+
 def _expect_member_roster(unit, members, shape, *, count, pattern, where):
     expected = [(expert, role, f"{unit}.{expert}.{role}")
                 for expert in range(count) for role in ROLES]
@@ -374,12 +498,16 @@ def _expect_member_roster(unit, members, shape, *, count, pattern, where):
             f"native MoE panel requires all {len(expected)} explicitly ordered source members")
     for member, (expert, role, name) in zip(members, expected):
         if (type(member["expert"]) is not int or member["expert"] != expert
-                or member["role"] != role or member["unit"] != name
+                or member["role"] != role
+                or member["unit"] not in _member_unit_names(unit, expert, role)
                 or member["format"] != shape["format"]):
             raise ValueError("native MoE expert-role member ordering/format differs")
-        geometry = ([shape["hidden_size"], shape["rank_local_intermediate"]] if role == "w2"
-                    else [shape["rank_local_intermediate"], shape["hidden_size"]])
-        _equal(member["shape"], geometry, f"{name} shape")
+        # The member's own shape is the CONTAINER: a Tessera checkpoint holds
+        # one whole unit per role whatever world serves it, so the module's
+        # geometry is what the wire identity names. This rank's own cut is the
+        # render, and a roster that claimed it here would describe the shard as
+        # if it were the module.
+        _equal(member["shape"], container_member_shape(shape, role), f"{name} shape")
     return members
 
 
@@ -426,10 +554,11 @@ def _declares_glm_fields(shape):
 def _member_roster(unit, members, shape):
     """This owner's ordered members, in the geometry's own naming and shape.
 
-    An LFM unit is still named exactly as before and still carries the
-    intermediate-width member shapes; a GLM unit carries its own source name
-    and its own rank-local widths.  The two rosters share this function, not a
-    shape constant.
+    Both geometries carry the WHOLE container each member frames: an LFM unit's
+    cut is trivial so its container is its declared width, and a GLM unit's
+    container is the module's, which is what the wire identity names. The rank
+    local cut is the render and the runtime binding, not this record. The two
+    rosters share this function, not a shape constant.
     """
     validate_geometry(geometry_only(shape))
     if not isinstance(unit, str):
@@ -533,7 +662,6 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     """
     import torch
     from tessera.cached_unit import verify_cached_unit, tensor_identity as producer_tensor_identity
-    from tessera.unit_artifact import read_unit_artifact
     from . import format_registry as fr
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .production_weight_cache import ProductionWeightCache, _cb_cache_tensor_identity
@@ -598,18 +726,30 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     tensors, actual_members, rendered = {}, [], {}
     for member in members:
         name = member["unit"]
+        role = member["role"]
         # PWC prefetch materializes disk shards on CPU. Use the same explicit
         # device transfer as the dense native reference; preserve stored dtype.
         source, render = source_weights[name], cache.get(name, format_name).to(device=device)
+        # The source is the WHOLE container the wire's own identity names; the
+        # render is THIS rank's cut of it. The two are the same tensor only at a
+        # world of one, so comparing them as one shape would refuse every real
+        # TP2 panel and accept only the TP1 spelling that hides the cut.
         if (source.device != device or render.device != device or source.dtype != torch.bfloat16
-                or render.dtype != torch.bfloat16 or list(source.shape) != member["shape"]
-                or render.shape != source.shape or not bool(torch.isfinite(source).all())
+                or render.dtype != torch.bfloat16
+                or list(source.shape) != container_member_shape(shape, role)
+                or list(render.shape) != rank_local_member_shape(shape, role)
+                or not bool(torch.isfinite(source).all())
                 or not bool(torch.isfinite(render).all())):
-            raise ValueError(f"native MoE source/PWC tensor is not the declared resident BF16 member: {name}")
+            raise ValueError(
+                f"native MoE source/PWC tensor is not the declared resident BF16 member: {name} "
+                f"(source {list(source.shape)} of container {container_member_shape(shape, role)}, "
+                f"render {list(render.shape)} of this rank's "
+                f"{rank_local_member_shape(shape, role)})")
         _equal(encoding_identities[name]["source"], producer_tensor_identity(source), f"{name} encoder source")
         _equal(encoding_identities[name]["unit"], name, f"{name} encoder unit")
         verify_cached_unit(wire_blobs[name], wire_records[name], encoding_identities[name])
-        decoded = read_unit_artifact(wire_blobs[name], device=str(device)).to(torch.bfloat16)
+        decoded = decoded_rank_member(wire_blobs[name], shape, role, device=device,
+                                      where=f"{name} wire/PWC")
         _equal(_cb_cache_tensor_identity(decoded), _cb_cache_tensor_identity(render), f"{name} wire/PWC")
         del decoded
         activation = activation_identity(spec, cache.activation_max_abs or {}, name)
@@ -624,15 +764,20 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     # Reuse the format/profile's declared gate/up roles. This pack is discarded
     # before the producer's native preparation and never persisted as a cache.
     roster = _roster_shape(shape)
-    width = roster["intermediate_size"]
+    # THIS rank's own width and THIS roster's own member names: the pack holds
+    # the rank-local experts the render loop just checked, and a member spelled
+    # in the source's projection vocabulary must be found by the name it
+    # declares rather than by a name this module would have invented.
+    width = member_intermediate_width(shape)
+    by_role = {(member["expert"], member["role"]): member["unit"] for member in members}
     with torch.inference_mode():
         gate_up = torch.empty(roster["experts"], 2 * width, shape["hidden_size"],
                               dtype=torch.bfloat16, device=device)
         for expert in range(roster["experts"]):
             for role_index, role in enumerate(ROLES[:2]):
                 gate_up[expert, role_index * width:(role_index + 1) * width].copy_(
-                    rendered[f"{unit}.{expert}.{role}"])
-        down = torch.stack([rendered[f"{unit}.{expert}.w2"] for expert in range(roster["experts"])])
+                    rendered[by_role[(expert, role)]])
+        down = torch.stack([rendered[by_role[(expert, "w2")]] for expert in range(roster["experts"])])
         phases = {}
         from .perturbed_x_cache import _activation_qdq
         for phase in PHASES:
@@ -912,10 +1057,25 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         for key in ("input", "topk_ids", "topk_weights"):
             _equal(expected[key], inputs["routing_capture"]["phases"][phase][key], f"{phase} capture {key}")
         phases[phase] = {**expected, "expected_route": route}
+    # The member record's own geometry is the CONTAINER the wire identity
+    # names; the runtime binding carries THIS rank's cut of it. The two are
+    # different fields and agree only at a world of one, so the binding is
+    # derived from the frozen cut rather than copied off the member -- and the
+    # derivation is checked against this module's own rank-local reading, so
+    # one home decides the arithmetic.
+    from .measured_runtime_prices import rank_local_member_shapes
+    member_shapes = rank_local_member_shapes(
+        {member["unit"]: member["shape"] for member in members},
+        tensor_parallel=inputs["shape"].get("tensor_parallel", 1),
+        where=f"{inputs['unit']} runtime binding")
+    for member in members:
+        _equal(list(member_shapes[member["unit"]]),
+               rank_local_member_shape(inputs["shape"], member["role"]),
+               f"{member['unit']} rank-local binding")
     binding = RuntimeBinding(
         {member["unit"]: member["format"] for member in members},
         {name: row["joint_operator_identity_sha256"] for name, row in rows.items()},
-        {member["unit"]: tuple(member["shape"]) for member in members},
+        member_shapes,
         operator_route_identity(route))
     return json.loads(json.dumps({"schema": PANEL_SCHEMA, "unit": inputs["unit"],
         "format": inputs["format"],
@@ -1052,6 +1212,15 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     binding = RuntimeBinding.from_dict(expected_panel["runtime_binding"])
     members = _member_roster(expected_panel["unit"], expected_panel["members"], expected_panel["shape"])
     _equal(dict(binding.member_formats), {member["unit"]: member["format"] for member in members}, "runtime member coverage")
+    # The binding carries THIS rank's cut of each member, not the container the
+    # member record and the wire identity frame. Restating it from the frozen
+    # geometry is what keeps a panel from publishing a container shape where the
+    # runtime loads a cut -- and the canonical combination of every rank's cut
+    # is the container, which the roster above has already checked.
+    _equal({unit: tuple(shape) for unit, shape in binding.member_shapes.items()},
+           {member["unit"]: tuple(rank_local_member_shape(expected_panel["shape"], member["role"]))
+            for member in members},
+           "runtime member shapes")
     operator = receipt["operator"]
     _equal(operator["members"], [_native_member_identity(member) for member in members], "receipt native members")
     for key in ("shape", "routing", "profile_role_order", "routing_capture_sha256", "serving_config_sha256"):

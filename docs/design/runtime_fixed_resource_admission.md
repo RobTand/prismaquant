@@ -142,11 +142,81 @@ an unknown timing rule is refused.
 and takes per-rank maxima for the transients, publishing a tuple per rank so no
 consumer is handed a reduction it did not ask for. `admit_rank_budgets` checks
 each rank against its own budget and names every rank that fails -- an
-imbalanced world whose sum or mean would have passed is refused. A device total
-additionally requires an admitted per-rank fixed charge and a versioned
-composition for the runtime-global workspace; both are owed, so the ranked
-device axis refuses today, by name, and publishes no device number rather than a
-sum with a term missing from it.
+imbalanced world whose sum or mean would have passed is refused.
+
+**The runtime-global workspace is composed inside the search (2026-09-17).** It
+used to be added after the frontier was built, so a fast option whose
+`vllm.WorkspaceManager` allocation did not fit could still prune the slower
+option that did. `allocator_solver.solve_runtime_frontier` now keeps a per-rank
+`identity -> bytes` map in each state, unions it during the fold, refuses one
+identity at two sizes, charges that rank's workspace bytes in its own budget
+check, and compares dominance only within an identical workspace identity set.
+`RANK_WORKSPACE_RULE` (`sum_of_distinct_frozen_workspace_identities_per_rank`)
+is the one rule both the fold and `compose_rank_totals` apply.
+
+**The per-rank fixed charge is bound to each rank's own capture (2026-09-17).**
+`prismaquant.full_engine_rank_partition.v1` carries one row per rank, and each
+row references **that rank's own** sealed full-engine report beside `rank`,
+`world_size`, `runtime_manifest_sha256` and that report's `capture_sha256`. The
+consumer recomputes that rank's four fixed terms from that rank's own
+observations and refuses a declared term that is not the recomputed one, so an
+arbitrary redistribution of a world total between ranks refuses term by term
+rather than passing a sum check. The whole-engine report reference is optional
+and is only a cross-check. A rank's report is one rank's capture, so its run
+identity carries the optional all-or-nothing rank scope (`rank`, `world_size`).
+
+**Two of the owed observations now have shapes (2026-09-17).** `worker_startup`
+closes on `worker_startup_records`: one record naming the rank that measured it,
+the `torch.cuda.memory_allocated()` sample taken after
+`process_weights_after_loading` and after `lock_workspace()`, the receipt's own
+`resources.resident_bytes`, and the `resident_bytes` of the producer's own
+`tessera.native_moe_workspace.v1` record in the same observation, with
+`workspace_locked: true`. `cache_capacity` closes on `kv_observations` in the
+shape the runtime's read-only observer already returns
+(`experiments/full_engine_kv.py:inspect_worker_kv`): the block manager's
+`num_blocks`, one `group_page_size_bytes` per cache group, the observer's
+deduplicated physical `storage` block (`storages`, each with its `owners`, and
+the `unique_physical_storage_bytes` the consumer re-adds) and the scheduler's
+`resolved_limits.max_num_batched_tokens`/`max_num_seqs`. Both close on an
+equality against the allocation ledger -- the fixed-owned resident rows must sum
+to the receipt's figure, and the `kv`-owned resident rows must sum to the
+deduplicated physical extent -- so neither side is trusted about the other, and
+no counter is thresholded: a locked workspace with no resident storage and a
+zero-block pool are real states. A multi-group or hybrid config therefore
+compares its actual physical backings rather than assuming every group's blocks
+are identical. The record's own `runtime_admission` attestation is required and
+must be true, because the capture harness's intrusive snapshot pass sets it
+false and names itself admission-ineligible; it never closes the domain by
+itself, which is what keeps the attestation honest. That is what makes
+`fixed_resident`, `fixed_activation` and `fixed_kv` recomputable, so the four
+fixed terms of a capture that observed them are numbers rather than nulls.
+
+**Producer-side hook: owed, and named.** Nothing in this tree emits either
+observation record, a rank-scoped run identity, or the engine's block-manager
+accounting; the consumer intake above is complete and reachable and takes the
+observer's own record shape, and the capture harness is what must assemble the
+records. The seam the routed-owner producer doc names is
+`experiments/bench_native_moe_operator.py`'s per-rank resource identity (which
+must be present for every rank of the world, never one process's bound presented
+as the operator's) for the startup record, and `experiments/full_engine_kv.py`'s
+`inspect_worker_kv` -- whose `group_page_size_bytes`, `storage.storages` and
+`resolved_limits` are already the coordinates this consumer reads -- for
+`kv_observations`; the per-phase activation charge comes from the CUPTI
+collector's per-phase bound (`resources.phases[phase].bound`), which classifies
+the ledger rows this consumer recomputes `fixed_activation` from. Tessera's
+`experiments/full_engine_resource_partition.py` still lists `worker_startup` and
+`cache_capacity` among its unimplemented domains, and that assembler is where
+the two records must be published. `owner_views`, `timing_captures`,
+`observer_qualification` and `runtime_provenance_relation` remain owed
+observations with no defined shape.
+
+With the workspace rule and the per-rank binding in place, a device total
+additionally requires an admitted per-rank fixed charge; the ranked device axis
+refuses today for that one named reason and publishes no device number rather
+than a sum with a term missing from it. `allocator.main` accepts
+`--rank-device-budget-bytes` and `--measured-runtime-rank-partition` and is the
+legitimate path that reads such a charge; the CPU fixtures that exercise it are
+synthetic and say so.
 
 ## Minimal envelope to freeze after observer qualification
 

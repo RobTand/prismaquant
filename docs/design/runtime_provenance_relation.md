@@ -91,6 +91,19 @@ those counts -- a receipt that priced a partial sum is refused. A dense or
 single-device row keeps the scalar spelling and the binding shape it has always
 had.
 
+A **per-rank fixed charge** is read from `prismaquant.full_engine_rank_partition.v1`,
+whose rank rows each reference **that rank's own** sealed full-engine report
+(`{path, sha256}`) beside `rank`, `world_size`, `runtime_manifest_sha256` and
+that report's `capture_sha256`. Each rank's report is one rank's capture, so its
+run identity carries the optional all-or-nothing rank scope (`rank`,
+`world_size`). `runtime_provenance.recompute_rank_fixed_charge` recomputes that
+rank's four fixed terms from that rank's own observations and refuses a declared
+term that is not the recomputed one, so a partition that merely redistributes a
+world total between ranks -- which summing one scalar report and splitting it
+would have allowed -- is refused term by term. The whole-engine report reference
+is optional and is only a cross-check that the per-rank terms still sum to the
+world's own recomputed terms.
+
 `admit_fixed_resources` recomputes the partition and admits only on agreement,
 so it still refuses every current fixed-resource claim -- by name rather than
 unconditionally. A `complete` status, opaque hashed proof, whole-engine peak, or

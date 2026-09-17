@@ -21,6 +21,7 @@ import hashlib
 import json
 import math
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -611,7 +612,7 @@ def _glm_shape():
             "n_group": 1, "topk_group": 1, "topk_method": "noaux_tc", "scoring_func": "sigmoid",
             "norm_topk_prob": True, "routed_scaling_factor": 2.5, "swiglu_limit": 10.0,
             "gated": True, "tensor_parallel": GLM_TP,
-            "tensor_parallel_cut_axis": "intermediate"}
+            "tensor_parallel_cut_axis": "intermediate", "tensor_parallel_rank": 0}
 
 
 def _glm_routing():
@@ -636,17 +637,23 @@ def _glm_cell():
     from prismaquant.joint_aura import arithmetic_identity, make_joint_aura_entry
 
     shape, routing = _glm_shape(), _glm_routing()
-    width = panel.rank_local_intermediate(shape)
     activation = {"schema": "prismaquant.joint_aura.activation.v1", "quantizes_input": True,
                   "activation_max_abs": None, "input_global_scale": None, "clip_enabled": False}
     members = []
     for expert in range(GLM_EXPERTS):
         for role in panel.ROLES:
             unit = f"{GLM_UNIT}.{expert}.{role}"
-            dims = [GLM_HIDDEN, width] if role == "w2" else [width, GLM_HIDDEN]
-            weight = _fake_identity(unit, dims)
+            # The MODULE's geometry, which is what the wire identity and the
+            # joint quality row bind, beside this rank's own cut of it -- the
+            # two fields a TP2 panel must not conflate (TS #539:
+            # `member["shape"]` is the source container, the runtime binding is
+            # the rank-local render).
+            container = panel.container_member_shape(shape, role)
+            local = panel.rank_local_member_shape(shape, role)
             members.append({"unit": unit, "expert": expert, "role": role, "format": FORMAT,
-                            "shape": dims, "source_weight": weight, "rendered_weight": weight,
+                            "shape": container,
+                            "source_weight": _fake_identity(unit, container),
+                            "rendered_weight": _fake_identity(unit + ".render", local),
                             "activation": copy.deepcopy(activation),
                             "wire": {"blob_sha256": "3" * 64, "blob_bytes": 42,
                                      "record": {"unit": unit}}})
@@ -787,3 +794,198 @@ def test_a_glm_owner_is_refused_a_single_rank_vector_for_a_two_rank_world(joined
     with pytest.raises(RuntimePriceError, match="exactly one record per rank"):
         parse_row_resources(collapsed, tensor_parallel=GLM_TP, where="glm row")
     assert len(receipts) == GLM_TP
+
+
+# --------------------------------------------------------------------------
+# The whole cost model: 864 member rows -> the allocator's own CLI
+# --------------------------------------------------------------------------
+
+GLM_CLI_BUDGETS = (10 ** 9, 10 ** 9)
+
+
+def _glm_cli_fixture(tmp_path, *, budgets=GLM_CLI_BUDGETS):
+    """A GLM-288 cost model, its measured owner row, and a sealed per-rank charge.
+
+    The row is the emitter's own: one atomic whole-owner row whose members are
+    the 864 rank-local expert projections, keyed by the unit its producer
+    observed. What the allocator's CLI needs beyond it is the cost model those
+    members are priced from (probe stats and joint-AURA rows for every member,
+    because the DP reads per-member identities), a runtime context that names
+    the owner's operator route, and the per-rank fixed charge two sealed
+    rank-scoped captures recompute. Nothing here is a measurement.
+    """
+    import pickle
+
+    from prismaquant import allocator
+    from prismaquant.allocator_candidates import serialized_candidate_payload
+    from prismaquant.measured_runtime_prices import CONTEXT_SCHEMA, SCHEMA
+    from test_runtime_rank_resources import _sealed_per_rank_partition
+
+    inputs, preflight, rows = _glm_cell()
+    # The owner's canonical wire extent is what the DP's aggregated candidate
+    # prices, so the fixture's wire records carry each member's real serialized
+    # extent rather than a placeholder. Without that the two sides of one
+    # artifact would disagree, which is a refusal the CLI would rightly make.
+    format_spec = allocator.fr.get_format(FORMAT)
+    for member in inputs["members"]:
+        serialized, _, _ = serialized_candidate_payload(
+            format_spec, tuple(member["shape"]), qname=member["unit"],
+            cb_serialization_context=None)
+        member["wire"]["blob_bytes"] = serialized
+    spec, panel, cost_payload, _receipts = _write(
+        (inputs, preflight, rows), tmp_path, world_size=GLM_TP, samples=[FAST, SLOW],
+        receipt_mutation=_one_token_route(GLM_ROUTE_SHAPE))
+    item = emitter.bind_native_receipt(spec, cost_payload=cost_payload, cost_sha256="4" * 64,
+                                       manifest_dir=tmp_path, table_dir=tmp_path)
+    row = copy.deepcopy(item["row"])
+    probe_path, cost_path = tmp_path / "glm-probe.pkl", tmp_path / "glm-costs.pkl"
+    # A routed expert member carries its own router/expert topology, which is
+    # what the explicit serving scope classifies it by; the shape and the
+    # parameter count are what the DP prices it with.
+    stats = {member["unit"]: {"h_trace": 1.0, "n_params": math.prod(member["shape"]),
+                              "in_features": member["shape"][1], "out_features": member["shape"][0],
+                              "router_path": f"{GLM_UNIT}.gate", "expert_id": member["expert"]}
+             for member in inputs["members"]}
+    model_dir = tmp_path / "glm-model"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text(json.dumps({"model_type": "glm5_next"}))
+    probe_path.write_bytes(pickle.dumps({"stats": stats, "meta": {"model": str(model_dir)}}))
+    cost_path.write_bytes(pickle.dumps({
+        "costs": cost_payload["costs"], "meta": {"formats": [FORMAT]},
+        "provenance": {"cost_mode": "aura", "joint_activation": True,
+                       "cost_currency": "joint_aura_predicted_dloss"}}))
+    receipt = tmp_path / "synthetic-receipt.txt"
+    receipt.write_text("Synthetic CPU test fixture, not GPU measurement evidence.\n")
+    receipt_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
+    context = {"schema": CONTEXT_SCHEMA,
+        "serving_context": {"platform": "sm_121", "structure": "routed_moe",
+                            "residency": "resident",
+                            "runtime_image": panel["runtime"]["image"], "execution_mode": "eager"},
+        "gpu_identity": "synthetic", "runtime_sha256": "b" * 64,
+        "source_sha256": panel["source_sha256"], "calibration_sha256": panel["calibration_sha256"],
+        "prompt_tokens": 1, "batch_size": 1, "tensor_parallel": GLM_TP, "graph_mode": "eager",
+        "operator_routes": {panel["unit"]: {panel["format"]: row["binding"]["operator_route"]}}}
+    now = datetime.now(timezone.utc)
+    table = {"schema": SCHEMA, "table_id": "synthetic-glm-only", "status": "proposal_data",
+        "composition": "sequential_operator_sum", "context": context,
+        "cost_sha256": hashlib.sha256(cost_path.read_bytes()).hexdigest(),
+        "measured_at": (now - timedelta(days=1)).isoformat(),
+        "valid_until": (now + timedelta(days=1)).isoformat(), "fixed_assignment": {},
+        "fixed_resources": {"prefill_ms": 0.0, "decode_ms": 0.0, "serialized_bytes": 0,
+                            "resident_bytes": 0, "peak_scratch_bytes": 0, "activation_bytes": 0,
+                            "kv_bytes": 0},
+        "fixed_resources_receipt_path": receipt.name, "fixed_resources_receipt_sha256": receipt_sha,
+        "rows": [row]}
+    table_path, context_path = tmp_path / "glm-runtime.json", tmp_path / "glm-context.json"
+    table_path.write_text(json.dumps(table))
+    context_path.write_text(json.dumps(context))
+    # The rank captures must name the bytes this table was priced against: its
+    # own source model and the runtime manifest its context declares. The
+    # remaining world coordinates are joined across the two ranks.
+    _partition_reference, partition = _sealed_per_rank_partition(
+        tmp_path, startup=(1024, 4096), model_sha256=(panel["source_sha256"],) * 2,
+        runtime_manifest_sha256="b" * 64)
+    partition_path = tmp_path / "glm-partition.json"
+    partition_path.write_text(json.dumps(partition, sort_keys=True))
+    argv = ["allocator", "--probe", str(probe_path), "--costs", str(cost_path),
+            "--formats", FORMAT, "--target-bits", "32", "--pareto-targets", "32",
+            "--layer-config", str(tmp_path / "layer.json"),
+            "--pareto-csv", str(tmp_path / "pareto.csv"),
+            "--pareto-output-dir", str(tmp_path / "seeds"),
+            # The rung the owner was measured in is a Tessera rung, so the run
+            # declares the serving scope it was priced under. The menu mode the
+            # tests set is `research`: this is a synthetic cost model that is
+            # never exported, and the attested-rung gate is what refuses a real
+            # export of an unattested rung.
+            "--tessera-platform", "sm_121",
+            "--tessera-runtime-image", panel["runtime"]["image"],
+            "--tessera-execution-mode", "eager", "--tessera-residency", "resident",
+            # The owner's rung is priced as research: the serving profile the
+            # GLM architecture defaults to is the packed-MoE export profile,
+            # whose format restrictions are about what may be exported.
+            "--target-profile", "research",
+            "--measured-runtime-table", str(table_path),
+            "--measured-runtime-context", str(context_path),
+            "--slo-prefill-p95-ttft-ms", "1000",
+            "--rank-device-budget-bytes", ",".join(str(budget) for budget in budgets),
+            "--measured-runtime-rank-partition", str(partition_path)]
+    return argv, partition_path, panel
+
+
+def test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members(tmp_path, monkeypatch):
+    """The main objective's own geometry, end to end through ``allocator.main``.
+
+    A whole routed owner is one DP item named by the allocator's aggregation
+    (``.__packed_serving__``), while the producer's row names the unit it
+    measured. The two are reconciled by the row's own member roster, and the
+    assignment the CLI writes is expanded back to all 864 member Linears. No
+    GPU ran: every receipt and cost row here is a synthetic CPU fixture.
+    """
+    argv, _partition, _panel = _glm_cli_fixture(tmp_path)
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
+    monkeypatch.setattr(sys, "argv", argv)
+    from prismaquant import allocator
+    from prismaquant.layer_config import load_assignment
+
+    allocator.main()
+    assignment = load_assignment(tmp_path / "layer.json")
+    members = {member["unit"] for member in _glm_cell()[0]["members"]}
+    assert GLM_MEMBERS == 864
+    assert set(assignment) == members, (
+        "the aggregated owner expands to its own 864 member Linears, not to a "
+        "packed-serving super-item name")
+    assert set(assignment.values()) == {FORMAT}
+    verdict = json.loads((tmp_path / "layer.json").read_text())[
+        "__prismaquant__"]["serve_constraints"]
+    assert verdict["per_rank_resources"] is True
+    assert verdict["device_memory_total_published"] is False
+    assert verdict["predicted"]["device_memory_bytes"] is None
+    ranked = verdict["coverage"]["memory"]["operator_rank_totals"]
+    assert ranked["world_size"] == GLM_TP
+    assert len(ranked["ranks"]) == GLM_TP
+
+
+def test_the_cli_refuses_a_forged_or_changed_rank_report(tmp_path, monkeypatch):
+    """The admitted budget is only as good as the per-rank evidence behind it.
+
+    Two defects a scalar world total cannot see: the partition redistributes
+    one world's numbers between its ranks, and a rank row points at its peer's
+    capture. Both refuse by name, before any solve runs.
+    """
+    argv, partition_path, _panel = _glm_cli_fixture(tmp_path)
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
+    partition = json.loads(partition_path.read_text())
+    redistributed = copy.deepcopy(partition)
+    redistributed["ranks"][0]["terms"] = copy.deepcopy(partition["ranks"][1]["terms"])
+    redistributed["ranks"][1]["terms"] = copy.deepcopy(partition["ranks"][0]["terms"])
+    partition_path.write_text(json.dumps(redistributed, sort_keys=True))
+    monkeypatch.setattr(sys, "argv", argv)
+    from prismaquant import allocator
+
+    with pytest.raises(SystemExit, match="may not restate it"):
+        allocator.main()
+    assert not (tmp_path / "layer.json").exists()
+
+    peer = copy.deepcopy(partition)
+    peer["ranks"][1]["report"] = copy.deepcopy(partition["ranks"][0]["report"])
+    partition_path.write_text(json.dumps(peer, sort_keys=True))
+    with pytest.raises(SystemExit, match="report rank"):
+        allocator.main()
+    assert not (tmp_path / "layer.json").exists()
+
+    # A rank that observed a different model under the same runtime, rank and
+    # world size. The partition's own reference is restated, so what refuses is
+    # the world-identity join rather than the checksum reader.
+    mixed_path = Path(partition["ranks"][1]["report"]["path"])
+    mixed_report = json.loads(mixed_path.read_text())
+    mixed_report["identity"]["run"]["model_sha256"] = "c" * 64
+    mixed_report["partition"]["identity"]["model_sha256"] = "c" * 64
+    mixed_path.write_text(json.dumps(mixed_report, sort_keys=True))
+    mixed = copy.deepcopy(partition)
+    mixed["ranks"][1]["report"] = {
+        "path": str(mixed_path),
+        "sha256": hashlib.sha256(mixed_path.read_bytes()).hexdigest()}
+    partition_path.write_text(json.dumps(mixed, sort_keys=True))
+    with pytest.raises(SystemExit, match="rank 1 names model_sha256"):
+        allocator.main()
+    assert not (tmp_path / "layer.json").exists()

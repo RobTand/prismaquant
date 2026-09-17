@@ -108,7 +108,8 @@ def test_the_consumer_reads_the_artifact_and_never_the_serving_runtime():
     assert mentions, "the schema the artifact declares about itself should be named"
     for mention in mentions:
         # Every mention is part of a schema identifier, never a module path.
-        assert re.match(r"tessera\.full_engine_resource_(report|identity|partition)\.v1",
+        assert re.match(r"tessera\.(full_engine_resource_(report|identity|partition)"
+                        r"|native_moe_workspace)\.v1",
                         mention), mention
 
 
@@ -394,8 +395,11 @@ def test_a_partition_of_another_capture_refuses(tmp_path):
 @pytest.mark.parametrize("domain", [name for name in DOMAINS if name != "history_join"])
 def test_a_domain_that_closes_where_the_consumer_cannot_refuses(tmp_path, domain):
     """Altered cache capacity, a missing timing tail and overlapping streams
-    all reach this consumer only as a domain state, because the report carries
-    no KV, timing or stream observation to recompute."""
+    reach this consumer only as a domain state, because the report carries no
+    timing or stream observation to recompute. The startup and cache domains
+    have closing conditions now, and this fixture supplies neither
+    observation, so a document that closes them anyway is still a claim the
+    consumer cannot reproduce."""
     def mutate(report):
         report["partition"]["domains"][domain] = {
             "state": "closed", "reason": None, "evidence": ["checkpoints"]}
@@ -406,8 +410,9 @@ def test_a_domain_that_closes_where_the_consumer_cannot_refuses(tmp_path, domain
 
 def test_the_two_checkable_domains_close_only_on_their_own_observed_condition(tmp_path):
     """`history_join` reads the unattributed external records and
-    `external_closure` reads the external native peak. The other four have no
-    condition in this schema, which is why they stay open above."""
+    `external_closure` reads the external native peak. The startup and cache
+    domains close on their own observation shapes (see the fixed-terms fixture
+    below), and this capture supplies neither, so both stay open here."""
     assert consume(tmp_path, supplied()).disagreements == ()
 
     def unattributed(report):
@@ -1023,7 +1028,8 @@ def test_an_allocation_live_across_a_step_boundary_is_carried_not_scratch(tmp_pa
     verdict = consume(tmp_path, closed_report(steps=CLOSED_STEPS, rows=[row]))
     # No disagreement means the consumer put the row in the `activation` cell
     # the fixture declares for it. The term itself stays null: every activation
-    # term depends on `worker_startup`, which never closes at this version.
+    # term depends on `worker_startup`, which closes only on a startup
+    # observation this capture does not carry.
     assert verdict.disagreements == ()
     assert verdict.recomputed_terms["fixed_activation"] is None
     assert verdict.recomputed_terms["fixed_scratch"] == CLOSED_FIXED_SCRATCH
@@ -1203,9 +1209,9 @@ def test_the_placement_obligation_moves_with_each_side(budget, peak, expected):
 
 
 def test_the_placement_obligation_is_null_while_either_side_is(tmp_path):
-    """At this schema version `fixed_resident` depends on `worker_startup`,
-    which never closes, so the budget side is null on every report the producer
-    can emit. The obligation is therefore null and refuses by name."""
+    """`fixed_resident` depends on `worker_startup`, which closes only on a
+    startup observation this capture does not carry, so the budget side is null
+    here. The obligation is therefore null and refuses by name."""
     verdict = consume(tmp_path, closed_report(steps=CLOSED_STEPS, rows=NON_STEP_ROWS))
     assert verdict.recomputed_non_step_transient_peak_bytes == 7000
     assert verdict.recomputed_scalar_budget_bytes is None
@@ -1256,3 +1262,344 @@ def test_the_off_step_price_moves_with_the_bytes_it_prices(tmp_path):
     assert _placement_obligation(6000, large.recomputed_non_step_transient_peak_bytes) == 9000
     # And the budget side moves it too, with the off-step side held fixed.
     assert _placement_obligation(12000, small.recomputed_non_step_transient_peak_bytes) == 12000
+
+
+# --------------------------------------------------------------------------
+# The startup and cache observations: what makes the four fixed terms
+# recomputable, and the rank scope a per-rank capture carries.
+# --------------------------------------------------------------------------
+
+STARTUP_ID = "0:1000:2"
+ACTIVATION_ID = "0:1300:1"
+KV_ID = "0:1100:1"
+STARTUP_BYTES = 1024
+WORKSPACE_SLOTS_BYTES = 512
+FIXED_ACTIVATION_BYTES = 512
+KV_BYTES = 2048
+#: The fixture's own fixed-resident charge: the row `closed_report` already
+#: carries (4096, never freed) plus the startup row this fixture adds at the
+#: ledger's first index.
+FIXED_RESIDENT_BYTES = 4096 + STARTUP_BYTES
+FIXED_TERM_BUDGET = 16680
+#: The producer's own scope sentences, restated so the fixture carries the
+#: producer's wording rather than a paraphrase. `full_engine_kv`'s read-only RPC
+#: emits the storage sentence; the startup record names the sample the native
+#: operator's own resource pass takes after `lock_workspace()`.
+KV_STORAGE_SCOPE = "actual shared CUDA backing storage, deduplicated by device/address/size"
+KV_SCOPE = ("actual stock resolved KV descriptors and policy; physical storage is "
+            "independently deduplicated")
+STARTUP_SCOPE = ("torch.cuda.memory_allocated() after process_weights_after_loading and "
+                 "lock_workspace(), beside the receipt's resident figure")
+
+
+def kv_record(**overrides):
+    """One rank's KV observation in the shape ``inspect_worker_kv`` emits.
+
+    The coordinates are the read-only RPC's own -- ``num_blocks``, one page size
+    per cache group, the deduplicated ``storage`` block and the scheduler's
+    ``resolved_limits`` -- and the record is an open mapping, so the rest of the
+    RPC's descriptors travel beside them exactly as the runtime publishes them.
+    """
+    storages = [{"device_type": "cuda", "device_id": 0, "address": 4096,
+                 "bytes": KV_BYTES, "owners": ["kv_cache.0"]}]
+    record = {
+        "num_blocks": 2,
+        "tensors": [{"size": KV_BYTES, "layers": 1, "layer_stride": KV_BYTES,
+                     "block_stride": KV_BYTES // 2, "offset": 0}],
+        "group_page_size_bytes": [KV_BYTES // 2],
+        "storage": {"views": [{"owner": "kv_cache.0", "device_type": "cuda", "device_id": 0,
+                               "address": 4096, "bytes": KV_BYTES, "storage_offset_bytes": 0,
+                               "view_extent_bytes": KV_BYTES, "shape": [KV_BYTES // 2, 1],
+                               "stride": [1, 1], "dtype": "torch.uint8"}],
+                    "storages": storages,
+                    "unique_physical_storage_bytes": sum(row["bytes"] for row in storages),
+                    "scope": KV_STORAGE_SCOPE},
+        "resolved_limits": {"max_model_len": 4096, "max_num_seqs": 1,
+                            "max_num_batched_tokens": 1, "tensor_parallel_size": 1},
+        "runtime_admission": True,
+        "scope": KV_SCOPE,
+    }
+    record.update(overrides)
+    return record
+
+
+def startup_record(*, rank=0, receipt_resident_bytes=None, workspace_resident_bytes=None,
+                   locked=True, **overrides):
+    """One rank's resident-after-load observation, hand-computed by this fixture."""
+    receipt = 4096 + STARTUP_BYTES if receipt_resident_bytes is None else receipt_resident_bytes
+    slots = WORKSPACE_SLOTS_BYTES if workspace_resident_bytes is None else workspace_resident_bytes
+    record = {"rank": rank,
+              "memory_allocated_bytes": receipt + slots,
+              "receipt_resident_bytes": receipt,
+              "workspace_resident_bytes": slots,
+              "workspace_locked": locked,
+              "scope": STARTUP_SCOPE}
+    record.update(overrides)
+    return record
+
+
+def _move_kv_ledger(report, delta):
+    """Re-state the fixture's KV-owned ledger rows, and its sweep with them.
+
+    The KV observation's own extent is left alone: the point is a record whose
+    numbers are internally consistent but are not the bytes this consumer
+    charges, which is exactly the equality the domain closes on.
+    """
+    observations = report["observations"]
+    for row in observations["torch_allocations"]:
+        if row["allocation_id"] == KV_ID:
+            row["bytes"] += delta
+            row["allocator_block_bytes_observed"] = [row["bytes"]]
+    for entry in report["partition"]["membership"]:
+        if entry["allocation_id"] == KV_ID:
+            entry["bytes"] += delta
+    observations["torch_observed_live_peak_bytes"] = _simultaneous_peak_of(
+        observations["torch_allocations"])
+    return report
+
+
+def fixed_terms_report(*, rank=None, world_size=None, runtime_manifest_sha256="a" * 64,
+                       model_sha256="a" * 64, workload_sha256="a" * 64, startup=True, kv=True,
+                       kv_geometry=True, startup_bytes=STARTUP_BYTES):
+    """A capture whose four fixed terms are recomputable, hand-computed here.
+
+    `closed_report` plus the two observations the startup and cache domains
+    close on: a fixed-owned allocation at the ledger's first index named by a
+    startup record, and the KV backing the fixture already carries named by a
+    KV observation whose own geometry multiplies out. Every number below is
+    this fixture's own arithmetic rather than the consumer's, so a
+    disagreement is the consumer's finding and not a restatement of its answer.
+
+    ``rank``/``world_size`` add the optional rank scope a per-rank capture
+    carries. ``startup=False``/``kv=False`` leave an observation out, which is
+    the state the axis refuses in; ``kv_geometry=False`` names the backing with
+    a geometry that does not multiply out to the allocation's own extent.
+    """
+    rows = [(STARTUP_ID, 0, None, startup_bytes, "outside_units", "fixed", "resident", None),
+            (ACTIVATION_ID, 12, 40, FIXED_ACTIVATION_BYTES, "escapes_unit", "fixed",
+             "activation", None)]
+    report = closed_report(steps=CLOSED_STEPS, rows=rows)
+    observations = report["observations"]
+    # The engine-side sample the producer's own contract names: allocated bytes
+    # after load and lock, the receipt's resident figure and its workspace slot
+    # storage. The receipt figure is this fixture's ledger sum, so the two sides
+    # cross-check instead of restating each other.
+    observations["worker_startup_records"] = (
+        [startup_record(rank=0 if rank is None else rank,
+                        receipt_resident_bytes=4096 + startup_bytes)] if startup else None)
+    record = kv_record()
+    if not kv_geometry:
+        record["storage"]["unique_physical_storage_bytes"] = KV_BYTES + 2
+    observations["kv_observations"] = [record] if kv else None
+    domains = report["partition"]["domains"]
+    for name, evidence, present in (("worker_startup", "worker_startup_records", startup),
+                                    ("cache_capacity", "kv_observations", kv)):
+        domains[name] = ({"state": "closed", "evidence": [evidence], "reason": None} if present
+                         else {"state": "open", "evidence": [],
+                               "reason": f"this capture observes no {evidence}"})
+    if startup and kv:
+        terms = {"fixed_resident": 4096 + startup_bytes,
+                 "candidate_resident": {"unit.a": 0, "unit.b": 1600},
+                 "fixed_activation": FIXED_ACTIVATION_BYTES,
+                 "candidate_activation": {"unit.a": 500, "unit.b": 900},
+                 "fixed_scratch": CLOSED_FIXED_SCRATCH,
+                 "candidate_scratch": dict(CLOSED_CANDIDATE_SCRATCH),
+                 "fixed_kv": KV_BYTES}
+        for block in (report["partition"], report["derived"]):
+            block["terms"] = copy.deepcopy(terms)
+        for scope in (report["partition"]["scope"], report["derived"]["scope"]):
+            scope["unavailable_terms"] = []
+            scope["expressible"] = True
+        report["derived"]["scalar_budget_bytes"] = (
+            FIXED_TERM_BUDGET + startup_bytes - STARTUP_BYTES)
+    if rank is not None:
+        report["identity"]["run"].update(rank=rank, world_size=world_size)
+    report["identity"]["run"]["model_sha256"] = model_sha256
+    report["identity"]["run"]["runtime_manifest_sha256"] = runtime_manifest_sha256
+    report["identity"]["run"]["workload_sha256"] = workload_sha256
+    report["partition"]["identity"] = copy.deepcopy(report["identity"]["run"])
+    return report
+
+
+def test_the_startup_and_cache_observations_make_the_four_fixed_terms_recomputable(tmp_path):
+    """The mechanism the per-rank fixed charge waits on, on a synthetic capture.
+
+    Every one of the seven terms becomes a number and the composition
+    completes, because the two observations this fixture supplies are the
+    closing conditions the schema now defines. This is a parser and
+    recomputation contract; it establishes no measurement.
+    """
+    verdict = consume(tmp_path, fixed_terms_report())
+    assert verdict.disagreements == ()
+    assert verdict.open_domains == ("provenance_admission", "timing_partition")
+    assert verdict.expressible_terms == TERMS
+    assert verdict.recomputed_terms["fixed_resident"] == FIXED_RESIDENT_BYTES
+    assert verdict.recomputed_terms["fixed_activation"] == FIXED_ACTIVATION_BYTES
+    assert verdict.recomputed_terms["fixed_kv"] == KV_BYTES
+    assert verdict.recomputed_scalar_budget_bytes == FIXED_TERM_BUDGET
+    assert "no scalar device budget is expressible" not in " ".join(verdict.blocking)
+
+
+@pytest.mark.parametrize("mutate,domain", [
+    (lambda report: report["observations"]["worker_startup_records"][0].update(
+        memory_allocated_bytes=4096 + STARTUP_BYTES), "worker_startup"),
+    (lambda report: report["observations"]["worker_startup_records"][0].update(
+        workspace_locked=False), "worker_startup"),
+    (lambda report: report["observations"]["worker_startup_records"][0].update(
+        receipt_resident_bytes=1), "worker_startup"),
+    (lambda report: report["observations"]["worker_startup_records"].append(
+        dict(report["observations"]["worker_startup_records"][0])), "worker_startup"),
+    (lambda report: report["observations"]["kv_observations"][0]["storage"].update(
+        unique_physical_storage_bytes=KV_BYTES + 2), "cache_capacity"),
+    (lambda report: report["observations"]["kv_observations"][0].update(
+        runtime_admission=False), "cache_capacity"),
+    # A pool of blocks with no physical backing at all, and the reverse.
+    (lambda report: report["observations"]["kv_observations"][0]["storage"].update(
+        storages=[]), "cache_capacity"),
+    (lambda report: report["observations"]["kv_observations"][0].update(num_blocks=0),
+     "cache_capacity"),
+    # The record's own extent and the ledger's KV-owned resident rows must be
+    # one number: the record is not evidence if the bytes it names are not the
+    # bytes this consumer charges.
+    (lambda report: _move_kv_ledger(report, 2), "cache_capacity"),
+    # Two backings that overlap on one device: a pool may not hold one byte
+    # twice, which is what makes the deduplicated extent an extent.
+    (lambda report: report["observations"]["kv_observations"][0]["storage"].update(
+        storages=[dict(report["observations"]["kv_observations"][0]["storage"]["storages"][0]),
+                  dict(report["observations"]["kv_observations"][0]["storage"]["storages"][0],
+                       address=4096 + KV_BYTES // 2, bytes=KV_BYTES // 2,
+                       owners=["kv_cache.1"])]), "cache_capacity"),
+    # A hybrid/multi-group config whose page geometry is missing or zero: the
+    # groups do not share one page size, so there is no block size to assume.
+    (lambda report: report["observations"]["kv_observations"][0].update(
+        group_page_size_bytes=[]), "cache_capacity"),
+    (lambda report: report["observations"]["kv_observations"][0]["resolved_limits"].update(
+        max_num_seqs=0), "cache_capacity"),
+    (lambda report: report["observations"]["kv_observations"].append(
+        dict(report["observations"]["kv_observations"][0])), "cache_capacity"),
+])
+def test_a_startup_or_cache_record_that_does_not_recompute_does_not_close(tmp_path, mutate, domain):
+    """A record whose own numbers disagree with the ledger is not evidence that
+    the charge was observed, and the domain stays open with the terms it
+    gates."""
+    report = fixed_terms_report()
+    mutate(report)
+    verdict = consume(tmp_path, report)
+    assert domain in verdict.open_domains
+    assert any(domain in reason for reason in verdict.disagreements), (
+        "the fixture still declares the domain closed, so the consumer must name the "
+        "disagreement rather than silently reopen it")
+
+
+def test_a_zero_charge_closes_on_the_same_equality(tmp_path):
+    """A genuinely zero charge is a state, not a refusal.
+
+    The record and the ledger must agree; nothing is thresholded, so a locked
+    workspace with no slots and an engine with no paged KV cache both close
+    their domain at zero -- as long as the ledger says the same thing.
+    """
+    report = fixed_terms_report()
+    observations = report["observations"]
+    record = observations["worker_startup_records"][0]
+    record["workspace_resident_bytes"] = 0
+    record["memory_allocated_bytes"] = record["receipt_resident_bytes"]
+    # The real record shape at zero blocks: the resolved page geometry stays,
+    # the observer's backing list is empty, and the deduplicated extent the
+    # operator charges is zero. A pool of no blocks is a state, not a refusal.
+    zero_blocks = kv_record(num_blocks=0)
+    zero_blocks["storage"]["views"] = []
+    zero_blocks["storage"]["storages"] = []
+    zero_blocks["storage"]["unique_physical_storage_bytes"] = 0
+    observations["kv_observations"] = [zero_blocks]
+    for row in observations["torch_allocations"]:
+        if row["allocation_id"] == KV_ID:
+            row["bytes"] = 0
+            row["allocator_block_bytes_observed"] = [0]
+    for entry in report["partition"]["membership"]:
+        if entry["allocation_id"] == KV_ID:
+            entry["bytes"] = 0
+    # The fixture's own sweep, so the observation moves with the rows it prices
+    # instead of contradicting them.
+    observations["torch_observed_live_peak_bytes"] = _simultaneous_peak_of(
+        observations["torch_allocations"])
+    for block in (report["partition"], report["derived"]):
+        block["terms"]["fixed_kv"] = 0
+    report["derived"]["scalar_budget_bytes"] = FIXED_TERM_BUDGET - KV_BYTES
+    verdict = consume(tmp_path, report)
+    assert verdict.disagreements == ()
+    assert verdict.open_domains == ("provenance_admission", "timing_partition")
+    assert verdict.recomputed_terms["fixed_kv"] == 0
+    assert verdict.recomputed_scalar_budget_bytes == FIXED_TERM_BUDGET - KV_BYTES
+
+
+def test_a_capture_without_the_observations_keeps_the_terms_null(tmp_path):
+    """Absence of evidence is not a zero charge: dropping either observation
+    leaves its domain open and nulls every term that depends on it."""
+    for keyword, domain, term in (("startup", "worker_startup", "fixed_resident"),
+                                  ("kv", "cache_capacity", "fixed_kv")):
+        verdict = consume(tmp_path, fixed_terms_report(**{keyword: False}))
+        assert domain in verdict.open_domains
+        assert verdict.recomputed_terms[term] is None
+
+
+@pytest.mark.parametrize("observation,value,diagnostic", [
+    ("worker_startup_records", [{"rank": 0, "memory_allocated_bytes": 1024}],
+     "expected exactly fields"),
+    ("worker_startup_records", [{"rank": 0, "memory_allocated_bytes": True,
+                                 "receipt_resident_bytes": 1024, "workspace_resident_bytes": 512,
+                                 "workspace_locked": True, "scope": STARTUP_SCOPE}],
+     "expected integer"),
+    ("worker_startup_records", [{"rank": 0, "memory_allocated_bytes": 1536,
+                                 "receipt_resident_bytes": 1024, "workspace_resident_bytes": 512,
+                                 "workspace_locked": 1, "scope": STARTUP_SCOPE}],
+     "expected a boolean"),
+    # The KV observation is deliberately an open mapping: it carries the
+    # runtime's own resolved descriptors and the consumer requires only the
+    # coordinates it recomputes from, so a record missing them refuses by name
+    # rather than by a closed field set.
+    ("kv_observations", [{"num_blocks": 2, "group_page_size_bytes": [1024],
+                          "max_num_batched_tokens": 1}],
+     "missing required fields"),
+    ("kv_observations", [kv_record(num_blocks="two")],
+     "expected integer"),
+    ("kv_observations", [kv_record(num_blocks=-1)],
+     "expected integer >= 0"),
+])
+def test_a_malformed_startup_or_cache_record_refuses_structurally(tmp_path, observation, value,
+                                                                  diagnostic):
+    """These two shapes are closed field sets like every other observation."""
+    report = fixed_terms_report()
+    report["observations"][observation] = value
+    with pytest.raises(RuntimePriceError, match=diagnostic):
+        consume(tmp_path, report)
+
+
+def test_a_rank_scoped_capture_names_its_rank_and_world(tmp_path):
+    """A per-rank capture is one rank's own observation of its own world.
+
+    The scope is what lets a per-rank fixed charge bind each rank's terms to
+    that rank's own report instead of to a redistribution of a world total.
+    """
+    reference = written(tmp_path, fixed_terms_report(rank=1, world_size=2,
+                                                     runtime_manifest_sha256="b" * 64),
+                        "rank1.json")
+    verdict = consume_full_engine_resource_report(
+        reference, root=tmp_path,
+        expected_run_identity={"rank": 1, "world_size": 2,
+                               "runtime_manifest_sha256": "b" * 64})
+    assert verdict.disagreements == ()
+    stale = consume_full_engine_resource_report(reference, root=tmp_path,
+                                                expected_run_identity={"rank": 0})
+    assert any("stale rank" in reason for reason in stale.disagreements)
+
+
+@pytest.mark.parametrize("scope,diagnostic", [
+    ({"rank": 1}, "expected exactly fields"),
+    ({"rank": 2, "world_size": 2}, "is not inside a world"),
+    ({"rank": 0, "world_size": 0}, "is not inside a world"),
+])
+def test_a_rank_scope_is_all_or_nothing_and_inside_its_world(tmp_path, scope, diagnostic):
+    report = fixed_terms_report()
+    report["identity"]["run"].update(scope)
+    with pytest.raises(RuntimePriceError, match=diagnostic):
+        consume(tmp_path, report)

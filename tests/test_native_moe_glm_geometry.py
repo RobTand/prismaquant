@@ -38,7 +38,8 @@ SOURCE_FACTS = {
 def glm_shape(**overrides):
     shape = {"geometry_version": panel.GEOMETRY_VERSION,
              "geometry_id": "glm53_next_routed_stack_v1", "source_id": "glm5_next",
-             "tensor_parallel": 1, "tensor_parallel_cut_axis": panel.GLM_TP_CUT_AXIS,
+             "tensor_parallel": 1, "tensor_parallel_rank": 0,
+             "tensor_parallel_cut_axis": panel.GLM_TP_CUT_AXIS,
              **SOURCE_FACTS}
     shape.update(overrides)
     # The module's own field set decides what a GLM geometry is; the fixture is
@@ -68,11 +69,23 @@ def glm_routing(**overrides):
 
 
 def glm_members(shape):
-    width = panel.rank_local_intermediate(shape)
+    """The whole CONTAINER each member role frames, in the producer's own names.
+
+    A Tessera checkpoint holds one whole unit per role whatever world serves
+    it, so the member record's geometry is the module's. ``glm_rank_local`` is
+    this rank's cut of the same members.
+    """
     return [{"expert": expert, "role": role, "format": panel.FORMAT,
              "unit": f"{GLM_UNIT}.{expert}.{role}",
-             "shape": ([shape["hidden_size"], width] if role == "w2" else [width, shape["hidden_size"]])}
+             "shape": panel.container_member_shape(shape, role)}
             for expert in range(shape["n_routed_experts"]) for role in panel.ROLES]
+
+
+def glm_rank_local(shape):
+    """The same roster as the producer's own projection spelling, cut to rank 0."""
+    return [{**member, "unit": member["unit"].rsplit(".", 1)[0] + "." + panel.ROLE_PROJECTIONS[member["role"]],
+             "shape": panel.rank_local_member_shape(shape, member["role"])}
+            for member in glm_members(shape)]
 
 
 # --------------------------------------------------------------------------
@@ -140,14 +153,40 @@ def test_an_unknown_geometry_version_is_refused_rather_than_read_as_this_one():
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("tp,expected", [(1, 2048), (2, 1024)])
-def test_the_rank_local_intermediate_follows_the_declared_cut(tp, expected):
+def test_the_rank_local_cut_follows_the_declared_world(tp, expected):
+    """The container is the module; this rank's window is its cut of it."""
     shape = panel.validate_geometry(glm_shape(tensor_parallel=tp))
     assert panel.rank_local_intermediate(shape) == expected
-    # And the member roster the consumer checks is that rank's own geometry.
+    # The roster records the CONTAINER, which no world changes.
     members = glm_members(shape)
     assert len(members) == 288 * 3
-    assert members[0]["shape"] == [expected, 4096]          # gate
-    assert members[2]["shape"] == [4096, expected]          # down
+    assert members[0]["shape"] == [2048, 4096]              # gate, whole module
+    assert members[2]["shape"] == [4096, 2048]              # down, whole module
+    assert panel._member_roster(GLM_UNIT, members, shape) == members
+    # ...and the rank-local reading is the same member cut to this rank.
+    assert panel.rank_local_member_shape(shape, "w1") == [expected, 4096]
+    assert panel.rank_local_member_shape(shape, "w3") == [expected, 4096]
+    assert panel.rank_local_member_shape(shape, "w2") == [4096, expected]
+
+
+def test_the_rank_window_is_this_ranks_own_range_of_the_container():
+    """Rows for gate/up, columns for down, and every rank's cut is the whole."""
+    shape = panel.validate_geometry(glm_shape(tensor_parallel=2, tensor_parallel_rank=1))
+    assert panel.member_window(shape, "w1") == ((1024, 2048), (0, 4096), "row")
+    assert panel.member_window(shape, "w3") == ((1024, 2048), (0, 4096), "row")
+    assert panel.member_window(shape, "w2") == ((0, 4096), (1024, 2048), "column")
+    # The canonical combination of every rank's cut is the container again, so
+    # the cut partitions the module instead of resizing it.
+    for role in panel.ROLES:
+        rows, cols, _axis = panel.member_window(shape, role)
+        container = panel.container_member_shape(shape, role)
+        assert (rows[1] - rows[0]) * 2 == container[0] or (cols[1] - cols[0]) * 2 == container[1]
+    # An owner whose intermediate does not divide by the world refuses rather
+    # than rounding; the LFM geometry has no rank coordinate at all.
+    lfm = {"experts": 32, "hidden_size": 4, "intermediate_size": 4, "top_k": 2}
+    assert panel.member_window(lfm, "w1") == ((0, 4), (0, 4), "row")
+    assert panel.member_window(lfm, "w2") == ((0, 4), (0, 4), "column")
+    assert panel.rank_local_member_shape(lfm, "w1") == [4, 4]
 
 
 def test_a_cut_axis_this_consumer_does_not_implement_is_refused():
@@ -160,6 +199,17 @@ def test_an_unsupported_tensor_parallel_size_is_refused():
     with pytest.raises(ValueError) as caught:
         panel.validate_geometry(glm_shape(tensor_parallel=4))
     assert "tensor_parallel" in str(caught.value), str(caught.value)
+
+
+@pytest.mark.parametrize("rank,diagnostic", [
+    (2, "not inside a world"), (-1, "not a rank index"), (True, "not a rank index"),
+    (1.0, "not a rank index"),
+])
+def test_a_rank_outside_its_world_is_refused(rank, diagnostic):
+    """The rank is a declared coordinate, and a world has no rank `world`."""
+    with pytest.raises(ValueError) as caught:
+        panel.validate_geometry(glm_shape(tensor_parallel=2, tensor_parallel_rank=rank))
+    assert diagnostic in str(caught.value), str(caught.value)
 
 
 def test_an_indivisible_cut_is_refused_rather_than_rounded():
@@ -180,10 +230,30 @@ def test_an_indivisible_cut_is_refused_rather_than_rounded():
     assert panel.validate_geometry(legal)["tensor_parallel"] == 2
 
 
-def test_a_glm_member_roster_is_the_rank_local_one_and_named_by_its_source():
+def test_a_glm_member_roster_is_the_container_and_admits_both_spellings():
+    """The member record frames the module; the rank-local claim is the render.
+
+    The census spells a routed member `...experts.<e>.gate_proj` where this
+    consumer's role vocabulary spells the same member `w1`. Both are one
+    member, the producer keeps the source spelling because its wire record's
+    own `identity.unit` is checked against it, and the geometry a member
+    declares is the WHOLE container -- the rank-local width belongs to the
+    render and to the runtime binding, not to the module.
+    """
     shape = panel.validate_geometry(glm_shape(tensor_parallel=2))
     members = panel._member_roster(GLM_UNIT, glm_members(shape), shape)
     assert members[-1]["unit"] == f"{GLM_UNIT}.287.w2"
+    assert members[-1]["shape"] == [shape["hidden_size"], shape["intermediate_size"]]
+    assert members[0]["shape"] == [shape["intermediate_size"], shape["hidden_size"]]
+    # The producer's own projection spelling is the same roster.
+    projection = [{**member, "unit": member["unit"].rsplit(".", 1)[0] + "."
+                   + panel.ROLE_PROJECTIONS[member["role"]]} for member in glm_members(shape)]
+    assert panel._member_roster(GLM_UNIT, projection, shape) == projection
+    # A rank-local geometry where the container belongs is refused: the module
+    # holds the whole unit whatever world serves it.
+    with pytest.raises(ValueError) as caught:
+        panel._member_roster(GLM_UNIT, glm_rank_local(shape), shape)
+    assert "shape" in str(caught.value), str(caught.value)
     # The LFM naming is still refused for a GLM geometry, by name.
     with pytest.raises(ValueError) as caught:
         panel._member_roster("model.layers.3.feed_forward.experts", glm_members(shape), shape)

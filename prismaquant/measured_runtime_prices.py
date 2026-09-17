@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .lane_eligibility import ServingContext
 from .serve_dispatch_table import DispatchTableError
@@ -913,6 +913,123 @@ def shape_only_fixed_resources(table: MeasuredRuntimeTable) -> tuple[RuntimeReso
                    **{OFF_STEP_FIELD: None}), stamp
 
 
+def reconcile_serving_unit_rows(
+        table: "MeasuredRuntimeTable", *,
+        menu_members: Mapping[tuple[str, str], Mapping[str, str]],
+) -> "MeasuredRuntimeTable":
+    """Key a whole-owner row onto the aggregated serving unit the DP prices.
+
+    A packed-MoE serving unit is one DP item whose name the allocator's own
+    aggregation produces (``allocator_candidates``'s ``.__packed_serving__.``
+    spelling). A producer that measured the whole owner writes the unit it
+    observed -- the owner's own module name, which is also what its members are
+    named under -- because that is what it measured. The two names are one
+    serving unit seen from two sides, and they are reconciled here: by the
+    row's own member roster, never by name similarity.
+
+    ``menu_members`` maps each DP option ``(unit, format)`` to the member
+    ``{name: format}`` map that option expands to. A row already keyed by a DP
+    option is left exactly as it was. A row whose roster is exactly one
+    option's roster is re-keyed to that option, after its declared operator
+    route is checked against the route this table's own context names for the
+    row's own unit -- so the route stays an independently supplied coordinate
+    rather than a label the row supplies about itself. A roster that matches
+    more than one option refuses by name, because no single DP unit may read
+    that row. A roster that matches none is left alone, and the existing
+    missing-row refusal fires where it is spent.
+    """
+    if not menu_members:
+        return table
+    by_roster: dict[tuple, list[tuple[str, str]]] = {}
+    for key, members in menu_members.items():
+        by_roster.setdefault((tuple(sorted(dict(members).items())), key[1]), []).append(key)
+    rows = []
+    for row in table.rows:
+        if row.key in menu_members:
+            rows.append(row)
+            continue
+        roster = (tuple(sorted(dict(row.binding.member_formats).items())), row.fmt)
+        matches = by_roster.get(roster, ())
+        if len(matches) > 1:
+            raise RuntimePriceError(
+                f"measured runtime row {row.key!r} prices a member roster that is exactly the "
+                f"roster of {sorted(matches)}, so it is not one serving unit's row and no "
+                "single DP unit may read it")
+        if not matches:
+            rows.append(row)
+            continue
+        (unit, _fmt), = matches
+        declared_route = table.context.operator_route(row.unit, row.fmt)
+        if declared_route != row.binding.operator_route:
+            raise RuntimePriceError(
+                f"measured runtime row {row.key!r} declares operator route "
+                f"{row.binding.operator_route!r} where this table's context names "
+                f"{declared_route!r} for its own unit")
+        rows.append(replace(row, unit=unit))
+    return replace(table, rows=tuple(rows))
+
+
+#: The expert-role spellings a routed serving unit's members carry, mapped to
+#: which axis of that member's own 2-D geometry is its intermediate one. The
+#: tensor-parallel cut divides the intermediate axis, so gate/up (column
+#: parallel: the output features are the container's rows) are cut on their
+#: first axis and down (row parallel: the input features are its columns) on
+#: its second. Both vocabularies are listed because the producer keeps the
+#: source's own spelling -- `prismaquant.native_moe_panel.ROLE_PROJECTIONS`
+#: holds the same table for the native panel, and a member whose name is in
+#: neither is not a routed expert projection at all.
+MOE_MEMBER_ROLE_AXES = {"w1": 0, "w3": 0, "w2": 1,
+                        "gate_proj": 0, "up_proj": 0, "down_proj": 1}
+
+
+def rank_local_member_shapes(source_shapes: Mapping[str, Sequence[int]], *,
+                             tensor_parallel: int,
+                             where: str = "runtime binding") -> dict[str, tuple[int, ...]]:
+    """Each routed member's OWN rank-local geometry, from the trusted context.
+
+    ``source_shapes`` is the module geometry the joint operator identity binds
+    -- the probe's full source, which is what a quality identity must be taken
+    on. The geometry the runtime binding carries is the same tensor CUT on the
+    intermediate axis by the table context's ``tensor_parallel``, and the two
+    are different fields that agree only at a world of one: comparing them as
+    one field refuses every real TP2 row.
+
+    The cut is validated rather than assumed: the extent must divide by the
+    world, and every rank's own cut times the world must be exactly the source,
+    so the canonical combination of all ranks is the container the wire
+    identity names. A member that carries no routed role spelling is a dense
+    Linear: its own geometry IS the binding, and it has no cut to take. An
+    option that mixes the two is refused, because no single rule then says
+    which members are cut.
+    """
+    world = _integer(tensor_parallel, "tensor_parallel", 1)
+    routed = [unit for unit in source_shapes
+              if str(unit).rsplit(".", 1)[-1] in MOE_MEMBER_ROLE_AXES]
+    shapes = {unit: tuple(_integer(dim, f"{unit} extent", 1) for dim in shape)
+              for unit, shape in source_shapes.items()}
+    if not routed:
+        return shapes
+    if len(routed) != len(shapes):
+        raise RuntimePriceError(
+            f"{where}: this serving unit mixes routed expert projections with members that carry "
+            "no expert role spelling, so no single rule says which of them is cut")
+    local = {}
+    for unit, shape in shapes.items():
+        if len(shape) != 2:
+            raise RuntimePriceError(
+                f"{where}: routed member {unit!r} carries a {len(shape)}-D geometry, and the "
+                "intermediate axis of a 2-D Linear is what the cut divides")
+        axis = MOE_MEMBER_ROLE_AXES[str(unit).rsplit(".", 1)[-1]]
+        if shape[axis] % world:
+            raise RuntimePriceError(
+                f"{where}: {unit}'s intermediate extent {shape[axis]} is not divisible by this "
+                f"table's tensor_parallel {world}")
+        cut = list(shape)
+        cut[axis] = shape[axis] // world
+        local[unit] = tuple(cut)
+    return local
+
+
 def build_runtime_resources(table: MeasuredRuntimeTable, candidates: Mapping[str, list], *,
                             expected_bindings: Mapping[tuple[str, str], RuntimeBinding]) -> dict[tuple[str, str], RuntimeResources]:
     """Price every candidate exactly; no family fallback or unmeasured group sums."""
@@ -1181,26 +1298,41 @@ class RankDeviceBounds:
                    recomputation) -> "RankDeviceBounds":
         """The one construction path an admitted per-rank charge may take.
 
-        ``recomputation`` is ``runtime_provenance.RankFixedCharge``: the verdict
-        of reading the sealed per-rank partition and cross-checking its sums
-        against the sealed full-engine report this consumer recomputes itself.
-        Every value below is compared with that verdict rather than accepted
-        from the caller, so a charge the recomputation did not produce -- or a
-        budget vector it did not cover -- cannot become bounds.
+        ``recomputation`` must be an actual
+        ``runtime_provenance.RankFixedCharge``: the verdict of reading the
+        sealed per-rank partition and recomputing each rank's own four fixed
+        terms from that rank's own sealed capture. Every value below is read
+        from that object rather than accepted from the caller, so a charge the
+        recomputation did not produce -- or a budget vector it did not cover --
+        cannot become bounds.
+
+        The type is checked, not duck-typed. ``getattr`` on an arbitrary object
+        accepts a ``SimpleNamespace`` carrying the two attribute names a
+        verdict happens to have, which is a *claim* to be a recomputation
+        rather than one, and this constructor is the one place that decides
+        whether a per-rank charge may reach a placement.
         """
+        from .runtime_provenance import RankFixedCharge
+
+        if not isinstance(recomputation, RankFixedCharge):
+            raise RuntimePriceError(
+                "an admitted per-rank charge is read from a "
+                "runtime_provenance.RankFixedCharge recomputation, and this value is a "
+                f"{type(recomputation).__name__}: carrying the attribute names a verdict has "
+                "is not the verdict. Load the sealed per-rank partition with "
+                "runtime_provenance.recompute_rank_fixed_charge")
         world = _integer(world_size, "world_size", 1)
-        expected_world = getattr(recomputation, "world_size", None)
-        if expected_world != world:
+        if recomputation.world_size != world:
             raise RuntimePriceError(
                 f"rank device bounds cover a world of {world} where the recomputation covers "
-                f"{expected_world!r}")
+                f"{recomputation.world_size!r}")
         budgets = _rank_vector(budgets_per_rank, world, "rank device budgets")
         for index, budget in enumerate(budgets):
             if budget < 1:
                 raise RuntimePriceError(
                     f"rank device budgets must be positive, and rank {index}'s is {budget}")
         charge = _rank_vector(charge_per_rank, world, "rank fixed charge")
-        recomputed = tuple(getattr(recomputation, "charge_per_rank", ()))
+        recomputed = tuple(recomputation.charge_per_rank)
         if recomputed != charge:
             raise RuntimePriceError(
                 f"the declared per-rank charge {charge} is not the recomputed one "
@@ -1210,7 +1342,7 @@ class RankDeviceBounds:
                 raise RuntimePriceError(
                     "a zero per-rank fixed charge is not evidence; the recomputation must show "
                     f"the fixed terms this rank actually holds (rank {index} recomputed {value})")
-        evidence = getattr(recomputation, "evidence", None)
+        evidence = recomputation.evidence
         if (not isinstance(evidence, Mapping)
                 or set(evidence) != set(_RANK_DEVICE_EVIDENCE_FIELDS)
                 or evidence["per_rank_partition"] is not True):

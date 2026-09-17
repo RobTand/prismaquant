@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -375,6 +376,122 @@ def test_a_rank_budget_forces_the_frontier_to_keep_the_option_that_fits():
     assert budgeted[0].device_bytes is None, "a ranked row publishes no scalar device total"
 
 
+def _workspace_row(prefill_ms, residents, workspace, *, world=2):
+    """A ranked row with explicitly stated per-rank workspace identities."""
+    return RuntimeRankResources.from_dict(
+        {"schema": RANK_RESOURCES_SCHEMA, "world_size": world, "timing_rule": RANK_TIMING_RULE,
+         "prefill_ms": prefill_ms, "decode_ms": None,
+         "rank_medians_ms": {"prefill": [prefill_ms] * world, "decode": [None] * world},
+         "wire_bytes": 1000, "wire_sha256": "0" * 64,
+         "ranks": [{"rank": rank, "resident_bytes": residents[rank], "peak_scratch_bytes": 0,
+                    "activation_bytes": 0, "workspace_resident_bytes": workspace[rank][1],
+                    "workspace_sha256": workspace[rank][0], "bound_sha256": "b" * 64}
+                   for rank in range(world)]},
+        tensor_parallel=world)
+
+
+def test_a_fast_option_whose_workspace_does_not_fit_loses_to_the_slower_one():
+    """The workspace is composed inside the fold, so the budget sees it.
+
+    ``FAST`` wins on loss and prefill and would dominate ``SLOW`` outright; its
+    runtime-global workspace is what breaches the rank, and a search that
+    composed the workspace after the frontier would have pruned ``SLOW`` before
+    that number existed.
+    """
+    from prismaquant.allocator_solver import Candidate, solve_runtime_frontier
+
+    fast = Candidate("FAST", 4.0, 1000, 1.0)
+    slow = Candidate("SLOW", 4.0, 1000, 2.0)
+    resources = {
+        ("unit", "FAST"): _workspace_row(1.0, [10, 10], [("a" * 64, 990), ("a" * 64, 990)]),
+        ("unit", "SLOW"): _workspace_row(5.0, [10, 10], [("b" * 64, 10), ("b" * 64, 10)])}
+    unbudgeted = solve_runtime_frontier({"unit": [fast, slow]}, resources,
+                                        max_memory_bytes=10 ** 6, max_prefill_ms=10.0)
+    assert [allocation.assignment["unit"] for allocation in unbudgeted][0] == "FAST"
+    budgeted = solve_runtime_frontier({"unit": [fast, slow]}, resources,
+                                      max_memory_bytes=10 ** 6, max_prefill_ms=10.0,
+                                      rank_devices=_admitted_bounds([1000, 1000], [1, 1]))
+    assert [allocation.assignment["unit"] for allocation in budgeted] == ["SLOW"]
+    assert budgeted[0].rank_workspace_bytes == (10, 10)
+
+
+def test_dominance_is_compared_only_inside_one_workspace_identity_set():
+    """A later unit can add an identity one prefix already holds.
+
+    ``FAST`` holds ``X`` (100 B) and is numerically smaller than ``SLOW``,
+    which holds ``Y`` (50 B). A second unit then adds ``Z`` (900 B) to
+    whichever prefix survives. Comparing the two prefixes before that fold
+    prunes ``SLOW``, whose 950 B total is the one that fits; comparing only
+    inside an identical identity set keeps both until the budget is read.
+    """
+    from prismaquant.allocator_solver import Candidate, solve_runtime_frontier
+
+    fast = Candidate("FAST", 4.0, 1000, 1.0)
+    slow = Candidate("SLOW", 4.0, 1000, 2.0)
+    tail = Candidate("TAIL", 4.0, 1000, 1.0)
+    resources = {
+        ("a", "FAST"): _workspace_row(1.0, [10, 10], [("1" * 64, 100), ("1" * 64, 100)]),
+        ("a", "SLOW"): _workspace_row(5.0, [10, 10], [("2" * 64, 50), ("2" * 64, 50)]),
+        ("b", "TAIL"): _workspace_row(1.0, [10, 10], [("3" * 64, 900), ("3" * 64, 900)])}
+    frontier = solve_runtime_frontier({"a": [fast, slow], "b": [tail]}, resources,
+                                      max_memory_bytes=10 ** 6, max_prefill_ms=10.0,
+                                      rank_devices=_admitted_bounds([1000, 1000], [1, 1]))
+    assert [allocation.assignment["a"] for allocation in frontier] == ["SLOW"], (
+        "the feasible prefix survives: 10 + 50 + 900 + 1 fits, and the pruned one "
+        "(10 + 100 + 900 + 1) does not")
+    assert frontier[0].rank_workspace_bytes == (950, 950)
+
+
+def test_one_workspace_identity_is_charged_once_inside_the_fold():
+    """Two units viewing one frozen allocation charge those bytes once."""
+    from prismaquant.allocator_solver import Candidate, solve_runtime_frontier
+
+    first = Candidate("FIRST", 4.0, 1000, 1.0)
+    second = Candidate("SECOND", 4.0, 1000, 1.0)
+    shared = [("5" * 64, 900), ("5" * 64, 900)]
+    resources = {("a", "FIRST"): _workspace_row(1.0, [10, 10], shared),
+                 ("b", "SECOND"): _workspace_row(1.0, [10, 10], shared)}
+    frontier = solve_runtime_frontier({"a": [first], "b": [second]}, resources,
+                                      max_memory_bytes=10 ** 6, max_prefill_ms=10.0,
+                                      rank_devices=_admitted_bounds([1000, 1000], [1, 1]))
+    assert len(frontier) == 1
+    assert frontier[0].rank_workspace_bytes == (900, 900), (
+        "one identity is one allocation per rank, not one per row that views it")
+
+
+def test_one_workspace_identity_at_two_sizes_refuses_inside_the_fold():
+    from prismaquant.allocator_solver import Candidate, solve_runtime_frontier
+
+    first = Candidate("FIRST", 4.0, 1000, 1.0)
+    second = Candidate("SECOND", 4.0, 1000, 1.0)
+    resources = {
+        ("a", "FIRST"): _workspace_row(1.0, [10, 10], [("5" * 64, 900), ("5" * 64, 900)]),
+        ("b", "SECOND"): _workspace_row(1.0, [10, 10], [("5" * 64, 800), ("5" * 64, 800)])}
+    with pytest.raises(ValueError, match="one frozen allocation cannot be two"):
+        solve_runtime_frontier({"a": [first], "b": [second]}, resources,
+                               max_memory_bytes=10 ** 6, max_prefill_ms=10.0)
+
+
+def test_a_duck_typed_recomputation_is_refused_by_name():
+    """Carrying the attribute names a verdict has is not the verdict.
+
+    ``getattr`` on an arbitrary object accepts a ``SimpleNamespace`` with the
+    two attributes ``RankFixedCharge`` happens to have, and a charge built from
+    one would reach a placement with no recomputation behind it.
+    """
+    impostor = SimpleNamespace(
+        world_size=2, charge_per_rank=(700, 900),
+        per_rank_terms=({"fixed_resident": 700}, {"fixed_resident": 900}),
+        evidence={"full_engine_report": None, "per_rank_partition": True},
+        partition_sha256="d" * 64)
+    with pytest.raises(RuntimePriceError, match="RankFixedCharge"):
+        RankDeviceBounds.recomputed(world_size=2, budgets_per_rank=[10 ** 6, 10 ** 6],
+                                    charge_per_rank=(700, 900), recomputation=impostor)
+    with pytest.raises(RuntimePriceError, match="RankFixedCharge"):
+        RankDeviceBounds.recomputed(world_size=2, budgets_per_rank=[10 ** 6, 10 ** 6],
+                                    charge_per_rank=(700, 900), recomputation=None)
+
+
 def test_a_pending_rank_charge_prices_rank_dimensions_and_admits_nothing():
     from prismaquant.allocator_solver import Candidate, solve_runtime_frontier
 
@@ -443,34 +560,42 @@ def test_pending_bounds_admit_nothing_and_an_admitted_one_reports_headroom():
         RankDeviceBounds.from_dict(admitted.as_dict())
 
 
-def _sealed_per_rank_partition(tmp_path, **overrides):
-    """A sealed partition of the synthetic full-engine capture, and its report."""
-    from prismaquant.full_engine_resource_report import consume_full_engine_resource_report
-    from test_full_engine_resource_report import written
-    from test_runtime_fixed_resource_admission import agreeing_report
+def _sealed_per_rank_partition(tmp_path, *, startup=(1024, 4096), world=2,
+                               runtime_manifest_sha256="a" * 64, model_sha256=None,
+                               workload_sha256=None, **overrides):
+    """One rank-scoped capture per rank, and the partition that binds them.
 
-    report = agreeing_report()
-    reference = written(tmp_path, report, "report.json")
-    terms = consume_full_engine_resource_report(reference, root=tmp_path).recomputed_terms
-    partition = {
-        "schema": "prismaquant.full_engine_rank_partition.v1",
-        "world_size": 2, "capture_sha256": report["partition"]["capture_sha256"],
-        "rule": "sealed_per_rank_terms_summing_to_the_recomputed_whole_engine_terms",
-        "full_engine_report": reference,
-        "ranks": [{"rank": rank,
-                   "terms": {term: terms[term] for term in ("fixed_resident", "fixed_activation",
-                                                            "fixed_scratch", "fixed_kv")}}
-                  for rank in range(2)]}
-    # Each rank holds its own share and the two shares add up to the capture's
-    # own recomputed term, so the partition allocates rather than creates.
-    for term in ("fixed_resident", "fixed_activation", "fixed_scratch", "fixed_kv"):
-        whole = terms[term]
-        if type(whole) is not int:
-            continue
-        partition["ranks"][0]["terms"][term] = whole // 2
-        partition["ranks"][1]["terms"][term] = whole - whole // 2
+    Each rank's own report carries its own startup bytes, so the two ranks'
+    recomputed charges differ: a partition that merely redistributed one world
+    total between them could not match both, which is the defect this fixture
+    exists to expose.
+    """
+    from prismaquant.full_engine_resource_report import consume_full_engine_resource_report
+    from prismaquant.runtime_provenance import FIXED_TERM_FIELDS
+    from test_full_engine_resource_report import fixed_terms_report, written
+
+    models = model_sha256 or ("a" * 64,) * world
+    workloads = workload_sha256 or ("a" * 64,) * world
+    ranks = []
+    for rank in range(world):
+        report = fixed_terms_report(rank=rank, world_size=world,
+                                    runtime_manifest_sha256=runtime_manifest_sha256,
+                                    model_sha256=models[rank],
+                                    workload_sha256=workloads[rank],
+                                    startup_bytes=startup[rank])
+        reference = written(tmp_path, report, f"rank{rank}.report.json")
+        terms = consume_full_engine_resource_report(reference, root=tmp_path).recomputed_terms
+        ranks.append({"rank": rank, "world_size": world,
+                      "runtime_manifest_sha256": runtime_manifest_sha256,
+                      "capture_sha256": report["identity"]["capture_sha256"],
+                      "report": reference,
+                      "terms": {term: terms[term] for term in FIXED_TERM_FIELDS}})
+    partition = {"schema": "prismaquant.full_engine_rank_partition.v1", "world_size": world,
+                 "rule": ("sealed_per_rank_captures_recomputed_terms_with_optional_whole_engine"
+                          "_cross_check"),
+                 "full_engine_report": None, "ranks": ranks}
     partition.update(overrides)
-    return written(tmp_path, partition, "partition.json"), reference, partition
+    return written(tmp_path, partition, "partition.json"), partition
 
 
 def test_a_recomputed_charge_admits_and_a_supplied_one_is_refused():
@@ -499,32 +624,125 @@ def test_a_recomputed_charge_admits_and_a_supplied_one_is_refused():
                                     charge_per_rank=(700,), recomputation=verdict)
 
 
-def test_the_synthetic_capture_cannot_yet_price_a_per_rank_fixed_charge(tmp_path):
-    """The mechanism exists; this capture's own fixed terms are not observed.
+def test_each_rank_charge_is_recomputed_from_that_ranks_own_capture(tmp_path):
+    """Two rank-scoped captures, two charges, neither read from the other.
 
-    The synthetic full-engine report recomputes its scratch terms and no fixed
-    resident, activation or KV term, so the per-rank partition is refused BY
-    NAME rather than charged as zero. That is the honest state of the axis: a
-    producer must publish a capture that observes the fixed terms per rank
-    before any rank is admitted against them.
+    This is the mechanism the ranked device axis waits on: every rank's four
+    fixed terms come from that rank's own sealed report, whose run identity
+    names the rank, the world and the runtime. The numbers here are synthetic
+    and the reports say so; what the test establishes is the binding.
     """
     from prismaquant.runtime_provenance import recompute_rank_fixed_charge
 
-    reference, _report, _partition = _sealed_per_rank_partition(tmp_path)
-    with pytest.raises(RuntimePriceError, match="recomputes no fixed_"):
-        recompute_rank_fixed_charge(reference, root=tmp_path)
+    reference, partition = _sealed_per_rank_partition(tmp_path)
+    charge = recompute_rank_fixed_charge(reference, root=tmp_path)
+    assert charge.world_size == 2
+    assert charge.charge_per_rank[0] != charge.charge_per_rank[1], (
+        "each rank's charge is its own capture's recomputation, so two captures "
+        "with different startup bytes cannot produce one world number")
+    assert charge.per_rank_terms[0]["fixed_resident"] == 4096 + 1024
+    assert charge.per_rank_terms[1]["fixed_resident"] == 4096 + 4096
+    assert charge.evidence["per_rank_partition"] is True
+    assert charge.evidence["full_engine_report"] is None, (
+        "the whole-engine cross-check is optional and was not supplied")
+    assert partition["ranks"][0]["report"] != partition["ranks"][1]["report"]
 
 
-def test_a_partition_that_moves_the_report_or_omits_a_rank_is_refused(tmp_path):
+def test_a_redistributed_partition_is_refused_term_by_term(tmp_path):
+    """Moving a rank's numbers to its peer keeps the sum and changes the rank.
+
+    The old contract compared only the per-term sum against one scalar report,
+    so this exact document passed: every term still summed to the world's own
+    value while each rank held a number its own capture never observed.
+    """
     from prismaquant.runtime_provenance import recompute_rank_fixed_charge
     from test_full_engine_resource_report import written
 
-    _reference, report_reference, partition = _sealed_per_rank_partition(tmp_path)
+    reference, partition = _sealed_per_rank_partition(tmp_path)
+    assert partition["ranks"][0]["terms"] != partition["ranks"][1]["terms"]
+    redistributed = copy.deepcopy(partition)
+    redistributed["ranks"][0]["terms"] = copy.deepcopy(partition["ranks"][1]["terms"])
+    redistributed["ranks"][1]["terms"] = copy.deepcopy(partition["ranks"][0]["terms"])
+    with pytest.raises(RuntimePriceError, match="may not restate it"):
+        recompute_rank_fixed_charge(written(tmp_path, redistributed, "moved.json"), root=tmp_path)
+    # The same numbers summed to the same world total, which is why the sum
+    # alone could never have caught it.
+    for term in partition["ranks"][0]["terms"]:
+        assert (partition["ranks"][0]["terms"][term] + partition["ranks"][1]["terms"][term]
+                == redistributed["ranks"][0]["terms"][term]
+                + redistributed["ranks"][1]["terms"][term])
+
+
+def test_a_partition_that_moves_a_report_its_rank_or_its_world_is_refused(tmp_path):
+    from prismaquant.runtime_provenance import recompute_rank_fixed_charge
+    from test_full_engine_resource_report import written
+
+    _reference, partition = _sealed_per_rank_partition(tmp_path)
     forged = copy.deepcopy(partition)
-    forged["full_engine_report"] = dict(report_reference, sha256="0" * 64)
+    forged["ranks"][0]["report"] = dict(partition["ranks"][0]["report"], sha256="0" * 64)
     with pytest.raises(RuntimePriceError):
         recompute_rank_fixed_charge(written(tmp_path, forged, "forged.json"), root=tmp_path)
     wrong_rule = copy.deepcopy(partition)
     wrong_rule["rule"] = "sum_of_whatever_the_caller_says"
     with pytest.raises(RuntimePriceError, match="partition rule"):
         recompute_rank_fixed_charge(written(tmp_path, wrong_rule, "rule.json"), root=tmp_path)
+    omitted = copy.deepcopy(partition)
+    omitted["ranks"] = omitted["ranks"][:1]
+    with pytest.raises(RuntimePriceError, match="one record per rank"):
+        recompute_rank_fixed_charge(written(tmp_path, omitted, "short.json"), root=tmp_path)
+    peer = copy.deepcopy(partition)
+    peer["ranks"][1]["report"] = copy.deepcopy(partition["ranks"][0]["report"])
+    with pytest.raises(RuntimePriceError, match="report rank"):
+        recompute_rank_fixed_charge(written(tmp_path, peer, "peer.json"), root=tmp_path)
+    foreign_runtime = copy.deepcopy(partition)
+    foreign_runtime["ranks"][1]["runtime_manifest_sha256"] = "c" * 64
+    with pytest.raises(RuntimePriceError, match="runtime manifest"):
+        recompute_rank_fixed_charge(written(tmp_path, foreign_runtime, "runtime.json"), root=tmp_path)
+    stale_capture = copy.deepcopy(partition)
+    stale_capture["ranks"][0]["capture_sha256"] = "d" * 64
+    with pytest.raises(RuntimePriceError, match="capture digest"):
+        recompute_rank_fixed_charge(written(tmp_path, stale_capture, "capture.json"), root=tmp_path)
+
+
+def test_a_rank_whose_own_capture_cannot_recompute_a_term_is_refused_by_name(tmp_path):
+    """A capture that observed no fixed terms charges nothing, rather than zero."""
+    from prismaquant.runtime_provenance import recompute_rank_fixed_charge
+    from test_full_engine_resource_report import fixed_terms_report, written
+
+    _reference, partition = _sealed_per_rank_partition(tmp_path)
+    blind = copy.deepcopy(partition)
+    blind["ranks"][1]["report"] = written(
+        tmp_path, fixed_terms_report(rank=1, world_size=2, startup=False), "blind.json")
+    with pytest.raises(RuntimePriceError, match="recomputes no fixed_"):
+        recompute_rank_fixed_charge(written(tmp_path, blind, "blind-partition.json"), root=tmp_path)
+
+
+@pytest.mark.parametrize("key", ["model_sha256", "workload_sha256"])
+def test_two_ranks_of_one_world_cannot_be_two_models_or_workloads(tmp_path, key):
+    """One shared runtime digest is not one world.
+
+    Rank 0 could observe a small model and rank 1 a different one, or the same
+    model under a different workload, and both reports would still name the
+    same runtime, rank and world size. Every world coordinate is therefore
+    joined across the ranks rather than checked per rank.
+    """
+    from prismaquant.runtime_provenance import recompute_rank_fixed_charge
+
+    reference, _partition = _sealed_per_rank_partition(
+        tmp_path, **{key: ("a" * 64, "b" * 64)})
+    with pytest.raises(RuntimePriceError, match=f"rank 1 names {key}"):
+        recompute_rank_fixed_charge(reference, root=tmp_path)
+
+
+def test_the_charge_is_bound_to_the_bytes_the_table_was_priced_against(tmp_path):
+    """The consumer's own identities decide, not the partition's own word."""
+    from prismaquant.runtime_provenance import recompute_rank_fixed_charge
+
+    reference, _partition = _sealed_per_rank_partition(tmp_path)
+    charge = recompute_rank_fixed_charge(
+        reference, root=tmp_path,
+        expected_run_identity={"model_sha256": "a" * 64, "runtime_manifest_sha256": "a" * 64})
+    assert charge.world_size == 2
+    with pytest.raises(RuntimePriceError, match="report model_sha256"):
+        recompute_rank_fixed_charge(reference, root=tmp_path,
+                                    expected_run_identity={"model_sha256": "9" * 64})
