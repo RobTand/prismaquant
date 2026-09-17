@@ -78,7 +78,16 @@ GPU_RUNTIME_FLAGS = {
 DEFAULT_GPU_RUNTIME = "nvidia"
 
 
-def validate_container(spec: dict) -> None:
+def validate_container(spec: dict, *, bounded: bool = False) -> None:
+    """Check a container spec, with the bounded-capture env gate opt-in.
+
+    ``bounded`` is the caller stating that this row is a bounded capture row.
+    The environment contract below belongs to THAT path -- a legacy row that
+    declares ``MIMALLOC_PURGE_DELAY=10`` on purpose is not a bounded capture
+    row, and refusing it here would break unrelated work for a rule it does
+    not fall under. The dispatch path already knows which it is building and
+    passes it.
+    """
     container = spec.get("container")
     if not isinstance(container, dict) or set(container) - {"image", "mounts", "content_sha256", "archive", "gpu_runtime"}:
         raise RuntimeError("container must declare image and optional mounts/content_sha256/archive/gpu_runtime only")
@@ -146,7 +155,7 @@ def validate_container(spec: dict) -> None:
         # Declaring it is optional -- the launcher supplies it -- but a spec may
         # not weaken it, and the refusal names the field so a reader of the spec
         # does not have to diff the container's environment to find out.
-        if name in env and env[name] != expected:
+        if bounded and name in env and env[name] != expected:
             raise RuntimeError(
                 f"spec env {name}={env[name]!r} contradicts the bounded capture "
                 f"contract ({name}={expected!r}); the launcher would have to "
@@ -374,8 +383,8 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
 
 def docker_command(spec: dict, command: list[str], *, cwd: str,
                    uid: int, gid: int, image_id: str, content_sha256=None,
-                   with_gpu=True, environ=None) -> list[str]:
-    validate_container(spec)
+                   with_gpu=True, environ=None, bounded=False) -> list[str]:
+    validate_container(spec, bounded=bounded)
     gpu_flags = GPU_RUNTIME_FLAGS[
         spec["container"].get("gpu_runtime", DEFAULT_GPU_RUNTIME)]
     argv = ["docker", "run", "--rm", *(gpu_flags if with_gpu else []), "--ipc=host",
@@ -423,7 +432,12 @@ def main(argv=None) -> int:
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     spec = json.loads(args.spec)
-    validate_container(spec)
+    # The spec the launcher forwards carries the bounded capture environment
+    # only for a bounded row, so the row's own env is what says which contract
+    # this is: a legacy spec that names a different purge delay is not held to
+    # a contract it never declared.
+    forwarded_env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
+    validate_container(spec, bounded=all(name in forwarded_env for name in BOUNDED_CAPTURE_ENV))
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a container command is required")

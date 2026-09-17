@@ -1406,6 +1406,41 @@ def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
     return completion
 
 
+def _config_device_envelope(config, command):
+    """The device envelope a joint command declares, validated before any device.
+
+    ``max_gpu_bytes`` is what ``_load_plan`` requires of every admitted plan,
+    and the envelope is the FIRST thing a command does that reaches the CUDA
+    allocator. Reading it with ``config["max_gpu_bytes"]`` therefore turned a
+    config the admission gate would have refused into a ``KeyError`` raised
+    after the device had already been touched -- indistinguishable, to a
+    reader, from a plan that was admitted and failed later. Stating it here
+    keeps the cheap input refusal cheap, and keeps the allocator touch to the
+    one place that owns it.
+    """
+    if "max_gpu_bytes" not in config:
+        raise ValueError(
+            f"joint {command}: the plan declares no max_gpu_bytes; every "
+            "admitted plan carries the device envelope its row is bounded by")
+    return config["max_gpu_bytes"]
+
+
+def _apply_device_envelope(device, device_bytes, *, where):
+    """Set the CUDA allocator envelope, through the one seam that names it.
+
+    A module-level indirection so the CPU suites that drive ``execute`` for its
+    preflight refusals can state the envelope without a device: those tests
+    patch ``gpu_guard.require_cuda_hot_path`` because a refusal that happens
+    before any allocation must be reachable without CUDA, and the envelope --
+    which is the FIRST thing that touches the allocator -- is the same shape of
+    seam. On a real box this is
+    :func:`prismaquant.memory_management.enforce_device_envelope` unchanged.
+    """
+    from .memory_management import enforce_device_envelope
+
+    return enforce_device_envelope(device, device_bytes, where=where)
+
+
 def _restores_activation_scale_env(function):
     """Scope ``execute``'s activation-scale write to the call that makes it.
 
@@ -1474,9 +1509,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     # ``max_memory_allocated`` only after a window had run, which on a
     # unified-memory box is a report about memory already spent. ``synthesize``
     # is the one CPU command and never reaches this function.
-    from .memory_management import enforce_device_envelope
-    device_envelope = enforce_device_envelope(
-        "cuda", config["max_gpu_bytes"], where=f"joint {command}")
+    device_envelope = _apply_device_envelope(
+        "cuda", _config_device_envelope(config, command), where=f"joint {command}")
     os.environ[ACTIVATION_SCALE_ENV] = config["execution"]["production_act_scales"]
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision("highest")

@@ -177,7 +177,12 @@ def test_actual_collector_refuses_unproven_sharing_before_forward(glm_checkpoint
 
 def test_guard_reserves_future_allocations_before_they_begin(memory_guard):
     guard, root, _memory = memory_guard
-    with pytest.raises(RuntimeError, match='physical memory refusal'):
+    # The reservation is charged before the work begins either way; which of
+    # the guard's refusals names it depends on which budget the caller says it
+    # belongs to. An un-split callback keeps the conservative single budget,
+    # so the CPU cap is what this one crosses -- and the CPU message is now a
+    # message of its own rather than one shared "physical memory" sentence.
+    with pytest.raises(RuntimeError, match='CPU memory refusal|physical memory refusal'):
         guard.check('before growth', reserve_bytes=12*1024**3)
     assert int((root/'memory.current').read_text()) == 1024**3
     assert guard.last['future_allocation_bytes'] == 12*1024**3

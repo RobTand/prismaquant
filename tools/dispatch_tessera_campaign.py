@@ -420,8 +420,13 @@ def load_spec(path: Path) -> dict:
     for name in sorted(spec.get("classes") or {}):
         resolved = row_class(spec, name)
         if "container" in resolved:
+            # The bounded-capture environment contract is stated by the row
+            # that is actually bounded: a class whose argv asks for the
+            # bounded policy has it here, and a legacy class that declares its
+            # own purge delay is not refused for a rule it does not fall under.
             validate_container({"container": resolved["container"],
-                                "env": resolved["env"]})
+                                "env": resolved["env"]},
+                               bounded=_row_is_bounded(resolved.get("argv") or []))
     validate_row_classes(spec, where=str(path))
     _process_baseline_bytes(spec, where=str(path))
     return spec
@@ -846,6 +851,22 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
 CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
 
 
+def _row_is_bounded(argv: list[str]) -> bool:
+    """Whether this row runs the bounded capture path.
+
+    One predicate, two readers: the row builder that merges the bounded
+    capture environment, and the container validation that holds a spec to the
+    SAME environment. A legacy row that declares its own purge delay is not a
+    bounded row and is not refused for a contract it does not fall under.
+    """
+    policy_flag = '--streaming-capture-policy'
+    bounded = (policy_flag + '=shared-inputs-bounded-v1' in argv or
+               (policy_flag in argv and
+                argv[argv.index(policy_flag) + 1] == 'shared-inputs-bounded-v1'))
+    return bounded or all(flag in argv for flag in
+        ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
+
+
 def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
          progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
          module: str = "prismaquant.tessera_campaign",
@@ -881,12 +902,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
                 f"argv names {named}; those bytes depend on a Hessian this "
                 "class may not have measured or adopted")
     env = dict(resolved['env'])
-    policy_flag = '--streaming-capture-policy'
-    bounded = (policy_flag+'=shared-inputs-bounded-v1' in argv or
-               (policy_flag in argv and
-                argv[argv.index(policy_flag)+1] == 'shared-inputs-bounded-v1'))
-    bounded = bounded or all(flag in argv for flag in
-        ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
+    bounded = _row_is_bounded(argv)
     if bounded:
         from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
         env = {**BOUNDED_CAPTURE_ENV, **env}
@@ -894,7 +910,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
     command = [resolved["python"], "-u", "-m", module, *argv]
     if "container" in resolved:
         container_spec = {"container": resolved["container"], "env": env}
-        validate_container(container_spec)
+        validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
                    json.dumps(container_spec, sort_keys=True), "--", *command]
     row = {

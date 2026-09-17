@@ -106,6 +106,20 @@ def load(config):
     return load_measured_anchor_input(config)
 
 
+def _stub_device_envelope(monkeypatch, bridge):
+    """State the device envelope without a device.
+
+    ``execute`` applies the CUDA allocator envelope before any allocation, and
+    it is the first thing in the command that reaches the allocator. These
+    tests drive ``execute`` on a CPU-only box to exercise the input refusals
+    that must stay reachable without CUDA, so they patch the same seam they
+    already patch for ``require_cuda_hot_path``.
+    """
+    monkeypatch.setattr(bridge, "_apply_device_envelope", lambda device, device_bytes, **kw: {
+        "enforced": False, "stub": True, "device": str(device),
+        "device_envelope_bytes": int(device_bytes)})
+
+
 def test_exact_measured_roster_excludes_interpolation(tmp_path):
     config, names, fmt, payload, _ = fixture(tmp_path)
     for rows in payload["costs"].values():
@@ -336,9 +350,10 @@ def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypat
     monkeypatch.setattr(calibration_data, "load_calibration_input", _observe)
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", lambda *_a, **_k:
         pytest.fail("subset draw reached model construction"))
+    _stub_device_envelope(monkeypatch, bridge)
     config = {"model": "fixture", "inputs": {}, "output_root": str(tmp_path),
         "calibration_input": {"path": "fixture", "sha256": "a" * 64},
-        "profile_tool": "cprofile",
+        "profile_tool": "cprofile", "max_gpu_bytes": 2048,
         "execution": {"production_act_scales": "0", "n_calib_samples": 1, "calib_seqlen": 512}}
 
     with pytest.raises(ValueError, match="original full draw nsamples"):
@@ -364,8 +379,10 @@ def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypat
     def forbidden(*_args, **_kwargs):
         pytest.fail("subset draw reached model construction")
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", forbidden)
+    _stub_device_envelope(monkeypatch, bridge)
     config = {"model": "fixture", "inputs": {}, "output_root": str(tmp_path),
         "calibration_input": {"path": "fixture", "sha256": "a" * 64},
+        "max_gpu_bytes": 2048,
         "execution": {"production_act_scales": "0", "n_calib_samples": 1, "calib_seqlen": 512}}
     config["profile_tool"] = profile_tool
     if profile_tool == "py-spy":
@@ -420,8 +437,9 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
         assert kwargs.get("source_authentication") is (source_owner if command == "prepare" else None)
         raise Reached
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", inspect)
+    _stub_device_envelope(monkeypatch, bridge)
     config = {"model": "fixture", "inputs": {}, "output_root": str(tmp_path),
-        "source_prefetch": prefetch,
+        "source_prefetch": prefetch, "max_gpu_bytes": 2048,
         "calibration_input": {"path": "fixture", "sha256": "a" * 64},
         "execution": {"production_act_scales": "0", "n_calib_samples": 512, "calib_seqlen": 512}}
     with pytest.raises(Reached):
@@ -433,6 +451,7 @@ def test_run_refuses_stale_prepared_gate_before_full_wire_intake(tmp_path, monke
     from prismaquant import aura_cost, gpu_guard, tessera_joint_aura as bridge
 
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_args: None)
+    _stub_device_envelope(monkeypatch, bridge)
     monkeypatch.setattr(aura_cost, '_aura_source_sha256', lambda: 'i' * 64)
     monkeypatch.setattr(bridge, 'load_measured_anchor_input',
                         lambda *_a, **_k: pytest.fail('full-wire intake ran before prepared gate'))
@@ -442,6 +461,7 @@ def test_run_refuses_stale_prepared_gate_before_full_wire_intake(tmp_path, monke
     prepared_path = tmp_path / 'prepared.json'
     prepared_path.write_text(json.dumps(record))
     config = {'model': 'fixture', 'inputs': {}, 'output_root': str(tmp_path),
+              'max_gpu_bytes': 2048,
               'execution': {'production_act_scales': '0'}, 'profile_tool': 'cprofile'}
     with pytest.raises(ValueError, match='prepared v3 schema|prepared plan_sha256|prepared implementation_sha256'):
         bridge.execute('run', config, plan_sha256='p' * 64, prepared=bind(prepared_path))
@@ -545,6 +565,7 @@ def test_sampling_refuses_unobserved_execution(tmp_path, monkeypatch, defect):
     import os
     from prismaquant import tessera_joint_aura as bridge, gpu_guard
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
+    _stub_device_envelope(monkeypatch, bridge)
     session = {"schema": "prismaquant.profiled_command_start.v1",
         "wrapper_pid": os.getppid(),
         "command": ["python", "-m", "prismaquant.tessera_joint_aura", "prepare"]}
@@ -559,6 +580,7 @@ def test_sampling_refuses_unobserved_execution(tmp_path, monkeypatch, defect):
         path.write_text(json.dumps(session))
     monkeypatch.setenv("PRISMAQUANT_SAMPLER_SESSION", str(path))
     config = {"output_root": str(tmp_path), "profile_tool": "py-spy",
+              "max_gpu_bytes": 2048,
               "execution": {"production_act_scales": "0"}}
     with pytest.raises(ValueError, match="sampl|observed"):
         bridge.execute("prepare", config, plan_sha256="b" * 64)

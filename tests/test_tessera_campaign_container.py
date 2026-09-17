@@ -282,12 +282,20 @@ def test_the_launcher_supplies_the_bounded_capture_environment(tmp_path):
 
 
 def test_a_spec_that_contradicts_the_bounded_capture_contract_refuses():
-    """A spec may omit it; it may not weaken it."""
+    """A bounded row's spec may omit it; it may not weaken it.
+
+    The contract binds the BOUNDED path, which is why every call here says so:
+    a legacy row that declares its own purge delay is not a bounded capture row
+    and keeps the environment it was sealed with.
+    """
     data = _bounded_spec(MIMALLOC_PURGE_DELAY="60000")
     with pytest.raises(RuntimeError) as refused:
-        _runner().validate_container(data)
+        _runner().validate_container(data, bounded=True)
     assert "contradicts the bounded capture contract" in str(refused.value)
 
     ok = _bounded_spec(PRISMAQUANT_RELEASE_SOURCE_PAGES="1",
                        MIMALLOC_PURGE_DELAY="0")
-    _runner().validate_container(ok)
+    _runner().validate_container(ok, bounded=True)
+    # The same spec on the legacy path is untouched: the rule is the bounded
+    # capture path's, and applying it everywhere was refusing unrelated work.
+    _runner().validate_container(data)

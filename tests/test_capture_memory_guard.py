@@ -225,7 +225,7 @@ def test_enforce_device_envelope_refuses_a_budget_that_bounds_nothing(monkeypatc
 # The callers, not just the guard
 # ---------------------------------------------------------------------------
 
-def test_reserve_allocation_keeps_an_unsplit_callback_conservative(tmp_path):
+def test_reserve_allocation_keeps_an_unsplit_callback_conservative(tmp_path, host):
     """A caller taught the split hands over two numbers; nothing else changes.
 
     The legacy shape -- one ``resource_check(label, reserve_bytes=N)`` -- is
