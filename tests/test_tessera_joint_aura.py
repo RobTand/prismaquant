@@ -429,12 +429,16 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
     def intake(_inputs, **kwargs):
         # The command holds the CUDA reservation, so any shard it still has to
         # synthesize decodes on that device rather than on one CPU core (#549).
+        # The head walk reports under the one phase every joint prepare
+        # declares; a COST run's counter belongs to its own read schedule and
+        # intake reports nothing there (#678).
         assert kwargs == {"reader": None, "synthesis_device": "cuda",
+                          "progress_phase": "head" if command == "prepare" else None,
                           **({"verify_payloads": False} if command == "prepare" else
                              {"verify_payloads": False, "require_existing_renders": True})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
             cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
-            encoder_source_reuse=None,
+            progress_committed=0, encoder_source_reuse=None,
             payload={"provenance": {"hessian": {"calibration_identity": draw}}})
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
     if command == "run":
@@ -1102,7 +1106,10 @@ def test_the_synthesis_loop_reports_what_it_has_committed(tmp_path, monkeypatch,
     lines = [line for line in capsys.readouterr().out.splitlines() if "synthesized" in line]
     assert len(lines) == 3 and "cells/s" in lines[-1]
     assert data.synthesized_now == 2
+    # One report per resolved unit -- here one cell each -- under the phase a
+    # fanned-out synthesis row declares.
     assert [count for count, _, _ in reports] == [1, 2]
+    assert [unit for _, _, unit in reports] == sorted(names)
     assert {phase for _, phase, _ in reports} == {"synthesize"}
 
 

@@ -13,6 +13,14 @@ from pathlib import Path
 # only after a complete qualification unit, never in the middle of a read.
 MAX_PHASE_BYTES = 32 * 1024**3
 
+#: The first phase a joint prepare declares, and the only name every manifest
+#: is required to carry (``load_prepare_read_set`` refuses one without it). It
+#: covers everything the action does before the first layer part: the measured
+#: anchor intake, source authentication and model construction. Named here,
+#: beside the layer/part names, so the reporting side spells no phase of its
+#: own (RobTand/prismaquant#678).
+HEAD_PHASE = "head"
+
 
 def phase_name(layer: int, part: int) -> str:
     return f"layer-{layer}-part-{part}"
@@ -69,7 +77,7 @@ def load_prepare_read_set(
     if any(not isinstance(unit, str) or not isinstance(phase, str)
            or phase not in declared for unit, phase in starts.items()):
         raise RuntimeError("joint prepare data manifest has invalid unit frontiers")
-    if "head" not in declared or not starts:
+    if HEAD_PHASE not in declared or not starts:
         raise RuntimeError("joint prepare data manifest has incomplete frontiers")
     return starts, _sealed_replay(annotations), tuple(declared)
 
