@@ -22,6 +22,8 @@ from .tessera_formats import parse_tessera_format_name
 
 INPUT_SCHEMA = "prismaquant.native_moe_inputs.v1"
 PANEL_SCHEMA = "tessera.native_moe_panel.v1"
+#: One rank's own cut record: the window, not a quality identity.
+RANK_RENDER_SCHEMA = "prismaquant.native_moe_rank_render.v1"
 #: The LFM stack this panel was built for, in the shape its validator reads.
 LFM_STACK = "lfm2_moe"
 LFM_EXPERTS = 32
@@ -355,6 +357,97 @@ def decoded_rank_member(blob, shape, role, *, device, where):
     return unit_artifact.reconstruct_unit(cut, parsed.forests, parsed.code).to(torch.bfloat16)
 
 
+def _qualified_quality_members(binding, *, members, source_model, calibration):
+    """The historical full-container render proof, read from its own bound PWC.
+
+    A rank holds a CUT of the module's render, and a quality identity may not
+    be taken on a cut: what the campaign qualified is the WHOLE container, and
+    that is what the joint quality row must name. This reads that proof out of
+    the ORIGINAL preparation the caller binds -- the prepared completion and
+    the ``ProductionWeightCache`` it names, each authenticated by its own
+    digest through :func:`tessera_joint_allocation._read_bound` -- rather than
+    from anything this producer wrote about itself. Nothing is rendered, no
+    cache is created, and the encoder identity is joined through the producer's
+    own canonical-JSON grammar rather than a second spelling of one hash.
+    """
+    import pickle
+    from .cost_stage_checkpoint import canonical_json_sha256
+    from .production_weight_cache import ProductionWeightCache
+    from .tessera_joint_allocation import _read_bound
+    from .tessera_joint_aura import (HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA,
+                                     RENDER_COMPARISON_BY_ORIGIN)
+
+    completion = json.loads(_read_bound(binding, "native full-quality preparation"))
+    _equal(completion.get("schema"), PREPARED_SCHEMA, "quality prepared schema")
+    _equal(completion.get("status"), "complete", "quality prepared completion")
+    _equal(completion["source_model_identity"], source_model, "quality source model")
+    for field in ("calibration_sha256", "shape", "dtype"):
+        _equal(completion["calibration_input"][field], calibration[field],
+               f"quality calibration {field}")
+    cache = pickle.loads(_read_bound(completion["production_cache"], "native qualified PWC"))
+    if not isinstance(cache, ProductionWeightCache):
+        raise ValueError("native quality preparation requires the actual ProductionWeightCache")
+    metadata = cache.metadata or {}
+    _equal(metadata.get("schema"), PREPARED_SCHEMA, "quality PWC schema")
+    for field in ("plan_sha256", "source_model_identity", "source_execution",
+                  "implementation_sha256", "reader_identity", "projection_backend"):
+        _equal(metadata.get(field), completion[field], f"quality PWC {field}")
+    verified = metadata.get("verified_cells")
+    if not isinstance(verified, dict) or "inputs" not in metadata:
+        raise ValueError("native quality preparation lacks its qualified render receipts")
+    result = {}
+    for member in members:
+        name, fmt = member["unit"], member["format"]
+        if fmt not in completion["formats_by_qname"].get(name, []):
+            raise ValueError(f"{name}: absent from the qualified candidate roster")
+        if (name, fmt) not in verified:
+            raise ValueError(f"{name}: absent from the qualified render receipts")
+        proof = verified[name, fmt]
+        for field in ("source_weight", "activation"):
+            _equal(proof[field], member[field], f"{name} qualified {field}")
+        # The qualified render is the CONTAINER the member record names, which
+        # is the one geometry a quality identity may be taken on.
+        _equal(proof["rendered_weight"]["shape"], member["shape"], f"{name} full quality shape")
+        _equal(proof["source_weight"]["shape"], member["shape"], f"{name} full source shape")
+        _equal(proof["wire_sha256"], member["wire"]["blob_sha256"], f"{name} qualified wire")
+        identity = member["wire"]["record"]["identity"]
+        _equal(proof["encoding_identity_sha256"],
+               canonical_json_sha256(identity, where=f"{name} original encoding"),
+               f"{name} qualified encoder")
+        _equal(identity["unit"], name, f"{name} encoder unit")
+        if proof["render_origin"] not in RENDER_COMPARISON_BY_ORIGIN:
+            raise ValueError(f"{name}: qualified render carries no closed-vocabulary origin")
+        _equal(proof["render_comparison"], RENDER_COMPARISON_BY_ORIGIN[proof["render_origin"]],
+               f"{name} qualified render comparison")
+        _sha(proof["render_file_sha256"], f"{name} qualified render file")
+        result[name] = dict(proof)
+    return result, {"prepared": binding, "plan_sha256": completion["plan_sha256"],
+                    "wire_validation": HISTORICAL_WIRE_VALIDATION,
+                    "inputs": metadata["inputs"]}
+
+
+def _rank_render_proof(member, shape, quality):
+    """Bind THIS rank's measured render to the window its qualified wire declares.
+
+    The proof is the cut's own record and never a quality identity: it names
+    the window of the whole container this rank holds, the qualified full
+    render the cut was taken from, and the encoder identity of the wire both
+    sides share. :func:`member_window` is the one home for that arithmetic, so
+    a window this record claims and a window the loader reads cannot differ.
+    """
+    rows, cols, axis = member_window(shape, member["role"])
+    _equal(member["rendered_weight"]["shape"], rank_local_member_shape(shape, member["role"]),
+           f"{member['unit']} observed rank render shape")
+    return {"schema": RANK_RENDER_SCHEMA, "unit": member["unit"],
+            "format": member["format"], "role": member["role"],
+            "rank": _execution_rank(shape), "world_size": shape["tensor_parallel"],
+            "rows": list(rows), "cols": list(cols), "axis": axis,
+            "wire_sha256": member["wire"]["blob_sha256"],
+            "encoding_identity_sha256": quality["encoding_identity_sha256"],
+            "qualified_render_sha256": identity_sha256(quality["rendered_weight"]),
+            "rendered_weight": member["rendered_weight"]}
+
+
 def validate_routing(routing):
     if not isinstance(routing, dict) or set(routing) not in (ROUTING_FIELDS, GLM_ROUTING_FIELDS):
         raise ValueError("native MoE requires exact captured routing settings")
@@ -667,7 +760,8 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
                        calibration_receipt, routing_capture, experts_module, profile,
                        wire_blobs, wire_records, encoding_identities, numerics,
                        max_resident_bytes, max_temporary_bytes, runtime_image, serving_config_sha256, probe_request,
-                       format_name=FORMAT, probe_calibration_receipt=None, probe_scope=None):
+                       format_name=FORMAT, probe_calibration_receipt=None, probe_scope=None,
+                       quality_prepared=None, quality_source_model=None):
     """Prepare one complete routed reference from existing resident PWC data.
 
     Member records explicitly declare the expert/role order. Source tensors and
@@ -683,6 +777,10 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     format_name = owner_format(shape, format_name)
     shape = {**shape, "format": format_name}
     execution = owner_execution(shape, format_name=format_name)
+    rank_local = shape.get("tensor_parallel", 1) > 1
+    if rank_local and (quality_prepared is None or quality_source_model is None):
+        raise ValueError("native rank-local preparation requires independently bound "
+                         "full-quality preparation")
     _member_roster(unit, members, shape)
     validate_routing(routing)
     _calibration_and_capture(calibration_receipt, routing_capture, unit=unit, shape=shape, routing=routing)
@@ -699,8 +797,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
         raise TypeError("native MoE requires the actual ProductionWeightCache")
     expected_profile = ("lfm2_moe" if geometry_family(shape) == "lfm2_moe_routed_stack_v1"
                         else "glm5_next")
-    expected_experts = _roster_shape(shape)["experts"] if False else (
-        shape["experts"] if "experts" in shape else shape["n_routed_experts"])
+    expected_experts = shape["experts"] if "experts" in shape else shape["n_routed_experts"]
     if (profile.name != expected_profile
             or type(experts_module).__name__ not in profile.packed_expert_module_class_names()
             or getattr(experts_module, "num_experts", None) != expected_experts):
@@ -743,7 +840,14 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
         role = member["role"]
         # PWC prefetch materializes disk shards on CPU. Use the same explicit
         # device transfer as the dense native reference; preserve stored dtype.
-        source, render = source_weights[name], cache.get(name, format_name).to(device=device)
+        source, full_render = source_weights[name], cache.get(name, format_name).to(device=device)
+        if list(full_render.shape) != container_member_shape(shape, role):
+            raise ValueError(f"{name}: PWC must retain the full quality render")
+        if rank_local:
+            rows, cols, _axis = member_window(shape, role)
+            render = full_render[rows[0]:rows[1], cols[0]:cols[1]].contiguous()
+        else:
+            render = full_render
         # The source is the WHOLE container the wire's own identity names; the
         # render is THIS rank's cut of it. The two are the same tensor only at a
         # world of one, so comparing them as one shape would refuse every real
@@ -773,11 +877,26 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
             "rendered_weight": _cb_cache_tensor_identity(render), "activation": activation,
             "wire": {"blob_sha256": hashlib.sha256(wire_blobs[name]).hexdigest(),
                      "blob_bytes": len(wire_blobs[name]), "record": wire_records[name]}})
+        if rank_local:
+            actual_members[-1]["quality_rendered_weight"] = _cb_cache_tensor_identity(full_render)
         tensors["source_weight/" + name], tensors["rendered_weight/" + name] = source, render
         rendered[name] = render
+    quality_context = None
+    if rank_local:
+        # The historical render was qualified under the campaign's own full
+        # calibration draw, not under the bounded first-sequence probe screen,
+        # so the parent receipt is what the qualification is bound to.
+        quality_members, quality_context = _qualified_quality_members(
+            quality_prepared, members=actual_members, source_model=quality_source_model,
+            calibration=calibration_receipt)
+        for member in actual_members:
+            quality = quality_members[member["unit"]]
+            _equal(member["quality_rendered_weight"], quality["rendered_weight"],
+                   f"{member['unit']} actual full PWC render")
+            member["rank_render_proof"] = _rank_render_proof(member, shape, quality)
     # Reuse the format/profile's declared gate/up roles. This pack is discarded
     # before the producer's native preparation and never persisted as a cache.
-    roster = _roster_shape(shape)
+    roster = _shape_for_roster(shape)
     # THIS rank's own width and THIS roster's own member names: the pack holds
     # the rank-local experts the render loop just checked, and a member spelled
     # in the source's projection vocabulary must be found by the name it
@@ -806,6 +925,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     del gate_up, down
     reference_file = Path(inspect.getfile(type(experts_module)))
     return {"schema": INPUT_SCHEMA, "unit": unit, "format": format_name, "shape": dict(shape),
+            **({"quality_preparation": quality_context} if quality_context is not None else {}),
             "members": actual_members, "profile_role_order": list(ROLES), "routing": dict(routing), "execution": execution,
             "calibration": calibration_receipt, "probe_calibration": probe_calibration_receipt,
             "probe_scope": probe_scope, "routing_capture": routing_capture,
@@ -1034,10 +1154,35 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     probe_calibration = _probe_calibration(inputs)
     for field, key in (("calibration_sha256", "calibration_sha256"), ("calibration_shape", "shape"), ("calibration_dtype", "dtype")):
         _equal(probe[field], probe_calibration[key], f"joint {field}")
+    quality_members = None
+    if inputs["shape"].get("tensor_parallel", 1) > 1:
+        if "quality_preparation" not in inputs:
+            raise ValueError("native rank-local panel requires independently bound "
+                             "full-quality preparation")
+        for member in members:
+            if not {"quality_rendered_weight", "rank_render_proof"} <= set(member):
+                raise ValueError(
+                    f"{member['unit']}: a rank-local member declares no full quality "
+                    "render and no rank render proof")
+        # The panel's own calibration receipt, not the bounded first-sequence
+        # probe screen: the historical render was qualified under the campaign
+        # draw, and a subset would refuse every real preparation.
+        quality_members, quality_context = _qualified_quality_members(
+            inputs["quality_preparation"]["prepared"], members=members,
+            source_model=probe["source_model"], calibration=inputs["calibration"])
+        _equal(quality_context, inputs["quality_preparation"], "quality preparation context")
     for member in members:
         joint = rows[member["unit"]]["joint_operator_identity"]
+        quality_render = member["rendered_weight"]
+        if quality_members is not None:
+            quality = quality_members[member["unit"]]
+            quality_render = quality["rendered_weight"]
+            _equal(member["quality_rendered_weight"], quality_render,
+                   f"{member['unit']} full quality render")
+            _equal(member["rank_render_proof"], _rank_render_proof(member, inputs["shape"], quality),
+                   f"{member['unit']} rank render proof")
         for key, expected in (("qname", member["unit"]), ("format", member["format"]),
-                              ("source_weight", member["source_weight"]), ("rendered_weight", member["rendered_weight"]),
+                              ("source_weight", member["source_weight"]), ("rendered_weight", quality_render),
                               ("activation", member["activation"])):
             _equal(joint[key], expected, f"{member['unit']} joint {key}")
         if joint["activation"].get("clip_enabled") is not False or joint["activation"].get("input_global_scale") is not None:
@@ -1092,6 +1237,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         member_shapes,
         operator_route_identity(route))
     return json.loads(json.dumps({"schema": PANEL_SCHEMA, "unit": inputs["unit"],
+        **({"quality_preparation": inputs["quality_preparation"]} if quality_members is not None else {}),
         "format": inputs["format"],
         "shape": inputs["shape"], "members": members, "profile_role_order": list(ROLES),
         "routing": inputs["routing"], "routing_capture_sha256": inputs["routing_capture_sha256"],

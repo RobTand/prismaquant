@@ -849,18 +849,7 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
         source_shape = operator["source_weight"]["shape"]
         rendered_shape = operator["rendered_weight"]["shape"]
         if source_shape != rendered_shape:
-            # A tensor-parallel rank holds a CUT of the module's own render, so
-            # the two geometries are the same tensor only at a world of one.
-            # What has to hold is that the render is the source restricted on
-            # exactly one axis by a whole factor, with the other axis unchanged:
-            # the cut partitions the container rather than resizing it. The
-            # joint identity still binds the SOURCE geometry, which is what a
-            # quality identity must be taken on.
-            differing = [axis for axis in (0, 1) if source_shape[axis] != rendered_shape[axis]]
-            if (len(differing) != 1
-                    or source_shape[differing[0]] % rendered_shape[differing[0]]
-                    or rendered_shape[1 - differing[0]] != source_shape[1 - differing[0]]):
-                raise ValueError("render/source geometry differs")
+            raise ValueError("render/source geometry differs")
         activation = operator["activation"]
         if activation["schema"] != "prismaquant.joint_aura.activation.v1" or type(activation["quantizes_input"]) is not bool:
             raise ValueError("invalid activation identity")

@@ -537,3 +537,21 @@ def test_a_routed_gemm_output_keeps_its_tolerance(joined, tmp_path):
     write(trace_path, trace)
     consume_moe_receipt(path, expected_sha256=digest, expected_panel=panel,
                         memory_trace_path=trace_path)
+
+
+def test_a_world_of_one_binds_no_separate_full_quality_preparation(joined):
+    """TP1 is unchanged: the container IS the cut, so there is one render.
+
+    The rank-local quality gate exists because a rank holds a CUT of the
+    module's render. At a world of one there is nothing to cut, so the panel
+    carries no second preparation and the joint quality row names the same
+    render the native member roster does.
+    """
+    inputs, preflight, rows = joined
+    assert inputs["shape"].get("tensor_parallel", 1) == 1
+    panel = freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
+    assert "quality_preparation" not in panel
+    member = panel["members"][0]
+    assert "quality_rendered_weight" not in member and "rank_render_proof" not in member
+    joint = rows[member["unit"]]["joint_operator_identity"]
+    assert joint["rendered_weight"] == member["rendered_weight"]

@@ -3,6 +3,46 @@
 As of: 2026-09-17 · `flash/prefill-receipt-alloc-bridge-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-17, `flash/prefill-receipt-alloc-bridge-20260916`) for the
+**quality seam between a module's render and one rank's cut of it**. No
+default, stage, format, lane, pin or ship gate changes, and no cache is added.
+
+- **`joint_aura.validate_joint_aura_entry` is strict again.** It briefly
+  admitted a render that was the source restricted on exactly one axis by a
+  whole factor. That leniency was global -- it applied to every entry in every
+  table, not only to a tensor-parallel row -- so a genuinely wrong render
+  geometry passed the joint quality gate everywhere. `source_shape` and
+  `rendered_shape` must simply be equal.
+- **A rank-local native panel names the full container render.** Above a world
+  of one, `native_moe_panel.prepare_moe_inputs` requires an independently bound
+  historical preparation (`quality_prepared` / `quality_source_model`) and
+  refuses without one. It keeps the FULL `ProductionWeightCache` render, cuts
+  this rank's window out of it, and publishes both: `quality_rendered_weight`
+  is the container the joint quality row binds, `rendered_weight` stays this
+  rank's cut. `freeze_moe_panel` compares the joint row against the qualified
+  container render, not against the rank-local one it used to accept.
+- **The cut carries its own proof, and it is not a quality identity.**
+  `rank_render_proof` (`prismaquant.native_moe_rank_render.v1`) names the
+  window `member_window` computes, the rank and world size, the wire digest,
+  the encoder identity and the qualified container render it was cut from. A
+  window that disagrees with the qualified wire's declared window is refused.
+- **The qualification is read, never asserted.** `_qualified_quality_members`
+  authenticates the prepared completion and the `ProductionWeightCache` it
+  names through `tessera_joint_allocation._read_bound`, then checks source
+  model, calibration draw, plan/reader/backend identity, candidate roster, wire
+  digest, encoder identity (through the producer's own canonical-JSON grammar)
+  and render comparison before it returns a single render identity. The
+  historical encoder status travels unchanged as
+  `HISTORICAL_WIRE_VALIDATION`. The binding is taken on the panel's own
+  calibration receipt, which is the campaign draw the render was qualified
+  under, and not on the bounded first-sequence probe screen.
+- A world of one is unchanged: container and cut are the same tensor, so no
+  second preparation is bound and no extra member field is published.
+
+Gates: `tests/test_joint_aura_validation_reuse.py`,
+`tests/test_native_receipt_table_routed.py`, `tests/test_native_moe_panel.py`.
+CPU regression evidence only -- no GPU, TP2, served, quality or timing claim.
+
 Re-stamped (2026-09-17, `flash/prefill-receipt-alloc-bridge-20260916`) for
 the canonical GLM v1 geometry compatibility repair: execution rank remains an
 optional validated coordinate, required only when selecting a TP2 wire window.
@@ -93,10 +133,10 @@ review named closed.
 - **The module geometry and the rank geometry are two fields, not one**
   (Tessera #539, merged `f08baa5f`). A Tessera checkpoint holds one whole unit
   per role whatever world serves it, so a routed member record frames the
-  MODULE (`member["shape"]`, and the joint quality identity's `source_weight`)
-  while the runtime binding carries THIS rank's cut of it
-  (`runtime_binding.member_shapes`, and the joint identity's `rendered_weight`).
-  The two agree only at a world of one. `native_moe_panel` now records the
+  MODULE (`member["shape"]`, and the joint quality identity's `source_weight`
+  **and** `rendered_weight`) while the runtime binding and the native member
+  roster carry THIS rank's cut of it (`runtime_binding.member_shapes`,
+  `member["rendered_weight"]`). The two agree only at a world of one. `native_moe_panel` now records the
   container geometry and admits both the producer's projection spelling
   (`gate_proj`/`up_proj`/`down_proj`) and this consumer's role spelling
   (`w1`/`w3`/`w2`) -- the producer keeps the source spelling because its wire
@@ -111,9 +151,10 @@ review named closed.
   `measured_runtime_prices.rank_local_member_shapes` derives the binding from
   the trusted table context's `tensor_parallel` and refuses a member whose
   intermediate extent does not divide by it, so the canonical combination of
-  every rank's cut is the container the wire identity names. `joint_aura`
-  admits a render that is the source restricted on exactly one axis by a whole
-  factor, and still refuses any other geometry difference.
+  every rank's cut is the container the wire identity names.
+  `joint_aura.validate_joint_aura_entry` refuses any render whose geometry is
+  not the source's, including a whole-factor restriction on one axis: a cut is
+  not a render, and a quality identity is taken on one geometry only.
 
 Debt D37 stands in substance: no table prices a device budget, no measured row
 exists, and no GPU ran. What changed is that the axis now refuses for exactly

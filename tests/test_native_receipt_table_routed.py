@@ -466,7 +466,11 @@ def _sealed_cell(joined_cell, *, phases=None):
     preflight["operator"]["phases"] = {phase: {"transport": copy.deepcopy(phases[phase]["transport"])}
                                        for phase in phases}
     for member in inputs["members"]:
-        member["wire"]["record"]["identity"] = {"encoder_source_sha256": WIRE_SEAL}
+        # Seal the encoder source WITHOUT discarding the rest of the wire
+        # record identity: a GLM cell names its own unit there, and the
+        # qualified render receipt is joined through that whole object.
+        member["wire"]["record"]["identity"] = {
+            **member["wire"]["record"].get("identity", {}), "encoder_source_sha256": WIRE_SEAL}
     sealed = {member["unit"]: member for member in inputs["members"]}
     for entry in preflight["operator"]["members"]:
         entry["wire_record_sha256"] = identity_sha256(sealed[entry["unit"]]["wire"]["record"])
@@ -631,7 +635,7 @@ def _glm_routing():
                                 "expert_bias_affects": "selection_only", "norm_topk_prob": True}}
 
 
-def _glm_cell():
+def _glm_cell(tmp_path):
     """One whole GLM routed owner at TP2, in the producer's own input shape."""
     from prismaquant import native_moe_panel as panel
     from prismaquant.joint_aura import arithmetic_identity, make_joint_aura_entry
@@ -654,9 +658,11 @@ def _glm_cell():
                             "shape": container,
                             "source_weight": _fake_identity(unit, container),
                             "rendered_weight": _fake_identity(unit + ".render", local),
+                            "quality_rendered_weight": _fake_identity(unit + ".full-render", container),
                             "activation": copy.deepcopy(activation),
                             "wire": {"blob_sha256": "3" * 64, "blob_bytes": 42,
-                                     "record": {"unit": unit}}})
+                                     "record": {"unit": unit, "identity": {
+                                         "unit": unit, "encoder_source_sha256": WIRE_SEAL}}}})
     source = {"files": {"fixture.safetensors": "8" * 64}, "config_sha256": "9" * 64,
               "auxiliary_sha256": {"config.json": "9" * 64},
               "tensors": {member["unit"] + ".weight": "fixture.safetensors" for member in members}}
@@ -682,6 +688,7 @@ def _glm_cell():
                  "format": FORMAT,
                  **{key: member[key] for key in ("source_weight", "rendered_weight", "activation")},
                  "arithmetic": arithmetic, "probe_identity_sha256": identity_sha256(probe)}
+        joint["rendered_weight"] = member["quality_rendered_weight"]
         rows[member["unit"]] = make_joint_aura_entry(
             operator_identity=joint, probe_identity=probe,
             signed_components=[{"weight": value, "activation": 0.0, "mixed": 0.0, "total": value}
@@ -744,10 +751,212 @@ def _glm_cell():
         "workspace": workspace, "workspace_sha256": identity_sha256(workspace),
         "native_tensors_sha256": identity_sha256(native["native_tensors"]),
         "scheme_sha256": identity_sha256(native["scheme"])}
+    _bind_glm_quality_fixture(tmp_path, inputs, model, calibration)
     return inputs, preflight, rows
 
 
+def _glm_rank_render_proof(member, shape):
+    """This rank's window of the whole container, written out rather than derived.
+
+    The producer computes the same record through ``member_window``. Spelling
+    it here as a literal is what makes the comparison in ``freeze_moe_panel``
+    evidence: a fixture that asked the code under test for its own expectation
+    would agree with any arithmetic, including the wrong one.
+    """
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+
+    rank = shape.get("tensor_parallel_rank", 0)
+    width = GLM_INTERMEDIATE // GLM_TP
+    low, high = rank * width, (rank + 1) * width
+    rows, cols, axis = (([0, GLM_HIDDEN], [low, high], "column") if member["role"] == "w2"
+                        else ([low, high], [0, GLM_HIDDEN], "row"))
+    return {"schema": "prismaquant.native_moe_rank_render.v1", "unit": member["unit"],
+            "format": member["format"], "role": member["role"], "rank": rank,
+            "world_size": GLM_TP, "rows": rows, "cols": cols, "axis": axis,
+            "wire_sha256": member["wire"]["blob_sha256"],
+            "encoding_identity_sha256": canonical_json_sha256(
+                member["wire"]["record"]["identity"], where="fixture encoding"),
+            "qualified_render_sha256": identity_sha256(member["quality_rendered_weight"]),
+            "rendered_weight": member["rendered_weight"]}
+
+
+def _bind_glm_quality_fixture(tmp_path, inputs, model, calibration):
+    """The original campaign's bound preparation: a completion and its own PWC.
+
+    Both records are the producer's own shape -- the completion literal in
+    ``tessera_joint_aura`` and the verified-cell receipt it writes per rung --
+    spelled out here so the panel is checked against the artifact a campaign
+    actually leaves behind and not against this test's convenience.
+    """
+    import pickle
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.tessera_joint_aura import HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA
+
+    verified = {}
+    for member in inputs["members"]:
+        verified[member["unit"], member["format"]] = {
+            "source_weight": member["source_weight"],
+            "rendered_weight": member["quality_rendered_weight"],
+            "activation": member["activation"],
+            "encoding_identity_sha256": canonical_json_sha256(
+                member["wire"]["record"]["identity"], where="fixture encoding"),
+            "wire_sha256": member["wire"]["blob_sha256"], "render_file_sha256": "e" * 64,
+            "render_origin": "encoded", "render_comparison": "independent_render_vs_wire"}
+        member["rank_render_proof"] = _glm_rank_render_proof(member, inputs["shape"])
+    campaign_inputs = {"fixture": "original campaign anchor inputs"}
+    common = {"schema": PREPARED_SCHEMA, "source_model_identity": model,
+              "plan_sha256": "d" * 64, "implementation_sha256": "f" * 64,
+              "source_execution": inputs["routing_capture"]["source_execution"],
+              "reader_identity": {"fixture": True}, "projection_backend": {"fixture": True}}
+    cache = ProductionWeightCache(weights={}, levers={}, metadata={
+        **common, "verified_cells": verified, "inputs": campaign_inputs})
+    cache_path = tmp_path / "qualified-production.pkl"
+    cache_path.write_bytes(pickle.dumps(cache))
+    completion = {**common, "status": "complete", "calibration_input": calibration,
+                  "formats_by_qname": {member["unit"]: [member["format"]]
+                                       for member in inputs["members"]},
+                  "production_cache": {"path": str(cache_path),
+                                       "sha256": hashlib.sha256(cache_path.read_bytes()).hexdigest()}}
+    path = tmp_path / "qualified-completion.json"
+    path.write_text(json.dumps(completion))
+    inputs["quality_preparation"] = {
+        "prepared": {"path": str(path),
+                     "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
+        "plan_sha256": common["plan_sha256"], "wire_validation": HISTORICAL_WIRE_VALIDATION,
+        "inputs": campaign_inputs}
+
+
 GLM_ROUTE_SHAPE = f"M1:N{2 * GLM_INTERMEDIATE}:K{GLM_HIDDEN}"
+
+
+#: Each mutation and the refusal it must produce, so a fixture that broke for
+#: any other reason cannot pass this test by raising something else.
+_QUALITY_MUTATIONS = {
+    "full_hash": "joint rendered_weight",
+    "full_shape": "render/source geometry differs",
+    "rank": "rank render proof",
+    "axis": "rank render proof",
+    "rows": "rank render proof",
+    "rank_hash": "rank render proof",
+    "wire": "qualified wire",
+    "encoder": "qualified encoder",
+    "prepared_bytes": "owned bytes",
+    "cache_bytes": "owned bytes",
+}
+
+
+@pytest.mark.parametrize("mutation", sorted(_QUALITY_MUTATIONS))
+def test_full_quality_and_rank_cut_are_independently_bound(tmp_path, mutation):
+    """One forged field per run, each refused by the gate that owns it.
+
+    The quality identity is the whole container's render and the cut proof is
+    this rank's window of it. They are separate bindings: forging either, or
+    the bytes of the preparation both are read from, must be refused, and the
+    refusal must name the thing that was forged.
+    """
+    from prismaquant import native_moe_panel as native
+    inputs, preflight, rows = _glm_cell(tmp_path)
+    member = inputs["members"][0]
+    joint = rows[member["unit"]]["joint_operator_identity"]
+    if mutation == "full_hash":
+        joint["rendered_weight"] = {**joint["rendered_weight"], "content_sha256": "0" * 64}
+    elif mutation == "full_shape":
+        # The 3dcb defect, at the panel: a joint quality row that names THIS
+        # rank's cut rather than the module's render.
+        joint["rendered_weight"] = dict(member["rendered_weight"])
+    elif mutation in ("rank", "axis", "rows", "rank_hash"):
+        proof = member["rank_render_proof"]
+        if mutation == "rank_hash":
+            proof["rendered_weight"] = {**proof["rendered_weight"], "content_sha256": "0" * 64}
+        else:
+            proof[mutation] = {"rank": 1, "axis": "column", "rows": [1024, 2048]}[mutation]
+    elif mutation == "wire":
+        member["wire"]["blob_sha256"] = "0" * 64
+    elif mutation == "encoder":
+        member["wire"]["record"]["identity"]["unit"] += ".wrong"
+    else:
+        path = tmp_path / ("qualified-completion.json" if mutation == "prepared_bytes"
+                           else "qualified-production.pkl")
+        path.write_bytes(path.read_bytes() + b" ")
+    rows[member["unit"]]["joint_operator_identity_sha256"] = identity_sha256(joint)
+    with pytest.raises(ValueError, match=_QUALITY_MUTATIONS[mutation]):
+        native.freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
+
+
+def test_a_rank_local_panel_refuses_an_unbound_quality_preparation(tmp_path):
+    """No bound historical preparation, no rank-local panel -- refused by name."""
+    from prismaquant import native_moe_panel as native
+    inputs, preflight, rows = _glm_cell(tmp_path)
+    del inputs["quality_preparation"]
+    with pytest.raises(ValueError, match="requires independently bound full-quality preparation"):
+        native.freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
+
+
+def test_a_rank_local_preparation_refuses_an_unbound_quality_preparation(monkeypatch):
+    """The same refusal on the producing side, before any tensor is touched.
+
+    The activation-protocol gate runs first and is unrelated, so it is
+    satisfied here rather than reordered: what this asserts is that the
+    preparation refuses on its own missing binding, not on a device.
+    """
+    pytest.importorskip("tessera.cached_unit")
+    pytest.importorskip("torch")
+    monkeypatch.setenv("PRISMAQUANT_PROD_ACT_SCALES", "0")
+    from prismaquant import native_moe_panel as native
+    with pytest.raises(ValueError, match="requires independently bound full-quality preparation"):
+        native.prepare_moe_inputs(
+            None, {}, {}, unit=GLM_UNIT, members=[], shape=_glm_shape(), routing=_glm_routing(),
+            calibration_receipt={}, routing_capture={}, experts_module=None, profile=None,
+            wire_blobs={}, wire_records={}, encoding_identities={}, numerics={},
+            max_resident_bytes=1, max_temporary_bytes=1,
+            runtime_image="fixture/image@sha256:" + "a" * 64, serving_config_sha256="b" * 64,
+            probe_request={})
+
+
+def test_the_frozen_joint_names_the_container_render_not_the_rank_cut(tmp_path):
+    """The positive half: the quality identity is the WHOLE module's render.
+
+    The panel keeps both readings and they are different objects -- the joint
+    quality row names the container, the native member roster and the runtime
+    binding name this rank's cut.
+    """
+    from prismaquant import native_moe_panel as native
+    inputs, preflight, rows = _glm_cell(tmp_path)
+    expected = copy.deepcopy(inputs["quality_preparation"])
+    frozen = native.freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
+    member = frozen["members"][0]
+    joint = rows[member["unit"]]["joint_operator_identity"]
+    assert member["role"] == "w1"
+    assert joint["rendered_weight"] == member["quality_rendered_weight"]
+    assert joint["rendered_weight"] != member["rendered_weight"]
+    assert member["quality_rendered_weight"]["shape"] == [GLM_INTERMEDIATE, GLM_HIDDEN]
+    assert member["rendered_weight"]["shape"] == [GLM_INTERMEDIATE // GLM_TP, GLM_HIDDEN]
+    assert frozen["quality_preparation"] == expected
+    assert "historical_prepared_identity" in frozen["quality_preparation"]["wire_validation"]
+    # The rank-local reading stays rank-local everywhere it is published.
+    assert "quality_rendered_weight" not in native._native_member_identity(member)
+    assert frozen["runtime_binding"]["member_shapes"][member["unit"]] == [
+        GLM_INTERMEDIATE // GLM_TP, GLM_HIDDEN]
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+def test_the_rank_render_proof_moves_its_window_with_the_rank(tmp_path, rank):
+    """Each rank's proof names its own window of one unchanged container."""
+    from prismaquant import native_moe_panel as native
+    inputs, preflight, rows = _glm_cell(tmp_path)
+    inputs["shape"]["tensor_parallel_rank"] = rank
+    inputs["routing_capture_sha256"] = identity_sha256(inputs["routing_capture"])
+    preflight["operator"]["routing_capture_sha256"] = inputs["routing_capture_sha256"]
+    for member in inputs["members"]:
+        member["rank_render_proof"] = _glm_rank_render_proof(member, inputs["shape"])
+    frozen = native.freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
+    member = frozen["members"][0]
+    width = GLM_INTERMEDIATE // GLM_TP
+    assert member["rank_render_proof"]["rows"] == [rank * width, (rank + 1) * width]
+    assert member["rank_render_proof"]["cols"] == [0, GLM_HIDDEN]
+    assert member["rank_render_proof"]["rank"] == rank
+    assert member["quality_rendered_weight"]["shape"] == [GLM_INTERMEDIATE, GLM_HIDDEN]
 
 
 def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
@@ -759,7 +968,7 @@ def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
     the rank-local shapes the served route reads (1024x4096, not 2048x4096), and
     the loader's own gate re-deriving every rank's bytes.
     """
-    cell = _glm_cell()
+    cell = _glm_cell(tmp_path)
     phases = _one_token_phases(hidden=GLM_HIDDEN, top_k=8)
     item, context, relation, panel, _receipts = _routed_gate(
         cell, tmp_path, world_size=GLM_TP, samples=[FAST, SLOW], phases=phases,
@@ -785,7 +994,7 @@ def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
 
 def test_a_glm_owner_is_refused_a_single_rank_vector_for_a_two_rank_world(joined, tmp_path):
     """288 experts do not change the rule: one rank's bound is not the world's."""
-    cell = _glm_cell()
+    cell = _glm_cell(tmp_path)
     phases = _one_token_phases(hidden=GLM_HIDDEN, top_k=8)
     item, _context, _relation, _panel, receipts = _routed_gate(
         cell, tmp_path, world_size=GLM_TP, phases=phases, route_shape=GLM_ROUTE_SHAPE)
@@ -821,7 +1030,7 @@ def _glm_cli_fixture(tmp_path, *, budgets=GLM_CLI_BUDGETS):
     from prismaquant.measured_runtime_prices import CONTEXT_SCHEMA, SCHEMA
     from test_runtime_rank_resources import _sealed_per_rank_partition
 
-    inputs, preflight, rows = _glm_cell()
+    inputs, preflight, rows = _glm_cell(tmp_path)
     # The owner's canonical wire extent is what the DP's aggregated candidate
     # prices, so the fixture's wire records carry each member's real serialized
     # extent rather than a placeholder. Without that the two sides of one
@@ -929,7 +1138,7 @@ def test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members(tmp_p
 
     allocator.main()
     assignment = load_assignment(tmp_path / "layer.json")
-    members = {member["unit"] for member in _glm_cell()[0]["members"]}
+    members = {member["unit"] for member in _panel["members"]}
     assert GLM_MEMBERS == 864
     assert set(assignment) == members, (
         "the aggregated owner expands to its own 864 member Linears, not to a "
