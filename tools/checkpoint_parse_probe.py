@@ -158,7 +158,8 @@ def main(argv=None) -> int:
         started = time.time()
         try:
             data = load_measured_anchor_input(
-                inputs, verify_payloads=False, require_existing_renders=True, log_every=0)
+                inputs, verify_payloads=False, require_existing_renders=True,
+                log_every=0, progress_phase=None)
         except Exception as exc:
             _report("loader.refused", elapsed_s=round(time.time() - started, 2),
                     refused_by=type(exc).__name__, reason=str(exc)[:600])

@@ -74,8 +74,11 @@ def main(argv=None) -> int:
     inputs = joint.get("inputs")
     if not isinstance(inputs, dict):
         raise ValueError("joint handoff has no bound original campaign inputs")
+    # A reader, not the synthesis stage: it declares no PrismaBuild phase, so
+    # it reports under none rather than under a name nothing declared (#678).
     data = load_measured_anchor_input(inputs, verify_payloads=False,
-                                      require_existing_renders=True)
+                                      require_existing_renders=True,
+                                      progress_phase=None)
     manifest = selected_cached_units_manifest(
         assignment, metadata, handoff, data, schema=CACHE_SCHEMA,
         research_proposal=research)
