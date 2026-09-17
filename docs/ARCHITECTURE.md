@@ -16877,3 +16877,46 @@ Partial resume preserves every original window ID and only filters completed
 members. Each retained window publishes the existing per-unit checkpoints after
 all probes, then reports durable progress; source/window phase entry precedes
 its necessary reads. No application prewarmer or dispatcher is introduced.
+
+## Served activation quantiser: one binding, and the caches that depend on it
+
+A served W4A4 rung's activation term is quantised by
+`torch.ops._C.scaled_fp4_quant` inside a serve. PrismaQuant's priced path used to
+model that operator in Torch, and the retained 84-group differential
+(`B/joint-aura-resume/QUANTIZER-84G-ATTESTATION.md`) priced 24 of 172,032 probed
+elements one E2M1 code away from it -- the kernel takes `outputScale` through
+`rcp.approx.ftz.f32` where the model divides by the used scale. The two are not
+the same quantiser, so the tree now treats them as two arithmetics of one
+contract rather than one approximation of the other.
+
+**The binding.** `prismaquant.nvfp4_activation_contract.ServedQuantizerIdentity`
+names the arithmetic (`registered_scaled_fp4_quant` or `prismaquant_model`) and
+the build it ran in: `op`, `platform`, `torch`, `torch_git`, `vllm`, and the
+launcher-stamped `image_content_sha256` from
+`joint_projection_backend.executing_image`. It is resolved ONCE per
+process/config (`resolve_served_quantizer_identity`, one cache slot; the vLLM
+extension import happens only there) and bound before any score or cache work
+(`bind_served_quantizer_identity`). No hot path probes, imports or hashes.
+
+**The contract.** `StaticActivationContract` carries the binding as
+`served_quantizer`. `quantize_dequantize` dispatches on it and on nothing else:
+an unbound contract that declares `measured_as_served` REFUSES rather than
+falling back to the model, an unknown backend refuses, `require=True` refuses an
+explicit model identity, a process that has already priced rows refuses
+re-binding to a different arithmetic, and a served identity missing its
+operator, platform or build is refused rather than published. Stock `NVFP4`'s
+default-off screen path keeps the model, stamped as `prismaquant_model`.
+
+**The caches.** A `ProductionWeightCache` render score whose row carries a
+static G was scored through that dispatch, so its record stamps the identity
+(`served_quantizer`) beside the G and policy it already carried. Both reuse
+paths -- `_check_resumed_render_score_policies` on resume and
+`production_cache_priced_input_global_scales` for the assignment-KL hook --
+call `require_matching_served_quantizer`, which refuses a row with no recorded
+identity when the run is bound to the operator, a model-priced row, and any
+build axis that differs (`op`, `platform`, `torch`, `torch_git`, `vllm`,
+`image_content_sha256`). Rows with no static G never reach the check: a
+weight-only or dynamically scored cost does not depend on which A-side
+arithmetic the run bound, so its cache stays reusable for a mathematical reason
+rather than a convenient one. The key (`qname|FMT`) is unchanged, and no second
+cache, rehash or per-row resolution is introduced.
