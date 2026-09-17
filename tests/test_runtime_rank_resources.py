@@ -9,6 +9,7 @@ exercised in ``tests/test_native_receipt_table_routed.py``.
 """
 from __future__ import annotations
 
+import copy
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -220,7 +221,9 @@ def test_composition_adds_extensive_terms_per_rank_and_takes_per_rank_peaks():
     assert totals.resident_bytes == (1009, 1014)
     assert totals.peak_scratch_bytes == (99, 11), "peaks are per-rank maxima, never a sum of ranks"
     assert totals.activation_bytes == (20, 77)
-    assert totals.workspace_resident_bytes == (128, 128)
+    assert totals.workspace_resident_bytes == (64, 64), (
+        "both rows carry the same frozen workspace identity per rank, and one "
+        "process-global allocation is charged once per rank")
     assert totals.as_dict()["schema"] == RANK_TOTALS_SCHEMA
     assert totals.as_dict()["withheld_terms"], "a reader is told which terms no total prices"
 
@@ -278,13 +281,36 @@ def test_a_missing_per_rank_charge_is_refused_with_the_gates_own_text():
     assert "no qualified recomputable full-engine resource partition" in str(refusal.value)
 
 
-def test_a_withheld_workspace_term_refuses_a_device_total():
-    records = [rank_record(0, workspace_resident_bytes=64), rank_record(1, workspace_resident_bytes=0)]
-    totals = compose_rank_totals([RuntimeRankResources.from_dict(vector(ranks=records),
-                                                                 tensor_parallel=2)])
-    with pytest.raises(RuntimePriceError, match="workspace_resident_bytes"):
-        admit_rank_budgets(totals, budgets_per_rank=[10 ** 9, 10 ** 9], charge_per_rank=[0, 0],
-                           charge_refusal=None)
+def test_a_shared_workspace_identity_is_charged_once_per_rank():
+    """Two rows viewing one frozen allocation charge those bytes once, not twice.
+
+    The ``vllm.WorkspaceManager`` allocation is process-global persistent state:
+    a device total that charged it once per priced row would charge for
+    allocations nobody made, and one that dropped it would price a box without
+    the state the runtime holds.
+    """
+    resources = RuntimeRankResources.from_dict(vector(), tensor_parallel=2)
+    totals = compose_rank_totals([resources, resources])
+    assert totals.workspace_resident_bytes == (64, 64), "one identity, one allocation per rank"
+    admitted = admit_rank_budgets(totals, budgets_per_rank=[10 ** 9, 10 ** 9],
+                                  charge_per_rank=[1, 1], charge_refusal=None)
+    assert admitted == (2000 + 20 + 10 + 64 + 1, 2002 + 21 + 11 + 64 + 1)
+
+
+def test_distinct_workspace_identities_add_and_one_identity_at_two_sizes_is_refused():
+    first = RuntimeRankResources.from_dict(vector(), tensor_parallel=2)
+    second = RuntimeRankResources.from_dict(
+        vector(ranks=[rank_record(0, workspace_sha256="e" * 64, workspace_resident_bytes=32),
+                      rank_record(1, workspace_sha256="f" * 64, workspace_resident_bytes=16)]),
+        tensor_parallel=2)
+    totals = compose_rank_totals([first, second])
+    assert totals.workspace_resident_bytes == (96, 80), (
+        "distinct frozen identities are distinct allocations and add")
+    conflicted = RuntimeRankResources.from_dict(
+        vector(ranks=[rank_record(0, workspace_resident_bytes=8), rank_record(1)]),
+        tensor_parallel=2)
+    with pytest.raises(RuntimePriceError, match="one frozen allocation cannot be two"):
+        compose_rank_totals([first, conflicted])
 
 
 @pytest.mark.parametrize("budgets,charge,diagnostic", [
@@ -311,10 +337,17 @@ def _ranked_row(prefill_ms, residents, *, world=2):
 
 
 def _admitted_bounds(budgets, charge):
-    return RankDeviceBounds(len(budgets), "recomputed_full_engine_partition", tuple(budgets),
-                            tuple(charge),
-                            {"full_engine_report": {"path": "report.json", "sha256": "e" * 64},
-                             "per_rank_partition": True})
+    """Bounds the way the recomputation produces them, not the way a payload claims them."""
+    from prismaquant.runtime_provenance import RankFixedCharge
+
+    verdict = RankFixedCharge(
+        world_size=len(budgets), charge_per_rank=tuple(charge),
+        per_rank_terms=tuple({"fixed_resident": value} for value in charge),
+        evidence={"full_engine_report": {"path": "report.json", "sha256": "e" * 64},
+                  "per_rank_partition": True},
+        partition_sha256="d" * 64)
+    return RankDeviceBounds.recomputed(world_size=len(budgets), budgets_per_rank=tuple(budgets),
+                                       charge_per_rank=tuple(charge), recomputation=verdict)
 
 
 def test_a_rank_budget_forces_the_frontier_to_keep_the_option_that_fits():
@@ -362,11 +395,33 @@ def test_a_pending_rank_charge_prices_rank_dimensions_and_admits_nothing():
     assert all(allocation.device_bytes is None for allocation in frontier)
 
 
+def test_the_reported_dimensions_name_the_axes_the_search_actually_has():
+    """A rank coordinate is never labelled as the scalar device term.
+
+    The ranked byte axes start at the same index the scalar device axis does, so
+    a diagnostic that sliced the combined vector labelled rank 0's residency
+    ``resident_bytes`` and then appended every rank's names -- one axis too many,
+    and the wrong one. Without a decode or a scalar device constraint the vector
+    is memory/dloss/prefill plus three coordinates per rank, and that is what the
+    report must say.
+    """
+    from prismaquant.allocator_solver import Candidate, solve_runtime_frontier
+
+    diag = {}
+    solve_runtime_frontier({"unit": [Candidate("FAST", 4.0, 1000, 1.0)]},
+                           {("unit", "FAST"): _ranked_row(1.0, [10, 900])},
+                           max_memory_bytes=10 ** 6, max_prefill_ms=10.0, diagnostics=diag)
+    assert diag["dimensions"] == [
+        "memory_bytes", "predicted_dloss", "prefill_ms",
+        "rank0_resident_bytes", "rank0_peak_scratch_bytes", "rank0_activation_bytes",
+        "rank1_resident_bytes", "rank1_peak_scratch_bytes", "rank1_activation_bytes"]
+
+
 @pytest.mark.parametrize("world_size,provenance,charge,evidence,diagnostic", [
     (2, "pending_measurement", (1, 1), None, "carries no value and no evidence"),
-    (2, "recomputed_full_engine_partition", None, None, "carries one value per rank"),
-    (2, "recomputed_full_engine_partition", (0, 5), None, "not evidence"),
     (2, "recomputed_full_engine_partition", (1, 1), None, "recomputed full-engine"),
+    (2, "recomputed_full_engine_partition", None, None, "recomputed full-engine"),
+    (2, "recomputed_full_engine_partition", (0, 5), None, "recomputed full-engine"),
     (2, "declared_by_the_caller", (1, 1), None, "provenance"),
     (2, "pending_measurement", None, None, "positive"),
 ])
@@ -384,4 +439,92 @@ def test_pending_bounds_admit_nothing_and_an_admitted_one_reports_headroom():
     admitted = _admitted_bounds([1000, 2000], [100, 400])
     assert admitted.admits_ranks is True
     assert admitted.per_rank_headroom() == (900, 1600)
-    assert RankDeviceBounds.from_dict(admitted.as_dict()) == admitted
+    with pytest.raises(RuntimePriceError, match="recomputed full-engine"):
+        RankDeviceBounds.from_dict(admitted.as_dict())
+
+
+def _sealed_per_rank_partition(tmp_path, **overrides):
+    """A sealed partition of the synthetic full-engine capture, and its report."""
+    from prismaquant.full_engine_resource_report import consume_full_engine_resource_report
+    from test_full_engine_resource_report import written
+    from test_runtime_fixed_resource_admission import agreeing_report
+
+    report = agreeing_report()
+    reference = written(tmp_path, report, "report.json")
+    terms = consume_full_engine_resource_report(reference, root=tmp_path).recomputed_terms
+    partition = {
+        "schema": "prismaquant.full_engine_rank_partition.v1",
+        "world_size": 2, "capture_sha256": report["partition"]["capture_sha256"],
+        "rule": "sealed_per_rank_terms_summing_to_the_recomputed_whole_engine_terms",
+        "full_engine_report": reference,
+        "ranks": [{"rank": rank,
+                   "terms": {term: terms[term] for term in ("fixed_resident", "fixed_activation",
+                                                            "fixed_scratch", "fixed_kv")}}
+                  for rank in range(2)]}
+    # Each rank holds its own share and the two shares add up to the capture's
+    # own recomputed term, so the partition allocates rather than creates.
+    for term in ("fixed_resident", "fixed_activation", "fixed_scratch", "fixed_kv"):
+        whole = terms[term]
+        if type(whole) is not int:
+            continue
+        partition["ranks"][0]["terms"][term] = whole // 2
+        partition["ranks"][1]["terms"][term] = whole - whole // 2
+    partition.update(overrides)
+    return written(tmp_path, partition, "partition.json"), reference, partition
+
+
+def test_a_recomputed_charge_admits_and_a_supplied_one_is_refused():
+    """The bounds are built from a recomputation, and the recomputation decides.
+
+    ``RankDeviceBounds.recomputed`` compares every value with the verdict rather
+    than accepting a charge beside the claim, so a caller cannot hand in a
+    number -- or a budget vector -- the recomputation did not produce.
+    """
+    from prismaquant.runtime_provenance import RankFixedCharge
+
+    verdict = RankFixedCharge(
+        world_size=2, charge_per_rank=(700, 900),
+        per_rank_terms=({"fixed_resident": 700}, {"fixed_resident": 900}),
+        evidence={"full_engine_report": {"path": "report.json", "sha256": "e" * 64},
+                  "per_rank_partition": True}, partition_sha256="d" * 64)
+    bounds = RankDeviceBounds.recomputed(world_size=2, budgets_per_rank=[10 ** 6, 10 ** 6],
+                                         charge_per_rank=(700, 900), recomputation=verdict)
+    assert bounds.admits_ranks is True
+    assert bounds.per_rank_headroom() == (10 ** 6 - 700, 10 ** 6 - 900)
+    with pytest.raises(RuntimePriceError, match="not the recomputed one"):
+        RankDeviceBounds.recomputed(world_size=2, budgets_per_rank=[10 ** 6, 10 ** 6],
+                                    charge_per_rank=(700, 901), recomputation=verdict)
+    with pytest.raises(RuntimePriceError, match="where the recomputation covers 2"):
+        RankDeviceBounds.recomputed(world_size=1, budgets_per_rank=[10 ** 6],
+                                    charge_per_rank=(700,), recomputation=verdict)
+
+
+def test_the_synthetic_capture_cannot_yet_price_a_per_rank_fixed_charge(tmp_path):
+    """The mechanism exists; this capture's own fixed terms are not observed.
+
+    The synthetic full-engine report recomputes its scratch terms and no fixed
+    resident, activation or KV term, so the per-rank partition is refused BY
+    NAME rather than charged as zero. That is the honest state of the axis: a
+    producer must publish a capture that observes the fixed terms per rank
+    before any rank is admitted against them.
+    """
+    from prismaquant.runtime_provenance import recompute_rank_fixed_charge
+
+    reference, _report, _partition = _sealed_per_rank_partition(tmp_path)
+    with pytest.raises(RuntimePriceError, match="recomputes no fixed_"):
+        recompute_rank_fixed_charge(reference, root=tmp_path)
+
+
+def test_a_partition_that_moves_the_report_or_omits_a_rank_is_refused(tmp_path):
+    from prismaquant.runtime_provenance import recompute_rank_fixed_charge
+    from test_full_engine_resource_report import written
+
+    _reference, report_reference, partition = _sealed_per_rank_partition(tmp_path)
+    forged = copy.deepcopy(partition)
+    forged["full_engine_report"] = dict(report_reference, sha256="0" * 64)
+    with pytest.raises(RuntimePriceError):
+        recompute_rank_fixed_charge(written(tmp_path, forged, "forged.json"), root=tmp_path)
+    wrong_rule = copy.deepcopy(partition)
+    wrong_rule["rule"] = "sum_of_whatever_the_caller_says"
+    with pytest.raises(RuntimePriceError, match="partition rule"):
+        recompute_rank_fixed_charge(written(tmp_path, wrong_rule, "rule.json"), root=tmp_path)

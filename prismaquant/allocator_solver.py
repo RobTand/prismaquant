@@ -399,14 +399,17 @@ def solve_runtime_frontier(
     for rank in range(ranked_world):
         base = 4 + 3 * rank
         rank_coordinates.extend((base, base + 1, base + 2))
-    axes = (0, 1, 2) + ((3,) if max_decode_ms is not None else ())
-    if max_device_bytes is not None:
-        axes += (4, 5, 6)
-    axes += tuple(rank_coordinates)
+    scalar_axes = (0, 1, 2) + ((3,) if max_decode_ms is not None else ())
+    device_axes = (4, 5, 6) if max_device_bytes is not None else ()
+    axes = scalar_axes + device_axes + tuple(rank_coordinates)
     names_by_axis = ("memory_bytes", "predicted_dloss", "prefill_ms", "decode_ms",
                      "resident_bytes", "peak_scratch_bytes", "activation_bytes")
+    # The device axis is three scalars of its own; a rank's coordinates are
+    # spelled per rank. Slicing the combined vector would label rank 0's
+    # residency as the scalar one whenever the decode axis is absent, so the
+    # names are built from the two lists that produced the vector.
     diag["dimensions"] = (
-        [names_by_axis[axis] for axis in axes[:4 + (3 if max_device_bytes is not None else 0)]]
+        [names_by_axis[axis] for axis in scalar_axes + device_axes]
         + [f"rank{rank}_{term}" for rank in range(ranked_world)
            for term in ("resident_bytes", "peak_scratch_bytes", "activation_bytes")])
     initial = (0, 0.0, 0.0, 0.0, 0, 0, 0) if not ranked_world else (

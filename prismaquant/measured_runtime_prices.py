@@ -92,13 +92,22 @@ _RANK_DEVICE_EVIDENCE_FIELDS = ("full_engine_report", "per_rank_partition")
 RANK_ADDITIVE_TERMS = ("resident_bytes", "workspace_resident_bytes")
 #: Terms that are independent per-rank maxima across those same units.
 RANK_PEAK_TERMS = ("peak_scratch_bytes", "activation_bytes")
-#: Terms a ranked consumer may not publish a device total without. The
-#: runtime-global workspace has no versioned cross-row composition rule (the
-#: routed producer says as much about its own observation), and the fixed
-#: terms come from the full-engine gate, which today refuses every v2 table.
-RANK_WITHHELD_TERMS = ("workspace_resident_bytes", "fixed_resident_bytes",
-                       "fixed_activation_bytes", "fixed_scratch_bytes",
-                       "fixed_kv_bytes", OFF_STEP_FIELD)
+#: Terms a ranked consumer may not publish a device total without. The fixed
+#: whole-engine terms come from the full-engine gate, which today refuses every
+#: v2 table; the workspace is no longer one of them, because it has a versioned
+#: composition rule (``RANK_WORKSPACE_RULE``).
+RANK_WITHHELD_TERMS = ("fixed_resident_bytes", "fixed_activation_bytes",
+                       "fixed_scratch_bytes", "fixed_kv_bytes", OFF_STEP_FIELD)
+#: How one process-global workspace becomes a per-rank charge, versioned because
+#: it is a rule rather than a number. The ``vllm.WorkspaceManager`` allocation is
+#: persistent runtime state shared by every operator in the process, not
+#: per-apply scratch and not an artifact: two priced rows that carry the same
+#: frozen workspace identity are viewing the SAME allocation, so it is charged
+#: once per rank for that identity rather than once per row. Two records that
+#: disagree about the bytes behind one identity are refused -- one allocation
+#: cannot be two allocations -- and distinct identities add, because they are
+#: distinct allocations.
+RANK_WORKSPACE_RULE = "sum_of_distinct_frozen_workspace_identities_per_rank"
 
 
 class RuntimePriceError(DispatchTableError):
@@ -953,11 +962,11 @@ def build_runtime_resources(table: MeasuredRuntimeTable, candidates: Mapping[str
 #: carrying no scalar reduction and no device total.
 RANK_TOTALS_SCHEMA = "prismaquant.runtime_rank_totals.v1"
 RANK_TOTALS_WITHHELD_REASON = (
-    "a device total needs the fixed whole-engine charge and the runtime-global workspace, "
-    "and neither has a versioned value at this schema version: the fixed terms come from "
-    "runtime_provenance.admit_fixed_resources, which refuses every v2 table today, and the "
-    "routed producer publishes its workspace as shared persistent runtime state with no "
-    "cross-row composition rule")
+    "a device total needs the fixed whole-engine charge, and that charge has no admitted value "
+    "at this schema version: the fixed terms come from "
+    "runtime_provenance.admit_fixed_resources, which refuses every v2 table today. The runtime-"
+    "global workspace is no longer withheld -- it is charged per rank by "
+    f"RANK_WORKSPACE_RULE={RANK_WORKSPACE_RULE!r}")
 
 
 @dataclass(frozen=True)
@@ -1021,7 +1030,7 @@ def compose_rank_totals(resources) -> RankTotals:
     resident = [0] * world
     scratch = [0] * world
     activation = [0] * world
-    workspace = [0] * world
+    workspace = [dict() for _ in range(world)]
     for row in rows:
         if isinstance(row, RuntimeRankResources):
             wire_bytes += row.wire_bytes
@@ -1029,14 +1038,21 @@ def compose_rank_totals(resources) -> RankTotals:
                 resident[rank] += entry.resident_bytes
                 scratch[rank] = max(scratch[rank], entry.peak_scratch_bytes)
                 activation[rank] = max(activation[rank], entry.activation_bytes)
-                workspace[rank] += entry.workspace_resident_bytes
+                identity = entry.workspace_sha256
+                prior = workspace[rank].get(identity)
+                if prior is not None and prior != entry.workspace_resident_bytes:
+                    raise RuntimePriceError(
+                        f"two priced rows carry workspace identity {identity} at different "
+                        f"sizes on rank {rank} ({prior} and {entry.workspace_resident_bytes}); "
+                        "one frozen allocation cannot be two allocations")
+                workspace[rank][identity] = entry.workspace_resident_bytes
         else:
             wire_bytes += row.serialized_bytes
             resident[0] += row.resident_bytes
             scratch[0] = max(scratch[0], row.peak_scratch_bytes)
             activation[0] = max(activation[0], row.activation_bytes)
     return RankTotals(world, wire_bytes, tuple(resident), tuple(scratch),
-                      tuple(activation), tuple(workspace))
+                      tuple(activation), tuple(sum(ids.values()) for ids in workspace))
 
 
 def _rank_vector(value, world: int, where: str) -> tuple[int, ...]:
@@ -1075,15 +1091,12 @@ def admit_rank_budgets(totals: RankTotals, *, budgets_per_rank, charge_per_rank,
         charge = (0,) * world
     else:
         charge = _rank_vector(charge_per_rank, world, where)
-    withheld = [name for name, vector in
-                (("workspace_resident_bytes", totals.workspace_resident_bytes),)
-                if any(entry for entry in vector)]
-    if withheld:
-        refuses.append(
-            f"this assignment holds {' and '.join(withheld)} per rank, and that term has no "
-            "versioned cross-row composition rule; the device total would be missing it")
+    # The runtime-global workspace is charged per rank by RANK_WORKSPACE_RULE,
+    # which compose_rank_totals already applied: one frozen identity counts once
+    # per rank no matter how many rows view it.
     totals_per_rank = tuple(totals.resident_bytes[rank] + totals.activation_bytes[rank]
-                            + totals.peak_scratch_bytes[rank] + charge[rank]
+                            + totals.peak_scratch_bytes[rank]
+                            + totals.workspace_resident_bytes[rank] + charge[rank]
                             for rank in range(world))
     over = [(rank, totals_per_rank[rank], budgets[rank]) for rank in range(world)
             if totals_per_rank[rank] > budgets[rank]]
@@ -1115,6 +1128,12 @@ class RankDeviceBounds:
 
     A declared zero charge is refused outright: it is indistinguishable from
     forgetting a term, and ``None`` is how this contract spells "not measured".
+    An admitted charge is not declarable either: a number written into a
+    document is a claim, and ``recomputed`` is the one constructor that only
+    accepts a value a recomputation produced. ``from_dict`` therefore loads
+    pending bounds and refuses an admitted spelling by name rather than reading
+    its charge, so a forged report reference or a hand-edited charge cannot
+    reach a placement decision.
     """
 
     world_size: int
@@ -1141,24 +1160,70 @@ class RankDeviceBounds:
                     "is claiming a measurement this contract says does not exist")
             charge = None
         else:
-            if self.charge_per_rank is None:
-                raise RuntimePriceError("an admitted per-rank charge carries one value per rank")
-            charge = _rank_vector(self.charge_per_rank, self.world_size, "rank fixed charge")
-            for index, value in enumerate(charge):
-                if value < 1:
-                    raise RuntimePriceError(
-                        "a zero per-rank fixed charge is not evidence; supply the recomputed "
-                        f"partition or leave the axis pending (rank {index} declared {value})")
-            if (not isinstance(self.evidence, Mapping)
-                    or set(self.evidence) != set(_RANK_DEVICE_EVIDENCE_FIELDS)
-                    or self.evidence["per_rank_partition"] is not True):
-                raise RuntimePriceError(
-                    "an admitted per-rank charge references the recomputed full-engine "
-                    "partition it came from")
+            # Only a recomputed full-engine partition may carry a charge, and the
+            # recomputation is not something a document can assert about itself:
+            # `recomputed` is the constructor for that verdict. Reading a charge
+            # out of a payload would let a caller declare "recomputed" over an
+            # arbitrary number and have every downstream gate believe it.
+            raise RuntimePriceError(
+                f"a declared per-rank charge is not evidence: only a recomputed full-engine "
+                f"partition may carry one, and this value was constructed with provenance "
+                f"{self.provenance!r} and no recomputation behind it. Load a sealed per-rank "
+                f"partition with runtime_provenance.recompute_rank_fixed_charge and build the "
+                f"bounds with RankDeviceBounds.recomputed")
         object.__setattr__(self, "budgets_per_rank", budgets)
         object.__setattr__(self, "charge_per_rank", charge)
         if self.evidence is not None:
             object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
+
+    @classmethod
+    def recomputed(cls, *, world_size: int, budgets_per_rank, charge_per_rank,
+                   recomputation) -> "RankDeviceBounds":
+        """The one construction path an admitted per-rank charge may take.
+
+        ``recomputation`` is ``runtime_provenance.RankFixedCharge``: the verdict
+        of reading the sealed per-rank partition and cross-checking its sums
+        against the sealed full-engine report this consumer recomputes itself.
+        Every value below is compared with that verdict rather than accepted
+        from the caller, so a charge the recomputation did not produce -- or a
+        budget vector it did not cover -- cannot become bounds.
+        """
+        world = _integer(world_size, "world_size", 1)
+        expected_world = getattr(recomputation, "world_size", None)
+        if expected_world != world:
+            raise RuntimePriceError(
+                f"rank device bounds cover a world of {world} where the recomputation covers "
+                f"{expected_world!r}")
+        budgets = _rank_vector(budgets_per_rank, world, "rank device budgets")
+        for index, budget in enumerate(budgets):
+            if budget < 1:
+                raise RuntimePriceError(
+                    f"rank device budgets must be positive, and rank {index}'s is {budget}")
+        charge = _rank_vector(charge_per_rank, world, "rank fixed charge")
+        recomputed = tuple(getattr(recomputation, "charge_per_rank", ()))
+        if recomputed != charge:
+            raise RuntimePriceError(
+                f"the declared per-rank charge {charge} is not the recomputed one "
+                f"{recomputed}; a charge is read from the recomputation, never supplied beside it")
+        for index, value in enumerate(charge):
+            if value < 1:
+                raise RuntimePriceError(
+                    "a zero per-rank fixed charge is not evidence; the recomputation must show "
+                    f"the fixed terms this rank actually holds (rank {index} recomputed {value})")
+        evidence = getattr(recomputation, "evidence", None)
+        if (not isinstance(evidence, Mapping)
+                or set(evidence) != set(_RANK_DEVICE_EVIDENCE_FIELDS)
+                or evidence["per_rank_partition"] is not True):
+            raise RuntimePriceError(
+                "an admitted per-rank charge references the recomputed full-engine partition "
+                "it came from, and this recomputation carries no such reference")
+        instance = object.__new__(cls)
+        for name, value in (("world_size", world),
+                            ("provenance", "recomputed_full_engine_partition"),
+                            ("budgets_per_rank", budgets), ("charge_per_rank", charge),
+                            ("evidence", MappingProxyType(dict(evidence)))):
+            object.__setattr__(instance, name, value)
+        return instance
 
     @property
     def admits_ranks(self) -> bool:

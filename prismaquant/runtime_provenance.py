@@ -476,6 +476,117 @@ FIXED_TERM_FIELDS = {"fixed_resident": "resident_bytes",
 UNOBSERVED_FIXED_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes")
 
 
+#: A sealed per-rank partition of a full-engine capture: the one document an
+#: admitted per-rank fixed charge is read from. It asserts no charge of its own
+#: -- it carries the observed per-rank terms, and the consumer recomputes the
+#: charge from them *and* checks that they sum, term by term, to the whole-engine
+#: terms the sealed report recomputes independently. A partition may therefore
+#: move bytes BETWEEN ranks (which is what charging each rank its own share
+#: means) but never invent bytes the whole capture does not hold.
+RANK_PARTITION_SCHEMA = "prismaquant.full_engine_rank_partition.v1"
+RANK_PARTITION_RULE = "sealed_per_rank_terms_summing_to_the_recomputed_whole_engine_terms"
+_RANK_PARTITION_FIELDS = ("schema", "world_size", "capture_sha256", "rule",
+                          "full_engine_report", "ranks")
+_RANK_PARTITION_RANK_FIELDS = ("rank", "terms")
+
+
+@dataclass(frozen=True)
+class RankFixedCharge:
+    """The verdict of recomputing one per-rank fixed charge, and its evidence.
+
+    Only this object may become an admitted ``RankDeviceBounds``
+    (``measured_runtime_prices.RankDeviceBounds.recomputed``): the charge is a
+    result here rather than a field a caller supplies beside a claim.
+    """
+
+    world_size: int
+    charge_per_rank: tuple[int, ...]
+    per_rank_terms: tuple
+    evidence: Mapping
+    partition_sha256: str
+
+
+def recompute_rank_fixed_charge(reference, *, root, where="rank fixed charge") -> RankFixedCharge:
+    """Each rank's fixed whole-engine charge, recomputed from a sealed partition.
+
+    Two sealed documents are read, and neither is trusted about the other's
+    numbers: the per-rank partition (this rank's observed terms, digest-checked)
+    and the full-engine resource report it belongs to (whose whole-engine terms
+    this consumer recomputes itself). The charge is the sum of each rank's own
+    terms, admitted only when every term is recomputable on both sides and the
+    per-rank sums equal the whole-engine values -- so a partition can allocate
+    the fixed charge across ranks, which is the placement question, but cannot
+    create it. An axis the report cannot recompute refuses by name instead of
+    being charged as zero.
+    """
+    from .full_engine_resource_report import consume_full_engine_resource_report
+
+    reader = ArtifactReader(Path(root))
+    _, document = reader.json(reference, where)
+    fields = _object(document, _RANK_PARTITION_FIELDS, where)
+    if fields["schema"] != RANK_PARTITION_SCHEMA:
+        raise RuntimePriceError(
+            f"{where}: unknown per-rank partition schema {fields['schema']!r}")
+    if fields["rule"] != RANK_PARTITION_RULE:
+        raise RuntimePriceError(
+            f"{where}: per-rank partition rule {fields['rule']!r} is not "
+            f"{RANK_PARTITION_RULE!r}")
+    world = _integer(fields["world_size"], where + " world size", 1)
+    capture = _sha(fields["capture_sha256"], where + " capture digest")
+    _, report = reader.json(fields["full_engine_report"], where + " full-engine report")
+    partition = report.get("partition") if isinstance(report, Mapping) else None
+    _equal(partition.get("capture_sha256") if isinstance(partition, Mapping) else None, capture,
+           f"{where} capture identity")
+    verdict = consume_full_engine_resource_report(dict(fields["full_engine_report"]), root=Path(root))
+    # The whole-engine side is checked first, because it decides whether a
+    # per-rank partition of this capture is evidence at all: a term the report
+    # cannot recompute has no per-rank value to compare against, and charging it
+    # from the partition alone would be charging an unobserved axis.
+    for term in FIXED_TERM_FIELDS:
+        whole = verdict.recomputed_terms.get(term)
+        if type(whole) is not int:
+            refusals = "; ".join(verdict.refusals)
+            raise RuntimePriceError(
+                f"{where}: the sealed full-engine report recomputes no {term}, so a per-rank "
+                f"partition of it is not evidence"
+                + (f" ({refusals})" if refusals else ""))
+    rows = fields["ranks"]
+    if not isinstance(rows, list) or len(rows) != world:
+        size = len(rows) if isinstance(rows, list) else "no"
+        raise RuntimePriceError(
+            f"{where}: a per-rank partition carries one record per rank: world size {world} "
+            f"against {size} records")
+    per_rank, sums = [], {term: 0 for term in FIXED_TERM_FIELDS}
+    for expected_rank, row in enumerate(rows):
+        row_where = f"{where} rank {expected_rank}"
+        row = _object(row, _RANK_PARTITION_RANK_FIELDS, row_where)
+        _equal(row["rank"], expected_rank, row_where + " rank")
+        terms = _object(row["terms"], tuple(FIXED_TERM_FIELDS), row_where + " terms")
+        resolved = {}
+        for term in FIXED_TERM_FIELDS:
+            value = terms[term]
+            if type(value) is not int or value < 0:
+                raise RuntimePriceError(
+                    f"{row_where}: {term} is {value!r}; an absent or non-integer term is a "
+                    "missing charge rather than a zero one")
+            resolved[term] = value
+            sums[term] += value
+        per_rank.append(resolved)
+    for term in FIXED_TERM_FIELDS:
+        whole = verdict.recomputed_terms[term]
+        if sums[term] != whole:
+            raise RuntimePriceError(
+                f"{where}: the per-rank {term} sums to {sums[term]} where the sealed report "
+                f"recomputes {whole}; a partition allocates the charge across ranks and may "
+                "not create it")
+    return RankFixedCharge(world_size=world,
+                           charge_per_rank=tuple(sum(terms.values()) for terms in per_rank),
+                           per_rank_terms=tuple(per_rank),
+                           evidence={"full_engine_report": dict(fields["full_engine_report"]),
+                                     "per_rank_partition": True},
+                           partition_sha256=_sha(reference["sha256"], where + " partition digest"))
+
+
 def recompute_fixed_resources(reference, *, root):
     """The fixed charge a table may declare, recomputed by the gate that admits it.
 
