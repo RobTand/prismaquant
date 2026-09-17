@@ -117,11 +117,19 @@ def test_the_real_artifact_prices_the_same_histogram():
     assert len(priced["owners"]) == 5
 
 
-def test_agreeing_traces_are_accepted():
+def test_a_legacy_traces_histogram_is_recorded_and_cannot_qualify():
+    """A pre-#509 file still reads as what it always was: a histogram.
+
+    Since #509 that is a DIAGNOSIS, not an agreement: the file names no
+    modules, so it cannot support a per-module claim, and the counts are not
+    accepted in the claim's place.
+    """
     verdict = _compare(_traces())
-    assert verdict["status"] == gate.AGREE, verdict["detail"]
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert verdict["detail"].startswith("NOT VERIFIED")
     assert verdict["served"] == verdict["priced"] == EXPECTED
     assert verdict["granularity"] == gate.GRANULARITY
+    assert verdict["exact_module_qualified"] is False
 
 
 def test_a_served_contract_that_differs_from_the_price_is_refused_naming_both():
@@ -216,16 +224,23 @@ def test_the_packaged_contract_prices_m44e1_as_served():
     verdict = gate.compare_route_traces(
         _traces(), expected_ranks=2, config=_config(), platform="sm_121",
         executes_by_platform=executes, formats=formats)
-    assert verdict["status"] == gate.AGREE, verdict["detail"]
+    # The real traces are pre-#509, so the price they match is the histogram:
+    # which module rode which contract is not something they carry.
+    assert verdict["served"] == verdict["priced"]
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert verdict["exact_module_qualified"] is False
 
 
 # ---------------------------------------------------------------------------
 # The shipcard slot: opened by the lane, closed by the traces, replayed
 # ---------------------------------------------------------------------------
-def _artifact(tmp_path):
+def _artifact(tmp_path, config=None):
     model_dir = tmp_path / "exported"
     model_dir.mkdir()
-    (model_dir / "config.json").write_bytes((FIXTURE / "config.json").read_bytes())
+    if config is None:
+        (model_dir / "config.json").write_bytes((FIXTURE / "config.json").read_bytes())
+    else:
+        (model_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
     (model_dir / "model-00001-of-00001.safetensors").write_bytes(b"weights")
     path = open_lane_shipcard(model_dir, "tessera")
     return model_dir, path
@@ -266,20 +281,32 @@ def test_the_lane_declares_the_trace_gate_and_a_tessera_card_owes_it(tmp_path):
 
 def test_agreeing_traces_close_the_slot_and_verify_replays_them(tmp_path, contract):
     model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path)) == 0
+    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
     record = shipcard.load_shipcard(path)["slots"]["route.trace"]
     assert record["passed"] is True
     assert record["trace_verdict"]["served"] == EXPECTED
+    assert record["trace_verdict"]["exact_module_qualified"] is True
     assert _trace_problems(path, model_dir) == []
+
+
+def test_a_legacy_serve_cannot_close_the_slot_and_leaves_it_open(
+        tmp_path, contract, capsys):
+    """#509: the histogram is a diagnosis, and it does not fill the slot."""
+    model_dir, path = _artifact(tmp_path)
+    assert _fill(path, model_dir, _trace_files(tmp_path)) == EXIT_NOT_VERIFIED
+    err = capsys.readouterr().err
+    assert "NOT VERIFIED" in err and "histogram grade" in err
+    assert shipcard.load_shipcard(path)["slots"]["route.trace"] is None
+    assert _trace_problems(path, model_dir) == ["route.trace: UNFILLED"]
 
 
 def test_a_mutated_served_contract_refuses_at_fill_and_leaves_the_slot_open(
         tmp_path, contract, capsys):
     model_dir, path = _artifact(tmp_path)
-    traces = [(label, _served_moe_as_fp8(trace)) for label, trace in _traces()]
+    traces = _fixture_traces(SWAPPED_RANK_FILES)
     assert _fill(path, model_dir, _trace_files(tmp_path, traces)) == 1
     err = capsys.readouterr().err
-    assert "REFUSED" in err and NVFP4 in err and FP8 in err
+    assert "REFUSED" in err and "per module" in err
     assert shipcard.load_shipcard(path)["slots"]["route.trace"] is None
     assert _trace_problems(path, model_dir) == ["route.trace: UNFILLED"]
 
@@ -297,20 +324,21 @@ def test_a_missing_rank_trace_is_not_verified_and_leaves_the_slot_open(
 
 def test_verify_replays_the_carried_traces_not_the_passed_flag(tmp_path, contract):
     model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path)) == 0
+    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
     card = shipcard.load_shipcard(path)
     record = card["slots"]["route.trace"]
-    record["route_traces"][1]["trace"] = _served_moe_as_fp8(record["route_traces"][1]["trace"])
+    swapped = _fixture_traces(SWAPPED_RANK_FILES)[1][1]
+    record["route_traces"][1]["trace"] = swapped
     assert record["passed"] is True
     problems = [p for p in shipcard.verify(card, model_dir=model_dir)
                 if p.startswith("route.trace")]
-    assert any("ranks served different module histograms" in p for p in problems), problems
+    assert any("differ per module" in p for p in problems), problems
     assert any("differs from the replay" in p for p in problems), problems
 
 
 def test_verify_refuses_traces_compared_against_another_config(tmp_path, contract):
     model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path)) == 0
+    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
     card = shipcard.load_shipcard(path)
     config = json.loads(card["slots"]["route.trace"]["config_json"])
     config["quantization_config"]["config_groups"].popitem()
@@ -322,7 +350,7 @@ def test_verify_refuses_traces_compared_against_another_config(tmp_path, contrac
 
 def test_verify_refuses_when_no_contract_can_be_read(tmp_path, contract, monkeypatch):
     model_dir, path = _artifact(tmp_path)
-    assert _fill(path, model_dir, _trace_files(tmp_path)) == 0
+    assert _fill(path, model_dir, _trace_files(tmp_path, _fixture_traces())) == 0
 
     def _absent():
         raise gate.TesseraRouteTraceError("no packaged Tessera runtime contract")
@@ -338,3 +366,442 @@ def test_the_tessera_arm_prints_the_trace_step():
     assert "TESSERA_ROUTE_TRACE=" in arm
     assert "fill-route-trace" in arm
     assert "--expected-ranks" in arm
+
+
+# ---------------------------------------------------------------------------
+# Tessera #509: the exact per-module grade
+#
+# A #509 trace stamps ``identity_version: 1`` in its header, ``rank``,
+# ``world_size`` and ``platform`` beside it, and names the modules that
+# dispatched under each entry. Only then can a consumer compare the contract
+# each module rode; the histogram cannot see a swap between two modules.
+#
+# ``tests/fixtures/tessera_route_trace_509`` is what Tessera's OWN telemetry
+# wrote at producer commit 8104dc6 (see that directory's ``PROVENANCE.md`` and
+# ``generate.py``), so the schema under test is the producer's and not one
+# invented here. The synthetic documents below exist only for inputs a real
+# producer never writes -- a malformed one, a half-stamped one -- and they
+# carry the producer's header shape so a schema change cannot hide behind them.
+# ---------------------------------------------------------------------------
+FIXTURE_509 = ROOT / "tests" / "fixtures" / "tessera_route_trace_509"
+EXACT_RANK_FILES = ("routes-rank0.json", "routes-rank1.json")
+SWAPPED_RANK_FILES = ("routes-swapped-rank0.json", "routes-swapped-rank1.json")
+
+#: ``module prefix -> (policy family, structure, activation contract, N:K,
+#: symbol, decoder)``. Two layer-0 modules ride different families, so a swap
+#: between them leaves every count in the histogram identical.
+EXACT_LEDGER = {
+    "model.language_model.layers.0.mlp.down_proj":
+        ("TESSERA_BF16", "dense", BF16, "N4096:K6144", "torch.mm", "torch_window"),
+    "model.language_model.layers.0.mlp.gate_up_proj":
+        ("TESSERA_FP8", "dense", FP8, "N8192:K6144", "torch.mm", "torch_window"),
+    "model.language_model.layers.1.mlp.experts":
+        ("TESSERA_NVFP4", "routed_moe", NVFP4, "N2048:K512",
+         "vllm.fused_moe.modular_kernel:FLASHINFER_CUTLASS", "native_span2"),
+    "model.language_model.layers.1.mlp.shared_experts.down_proj":
+        ("TESSERA_NVFP4", "dense", NVFP4, "N4096:K1024", "torch.mm", "torch_window"),
+    "model.language_model.layers.1.mlp.shared_experts.gate_up_proj":
+        ("TESSERA_NVFP4", "dense", NVFP4, "N8192:K1024", "torch.mm", "torch_window"),
+}
+
+#: The payload ``formats[]`` grid each policy family's modules are priced on.
+_GRID_FOR_FAMILY = {"TESSERA_BF16": "BF16", "TESSERA_FP8": "E4M3",
+                    "TESSERA_NVFP4": "E2M1x2"}
+
+#: The one identity schema version a consumer may read, pinned here so a gate
+#: that changes it has to say so in this file rather than inherit the change.
+IDENTITY_VERSION = 1
+
+
+def _exact_config(ledger=None):
+    """The price for ``ledger``: one config group per (family, structure)."""
+    ledger = EXACT_LEDGER if ledger is None else ledger
+    grouped = {}
+    for name, (family, structure, *_rest) in ledger.items():
+        grouped.setdefault((family, structure), []).append(name)
+    groups = {
+        f"tessera_{family.lower()}_{structure}": {
+            "scheme": {"family": family, "structure": structure,
+                       "grid": _GRID_FOR_FAMILY[family]},
+            "targets": sorted(names),
+        }
+        for (family, structure), names in grouped.items()
+    }
+    return {"quantization_config": {"quant_method": "tessera",
+                                    "config_groups": groups}}
+
+
+def _entry(family, structure, contract, shape, names, **overrides):
+    entry = {
+        "policy": f"{family}:resident",
+        "shape": shape,
+        "symbol": "torch.mm",
+        "decoder": "torch_window",
+        "contract": contract,
+        "kind": gate.TRACE_KIND_FOR_STRUCTURE[structure],
+        "launches": 1,
+        "modules": len(names),
+        "module_names": list(names),
+        "unnamed_modules": 0,
+        "dispatches_without_prefix": 0,
+    }
+    entry.update(overrides)
+    return entry
+
+
+def _document(entries, *, rank=0, world_size=2, platform="sm_121",
+              identity_version=IDENTITY_VERSION, rank_source="torch.distributed",
+              rank_conflict=None):
+    """A synthetic document carrying the producer's own header shape."""
+    document = {"schema": "tessera.route_trace/1", "pid": 7, "entries": entries,
+                "rank_conflict": rank_conflict}
+    if rank is not None:
+        document["rank"] = rank
+    if world_size is not None:
+        document["world_size"] = world_size
+    if rank_source is not None:
+        document["rank_source"] = rank_source
+    if platform is not None:
+        document["platform"] = platform
+    if identity_version is not None:
+        document["identity_version"] = identity_version
+    return document
+
+
+def _exact_trace(ledger, *, rank, token_counts=(1, 4), **header):
+    """One rank's exact-grade trace for ``ledger``."""
+    entries = []
+    for m in token_counts:
+        grouped = {}
+        for name, (family, structure, contract, shape, symbol, decoder) in ledger.items():
+            key = (family, structure, contract, f"M{m}:{shape}", symbol, decoder)
+            grouped.setdefault(key, []).append(name)
+        for (family, structure, contract, shape, symbol, decoder), names in sorted(grouped.items()):
+            entries.append(_entry(family, structure, contract, shape, sorted(names),
+                                  symbol=symbol, decoder=decoder))
+    return _document(entries, rank=rank, **header)
+
+
+def _exact_traces(ledger=None, **header):
+    ledger = EXACT_LEDGER if ledger is None else ledger
+    return [(f"rank{rank}", _exact_trace(ledger, rank=rank, **header))
+            for rank in range(2)]
+
+
+def _contract_parts():
+    return _contract()
+
+
+def _compare_exact(traces, *, priced=None, expected_ranks=2, platform="sm_121"):
+    executes, formats = _contract_parts()
+    return gate.compare_route_traces(
+        traces, expected_ranks=expected_ranks, config=_exact_config(priced),
+        platform=platform, executes_by_platform=executes, formats=formats)
+
+
+def _fixture_traces(names=EXACT_RANK_FILES, *, priced=None):
+    """``[(rank label, payload), ...]`` read from the producer's written trace."""
+    traces = []
+    for index, name in enumerate(names):
+        payload = json.loads((FIXTURE_509 / name).read_text())
+        traces.append((f"rank{index}", payload))
+    return traces
+
+
+def _compare_fixture_509(names=EXACT_RANK_FILES, **kwargs):
+    """The gate on a real producer trace, priced by the m44e1 artifact."""
+    return _compare(_fixture_traces(names), **kwargs)
+
+
+def _served_owners():
+    """What the m44e1 artifact prices, keyed exactly as the gate keys it."""
+    executes, formats = _contract_parts()
+    return gate.priced_histogram(
+        _config(), platform="sm_121", executes_by_platform=executes,
+        formats=formats)["owners"]
+
+
+def test_the_fixture_is_a_written_trace_and_not_a_local_transcription():
+    """Tessera wrote these; the schema under test is the producer's (#509)."""
+    assert gate.IDENTITY_VERSION == IDENTITY_VERSION
+    for name in EXACT_RANK_FILES + SWAPPED_RANK_FILES:
+        payload = json.loads((FIXTURE_509 / name).read_text())
+        assert payload["schema"] == gate.ROUTE_TRACE_SCHEMA
+        assert payload["identity_version"] == IDENTITY_VERSION
+        assert payload["rank_source"] == "torch.distributed"
+        assert payload["rank_conflict"] is None
+        assert payload["platform"] == "sm_121"
+        assert payload["world_size"] == 2
+        assert payload["rank"] in (0, 1)
+        assert payload["entries"]
+        for entry in payload["entries"]:
+            assert entry["module_names"] == sorted(entry["module_names"])
+            assert entry["modules"] == (
+                len(entry["module_names"]) + entry["unnamed_modules"])
+            assert entry["unnamed_modules"] == 0
+
+
+def test_a_written_producer_trace_is_compared_module_by_module_and_says_so():
+    verdict = _compare_fixture_509()
+    assert verdict["status"] == gate.AGREE, verdict["detail"]
+    assert verdict["granularity"] == gate.EXACT_GRANULARITY
+    assert verdict["exact_module_qualified"] is True
+    assert verdict["served_modules"]["rank0"] == verdict["priced_owners"]
+    assert verdict["served_modules"]["rank1"] == verdict["priced_owners"]
+    assert verdict["priced_owners"] == _served_owners()
+    assert len(verdict["priced_owners"]) == len(EXACT_LEDGER)
+    header = verdict["header"]["rank0"]
+    assert (header["rank"], header["world_size"], header["platform"]) == (0, 2, "sm_121")
+    assert header["identity_version"] == IDENTITY_VERSION
+    assert header["rank_conflict"] is None
+
+
+def test_the_written_swapped_serve_is_refused_though_its_counts_are_identical():
+    """Two serves the producer wrote; only the module names can tell them apart."""
+    for (label, agreed), (other_label, swapped) in zip(
+            _fixture_traces(), _fixture_traces(SWAPPED_RANK_FILES)):
+        as_served = gate.served_histogram(
+            gate.parse_route_trace_document(agreed, where=label)[0], where=label)
+        when_swapped = gate.served_histogram(
+            gate.parse_route_trace_document(swapped, where=other_label)[0],
+            where=other_label)
+        assert when_swapped["histogram"] == as_served["histogram"], (
+            "the swapped fixture must not change a count, or it tests nothing")
+
+    verdict = _compare_fixture_509(SWAPPED_RANK_FILES)
+    assert verdict["status"] == gate.REFUSED
+    assert "differ per module" in verdict["detail"]
+    assert (
+        "model.language_model.layers.0.mlp.down_proj: "
+        f"priced TESSERA_BF16/dense/{BF16} but served "
+        f"TESSERA_NVFP4/dense/{NVFP4}" in verdict["detail"]
+    ), verdict["detail"]
+    assert (
+        "model.language_model.layers.1.mlp.shared_experts.down_proj: "
+        f"priced TESSERA_NVFP4/dense/{NVFP4} but served "
+        f"TESSERA_BF16/dense/{BF16}" in verdict["detail"]
+    ), verdict["detail"]
+
+
+def test_a_module_named_under_two_contracts_in_one_forward_is_refused():
+    """One module counted twice looks exactly like two modules to the counts."""
+    priced = {
+        "m.a": ("TESSERA_NVFP4", "dense", NVFP4, "N2048:K512", "torch.mm", "torch_window"),
+        "m.b": ("TESSERA_BF16", "dense", BF16, "N2048:K512", "torch.mm", "torch_window"),
+    }
+    entries = [
+        _entry("TESSERA_NVFP4", "dense", NVFP4, "M1:N2048:K512", ["m.a"]),
+        _entry("TESSERA_BF16", "dense", BF16, "M1:N2048:K512", ["m.a"]),
+    ]
+    documents = [_document(entries, rank=rank) for rank in range(2)]
+    traces = [(f"rank{rank}", document) for rank, document in enumerate(documents)]
+    parsed, _header = gate.parse_route_trace_document(documents[0], where="dup")
+    assert gate.served_histogram(parsed, where="dup")["histogram"] == {
+        f"TESSERA_NVFP4/dense/{NVFP4}": 1, f"TESSERA_BF16/dense/{BF16}": 1}
+
+    verdict = _compare_exact(traces, priced=priced)
+    assert verdict["status"] == gate.REFUSED
+    assert "'m.a' dispatched under" in verdict["detail"], verdict["detail"]
+
+
+def test_the_named_modules_must_add_up_to_the_reported_count():
+    priced = {
+        "m.a": ("TESSERA_NVFP4", "dense", NVFP4, "N2048:K512", "torch.mm", "torch_window"),
+        "m.b": ("TESSERA_NVFP4", "dense", NVFP4, "N2048:K512", "torch.mm", "torch_window"),
+    }
+    entries = [_entry("TESSERA_NVFP4", "dense", NVFP4, "M1:N2048:K512", ["m.a"],
+                      modules=2)]
+    traces = [(f"rank{rank}", _document(entries, rank=rank)) for rank in range(2)]
+    verdict = _compare_exact(traces, priced=priced)
+    assert verdict["status"] == gate.REFUSED
+    assert "modules=2" in verdict["detail"], verdict["detail"]
+
+
+def test_a_module_the_serve_could_not_name_is_refused_not_counted():
+    """A count is not a name: the unnamed count never passes on the histogram."""
+    priced = {
+        "m.a": ("TESSERA_NVFP4", "dense", NVFP4, "N2048:K512", "torch.mm", "torch_window"),
+        "m.b": ("TESSERA_NVFP4", "dense", NVFP4, "N4096:K1024", "torch.mm", "torch_window"),
+    }
+    entries = [_entry("TESSERA_NVFP4", "dense", NVFP4, "M1:N2048:K512", ["m.a"],
+                      modules=2, unnamed_modules=1, dispatches_without_prefix=1)]
+    documents = [_document(entries, rank=rank) for rank in range(2)]
+    traces = [(f"rank{rank}", document) for rank, document in enumerate(documents)]
+    executes, formats = _contract_parts()
+    served = gate.served_histogram(
+        gate.parse_route_trace_document(documents[0], where="unnamed")[0], where="unnamed")
+    assert served["histogram"] == gate.priced_histogram(
+        _exact_config(priced), platform="sm_121", executes_by_platform=executes,
+        formats=formats)["histogram"]
+
+    verdict = _compare_exact(traces, priced=priced)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "no stable prefix" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+@pytest.mark.parametrize("damage", [
+    pytest.param(lambda trace: {k: v for k, v in trace.items()
+                                if k != "identity_version"}, id="names-without-version"),
+    pytest.param(lambda trace: {**trace, "identity_version": IDENTITY_VERSION + 1},
+                 id="future-version"),
+    pytest.param(lambda trace: {**trace, "entries": [
+        {k: v for k, v in entry.items() if k != "unnamed_modules"}
+        for entry in trace["entries"]]}, id="partial-entry-identity"),
+    pytest.param(lambda trace: {**trace, "identity_version": None}, id="version-absent"),
+    pytest.param(lambda trace: {k: v for k, v in trace.items()
+                                if k != "rank_source"}, id="rank-source-absent"),
+    pytest.param(lambda trace: {**trace, "rank_source": "unavailable"},
+                 id="rank-source-unknown"),
+    pytest.param(lambda trace: {k: v for k, v in trace.items()
+                                if k != "rank_conflict"}, id="rank-conflict-absent"),
+    pytest.param(lambda trace: {**trace, "rank": None, "world_size": None,
+                                "rank_source": "unavailable",
+                                "platform": ""}, id="nothing-observed"),
+])
+def test_missing_identity_is_not_verified_and_never_read_as_v1(damage):
+    traces = [(label, damage(trace)) for label, trace in _exact_traces()]
+    verdict = _compare_exact(traces)
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert verdict["detail"].startswith("NOT VERIFIED")
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_identity_version_without_names_is_refused():
+    traces = []
+    for rank, trace in _exact_traces():
+        entries = [{k: v for k, v in entry.items()
+                    if k not in ("module_names", "unnamed_modules",
+                                 "dispatches_without_prefix")}
+                   for entry in trace["entries"]]
+        for entry in entries:
+            entry["modules"] = 1
+        traces.append((rank, {**trace, "entries": entries}))
+    verdict = _compare_exact(traces)
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert "names no modules" in verdict["detail"] or "name their modules" in verdict["detail"]
+
+
+def test_a_legacy_trace_stays_histogram_grade_and_is_never_exact_qualified():
+    verdict = _compare(_traces())
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert verdict["granularity"] == gate.GRANULARITY
+    assert verdict["exact_module_qualified"] is False
+    assert verdict["served_modules"] is None
+    assert verdict["header"]["rank0"]["present"] == []
+    assert "histogram grade" in verdict["detail"]
+
+
+def _without_module_identity(trace):
+    """The same rank's file without the #509 entry identity, header intact."""
+    stripped = {key: value for key, value in trace.items() if key != "identity_version"}
+    stripped["entries"] = [
+        {key: value for key, value in entry.items()
+         if key not in ("module_names", "unnamed_modules", "dispatches_without_prefix")}
+        for entry in trace["entries"]]
+    return stripped
+
+
+def test_ranks_that_disagree_on_the_grade_are_not_verified():
+    """One rank stamps its rank identity and names no module; the other names them."""
+    exact = _exact_traces()
+    traces = [exact[0], (exact[1][0], _without_module_identity(exact[1][1]))]
+    verdict = _compare_exact(traces)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "same identity" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_a_legacy_file_among_exact_ones_cannot_complete_the_identity():
+    exact = _exact_traces()
+    legacy = json.loads((FIXTURE / RANK_FILES[1]).read_text())
+    verdict = _compare_exact([exact[0], (exact[1][0], legacy)])
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "same identity" in verdict["detail"], verdict["detail"]
+
+
+@pytest.mark.parametrize("damage", [
+    pytest.param(lambda traces: [(label, {**trace, "world_size": 4})
+                                 for label, trace in traces], id="world-size"),
+    pytest.param(lambda traces: [(label, {**trace, "rank": 0})
+                                 for label, trace in traces], id="duplicate-rank"),
+    pytest.param(lambda traces: [(traces[0][0], {**traces[0][1], "platform": "gfx1201"}),
+                                 traces[1]], id="platform"),
+    pytest.param(lambda traces: [(traces[0][0], {**traces[0][1],
+                                                 "rank_conflict": {"rank": 1, "world_size": 2,
+                                                                   "source": "torch.distributed"}}),
+                                 traces[1]], id="rank-conflict"),
+])
+def test_a_header_that_does_not_match_the_serve_is_refused(damage):
+    verdict = _compare_exact(damage(_exact_traces()))
+    assert verdict["status"] == gate.REFUSED, verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_a_rank_that_never_joined_a_group_cannot_qualify():
+    """A null rank/world with ``rank_source: "unavailable"`` is unknown, not rank 0."""
+    traces = _exact_traces()
+    blank = {k: v for k, v in traces[1][1].items() if k not in ("rank", "world_size")}
+    verdict = _compare_exact([traces[0], (traces[1][0], blank)])
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_a_label_bound_to_another_rank_than_the_file_stamps_is_refused():
+    traces = _exact_traces()
+    swapped = [("rank1", traces[0][1]), ("rank0", traces[1][1])]
+    verdict = _compare_exact(swapped)
+    assert verdict["status"] == gate.REFUSED
+    assert "bound to rank" in verdict["detail"], verdict["detail"]
+
+
+def test_a_recorded_rank_conflict_is_refused_not_qualified():
+    """The producer records a later disagreeing rank; that identity is not one."""
+    conflict = {"rank": 1, "world_size": 2, "source": "torch.distributed"}
+    traces = []
+    for label, payload in _fixture_traces():
+        traces.append((label, {**payload, "rank_conflict": conflict}))
+    verdict = _compare(traces)
+    assert verdict["status"] == gate.REFUSED, verdict["detail"]
+    assert "disagreeing rank identity" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_a_missing_rank_conflict_field_is_not_verified():
+    """Absent is not null: the file has to say that no later rank disagreed."""
+    traces = [(label, {k: v for k, v in payload.items() if k != "rank_conflict"})
+              for label, payload in _fixture_traces()]
+    verdict = _compare(traces)
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert "no rank_conflict field" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_the_producers_unknown_platform_is_not_verified():
+    """``""`` is "never latched a token": unknown is not the platform priced for."""
+    traces = [(label, {**payload, "platform": ""}) for label, payload in _fixture_traces()]
+    verdict = _compare(traces)
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert "never latched a platform" in verdict["detail"], verdict["detail"]
+    assert verdict["exact_module_qualified"] is False
+
+
+def test_a_missing_rank_source_is_not_verified():
+    traces = [(label, {k: v for k, v in payload.items() if k != "rank_source"})
+              for label, payload in _fixture_traces()]
+    verdict = _compare(traces)
+    assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
+    assert "rank_source" in verdict["detail"], verdict["detail"]
+
+
+def test_the_real_fixtures_qualify_only_when_every_module_map_matches():
+    """``exact_module_qualified`` is set after the comparison, not before it."""
+    verdict = _compare_fixture_509()
+    assert verdict["status"] == gate.AGREE
+    assert verdict["exact_module_qualified"] is True
+
+    traces = _fixture_traces(SWAPPED_RANK_FILES)
+    refused = _compare(traces)
+    assert refused["status"] == gate.REFUSED
+    assert refused["exact_module_qualified"] is False
+    assert refused["granularity"] == gate.EXACT_GRANULARITY
