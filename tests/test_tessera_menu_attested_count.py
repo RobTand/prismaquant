@@ -149,9 +149,15 @@ def test_the_fatal_refusal_carries_the_cause_too():
                  "serving_scope_supplied": False}
     cause = menu.tessera_refusal_cause(diagnosis)
     assert cause.startswith("; ")
-    assert "no Tessera serving scope was supplied" in cause
+    assert "no Tessera serving scope supplied" in cause
     assert "--tessera-platform" in cause
     assert "the pinned contract attests TESSERA_E4M3_K1_R1024" in cause
+    # It names the scope gap without promising a scope would close it: on the
+    # only real table a scope moves 0 of 16 attested rungs to 1 of 16, so
+    # "unattested only because no scope was supplied" would be false for
+    # fifteen of them.
+    assert "which may or may not attest them" in cause
+    assert "only because" not in cause
     # No Tessera rungs refused -> nothing appended, so a non-Tessera menu
     # refusal reads exactly as it did.
     assert menu.tessera_refusal_cause(None) == ""
