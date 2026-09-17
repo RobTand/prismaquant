@@ -753,6 +753,21 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
     holes: dict[str, list[str]] = collections.defaultdict(list)
     non_act: set[str] = set()
     not_executed: set[str] = set()
+    # The same two answers, kept PER (unit, format) because that is the
+    # granularity the coverage requirement is stated at: a format can be built
+    # (and be a passthrough, or a grid this lane never runs) at one unit's
+    # shape and UNBUILDABLE at another's, and the union of the names would
+    # exempt the second unit's cell from the gate while the stage itself calls
+    # it a hole. ``non_act``/``not_executed`` stay as the readable summary of
+    # what was seen; this map is what an exemption is read from.
+    exempt_cells: dict[str, dict[str, str]] = {}
+
+    def _record_exempt(name: str, na, ne_) -> None:
+        for fmt in na:
+            exempt_cells.setdefault(name, {})[fmt] = "activation_identity"
+        for fmt in ne_:
+            exempt_cells.setdefault(name, {})[fmt] = "not_executed_by_lane"
+
     t0 = time.time()
     done = 0
     var_source = collections.Counter()
@@ -838,6 +853,7 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                     device=device, executes_all=executes_all, patterns=patterns)
                 non_act |= na
                 not_executed |= ne_
+                _record_exempt(name, na, ne_)
                 for fmt, message in unbuildable:
                     holes[fmt].append(f"{name}: unbuildable ({message})")
                 for fmt, plugin in required:
@@ -887,6 +903,7 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                     device=device, executes_all=executes_all, patterns=patterns)
                 non_act |= na
                 not_executed |= ne_
+                _record_exempt(name, na, ne_)
                 for fmt, message in unbuildable:
                     holes[fmt].append(f"{name}: unbuildable ({message})")
                 for fmt, plugin in required:
@@ -937,6 +954,7 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
                 device=device, executes_all=executes_all, patterns=patterns)
             non_act |= na
             not_executed |= ne_
+            _record_exempt(name, na, ne_)
             for fmt, message in unbuildable:
                 holes[fmt].append(f"{name}: unbuildable ({message})")
             for fmt, plugin in required:
@@ -967,11 +985,17 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
              # The two ways a requested cell is free of an A-side BY CONTRACT,
              # reported apart because they are different answers -- and because
              # the campaign-coverage gate below has to subtract them from the
-             # unfulfilled set rather than call BF16 a hole. A format the
-             # registry cannot build for a shape is in neither set: it stays a
-             # hole.
+             # unfulfilled set rather than call BF16 a hole. Descriptive only:
+             # these are the names seen free SOMEWHERE, and a name is not an
+             # exemption. The gate reads ``coverage_exempt_cells``, which is per
+             # (unit, format), so a format that is a passthrough at one unit's
+             # shape and unbuildable at another's still keeps the second unit's
+             # cell a hole. A format the registry cannot build for a shape
+             # appears in neither.
              "activation_identity_formats": sorted(non_act),
-             "not_executed_formats": sorted(not_executed)})
+             "not_executed_formats": sorted(not_executed),
+             "coverage_exempt_cells": {name: dict(sorted(by_format.items()))
+                                       for name, by_format in sorted(exempt_cells.items())}})
 
 
 def merge_act_dloss(costs: dict, table: dict) -> dict:
@@ -1065,10 +1089,13 @@ def main() -> int:
         "--require-complete-coverage", action="store_true",
         help="refuse unless EVERY requested (unit, format) cell this lane's "
              "activation contract OWES a price has one: a joint AURA row, or an "
-             "A-side computed and merged here. A format that leaves activations "
-             "alone (BF16 and the other passthroughs) or whose activation grid "
-             "this lane never executes is free by contract and counts as "
-             "covered. Off by default: partial coverage is a hole set a "
+             "A-side computed and merged here. A cell whose format leaves "
+             "activations alone AT THAT UNIT'S SHAPE (BF16 and the other "
+             "passthroughs), or whose grid this lane never executes, is free by "
+             "contract and counts as covered -- per cell, not per format name, "
+             "because the same name can be a passthrough at one shape and "
+             "unbuildable at another. Off by default: partial coverage is a "
+             "hole set a "
              "research arm may deliberately carry, and the campaign "
              "requirement is the campaign's to declare, not this stage's "
              "default.")
@@ -1183,16 +1210,18 @@ def main() -> int:
         # requirement this deliberately does not decide here).
         log(f"coverage: {len(unfulfilled)} of {len(requested)} requested cells "
             f"have no A-side in this output; they keep a weight-only cost")
-    # The two ways a requested cell is free BY CONTRACT, subtracted here so a
-    # passthrough is not refused as a hole. Both are format-level facts -- does
-    # the format quantize activations at all, and does THIS lane execute that
-    # grid -- which is why the stage reports them as sets rather than per cell.
-    # A format the registry cannot build for a unit's shape is in neither set:
-    # that stays a hole.
-    free_by_contract = set(meta.get("activation_identity_formats") or ()) | set(
-        meta.get("not_executed_formats") or ())
-    uncovered = {cell for cell in unfulfilled
-                 if cell[1] not in free_by_contract}
+    # A requested cell is free BY CONTRACT when the format quantizes no
+    # activations at THIS unit's shape, or its grid is one THIS lane never
+    # executes. Both answers are recorded per (unit, format) by the stage that
+    # built the plugin, and the subtraction is per cell for that reason: a
+    # format can be a passthrough at one unit's shape and UNBUILDABLE at
+    # another's. A name-level union would exempt the unbuildable cell from the
+    # gate while the stage itself reported it as a hole -- the gate would pass
+    # on exactly the artifact it exists to refuse.
+    exempt_cells = {(name, fmt)
+                    for name, by_format in (meta.get("coverage_exempt_cells") or {}).items()
+                    for fmt in by_format}
+    uncovered = {cell for cell in unfulfilled if cell not in exempt_cells}
     if args.require_complete_coverage and uncovered:
         # The campaign requirement (#655): every cell the campaign asked for
         # carries its own activation term. A positive WEIGHT-ONLY surrogate is
@@ -1205,9 +1234,9 @@ def main() -> int:
             f"{len(requested)} requested (unit, format) cells that this lane "
             f"OWES an activation-side price have none in --cost-out, so their "
             f"cost would be weight-only (examples: {examples}). Free by "
-            f"contract and therefore excluded: "
-            f"{sorted(free_by_contract) or 'none'}. Price them, joint-price "
-            f"them, or drop the requirement for this arm.")
+            f"contract AT ITS OWN SHAPE and therefore excluded: "
+            f"{sorted(f'{n}@{f}' for n, f in exempt_cells) or 'none'}. Price "
+            f"them, joint-price them, or drop the requirement for this arm.")
     # The silent no-op this refusal exists for: nothing was priced AND at least
     # one requested cell is unaccounted for. An all-joint artifact is the other
     # case -- every requested cell covered, nothing computed, nothing to add.

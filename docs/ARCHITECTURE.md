@@ -154,16 +154,19 @@ accepts, not a caught hole. So the honest statement of the contract is:
     default: `--require-complete-coverage` refuses unless every requested
     `(unit, format)` cell this lane OWES a price has one. A cell is covered
     when it is joint-priced or priced and merged here; it is free BY CONTRACT,
-    and therefore not a hole, when the format quantizes no activations (BF16
-    and the other passthroughs) or its activation grid is one this lane never
-    executes. The two sets are reported apart
-    (`activation_identity_formats`, `not_executed_formats`) because "leaves
-    activations alone" and "this runtime never runs that grid" are different
-    answers. A format the registry cannot build for a unit's shape is in
-    neither set and stays a hole. Off by default, so a research arm may still
-    carry holes deliberately and pre-AQUA artifacts are untouched; the flag is
-    one explicit opt-in, with no production default promoted (issue #655 is the
-    campaign-level requirement this states).
+    and therefore not a hole, when the format quantizes no activations at THAT
+    unit's shape (BF16 and the other passthroughs) or its activation grid is one
+    this lane never executes. The exemption is recorded and read PER
+    `(unit, format)` (`coverage_exempt_cells`, with the reason), because a
+    format name can be a passthrough at one shape and UNBUILDABLE at another's:
+    a name-level union of the exemptions would let the gate pass on an artifact
+    the stage itself reported a hole in. A format the registry cannot build for
+    a unit's shape is in neither set and stays a hole, and the two readable
+    summaries (`activation_identity_formats`, `not_executed_formats`) are
+    descriptive only. Off by default, so a research arm may still carry holes
+    deliberately and pre-AQUA artifacts are untouched; the flag is one explicit
+    opt-in, with no production default promoted (issue #655 is the campaign-level
+    requirement this states).
 
 Which variance the A-side uses is likewise one authority now,
 `format_cost_protocol.resolve_act_quant_variance`, so a caller that cannot hold

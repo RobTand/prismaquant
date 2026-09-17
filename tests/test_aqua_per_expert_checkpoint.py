@@ -719,4 +719,87 @@ def test_a_bf16_passthrough_is_free_by_contract_not_a_missing_a_side(
     assert prov["required_cells_without_act_price"] == 0
     assert prov["cells_without_act_price"] == 1        # BF16, free by contract
     assert "BF16" in prov["activation_identity_formats"]
+    # Explicit PER CELL: the exemption names the unit and the reason, so the
+    # gate and a reader can both tell which cell it covers.
+    assert prov["coverage_exempt_cells"][legacy_name]["BF16"] == \
+        "activation_identity"
+    assert joint_name not in prov["coverage_exempt_cells"]
     assert prov["joint_cells_already_priced"] == [[joint_name, "NVFP4"]]
+
+
+def test_a_name_seen_free_at_one_shape_does_not_exempt_another_shape(
+        tmp_path, monkeypatch):
+    """QA on 8eee2b3430: the exemption is per (unit, format), not per name.
+
+    ``free_by_contract`` was the UNION of format names seen free somewhere. If a
+    format builds as a passthrough at unit A's shape and cannot be built at unit
+    B's, the union exempted B's cell from the coverage gate while the stage
+    itself recorded it as a hole -- the gate passed on exactly the artifact it
+    exists to refuse. Here BF16 is a passthrough at A's shape and the same name
+    cannot be built at B's (the seam makes the second shape untileable, which is
+    what a shape-dependent format does for real), so the requirement refuses B
+    and says why, while A stays exempt.
+    """
+    import dataclasses
+    import json
+    import pickle
+    import sys
+
+    import torch
+    from safetensors.torch import save_file
+
+    from prismaquant import aqua_activation_cost as aqc
+    from prismaquant.format_cost_registry import RegistryFormatPlugin
+
+    even = "model.layers.0.mlp.down_proj"
+    odd = "model.layers.0.mlp.o_proj"
+    rng = np.random.default_rng(0)
+    tensors, weight_map = {}, {}
+    for name, cols in ((even, _IN), (odd, _IN + 1)):
+        tensors[f"{name}.weight"] = torch.tensor(
+            rng.standard_normal((_ROWS, cols)), dtype=torch.bfloat16)
+        weight_map[f"{name}.weight"] = "shard-00001.safetensors"
+    save_file(tensors, str(tmp_path / "shard-00001.safetensors"))
+    (tmp_path / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": weight_map}))
+
+    units = [_dense_unit(even),
+             dataclasses.replace(_dense_unit(odd), in_features=_IN + 1,
+                                 n_params=_ROWS * (_IN + 1),
+                                 act_sq_sum=np.full(_IN + 1, 1.0),
+                                 act_absmax=np.full(_IN + 1, 4.0))]
+    card_path = tmp_path / "card.npz"
+    _card(units).to_npz(str(card_path))
+    cost_in = tmp_path / "cost-in.pkl"
+    cost_in.write_bytes(pickle.dumps({"costs": {
+        even: {"BF16": {"predicted_dloss": 0.0}},
+        odd: {"BF16": {"predicted_dloss": 0.0}}}, "provenance": {}}))
+    cost_out = tmp_path / "cost-out.pkl"
+    argv = ["aqua-activation-cost", "--card", str(card_path),
+            "--model-path", str(tmp_path), "--cost-in", str(cost_in),
+            "--cost-out", str(cost_out), "--device", "cpu",
+            "--lane-executes-all-activation-grids",
+            "--require-complete-coverage"]
+
+    # The stage imports this class inside `required_activation_formats`, so the
+    # attribute on the class object is the seam both reach.
+    real_build = RegistryFormatPlugin.build
+
+    def build(name, *, shape, **kwargs):
+        if int(shape[-1]) % 2:
+            raise ValueError(f"shape {tuple(shape)} is not tileable")
+        return real_build(name, shape=shape, **kwargs)
+
+    monkeypatch.setattr(RegistryFormatPlugin, "build", build)
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="require-complete-coverage") as refused:
+        aqc.main()
+    message = str(refused.value)
+    # The refusal names the cells it refuses in the examples, and the cells it
+    # exempts in its own list -- so a bare substring test on the whole message
+    # would pass either way. Read the examples.
+    examples = message.split("examples: ", 1)[1].split(")", 1)[0]
+    assert f"{odd}@BF16" in examples, "the unbuildable cell is not exempt"
+    assert f"{even}@BF16" not in examples, "the passthrough cell is exempt"
+    assert f"{even}@BF16" in message, "and it is named as the exemption it is"
+    assert not cost_out.exists()
