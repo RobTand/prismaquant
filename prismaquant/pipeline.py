@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -237,6 +238,17 @@ def check_frontier_materialization(model_path: str | Path, mode: str) -> tuple[i
 
 STAGE_SETTINGS_SCHEMA = "prismaquant.stage_settings/1"
 STAGE_MANIFEST_SCHEMA = "prismaquant.stage_settings_manifest/2"
+
+#: Reserved key inside a stage's entry in `<artifact>.settings.json`. Its
+#: presence says the stage's artifact identity is UNKNOWN: the artifact predates
+#: the stage's settings guard (or a manifest never recorded the stage), so no
+#: projection was ever verified against its bytes. The value is the admission
+#: record, never a settings projection -- today's settings appear only under
+#: ``observed_current_request`` and are explicitly not what produced the
+#: artifact. The key is deliberately not shaped like a manifest key (no real
+#: key begins with ``_``), so a reader that does not know about it compares it,
+#: finds a diff, and refuses rather than stamping today's settings over it.
+UNVERIFIED_SETTINGS_KEY = "_unverified_settings"
 
 # Render-affecting environment, shared by every artifact that stores rendered
 # weights. Mirrors RENDER_ENV_SETTINGS in run-pipeline.sh.
@@ -542,6 +554,65 @@ def _load_stage_manifest(path: Path) -> dict[str, Any]:
     }
 
 
+def _unverified_reuse_record(entry: object) -> Mapping[str, Any] | None:
+    """Return the admission record when ``entry`` is an unverified stage record."""
+    if (
+        isinstance(entry, Mapping)
+        and set(entry) == {UNVERIFIED_SETTINGS_KEY}
+        and isinstance(entry[UNVERIFIED_SETTINGS_KEY], Mapping)
+    ):
+        return entry[UNVERIFIED_SETTINGS_KEY]
+    return None
+
+
+def _record_unverified_reuse(
+    artifact_path: Path,
+    manifest_path: Path,
+    stage: str,
+    requested: Mapping[str, str],
+    reason: str,
+) -> str | None:
+    """Record that ``stage`` reuses an artifact whose identity stays unknown.
+
+    The requested projection is filed under ``observed_current_request`` -- it
+    is this run's request, not the artifact's settings and not production
+    proof. The stage's settings record is never written here, so an artifact
+    that was reused unverified can never become indistinguishable from one
+    whose projection was actually compared. A verified record already stored
+    for the stage is left untouched. Returns an error string when the
+    admission could not be persisted.
+    """
+    try:
+        if manifest_path.exists():
+            payload = _load_stage_manifest(manifest_path)
+        else:
+            payload = {"schema": STAGE_MANIFEST_SCHEMA, "stages": {}}
+        stages = dict(payload.get("stages") or {})
+        existing = stages.get(stage)
+        if existing is not None:
+            # Either the admission is already on file (keep its first
+            # observation) or a verified projection owns the stage. Never
+            # overwrite either with a fresh request.
+            return None
+        stages[stage] = {
+            UNVERIFIED_SETTINGS_KEY: {
+                "settings_identity": "unknown",
+                "attests_this_artifact": False,
+                "artifact": str(artifact_path),
+                "reason": reason,
+                "observed_current_request": dict(requested),
+                "first_observed_unix": int(time.time()),
+            }
+        }
+        payload["stages"] = stages
+        payload["schema"] = STAGE_MANIFEST_SCHEMA
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
+    except OSError as exc:
+        return f"{manifest_path}: {exc}"
+    return None
+
+
 def check_stage_settings(
     artifact: str | Path,
     stage: str,
@@ -554,9 +625,13 @@ def check_stage_settings(
     * artifact absent -> record this stage's projection, exit 0.
     * artifact present with a matching recorded projection -> exit 0.
     * artifact present, projection differs -> exit 2, naming every diff.
-    * artifact present, this stage never recorded -> WARN and record
-      (trust-on-first-use: artifacts predating a stage's guard are not
-      invalidated, which is the pre-R5 contract for missing manifests).
+    * artifact present, this stage has no recorded projection -> WARN and reuse
+      with the artifact's identity left explicitly UNKNOWN. Legacy artifacts
+      stay reusable (Rob, 2026-09-16: "I don't mind if old data gets reused"),
+      but the manifest records the admission -- never today's settings as if
+      they had produced the artifact -- and every later check reaches the same
+      conclusion instead of upgrading the unknown to verified. Retiring the
+      artifact is the operator's call: delete it (and its .settings.json).
       Tessera plans are the exception: an old plan cannot be bound to a new
       allocation by recording today's hash after translation already happened.
     """
@@ -579,37 +654,60 @@ def check_stage_settings(
     messages: list[str] = []
 
     if artifact_path.exists():
-        if not manifest_path.exists():
-            if stage == "tessera-plan":
-                return 2, [
-                    f"[pipeline] ERROR: {stage}: {artifact_path} has no recorded "
-                    "allocation content binding; refusing silent reuse. "
-                    "Rebuild the plan from the current allocation.",
-                ]
-            return 0, [
-                f"[pipeline] WARNING: {stage}: reusing {artifact_path} which "
-                "has no settings manifest (predates the settings-hash guard); "
-                "cannot verify it matches the current settings",
-            ]
-        stored = _load_stage_manifest(manifest_path)
-        prev = (stored.get("stages") or {}).get(stage)
-        if prev is None:
+        stored = _load_stage_manifest(manifest_path) if manifest_path.exists() else None
+        prev = (stored.get("stages") or {}).get(stage) if stored is not None else None
+        if prev is None and stored is not None:
             legacy = stored.get("legacy")
             if isinstance(legacy, Mapping) and set(legacy) == set(declared):
                 prev = dict(legacy)
+        if prev is None and stage == "tessera-plan":
+            return 2, [
+                f"[pipeline] ERROR: {stage}: {artifact_path} has no recorded "
+                "allocation content binding"
+                + ("" if stored is None else " for this stage")
+                + "; refusing silent reuse. Rebuild the plan from the current "
+                "allocation.",
+            ]
+        if prev is not None:
+            admitted = _unverified_reuse_record(prev)
+            if admitted is not None:
+                messages.append(
+                    f"[pipeline] WARNING: {stage}: {artifact_path} is still "
+                    "UNVERIFIED (recorded unix "
+                    f"{admitted.get('first_observed_unix')}): its artifact "
+                    "predates this stage's settings guard and nothing has "
+                    "compared it to the current settings; reuse continues with "
+                    "its identity unknown"
+                )
+                if dict(admitted.get("observed_current_request") or {}) != declared:
+                    messages.append(
+                        f"[pipeline] WARNING: {stage}: the current settings "
+                        "request differs from the one recorded when this "
+                        "unverified reuse began; the artifact's identity is "
+                        "unknown under either request and this is not a "
+                        "verification"
+                    )
+                return 0, messages
         if prev is None:
-            if stage == "tessera-plan":
-                return 2, [
-                    f"[pipeline] ERROR: {stage}: {artifact_path} has no recorded "
-                    "allocation content binding for this stage; refusing silent reuse. "
-                    "Rebuild the plan from the current allocation.",
-                ]
-            messages.append(
-                f"[pipeline] WARNING: {stage}: {artifact_path} predates this "
-                "stage's settings guard; recording the current settings "
-                "instead of invalidating it"
+            reason = (
+                "has no settings manifest (predates the settings-hash guard)"
+                if stored is None
+                else "predates this stage's settings guard"
             )
-            _record_stage_settings(manifest_path, stage, declared)
+            messages.append(
+                f"[pipeline] WARNING: {stage}: {artifact_path} {reason}; "
+                "reusing it UNVERIFIED -- recording that its settings identity "
+                "is unknown instead of stamping today's settings onto it"
+            )
+            failure = _record_unverified_reuse(
+                artifact_path, manifest_path, stage, declared, reason
+            )
+            if failure:
+                messages.append(
+                    f"[pipeline] WARNING: {stage}: could not record the "
+                    f"unverified admission ({failure}); the reuse is unverified "
+                    "and the next check reaches the same conclusion"
+                )
             return 0, messages
         diffs = {
             key: (prev.get(key), declared.get(key))

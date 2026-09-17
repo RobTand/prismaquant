@@ -1255,7 +1255,10 @@ python3 -m prismaquant.pipeline \
 # D6's silent-reuse class landing exactly on a mode change. Every producer now
 # stamps provenance["cost_mode"]; reuse is conditional on it matching. This is
 # the in-tree pattern the CB hybrid already used for its own merge probe.
-# Unstamped tables (pre-R2) warn and are reused, never invalidated.
+# Unstamped tables (pre-R2) warn and are reused UNVERIFIED, never invalidated
+# and never restamped: the table keeps no provenance['cost_mode'], this run
+# records nothing that claims it was produced under the current settings, and
+# the artifact's own stage guard files the same unverified admission.
 # -----------------------------------------------------------------------
 cost_table_cost_mode() {
   python3 - "$1" <<'COSTPROV'
@@ -1277,7 +1280,7 @@ cost_table_reusable() {
   [[ -f "$path" ]] || return 1
   stamped="$(cost_table_cost_mode "$path")"
   if [[ -z "$stamped" ]]; then
-    echo "[pipeline] WARNING: $path carries no provenance['cost_mode'] (predates the R2 stamp); reusing it under COST_MODE=${COST_MODE} unverified"
+    echo "[pipeline] WARNING: $path carries no provenance['cost_mode'] (predates the R2 stamp); reusing it UNVERIFIED under COST_MODE=${COST_MODE} -- its mode is unknown, this run does not stamp the current mode onto it, and no verified provenance is recorded for it"
     return 0
   fi
   if [[ "$stamped" != "$COST_MODE" ]]; then
