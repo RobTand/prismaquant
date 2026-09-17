@@ -1,7 +1,20 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-16 · `codex/509-pq-route-trace-gate`. Stamps
+As of: 2026-09-17 · `flash/nvfp4-empty-activation-guard-20260917`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/nvfp4-empty-activation-guard-20260917`) for the
+**empty activation batch** on the served static contract's registered-operator
+leg (§"Served activation quantiser"). `torch.ops._C.scaled_fp4_quant` derives
+its launch grid from the token count, so a zero-row activation asked for an
+empty grid and left `cudaErrorInvalidValue` sticky in the context: the call
+returned, `synchronize` reported nothing, and the next checked launch raised.
+The leg now runs its own guards and then allocates the input's own shape, dtype
+and device instead of launching. Measured on sparklina, sm_121, image
+`a5424378…`: pre-fix M = 0 raised `CUDA error: invalid argument` at the next
+checked launch, fixed M = 0 completed `next_launch` + `sync2` with an empty
+`(0, 1024)` bf16 output, and M = 1 was clean on both. No other quantizer path,
+contract field, cache rule or gate moves.
 
 Re-stamped (2026-09-16, `codex/509-pq-route-trace-gate`) for **the exact
 per-module route-trace grade** (§7.1, §9.4; the Tessera lane's serve-side leg,
