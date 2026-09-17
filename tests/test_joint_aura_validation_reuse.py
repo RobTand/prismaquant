@@ -96,3 +96,21 @@ def test_preparation_keeps_original_source_type_rejection():
         joint.validate_joint_aura_entry(row)
     with pytest.raises((RuntimeError, ValueError), match="source shard"):
         _prepare(row)
+
+
+@pytest.mark.parametrize("shape", [[1, 2], [2, 1]])
+def test_joint_quality_refuses_a_divisible_axis_rank_render(shape):
+    """A quality identity is taken on ONE geometry, and only on one.
+
+    A render that is the source restricted by a whole factor on exactly one
+    axis is a tensor-parallel CUT, not the module's render. Admitting it here
+    would let a wrong render geometry pass the joint quality gate for every
+    entry in the table, so the shapes must simply be equal.
+    """
+    row = _row(UNIT_A, [1, 2, 3])
+    operator = row["joint_operator_identity"]
+    operator["source_weight"]["shape"] = [2, 2]
+    operator["rendered_weight"]["shape"] = shape
+    row["joint_operator_identity_sha256"] = joint.identity_sha256(operator)
+    with pytest.raises(ValueError, match="render/source geometry differs"):
+        joint.validate_joint_aura_entry(row)

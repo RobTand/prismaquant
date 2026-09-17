@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from . import format_registry as fr
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .measured_runtime_prices import RuntimeResources
+    from .measured_runtime_prices import RankDeviceBounds, RuntimeResources
     # Import-time-free: the solver must not depend on the serving-profile
     # loader at runtime (the lane is attached by candidate construction and
     # never read by the DP), but the annotation should still name the type.
@@ -125,6 +125,13 @@ class RuntimeAllocation:
     is summed independently; activation and scratch are separate sequential
     peaks. ``device_bytes`` adds those three quantities and the caller's fixed
     device charge (for example KV and non-quantizable resident weights).
+
+    When any chosen row prices itself per rank
+    (``measured_runtime_prices.RuntimeRankResources``) the three device
+    coordinates and ``device_bytes`` are ``None`` rather than a number: those
+    rows have one value per rank and no device ever held the sum or the maximum
+    of them. ``memory_bytes`` (one artifact's wire extent) and the timing pair
+    still price normally.
     """
 
     assignment: dict[str, str]
@@ -133,10 +140,15 @@ class RuntimeAllocation:
     predicted_dloss: float
     prefill_ms: float
     decode_ms: float | None
-    resident_bytes: int
-    peak_scratch_bytes: int
-    activation_bytes: int
-    device_bytes: int
+    resident_bytes: int | None
+    peak_scratch_bytes: int | None
+    activation_bytes: int | None
+    device_bytes: int | None
+    #: The runtime-global workspace each rank carries, charged per frozen
+    #: identity by ``measured_runtime_prices.RANK_WORKSPACE_RULE``. One number
+    #: per rank, and ``None`` for a scalar proposal: this is a per-rank term
+    #: like the three above it, not a reduction over them.
+    rank_workspace_bytes: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +158,64 @@ class _RuntimeState:
     formats: tuple[str, ...]
     parent: _RuntimeState | None = None
     candidate: Candidate | None = None
+    #: One rank's frozen workspace identities and the bytes behind them, unioned
+    #: as units are folded in. Empty for a scalar row's frontier. It is state
+    #: rather than a post-search sum because a runtime-global workspace is
+    #: charged per identity and two prefixes that hold different identities are
+    #: not comparable: a unit folded into one of them later can add an identity
+    #: the other already holds.
+    workspace: tuple = ()
+
+
+def _merge_workspace(prior: tuple, added: tuple, *, name: str) -> tuple:
+    """Union one unit's per-rank workspace identity maps into a prefix's.
+
+    The ``vllm.WorkspaceManager`` allocation is process-global runtime state
+    shared by every operator in the process, not per-apply scratch and not an
+    artifact: two priced rows that carry the same frozen workspace identity are
+    viewing the SAME allocation, so it is charged once per rank for that
+    identity rather than once per row. Two rows that disagree about the bytes
+    behind one identity are refused -- one allocation cannot be two
+    allocations -- and distinct identities add.
+    """
+    if not added:
+        return prior
+    if prior and len(prior) != len(added):
+        raise ValueError(
+            f"unit {name!r} prices its workspace for a different world than the prefix it "
+            "is folded into")
+    if not prior:
+        return tuple(tuple(sorted(rank_map)) for rank_map in added)
+    merged = []
+    for rank, (base, extra) in enumerate(zip(prior, added)):
+        rank_map = dict(base)
+        for identity, size in extra:
+            seen = rank_map.get(identity)
+            if seen is not None and seen != size:
+                raise ValueError(
+                    f"two priced rows carry workspace identity {identity} at different sizes on "
+                    f"rank {rank} ({seen} and {size}); one frozen allocation cannot be two "
+                    f"allocations (unit {name!r})")
+            rank_map[identity] = size
+        merged.append(tuple(sorted(rank_map.items())))
+    return tuple(merged)
+
+
+def _workspace_bytes(workspace: tuple, rank: int) -> int:
+    """One rank's own charge for the workspace identities its prefix holds."""
+    return sum(size for _, size in workspace[rank])
+
+
+def _workspace_identities(workspace: tuple) -> tuple:
+    """The identity set a prefix holds, per rank, as a dominance coordinate.
+
+    Two prefixes are comparable only within an identical identity set: a unit
+    folded into one of them later may add an identity the other already holds,
+    so a state that looks larger today can be the smaller one afterwards. The
+    bytes behind an identity are fixed (a disagreement refuses above), so the
+    identity names alone decide which bucket a state belongs to.
+    """
+    return tuple(tuple(identity for identity, _ in rank_map) for rank_map in workspace)
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +296,7 @@ def solve_runtime_frontier(
     max_device_bytes: int | None = None,
     fixed_device_bytes: int = 0,
     fixed_non_step_peak_bytes: int | None = None,
+    rank_devices: "RankDeviceBounds | None" = None,
     max_states: int = 100_000,
     max_transitions: int = 8_000_000,
     diagnostics: dict | None = None,
@@ -261,6 +332,30 @@ def solve_runtime_frontier(
     lexically earlier prefix preserves the final tie rule in those cases.
     This auxiliary coordinate is removed for the final resource frontier.
 
+    A per-rank table replaces the three device coordinates with three per rank:
+    a ranked row (``measured_runtime_prices.RuntimeRankResources``) carries one
+    residency, one scratch peak and one activation peak per rank, and no device
+    ever held their sum or their maximum. ``rank_devices`` is one versioned
+    ``measured_runtime_prices.RankDeviceBounds`` for the world the rows declare.
+    When its provenance admits a per-rank fixed charge, every rank is filtered
+    against its own budget inside the fold, so an alternative that one rank's
+    budget would have accepted cannot be pruned before that budget is read.
+    While the charge is pending it prices the rank dimensions -- a common
+    unknown constant cannot reorder them -- admits no rank, and leaves every
+    returned allocation's byte coordinates ``None``. A ranked row meeting a
+    scalar ``max_device_bytes`` is refused by name: one box's budget is not a
+    rank sum or a rank maximum, and choosing the reduction is the caller's
+    decision rather than the solver's.
+
+    The runtime-global workspace is composed here too, not after the search
+    (``measured_runtime_prices.RANK_WORKSPACE_RULE``): each prefix carries the
+    frozen workspace identity set it has accumulated, one identity at two sizes
+    refuses, and dominance is compared only within an identical identity set,
+    because a unit folded in later can add an identity one prefix already holds.
+    The per-rank budget check includes that rank's workspace bytes, so a fast
+    option whose workspace does not fit is rejected in the fold rather than
+    pruning the slower option that does.
+
     ``max_states`` bounds each fold frontier (including that tie coordinate);
     ``max_transitions`` bounds the total attempted cross-product pairs before
     budget/dominance filtering. Crossing either finite bound raises
@@ -285,6 +380,25 @@ def solve_runtime_frontier(
 
     if any(not isinstance(name, str) or not name for name in candidates):
         raise ValueError("candidate unit names must be nonempty strings")
+    # The per-rank spelling, imported here for the same reason the annotation
+    # above is import-time-free: the solver reads two attribute sets off a row,
+    # and which one a row carries decides whether these byte axes exist at all.
+    from .measured_runtime_prices import RuntimeRankResources
+    ranked_rows = {key for key, row in resources.items() if isinstance(row, RuntimeRankResources)}
+    ranked_world = 0
+    if ranked_rows:
+        worlds = {resources[key].world_size for key in ranked_rows}
+        if len(worlds) != 1:
+            raise ValueError(
+                "priced rows disagree about their world size, so no per-rank vector covers one "
+                "box")
+        ranked_world = worlds.pop()
+    if rank_devices is not None:
+        if not ranked_rows:
+            raise ValueError("per-rank device bounds price a frontier with no per-rank row")
+        if getattr(rank_devices, "world_size", None) != ranked_world:
+            raise ValueError(
+                "per-rank device bounds cover a different world than the priced rows")
     names = sorted(candidates)
     options = {}
     for name in names:
@@ -304,8 +418,13 @@ def solve_runtime_frontier(
                 raise ValueError(f"missing measured {label}")
             row = resources[key]
             memory = _runtime_int(c.memory_bytes, f"{label} memory_bytes")
-            serialized = _runtime_int(getattr(row, "serialized_bytes", None),
-                                      f"{label} serialized_bytes")
+            # A ranked row's wire extent is one canonical owner charge: the
+            # same container is framed once and sharded locally, so this axis
+            # prices it once for the whole owner.
+            serialized = _runtime_int(
+                row.wire_bytes if key in ranked_rows
+                else getattr(row, "serialized_bytes", None),
+                f"{label} serialized_bytes")
             if serialized != memory:
                 raise ValueError(f"{label} serialized_bytes={serialized} differs from candidate memory_bytes={memory}")
             loss = _runtime_float(c.predicted_dloss, f"{label} predicted_dloss", nonnegative=False)
@@ -313,22 +432,93 @@ def solve_runtime_frontier(
             decode = getattr(row, "decode_ms", None)
             if decode is not None or max_decode_ms is not None:
                 decode = _runtime_float(decode, f"{label} decode_ms")
-            resident = _runtime_int(getattr(row, "resident_bytes", None), f"{label} resident_bytes")
-            scratch = _runtime_int(getattr(row, "peak_scratch_bytes", None), f"{label} peak_scratch_bytes")
-            activation = _runtime_int(getattr(row, "activation_bytes", None), f"{label} activation_bytes")
-            unit_options.append((c, (memory, loss, prefill, decode, resident, scratch, activation)))
+            if key in ranked_rows:
+                # A scalar budget cannot decide a per-rank row: whichever
+                # reduction the caller had in mind, the boxes in this world do
+                # not share it. Per-rank admission is
+                # `rank_devices`, and it needs a per-rank budget vector and a
+                # per-rank fixed charge that is not pending.
+                if max_device_bytes is not None:
+                    raise ValueError(
+                        f"{label} prices itself per rank, and a scalar device budget prices "
+                        "one device; declare per-rank budgets instead of a rank sum or "
+                        "maximum")
+                entry = row
+                resident = tuple(rank.resident_bytes for rank in entry.ranks)
+                scratch = tuple(rank.peak_scratch_bytes for rank in entry.ranks)
+                activation = tuple(rank.activation_bytes for rank in entry.ranks)
+                # The runtime-global workspace is charged per identity per rank
+                # (measured_runtime_prices.RANK_WORKSPACE_RULE), and it is
+                # composed inside the fold rather than after the search: a
+                # candidate whose workspace is larger must not be pruned by a
+                # comparison that never looked at it.
+                workspace = tuple(((rank.workspace_sha256, rank.workspace_resident_bytes),)
+                                  for rank in entry.ranks)
+            else:
+                resident = _runtime_int(getattr(row, "resident_bytes", None), f"{label} resident_bytes")
+                scratch = _runtime_int(getattr(row, "peak_scratch_bytes", None), f"{label} peak_scratch_bytes")
+                activation = _runtime_int(getattr(row, "activation_bytes", None), f"{label} activation_bytes")
+                if ranked_world:
+                    # A world above one prices every row per rank, so a scalar
+                    # row here is a one-rank vector and nothing else.
+                    if ranked_world != 1:
+                        raise ValueError(
+                            f"{label} is a scalar row inside a world of {ranked_world}; a rank "
+                            "sum or maximum is not a row's own value")
+                    resident, scratch, activation = (resident,), (scratch,), (activation,)
+                workspace = ()
+            unit_options.append((c, (memory, loss, prefill, decode, resident, scratch, activation,
+                                     workspace)))
         options[name] = sorted(unit_options, key=lambda option: option[0].fmt)
 
-    axes = (0, 1, 2) + ((3,) if max_decode_ms is not None else ())
-    if max_device_bytes is not None:
-        axes += (4, 5, 6)
-    diag["dimensions"] = [
-        ("memory_bytes", "predicted_dloss", "prefill_ms", "decode_ms",
-         "resident_bytes", "peak_scratch_bytes", "activation_bytes")[axis]
-        for axis in axes]
-    frontier = [_RuntimeState((0, 0.0, 0.0, 0.0, 0, 0, 0), ())]
+    # A ranked row carries three values per rank, and each of them is its own
+    # coordinate: terminology aside, this is the scalar device axis repeated per
+    # rank, because the ranks are separate boxes. Summing them, or keeping one
+    # of them, would let the DP discard the very alternative a rank's own budget
+    # decides -- and a constraint checked after pruning cannot bring it back.
+    rank_coordinates = []
+    for rank in range(ranked_world):
+        base = 4 + 3 * rank
+        rank_coordinates.extend((base, base + 1, base + 2))
+    if ranked_world:
+        # Named on the diagnostics so a reader can see which composition rule
+        # the fold applied rather than inferring it from the byte axes.
+        from .measured_runtime_prices import RANK_WORKSPACE_RULE
+        diag["workspace_rule"] = RANK_WORKSPACE_RULE
+    scalar_axes = (0, 1, 2) + ((3,) if max_decode_ms is not None else ())
+    device_axes = (4, 5, 6) if max_device_bytes is not None else ()
+    axes = scalar_axes + device_axes + tuple(rank_coordinates)
+    names_by_axis = ("memory_bytes", "predicted_dloss", "prefill_ms", "decode_ms",
+                     "resident_bytes", "peak_scratch_bytes", "activation_bytes")
+    # The device axis is three scalars of its own; a rank's coordinates are
+    # spelled per rank. Slicing the combined vector would label rank 0's
+    # residency as the scalar one whenever the decode axis is absent, so the
+    # names are built from the two lists that produced the vector.
+    diag["dimensions"] = (
+        [names_by_axis[axis] for axis in scalar_axes + device_axes]
+        + [f"rank{rank}_{term}" for rank in range(ranked_world)
+           for term in ("resident_bytes", "peak_scratch_bytes", "activation_bytes")])
+    initial = (0, 0.0, 0.0, 0.0, 0, 0, 0) if not ranked_world else (
+        (0, 0.0, 0.0, 0.0) + (0,) * (3 * ranked_world))
+    frontier = [_RuntimeState(initial, ())]
     if max_device_bytes is not None and fixed_device_bytes > max_device_bytes:
         frontier = []
+    rank_charge = None
+    if rank_devices is not None and rank_devices.admits_ranks:
+        rank_charge = rank_devices.charge_per_rank
+
+    def _fold(a, b):
+        """One unit's option added to a prefix, in this frontier's own shape."""
+        head = (a[0] + b[0], a[1] + b[1], a[2] + b[2],
+                None if a[3] is None or b[3] is None else a[3] + b[3])
+        if not ranked_world:
+            return head + (a[4] + b[4], max(a[5], b[5]), max(a[6], b[6]))
+        tail = []
+        for rank in range(ranked_world):
+            tail.extend((a[4 + 3 * rank] + b[4][rank],
+                         max(a[5 + 3 * rank], b[5][rank]),
+                         max(a[6 + 3 * rank], b[6][rank])))
+        return head + tuple(tail)
 
     for name in names:
         if not frontier:
@@ -346,9 +536,7 @@ def solve_runtime_frontier(
         for state in frontier:
             a = state.totals
             for c, b in options[name]:
-                totals = (a[0] + b[0], a[1] + b[1], a[2] + b[2],
-                          None if a[3] is None or b[3] is None else a[3] + b[3],
-                          a[4] + b[4], max(a[5], b[5]), max(a[6], b[6]))
+                totals = _fold(a, b)
                 if any(value is not None and not isfinite(value)
                        for value in totals[1:4]):
                     raise ValueError(f"runtime totals overflowed at unit {name!r}")
@@ -360,11 +548,30 @@ def solve_runtime_frontier(
                         and _placement_bytes(totals, fixed_device_bytes,
                                              fixed_non_step_peak_bytes) > max_device_bytes):
                     continue
+                workspace = (_merge_workspace(state.workspace, b[7], name=name)
+                             if ranked_world else ())
+                if rank_charge is not None:
+                    over = [rank for rank in range(ranked_world)
+                            if (totals[4 + 3 * rank] + totals[5 + 3 * rank]
+                                + totals[6 + 3 * rank] + _workspace_bytes(workspace, rank)
+                                + rank_charge[rank]
+                                > rank_devices.budgets_per_rank[rank])]
+                    if over:
+                        # Each rank is checked against its own budget here, in
+                        # the search, rather than after a frontier has already
+                        # dropped the alternative that would have fitted.
+                        diag.setdefault("rank_budget_refusals", 0)
+                        diag["rank_budget_refusals"] += 1
+                        continue
                 vector = tuple(totals[axis] for axis in axes)
                 formats = state.formats + (c.fmt,)
-                prior = unique.get(vector)
+                # The workspace identity set is part of the state key, so two
+                # prefixes that hold different identities both survive to be
+                # compared only within their own bucket below.
+                key = (vector, _workspace_identities(workspace))
+                prior = unique.get(key)
                 if prior is None or formats < prior.formats:
-                    unique[vector] = _RuntimeState(totals, formats, state, c)
+                    unique[key] = _RuntimeState(totals, formats, state, c, workspace)
         ordered = sorted(unique.items())
         if not ordered:
             frontier = []
@@ -376,14 +583,24 @@ def solve_runtime_frontier(
             # self without requiring numerical epsilons on measured resources.
             ranks = {formats: i for i, formats in enumerate(
                 sorted(state.formats for _, state in ordered))}
-            coordinates = [ranks[state.formats] if name != names[-1] else index
-                           for index, (_, state) in enumerate(ordered)]
-            tree = _runtime_dominance_tree(
-                [vector + (coordinate,) for (vector, _), coordinate
-                 in zip(ordered, coordinates)])
+            entries = []
+            for index, ((vector, identities), state) in enumerate(ordered):
+                coordinate = ranks[state.formats] if name != names[-1] else index
+                entries.append((vector, identities, coordinate, state))
+            # Dominance is compared only inside one identical workspace identity
+            # set. A unit folded in later can add an identity one prefix already
+            # holds, so a cross-bucket comparison would read today's smaller
+            # number as tomorrow's and prune the alternative that fits. One
+            # tree per bucket keeps the exact orthant query and the existing
+            # frontier bound.
+            points_by_identity_set: dict[tuple, list] = {}
+            for vector, identities, coordinate, _state in entries:
+                points_by_identity_set.setdefault(identities, []).append(vector + (coordinate,))
+            trees = {identities: _runtime_dominance_tree(points)
+                     for identities, points in points_by_identity_set.items()}
             frontier = []
-            for (vector, state), coordinate in zip(ordered, coordinates):
-                if not _runtime_has_dominator(tree, vector + (coordinate - 1,)):
+            for vector, identities, coordinate, state in entries:
+                if not _runtime_has_dominator(trees[identities], vector + (coordinate - 1,)):
                     frontier.append(state)
                     if len(frontier) > max_states:
                         diag.update(refusal="max_states", refused_unit=name,
@@ -403,13 +620,24 @@ def solve_runtime_frontier(
             chosen[name] = cursor.candidate
             cursor = cursor.parent
         chosen = {name: chosen[name] for name in names}
+        ranked = any((name, chosen[name].fmt) in ranked_rows for name in names)
         a = state.totals
+        # A ranked proposal reports no device total at all: the three byte
+        # coordinates above are placeholders for a row that prices one value
+        # per rank, and publishing their sum would be publishing a number no
+        # device held.
         result.append(RuntimeAllocation(
             assignment={name: c.fmt for name, c in chosen.items()},
             chosen_candidates=chosen, memory_bytes=a[0], predicted_dloss=a[1],
-            prefill_ms=a[2], decode_ms=a[3], resident_bytes=a[4],
-            peak_scratch_bytes=a[5], activation_bytes=a[6],
-            device_bytes=_placement_bytes(a, fixed_device_bytes, fixed_non_step_peak_bytes)))
+            prefill_ms=a[2], decode_ms=a[3],
+            resident_bytes=None if ranked else a[4],
+            peak_scratch_bytes=None if ranked else a[5],
+            activation_bytes=None if ranked else a[6],
+            device_bytes=None if ranked else _placement_bytes(
+                a, fixed_device_bytes, fixed_non_step_peak_bytes),
+            rank_workspace_bytes=(None if not ranked else
+                                  tuple(_workspace_bytes(state.workspace, rank)
+                                        for rank in range(ranked_world)))))
     diag.update(complete=True, feasible=bool(result), frontier_size=len(result))
     return result
 

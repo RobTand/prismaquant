@@ -1,7 +1,266 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/d37-reemission-not-mechanical-20260917`. Stamps
+As of: 2026-09-17 · `flash/prefill-receipt-alloc-bridge-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/prefill-receipt-alloc-bridge-20260916`) for the
+**quality seam between a module's render and one rank's cut of it**. No
+default, stage, format, lane, pin or ship gate changes, and no cache is added.
+
+- **`joint_aura.validate_joint_aura_entry` is strict again.** It briefly
+  admitted a render that was the source restricted on exactly one axis by a
+  whole factor. That leniency was global -- it applied to every entry in every
+  table, not only to a tensor-parallel row -- so a genuinely wrong render
+  geometry passed the joint quality gate everywhere. `source_shape` and
+  `rendered_shape` must simply be equal.
+- **A rank-local native panel names the full container render.** Above a world
+  of one, `native_moe_panel.prepare_moe_inputs` requires an independently bound
+  historical preparation (`quality_prepared` / `quality_source_model`) and
+  refuses without one. It keeps the FULL `ProductionWeightCache` render, cuts
+  this rank's window out of it, and publishes both: `quality_rendered_weight`
+  is the container the joint quality row binds, `rendered_weight` stays this
+  rank's cut. `freeze_moe_panel` compares the joint row against the qualified
+  container render, not against the rank-local one it used to accept.
+- **The cut carries its own proof, and it is not a quality identity.**
+  `rank_render_proof` (`prismaquant.native_moe_rank_render.v1`) names the
+  window `member_window` computes, the rank and world size, the wire digest,
+  the encoder identity and the qualified container render it was cut from. A
+  window that disagrees with the qualified wire's declared window is refused.
+- **The qualification is read, never asserted.** `_qualified_quality_members`
+  authenticates the prepared completion and the `ProductionWeightCache` it
+  names through `tessera_joint_allocation._read_bound`, then checks source
+  model, calibration draw, plan/reader/backend identity, candidate roster, wire
+  digest, encoder identity (through the producer's own canonical-JSON grammar)
+  and render comparison before it returns a single render identity. The
+  historical encoder status travels unchanged as
+  `HISTORICAL_WIRE_VALIDATION`. The binding is taken on the panel's own
+  calibration receipt, which is the campaign draw the render was qualified
+  under, and not on the bounded first-sequence probe screen.
+- A world of one is unchanged: container and cut are the same tensor, so no
+  second preparation is bound and no extra member field is published.
+
+Gates: `tests/test_joint_aura_validation_reuse.py`,
+`tests/test_native_receipt_table_routed.py`, `tests/test_native_moe_panel.py`.
+CPU regression evidence only -- no GPU, TP2, served, quality or timing claim.
+
+Re-stamped (2026-09-17, `flash/prefill-receipt-alloc-bridge-20260916`) for
+the canonical GLM v1 geometry compatibility repair: execution rank remains an
+optional validated coordinate, required only when selecting a TP2 wire window.
+The shared canonical field set and full-module roster do not depend on rank.
+
+Re-stamped (2026-09-17, `flash/prefill-receipt-alloc-bridge-20260916`) for the
+**four review follow-ups on the per-rank path** (§4.10/§4.11;
+RobTand/prismaquant#658, #237). Nothing here changes a default, stage, format,
+lane, pin or ship gate, and no new allocator, cache or scheduler was added: the
+ranked device axis is the same versioned interface, with the four defects the
+review named closed.
+
+- **The runtime-global workspace is composed INSIDE the search.** It used to be
+  added after the frontier was built, so a fast option carrying a huge
+  `vllm.WorkspaceManager` allocation could prune the slower option that fit.
+  `solve_runtime_frontier` now keeps a per-rank `identity -> bytes` map in each
+  state, unions it during the fold (`_merge_workspace`), refuses one identity at
+  two sizes, includes that rank's workspace bytes in the per-rank budget check,
+  and compares dominance **only within an identical workspace identity set** --
+  one dominance tree per identity set, reusing the existing exact orthant query
+  and the existing `max_states` bound. A unit folded in later can add an identity
+  one prefix already holds, which is exactly why a cross-set comparison would
+  read today's smaller number as tomorrow's. `RANK_WORKSPACE_RULE`
+  (`sum_of_distinct_frozen_workspace_identities_per_rank`) is now the rule the
+  solver applies and the one `compose_rank_totals` applies to a built
+  assignment, and `RuntimeAllocation.rank_workspace_bytes` publishes the
+  per-rank charge beside the per-rank byte coordinates.
+- **Each rank's fixed charge is bound to that rank's OWN sealed capture.**
+  `recompute_rank_fixed_charge` used to read one scalar full-engine report and
+  check only that the partition's per-rank numbers *summed* to it, so an
+  arbitrary redistribution of the world total between ranks passed. A
+  `prismaquant.full_engine_rank_partition.v1` rank row now references that
+  rank's own report (`{path, sha256}`) plus `rank`, `world_size`,
+  `runtime_manifest_sha256` and that report's `capture_sha256`, and the consumer
+  recomputes that rank's four fixed terms from that rank's own observations and
+  refuses any declared term that is not the recomputed one. A rank row pointing
+  at a peer's report, a scalar report, another runtime, or a stale capture
+  refuses by name, and every **world** coordinate -- source model, measured
+  assignment, canonical unit roster, serving configuration, runtime manifest and
+  workload -- is joined across the ranks, because a shared runtime digest alone
+  would let rank 0 observe a small model and rank 1 a different one under one
+  world number. The consumer's own `expected_run_identity` binds those
+  coordinates to the table's context, so a charge measured on other bytes cannot
+  price this table. The whole-engine report reference is now **optional** and is
+  only a cross-check that the per-rank terms still sum to the world's own
+  recomputed terms -- never a substitute for the per-rank evidence.
+- **The capture mechanism the four fixed terms wait on now exists.** A capture
+  may carry `worker_startup_records` -- one record naming this rank, the
+  `torch.cuda.memory_allocated()` sample taken after
+  `process_weights_after_loading` and after `lock_workspace()`, the receipt's own
+  `resources.resident_bytes` and the `resident_bytes` of the producer's own
+  `tessera.native_moe_workspace.v1` record (`bench_native_moe_operator.py`'s
+  `observe_workspace`) -- and `kv_observations`, taken in the shape the runtime's
+  own read-only KV observer already returns
+  (`experiments/full_engine_kv.py:inspect_worker_kv`): the block manager's
+  `num_blocks`, one `group_page_size_bytes` per cache group (a hybrid or
+  multi-group config has more than one and its groups do not share a page
+  geometry, so no single block size is the pool), the observer's deduplicated
+  physical `storage` block with its per-backing `owners`, and the scheduler's
+  `resolved_limits.max_num_batched_tokens`/`max_num_seqs`. Those are the closing
+  conditions of the `worker_startup` and `cache_capacity` domains, and both close
+  on an equality against the allocation ledger rather than on a threshold, so a
+  genuinely zero workspace or a zero-block pool is a real state and
+  `fixed_resident`, `fixed_activation`, `fixed_scratch` and `fixed_kv` become
+  recomputable numbers on a capture that observed them. The KV record's own
+  `runtime_admission` attestation must be true: the intrusive snapshot pass the
+  capture harness emits sets it false and names itself timing- and
+  admission-ineligible in `scope`, and closing the domain on that pass would
+  price bytes the harness warns are not admissible. A capture that supplies
+  neither observation keeps both domains open and every dependent term null,
+  which is still the state of every capture in the tree. A run identity may also
+  carry the optional all-or-nothing rank scope (`rank`, `world_size`) that makes
+  a report *one rank's* capture.
+- **A legitimate CLI path exists.** `allocator.main` accepts
+  `--rank-device-budget-bytes` and `--measured-runtime-rank-partition`, reads
+  the sealed partition, recomputes the per-rank charge itself, builds
+  `RankDeviceBounds.recomputed` and passes it to `solve_runtime_frontier`; the
+  bounds constructor now requires the actual
+  `runtime_provenance.RankFixedCharge` type rather than duck-typing two
+  attribute names off an arbitrary object.
+- **The row key and the DP unit are reconciled.** A packed-MoE serving unit is
+  one DP item named by `allocator_candidates`'s `.__packed_serving__.`
+  aggregation, while the producer's row names the owner module it measured.
+  `measured_runtime_prices.reconcile_serving_unit_rows` re-keys such a row by
+  its own member roster -- never by name similarity -- after checking the row's
+  declared route against the route the table's context names for the row's own
+  unit, and refuses a roster that matches more than one DP option.
+- **The module geometry and the rank geometry are two fields, not one**
+  (Tessera #539, merged `f08baa5f`). A Tessera checkpoint holds one whole unit
+  per role whatever world serves it, so a routed member record frames the
+  MODULE (`member["shape"]`, and the joint quality identity's `source_weight`
+  **and** `rendered_weight`) while the runtime binding and the native member
+  roster carry THIS rank's cut of it (`runtime_binding.member_shapes`,
+  `member["rendered_weight"]`). The two agree only at a world of one. `native_moe_panel` now records the
+  container geometry and admits both the producer's projection spelling
+  (`gate_proj`/`up_proj`/`down_proj`) and this consumer's role spelling
+  (`w1`/`w3`/`w2`) -- the producer keeps the source spelling because its wire
+  record's own `identity.unit` is checked against it. The shared canonical GLM
+  geometry excludes execution rank. An optional `tensor_parallel_rank` is
+  validated and retained in rank-local views; TP2 slicing requires it explicitly,
+  while TP1 can use its sole rank. The wire cut itself goes
+  through `tessera.layout.can_shard`/`slice_unit`, the producer-neutral
+  primitive the loader calls (including the trellis `INITIAL_STATE` a row cut
+  needs); PrismaQuant never imports `tessera.serving`, and the cross-repo
+  equivalence to the serving cut is Tessera's own test.
+  `measured_runtime_prices.rank_local_member_shapes` derives the binding from
+  the trusted table context's `tensor_parallel` and refuses a member whose
+  intermediate extent does not divide by it, so the canonical combination of
+  every rank's cut is the container the wire identity names.
+  `joint_aura.validate_joint_aura_entry` refuses any render whose geometry is
+  not the source's, including a whole-factor restriction on one axis: a cut is
+  not a render, and a quality identity is taken on one geometry only.
+
+Debt D37 stands in substance: no table prices a device budget, no measured row
+exists, and no GPU ran. What changed is that the axis now refuses for exactly
+one reason -- a capture that observes the four fixed terms per rank has not been
+published -- rather than for three. **The producer-side hook is still owed and
+is named here rather than assumed:** the consumer intake above is complete and
+reachable and takes the observer's own record shape, but nothing in either tree
+yet assembles those records into `observations.worker_startup_records`,
+`observations.kv_observations` or a rank-scoped run identity -- Tessera's
+`experiments/full_engine_resource_partition.py` still lists `worker_startup` and
+`cache_capacity` among its unimplemented domains -- and the capture harness
+(`experiments/bench_native_moe_operator.py`'s per-rank resource identity seam,
+and `experiments/full_engine_kv.py`'s deduplicated block-manager accounting) is
+what must publish them. Gates: `tests/test_runtime_rank_resources.py`
+(the workspace-in-the-fold regressions, the redistributed-partition refusal, the
+duck-typed verdict refusal), `tests/test_full_engine_resource_report.py` (the
+startup/cache observation shapes and the rank scope),
+`tests/test_native_receipt_table_routed.py` (the GLM-288 owner priced from two
+rank receipts, then the **whole 864-member cost model through `allocator.main`**
+with a recomputed per-rank budget, plus the forged-partition and peer-report
+refusals), `tests/test_runtime_fixed_resource_admission.py`,
+`tests/test_allocator_runtime_frontier.py`,
+`tests/test_allocator_measured_runtime_cli.py`,
+`tests/test_architecture_doc.py` and `tests/test_docs_staleness.py`.
+
+Re-stamped (2026-09-16, `flash/prefill-receipt-alloc-bridge-20260916`) for the
+**per-rank resource vector a whole routed MoE owner prices** (§4.10/§4.11;
+RobTand/prismaquant#658, #237). A tensor-parallel routed owner has no scalar
+answer to "how many device bytes does this row cost": each rank holds its own
+share, so a rank sum and a rank maximum are both numbers no device ever held.
+The main objective's own geometry is priced end to end: GLM-5.3-Flash's routed
+stack (288 experts, top-8 `noaux_tc` selection with the live FP32 correction
+bias, `norm_topk_prob`, routed scale 2.5, SwiGLU clamp 10.0, served TP2) reached
+this bridge by porting the versioned geometry work (`native_moe_panel`'s
+`GLM_SOURCE_GEOMETRY`/`validate_glm_geometry`, `rank_local_intermediate` = the
+intermediate axis cut, so a TP2 rank-local member is 1024x4096 where TP1 is
+2048x4096). A geometry is a versioned object rather than a widened constant: the
+LFM shape keeps its exact field set and its exact refusal text, and a GLM field
+set arriving through the LFM door is refused rather than read with LFM's rules.
+The producer's whole-owner receipt carries, per rank, `resources.rank`,
+`resources.world_size`, the bounds it gathered from its peers (`resources.peers`
+as `{rank, world_size, bound_sha256}`) and its own `resources.self.bound_sha256`
+computed before the timed region, beside `latency_scope`
+(`kind: one_whole_owner_apply`, `per_rank: true`) and `runtime.collective` --
+the runtime's own final `tensor_model_parallel_all_reduce` at
+`vllm.model_executor.layers.fused_moe.runner.moe_runner:_maybe_reduce_final_output`,
+required by this owner and never skipped.
+
+- **The timed region is accepted on the COUNT, not on the declaration.**
+  `latency_scope.collective_calls_per_phase` is how many times that callsite ran
+  inside each priced apply; the consumer requires exactly what the world needs
+  (once per phase at a world above one, never at a world of one), binds the
+  counted callsite to the site it pins, and reads
+  `includes_output_collective` against those counts rather than against the
+  config's intent. A receipt whose samples priced a partial sum -- the TP2 arm
+  that called the quant method without the runner's own reduction -- is refused
+  by name.
+- **The consumer's minimum complete path is closed on CPU.** The rank *roster*
+  is re-derived, never summarized: `runtime_provenance.routed_owner_rank_resources`
+  recomputes each rank's own resource digest, checks every other rank's against
+  the copy that rank gathered, and builds
+  `prismaquant.runtime_rank_resources.v1` -- one record per rank plus one
+  whole-owner timing pair, `slowest_rank_median_of_one_whole_owner_apply`, with
+  every rank's median kept beside it (never a sum of leaf timings, never a world
+  mean). The whole module's wire extent is charged **once**, from the frozen
+  panel's own member wire records: the producer frames one canonical container
+  and shards it locally, so one rank's view summed per rank would double-count
+  the same bytes. `native_receipt_table` binds such a row from a roster
+  (`peer_receipts`), and `measured_runtime_prices` composes per-rank terms
+  (additive weights, per-rank peak maxima) and admits each rank against its own
+  budget (`compose_rank_totals`, `admit_rank_budgets`), refusing an imbalanced
+  world whose sum or mean would have passed.
+- **The rank dimensions are in the search, not after it.**
+  `solve_runtime_frontier` carries three coordinates per rank (summed
+  residency, per-rank scratch peak, per-rank activation peak) in its dominance
+  vector and filters each rank against its own budget inside the fold, so an
+  alternative a rank's budget would have accepted cannot be pruned before that
+  budget is read. Per-rank budgets arrive as one versioned object
+  (`prismaquant.runtime_rank_device_bounds.v1`) beside the fixed whole-engine
+  charge per rank, whose provenance is either
+  `recomputed_full_engine_partition` (an axis that admits) or
+  `pending_measurement` (an axis that prices the rank dimensions -- a common
+  unknown charge cannot reorder them -- and admits no rank); a declared zero
+  charge is refused rather than read as a charge. Scalar v2 rows keep their
+  meaning byte for byte; a scalar row under a TP>1 context is refused by name,
+  and so is a ranked row meeting a scalar device budget.
+
+No default, stage, format, lane, pin or ship gate changed, and **debt D37 is
+unchanged in substance**: no v2 table prices a device budget. A ranked row is
+priced as one atomic member-assignment row and its predicted device total is
+published as `None` (the per-rank totals travel instead). As stamped here the
+ranked device axis refused for two named reasons -- the fixed whole-engine
+charge per rank had no admitted value, and the runtime-global workspace had no
+versioned cross-row composition rule; the 2026-09-17 stamp above closes both.
+Gates: `tests/test_runtime_rank_resources.py`,
+`tests/test_native_receipt_table_routed.py` (which prices the GLM-288 owner at
+TP2 from two rank receipts, including its rank-local 1024x4096 member shapes and
+the single canonical container charge) and `tests/test_native_moe_glm_geometry.py`,
+plus the existing dense emitter, admission-split, fixed-resource, solver and
+prefill-frontier suites. **Not claimed:** no GPU qualification, no real TP2
+receipt pair, no measured row and no producer for the admitted per-rank fixed
+charge -- the CPU receipts for both geometries are synthetic and say so, and the
+producer's own two-rank CPU run is its own evidence, not this stamp's. A full
+`allocator.main` run over a GLM *cost model* (the whole-owner serving unit and
+its member cost rows) was likewise not assembled at this stamp; the 2026-09-17
+stamp above adds it, still on synthetic CPU fixtures.
 
 Re-stamped (2026-09-17, `flash/d37-reemission-not-mechanical-20260917`) for a
 **false claim inside debt D37**, not for a code change. D37 recorded that
@@ -2260,7 +2519,10 @@ resident KV rows -- what it waits on is `cache_capacity`, which never closes
 here. Only `fixed_scratch` and `candidate_scratch` are reachable at
 this version; altered cache capacity, a missing timing tail and overlapping
 streams reach the consumer only as a domain state, which is why it has no test
-for them. No measured
+for them. (The 2026-09-17 stamp above defines the `worker_startup` and
+`cache_capacity` closing observations, so both domains close on a capture that
+carries them, and altered cache capacity, a missing timing tail and overlapping
+streams are the refusals its tests now exercise.) No measured
 table, production setting, pin, serving lane or admission behavior changes,
 and no GPU, served, latency, quality or capacity measurement was run.
 Gates: `tests/test_full_engine_resource_report.py`,

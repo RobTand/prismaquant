@@ -1,10 +1,15 @@
 """Assemble a ``prismaquant.measured_runtime_prices.v2`` table from native receipts.
 
-One table row is one Tessera ``tessera.native_dense_operator_receipt.v1`` bound
-to the panel it was frozen against, the joint AURA cost row that panel names,
-and the runtime relation the receipt's runtime must belong to. Every binding
-here is read off the receipts through the same consumer the loader reuses
-(``native_operator_panel.consume_native_receipt``); nothing is restated from a
+One table row is one Tessera native producer receipt bound to the panel it was
+frozen against, the joint AURA cost row that panel names, and the runtime
+relation the receipt's runtime must belong to. Two panel kinds reach this
+module: a dense operator (``tessera.native_dense_operator_receipt.v1`` over
+``tessera.native_dense_panel.v1``) and a whole routed MoE owner
+(``tessera.native_moe_operator_receipt.v1`` over ``tessera.native_moe_panel.v1``),
+one atomic member-assignment row whose roster binds one receipt per rank of the
+world it was measured in. Every binding here is read off the receipts through
+the same consumer the loader reuses (``native_operator_panel.consume_native_receipt``
+or ``native_moe_panel.consume_moe_receipt``); nothing is restated from a
 producer summary, and nothing is defaulted where the evidence is absent.
 
 What this module does not do: it does not admit anything. The written table
@@ -59,8 +64,8 @@ from typing import Any, Mapping
 
 from .measured_runtime_prices import (
     PROVENANCE_CONTEXT_SCHEMA, PROVENANCE_IDENTITY_KIND, PROVENANCE_TABLE_SCHEMA,
-    RuntimePriceError, _object, _string, identity_sha256, load_measured_runtime_table,
-    parse_runtime_context,
+    RANK_RESOURCES_SCHEMA, RuntimeBinding, RuntimePriceError, _object, _string,
+    identity_sha256, load_measured_runtime_table, parse_runtime_context,
 )
 from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
 
@@ -72,8 +77,22 @@ EXIT_NATIVE_ROWS_ONLY = 3
 EXIT_CODES = {"admitted": EXIT_ADMITTED, "refused": EXIT_REFUSED,
               "native_rows_only": EXIT_NATIVE_ROWS_ONLY}
 DENSE_PANEL_SCHEMA = "tessera.native_dense_panel.v1"
+#: A whole routed MoE owner: one stack of experts priced as one serving unit.
+#: Its row has no single joint operator identity to bind -- the identity lives
+#: on each member -- and, under tensor parallelism, no single scalar resource
+#: answer either, which is why such a row prices itself per rank.
+MOE_PANEL_SCHEMA = "tessera.native_moe_panel.v1"
 BINDING_FIELDS = ("unit", "format", "run_id", "panel", "receipt", "memory_trace")
+#: A rank other than the one whose receipt is the binding's own: its receipt
+#: and memory trace, and the rank the receipt must declare. A world above one
+#: is priced from every rank's own receipt, so a row that cites one process's
+#: bound as the world's is refused before it is written.
+PEER_BINDING_FIELDS = ("rank", "receipt", "memory_trace")
 PHASES = ("prefill", "decode")
+#: The serving context's structure coordinate, per panel kind. A table prices
+#: one structure: a routed owner is not a bigger dense unit, and the lane a
+#: consumer resolves for either is not the same question.
+PANEL_STRUCTURE = {DENSE_PANEL_SCHEMA: "dense", MOE_PANEL_SCHEMA: "routed_moe"}
 
 #: The one field of an attested native runtime record that a bound panel may
 #: differ in, and the only one.
@@ -202,26 +221,162 @@ def bind_cost_row(panel: Mapping, cost_payload: Mapping, cost_sha256: str) -> Ma
     return row
 
 
+def _bind_routed_cost_rows(panel: Mapping, cost_payload: Mapping, cost_sha256: str) -> RuntimeBinding:
+    """Every member of one routed owner, joined to its own joint AURA row.
+
+    A whole routed owner has no single joint operator identity to compare: the
+    identity lives on each member row, and the panel's frozen ``runtime_binding``
+    already carries one per member. So this checks each member's cost row
+    against the binding's digest for that member, and every member's aligned
+    probes against the one probe identity the owner was frozen with. The
+    binding it returns is what the table row and the loader's intake gate both
+    compare, so no member can be dropped or re-spelled between them.
+    """
+    from .joint_aura import validate_joint_aura_entry
+
+    where = f"{panel['unit']}@{panel['format']}"
+    if panel["cost_sha256"] != cost_sha256:
+        raise RuntimePriceError(f"panel cost_sha256 is not the digest of the supplied cost payload: {where}")
+    binding = RuntimeBinding.from_dict(panel["runtime_binding"])
+    for member in panel["members"]:
+        name, member_fmt = member["unit"], member["format"]
+        member_where = f"{name}@{member_fmt}"
+        if binding.member_formats.get(name) != member_fmt:
+            raise RuntimePriceError(f"routed owner binding does not name its own member: {member_where}")
+        entry = cost_payload["costs"].get(name)
+        row = entry.get(member_fmt) if isinstance(entry, Mapping) else None
+        if row is None:
+            raise RuntimePriceError(f"cost payload has no row for {member_where}")
+        try:
+            joint = validate_joint_aura_entry(row)
+        except (ValueError, TypeError, KeyError):
+            joint = False
+        if not joint:
+            raise RuntimePriceError(f"cost payload row is not joint AURA currency: {member_where}")
+        if row["joint_operator_identity_sha256"] != binding.member_operator_identity_sha256[name]:
+            raise RuntimePriceError(
+                f"member joint operator identity differs from the cost payload row: {member_where}")
+        if row["probe_identity_sha256"] != panel["probe_identity_sha256"]:
+            raise RuntimePriceError(
+                f"member probe identity differs from the frozen panel: {member_where}")
+    return binding
+
+
+def _bind_routed_receipt(*, spec_binding: dict, panel: Mapping, panel_ref: dict, receipt_path: Path,
+                         receipt_ref: dict, trace_path: Path, trace_ref: dict, unit: str, fmt: str,
+                         run_id: str, cost_payload: Mapping, cost_sha256: str,
+                         manifest_dir: Path, table_dir: Path, peer_specs) -> dict:
+    """One whole routed owner -> one atomic member-assignment row.
+
+    A whole owner is one apply measured on every rank of its world, so the row
+    is priced from *every* rank's own receipt, each read through the same
+    consumer ``admit_native_rows`` reuses, and its resources come from
+    ``runtime_provenance.routed_owner_rank_resources`` -- the one reader of the
+    producer's per-rank records, called again by the gate that admits the row.
+    The row's cited samples are the slowest rank's, because that rank's median
+    is the number it prices; every rank's median travels beside it.
+    """
+    from .native_moe_panel import consume_moe_receipt
+    from .runtime_provenance import routed_owner_rank_resources, routed_slowest_rank
+
+    where = f"{unit}@{fmt}"
+    binding = _bind_routed_cost_rows(panel, cost_payload, cost_sha256)
+    roster, peers = [], []
+    entries = [{"rank": None, "receipt": receipt_path, "receipt_ref": receipt_ref,
+                "trace": trace_path, "trace_ref": trace_ref,
+                "peer": None}]
+    for spec in peer_specs:
+        _object(spec, PEER_BINDING_FIELDS, "native peer receipt binding")
+        peer_receipt, peer_receipt_ref = _reference(
+            _resolve(spec["receipt"], manifest_dir), table_dir,
+            f"native peer receipt for {where}")
+        peer_trace, peer_trace_ref = _reference(
+            _resolve(spec["memory_trace"], manifest_dir), table_dir,
+            f"native peer memory trace for {where}")
+        rank = spec["rank"]
+        if type(rank) is not int or rank < 0:
+            raise RuntimePriceError(f"native peer receipt rank must be a nonnegative integer: {where}")
+        peer = {"rank": rank, "receipt": peer_receipt_ref, "memory_trace": peer_trace_ref}
+        peers.append(peer)
+        entries.append({"rank": rank, "receipt": peer_receipt, "receipt_ref": peer_receipt_ref,
+                        "trace": peer_trace, "trace_ref": peer_trace_ref, "peer": peer})
+    for entry in entries:
+        receipt = _json(entry["receipt"], "native MoE receipt")
+        entry["receipt_json"] = receipt
+        declared = receipt.get("resources", {}).get("rank") if isinstance(receipt.get("resources"), Mapping) else None
+        if type(declared) is not int or declared < 0:
+            raise RuntimePriceError(
+                f"native owner receipt for {where} declares no rank of its own")
+        if entry["rank"] is not None and entry["rank"] != declared:
+            raise RuntimePriceError(
+                f"native peer receipt for {where} declares rank {declared!r}, not "
+                f"{entry['rank']!r}")
+        entry["rank"] = declared
+        try:
+            entry["observation"] = consume_moe_receipt(
+                entry["receipt"], expected_sha256=entry["receipt_ref"]["sha256"],
+                expected_panel=panel, memory_trace_path=entry["trace"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise RuntimePriceError(f"native producer admission refused: {exc}") from exc
+    entries.sort(key=lambda entry: entry["rank"])
+    if [entry["rank"] for entry in entries] != list(range(len(entries))):
+        raise RuntimePriceError(
+            f"native owner row for {where} must name every rank of its world once, and the "
+            f"receipts it was handed declare ranks {[entry['rank'] for entry in entries]}")
+    resources = routed_owner_rank_resources(
+        panel, [(entry["rank"], entry["receipt_json"], entry["observation"]) for entry in entries],
+        where=f"native owner row {where}")
+    measurements = {}
+    for phase in PHASES:
+        cited = entries[routed_slowest_rank(resources, phase)]
+        timing = cited["observation"]["phases"][phase]["measurement"]
+        measurements[phase] = {"method": timing["method"], "samples_ms": list(timing["samples_ms"]),
+                               "warmup_iterations": timing["warmup_iterations"],
+                               "receipt_path": cited["receipt_ref"]["path"],
+                               "receipt_sha256": cited["receipt_ref"]["sha256"]}
+    row = {"unit": unit, "format": fmt, "binding": binding.as_dict(), "resources": resources,
+           "prefill": measurements["prefill"], "decode": measurements["decode"]}
+    primary = next(entry for entry in entries if entry["peer"] is None)
+    bound = dict(spec_binding)
+    if peers:
+        bound["peer_receipts"] = [{key: value for key, value in peer.items()} for peer in peers]
+    return {"row": row, "binding": bound, "panel": panel,
+            "observation": primary["observation"],
+            "cost_row_identity_sha256": panel["probe_identity_sha256"]}
+
+
 def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: str,
                         manifest_dir: Path, table_dir: Path) -> dict:
     """One receipt binding -> one table row, one receipt binding, one observation.
 
-    The receipt is consumed through ``consume_native_receipt`` against the
-    panel as frozen, exactly as ``admit_native_rows`` will consume it again.
+    The receipt is consumed through the consumer the loader's intake gate reuses
+    -- ``consume_native_receipt`` for a dense panel, ``consume_moe_receipt`` for
+    a whole routed owner -- against the panel as frozen, and never from a
+    producer summary of either.
     """
     from .native_operator_panel import consume_native_receipt, operator_route_identity
 
-    _object(spec, BINDING_FIELDS, "native receipt binding")
+    _object(spec, BINDING_FIELDS + (("peer_receipts",) if "peer_receipts" in spec else ()),
+            "native receipt binding")
     unit, fmt, run_id = (_string(spec[key], "native receipt " + key) for key in ("unit", "format", "run_id"))
     where = f"{unit}@{fmt}"
     panel_path, panel_ref = _reference(_resolve(spec["panel"], manifest_dir), table_dir, f"native panel for {where}")
     receipt_path, receipt_ref = _reference(_resolve(spec["receipt"], manifest_dir), table_dir, f"native receipt for {where}")
     trace_path, trace_ref = _reference(_resolve(spec["memory_trace"], manifest_dir), table_dir, f"native memory trace for {where}")
     panel = _json(panel_path, "native panel")
-    if not isinstance(panel, Mapping) or panel.get("schema") != DENSE_PANEL_SCHEMA:
+    if not isinstance(panel, Mapping) or panel.get("schema") not in PANEL_STRUCTURE:
         raise RuntimePriceError("unsupported native producer panel")
     if (panel["unit"], panel["format"]) != (unit, fmt):
         raise RuntimePriceError(f"native panel names {panel['unit']}@{panel['format']}, not {where}")
+    spec_binding = {"unit": unit, "format": fmt, "run_id": run_id,
+                    "panel": panel_ref, "receipt": receipt_ref, "memory_trace": trace_ref}
+    if panel["schema"] == MOE_PANEL_SCHEMA:
+        return _bind_routed_receipt(spec_binding=spec_binding, panel=panel, panel_ref=panel_ref,
+                                    receipt_path=receipt_path, receipt_ref=receipt_ref,
+                                    trace_path=trace_path, trace_ref=trace_ref, unit=unit, fmt=fmt,
+                                    run_id=run_id, cost_payload=cost_payload, cost_sha256=cost_sha256,
+                                    manifest_dir=manifest_dir, table_dir=table_dir,
+                                    peer_specs=spec.get("peer_receipts", ()))
     cost_row = bind_cost_row(panel, cost_payload, cost_sha256)
     try:
         observation = consume_native_receipt(receipt_path, expected_sha256=receipt_ref["sha256"],
@@ -323,6 +478,12 @@ def derive_context(panels: list[Mapping], *, relation: Mapping) -> dict:
         raise RuntimePriceError("no native receipts were bound; a table needs at least one row")
     first = panels[0]
     _require_one_runtime(panels)
+    structures = {PANEL_STRUCTURE[panel["schema"]] for panel in panels}
+    if len(structures) != 1:
+        raise RuntimePriceError(
+            "native receipts were produced on more than one structure: "
+            f"{sorted(structures)}; a table prices one")
+    structure = structures.pop()
     for panel in panels[1:]:
         for what, key in (("source model", lambda p: p["source_sha256"]),
                           ("calibration", lambda p: p["calibration_sha256"]),
@@ -341,7 +502,7 @@ def derive_context(panels: list[Mapping], *, relation: Mapping) -> dict:
             raise RuntimePriceError(f"native {phase} panels do not all run {expected} token(s)")
     return {
         "schema": PROVENANCE_CONTEXT_SCHEMA, "runtime_identity_kind": PROVENANCE_IDENTITY_KIND,
-        "serving_context": {"platform": f"sm_{major}{minor}", "structure": "dense",
+        "serving_context": {"platform": f"sm_{major}{minor}", "structure": structure,
                             "residency": execution["mode"], "runtime_image": runtime["image"],
                             "execution_mode": execution["execution_mode"]},
         "gpu_identity": gpu["uuid"], "runtime_sha256": identity_sha256(relation),
@@ -365,6 +526,22 @@ def derive_fixed_resources(report_path: Path, table_dir: Path) -> tuple[dict, di
         {"path": str(report_path.resolve()), "sha256": reference["sha256"]},
         root=report_path.resolve().parent)
     return declared, evidence, {"reference": reference, **verdict}
+
+
+def _report_resources(resources: Mapping) -> dict:
+    """The emission report's own spelling of one row's byte terms.
+
+    A ranked row is reported per rank. Reducing it here to one number per axis
+    would be exactly the rank sum or rank maximum the table itself refuses, and
+    an emission report is where a reader goes to see what was priced.
+    """
+    if resources.get("schema") == RANK_RESOURCES_SCHEMA:
+        return {"world_size": resources["world_size"], "timing_rule": resources["timing_rule"],
+                "rank_medians_ms": resources["rank_medians_ms"], "ranks": resources["ranks"]}
+    return {"serialized_bytes": resources["serialized_bytes"],
+            "resident_bytes": resources["resident_bytes"],
+            "peak_scratch_bytes": resources["peak_scratch_bytes"],
+            "activation_bytes": resources["activation_bytes"]}
 
 
 def admission_report(path: Path, *, expected_context, expected_cost_sha256: str,
@@ -468,10 +645,7 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
                   "runtime_sha256": identity_sha256(item["panel"]["runtime"]), "unshared_native_libraries": unshared,
                   "prefill_ms": item["row"]["resources"]["prefill_ms"], "decode_ms": item["row"]["resources"]["decode_ms"],
                   "samples": {phase: len(item["row"][phase]["samples_ms"]) for phase in PHASES},
-                  "peak_scratch_bytes": item["row"]["resources"]["peak_scratch_bytes"],
-                  "activation_bytes": item["row"]["resources"]["activation_bytes"],
-                  "serialized_bytes": item["row"]["resources"]["serialized_bytes"],
-                  "resident_bytes": item["row"]["resources"]["resident_bytes"],
+                  **_report_resources(item["row"]["resources"]),
                   "operator_route": item["row"]["binding"]["operator_route"],
                   "joint_operator_identity_sha256": item["cost_row_identity_sha256"],
                   "panel": item["binding"]["panel"], "receipt": item["binding"]["receipt"],

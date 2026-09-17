@@ -49,20 +49,85 @@ DOMAIN_STATES = ("closed", "open", "refused")
 #: Domains whose closing condition this consumer can itself check against the
 #: raw observations this schema emits. Every other domain stays open here
 #: whatever the report says: a state the consumer cannot verify is
-#: ``qualified: true`` spelled differently.
-CHECKABLE_DOMAINS = ("history_join", "external_closure")
+#: ``qualified: true`` spelled differently. The first two close on the raw
+#: ledger alone; the last two close on the shape of the startup and KV
+#: observations, which is what makes the fixed resident, activation and KV
+#: terms recomputable rather than permanently owed.
+CHECKABLE_DOMAINS = ("worker_startup", "history_join", "external_closure",
+                     "cache_capacity")
 
 #: The observations this schema version names and sets to null, so a consumer
 #: can tell "this capture did not observe it" from "the producer dropped it".
-#: They are what the other four domains would close on, which is why the
-#: scalar composition cannot complete at v1 even on a flawless capture: only
-#: `fixed_scratch` and `candidate_scratch` are reachable at all. A non-null
-#: value here is refused rather than read -- this consumer recomputes nothing
-#: from an observation whose shape v1 does not define, and a domain that
-#: closed on one would be certifying itself.
-OWED_OBSERVATIONS = ("kv_observations", "observer_qualification", "owner_views",
-                     "runtime_provenance_relation", "timing_captures",
-                     "worker_startup_records")
+#: They are what the four domains with no consumer-checkable closing condition
+#: would close on, which is why the scalar composition cannot complete at v1
+#: even on a flawless capture: only `fixed_scratch` and `candidate_scratch` are
+#: reachable from a capture that supplies none of them. A non-null value here
+#: is refused rather than read -- this consumer recomputes nothing from an
+#: observation whose shape v1 does not define, and a domain that closed on one
+#: would be certifying itself.
+#:
+#: ``worker_startup_records`` and ``kv_observations`` left this list when their
+#: shapes were defined below: they are now *checked* observations that close
+#: ``worker_startup`` and ``cache_capacity``, which is what makes
+#: ``fixed_resident``, ``fixed_activation`` and ``fixed_kv`` recomputable from a
+#: capture that actually observed them, instead of terms no schema version
+#: could express.
+OWED_OBSERVATIONS = ("observer_qualification", "owner_views",
+                     "runtime_provenance_relation", "timing_captures")
+
+#: One rank's resident-after-load observation: the engine-side sample the
+#: producer's own contract names for ``fixed_resident``. ``rank`` is the
+#: process that measured it (not the world it was configured for),
+#: ``memory_allocated_bytes`` is ``torch.cuda.memory_allocated()`` sampled after
+#: ``process_weights_after_loading`` and after ``lock_workspace()``,
+#: ``receipt_resident_bytes`` is the receipt's own ``resources.resident_bytes``
+#: and ``workspace_resident_bytes`` the ``resident_bytes`` of the producer's own
+#: ``tessera.native_moe_workspace.v1`` record
+#: (``bench_native_moe_operator.observe_workspace``), which is the sum of that
+#: record's distinct slot storages. ``worker_startup`` closes when the workspace
+#: is locked and the ledger's fixed-owned resident rows sum to the receipt's
+#: figure, which is what ties the engine-side sample to the allocation ledger
+#: this consumer recomputes from. ``scope`` names the sample in the producer's
+#: own words, exactly as the KV record does, so the record says what it observed
+#: rather than leaving a reader to infer it.
+WORKER_STARTUP_RECORD_FIELDS = ("memory_allocated_bytes", "rank",
+                                "receipt_resident_bytes", "scope", "workspace_locked",
+                                "workspace_resident_bytes")
+
+#: One rank's KV-pool accounting, and the engine's rather than this operator's.
+#: This is the record the runtime's own read-only KV observer already returns
+#: (``experiments/full_engine_kv.py:inspect_worker_kv``), and it is taken as it
+#: is emitted rather than projected into a smaller spelling of the same pool:
+#: ``num_blocks``, one ``group_page_size_bytes`` per cache group -- a hybrid or
+#: multi-group config has more than one and its groups do not share a page
+#: geometry, so no single block size is the pool -- and the sensor's own
+#: ``storage`` block, whose ``storages`` are the physical backings deduplicated
+#: by ``(device_type, device_id, address)`` with their ``owners`` views and
+#: whose ``unique_physical_storage_bytes`` this consumer re-adds. The
+#: scheduler's ``resolved_limits`` carry ``max_num_batched_tokens`` and
+#: ``max_num_seqs``. Every other coordinate the observer emits (``tensors``,
+#: ``received``, ``runner_resolved``, ``kernel_block_sizes``,
+#: ``capacity_policy``, ``group_details``, ``capacity_assertions``,
+#: ``received_argument_scope``) travels as evidence.
+#:
+#: ``runtime_admission`` is the producer's own closure attestation, and the
+#: reason it is required rather than assumed: the intrusive snapshot pass sets
+#: it ``False`` and says in ``scope`` that the pass is timing- and
+#: admission-ineligible, so a consumer that closed this domain on that pass
+#: would be pricing bytes the harness warns are not admissible. It never closes
+#: the domain by itself -- the recomputed storage arithmetic and the ledger
+#: equality below do that -- but a record that does not carry the attestation is
+#: refused rather than read.
+#:
+#: Unlike the other observations this one is an *open* mapping: it carries the
+#: runtime's own resolved descriptors, whose field set the runtime owns. The
+#: consumer requires the coordinates it recomputes from and keeps the rest as
+#: evidence.
+KV_OBSERVATION_REQUIRED_FIELDS = ("group_page_size_bytes", "num_blocks",
+                                  "resolved_limits", "runtime_admission", "scope", "storage")
+KV_RESOLVED_LIMIT_FIELDS = ("max_num_batched_tokens", "max_num_seqs")
+KV_STORAGE_SET_FIELDS = ("storages", "unique_physical_storage_bytes")
+KV_STORAGE_FIELDS = ("address", "bytes", "device_id", "device_type", "owners")
 
 TERMS = ("fixed_resident", "candidate_resident", "fixed_activation",
          "candidate_activation", "fixed_scratch", "candidate_scratch", "fixed_kv")
@@ -93,8 +158,9 @@ RECOMPUTABLE_TERMS = TERMS
 #: The three owner classes the producer accepts. `kv` is one of them: a KV
 #: backing is an observed allocation like any other and `fixed_kv` is the sum
 #: of the resident ones, so dropping it here would unclassify a real row and
-#: null every term on any capture that has one. What `fixed_kv` still waits on
-#: is its domain, `cache_capacity`, which never closes at this schema version.
+#: null every term on any capture that has one. What `fixed_kv` waits on is its
+#: domain, `cache_capacity`, which closes on a KV observation this capture must
+#: carry rather than on any producer flag.
 OWNER_CLASSES = ("fixed", "candidate", "kv")
 #: Neither label supplies a classification or an invariance, so a row carrying
 #: one is unclassified and named, never bucketed.
@@ -142,9 +208,17 @@ SUPPORTED_ARGUMENT_DOMAIN_STATUS = ("unavailable", "observed")
 
 _TOP_FIELDS = tuple(sorted(ENVELOPE_MEMBERS + ("schema",)))
 _IDENTITY_FIELDS = ("capture_sha256", "fixture_provenance", "run")
+#: The rank scope a capture taken on one rank of a tensor-parallel world adds to
+#: its run identity. Optional and all-or-nothing: a scalar capture names only
+#: the device it observed, and a capture that names a rank names the world it
+#: belongs to, so a per-rank charge can bind each rank's own four fixed terms
+#: to that rank's own sealed report instead of to a redistribution of a world
+#: total.
+_RUN_RANK_FIELDS = ("rank", "world_size")
 _RUN_FIELDS = ("assignment_sha256", "canonical_units_sha256", "configuration_sha256",
                "device_id", "device_uuid", "model_sha256", "runtime_manifest_sha256",
                "schema", "workload_sha256")
+_RUN_SCOPED_FIELDS = tuple(sorted(set(_RUN_FIELDS) | set(_RUN_RANK_FIELDS)))
 _RUN_DIGESTS = ("assignment_sha256", "canonical_units_sha256", "configuration_sha256",
                 "model_sha256", "runtime_manifest_sha256", "workload_sha256")
 _EXECUTION_FIELDS = ("graph_mode", "residency", "topology")
@@ -230,6 +304,23 @@ def _optional_index(value: Any, where: str):
 
 def _optional_string(value: Any, where: str):
     return None if value is None else _string(value, where)
+
+
+def _required(value: Any, fields: Sequence[str], where: str) -> Mapping:
+    """A mapping that must carry these coordinates, and may carry others.
+
+    The two observations that carry the runtime's own resolved descriptors are
+    the exception to this module's closed field sets: their extra fields belong
+    to the runtime, and refusing them would refuse every real capture. The
+    coordinates this consumer recomputes from are required and validated; the
+    rest travel as evidence.
+    """
+    if not isinstance(value, Mapping):
+        raise RuntimePriceError(f"{where}: expected an object")
+    missing = [name for name in fields if name not in value]
+    if missing:
+        raise RuntimePriceError(f"{where}: missing required fields {sorted(missing)}")
+    return value
 
 
 def _string_list(value: Any, where: str, *, unique: bool = True) -> list[str]:
@@ -376,7 +467,31 @@ def _recomputed_coverage_state(intervals, executed: Any) -> str:
 
 
 def _run_identity(value: Any, where: str) -> Mapping:
-    run = _object(value, _RUN_FIELDS, where)
+    """One capture's run identity, optionally scoped to a rank of a world.
+
+    A scalar capture names the device it observed and nothing else. A capture
+    taken on one rank of a tensor-parallel world additionally names which rank
+    and world it observed, because a rank's own fixed terms are only that
+    rank's if the report that carries them says which rank it is. The scope is
+    all-or-nothing and the two shapes are separate field sets, so a document
+    cannot carry a rank without a world for a consumer to check it against.
+    """
+    if not isinstance(value, Mapping):
+        raise RuntimePriceError(f"{where}: expected an object")
+    fields = set(value)
+    if fields == set(_RUN_FIELDS):
+        run = _object(value, _RUN_FIELDS, where)
+    elif fields == set(_RUN_SCOPED_FIELDS):
+        run = _object(value, _RUN_SCOPED_FIELDS, where)
+        world = _index(run["world_size"], where + " world size")
+        rank = _index(run["rank"], where + " rank")
+        if world < 1 or rank >= world:
+            raise RuntimePriceError(
+                f"{where}: rank {rank} is not inside a world of {world}")
+    else:
+        raise RuntimePriceError(
+            f"{where}: expected exactly fields {sorted(_RUN_FIELDS)} or "
+            f"{sorted(_RUN_SCOPED_FIELDS)}")
     _equal(run["schema"], IDENTITY_SCHEMA, where + " schema")
     for key in _RUN_DIGESTS:
         _sha(run[key], f"{where} {key}")
@@ -484,6 +599,41 @@ def _observations(value: Any, where: str) -> Mapping:
             raise RuntimePriceError(
                 f"{where}: {name} is not null, but this schema version defines no shape for it, "
                 "so nothing here can recompute a term or close a domain from it")
+    startup = observations["worker_startup_records"]
+    if startup is not None:
+        for item in _list(startup, where + " worker startup records"):
+            record = _object(item, WORKER_STARTUP_RECORD_FIELDS, where + " worker startup record")
+            _index(record["rank"], where + " worker startup rank")
+            _index(record["memory_allocated_bytes"], where + " worker startup allocated bytes")
+            _index(record["receipt_resident_bytes"], where + " worker startup receipt resident bytes")
+            _index(record["workspace_resident_bytes"],
+                   where + " worker startup workspace resident bytes")
+            _bool(record["workspace_locked"], where + " worker startup workspace locked")
+            _string(record["scope"], where + " worker startup scope")
+    kv = observations["kv_observations"]
+    if kv is not None:
+        for item in _list(kv, where + " kv observations"):
+            record = _required(item, KV_OBSERVATION_REQUIRED_FIELDS, where + " kv observation")
+            _index(record["num_blocks"], where + " kv blocks")
+            _bool(record["runtime_admission"], where + " kv runtime admission")
+            _string(record["scope"], where + " kv scope")
+            for page in _list(record["group_page_size_bytes"], where + " kv group page sizes"):
+                _index(page, where + " kv group page size")
+            limits = _required(record["resolved_limits"], KV_RESOLVED_LIMIT_FIELDS,
+                               where + " kv resolved limits")
+            _index(limits["max_num_batched_tokens"], where + " kv batched tokens")
+            _index(limits["max_num_seqs"], where + " kv sequences")
+            storage_set = _required(record["storage"], KV_STORAGE_SET_FIELDS,
+                                    where + " kv storage observation")
+            _index(storage_set["unique_physical_storage_bytes"],
+                   where + " kv unique physical storage bytes")
+            for storage in _list(storage_set["storages"], where + " kv storages"):
+                row = _object(storage, KV_STORAGE_FIELDS, where + " kv storage")
+                _string(row["device_type"], where + " kv storage device type")
+                _index(row["device_id"], where + " kv storage device id")
+                _index(row["address"], where + " kv storage address")
+                _index(row["bytes"], where + " kv storage bytes")
+                _string_list(row["owners"], where + " kv storage owners")
     return observations
 
 
@@ -757,14 +907,17 @@ def _simultaneous_peak(allocations: Sequence[Mapping]) -> int:
     return peak
 
 
-def _recompute_domains(observations: Mapping) -> dict[str, bool]:
+def _recompute_domains(observations: Mapping, identity: Mapping) -> dict[str, bool]:
     """Which domains this consumer can itself see closed, keyed by name.
 
-    Only two of the six have a closing condition expressible in the raw
-    observations this schema emits. The other four have none, so they are open
-    here regardless of the state the report declares: a domain that closes
-    because a field was truthy is a status flag, and the consumer would be
-    reading the producer's word for what the producer did.
+    Four of the six now have a closing condition expressible in the raw
+    observations this schema emits: the two ledger conditions below, and the
+    two observation shapes that name the startup prefix and the KV backings.
+    The remaining two -- ``provenance_admission`` and ``timing_partition`` --
+    have none, so they are open here regardless of the state the report
+    declares: a domain that closes because a field was truthy is a status flag,
+    and the consumer would be reading the producer's word for what the producer
+    did.
     """
     blocked_by_issues = bool(observations["issues"])
     closed = {name: False for name in DOMAINS}
@@ -772,7 +925,105 @@ def _recompute_domains(observations: Mapping) -> dict[str, bool]:
                               and not observations["unattributed_external_records"])
     closed["external_closure"] = (not blocked_by_issues
                                   and observations["external_native_peak_bytes"] is not None)
+    closed["worker_startup"] = (not blocked_by_issues
+                                and _worker_startup_observed(observations, identity))
+    closed["cache_capacity"] = (not blocked_by_issues
+                                and _cache_capacity_observed(observations))
     return closed
+
+
+def _worker_startup_observed(observations: Mapping, identity: Mapping) -> bool:
+    """Whether this rank's resident-after-load observation is present.
+
+    The producer's own contract names the source: a
+    ``torch.cuda.memory_allocated()`` sample taken after
+    ``process_weights_after_loading`` and after ``lock_workspace()``, beside the
+    receipt's ``resources.resident_bytes`` and the ``resident_bytes`` of the
+    producer's own ``tessera.native_moe_workspace.v1`` record. The domain closes
+    when the record names this report's own rank (the process that measured it,
+    not the world it was configured for), the workspace is locked -- which is
+    what makes its resident storage a stable charge -- and the ledger's
+    fixed-owned resident rows sum to exactly the receipt's figure. That last
+    equality is what ties the engine-side sample to the allocation ledger this
+    consumer recomputes from, so neither side is trusted about the other; a zero
+    charge is a real state and closes on the same equality rather than being
+    refused for looking small.
+
+    The allocator's own sample must cover the receipt's resident plus its
+    workspace slots, which is the one direction the two sides can be compared
+    without either being a claim about the other's internals.
+    """
+    records = observations["worker_startup_records"]
+    if not records or len(records) != 1:
+        return False
+    record = records[0]
+    measured_rank = identity["run"].get("rank")
+    if measured_rank is not None and record["rank"] != measured_rank:
+        return False
+    if record["workspace_locked"] is not True:
+        return False
+    if record["memory_allocated_bytes"] < (record["receipt_resident_bytes"]
+                                           + record["workspace_resident_bytes"]):
+        return False
+    ledger = sum(row["bytes"] for row in observations["torch_allocations"]
+                 if list(row["observed_categories"]) == ["fixed"]
+                 and row["free_completed_index"] is None)
+    return ledger == record["receipt_resident_bytes"]
+
+
+def _cache_capacity_observed(observations: Mapping) -> bool:
+    """Whether the engine's own KV-pool accounting is present.
+
+    ``fixed_kv`` is the engine's, not this operator's: the source is the block
+    manager's resolved ``num_blocks`` and per-group page geometry beside the
+    observer's own deduplicated physical ``storage`` block. The domain closes on
+    the physical backings, not on a block-count formula: the distinct storages
+    must not overlap, their own bytes must add up to
+    ``unique_physical_storage_bytes``, and the ledger's ``kv``-owned resident
+    rows must sum to that same extent. A hybrid or multi-group config therefore
+    compares its actual backings rather than assuming every group's blocks are
+    identical, and a pool of zero blocks is a real state rather than a refusal.
+
+    ``runtime_admission`` is required and must be true: the intrusive snapshot
+    pass the capture harness emits sets it false and names itself timing- and
+    admission-ineligible in ``scope``, and closing this domain on that pass
+    would be pricing bytes the harness warns are not admissible.
+    """
+    records = observations["kv_observations"]
+    if not records or len(records) != 1:
+        return False
+    record = records[0]
+    if record["runtime_admission"] is not True:
+        return False
+    limits = record["resolved_limits"]
+    if limits["max_num_batched_tokens"] < 1 or limits["max_num_seqs"] < 1:
+        return False
+    pages = record["group_page_size_bytes"]
+    if not pages or any(page < 1 for page in pages):
+        return False
+    if record["num_blocks"] < 0:
+        return False
+    storage_set = record["storage"]
+    storages = storage_set["storages"]
+    if bool(storages) != bool(record["num_blocks"]):
+        return False
+    spans = []
+    for row in storages:
+        if (row["device_type"] != "cuda" or row["address"] < 1 or row["bytes"] < 1
+                or not row["owners"]):
+            return False
+        spans.append((row["device_type"], row["device_id"], row["address"],
+                      row["address"] + row["bytes"]))
+    ordered = sorted(spans)
+    for first, second in zip(ordered, ordered[1:]):
+        if (first[0], first[1]) == (second[0], second[1]) and first[3] > second[2]:
+            return False
+    if storage_set["unique_physical_storage_bytes"] != sum(row["bytes"] for row in storages):
+        return False
+    ledger = sum(row["bytes"] for row in observations["torch_allocations"]
+                 if list(row["observed_categories"]) == ["kv"]
+                 and row["free_completed_index"] is None)
+    return ledger == storage_set["unique_physical_storage_bytes"]
 
 
 def _recompute_membership(observations: Mapping) -> tuple[list[dict], list[dict], list[dict]]:
@@ -1125,7 +1376,7 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
             disagree(f"uncharged allocation {row['allocation_id']} is placed in another cell "
                      f"than it recomputes")
 
-    closed = _recompute_domains(observations)
+    closed = _recompute_domains(observations, identity)
     for name in DOMAINS:
         claimed = partition["domains"][name]
         if (claimed["state"] == "closed") != closed[name]:

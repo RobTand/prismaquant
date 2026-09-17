@@ -846,7 +846,9 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
                 raise ValueError("invalid tensor content hash")
             if tensor["dtype"] not in ("torch.float32", "torch.bfloat16", "torch.float16", "torch.float64") or type(tensor["logical_bytes"]) is not int or tensor["logical_bytes"] <= 0:
                 raise ValueError("invalid tensor storage identity")
-        if operator["source_weight"]["shape"] != operator["rendered_weight"]["shape"]:
+        source_shape = operator["source_weight"]["shape"]
+        rendered_shape = operator["rendered_weight"]["shape"]
+        if source_shape != rendered_shape:
             raise ValueError("render/source geometry differs")
         activation = operator["activation"]
         if activation["schema"] != "prismaquant.joint_aura.activation.v1" or type(activation["quantizes_input"]) is not bool:
