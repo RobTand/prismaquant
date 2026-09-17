@@ -24,6 +24,7 @@ from types import SimpleNamespace
 
 from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, atomic_write_bytes, canonical_json_sha256,
+    canonical_json_sha256_normalized,
     prepare_journal, unit_path, write_unit,
 )
 
@@ -424,7 +425,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
     _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
     identity = manifest["identity"]
-    seal = canonical_json_sha256(identity, where="joint anchor input")
+    # The checkpoint is parsed from JSON, so its identity is already normalized
+    # (string keys, dict/list containers, JSON scalars) and the seal can stream
+    # the canonical bytes into the digest. The generic helper normalizes first,
+    # which holds the encoded text, a second full graph and the second encoded
+    # text at once; on a checkpoint this size that is the difference between
+    # fitting a bounded envelope and being killed by it. Same digest -- held by
+    # tests/test_canonical_json_normalized.py.
+    seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
     _same(seal, manifest.get("identity_sha256"), "campaign checkpoint seal")
     _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
     _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
