@@ -2390,17 +2390,36 @@ def _render_score_read_contract(record: Mapping[str, object]):
     """
     fmt = record.get("format")
     if not isinstance(fmt, str) or not fmt:
+        # The one narrowed legacy case, and it is a property of the record's
+        # shape rather than of a failed lookup: ``_render_score_record`` has
+        # always stamped ``format``, so a static-G record without one was not
+        # written by this writer.  It carries no format to resolve, so the
+        # caller's process binding is the only expectation available.
         return None
     try:
         from prismaquant import format_registry as fr
 
         spec = fr.get_format(fr.canonical_format_name(fmt))
-    except Exception:
-        return None
+    except Exception as exc:
+        # FAIL CLOSED.  A format this tree cannot resolve -- a missing package,
+        # a corrupt registry row, a name whose render lane is gone -- is not
+        # evidence that the row was priced under the process's arithmetic.
+        # Reinterpreting a static-G cost under the global binding is exactly how
+        # a model-priced cost would be admitted as registered-operator pricing.
+        raise RuntimeError(
+            f"render score record names format {fmt!r}, which this tree cannot "
+            f"resolve ({type(exc).__name__}: {exc}); a static-G cost cannot be "
+            "checked against the arithmetic that priced it, so it is refused "
+            "rather than reinterpreted under another binding"
+        ) from exc
     try:
         return _static_activation_contract_of(spec)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(
+            f"render score record names format {fmt!r} whose activation "
+            f"contract cannot be read ({type(exc).__name__}: {exc}); refusing "
+            "to reinterpret a static-G cost under another binding"
+        ) from exc
 
 
 def _check_resumed_render_score_policies(

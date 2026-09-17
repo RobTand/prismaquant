@@ -181,6 +181,16 @@ def _registry_with(monkeypatch, contract):
     monkeypatch.setattr(pwc, "_static_activation_contract_of", lambda spec: contract)
 
 
+@pytest.fixture(autouse=True)
+def _the_registry_answers_in_this_module(monkeypatch):
+    """Every record here names a format, and the reader now RESOLVES it.
+
+    Scoped to this module on purpose: the fail-closed behaviour below is what
+    production sees, and a repository-wide fixture would hide it.
+    """
+    _registry_with(monkeypatch, None)
+
+
 def test_a_contract_bound_build_reuses_through_the_real_read(monkeypatch):
     """A correctly stamped contract-bound row must not be refused by the run's
     OWN binding: the reader resolves the contract the row was priced through."""
@@ -212,3 +222,17 @@ def test_the_real_read_still_rejects_another_build(monkeypatch):
 
     with pytest.raises(owner.ServedQuantizerUnboundError, match="differing axes are backend"):
         _check_resumed_render_score_policies(records, policy=POLICY, where="test")
+
+
+def test_an_unresolvable_format_is_refused_not_reinterpreted(monkeypatch):
+    """A missing package or corrupt registry row must fail closed."""
+    from prismaquant import format_registry as fr
+
+    _bind(_registered_identity())
+    monkeypatch.setattr(
+        fr, "get_format",
+        lambda name: (_ for _ in ()).throw(KeyError("no such format")))
+
+    with pytest.raises(RuntimeError, match="cannot be checked against the arithmetic"):
+        _check_resumed_render_score_policies(
+            _record(identity=_registered_identity()), policy=POLICY, where="test")
