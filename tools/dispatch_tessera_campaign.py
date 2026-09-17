@@ -426,8 +426,13 @@ def load_spec(path: Path) -> dict:
     for name in sorted(spec.get("classes") or {}):
         resolved = row_class(spec, name)
         if "container" in resolved:
+            # The bounded-capture environment contract is stated by the row
+            # that is actually bounded: a class whose argv asks for the
+            # bounded policy has it here, and a legacy class that declares its
+            # own purge delay is not refused for a rule it does not fall under.
             validate_container({"container": resolved["container"],
-                                "env": resolved["env"]})
+                                "env": resolved["env"]},
+                               bounded=_row_is_bounded(resolved.get("argv") or []))
     validate_row_classes(spec, where=str(path))
     _process_baseline_bytes(spec, where=str(path))
     return spec
@@ -1502,6 +1507,28 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
 CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
 
 
+def _row_is_bounded(argv: list[str]) -> bool:
+    """Whether this row runs the bounded capture path.
+
+    One predicate, two readers: the row builder that merges the bounded
+    capture environment, and the container validation that holds a spec to the
+    SAME environment. A legacy row that declares its own purge delay is not a
+    bounded row and is not refused for a contract it does not fall under.
+    """
+    policy_flag = '--streaming-capture-policy'
+    # ``--streaming-capture-policy`` takes a value, and a malformed argv that
+    # ends on the flag has no next element: reading it blindly raised
+    # IndexError, which is a crash rather than the refusal a malformed flag
+    # deserves. A flag with no value is not the bounded policy.
+    index = argv.index(policy_flag) if policy_flag in argv else None
+    named = (argv[index + 1] if index is not None and index + 1 < len(argv)
+             else None)
+    bounded = (policy_flag + '=shared-inputs-bounded-v1' in argv
+               or named == 'shared-inputs-bounded-v1')
+    return bounded or all(flag in argv for flag in
+        ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
+
+
 def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
          progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
          module: str = "prismaquant.tessera_campaign",
@@ -1537,12 +1564,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
                 f"argv names {named}; those bytes depend on a Hessian this "
                 "class may not have measured or adopted")
     env = dict(resolved['env'])
-    policy_flag = '--streaming-capture-policy'
-    bounded = (policy_flag+'=shared-inputs-bounded-v1' in argv or
-               (policy_flag in argv and
-                argv[argv.index(policy_flag)+1] == 'shared-inputs-bounded-v1'))
-    bounded = bounded or all(flag in argv for flag in
-        ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
+    bounded = _row_is_bounded(argv)
     if bounded:
         from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
         env = {**BOUNDED_CAPTURE_ENV, **env}
@@ -1550,7 +1572,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
     command = [resolved["python"], "-u", "-m", module, *argv]
     if "container" in resolved:
         container_spec = {"container": resolved["container"], "env": env}
-        validate_container(container_spec)
+        validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
                    json.dumps(container_spec, sort_keys=True), "--", *command]
     row = {
@@ -2400,7 +2422,7 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
 
 
 def _pbrun_argv(args, *, manifest: Path, inner: list[str],
-                progress_phases=(), gpu_memory_gb=None) -> list[str]:
+                progress_phases=(), gpu_memory_gb=None, container_spec=None) -> list[str]:
     """The submission command, with ``--data-manifest`` before ``--detach``.
 
     Everything after ``--`` is the action; ``--data-manifest`` is an option of
@@ -2409,7 +2431,8 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     summary into the action, which is also why ``produced_by`` carries nothing
     run-specific: the manifest's digest is part of the action key.
     """
-    spec = Path(args.spec).read_text()
+    spec = (Path(args.spec).read_text() if container_spec is None
+            else json.dumps(container_spec, sort_keys=True))
     argv = ["python3", str(args.pbrun), "--demand", args.demand]
     if gpu_memory_gb is not None:
         # The device envelope is a *subset* of the unified reservation on
@@ -2462,6 +2485,14 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     manifest is built, so a plan whose inputs are not on disk yet still shows
     what would be submitted.
     """
+    container_spec = json.loads(Path(args.spec).read_text())
+    if (entry_point == JOINT_ENTRY_POINT
+            and (plan.get("qualification_window") is not None
+                 or plan.get("execution", {}).get("retained_operator_windows") is not None)):
+        from tools.tessera_campaign_container import BOUNDED_CAPTURE_ENV, validate_container
+        validate_container(container_spec, bounded=True)
+        container_spec = {**container_spec,
+                          "env": {**BOUNDED_CAPTURE_ENV, **container_spec.get("env", {})}}
     manifest_path = _manifest_path(args, plan, entry_point=entry_point,
                                    command=command)
     manifest = build()
@@ -2475,7 +2506,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     # a reservation below the container cap or below the combined physical
     # bound is refused here rather than admitted and then declined by the row.
     demand_record = verify_joint_submission_demand(
-        json.loads(Path(args.spec).read_text()), plan, args.demand,
+        container_spec, plan, args.demand,
         label=f"{entry_point}:{command}")
     gpu_memory_gb = None
     gpu_bytes = plan.get("max_gpu_bytes")
@@ -2516,7 +2547,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
                      "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
     argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
                        progress_phases=phase_names,
-                       gpu_memory_gb=gpu_memory_gb)
+                       gpu_memory_gb=gpu_memory_gb, container_spec=container_spec)
     summary = {
         "entry_point": f"{entry_point}:{command}",
         "data_manifest": str(manifest_path),

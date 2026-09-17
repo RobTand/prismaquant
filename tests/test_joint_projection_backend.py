@@ -148,6 +148,13 @@ def test_prewarmer_device_scope_cannot_be_reused_for_another_device():
         backend.require_prewarmed_projection(fused, device='cuda:1')
 
 
+def _stub_device_envelope(monkeypatch, bridge):
+    """State the device envelope without a device (see tests/test_tessera_joint_aura.py)."""
+    monkeypatch.setattr(bridge, "_apply_device_envelope", lambda device, device_bytes, **kw: {
+        "enforced": False, "stub": True, "device": str(device),
+        "device_envelope_bytes": int(device_bytes)})
+
+
 def _plan(tmp_path):
     from prismaquant.tessera_joint_aura import SCHEMA
     return {'schema': SCHEMA, 'model': 'fixture', 'inputs': {}, 'output_root': str(tmp_path),
@@ -179,6 +186,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
     from prismaquant import model_profiles, aura_cost, joint_aura
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)
+    _stub_device_envelope(monkeypatch, bridge)
     monkeypatch.setattr(model_profiles, 'detect_profile', lambda _: object())
     draw = dict(fit_ids_sha256='a' * 64, text_sha256='b' * 64, nsamples=512, seqlen=512, seed=0)
     calibration = {'provenance': draw}
@@ -245,6 +253,7 @@ def test_identity_gate_refuses_before_the_head_phase_writes_any_render(tmp_path,
         # The measured difference between the qualifying and campaign images.
         'cxx_version': 'c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\n'})
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)
+    _stub_device_envelope(monkeypatch, bridge)
     monkeypatch.setattr(bridge, 'load_measured_anchor_input',
                         lambda *_args, **_kwargs: pytest.fail('the head phase ran before the identity gate'))
     config = _plan(tmp_path)

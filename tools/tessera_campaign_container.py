@@ -37,6 +37,37 @@ TOKEN_ENV = "PRISMABUILD_ACTION_PROGRESS_TOKEN"
 SAFE_PATH_ENV = "PYTHONSAFEPATH"
 
 
+#: The environment a bounded capture row's process must have been started with,
+#: per ``prismaquant/autoscale.py``: torch wheels may statically link mimalloc,
+#: whose delayed purge otherwise retains completed H/X after every owner is
+#: gone, and the release-source-pages policy is the other half of the same
+#: bounded phase plan. ``prismaquant.tessera_joint_aura`` calls
+#: ``require_bounded_capture_environment`` before metadata intake and device
+#: allocation; the joint submission adapter supplies missing names from the
+#: plan's qualification-window or retained-execution requirement.
+#:
+#: Carried here for the same reason as ``PATH_ENV`` and ``SAFE_PATH_ENV``:
+#: importing ``prismaquant`` on the worker to read the contract runs the
+#: package's production initialisation before the qualified container starts
+#: (#601), and this adapter is host-side. The two constants are held together by
+#: ``tests/test_tessera_campaign_container.py``, which imports both and fails if
+#: they drift -- a second copy is only a defect when nothing compares them.
+#:
+#: The launcher SUPPLIES these for a BOUNDED row rather than requiring the spec
+#: to restate them, and refuses a bounded spec that declares a different value.
+#: A bounded row cannot start without them, and refusing a sealed spec for
+#: omitting one would turn a fixable launch into a re-seal. They are the
+#: bounded path's environment and nothing else's: a legacy row that declares
+#: ``MIMALLOC_PURGE_DELAY=10`` on purpose keeps 10 in the container it starts.
+#: The launcher states which contract it is under from the row's own sealed
+#: environment (``main``), because that is the only marker the host-side
+#: adapter sees -- it is deliberately importable without ``prismaquant``.
+BOUNDED_CAPTURE_ENV = {
+    "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
+    "MIMALLOC_PURGE_DELAY": "0",
+}
+
+
 #: How a container reaches the GPU it was admitted for, per GPU runtime.
 #:
 #: ``--gpus all`` is the NVIDIA container runtime's flag and nothing else's. A
@@ -92,7 +123,16 @@ def container_memory_budget_gb(spec: dict) -> float | None:
     return float(raw)
 
 
-def validate_container(spec: dict) -> None:
+def validate_container(spec: dict, *, bounded: bool = False) -> None:
+    """Check a container spec, with the bounded-capture env gate opt-in.
+
+    ``bounded`` is the caller stating that this row is a bounded capture row.
+    The environment contract below belongs to THAT path -- a legacy row that
+    declares ``MIMALLOC_PURGE_DELAY=10`` on purpose is not a bounded capture
+    row, and refusing it here would break unrelated work for a rule it does
+    not fall under. The dispatch path already knows which it is building and
+    passes it.
+    """
     container = spec.get("container")
     if not isinstance(container, dict) or set(container) - {"image", "mounts", "content_sha256", "archive", "gpu_runtime"}:
         raise RuntimeError("container must declare image and optional mounts/content_sha256/archive/gpu_runtime only")
@@ -156,6 +196,16 @@ def validate_container(spec: dict) -> None:
         raise RuntimeError('actual container content is supplied by the inspected launcher')
     if SAFE_PATH_ENV in env:
         raise RuntimeError('the import guard is supplied by the launcher, not by a spec')
+    for name, expected in BOUNDED_CAPTURE_ENV.items():
+        # Declaring it is optional -- the launcher supplies it -- but a spec may
+        # not weaken it, and the refusal names the field so a reader of the spec
+        # does not have to diff the container's environment to find out.
+        if bounded and name in env and env[name] != expected:
+            raise RuntimeError(
+                f"spec env {name}={env[name]!r} contradicts the bounded capture "
+                f"contract ({name}={expected!r}); the launcher would have to "
+                "override the spec to run the row, and a bounded row that starts "
+                "with the wrong value is refused by the pass before metadata intake")
 
 
 def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
@@ -377,8 +427,8 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
 
 def docker_command(spec: dict, command: list[str], *, cwd: str,
                    uid: int, gid: int, image_id: str, content_sha256=None,
-                   with_gpu=True, environ=None) -> list[str]:
-    validate_container(spec)
+                   with_gpu=True, environ=None, bounded=False) -> list[str]:
+    validate_container(spec, bounded=bounded)
     gpu_flags = GPU_RUNTIME_FLAGS[
         spec["container"].get("gpu_runtime", DEFAULT_GPU_RUNTIME)]
     argv = ["docker", "run", "--rm", *(gpu_flags if with_gpu else []), "--ipc=host",
@@ -416,7 +466,14 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
         if mount.get("readonly", False):
             value += ",readonly"
         argv += ["--mount", value]
+    # The bounded capture defaults are the BOUNDED path's environment, so they
+    # are merged only for a row the caller says is bounded. Merging them for
+    # every row overrode a legacy spec's own declaration one layer below the
+    # row-env check that already keeps it: a legacy row sealed with
+    # ``MIMALLOC_PURGE_DELAY=10`` reached the container with ``0``.
+    bounded_defaults = BOUNDED_CAPTURE_ENV if bounded else {}
     forwarded = {SAFE_PATH_ENV: "1", **spec.get("env", {}),
+                 **bounded_defaults,
                  **progress_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
@@ -451,7 +508,16 @@ def main(argv=None) -> int:
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     spec = json.loads(args.spec)
-    validate_container(spec)
+    # The spec the launcher forwards carries the bounded capture environment
+    # only for a bounded row (``dispatch_tessera_campaign._row_is_bounded``
+    # merges it), so the row's own env is the marker that says which contract
+    # this is: a legacy spec that names a different purge delay is not held to
+    # a contract it never declared, and is not handed the bounded defaults
+    # either. Both readers of the marker -- the validation below and the
+    # argv built later -- are stated from this one value.
+    forwarded_env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
+    bounded = all(name in forwarded_env for name in BOUNDED_CAPTURE_ENV)
+    validate_container(spec, bounded=bounded)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a container command is required")
@@ -479,7 +545,7 @@ def main(argv=None) -> int:
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id,
                             content_sha256=content_digest, with_gpu=with_gpu,
-                            environ=os.environ)
+                            environ=os.environ, bounded=bounded)
     os.execvp(docker[0], docker)
     return 1  # exec never returns
 

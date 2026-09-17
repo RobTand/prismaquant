@@ -1047,6 +1047,77 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
         line for line in printed.splitlines() if line.startswith("[submit] "))
 
 
+@pytest.mark.parametrize("mode", ["qualification", "retained", "legacy"])
+@pytest.mark.parametrize("original_env", [{}, {"PRISMAQUANT_RELEASE_SOURCE_PAGES": "1"}])
+def test_joint_submit_environment_reaches_launcher_argv(
+    scratch, shared_mount, monkeypatch, capsys, mode, original_env,
+):
+    import dispatch_tessera_campaign as dispatch
+    from tools import tessera_campaign_container as launcher
+
+    fixture = _workspace(scratch)
+    plan = json.loads(fixture["plan"].read_text())
+    if mode != "qualification":
+        plan.pop("qualification_window")
+    if mode == "retained":
+        plan["execution"]["retained_operator_windows"] = {"schema": "fixture"}
+    fixture["plan"].write_text(json.dumps(plan))
+    environment = dict(original_env)
+    if mode == "legacy":
+        environment["MIMALLOC_PURGE_DELAY"] = "10"
+        environment.pop("PRISMAQUANT_RELEASE_SOURCE_PAGES", None)
+    spec = scratch / "spec.joint.json"
+    original = json.dumps({"container": {"image": "x"}, "env": environment})
+    spec.write_text(original)
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    assert dispatch.main([
+        "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+        *_scope_args(fixture), "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+        "--manifest-dir", str(scratch / "manifests"), "--dry-run",
+    ]) == 0
+    line = next(line for line in capsys.readouterr().out.splitlines()
+                if line.startswith("[dry-run] "))
+    submitted = shlex.split(line[len("[dry-run] "):])
+    launcher_args = submitted[submitted.index("tools.tessera_campaign_container") + 1:]
+    monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [{"Id": "sha256:" + "a" * 64}])
+    monkeypatch.setattr(launcher, "image_content_sha256", lambda _: "b" * 64)
+    monkeypatch.setattr(launcher, "verify_pinned_import", lambda *args, **kwargs: {})
+    monkeypatch.setattr(launcher, "gpu_attachment", lambda *args, **kwargs: (False, "CPU test"))
+    executed = []
+    monkeypatch.setattr(launcher.os, "execvp", lambda binary, argv: executed.append(argv))
+    launcher.main(launcher_args)
+    docker_env = dict(item.split("=", 1) for index, item in enumerate(executed[0])
+                      if index and executed[0][index - 1] == "--env")
+    assert spec.read_text() == original
+    if mode == "legacy":
+        assert docker_env["MIMALLOC_PURGE_DELAY"] == "10"
+        assert "PRISMAQUANT_RELEASE_SOURCE_PAGES" not in docker_env
+    else:
+        assert docker_env["MIMALLOC_PURGE_DELAY"] == "0"
+        assert docker_env["PRISMAQUANT_RELEASE_SOURCE_PAGES"] == "1"
+
+
+@pytest.mark.parametrize("name,value", [("MIMALLOC_PURGE_DELAY", "10"),
+                                        ("PRISMAQUANT_RELEASE_SOURCE_PAGES", "0")])
+def test_joint_submit_refuses_environment_conflicts_before_manifest(
+    scratch, shared_mount, monkeypatch, name, value,
+):
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}, "env": {name: value}}))
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest",
+                        lambda *args, **kwargs: pytest.fail("manifest built before environment refusal"))
+    with pytest.raises(RuntimeError, match=name):
+        dispatch.main([
+            "submit-joint", "prepare", "--plan", str(fixture["plan"]),
+            *_scope_args(fixture), "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+            "--manifest-dir", str(scratch / "manifests"), "--dry-run",
+        ])
+
+
 def test_fresh_verified_prepare_seals_the_same_phases_and_manifest_digest(
     scratch, shared_mount, capsys, monkeypatch,
 ):

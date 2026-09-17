@@ -1029,6 +1029,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     from . import tessera_calibration_cache as cc, tessera_hessian as th, tessera_campaign as tc
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .joint_prewarm_phases import phase_name
+    from .memory_management import reserve_allocation
     from .production_weight_cache import ProductionWeightCache
     from .routed_experts import PackedExpertProjection, refresh_packed_expert_projections
     from . import format_registry as fr
@@ -1235,12 +1236,36 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                 unit_load_execution = {}
                 try:
                     if guard is not None:
-                        guard.check('before_joint_qualification_unit:' + unit_names[0], reserve_bytes=
-                            2 * capture_sizes[unit_names[0]] + max_render_bytes +
-                            policy['max_load_buffer_bytes'] + 2 * max_wire_read_bytes +
-                            policy['workspace_reserve_bytes'] +
-                            (0 if capture_load_policy is None else 2 * capture_load_policy['max_buffer_bytes'] +
-                             capture_load_policy['max_scratch_bytes']))
+                        # TWO BUDGETS, ONE UNIT'S FUTURE. The unit's capture
+                        # payload, its serialized load buffers, the wire blobs
+                        # read ahead of the render and the verified-load scratch
+                        # are bytes THIS PROCESS holds, so they are charged to
+                        # the cgroup cap the kernel enforces. The unit's X/H
+                        # (moved to the device by the capture prefetch), the
+                        # render being verified and the projection's workspace
+                        # are device bytes, charged to the plan's envelope. The
+                        # render is charged to BOTH on purpose and is the one
+                        # term this adds to the old mixed number: PWC's backing
+                        # storages are the cgroup's, and the tensor handed to the
+                        # verifier is a copy of it on the device, so a bound that
+                        # named the render once was counting one of the two.
+                        # Everything else is the same total, re-labelled:
+                        # adding the device half to the 21 GiB cap is what
+                        # refused the row's first unit.
+                        capture_bytes = capture_sizes[unit_names[0]]
+                        reserve_allocation(
+                            guard.check,
+                            'before_joint_qualification_unit:' + unit_names[0],
+                            cpu_bytes=(
+                                capture_bytes + max_render_bytes +
+                                policy['max_load_buffer_bytes'] +
+                                2 * max_wire_read_bytes +
+                                (0 if capture_load_policy is None else
+                                 2 * capture_load_policy['max_buffer_bytes'] +
+                                 capture_load_policy['max_scratch_bytes'])),
+                            device_bytes=(
+                                capture_bytes + max_render_bytes +
+                                policy['workspace_reserve_bytes']))
                     (acts, hessians, _counts, _maxima), _receipt = cc.prefetch_capture(capture_path,
                         expected_sha256=capture["sha256"],
                         **({"expected_identity": expected} if metadata_owner is None else
@@ -1561,6 +1586,41 @@ def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
     return completion
 
 
+def _config_device_envelope(config, command):
+    """The device envelope a joint command declares, read before any device.
+
+    ``max_gpu_bytes`` is what ``_load_plan`` requires of every admitted plan,
+    and the envelope is the FIRST thing a command does that reaches the CUDA
+    allocator. Reading it with ``config["max_gpu_bytes"]`` therefore turned a
+    config the admission gate would have refused into a ``KeyError`` raised
+    after the device had already been touched -- indistinguishable, to a
+    reader, from a plan that was admitted and failed later. Stating it here
+    keeps the cheap input refusal cheap, and keeps the allocator touch to the
+    one place that owns it.
+    """
+    if "max_gpu_bytes" not in config:
+        raise ValueError(
+            f"joint {command}: the plan declares no max_gpu_bytes; every "
+            "admitted plan carries the device envelope its row is bounded by")
+    return config["max_gpu_bytes"]
+
+
+def _apply_device_envelope(device, device_bytes, *, where):
+    """Set the CUDA allocator envelope, through the one seam that names it.
+
+    A module-level indirection so the CPU suites that drive ``execute`` for its
+    preflight refusals can state the envelope without a device: those tests
+    patch ``gpu_guard.require_cuda_hot_path`` because a refusal that happens
+    before any allocation must be reachable without CUDA, and the envelope --
+    which is the FIRST thing that touches the allocator -- is the same shape of
+    seam. On a real box this is
+    :func:`prismaquant.memory_management.enforce_device_envelope` unchanged.
+    """
+    from .memory_management import enforce_device_envelope
+
+    return enforce_device_envelope(device, device_bytes, where=where)
+
+
 def _restores_activation_scale_env(function):
     """Scope ``execute``'s activation-scale write to the call that makes it.
 
@@ -1622,6 +1682,28 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     from .tessera_reader import load_declared_reader
 
     require_cuda_hot_path("tessera_joint_aura", "cuda")
+    # THE ENVELOPE'S OWN CONFIG IS READ HERE, as a pure input refusal: a plan
+    # with no ``max_gpu_bytes`` is refused, by name, before this process has
+    # touched the allocator -- read with a subscript it was a ``KeyError``
+    # raised after a device allocation, indistinguishable from an admitted
+    # plan that failed later. The value's own validation (a positive byte
+    # count) and the allocator touch both belong to ``_apply_device_envelope``
+    # further down. ``synthesize`` is the one CPU command and never reaches
+    # this function.
+    #
+    # WHAT IS *NOT* PROMISED: the prepared-completion preflight compares the
+    # record against the prewarmed projection backend's identity, so it cannot
+    # run before the prewarm, and the prewarm is what allocates. A stale
+    # prepared record therefore refuses just after the envelope is set rather
+    # than before it. Both the pure refusal and the ordering are measured on a
+    # CPU-only box, with no mocked device, by
+    # ``test_a_missing_device_envelope_is_a_pure_input_refusal`` and
+    # ``test_the_declared_envelope_reaches_the_allocator_unchanged``.
+    declared_device_bytes = _config_device_envelope(config, command)
+    if (config.get("qualification_window") is not None
+            or config["execution"].get("retained_operator_windows") is not None):
+        from .autoscale import require_bounded_capture_environment
+        require_bounded_capture_environment(os.environ)
     os.environ[ACTIVATION_SCALE_ENV] = config["execution"]["production_act_scales"]
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision("highest")
@@ -1629,6 +1711,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     execution = config["execution"]
     root = Path(config["output_root"]) / command
     root.mkdir(parents=True, exist_ok=True)
+    device_envelope = None
     prewarm_phase_starts = None
     sealed_replay = None
     prewarm_phases = None
@@ -1660,7 +1743,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
                   "started_epoch": time.time(), "torch": str(torch.__version__),
                   "cuda": torch.version.cuda, "affinity": sorted(os.sched_getaffinity(0))},
-              "phases": [], "passed": False}
+              "phases": [], "passed": False, "device_envelope": device_envelope}
     result["env"]["container_content_sha256"] = executing_image()
     profile_tool = config.get("profile_tool", "cprofile")
     profiler = cProfile.Profile() if profile_tool == "cprofile" else None
@@ -1688,8 +1771,6 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         # Every capture-free identity gate runs first: an unqualified runtime,
         # kernel source digest, build flag or binary sha256 is refused in
         # seconds rather than after hours of measured anchor input (#553).
-        projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
-        result["projection_backend"] = projection_backend.identity
         # The reader is bound first of the input owners: synthesizing an
         # adopted rung's missing render decodes its wire, and that decode must
         # come from the same bound consumer the qualification leg uses, not a
@@ -1698,6 +1779,21 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         reader_identity = None if reader is None else reader.identity
         implementation = (_aura_source_sha256() if source_transition is None
                           else source_transition.measurement_source_sha256)
+        # THE DEVICE ENVELOPE IS APPLIED HERE, after the refusals that need no
+        # device -- the envelope's own config and the declared reader -- and
+        # before the first thing that allocates on the device (the projection
+        # prewarm below). The prepared-completion preflight is the one refusal
+        # that cannot precede it: it compares the record against the prewarmed
+        # backend's identity, and the prewarm is what allocates. Both GPU
+        # commands take it, because both allocate, and ``max_gpu_bytes`` was
+        # otherwise compared with ``max_memory_allocated`` only after a window
+        # had run, which on a unified-memory box is a report about memory
+        # already spent.
+        device_envelope = _apply_device_envelope(
+            "cuda", declared_device_bytes, where=f"joint {command}")
+        result["device_envelope"] = device_envelope
+        projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
+        result["projection_backend"] = projection_backend.identity
         if command == "run":
             _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
                 implementation_sha256=implementation, reader_identity=reader_identity,
@@ -1740,10 +1836,17 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             result['joint_eval'] = eval_panel
         if command == "prepare":
             if config.get("qualification_window") is not None:
-                from .autoscale import require_bounded_capture_environment
                 from .memory_management import CaptureMemoryGuard
-                require_bounded_capture_environment(os.environ)
-                qualification_guard = CaptureMemoryGuard("cuda")
+                # TWO BUDGETS, TWO ENFORCEMENTS. The cgroup cap the spec declares
+                # is a CPU-accounted hard limit; the plan's ``max_gpu_bytes`` is
+                # the device envelope, already applied above before this process
+                # touched the device. The guard holds the first, that cap holds
+                # the second, and the aggregate the submission reserved from
+                # PrismaBuild is their sum -- so a row that holds 80 GiB of
+                # device residency beside a 21 GiB CPU cap is bounded rather
+                # than refused by its own arithmetic.
+                qualification_guard = CaptureMemoryGuard(
+                    "cuda", device_bytes=config["max_gpu_bytes"])
                 qualification_guard.check("before_joint_source_authentication")
             source_authentication = _prepare_source_owner(
                 config, data, resource_check=(None if qualification_guard is None

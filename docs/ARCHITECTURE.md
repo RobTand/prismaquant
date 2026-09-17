@@ -1,7 +1,25 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/nvfp4-empty-activation-guard-20260917`. Stamps
+As of: 2026-09-17 · `flash/bounded-capture-guard-main`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/bounded-capture-guard-main`) for **the joint
+submission adapter carrying the bounded environment**. `submit-joint` derives
+the requirement from the plan's `qualification_window` or
+`execution.retained_operator_windows`, validates explicit values against the
+existing `BOUNDED_CAPTURE_ENV`, and fills missing defaults in the serialized
+container spec passed to PrismaBuild. It does not mutate the operator's spec
+file. Contradictions refuse before manifest construction; genuinely unbounded
+legacy rows retain their declared purge delay. The container launcher receives
+both names and enforces the same contract. `tessera_joint_aura.execute` refuses
+an incomplete bounded environment after the pure device-envelope configuration
+check but before source identity metadata, prewarm read sets, or allocator
+touches. The device cap still follows pure input refusals and precedes the
+first device allocation. No format, calibration arithmetic, residency budget,
+or serving gate changes. Regression gates:
+`tests/test_glm_joint_data_manifest_at_submit.py` exercises `cmd_submit_joint`
+through the launcher's Docker argv; `tests/test_tessera_joint_aura.py` checks
+the early refusal and existing device ordering.
 
 Re-stamped (2026-09-17, `flash/nvfp4-empty-activation-guard-20260917`) for the
 **empty activation batch** on the served static contract's registered-operator
@@ -15,6 +33,61 @@ and device instead of launching. Measured on sparklina, sm_121, image
 checked launch, fixed M = 0 completed `next_launch` + `sync2` with an empty
 `(0, 1024)` bf16 output, and M = 1 was clean on both. No other quantizer path,
 contract field, cache rule or gate moves.
+
+Re-stamped (2026-09-17, `flash/bounded-capture-guard-main`) for **the
+bounded joint row holding two budgets, not one**. A bounded row is 21 GiB of
+enforced CPU cap (the spec's `cpu_memory_gb`, passed as `docker --memory` and
+`--memory-swap`), 80 GiB of device envelope (the plan's `max_gpu_bytes`) and a
+101 GiB aggregate PrismaBuild reservation, which is the sum of the two budgets.
+`CaptureMemoryGuard` added the whole CUDA reservation to the cgroup charge and
+compared the sum with the smallest limit it could see, so a row holding 80 GiB
+of device residency beside a 21 GiB CPU cap refused at construction -- its own
+arithmetic, not a physical bound. The guard now takes an optional `device_bytes`
+envelope and, when one is declared, holds three separate refusals: the cgroup's
+accounted bytes against `cap - MARGIN_BYTES`, `torch.cuda.memory_reserved`
+against the envelope, and host availability against a host floor (minimum
+`MIN_HOST_FLOOR_BYTES`, 3 GiB; the bounded capture path holds 8 GiB, the
+campaign's own declared `min_free_gib`, inherited rather than measured here).
+Without `device_bytes` every existing caller keeps the conservative predicate
+unchanged.
+
+The split only bounds the row if the bytes arrive on the right side of it, so
+the CALLERS were fixed in the same change. `prepare_cache`'s per-unit
+reservation, `tessera_calibration_cache`'s prefetch (serial and parallel) and
+`cost_streaming`'s selected-source copy each charge the payload they hold to the
+cgroup and the tensors they hand to the device to the envelope, through
+`memory_management.reserve_allocation` -- a callback that does not declare the
+split keeps the old summed arithmetic, so no unrelated caller moves. The render
+term is now charged to BOTH budgets: its PWC backing storage is the cgroup's and
+the tensor the verifier receives is a copy on the device, so the bound that
+named it once was counting one of the two. `enforce_device_envelope` calls
+`torch.cuda.set_per_process_memory_fraction` with the plan's budget over the
+device's own reported total -- on the device's RESOLVED index, because the
+allocator api refuses the unspecified `cuda` the properties call accepts -- and
+is applied on the execution path for `prepare` AND `run` after the refusals
+that need no device and before the first allocation: the plan's `max_gpu_bytes`
+is read by name, so a plan without it refuses before any allocator touch, and
+the projection prewarm -- the first thing that allocates -- follows the cap. A
+stale prepared completion is the one refusal that comes after it, because it is
+compared against the prewarmed backend's identity. No CUDA context, streamer,
+kernel or tensor exists before the cap; the fraction bounds torch's caching
+allocator, not the CUDA context, NCCL or native driver allocations, and the
+CPU-only stage never reaches it.
+PrismaBuild's `--gpu-memory-gb` is admission accounting (verified by inspection:
+no fleet runtime path sets a process-level CUDA cap in the action environment),
+so the process-level bound is the one above. The bounded capture environment
+(`PRISMAQUANT_RELEASE_SOURCE_PAGES=1`, `MIMALLOC_PURGE_DELAY=0`) is supplied by
+`tools/tessera_campaign_container.py` the way `PYTHONSAFEPATH` is, because the
+producer image bakes in neither name and `require_bounded_capture_environment`
+runs at the pass's first bounded step, minutes into the loader, where a missing
+name is a dead pilot rather than a refusal; a spec that declares a contradicting
+value is refused rather than overridden, and only a BOUNDED row is handed those
+defaults -- a legacy row keeps the environment it was sealed with, in the argv
+the container is actually started from. Gates:
+`tests/test_capture_memory_guard.py`, `tests/test_tessera_campaign_container.py`,
+`tests/test_tessera_joint_aura.py`, `tools/joint_prepare_startup_probe.py`. The
+container `--memory` cap the CPU budget is enforced by is
+RobTand/prismaquant#663's launcher change, not this one.
 
 Re-stamped (2026-09-17, `campaign/identity-and-coverage-main-20260916`) for
 **a joint AURA row being only its own cell**. The per-cell AQUA coverage
