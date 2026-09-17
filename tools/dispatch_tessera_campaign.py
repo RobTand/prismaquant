@@ -1058,9 +1058,12 @@ def joint_campaign_scope(plan: dict, *, label: str = "joint row") -> dict:
     # The candidate roster is `identity.units[unit].menu` inside the campaign's
     # merged checkpoint, and the joint loader refuses any priced rung outside
     # it. Binding that artifact binds the exact (unit, format) roster the pass
-    # is admitted against -- a reduced or substituted menu is different bytes,
-    # so it is a different campaign -- without re-reading 6.8 GB of identity at
-    # submission time to name it twice.
+    # is admitted against: a reduced or substituted menu is different bytes, so
+    # it is a different campaign. The bind costs ONE sequential read of the
+    # artifact per submission (``_bound_digest`` hashes it rather than trusting
+    # the plan's own number); what it avoids is parsing the identity into the
+    # graph, which is the memory the joint loader's streaming seal exists to
+    # remove.
     campaign_checkpoint_sha256 = _bound_digest(
         inputs, "merged_checkpoint", label=label,
         where="joint plan inputs.merged_checkpoint")

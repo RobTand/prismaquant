@@ -811,8 +811,11 @@ fields, and the frozen identity has to reproduce them:
 * `campaign_checkpoint_sha256` -- the plan's bound merged campaign checkpoint.
   That artifact's `identity.units[unit].menu` is the exact per-unit candidate
   roster the pass is admitted against (the loader refuses any priced rung
-  outside it), so binding it binds the candidate roster without re-reading 6.8
-  GB of identity at submission time.
+  outside it), so binding it binds the candidate roster. The bind hashes the
+  artifact -- one sequential read per submission, once and not per row -- and
+  it is the parsing that is avoided, not the read: the identity is never turned
+  into a graph here, which is the memory the joint loader's streaming seal
+  exists to remove.
 
 A frozen identity sealed before these fields existed says so -- it must be
 re-sealed from a campaign-scoped plan -- rather than comparing against an absent
