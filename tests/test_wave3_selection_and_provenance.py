@@ -10,7 +10,9 @@
 """
 
 import json
+import pickle
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -151,6 +153,50 @@ def test_unstamped_cost_tables_are_reused_not_invalidated():
     block = script.split("cost_table_reusable() {", 1)[1].split("\n}", 1)[0]
     assert "predates the R2 stamp" in block
     assert "return 0" in block
+
+
+def test_cost_table_reuse_is_unverified_legacy_and_never_restamped(tmp_path):
+    """Execute the real predicate rather than only reading it (RobTand/prismaquant#654).
+
+    Legacy reuse stays allowed; what must not happen is the shell quietly
+    treating an unstamped table as if it carried the current mode. The
+    predicate is also asserted to leave the table's bytes alone, so no later
+    reader can find a `provenance['cost_mode']` this run invented.
+    """
+    script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
+    block = "cost_table_cost_mode() {" + script.split(
+        "cost_table_cost_mode() {", 1)[1].split(
+        "\nrequire_stage_settings() {", 1)[0]
+
+    def reusable(payload, mode="aura"):
+        path = tmp_path / "cost.pkl"
+        path.write_bytes(pickle.dumps(payload))
+        before = path.read_bytes()
+        command = (f"{block}\nCOST_MODE={mode}\n"
+                   "cost_table_reusable \"$1\"\necho \"RC=$?\"\n")
+        result = subprocess.run(["bash", "-c", command, "bash", str(path)],
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+        assert path.read_bytes() == before, "the predicate rewrote the cost table"
+        return int(result.stdout.strip().rsplit("RC=", 1)[1]), result.stdout
+
+    # Pre-R2 table: reusable, but only as an unverified legacy artifact.
+    rc, output = reusable({"costs": {"u": {"BF16": {"predicted_dloss": 0.0}}}})
+    assert rc == 0
+    assert "no provenance['cost_mode']" in output
+    assert "UNVERIFIED" in output
+
+    # Matching stamp: reusable, silent.
+    rc, output = reusable(
+        {"costs": {}, "provenance": {"cost_mode": "aura"}})
+    assert rc == 0
+    assert "predates the R2 stamp" not in output
+
+    # Stamped mismatch: still refused, naming both modes.
+    rc, output = reusable(
+        {"costs": {}, "provenance": {"cost_mode": "local"}})
+    assert rc == 1
+    assert "local" in output and "aura" in output and "REBUILDING" in output
 
 
 # -------------------------------------------------------------------- R11
