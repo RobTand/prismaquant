@@ -266,3 +266,107 @@ def test_the_lfm_routing_is_untouched_by_the_glm_addition():
     glm = glm_routing(routed_scaling_factor=1.0)
     with pytest.raises(ValueError):
         panel.validate_routing(glm)
+
+
+# --------------------------------------------------------------------------
+# Root review of 266f80e52f: the four holes, each pinned by a regression
+# --------------------------------------------------------------------------
+
+def test_a_correction_bias_is_mandatory_for_this_source():
+    """`noaux_tc` routes on the bias, so a capture without it is a different model.
+
+    Root review found `validate_glm_routing` accepted `correction_bias=None`,
+    which reads as "this source has no bias". GLM-5.3's selection does use
+    `e_score_correction_bias`, so a panel without it would price a different
+    expert mixture while claiming this geometry.
+    """
+    routing = glm_routing()
+    routing["source_protocol"] = {**routing["source_protocol"], "correction_bias": None}
+    with pytest.raises(ValueError) as caught:
+        panel.validate_routing(routing)
+    assert "correction bias" in str(caught.value), str(caught.value)
+
+
+@pytest.mark.parametrize("renormalize,norm_topk_prob", [(False, True), (True, False)])
+def test_an_inconsistent_renormalization_capture_is_refused(renormalize, norm_topk_prob):
+    """Two statements of one fact must agree, and both must be true.
+
+    `routing.renormalize` and `source_protocol.norm_topk_prob` describe the same
+    served step. Root review found `renormalize=False` accepted while the source
+    said `norm_topk_prob=True`; whichever reader ran first would decide which
+    mixture got priced.
+    """
+    routing = glm_routing(renormalize=renormalize)
+    routing["source_protocol"] = {**routing["source_protocol"],
+                                  "norm_topk_prob": norm_topk_prob}
+    with pytest.raises(ValueError) as caught:
+        panel.validate_routing(routing)
+    message = str(caught.value)
+    assert "renormalize" in message or "norm_topk_prob" in message, message
+
+
+@pytest.mark.parametrize("key,value", [
+    ("tensor_parallel", True), ("tensor_parallel", 1.0),
+    ("geometry_version", True), ("geometry_version", 1.0),
+    ("n_routed_experts", True), ("top_k", 8.0), ("hidden_size", 4096.0),
+])
+def test_a_non_integer_coordinate_is_refused_before_any_width_arithmetic(key, value):
+    """`True` is an int and `1.0 == 1`, and both would reach slicing.
+
+    Root review found `tensor_parallel=True` and `geometry_version=True` passing
+    the numeric equality checks. A geometry is a declaration; a bool or float is
+    not this geometry, and the refusal must happen before
+    `rank_local_intermediate` divides by it or a member shape is sliced with it.
+    """
+    with pytest.raises(ValueError) as caught:
+        panel.validate_geometry(glm_shape(**{key: value}))
+    # The refusal names the coordinate (the geometry-version refusal spells it
+    # with a space); either way the arithmetic a non-integer would corrupt is
+    # never reached.
+    message = str(caught.value)
+    assert key in message or key.replace("_", " ") in message, message
+
+
+def test_the_owner_format_is_a_parameter_and_is_validated():
+    """A4/A8/A16 reach the owner; the old constant capped it at one rung."""
+    shape = panel.validate_geometry(glm_shape())
+    for name in ("TESSERA_E4M3_K1_R1024", "TESSERA_BF16_K1_R1024",
+                 "TESSERA_BF16_K1_R832", "TESSERA_E2M1_K2_R896"):
+        assert panel.owner_format(shape, name) == name
+    for bad in ("FP8_E4M3", "", " NVFP4", None, "TESSERA_E4M3_K1_R0"):
+        with pytest.raises(ValueError):
+            panel.owner_format(shape, bad)
+
+
+def test_the_owner_format_selects_the_member_format_in_the_roster():
+    """The roster's members carry the owner's format, not a module constant.
+
+    The format lives on the geometry view the roster reads
+    (`_shape_for_roster`), which is the one place it is resolved -- so a BF16
+    owner's members are BF16 and an E2M1 control's are E2M1, with no module
+    constant in the path. The fixture's members are built from that same view,
+    so this test cannot disagree with the module about where the format lives.
+    """
+    for name in ("TESSERA_BF16_K1_R832", "TESSERA_E2M1_K2_R896"):
+        validated = panel.validate_geometry(glm_shape())
+        shape = {**validated, "format": name}
+        members = [{**m, "format": name} for m in glm_members(panel._shape_for_roster(shape))]
+        assert panel._shape_for_roster(shape)["format"] == name
+        roster = panel._member_roster(GLM_UNIT, members, shape)
+        assert {m["format"] for m in roster} == {name}
+
+
+@pytest.mark.parametrize("tp", [1, 2])
+def test_the_owner_execution_carries_the_geometries_own_tensor_parallel(tp):
+    """A TP2 owner's execution record must say 2, not the LFM constant's 1.
+
+    Root review: `EXECUTION` hardcoded `tensor_parallel: 1`, so a TP2 owner would
+    have declared a TP1 execution over TP2 rank-local member widths.
+    """
+    shape = panel.validate_geometry(glm_shape(tensor_parallel=tp))
+    execution = panel.owner_execution(shape, format_name=panel.FORMAT)
+    assert execution["tensor_parallel"] == tp
+    assert execution["tensor_parallel_cut_axis"] == panel.GLM_TP_CUT_AXIS
+    # And the LFM record is untouched, byte for byte.
+    lfm = {"experts": 32, "hidden_size": 4, "intermediate_size": 4, "top_k": 2}
+    assert panel.owner_execution(lfm, format_name=panel.FORMAT) == panel.EXECUTION

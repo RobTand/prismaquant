@@ -92,15 +92,64 @@ GLM_SHAPE_FIELDS = {"geometry_version", "geometry_id", "source_id", "n_routed_ex
                     "routed_scaling_factor", "swiglu_limit", "gated", "tensor_parallel",
                     "tensor_parallel_cut_axis"}
 
+def owner_format(shape, format_name):
+    """The one format a whole routed owner holds, validated as Tessera-shaped.
+
+    A whole owner is ONE format for all of its members -- that is the serving
+    constraint and the producer asserts it per member -- but WHICH format is a
+    parameter, not a constant. It was `FORMAT` (E4M3 K1 R1024) everywhere, which
+    silently capped the owner at one rung of one family and is exactly the kind
+    of wiring that makes an A4/A8/A16 experiment unreachable while the geometry
+    validator looks complete.
+    """
+    parsed = parse_tessera_format_name(format_name)
+    if parsed is None:
+        raise ValueError(f"native MoE owner format {format_name!r} is not a Tessera format")
+    if format_name != format_name.strip():
+        raise ValueError("native MoE owner format must be trimmed")
+    return format_name
+
+
+def owner_execution(shape, *, format_name):
+    """The execution record, with the geometry's own tensor-parallel fact.
+
+    `EXECUTION` is the LFM record and stays byte-identical for LFM. A GLM owner
+    states its rank's own TP, because the priced member shapes are the rank-local
+    ones: a TP2 owner's execution record says 2, so a receipt cannot claim a TP1
+    execution over TP2 member widths.
+    """
+    if geometry_family(shape) != "glm53_next_routed_stack_v1":
+        return dict(EXECUTION)
+    return {**EXECUTION, "tensor_parallel": shape["tensor_parallel"],
+            "tensor_parallel_cut_axis": shape["tensor_parallel_cut_axis"]}
+
+
 def _shape_for_roster(shape):
-    """The member roster's own view: rank-local width and one frozen format."""
-    width = (rank_local_intermediate(shape)
-             if geometry_family(shape) == "glm53_next_routed_stack_v1"
-             else shape["intermediate_size"])
-    return {**shape, "rank_local_intermediate": width, "format": FORMAT}
+    """The member roster's own view: expert count, rank-local width, one format.
+
+    The view is what the roster reads, and it normalizes the two geometries'
+    own spellings -- ``experts`` for LFM, ``n_routed_experts`` for GLM -- into
+    the single ``experts`` the roster walks, so no caller has to know which
+    geometry it holds to count members. The format comes from the caller's
+    shape (a prepared owner's) and defaults to this module's constant only when
+    none was declared.
+    """
+    glm = geometry_family(shape) == "glm53_next_routed_stack_v1"
+    width = rank_local_intermediate(shape) if glm else shape["intermediate_size"]
+    return {**shape, "experts": shape["n_routed_experts"] if glm else shape["experts"],
+            "rank_local_intermediate": width,
+            "format": shape.get("format", FORMAT)}
 
 
 def _at_or_above_one(value, name):
+    """A positive integer, where `True` and `1.0` are not integers.
+
+    `type(value) is not int` is what makes that true: `isinstance(True, int)`
+    and `1.0 == 1` both hold, so a geometry carrying `tensor_parallel=True` or
+    `intermediate_size=2047.0` would otherwise reach the width arithmetic and
+    the slice bounds as a bool or a float. A geometry is a declaration, and a
+    declaration that is not an integer is not this geometry.
+    """
     if type(value) is not int or value < 1:
         raise ValueError(f"{name}: a positive integer is required")
     return value
@@ -139,10 +188,14 @@ def validate_glm_geometry(shape):
     """
     if set(shape) != GLM_SHAPE_FIELDS:
         raise ValueError("GLM routed owner requires exactly the versioned geometry fields")
-    if shape["geometry_version"] != GEOMETRY_VERSION:
+    if (type(shape["geometry_version"]) is not int
+            or type(GEOMETRY_VERSION) is not int
+            or shape["geometry_version"] != GEOMETRY_VERSION):
         raise ValueError(
             f"GLM routed owner geometry version {shape['geometry_version']!r} is not "
             f"this consumer's {GEOMETRY_VERSION}")
+    for key in ("tensor_parallel",):
+        _at_or_above_one(shape[key], key)
     for key, expected in (GLM_SOURCE_GEOMETRY.items()):
         if shape[key] != expected:
             raise ValueError(
@@ -270,19 +323,46 @@ def validate_glm_routing(routing):
             "normalized top-k weights before the routed scale, and a panel without it "
             "prices a different mixture")
     _sha(source["router_source_sha256"], "router source")
+    # The correction bias is MANDATORY for this source, not optional. GLM-5.3
+    # routes with `noaux_tc`: `e_score_correction_bias` takes part in which
+    # experts are selected, so a panel without it does not price this model's
+    # mixture even when every other coordinate matches. `None` here would read
+    # as "this source has no bias", which is a different source.
     correction = source["correction_bias"]
-    if correction is not None:
-        if not isinstance(correction, dict) or set(correction) != {"content_sha256", "dtype"}:
-            raise ValueError("GLM routed owner correction bias needs its content digest and dtype")
-        _sha(correction["content_sha256"], "source correction bias")
-        if correction["dtype"] != "torch.float32":
-            raise ValueError("GLM routed owner correction bias is the source's FP32 bias, not a cast")
+    if not isinstance(correction, dict) or set(correction) != {"content_sha256", "dtype"}:
+        raise ValueError(
+            "GLM routed owner requires its live FP32 correction bias, with its "
+            "content digest and dtype; None is a different source's protocol")
+    _sha(correction["content_sha256"], "source correction bias")
+    if correction["dtype"] != "torch.float32":
+        raise ValueError("GLM routed owner correction bias is the source's FP32 bias, not a cast")
+    # `renormalize` and the source protocol's `norm_topk_prob` are the same
+    # fact stated twice, and both are read: the served route normalizes the
+    # selected weights before applying the routed scale. An inconsistent
+    # capture -- one of them true and the other false -- is refused rather than
+    # resolved in whichever direction the reader happens to check first.
+    if routing["renormalize"] is not True:
+        raise ValueError(
+            "GLM routed owner requires renormalize true: the served route applies "
+            "normalized top-k weights before the routed scale")
+    if routing["renormalize"] is not source["norm_topk_prob"]:
+        raise ValueError(
+            "GLM routed owner capture is internally inconsistent: renormalize "
+            f"{routing['renormalize']!r} against source norm_topk_prob "
+            f"{source['norm_topk_prob']!r}")
     return routing
 
 
 def geometry_family(shape):
-    """Which versioned geometry this shape is, by the fields it carries."""
-    if isinstance(shape, dict) and set(shape) == set(GLM_SHAPE_FIELDS):
+    """Which versioned geometry this shape is, by the fields it carries.
+
+    Read through :func:`geometry_only`, because a prepared owner's shape also
+    carries its format and its rank-local width and those are not geometry
+    coordinates: a shape that has been through `_shape_for_roster` is still the
+    same geometry.
+    """
+    fields = set(geometry_only(shape)) if isinstance(shape, dict) else set()
+    if fields == set(GLM_SHAPE_FIELDS):
         return "glm53_next_routed_stack_v1"
     return "lfm2_moe_routed_stack_v1"
 
@@ -304,6 +384,17 @@ def _expect_member_roster(unit, members, shape, *, count, pattern, where):
     return members
 
 
+#: The keys a prepared owner adds to its geometry. They are not part of the
+#: geometry contract, and the roster/format views read them; a validator that
+#: saw them would refuse the owner's own shape.
+_OWNER_VIEW_KEYS = ("format", "rank_local_intermediate")
+
+
+def geometry_only(shape):
+    """The geometry contract fields, without the owner-view keys."""
+    return {key: value for key, value in shape.items() if key not in _OWNER_VIEW_KEYS}
+
+
 def _member_roster(unit, members, shape):
     """This owner's ordered members, in the geometry's own naming and shape.
 
@@ -312,7 +403,7 @@ def _member_roster(unit, members, shape):
     and its own rank-local widths.  The two rosters share this function, not a
     shape constant.
     """
-    validate_geometry(shape)
+    validate_geometry(geometry_only(shape))
     if not isinstance(unit, str):
         raise ValueError("native MoE panel needs an exact routed stack name")
     if geometry_family(shape) == "glm53_next_routed_stack_v1":
@@ -405,7 +496,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
                        calibration_receipt, routing_capture, experts_module, profile,
                        wire_blobs, wire_records, encoding_identities, numerics,
                        max_resident_bytes, max_temporary_bytes, runtime_image, serving_config_sha256, probe_request,
-                       probe_calibration_receipt=None, probe_scope=None):
+                       format_name=FORMAT, probe_calibration_receipt=None, probe_scope=None):
     """Prepare one complete routed reference from existing resident PWC data.
 
     Member records explicitly declare the expert/role order. Source tensors and
@@ -419,6 +510,9 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .production_weight_cache import ProductionWeightCache, _cb_cache_tensor_identity
     _no_preclip()
+    format_name = owner_format(shape, format_name)
+    shape = {**shape, "format": format_name}
+    execution = owner_execution(shape, format_name=format_name)
     _member_roster(unit, members, shape)
     validate_routing(routing)
     _calibration_and_capture(calibration_receipt, routing_capture, unit=unit, shape=shape, routing=routing)
@@ -433,9 +527,16 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     _sha(serving_config_sha256, "serving configuration")
     if not isinstance(cache, ProductionWeightCache):
         raise TypeError("native MoE requires the actual ProductionWeightCache")
-    if (profile.name != "lfm2_moe" or type(experts_module).__name__ not in profile.packed_expert_module_class_names()
-            or getattr(experts_module, "num_experts", None) != shape["experts"]):
-        raise ValueError("native MoE reference requires the source profile's actual packed LFM experts module")
+    expected_profile = ("lfm2_moe" if geometry_family(shape) == "lfm2_moe_routed_stack_v1"
+                        else "glm5_next")
+    expected_experts = _roster_shape(shape)["experts"] if False else (
+        shape["experts"] if "experts" in shape else shape["n_routed_experts"])
+    if (profile.name != expected_profile
+            or type(experts_module).__name__ not in profile.packed_expert_module_class_names()
+            or getattr(experts_module, "num_experts", None) != expected_experts):
+        raise ValueError(
+            f"native MoE reference requires the source profile's actual packed "
+            f"{expected_profile} experts module")
     names = [member["unit"] for member in members]
     for values in (source_weights, wire_blobs, wire_records, encoding_identities):
         if set(values) != set(names):
@@ -463,15 +564,15 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     required = packed_bytes + max(source_weights[name].numel() * source_weights[name].element_size() for name in names)
     if required > _bytes(max_temporary_bytes, "temporary packing budget"):
         raise ValueError("native MoE reference pack exceeds its explicit temporary budget")
-    prefetch = prefetch_joint_cache(cache, names, {name: [FORMAT] for name in names},
+    prefetch = prefetch_joint_cache(cache, names, {name: [format_name] for name in names},
                                    max_resident_bytes=max_resident_bytes)
-    spec = fr.get_format(FORMAT)
+    spec = fr.get_format(format_name)
     tensors, actual_members, rendered = {}, [], {}
     for member in members:
         name = member["unit"]
         # PWC prefetch materializes disk shards on CPU. Use the same explicit
         # device transfer as the dense native reference; preserve stored dtype.
-        source, render = source_weights[name], cache.get(name, FORMAT).to(device=device)
+        source, render = source_weights[name], cache.get(name, format_name).to(device=device)
         if (source.device != device or render.device != device or source.dtype != torch.bfloat16
                 or render.dtype != torch.bfloat16 or list(source.shape) != member["shape"]
                 or render.shape != source.shape or not bool(torch.isfinite(source).all())
@@ -494,14 +595,16 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
         rendered[name] = render
     # Reuse the format/profile's declared gate/up roles. This pack is discarded
     # before the producer's native preparation and never persisted as a cache.
+    roster = _roster_shape(shape)
+    width = roster["intermediate_size"]
     with torch.inference_mode():
-        gate_up = torch.empty(shape["experts"], 2 * shape["intermediate_size"], shape["hidden_size"],
+        gate_up = torch.empty(roster["experts"], 2 * width, shape["hidden_size"],
                               dtype=torch.bfloat16, device=device)
-        for expert in range(shape["experts"]):
+        for expert in range(roster["experts"]):
             for role_index, role in enumerate(ROLES[:2]):
-                gate_up[expert, role_index * shape["intermediate_size"]:(role_index + 1) * shape["intermediate_size"]].copy_(
+                gate_up[expert, role_index * width:(role_index + 1) * width].copy_(
                     rendered[f"{unit}.{expert}.{role}"])
-        down = torch.stack([rendered[f"{unit}.{expert}.w2"] for expert in range(shape["experts"])])
+        down = torch.stack([rendered[f"{unit}.{expert}.w2"] for expert in range(roster["experts"])])
         phases = {}
         from .perturbed_x_cache import _activation_qdq
         for phase in PHASES:
@@ -515,8 +618,8 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
                 for key in ("input", "topk_ids", "topk_weights", "reference_qdq", "reference_output")}}
     del gate_up, down
     reference_file = Path(inspect.getfile(type(experts_module)))
-    return {"schema": INPUT_SCHEMA, "unit": unit, "format": FORMAT, "shape": dict(shape),
-            "members": actual_members, "profile_role_order": list(ROLES), "routing": dict(routing), "execution": dict(EXECUTION),
+    return {"schema": INPUT_SCHEMA, "unit": unit, "format": format_name, "shape": dict(shape),
+            "members": actual_members, "profile_role_order": list(ROLES), "routing": dict(routing), "execution": execution,
             "calibration": calibration_receipt, "probe_calibration": probe_calibration_receipt,
             "probe_scope": probe_scope, "routing_capture": routing_capture,
             "routing_capture_sha256": identity_sha256(routing_capture),
@@ -525,7 +628,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
                           "module_class": f"{type(experts_module).__module__}.{type(experts_module).__qualname__}",
                           "module_source_sha256": hashlib.sha256(reference_file.read_bytes()).hexdigest(),
                           "profile": profile.name, "temporary_pack_bytes": packed_bytes,
-                          "activation_preclip": False},
+                          "activation_preclip": False, "format": format_name},
             "prefetch": prefetch, "phases": phases}, tensors
 
 
@@ -698,7 +801,8 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         raise ValueError("native MoE panel requires untimed producer preparation")
     members = _member_roster(inputs["unit"], inputs["members"], inputs["shape"])
     validate_routing(inputs["routing"])
-    _equal(inputs["execution"], EXECUTION, "input execution")
+    _equal(inputs["execution"], owner_execution(inputs["shape"], format_name=inputs["format"]),
+           "input execution")
     _equal(inputs["profile_role_order"], list(ROLES), "source profile role order")
     _calibration_and_capture(inputs["calibration"], inputs["routing_capture"], unit=inputs["unit"],
                              shape=inputs["shape"], routing=inputs["routing"])
@@ -761,7 +865,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     _equal(preflight["native_tensors_sha256"], identity_sha256(operator["native_tensors"]), "native tensors")
     _equal(preflight["scheme_sha256"], identity_sha256(operator["scheme"]), "native scheme")
     _equal(operator["config_sha256"], identity_sha256(operator["config"]), "native MoE config")
-    _equal(preflight["runtime"]["execution"], EXECUTION, "native execution")
+    _equal(preflight["runtime"]["execution"], inputs["execution"], "native execution")
     _equal(preflight["runtime"]["image"], inputs["runtime_image"], "native image")
     _equal(operator["serving_config_sha256"], _sha(inputs["serving_config_sha256"], "serving configuration"), "native serving config")
     _workspace_identity(preflight["workspace"])
@@ -785,7 +889,8 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         {name: row["joint_operator_identity_sha256"] for name, row in rows.items()},
         {member["unit"]: tuple(member["shape"]) for member in members},
         operator_route_identity(route))
-    return json.loads(json.dumps({"schema": PANEL_SCHEMA, "unit": inputs["unit"], "format": FORMAT,
+    return json.loads(json.dumps({"schema": PANEL_SCHEMA, "unit": inputs["unit"],
+        "format": inputs["format"],
         "shape": inputs["shape"], "members": members, "profile_role_order": list(ROLES),
         "routing": inputs["routing"], "routing_capture_sha256": inputs["routing_capture_sha256"],
         "source_sha256": probe["source_model"]["content_sha256"], "calibration_sha256": probe["calibration_sha256"],
@@ -793,7 +898,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         "source_execution": execution,
         "source_execution_qualification_sha256": source_execution_qualification_sha256,
         "cost_sha256": cost_sha256, "serving_config_sha256": inputs["serving_config_sha256"], "probe_identity_sha256": first["probe_identity_sha256"],
-        "runtime_binding": binding.as_dict(), "execution": dict(EXECUTION), "runtime": preflight["runtime"],
+        "runtime_binding": binding.as_dict(), "execution": inputs["execution"], "runtime": preflight["runtime"],
         "native_tensors_sha256": preflight["native_tensors_sha256"], "scheme_sha256": preflight["scheme_sha256"],
         "config_sha256": operator["config_sha256"], "workspace": preflight["workspace"],
         "workspace_sha256": preflight["workspace_sha256"], "numerics": inputs["numerics"], "phases": phases}, allow_nan=False))
@@ -967,7 +1072,8 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
                               "input_bytes": expected["input"]["logical_bytes"],
                               "output_bytes": expected["reference_output"]["logical_bytes"]}
     return {"schema": "prismaquant.native_moe_observation.v1", "status": "operator_evidence",
-            "unit": expected_panel["unit"], "format": FORMAT, "runtime_binding": binding.as_dict(),
+            "unit": expected_panel["unit"], "format": expected_panel["format"],
+            "runtime_binding": binding.as_dict(),
             "panel_sha256": identity_sha256(expected_panel), "receipt_sha256": expected_sha256,
             "cost_sha256": expected_panel["cost_sha256"], "probe_scope": expected_panel.get("probe_scope"),
             "phases": observations,
