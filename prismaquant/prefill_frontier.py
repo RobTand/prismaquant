@@ -71,6 +71,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from .cost_stage_checkpoint import atomic_write_bytes, publish_new_bytes
 from .layer_config import LAYER_CONFIG_META_KEY
 from .measured_runtime_prices import identity_sha256
 
@@ -275,6 +276,126 @@ def point_dispersion(verdict: dict, *, prefill_samples_ms: dict, decode_samples_
     return out
 
 
+def _assignment_payload(assignment: dict, digest: str, provenance_stub: dict) -> dict:
+    """The exact object this module publishes at ``<digest>.json``."""
+    return {**assignment, LAYER_CONFIG_META_KEY: {
+        "schema": ASSIGNMENT_SCHEMA, "assignment_sha256": digest,
+        "research_only": True,
+        "note": ("prefill frontier sweep point; re-run the allocator at "
+                 "this SLO for a shippable layer config with full metadata"),
+        **provenance_stub}}
+
+
+def _verify_reusable_assignment(path: Path, *, assignment: dict, digest: str,
+                                provenance_stub: dict) -> dict:
+    """Refuse an existing digest-named file that is not this solve's assignment.
+
+    The path IS the assignment's identity, so a file found there is reusable
+    only when it is that assignment: the bytes parse, the ``LAYER_CONFIG_META_KEY``
+    block states this module's schema and digest and ``research_only`` true, the
+    assignment recovered from the file equals this solve's and re-hashes to the
+    digest.  Anything else is refused by name rather than reused, and is never
+    overwritten -- the file may be another writer's work in flight.
+
+    ``research_only`` is checked because it is the standing the artifact claims,
+    and no point this module publishes may be carried by a file that does not
+    claim it: a reused file whose block is missing the key or sets it false is
+    refused, exactly as a wrong schema is, rather than adopted on the strength of
+    the digest alone.
+
+    THE PROVENANCE THE FILE RECORDS IS RETURNED, NOT DEMANDED.  The digest covers
+    the assignment alone, so two sweeps over tables with different bytes can
+    resolve to one path while their assignments agree -- a table re-measured
+    without moving a median does it, and ``tests/test_prefill_frontier_dispersion.py``
+    runs it.  The file then records whoever published it first, which is a true
+    statement about the file and no statement about this run's solve.  So the
+    obligation is that the file SAYS which table published it (a missing or
+    non-string ``table_id``/``table_sha256`` is refused, because then nothing can
+    tell the two apart), and the caller reports what it found beside the point's
+    own numbers instead of adopting it as its own.  What made the old code wrong
+    was never the difference in provenance; it was never reading the file at all.
+    """
+    where = f"assignment {digest}"
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise PrefillFrontierError(
+                f"{where}: {path} is not a regular file; refusing to reuse it")
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise PrefillFrontierError(
+            f"{where}: {path} is unreadable ({exc}); refusing to reuse it") from exc
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        raise PrefillFrontierError(
+            f"{where}: {path} is not readable JSON ({exc}); refusing to reuse a corrupt "
+            "or truncated assignment") from exc
+    if not isinstance(payload, dict):
+        raise PrefillFrontierError(
+            f"{where}: {path} is not a JSON object; refusing to reuse it")
+    meta = payload.get(LAYER_CONFIG_META_KEY)
+    if not isinstance(meta, dict):
+        raise PrefillFrontierError(
+            f"{where}: {path} carries no {LAYER_CONFIG_META_KEY} block, so this module "
+            "cannot bind it to the current solve; refusing to reuse it")
+    problems = []
+    if meta.get("schema") != ASSIGNMENT_SCHEMA:
+        problems.append(f"schema {meta.get('schema')!r} != {ASSIGNMENT_SCHEMA!r}")
+    if meta.get("assignment_sha256") != digest:
+        problems.append(
+            f"recorded assignment_sha256 {meta.get('assignment_sha256')!r} != {digest}")
+    if meta.get("research_only") is not True:
+        problems.append(
+            f"research_only is {meta.get('research_only')!r}, not True, so the file does "
+            "not claim the research-only standing every point this module publishes "
+            "carries")
+    stored = {key: value for key, value in payload.items() if key != LAYER_CONFIG_META_KEY}
+    if stored != assignment:
+        problems.append("the stored assignment differs from this solve's assignment")
+    elif identity_sha256(stored) != digest:
+        problems.append("the stored assignment does not hash to the name it is filed under")
+    recorded = {}
+    for key, value in sorted(provenance_stub.items()):
+        if not isinstance(value, str) or not isinstance(meta.get(key), str):
+            problems.append(
+                f"provenance {key} is {meta.get(key)!r}, and a file whose published "
+                "provenance cannot be read cannot be told from another table's")
+        else:
+            recorded[key] = meta[key]
+    if problems:
+        raise PrefillFrontierError(
+            f"{where}: {path} exists but is not this solve's assignment: "
+            + "; ".join(problems)
+            + ". Refusing to reuse it and refusing to overwrite it; move it aside or "
+            "point this sweep at another --assignments-dir.")
+    return recorded
+
+
+def _publish_assignment(assignments_dir: Path, *, assignment: dict, digest: str,
+                        provenance_stub: dict) -> tuple[Path, dict]:
+    """Publish this solve's assignment, or prove the file already there is it.
+
+    ``publish_new_bytes`` is a hard-link creation, so the file is either absent
+    or complete; when it reports that one was already there, the loser of that
+    race reads what won and validates it rather than replacing it.  When this
+    call created the file, the bytes behind the returned path are the payload it
+    just built for exactly this digest; when somebody else did, the bytes are
+    read back and must pass :func:`_verify_reusable_assignment` before the path
+    is returned.  No path reaches the caller without bytes this call either
+    wrote or read.
+
+    Returns the path and the provenance the FILE records: this run's when this
+    run published it, and the first publisher's when it was already there.
+    """
+    path = assignments_dir / f"{digest}.json"
+    payload = _assignment_payload(assignment, digest, provenance_stub)
+    encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    if publish_new_bytes(path, encoded):
+        return path, {key: str(value) for key, value in provenance_stub.items()}
+    return path, _verify_reusable_assignment(path, assignment=assignment, digest=digest,
+                                             provenance_stub=provenance_stub)
+
+
 def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
                   fixed_resource_scope: dict | None = None, dispersion=None) -> dict:
     """One grid point from the allocator's solve record; writes its assignment.
@@ -284,6 +405,13 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
     (``serve_constraints.evaluate_measured_assignment``); this refuses rather
     than trusts it, because the whole content of the scope is that no device
     term reaches a document.
+
+    The assignment file is published through
+    :func:`_publish_assignment`, so the ``assignment_sha256``/``assignment_path``
+    pair this returns is one whose bytes this solve wrote (a fresh publication,
+    whose payload is built from that digest's own assignment) or read back and
+    bound to it (a reuse, which is refused unless the file IS the assignment):
+    the name is the digest, and a name is not evidence.
     """
     diag = record.get("diagnostics", {})
     point = {
@@ -309,16 +437,9 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
         return point
     assignment = dict(record["assignment"])
     digest = identity_sha256(assignment)
-    path = assignments_dir / f"{digest}.json"
-    if not path.exists():
-        assignments_dir.mkdir(parents=True, exist_ok=True)
-        payload = {**assignment, LAYER_CONFIG_META_KEY: {
-            "schema": ASSIGNMENT_SCHEMA, "assignment_sha256": digest,
-            "research_only": True,
-            "note": ("prefill frontier sweep point; re-run the allocator at "
-                     "this SLO for a shippable layer config with full metadata"),
-            **provenance_stub}}
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    path, published_by = _publish_assignment(assignments_dir, assignment=assignment,
+                                             digest=digest,
+                                             provenance_stub=provenance_stub)
     point.update({
         "predicted_dloss": float(record["predicted_dloss"]),
         "achieved_bits": float(record["achieved_bits"]),
@@ -328,6 +449,10 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
         "device_memory_bytes": _attained(record, "device_memory_bytes"),
         "assignment_sha256": digest,
         "assignment_path": str(path),
+        # The provenance the FILE records, which is this run's unless an earlier
+        # sweep published this (identical) assignment first.  A reader can see
+        # the difference here instead of inferring it from the file.
+        "assignment_file_provenance": published_by,
         "serve_constraints": record["serve_constraints"],
     })
     if point["attained_prefill_ms"] is None:
@@ -555,7 +680,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if document is None:
         raise SystemExit("[prefill-frontier] the allocator returned without running the sweep")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n")
+    # The document is one name with one current value, so it is REPLACED, and
+    # by the shared atomic writer rather than write_text: an interrupted sweep
+    # otherwise leaves a truncated curve where a complete one was, and every
+    # reader of the output path reads the half-file with nothing to tell it so.
+    atomic_write_bytes(
+        output, (json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8"))
     saturation = document["saturation"]
     print(f"[prefill-frontier] {document['n_feasible']}/{document['n_points']} feasible, "
           f"{document['n_nondominated']} nondominated, "

@@ -271,3 +271,48 @@ def test_module_help_runs_from_a_clean_interpreter():
                             cwd=root, env=env, capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stderr
     assert "--slo-grid" in result.stdout and "--measured-runtime-table" in result.stdout
+
+
+def test_the_document_is_published_through_the_atomic_writer(tmp_path, monkeypatch):
+    """The curve is REPLACED at its own path, so an interrupted run is not a half-file.
+
+    ``main`` wrote the document with ``Path.write_text``, which truncates the
+    output path and then fills it: a sweep killed between those two steps
+    destroyed the curve it was replacing and left unparseable JSON where a
+    complete document had been, with nothing at the path to say so. The
+    document now reaches that path through the shared atomic writer
+    (``cost_stage_checkpoint.atomic_write_bytes``: staged beside the target,
+    fsynced, then ``os.replace``d), so the old curve or the new one is what a
+    reader finds. Both halves are asserted here, because either alone is
+    satisfiable by code that does not PUBLISH the payload.
+    """
+    from prismaquant.cost_stage_checkpoint import atomic_write_bytes as real_writer
+
+    _, allocator_argv = _curve_fixture(tmp_path)
+    output = tmp_path / "frontier.json"
+    previous = b'{"schema": "prismaquant.prefill_frontier.v1", "previous": true}\n'
+    output.write_bytes(previous)
+    seen: dict = {}
+
+    def recorded(path, payload):
+        seen["path"], seen["payload"] = Path(path), payload
+        real_writer(Path(path), payload)
+
+    monkeypatch.setattr(prefill_frontier, "atomic_write_bytes", recorded)
+    code = prefill_frontier.main(["--slo-grid", "auto", "--output", str(output), "--",
+                                  *allocator_argv])
+    assert code == 0
+    assert seen["path"] == output, "the document must go to the requested path"
+    document = json.loads(seen["payload"])
+    assert DOCUMENT_KEYS <= set(document)
+    assert output.read_bytes() == seen["payload"], "the file a reader gets IS the payload"
+    published = output.read_bytes()
+
+    def dies(path, payload):
+        raise RuntimeError("crash during publication")
+
+    monkeypatch.setattr(prefill_frontier, "atomic_write_bytes", dies)
+    with pytest.raises(RuntimeError):
+        prefill_frontier.main(["--slo-grid", "auto", "--output", str(output), "--",
+                               *allocator_argv])
+    assert output.read_bytes() == published, "an interrupted publication leaves the old curve"

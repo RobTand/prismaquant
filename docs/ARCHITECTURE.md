@@ -47,6 +47,82 @@ so both ends load `prismaquant/joint_replay_frontier.py` by path. Gates:
 resumed GPU subset has been run under a sealed frontier, so the ARC payoff
 and the resumed wall-clock are unmeasured here; this stamp records the
 contract.
+As of: 2026-09-16 · `flash/issue-654-stage-settings-provenance-20260916`. Stamps
+follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-16, `flash/issue-654-stage-settings-provenance-20260916`)
+for the **stage-settings guard's legacy-reuse admission** (§3.4;
+RobTand/prismaquant#654). Neither of the guard's unrecorded-stage branches
+compared anything to the artifact, and they failed differently. When the
+manifest did not exist at all the guard warned and returned 0 **recording
+nothing** — the artifact stayed reusable, its identity was known to nobody, and
+no later run could tell the difference between "never examined" and "examined
+and agreed". When the manifest existed but had never recorded the stage the
+guard appended *today's* projection to it: from that first resumed run a
+pre-guard `cost_aura.pkl` measured under other probes, seed, dataset or menu was
+indistinguishable in the manifest from one this run had verified, and
+`run-pipeline.sh` then reused it while the allocator read it as this run's
+number. Rob's decision (2026-09-16) is that old data stays reusable while the
+pipeline is in flux; what may not happen is the laundering. A stage with no
+recorded projection now files an **admission** instead: `_unverified_settings`
+holding `settings_identity: unknown`, `attests_this_artifact: false`, the
+reason, and this run's request under `observed_current_request` -- the request,
+never the artifact's settings and never production proof. Repeated checks read
+that admission back and stay unknown, so a retry, a changed request, or a
+second stage owning the same path can never upgrade it to verified. Recording a
+projection is now confined to the absent-artifact (fresh production) path, and
+a refused mismatch files nothing at all. The marker is deliberately a key no
+manifest key can be, so a reader that predates this change compares it, finds a
+diff, and exits 2 rather than stamping the artifact into its own record. The
+Tessera plan's allocation-content binding still refuses rather than records,
+and now refuses an admission marker as firmly as an unrecorded stage: a
+translated plan needs a real binding, and the marker says the identity is
+unknown. Every known-and-matching reuse is unchanged.
+`cost_table_reusable()` still reuses a table with no `provenance['cost_mode']`
+and now says plainly that the reuse is unverified and that the current mode is
+never stamped onto it. Gates: `tests/test_stage_settings_guard.py` pins the
+pre-fix restamp, reuse-stays-unknown across retries and changed requests, a
+recorded mismatch still refusing, Tessera still refusing without filing an
+admission, and Tessera refusing a manifest that already carries one;
+`tests/test_wave3_selection_and_provenance.py::test_cost_table_reuse_is_unverified_legacy_and_never_restamped`
+executes the real shell predicate against real pickles and checks the table's
+bytes are left alone. No default, stage, format, lane, ship gate or allocator
+default changed.
+
+Re-stamped (2026-09-16, `codex/pq-r3-prefill-assignment-reuse`) for the **prefill
+frontier's assignment publication** (§12, §4.5). `prefill_frontier._point_record`
+wrote `<assignment digest>.json` only when the path was absent and never read a
+file that was already there, so a leftover at that name -- an interrupted write,
+a hand edit, another table's sweep -- was reused while the point published THIS
+solve's dloss, attained prefill and digest beside it. The file is now published
+by the shared no-clobber primitive (`cost_stage_checkpoint.publish_new_bytes`, a
+hard-link creation), and a file already there is read and verified before it is
+reused: it must parse, carry this module's schema and digest, hold exactly this
+solve's assignment, re-hash to the name it is filed under, and claim
+`research_only` true -- the standing every point this module publishes carries,
+so a block that leaves the key out or sets it false is refused rather than
+adopted on the digest alone. Corrupt,
+truncated and different-assignment files are refused by name and never
+overwritten, and the loser of a publication race validates the winner rather
+than replacing it. Provenance is the one fact the name cannot carry: a
+re-measured table whose medians do not move resolves to the same path
+(`tests/test_prefill_frontier_dispersion.py` runs exactly that), so a file
+recording a different `table_id`/`table_sha256` is reused -- it IS the assignment
+-- and the point carries `assignment_file_provenance` naming the run that
+published it instead of adopting it as this run's; a file with no readable
+provenance is refused. No default, stage, format, lane, ship gate or allocator
+default changed.
+
+The same commit's second half is the **frontier document's own publication**
+(§12). `prefill_frontier.main` wrote the curve at `--output` with
+`Path.write_text`, which truncates the file and then fills it, so a sweep killed
+between those steps destroyed the curve it was replacing and left unparseable
+JSON at a path every consumer parses. The document is now written through
+`cost_stage_checkpoint.atomic_write_bytes` (staged beside the target, fsynced,
+`os.replace`d): replacement is the right shape for one name with one current
+value, and an interrupted run leaves the old curve or the new one. The
+publication is asserted through the CLI itself in
+`tests/test_prefill_frontier.py::test_the_document_is_published_through_the_atomic_writer`.
 
 Re-stamped (2026-09-15, `claude/tp2-measurement-instruments`) for the **gold
 lane's multi-node instruments** (§2.3, §7.3). Three things a gold receipt did
@@ -8553,13 +8629,28 @@ Contract:
 | artifact absent | record this stage's projection, build |
 | recorded projection matches | reuse |
 | recorded projection differs | **`exit 2`**, naming every differing key and the stale file |
-| no record for this stage (pre-guard artifact) | **WARN**, record, guard from then on |
+| no record for this stage (pre-guard artifact) | **WARN**, reuse, and file the admission that the artifact's settings identity is **UNKNOWN** — never today's projection |
 
 The manifest is `<artifact>.settings.json`, keyed by stage, so two stages can legitimately own
 one path — under `COST_MODE=aura` + `validated-surrogate` the AURA dW cache and the frontier
 cache **are the same file** (principle 8's one-render identity), and both key sets coexist.
 Pre-R5 flat manifests are read as a `legacy` block and still guard the stage whose key set they
 match, so no live `WORK_DIR` is invalidated by the upgrade.
+
+**The fourth row records an admission, not a setting.** Legacy reuse is the contract
+(Rob, 2026-09-16: old data stays reusable while the pipeline is in flux), and the artifact
+predates the guard, so its identity cannot be recovered from the bytes — the one thing the
+manifest must not do is *claim* one. `stages[stage]` therefore holds a single reserved key,
+`_unverified_settings` (`pipeline.UNVERIFIED_SETTINGS_KEY`), carrying `settings_identity:
+unknown`, `attests_this_artifact: false`, the reason, `first_observed_unix`, and the run's
+request under `observed_current_request` — the request, never the artifact's settings and never
+production proof. Every later check reads the admission back and reaches the same conclusion:
+a retry, a request that changed, or a second stage on the same path can never promote it to a
+verified record, and only the absent-artifact row writes a projection. Because the marker is not
+shaped like a manifest key, a reader that predates it finds a diff and exits 2 rather than
+stamping. A refused mismatch files nothing, and the `tessera-plan` carve-out is untouched: an old
+plan still refuses, because an allocation binding guessed after translation is a fiction rather
+than an admission.
 
 **Coverage is now every skip-if-exists artifact** — **16 call sites over 16 declared
 artifacts**: `probe`, `base-cost`, `render-cost-cache`, `render-cost`, `aura-dw-cache`,
@@ -8590,7 +8681,9 @@ estimator. Every producer (`incremental_measure_quant_cost`, `production_render_
 `aura_cost`, `expert_empirical_cost`, and the inline sidecar-backfill finalize) now stamps
 `provenance["cost_mode"]` from `--cost-mode`, and `cost_table_reusable()` (`669`) makes reuse of
 the *allocator's* table conditional on it matching. A mismatch **rebuilds** with a loud line
-naming both modes; an unstamped (pre-R2) table warns and is reused, never invalidated. Under
+naming both modes; an unstamped (pre-R2) table warns and is reused, never invalidated — and never
+restamped, so the table keeps no `cost_mode` this run invented and the artifact's own stage guard
+files the same unverified admission (§3.4). Under
 `COST_MODE=local` the baseline *is* the allocator table so it carries the same gate; under the
 other modes `cost_baseline.pkl` is mode-agnostic on purpose and is shared across mode changes.
 This is re-vet **R2 precondition (i)** — the prerequisite to flipping the `COST_MODE` default,
@@ -9687,7 +9780,9 @@ that budget. The output, `prismaquant.prefill_frontier.v1`, carries the whole cu
 point `slo_ms`, `predicted_dloss`, `payload_bytes`, `achieved_bits`, `attained_prefill_ms`
 (fixed work included) and its `attained_prefill_ms_bootstrap` interval, `attained_decode_ms`
 and its twin, `device_memory_bytes`, `assignment_sha256` and
-`assignment_path`, `refusal_reason`, `nondominated` -- plus `saturation` (measured at the
+`assignment_path` (a content-addressed file verified before reuse, with
+`assignment_file_provenance` naming the run that published it), `refusal_reason`,
+`nondominated` -- plus `saturation` (measured at the
 table's upper bound and verified), `slo_axis` (table-derived bounds), `monotone_loss`, and
 provenance (table identity, context, cost digest, git commit, allocator argv, bootstrap
 draws/seed). The intervals resample each priced row's own samples
