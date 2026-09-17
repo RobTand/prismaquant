@@ -90,10 +90,14 @@ def test_a_joint_row_is_only_its_own_cell(measured_payload):
 
     other = next(unit for unit in sorted(measured_payload["costs"])
                  if unit != name)
-    with pytest.raises(ValueError, match="produced for"):
+    # The mismatch is its own error class, not the one a malformed row raises:
+    # a caller that turns it into a refusal must not also swallow the
+    # malformed-evidence failures `validate_joint_aura_entry` reports.
+    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
         ac.joint_row_binds_cell(row, other, "FP8_E4M3", where="test")
-    with pytest.raises(ValueError, match="produced for"):
+    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
         ac.joint_row_binds_cell(row, name, "NVFP4A16", where="test")
+    assert issubclass(ac.JointCellCoordinateError, ValueError)
 
 
 def test_a_row_that_is_not_joint_is_not_this_predicate(measured_payload):

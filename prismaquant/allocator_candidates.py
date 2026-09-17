@@ -1579,6 +1579,15 @@ def cost_entry_is_joint_aura(cost_entry: dict) -> bool:
     return validate_joint_aura_entry(cost_entry)
 
 
+class JointCellCoordinateError(ValueError):
+    """A joint row found under a key its own operator identity does not name.
+
+    Distinct from the ``ValueError`` ``validate_joint_aura_entry`` raises for a
+    malformed row, so a caller can turn the coordinate mismatch into its own
+    refusal while leaving malformed-evidence failures exactly as they were.
+    """
+
+
 def joint_row_binds_cell(cost_entry: dict, name: str, fmt: str, *, where: str) -> bool:
     """Whether a joint A-side found at ``name@fmt`` was produced *for* that cell.
 
@@ -1594,9 +1603,9 @@ def joint_row_binds_cell(cost_entry: dict, name: str, fmt: str, *, where: str) -
     weight-only cost that reads as covered.
 
     Returns False when the entry is not a joint row at all, so a caller can ask
-    about every row it holds. Raises ``ValueError`` on a joint row whose
-    operator identity does not name this cell: a known coordinate mismatch is a
-    refusal, never a row to skip quietly.
+    about every row it holds. Raises ``JointCellCoordinateError`` on a joint row
+    whose operator identity does not name this cell: a known coordinate
+    mismatch is a refusal, never a row to skip quietly.
     """
     if not cost_entry_is_joint_aura(cost_entry):
         return False
@@ -1605,7 +1614,7 @@ def joint_row_binds_cell(cost_entry: dict, name: str, fmt: str, *, where: str) -
                 if isinstance(operator, Mapping) else "no operator identity")
     if (not isinstance(operator, Mapping) or operator.get("qname") != name
             or operator.get("format") != fmt):
-        raise ValueError(
+        raise JointCellCoordinateError(
             f"{where}: the joint A-side at {name}@{fmt} was produced for "
             f"{produced}. A joint row carries the activation term of the "
             "operator it measured, so it is only its own cell; a row copied, "

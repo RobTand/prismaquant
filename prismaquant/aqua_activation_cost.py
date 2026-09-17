@@ -76,7 +76,8 @@ import time
 import numpy as np
 
 from .allocator_candidates import (
-    ACT_DLOSS_KEY, cost_entry_is_joint_aura, joint_row_binds_cell)
+    ACT_DLOSS_KEY, JointCellCoordinateError, cost_entry_is_joint_aura,
+    joint_row_binds_cell)
 
 #: Return the CUDA pool to the OS once it has reserved this much. On GB10's
 #: UNIFIED memory a reserved CUDA block IS host RAM, so it competes with the
@@ -1139,7 +1140,7 @@ def main() -> int:
             try:
                 binds = joint_row_binds_cell(
                     row, name, fmt, where=f"{args.cost_in}: {name}@{fmt}")
-            except ValueError as error:
+            except JointCellCoordinateError as error:
                 raise SystemExit(f"REFUSE: {error}") from error
             if binds:
                 already.add((name, fmt))
