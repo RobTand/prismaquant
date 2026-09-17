@@ -288,9 +288,13 @@ def test_execute_passes_the_plan_policy_to_the_intake(tmp_path, monkeypatch, com
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     # ``execute`` reads the plan's envelope before it calls the allocator; this
     # config is not an admitted plan, so the field is supplied and the CUDA
-    # half is stubbed rather than exercised on a CPU-only box.
+    # half is stubbed rather than exercised on a CPU-only box. The stub is
+    # declared only where the envelope exists: a tree whose ``memory_management``
+    # has no device envelope runs this path unarmed, and the encoder reuse this
+    # file gates does not depend on it either way.
     monkeypatch.setattr(memory_management, "enforce_device_envelope",
-                        lambda *_args, **_kwargs: {"enforced": False, "reason": "cpu fixture"})
+                        lambda *_args, **_kwargs: {"enforced": False, "reason": "cpu fixture"},
+                        raising=False)
     draw = dict(fit_ids_sha256="a" * 64, text_sha256="b" * 64, nsamples=512, seqlen=512, seed=0)
     seen = []
 
