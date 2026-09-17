@@ -76,6 +76,22 @@ lane, pin, plugin contract, ship gate or published byte changes. Gates:
 `tests/test_joint_qualification_windows.py`,
 `tests/test_joint_retained_window_plan.py`.
 
+Re-stamped (2026-09-17, `flash/478-offstep-owner-mirror-20260917`) for **an
+owner class being required exactly where a composition term reads one**
+(Tessera #478). `_classify` asked ownership first and refused a row with no
+owner category before it ever asked what the row's lifetime was. No term
+charges an allocation proven live during no declared engine step, so no term
+reads its owner class, and the consumer nulled every term on a field it never
+consumes. Measured by recomputing the a5 capture's raw ledger through both
+classifications (Tessera action key `71418237b8d7be1b53fd6e58caa2dac1`,
+21,556 rows): unclassified 21,104 rows / 80,279,393,776 bytes -> 1,276 rows /
+731,857,273 bytes, with the 19,828 rows that move all off-step and swept to a
+535,409,186-byte peak the partition already prices separately. Both terms and
+domains are unchanged on that capture, so this removes a blocker rather than
+closing a domain. The producer half is Tessera's matching change; a `shared`
+boundary tensor a term would charge is still unclassified and still nulls
+every term.
+
 Re-stamped (2026-09-17, `flash/d37-pair-first-refusal-and-menu-diagnosis-20260917`)
 for **which gate actually refuses the only real v2 table first**, and for the
 one identity that ties D37's consumer half to D39's evidence half. No default,
@@ -2488,6 +2504,12 @@ new `non_step` lifetime class that no composition term charges. The whole
 classification is gated on `step_coverage.state == "complete"`; `partial` and
 `unobserved` leave the row unclassified, which nulls every term, because a row
 live during no *declared* step may still be live during an undeclared one. The
+lifetime question is asked **before** the ownership one: no composition term
+charges an off-step row, so none reads its owner class, and such a row is
+classified with `owner_class: null` when no checkpoint census saw it (Tessera
+#478 -- 19,828 of the a5 capture's 21,104 unclassified rows, 79.5 GB of 80.2
+GB). A row a term does charge still needs one supported class, so a `shared`
+boundary tensor is unclassified exactly as before. The
 coverage state is itself recomputed from the declared and executed counts. An
 interval that spans two steps refuses in either of the two ways one can: a
 declared step interval that spans another declared step's extent, and a unit
