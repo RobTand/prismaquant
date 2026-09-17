@@ -21,6 +21,19 @@ def bind(path):
     return {"path": str(path), "sha256": sha(path)}
 
 
+def installed_encoder_source_sha256():
+    """The seal this interpreter's Tessera package derives.
+
+    A checkpoint identity carries the seal of the package that priced it, and
+    the intake refuses any other value the plan has not explicitly named. The
+    fixture is a checkpoint priced under the installed package, so its
+    identity must carry that package's own seal rather than a placeholder.
+    """
+    from tessera.cached_unit import encoder_source_sha256
+
+    return encoder_source_sha256()
+
+
 def fixture(tmp_path):
     names = ["model.layers.0.self_attn.q_proj", "model.layers.0.self_attn.k_proj"]
     fmt = "TESSERA_E4M3_K1_R1024"
@@ -32,9 +45,10 @@ def fixture(tmp_path):
     wire.mkdir(parents=True)
     from prismaquant.production_weight_cache import _cache_weight_filename
     source = {"shape": [4, 4], "dtype": "bfloat16", "sha256": "a" * 64}
+    encoder_seal = installed_encoder_source_sha256()
     identity = {"campaign_schema": "prismaquant.tessera_campaign_cost.v1",
                 "currency": "output_mse_under_route_activation_contract",
-                "prismaquant_source_sha256": "b" * 64, "encoder_source_sha256": "c" * 64,
+                "prismaquant_source_sha256": "b" * 64, "encoder_source_sha256": encoder_seal,
                 "calibration": {"fit_ids_sha256": "d" * 64},
                 "units": {n: {"weight": source, "hessian": None,
                                "input_global_scale": None, "menu": [fmt],
@@ -63,7 +77,7 @@ def fixture(tmp_path):
         record = {"file": filename, "blob_bytes": len(blob),
                   "blob_sha256": hashlib.sha256(blob).hexdigest(),
                   "identity": {"unit": n, "source": source, "calibration": None,
-                               "encoder_source_sha256": "c" * 64,
+                               "encoder_source_sha256": encoder_seal,
                                "recipe": {"grid": "E4M3", "q256": 1024}}}
         states[n] = {"anchors": [anchor], "wire_records": {fmt: record}}
         write_unit(parts, stage="Tessera campaign", qname=n,
@@ -327,6 +341,7 @@ def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypat
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
         census={"model": "fixture", "attention_implementation": "eager"}, cells={},
         unit_scope=None, render_mirror_root=None, synthesized_now=0,
+        encoder_source_reuse=None,
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     # Called after the write, so it is where the live value can be read.
     during = {}
@@ -358,6 +373,7 @@ def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypat
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
         census={"model": "fixture", "attention_implementation": "eager"}, cells={},
         unit_scope=None, render_mirror_root=None, synthesized_now=0,
+        encoder_source_reuse=None,
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((1, 512), dtype=torch.int64), {"provenance": {**draw, "nsamples": 1}}))
@@ -401,6 +417,7 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
                              {"verify_payloads": False, "require_existing_renders": True})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
             cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
+            encoder_source_reuse=None,
             payload={"provenance": {"hessian": {"calibration_identity": draw}}})
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
     if command == "run":

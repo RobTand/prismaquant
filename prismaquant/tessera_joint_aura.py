@@ -45,6 +45,20 @@ RENDER_COMPARISONS = ("independent_render_vs_wire", "wire_round_trip_only")
 # that the ``.pt`` still round-trips to the bytes it was written from.
 RENDER_COMPARISON_BY_ORIGIN = {"encoded": "independent_render_vs_wire",
                                "synthesized_from_wire": "wire_round_trip_only"}
+# The producer's encoder source seal hashes every python/cuda/cpp file of the
+# installed Tessera package, the unmeasured branches included
+# (``tessera.cached_unit.encoder_source_sha256``). A campaign priced under an
+# older package therefore cannot pass a newer package's own seal, even when
+# every byte the encoder actually read -- source weight, H, calibration,
+# recipe, unit, fixture and wire blob -- is identical. A plan may name such a
+# historical digest explicitly, one 64-hex value at a time; that is an
+# admission that those wire bytes are reused without re-deriving the encoder's
+# own seal, and every receipt carries the admission. It is not a licence for
+# any other identity field to differ, and there is no wildcard spelling.
+HISTORICAL_ENCODER_REUSE_SCHEMA = "prismaquant.tessera_joint_aura.historical_encoder_reuse.v1"
+ENCODER_REUSE_STATUS = "unverified_encoder_reuse"
+HISTORICAL_ENCODER_REUSE_ENTRY_FIELDS = frozenset(
+    {"encoder_source_sha256", "reason", "evidence", "recorded_unix", "recorded_by"})
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
 STAGE = "Tessera campaign"
@@ -119,6 +133,108 @@ def _json(path, value):
                                               allow_nan=False) + "\n").encode())
 
 
+def _require_sha256(value, where):
+    _require(isinstance(value, str) and len(value) == 64 and
+             all(character in "0123456789abcdef" for character in value),
+             f"{where}: 64-hex digest required")
+    return value
+
+
+def normalize_historical_encoder_reuse(value, *, where="historical encoder reuse"):
+    """Validate a plan's explicit allowance for a historical encoder seal.
+
+    Closed by construction: a versioned schema and a non-empty list of named
+    64-hex digests, each with its own reason and provenance. An empty list, a
+    prefix, a glob or a missing block all mean the same thing -- no reuse -- so
+    there is no spelling that admits an unnamed hash.
+    """
+    if value is None:
+        return None
+    _require(isinstance(value, dict) and set(value) == {"schema", "allowlist"},
+             f"{where}: requires exactly schema and allowlist")
+    _same(value["schema"], HISTORICAL_ENCODER_REUSE_SCHEMA, f"{where} schema")
+    entries = value["allowlist"]
+    _require(isinstance(entries, list) and bool(entries),
+             f"{where}: a non-empty explicit allowlist is required")
+    seen, normalized = set(), []
+    for index, entry in enumerate(entries):
+        label = f"{where} allowlist[{index}]"
+        _require(isinstance(entry, dict) and set(entry) == HISTORICAL_ENCODER_REUSE_ENTRY_FIELDS,
+                 f"{label}: requires exactly {sorted(HISTORICAL_ENCODER_REUSE_ENTRY_FIELDS)}")
+        digest = _require_sha256(entry["encoder_source_sha256"],
+                                 f"{label} encoder_source_sha256")
+        _require(digest not in seen, f"{label}: duplicate encoder_source_sha256 {digest}")
+        seen.add(digest)
+        for key in ("reason", "evidence", "recorded_by"):
+            _require(isinstance(entry[key], str) and bool(entry[key].strip()),
+                     f"{label}: non-empty {key} required")
+        recorded_unix = entry["recorded_unix"]
+        _require(type(recorded_unix) in (int, float) and math.isfinite(recorded_unix)
+                 and recorded_unix >= 0,
+                 f"{label}: finite non-negative recorded_unix required")
+        normalized.append(dict(entry))
+    return {"schema": HISTORICAL_ENCODER_REUSE_SCHEMA, "allowlist": normalized}
+
+
+def _encoder_reuse_entry(policy, digest):
+    for entry in (policy or {}).get("allowlist", ()):
+        if entry["encoder_source_sha256"] == digest:
+            return entry
+    return None
+
+
+def resolve_encoder_source_reuse(recorded, current, policy, *, where):
+    """Decide whether one recorded encoder seal may be reused, and say so.
+
+    The installed package's own seal is the only one a run can re-derive, so
+    equality needs no permission and is reported as no reuse at all. Any other
+    recorded digest is refused unless the plan named that exact value. A named
+    value is carried forward with both observed digests, so no downstream
+    report can read the result as a re-derived encoder seal.
+    """
+    _require_sha256(recorded, f"{where} recorded encoder source")
+    _require_sha256(current, f"{where} current encoder source")
+    if recorded == current:
+        return None
+    entry = _encoder_reuse_entry(policy, recorded)
+    _require(entry is not None,
+             f"{where}: recorded encoder_source_sha256 {recorded} is not the installed "
+             f"package's {current} and the plan does not name it in "
+             "historical_encoder_reuse; refusing unverified encoder reuse")
+    return {"schema": HISTORICAL_ENCODER_REUSE_SCHEMA, "status": ENCODER_REUSE_STATUS,
+            "recorded_encoder_source_sha256": recorded,
+            "observed_current_encoder_source_sha256": current,
+            "allowlist_entry": dict(entry)}
+
+
+def require_encoder_source_reuse_record(value, *, where):
+    """Validate one carried reuse record before it authorizes an identity swap."""
+    if value is None:
+        return None
+    fields = {"schema", "status", "recorded_encoder_source_sha256",
+              "observed_current_encoder_source_sha256", "allowlist_entry"}
+    _require(isinstance(value, dict) and set(value) == fields,
+             f"{where}: malformed encoder reuse record")
+    _same(value["schema"], HISTORICAL_ENCODER_REUSE_SCHEMA, f"{where} reuse schema")
+    _same(value["status"], ENCODER_REUSE_STATUS, f"{where} reuse status")
+    _require_sha256(value["recorded_encoder_source_sha256"], f"{where} recorded encoder source")
+    _require_sha256(value["observed_current_encoder_source_sha256"],
+                    f"{where} current encoder source")
+    _require(value["recorded_encoder_source_sha256"] !=
+             value["observed_current_encoder_source_sha256"],
+             f"{where}: a reuse record must name two different seals")
+    # The carried entry is re-validated by the plan's own normalizer, so a
+    # hand-built record cannot smuggle a field shape the plan grammar refuses.
+    policy = normalize_historical_encoder_reuse(
+        {"schema": HISTORICAL_ENCODER_REUSE_SCHEMA, "allowlist": [value["allowlist_entry"]]},
+        where=f"{where} carried allowlist")
+    _same(policy["allowlist"][0], value["allowlist_entry"],
+          f"{where}: carried allowlist entry is not its normalized form")
+    _same(value["allowlist_entry"]["encoder_source_sha256"],
+          value["recorded_encoder_source_sha256"], f"{where}: allowlist entry names another seal")
+    return dict(value)
+
+
 @dataclass
 class MeasuredAnchorInput:
     inputs: dict
@@ -138,6 +254,12 @@ class MeasuredAnchorInput:
     # How many shards THIS read synthesized. Distinct from the per-origin
     # census, which counts what is on disk however it got there.
     synthesized_now: int = 0
+    # ``None`` when the checkpoint's recorded encoder source seal is the
+    # installed package's own. Otherwise the explicit record that this read
+    # verifies wire identities against a historical seal the plan named, with
+    # both observed digests. ``verify_anchor_render`` refuses to swap the seal
+    # without it, so no cell can be qualified under a seal nothing observed.
+    encoder_source_reuse: "dict | None" = None
 
     @property
     def total_render_bytes(self):
@@ -316,7 +438,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                defer_render_hashes=False, reader=None,
                                synthesis_device="cpu", unit_scope=None,
                                render_mirror_root=None, log_every=100,
-                               require_existing_renders=False):
+                               require_existing_renders=False,
+                               historical_encoder_reuse=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -370,10 +493,19 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     hours at 2.6 cells/s saying nothing. The default is chosen against that
     measured rate rather than rounded -- 100 shards is ~38 s there and ~16 s
     on the GPU, inside the two minutes a silent phase is a defect after.
+
+    ``historical_encoder_reuse`` is the plan's explicit allowance for a
+    recorded encoder source seal the installed package cannot re-derive. The
+    checkpoint's recorded digest is compared against the installed package's
+    own here, once, before any render origin is resolved or any wire decoded:
+    an unlisted digest is refused in the intake rather than after the
+    per-cell origin walk. An admitted reuse is carried on the returned input
+    so ``prepare_cache`` hands the same record to every cell.
     """
     from .production_weight_cache import _cache_weight_filename
     from tools.dispatch_tessera_campaign import _require_receipts
 
+    reuse_policy = normalize_historical_encoder_reuse(historical_encoder_reuse)
     _require(type(verify_payloads) is bool, "verify_payloads must be an explicit boolean")
     _require(type(defer_render_hashes) is bool, "defer_render_hashes must be boolean")
     _require(not defer_render_hashes or verify_payloads,
@@ -453,6 +585,13 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         value = identity.get(key)
         _require(isinstance(value, str) and len(value) == 64 and
                  all(c in "0123456789abcdef" for c in value), f"missing checkpoint {key}")
+    # The one encoder identity a run can re-derive is the installed package's
+    # own. Refuse anything else here -- before the per-cell origin walk reads
+    # or decodes a wire -- unless the plan named that exact digest.
+    from . import tessera_campaign as tc
+    encoder_source_reuse = resolve_encoder_source_reuse(
+        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
+        reuse_policy, where="joint anchor checkpoint encoder source")
     parts = paths["merged_checkpoint"].with_name(paths["merged_checkpoint"].name + ".parts")
     for row in manifest["units"]:
         _same(parts / row["file"], unit_path(parts, row["qname"]), "canonical checkpoint unit path")
@@ -545,7 +684,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                   render_mirror_root=None if render_mirror_root is None else str(render_mirror_root))
     if not verify_payloads:
         return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
-                                   formats, **scoped)
+                                   formats, encoder_source_reuse=encoder_source_reuse, **scoped)
 
     def verify_files(item):
         pair, cell = item
@@ -575,7 +714,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                 if digest is not None:
                     cells[pair]["render_file_sha256"] = digest
     return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
-                               formats, **scoped)
+                               formats, encoder_source_reuse=encoder_source_reuse, **scoped)
 
 
 def calibrated_maxima(data, profile):
@@ -595,7 +734,8 @@ def calibrated_maxima(data, profile):
 
 def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_source,
                          projected_unit, static_scales, bound_unit=None, reader=None,
-                         release_file_pages=False, wire_blob=None, wire_sha256=None):
+                         release_file_pages=False, wire_blob=None, wire_sha256=None,
+                         encoder_source_reuse=None):
     """Re-derive encoder inputs from actual source/H and compare decoded bytes.
 
     Two legs, and they do not establish the same thing. ``verify_cached_unit``
@@ -608,6 +748,17 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
     establish that the shard still round-trips -- a corruption check between
     the write and this read, not evidence about the encode. The returned
     record names both facts so a reader never has to infer which one it holds.
+
+    ``encoder_source_reuse`` is the intake's explicit record for a checkpoint
+    priced under a historical encoder package. The freshly derived identity is
+    compared against it -- the run's own package must be the one that record
+    observed -- and then exactly one field, the encoder source seal, is
+    replaced by the recorded value so the historical wire receipt can be
+    checked against the historical identity it was written under. Both
+    digests are returned: ``current_encoding_identity_sha256`` over the
+    identity this package derives, and ``encoding_identity_sha256`` over the
+    identity actually compared. Nothing in the wire or its record is
+    rewritten, and the substitution is refused without a validated record.
     """
     import torch
     from . import tessera_campaign as tc
@@ -630,6 +781,18 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         calibration_source=calibration_source, static_scales=static_scales,
         projected_units={} if projected_unit is None else {name: projected_unit},
         **({} if bound_unit is None else {"bound_unit": bound_unit}))
+    reuse = require_encoder_source_reuse_record(
+        encoder_source_reuse, where=f"{name}@{fmt} encoder reuse")
+    current_encoding_identity_sha256 = None
+    if reuse is not None:
+        # The identity this run just derived is the only thing that can say
+        # which package the substitution is a substitution from.
+        _same(expected.get("encoder_source_sha256"),
+              reuse["observed_current_encoder_source_sha256"],
+              f"{name}@{fmt}: installed encoder source seal")
+        current_encoding_identity_sha256 = canonical_json_sha256(
+            expected, where="joint anchor current encoding identity")
+        expected["encoder_source_sha256"] = reuse["recorded_encoder_source_sha256"]
     wire_path = Path(cell["wire"])
     wire_stat = wire_path.stat() if release_file_pages else None
     if wire_blob is None:
@@ -664,6 +827,13 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
                               if source_receipt is None else source_receipt),
             "rendered_weight": _cb_cache_tensor_identity(rendered_weight),
             "encoding_identity_sha256": canonical_json_sha256(expected, where="joint anchor encoding"),
+            # Present only when the encoder source seal was substituted. The
+            # digest this run's own package derives is retained beside the one
+            # actually compared, so the receipt never reads as a re-derivation
+            # of the historical seal.
+            **({} if reuse is None else {
+                "current_encoding_identity_sha256": current_encoding_identity_sha256,
+                "encoder_source_reuse": reuse}),
             "wire_sha256": actual_wire_sha256,
             "render_file_sha256": cell["render_file_sha256"],
             "render_origin": render_origin, "render_comparison": render_comparison}
@@ -1134,6 +1304,13 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                                 projected_unit=projected.get(name), static_scales=scales,
                                                 bound_unit=bound_unit, reader=reader, wire_blob=blob,
                                                 wire_sha256=wire_sha256,
+                                                # ``MeasuredAnchorInput`` always carries this;
+                                                # a caller that hands this seam a duck-typed
+                                                # roster is treated as naming no reuse, which
+                                                # fails closed in ``verify_cached_unit`` rather
+                                                # than admitting a seal nothing named.
+                                                encoder_source_reuse=getattr(
+                                                    data, "encoder_source_reuse", None),
                                                 **({'release_file_pages': True} if policy is not None else {}))
                                             activation = activation_identity(fr.get_format(fmt), cache.activation_max_abs, name)
                                             _same(activation["input_global_scale"], cell["anchor"].get("input_global_scale"),
@@ -1241,6 +1418,9 @@ def _load_plan(path, digest, *, projection_runtime=True):
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
     if config.get("source_identity_cache") is not None:
         _bound(config["source_identity_cache"], "source identity cache")
+    # A plan that names a historical encoder seal is the only place one may be
+    # admitted; the strict default is the same as before this field existed.
+    normalize_historical_encoder_reuse(config.get("historical_encoder_reuse"))
     _source_prefetch(config)
     execution = config["execution"]
     from .glm_source_derivative import normalize_source_derivative
@@ -1529,12 +1709,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         data = load_measured_anchor_input(config["inputs"], reader=reader,
             synthesis_device="cuda",
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
+            **({} if config.get("historical_encoder_reuse") is None else
+               {"historical_encoder_reuse": config["historical_encoder_reuse"]}),
             **({"verify_payloads": False} if command == "prepare" else
                {"verify_payloads": False, "require_existing_renders": True}))
         _require(data.unit_scope is None and data.render_mirror_root is None,
                  "joint execution requires the complete campaign roster in its own caches")
         result["file_hash_workers"] = file_hash_workers
         result["reader_identity"] = reader_identity
+        result["encoder_source_reuse"] = data.encoder_source_reuse
         # Per-run, not per-origin: the census says what is on disk, this says
         # how much of it this run had to write.
         result["renders_synthesized_now"] = data.synthesized_now
@@ -1635,6 +1818,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 "source_execution": source_execution, "calibration_input": calibration,
                 "production_cache": {"path": str(cache_path), "sha256": _sha(cache_path)},
                 "formats_by_qname": data.formats_by_qname, "measured_cells": len(data.cells),
+                "encoder_source_reuse": data.encoder_source_reuse,
                 **render_census}
         else:
             _require(prepared is not None, "cost execution requires independently bound prepared inputs")
@@ -1646,6 +1830,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                                ("source_model_identity", source), ("source_execution", source_execution),
                                ("calibration_input", calibration), ("measured_cells", len(data.cells)),
                                ("reader_identity", reader_identity),
+                               ("encoder_source_reuse", data.encoder_source_reuse),
                                ("render_origins", render_census["render_origins"]),
                                ("render_comparisons", render_census["render_comparisons"]),
                                ("projection_backend", projection_backend.identity)):
@@ -1790,7 +1975,8 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
     started = time.time()
     data = load_measured_anchor_input(config["inputs"], reader=reader, verify_payloads=False,
                                       synthesis_device=device, unit_scope=scope,
-                                      render_mirror_root=mirror_root, log_every=log_every)
+                                      render_mirror_root=mirror_root, log_every=log_every,
+                                      historical_encoder_reuse=config.get("historical_encoder_reuse"))
     record = {"schema": SYNTHESIS_SCHEMA, "plan_sha256": plan_sha256, "units": units,
               "unit_scope": scope, "device": device, "mirror_root": data.render_mirror_root,
               "host": socket.gethostname(), "pid": os.getpid(),
@@ -1798,6 +1984,7 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
               "decoder_source": _decoder_identity(reader),
               "units_read": len(data.formats_by_qname), "cells": len(data.cells),
               "renders_synthesized_now": data.synthesized_now,
+              "encoder_source_reuse": data.encoder_source_reuse,
               "seconds": time.time() - started, **cell_render_census(data.cells)}
     if compare:
         record["comparison"] = _compare_mirrored_renders(data)
