@@ -963,7 +963,15 @@ def activation_dloss_table(card, model_path: str, formats: list[str], *,
              "per_expert_units_priced": len(per_expert),
              "units_unresolved": len(unresolved),
              "units_without_requested_cells": len(no_cells),
-             "units_fully_joint_priced": len(already_priced)})
+             "units_fully_joint_priced": len(already_priced),
+             # The two ways a requested cell is free of an A-side BY CONTRACT,
+             # reported apart because they are different answers -- and because
+             # the campaign-coverage gate below has to subtract them from the
+             # unfulfilled set rather than call BF16 a hole. A format the
+             # registry cannot build for a shape is in neither set: it stays a
+             # hole.
+             "activation_identity_formats": sorted(non_act),
+             "not_executed_formats": sorted(not_executed)})
 
 
 def merge_act_dloss(costs: dict, table: dict) -> dict:
@@ -1053,6 +1061,17 @@ def main() -> int:
                          "Linear's real input rows instead of modelled from a "
                          "per-channel Gaussian fit; units with no cached rows "
                          "fall back to the model and are counted separately.")
+    ap.add_argument(
+        "--require-complete-coverage", action="store_true",
+        help="refuse unless EVERY requested (unit, format) cell this lane's "
+             "activation contract OWES a price has one: a joint AURA row, or an "
+             "A-side computed and merged here. A format that leaves activations "
+             "alone (BF16 and the other passthroughs) or whose activation grid "
+             "this lane never executes is free by contract and counts as "
+             "covered. Off by default: partial coverage is a hole set a "
+             "research arm may deliberately carry, and the campaign "
+             "requirement is the campaign's to declare, not this stage's "
+             "default.")
     args = ap.parse_args()
 
     from .sensitivity_card import SensitivityCard
@@ -1164,6 +1183,31 @@ def main() -> int:
         # requirement this deliberately does not decide here).
         log(f"coverage: {len(unfulfilled)} of {len(requested)} requested cells "
             f"have no A-side in this output; they keep a weight-only cost")
+    # The two ways a requested cell is free BY CONTRACT, subtracted here so a
+    # passthrough is not refused as a hole. Both are format-level facts -- does
+    # the format quantize activations at all, and does THIS lane execute that
+    # grid -- which is why the stage reports them as sets rather than per cell.
+    # A format the registry cannot build for a unit's shape is in neither set:
+    # that stays a hole.
+    free_by_contract = set(meta.get("activation_identity_formats") or ()) | set(
+        meta.get("not_executed_formats") or ())
+    uncovered = {cell for cell in unfulfilled
+                 if cell[1] not in free_by_contract}
+    if args.require_complete_coverage and uncovered:
+        # The campaign requirement (#655): every cell the campaign asked for
+        # carries its own activation term. A positive WEIGHT-ONLY surrogate is
+        # the case this must not accept -- it is tradeable and biased, but it is
+        # not an A-side price, and an unmeasured A-side on an
+        # activation-quantizing cell is what silently buys 4-bit.
+        examples = ", ".join(f"{name}@{fmt}" for name, fmt in sorted(uncovered)[:5])
+        raise SystemExit(
+            f"REFUSE: --require-complete-coverage: {len(uncovered)} of "
+            f"{len(requested)} requested (unit, format) cells that this lane "
+            f"OWES an activation-side price have none in --cost-out, so their "
+            f"cost would be weight-only (examples: {examples}). Free by "
+            f"contract and therefore excluded: "
+            f"{sorted(free_by_contract) or 'none'}. Price them, joint-price "
+            f"them, or drop the requirement for this arm.")
     # The silent no-op this refusal exists for: nothing was priced AND at least
     # one requested cell is unaccounted for. An all-joint artifact is the other
     # case -- every requested cell covered, nothing computed, nothing to add.
@@ -1194,6 +1238,11 @@ def main() -> int:
         "requested_cells": len(requested),
         "priced_cells": len(priced_cells),
         "cells_without_act_price": len(unfulfilled),
+        # The same count with the cells that are free by contract subtracted --
+        # what the campaign-coverage gate reads, and the number an operator
+        # compares against the campaign's requirement.
+        "required_cells_without_act_price": len(uncovered),
+        "require_complete_coverage": bool(args.require_complete_coverage),
         "joint_cells_already_priced": [
             list(cell) for cell in sorted(joint_requested)],
         **meta,

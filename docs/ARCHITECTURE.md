@@ -150,10 +150,20 @@ accepts, not a caught hole. So the honest statement of the contract is:
   * the legacy default stays what it is -- `cost_entry_act_dloss` reads an
     absent key as `0.0` so pre-AQUA artifacts remain bit-for-bit reproducible;
   * for a CAMPAIGN, "this artifact has no A-side for a format the lane
-    executes" is not currently enforced anywhere, and closing it needs an
-    explicit requirement (refuse on holes, or a required-coverage declaration
-    per campaign) rather than a silent default. That is a policy decision, and
-    it is filed as a gap with the evidence rather than improvised here.
+    executes" is now an explicit requirement the campaign declares, not a
+    default: `--require-complete-coverage` refuses unless every requested
+    `(unit, format)` cell this lane OWES a price has one. A cell is covered
+    when it is joint-priced or priced and merged here; it is free BY CONTRACT,
+    and therefore not a hole, when the format quantizes no activations (BF16
+    and the other passthroughs) or its activation grid is one this lane never
+    executes. The two sets are reported apart
+    (`activation_identity_formats`, `not_executed_formats`) because "leaves
+    activations alone" and "this runtime never runs that grid" are different
+    answers. A format the registry cannot build for a unit's shape is in
+    neither set and stays a hole. Off by default, so a research arm may still
+    carry holes deliberately and pre-AQUA artifacts are untouched; the flag is
+    one explicit opt-in, with no production default promoted (issue #655 is the
+    campaign-level requirement this states).
 
 Which variance the A-side uses is likewise one authority now,
 `format_cost_protocol.resolve_act_quant_variance`, so a caller that cannot hold

@@ -607,3 +607,116 @@ def test_the_silent_no_op_refusal_still_fires(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="byte-equivalent copy"):
         aqc.main()
     assert not cost_out.exists()
+
+
+def test_a_positive_weight_only_cell_refuses_the_campaign_coverage_requirement(
+        tmp_path, monkeypatch):
+    """#655: a requested cell with no A-side refuses when the campaign asks.
+
+    ``cost_entry_prices_unmeasured_activation_at_zero`` excludes only the cell
+    whose weight side is EXACTLY 0.0; a positive weight-side surrogate is the
+    accepted L1 design and is admitted by default. When the campaign declares
+    that coverage is mandatory, a requested cell with no A-side has to refuse
+    whatever its weight-only price is -- that is the difference between a biased
+    estimate and a covered cell.
+    """
+    import dataclasses
+    import pickle
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+
+    priced_name = "model.layers.0.mlp.down_proj"
+    hole_name = "model.layers.0.mlp.o_proj"
+    costs = {priced_name: {"FP8_E4M3": {"predicted_dloss": 0.5}},
+             hole_name: {"NVFP4": {"predicted_dloss": 1.0}}}
+    units = [_dense_unit(priced_name),
+             dataclasses.replace(_dense_unit(hole_name), g_sq_sum=None)]
+    cost_out, argv = _cli_fixture(tmp_path, costs, units,
+                                  extra_dense=(hole_name,))
+
+    # The default is unchanged: the hole is counted and reported, and the arm
+    # still runs. This is what keeps a research arm able to carry holes.
+    monkeypatch.setattr(sys, "argv", argv)
+    assert aqc.main() == 0
+    prov = pickle.loads(cost_out.read_bytes())["provenance"]["aqua_activation_cost"]
+    assert prov["cells_without_act_price"] == 1
+    assert prov["required_cells_without_act_price"] == 1
+    assert prov["require_complete_coverage"] is False
+
+    cost_out.unlink()
+    monkeypatch.setattr(sys, "argv", [*argv, "--require-complete-coverage"])
+    with pytest.raises(SystemExit, match="require-complete-coverage") as refused:
+        aqc.main()
+    assert f"{hole_name}@NVFP4" in str(refused.value)
+    assert not cost_out.exists()
+
+
+def test_an_unrelated_joint_cell_does_not_cover_a_requested_legacy_cell(
+        tmp_path, monkeypatch):
+    """The joint row covers ITS cell. A different requested cell still needs one.
+
+    This is the same accounting `--require-complete-coverage` reads: the joint
+    cells are subtracted because they carry their own activation term, and every
+    other requested cell has to be priced here. A neighbouring joint rung says
+    nothing about it.
+    """
+    import dataclasses
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+
+    joint_name = "model.layers.0.mlp.down_proj"
+    hole_name = "model.layers.0.mlp.o_proj"
+    cost_out, argv = _cli_fixture(
+        tmp_path,
+        {joint_name: {"NVFP4": _joint_row(joint_name, "NVFP4")},
+         hole_name: {"NVFP4": {"predicted_dloss": 1.0}}},
+        [_dense_unit(joint_name),
+         dataclasses.replace(_dense_unit(hole_name), g_sq_sum=None)],
+        extra_dense=(hole_name,),
+        extra_argv=("--require-complete-coverage",))
+
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="require-complete-coverage") as refused:
+        aqc.main()
+    message = str(refused.value)
+    assert f"{hole_name}@NVFP4" in message
+    assert f"{joint_name}@NVFP4" not in message
+    assert not cost_out.exists()
+
+
+def test_a_bf16_passthrough_is_free_by_contract_not_a_missing_a_side(
+        tmp_path, monkeypatch):
+    """The complete-coverage gate accepts a menu whose only unpriced rung is
+    one that quantizes no activations.
+
+    BF16 is the unquantized arm: it is correctly absent from the A-side table,
+    and it is not a hole. Folding it into the hole set would make the gate
+    unreachable on every real menu, which is the other way a coverage rule
+    fails.
+    """
+    import pickle
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+
+    joint_name = "model.layers.0.mlp.down_proj"
+    legacy_name = "model.layers.0.mlp.o_proj"
+    cost_out, argv = _cli_fixture(
+        tmp_path,
+        {joint_name: {"NVFP4": _joint_row(joint_name, "NVFP4")},
+         legacy_name: {"FP8_E4M3": {"predicted_dloss": 0.5},
+                       "BF16": {"predicted_dloss": 0.0}}},
+        [_dense_unit(joint_name), _dense_unit(legacy_name)],
+        extra_dense=(legacy_name,),
+        extra_argv=("--require-complete-coverage",))
+
+    monkeypatch.setattr(sys, "argv", argv)
+    assert aqc.main() == 0
+
+    prov = pickle.loads(cost_out.read_bytes())["provenance"]["aqua_activation_cost"]
+    assert prov["required_cells_without_act_price"] == 0
+    assert prov["cells_without_act_price"] == 1        # BF16, free by contract
+    assert "BF16" in prov["activation_identity_formats"]
+    assert prov["joint_cells_already_priced"] == [[joint_name, "NVFP4"]]
