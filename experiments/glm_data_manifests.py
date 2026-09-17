@@ -75,6 +75,16 @@ _phase_spec = importlib.util.spec_from_file_location(
 _phase_module = importlib.util.module_from_spec(_phase_spec)
 _phase_spec.loader.exec_module(_phase_module)
 
+#: The resumed read order and the annotations that seal it (#607). Loaded the
+#: same way for the same reason: a CPU manifest build has no GPU image, and
+#: the preparing action reads this exact file to walk the order it sealed.
+_replay_spec = importlib.util.spec_from_file_location(
+    "joint_replay_frontier",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "prismaquant",
+                 "joint_replay_frontier.py"))
+_replay_module = importlib.util.module_from_spec(_replay_spec)
+_replay_spec.loader.exec_module(_replay_module)
+
 #: ``prismabuild.core._DATA_MANIFEST_KEYS`` and ``_DATA_MANIFEST_ENTRY_KEYS``,
 #: restated because PrismaBuild is not importable from the environments that
 #: build a manifest.  ``validate_data_manifest`` builds both through
@@ -799,6 +809,82 @@ def _add_render(track: "_Phases", owner: str, render_sizes: dict, name: str,
     if size:
         track.add(path, 0, size, "renders")
 
+
+def _is_resume(argv) -> bool:
+    """Whether this submission forwards the pass's own resume switch."""
+    return bool(argv) and "--resume" in [str(item) for item in argv]
+
+
+def _canonical_sha256(value) -> str:
+    """``cost_stage_checkpoint.canonical_json_sha256`` without the import.
+
+    The acting image computes the journal's identity digest with that module.
+    This reproduces its canonical encoding (sorted keys, no spaces) so a
+    manifest built on a CPU box can check the journal it is about to seal. A
+    disagreement is a refusal, never a repair: the sealed digest is what the
+    preparing action compares against at run time.
+    """
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _qualification_journal_state(plan: dict, *, roster):
+    """``(completed units, journal identity sha256)``, or ``None`` if none.
+
+    ``None`` means the pass never journaled a unit, so a resume has nothing to
+    replay and seals an empty frontier. Everything else that is not exactly
+    the journal this campaign wrote is a refusal: a journal whose identity does
+    not hash to its own digest, one qualified against another campaign
+    checkpoint, or one whose unit roster is not this campaign's. Sealing a
+    prefix against any of those would name reads the resumed action is not
+    going to make.
+    """
+    journal = os.path.join(plan["output_root"], "prepare", "qualification")
+    manifest_path = os.path.join(journal, "manifest.json")
+    if not os.path.isfile(manifest_path):
+        return None
+    manifest = _read_json(manifest_path, "qualification journal manifest")
+    if (manifest.get("schema") != _replay_module.JOURNAL_MANIFEST_SCHEMA
+            or manifest.get("stage") != _replay_module.QUALIFICATION_STAGE):
+        raise SystemExit(
+            f"{manifest_path}: not a {_replay_module.QUALIFICATION_STAGE!r} "
+            "journal; refusing to seal a replay frontier against it")
+    identity = manifest.get("identity")
+    identity_sha256 = manifest.get("identity_sha256")
+    if (not isinstance(identity, dict) or not isinstance(identity_sha256, str)
+            or len(identity_sha256) != 64):
+        raise SystemExit(f"{manifest_path}: journal identity is missing or malformed")
+    if _canonical_sha256(identity) != identity_sha256:
+        raise SystemExit(
+            f"{manifest_path}: journal identity does not hash to its own digest; "
+            "refusing to seal a replay frontier")
+    checkpoint = _bound(plan["inputs"]["merged_checkpoint"],
+                        "plan inputs.merged_checkpoint")
+    seal = _read_json(checkpoint, "merged checkpoint").get("identity_sha256")
+    if identity.get("campaign_checkpoint_sha256") != seal:
+        raise SystemExit(
+            f"{manifest_path}: journal campaign checkpoint "
+            f"{identity.get('campaign_checkpoint_sha256')!r} is not the merged "
+            f"checkpoint's seal {seal!r}; re-plan rather than resume against a "
+            "different campaign checkpoint")
+    units = manifest.get("units")
+    listed = [row.get("qname") for row in units] if isinstance(units, list) else None
+    files = [row.get("file") for row in units] if isinstance(units, list) else None
+    if (listed is None or any(not isinstance(name, str) for name in listed)
+            or any(not isinstance(name, str) for name in files)
+            or len(set(listed)) != len(listed)):
+        raise SystemExit(f"{manifest_path}: journal unit roster is malformed")
+    if sorted(listed) != sorted(roster):
+        raise SystemExit(
+            f"{manifest_path}: journal roster of {len(listed)} unit(s) is not "
+            f"this campaign's {len(roster)}-unit roster; refusing to seal a "
+            "replay frontier over a different unit set")
+    completed = sorted(row["qname"] for row in units
+                       if os.path.isfile(os.path.join(journal, row["file"])))
+    return completed, identity_sha256
+
+
 def _checkpoint_unit_shards(track: "_Phases", checkpoint: str, roster) -> dict:
     """Declare one shard of the merged checkpoint per unit, or refuse.
 
@@ -1238,6 +1324,42 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     # A plan that declares a qualification window runs one unit per capture
     # window; without one the whole layer's captures are loaded together.
     per_unit_window = plan.get("qualification_window") is not None
+    # A resumed prepare reads its journal's units before the layer walk:
+    # ``_qualification_replay`` re-authenticates each one's X/H capture, wires
+    # and renders, and only then does the walk qualify the rest. Those are not
+    # the layer/part reads a fresh manifest declares, so they get their own
+    # phases in front of the walk -- and the roster, its exact order and the
+    # journal identity are sealed beside them, because the resumed action
+    # refuses to report a transition for a journal that moved after
+    # submission (RobTand/prismaquant#607).
+    replay, replayed = None, frozenset()
+    if command == "prepare" and per_unit_window and _is_resume(argv):
+        state = _qualification_journal_state(plan, roster=roster)
+        completed, journal_identity_sha256 = state if state is not None else ([], None)
+        replayed = frozenset(completed)
+        # The replay block is windowed exactly as the walk is. One phase per
+        # unit would be a phase table as long as the journal -- tens of
+        # thousands of entries on the census -- and the submission declares one
+        # PB progress phase per manifest phase, up to 2048. A part therefore
+        # starts before a unit only once the current one has reached the
+        # budget, so a part is never split inside a unit and never starts empty.
+        replay_starts, part = {}, 0
+        for name in completed:
+            if not replay_starts:
+                track.begin(_replay_module.replay_phase_name(part))
+            elif track._phase_bytes >= _phase_module.MAX_PHASE_BYTES:
+                part += 1
+                track.begin(_replay_module.replay_phase_name(part))
+            replay_starts[name] = track._phase
+            _add_capture(track, campaign.capture_files_for([name]))
+            for fmt, wire, wire_bytes in sorted(cells[name], key=lambda row: row[0]):
+                track.add(wire, 0, wire_bytes, "wires")
+                _add_render(track, owners[name], render_sizes, name, fmt)
+        replay = _replay_module.seal_frontier(
+            completed,
+            {name: [fmt for fmt, _wire, _bytes in cells[name]] for name in roster},
+            phase_start_units=replay_starts,
+            journal_identity_sha256=journal_identity_sha256)
     source_lookahead = 0
     if command == "prepare" and per_unit_window:
         prefetch = plan.get("source_prefetch") or {}
@@ -1256,11 +1378,19 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     for layer in layers:
         names = sorted(by_layer[layer])
         part = 0
-        track.begin(_phase_module.phase_name(layer, part) if command == "prepare" and per_unit_window
-                    else f"layer-{layer}")
         source_layers = ([layer] if not (command == "prepare" and per_unit_window)
                          else [target for target in all_source_layers
                                if max(0, target - source_lookahead) == layer])
+        if replay is not None and not source_layers and all(
+                name in replayed for name in names):
+            # Every unit of this layer is in the replay block, and the walk
+            # declares no source extents of its own here, so this layer reads
+            # nothing: beginning its phase would seal a transition over zero
+            # bytes. A resuming walk has fewer phases than a fresh one, which
+            # is the point -- the phases it does seal are the reads it makes.
+            continue
+        track.begin(_phase_module.phase_name(layer, part) if command == "prepare" and per_unit_window
+                    else f"layer-{layer}")
         for source_layer in source_layers:
             if source_schedule is not None and source_cache is None:
                 for path, size in source_schedule["layers"][source_layer]:
@@ -1281,6 +1411,11 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             for name in names:
                 _add_capture(track, captures[name])
         for name in names:
+            if name in replayed:
+                # Already authenticated by ``_qualification_replay`` in the
+                # replay phase that declared its bytes; the walk does not read
+                # it again, so it draws no boundary here.
+                continue
             if command == "prepare" and per_unit_window:
                 # Only a complete unit is a durable progress boundary. Keep a
                 # first unit whose source extents make the phase oversized;
@@ -1321,6 +1456,12 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             f"row caches (first looked for {absent[0] if absent else '?'}); "
             "refusing to declare a read set that omits every render")
 
+    if replay is not None:
+        # One table for the resumed order: a replayed unit starts in its replay
+        # phase, the rest start in their layer phase. The preparing action
+        # looks every unit up in it, exactly as it does for a fresh run.
+        phase_start_units.update(replay[_replay_module.PHASE_START_UNITS_KEY])
+
     annotations = {
         "entry_point": f"{JOINT_ENTRY_POINT}:{command}",
         "plan": plan_path,
@@ -1349,6 +1490,7 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         **({"phase_start_units": phase_start_units,
             "phase_target_bytes": _phase_module.MAX_PHASE_BYTES}
            if command == "prepare" and per_unit_window else {}),
+        **({} if replay is None else replay),
         "argv": None if argv is None else [str(item) for item in argv],
     }
     return _finish(track, produced_by, annotations,

@@ -33,6 +33,7 @@ have no torch, and the producer they exercise imports nothing from the
 
 import gzip
 import hashlib
+import importlib.util
 import json
 import os
 import pickle
@@ -52,6 +53,14 @@ if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
 from experiments import glm_data_manifests  # noqa: E402
+
+#: The sealed replay frontier's own definitions, loaded the way the producer
+#: loads them: no ``prismaquant`` package, no GPU image.
+_replay_spec = importlib.util.spec_from_file_location(
+    "joint_replay_frontier",
+    ROOT / "prismaquant" / "joint_replay_frontier.py")
+replay_frontier = importlib.util.module_from_spec(_replay_spec)
+_replay_spec.loader.exec_module(replay_frontier)
 
 PREFIX = "model.language_model.layers."
 UNITS = {
@@ -243,6 +252,75 @@ def shared_mount(scratch, monkeypatch):
     """The fixture's files are not on /mnt/shared, so the prefix moves to it."""
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(scratch))
     return scratch
+
+
+def canonical_sha256(value) -> str:
+    """``cost_stage_checkpoint.canonical_json_sha256``, restated."""
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def workspace_with_sealed_checkpoint(scratch):
+    """The campaign fixture, with the merged checkpoint's own seal.
+
+    The journal identity names the campaign checkpoint it was qualified
+    against, and the checkpoint names its own seal, so a journal that was
+    written against another merge is recognisable as one.
+    """
+    fixture = _workspace(scratch)
+    checkpoint = Path(fixture["checkpoint"])
+    document = json.loads(checkpoint.read_text())
+    identity = {
+        "campaign_schema": "prismaquant.tessera_joint_cost.v1",
+        "currency": "fixture",
+        "units": sorted(fixture["names"]),
+        "prismaquant_source_sha256": "a" * 64,
+        "encoder_source_sha256": "b" * 64,
+    }
+    document["identity"] = identity
+    document["identity_sha256"] = canonical_sha256(identity)
+    checkpoint.write_text(json.dumps(document))
+    return fixture, document["identity_sha256"]
+
+
+def plant_journal(fixture, completed, *, checkpoint_sha256, roster=None):
+    """A qualification journal as ``cost_stage_checkpoint`` writes one."""
+    journal = Path(fixture["output_root"]) / "prepare" / "qualification"
+    (journal / "units").mkdir(parents=True, exist_ok=True)
+    names = sorted(fixture["names"] if roster is None else roster)
+    identity = {
+        "schema": "prismaquant.joint_qualification_journal.v1",
+        "inputs": {"fixture": "inputs"},
+        "campaign_checkpoint_sha256": checkpoint_sha256,
+        "cells_sha256": "c" * 64,
+    }
+    identity_sha256 = canonical_sha256(identity)
+    units = []
+    for name in names:
+        relative = f"units/{hashlib.sha256(name.encode()).hexdigest()}.pkl"
+        units.append({"qname": name, "file": relative})
+        if name not in completed:
+            continue
+        payload = pickle.dumps({"fixture": name}, protocol=pickle.HIGHEST_PROTOCOL)
+        envelope = {
+            "schema": replay_frontier.JOURNAL_UNIT_SCHEMA,
+            "stage": replay_frontier.QUALIFICATION_STAGE,
+            "qname": name,
+            "identity_sha256": identity_sha256,
+            "payload_sha256": hashlib.sha256(payload).hexdigest(),
+            "payload": payload,
+        }
+        (journal / relative).write_bytes(
+            pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL))
+    (journal / "manifest.json").write_text(json.dumps({
+        "schema": replay_frontier.JOURNAL_MANIFEST_SCHEMA,
+        "stage": replay_frontier.QUALIFICATION_STAGE,
+        "identity_sha256": identity_sha256,
+        "identity": identity,
+        "units": units,
+    }))
+    return identity_sha256
 
 
 def _phase(manifest, name):
@@ -864,6 +942,68 @@ def test_fresh_verified_prepare_seals_the_same_phases_and_manifest_digest(
         argv[argv.index("--data-manifest") + 1])
     summary = json.loads(printed[printed.index("{\n"):])
     assert argv[argv.index("--prewarm-manifest-sha256") + 1] == summary["manifest_sha256"]
+
+
+def test_a_resumed_prepare_seals_its_order_and_the_submission_carries_it(
+    scratch, shared_mount, capsys, monkeypatch,
+):
+    """#607's submission end: a resume must carry the order it will read.
+
+    Before this, ``submit-joint prepare --resume`` declined to declare progress
+    phases and never passed ``--prewarm-manifest``, so the action had no sealed
+    read order to report against, the row stayed cold, and the resumed read
+    order was not bound to anything.
+    """
+    import dispatch_tessera_campaign as dispatch
+
+    fixture, checkpoint_sha256 = workspace_with_sealed_checkpoint(scratch)
+    resumed_unit = fixture["names"][0]
+    journal_sha256 = plant_journal(fixture, {resumed_unit},
+                                   checkpoint_sha256=checkpoint_sha256)
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    original = glm_data_manifests.build_joint_pass_manifest
+    built = []
+
+    def verified(*args, **kwargs):
+        manifest = original(*args, **kwargs)
+        manifest["annotations"]["source_authentication_mode"] = (
+            "verified_streamed_identity_cache")
+        built.append(manifest)
+        return manifest
+
+    monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    assert dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
+                          "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+                          "--resume", "--manifest-dir", str(scratch / "manifests"),
+                          "--dry-run"]) == 0
+    printed = capsys.readouterr().out
+    command = next(line for line in printed.splitlines() if line.startswith("[dry-run] "))
+    argv = shlex.split(command[len("[dry-run] "):])
+
+    # The sealed table is the resumed order this time: the head, the journal's
+    # replay part, then the layer walk over the units still to qualify.
+    phases = [argv[i + 1].split("=", 1)[0] for i, value in enumerate(argv)
+              if value == "--progress-phase"]
+    assert phases == ["head", "replay-0000", "layer-0-part-0", "layer-1-part-0"]
+    assert argv.index("--progress-phase") < argv.index("--data-manifest")
+    # The action reads the same manifest the storage role warms, by digest.
+    assert argv[argv.index("--prewarm-manifest") + 1] == (
+        argv[argv.index("--data-manifest") + 1])
+    summary = json.loads(printed[printed.index("{\n"):])
+    assert argv[argv.index("--prewarm-manifest-sha256") + 1] == summary["manifest_sha256"]
+    assert summary["phases"] == built[0]["annotations"]["phases"]
+    assert "--resume" in argv
+
+    # The declared read order is the resumed one, and it is bound to the
+    # journal identity that was on disk at submission.
+    annotations = built[0]["annotations"]
+    assert annotations["replay_roster"] == [resumed_unit]
+    assert annotations["replay_roster_sha256"] == replay_frontier.roster_sha256(
+        [resumed_unit])
+    assert annotations["replay_journal_identity_sha256"] == journal_sha256
+    assert annotations["phase_start_units"][resumed_unit] == "replay-0000"
 
 
 def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
