@@ -1700,6 +1700,10 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     # ``test_a_missing_device_envelope_is_a_pure_input_refusal`` and
     # ``test_the_declared_envelope_reaches_the_allocator_unchanged``.
     declared_device_bytes = _config_device_envelope(config, command)
+    if (config.get("qualification_window") is not None
+            or config["execution"].get("retained_operator_windows") is not None):
+        from .autoscale import require_bounded_capture_environment
+        require_bounded_capture_environment(os.environ)
     os.environ[ACTIVATION_SCALE_ENV] = config["execution"]["production_act_scales"]
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision("highest")
@@ -1832,9 +1836,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             result['joint_eval'] = eval_panel
         if command == "prepare":
             if config.get("qualification_window") is not None:
-                from .autoscale import require_bounded_capture_environment
                 from .memory_management import CaptureMemoryGuard
-                require_bounded_capture_environment(os.environ)
                 # TWO BUDGETS, TWO ENFORCEMENTS. The cgroup cap the spec declares
                 # is a CPU-accounted hard limit; the plan's ``max_gpu_bytes`` is
                 # the device envelope, already applied above before this process

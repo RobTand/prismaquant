@@ -1197,6 +1197,28 @@ def test_the_declared_envelope_reaches_the_allocator_unchanged(tmp_path, monkeyp
         assert order == [("envelope", "cuda", declared), ("prewarm",)], (declared, order)
 
 
+@pytest.mark.parametrize("mode", ["qualification", "retained"])
+def test_bounded_environment_refuses_before_metadata_and_device(tmp_path, monkeypatch, mode):
+    from prismaquant import gpu_guard, tessera_joint_aura as bridge
+
+    monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
+    monkeypatch.setenv("PRISMAQUANT_RELEASE_SOURCE_PAGES", "1")
+    monkeypatch.delenv("MIMALLOC_PURGE_DELAY", raising=False)
+    monkeypatch.setattr(bridge, "_seed_source_identity_cache",
+                        lambda *args: pytest.fail("metadata intake preceded environment refusal"))
+    monkeypatch.setattr(bridge, "_apply_device_envelope",
+                        lambda *args, **kwargs: pytest.fail("device touched before environment refusal"))
+    config = {"model": "fixture", "inputs": {}, "output_root": str(tmp_path),
+              "max_gpu_bytes": 2048,
+              "execution": {"production_act_scales": "0"}}
+    if mode == "qualification":
+        config["qualification_window"] = {"max_load_buffer_bytes": 1}
+    else:
+        config["execution"]["retained_operator_windows"] = {"schema": "fixture"}
+    with pytest.raises(RuntimeError, match="MIMALLOC_PURGE_DELAY=0"):
+        bridge.execute("prepare", config, plan_sha256="b" * 64)
+
+
 def test_a_pure_refusal_precedes_the_allocator_touch(tmp_path, monkeypatch):
     """A row refused for metadata must be refused before the device is touched.
 

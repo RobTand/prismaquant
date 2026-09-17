@@ -42,9 +42,9 @@ SAFE_PATH_ENV = "PYTHONSAFEPATH"
 #: whose delayed purge otherwise retains completed H/X after every owner is
 #: gone, and the release-source-pages policy is the other half of the same
 #: bounded phase plan. ``prismaquant.tessera_joint_aura`` calls
-#: ``require_bounded_capture_environment`` at its first bounded step, which is
-#: well into the loader on this campaign -- so a spec that omits a name is not a
-#: late refusal, it is a dead pilot.
+#: ``require_bounded_capture_environment`` before metadata intake and device
+#: allocation; the joint submission adapter supplies missing names from the
+#: plan's qualification-window or retained-execution requirement.
 #:
 #: Carried here for the same reason as ``PATH_ENV`` and ``SAFE_PATH_ENV``:
 #: importing ``prismaquant`` on the worker to read the contract runs the
@@ -205,8 +205,7 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
                 f"spec env {name}={env[name]!r} contradicts the bounded capture "
                 f"contract ({name}={expected!r}); the launcher would have to "
                 "override the spec to run the row, and a bounded row that starts "
-                "with the wrong value is refused by the pass long after the "
-                "loader has read the model")
+                "with the wrong value is refused by the pass before metadata intake")
 
 
 def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:

@@ -2422,7 +2422,7 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
 
 
 def _pbrun_argv(args, *, manifest: Path, inner: list[str],
-                progress_phases=(), gpu_memory_gb=None) -> list[str]:
+                progress_phases=(), gpu_memory_gb=None, container_spec=None) -> list[str]:
     """The submission command, with ``--data-manifest`` before ``--detach``.
 
     Everything after ``--`` is the action; ``--data-manifest`` is an option of
@@ -2431,7 +2431,8 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     summary into the action, which is also why ``produced_by`` carries nothing
     run-specific: the manifest's digest is part of the action key.
     """
-    spec = Path(args.spec).read_text()
+    spec = (Path(args.spec).read_text() if container_spec is None
+            else json.dumps(container_spec, sort_keys=True))
     argv = ["python3", str(args.pbrun), "--demand", args.demand]
     if gpu_memory_gb is not None:
         # The device envelope is a *subset* of the unified reservation on
@@ -2484,6 +2485,14 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     manifest is built, so a plan whose inputs are not on disk yet still shows
     what would be submitted.
     """
+    container_spec = json.loads(Path(args.spec).read_text())
+    if (entry_point == JOINT_ENTRY_POINT
+            and (plan.get("qualification_window") is not None
+                 or plan.get("execution", {}).get("retained_operator_windows") is not None)):
+        from tools.tessera_campaign_container import BOUNDED_CAPTURE_ENV, validate_container
+        validate_container(container_spec, bounded=True)
+        container_spec = {**container_spec,
+                          "env": {**BOUNDED_CAPTURE_ENV, **container_spec.get("env", {})}}
     manifest_path = _manifest_path(args, plan, entry_point=entry_point,
                                    command=command)
     manifest = build()
@@ -2497,7 +2506,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     # a reservation below the container cap or below the combined physical
     # bound is refused here rather than admitted and then declined by the row.
     demand_record = verify_joint_submission_demand(
-        json.loads(Path(args.spec).read_text()), plan, args.demand,
+        container_spec, plan, args.demand,
         label=f"{entry_point}:{command}")
     gpu_memory_gb = None
     gpu_bytes = plan.get("max_gpu_bytes")
@@ -2538,7 +2547,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
                      "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
     argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
                        progress_phases=phase_names,
-                       gpu_memory_gb=gpu_memory_gb)
+                       gpu_memory_gb=gpu_memory_gb, container_spec=container_spec)
     summary = {
         "entry_point": f"{entry_point}:{command}",
         "data_manifest": str(manifest_path),

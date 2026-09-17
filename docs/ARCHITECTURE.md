@@ -1,7 +1,25 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/nvfp4-empty-activation-guard-20260917`. Stamps
+As of: 2026-09-17 · `flash/bounded-capture-guard-main`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/bounded-capture-guard-main`) for **the joint
+submission adapter carrying the bounded environment**. `submit-joint` derives
+the requirement from the plan's `qualification_window` or
+`execution.retained_operator_windows`, validates explicit values against the
+existing `BOUNDED_CAPTURE_ENV`, and fills missing defaults in the serialized
+container spec passed to PrismaBuild. It does not mutate the operator's spec
+file. Contradictions refuse before manifest construction; genuinely unbounded
+legacy rows retain their declared purge delay. The container launcher receives
+both names and enforces the same contract. `tessera_joint_aura.execute` refuses
+an incomplete bounded environment after the pure device-envelope configuration
+check but before source identity metadata, prewarm read sets, or allocator
+touches. The device cap still follows pure input refusals and precedes the
+first device allocation. No format, calibration arithmetic, residency budget,
+or serving gate changes. Regression gates:
+`tests/test_glm_joint_data_manifest_at_submit.py` exercises `cmd_submit_joint`
+through the launcher's Docker argv; `tests/test_tessera_joint_aura.py` checks
+the early refusal and existing device ordering.
 
 Re-stamped (2026-09-17, `flash/nvfp4-empty-activation-guard-20260917`) for the
 **empty activation batch** on the served static contract's registered-operator
