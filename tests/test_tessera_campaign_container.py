@@ -309,3 +309,56 @@ def test_main_withholds_the_device_from_a_row_that_reserved_none(monkeypatch, tm
     assert '--gpus' not in launched['argv'], (
         'the exec line still maps the whole GPU into a container whose row '
         'reserved none (#430): ' + ' '.join(launched['argv'][:8]))
+
+
+# --- the bounded capture environment the pass requires before it touches CUDA
+
+def _bounded_spec(**env_overrides):
+    data = spec()
+    data["container"]["image"] = "qualified:fixed"
+    data["cpu_memory_gb"] = 21
+    data["env"] = {**data["env"], **env_overrides}
+    return data
+
+
+def test_the_two_bounded_capture_constants_cannot_drift():
+    """The launcher's copy is compared against the pass's, so it cannot go stale.
+
+    ``require_bounded_capture_environment`` is called at the joint pass's first
+    bounded step -- minutes into loading the model on this campaign -- so a
+    launcher that supplied a stale value would kill a run that had already paid
+    for its loader. This is the comparison that makes the host-side copy safe.
+    """
+    from prismaquant import autoscale
+
+    assert _runner().BOUNDED_CAPTURE_ENV == autoscale.BOUNDED_CAPTURE_ENV
+
+
+def test_the_launcher_supplies_the_bounded_capture_environment(tmp_path):
+    """A sealed spec that omits the names still gets a container that can start."""
+    data = _bounded_spec()
+    assert "MIMALLOC_PURGE_DELAY" not in data["env"]
+    argv = _runner().docker_command(
+        data, ["python3", "-c", "pass"], cwd=str(tmp_path), uid=1, gid=1,
+        image_id="sha256:" + "a" * 64, with_gpu=False, environ={})
+    forwarded = [argv[index + 1] for index, value in enumerate(argv)
+                 if value == "--env"]
+    for name, expected in _runner().BOUNDED_CAPTURE_ENV.items():
+        assert f"{name}={expected}" in forwarded, (name, forwarded)
+    # The CPU cap itself (`--memory`/`--memory-swap` from the spec's own
+    # ``cpu_memory_gb``) is the launcher change on RobTand/prismaquant#663, not
+    # this one: this delivery supplies the environment the bounded pass refuses
+    # without, and the two land together. Asserting the cap here would make this
+    # test fail on a tree that has neither, which is what it did.
+
+
+def test_a_spec_that_contradicts_the_bounded_capture_contract_refuses():
+    """A spec may omit it; it may not weaken it."""
+    data = _bounded_spec(MIMALLOC_PURGE_DELAY="60000")
+    with pytest.raises(RuntimeError) as refused:
+        _runner().validate_container(data)
+    assert "contradicts the bounded capture contract" in str(refused.value)
+
+    ok = _bounded_spec(PRISMAQUANT_RELEASE_SOURCE_PAGES="1",
+                       MIMALLOC_PURGE_DELAY="0")
+    _runner().validate_container(ok)

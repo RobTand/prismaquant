@@ -859,6 +859,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     from . import tessera_calibration_cache as cc, tessera_hessian as th, tessera_campaign as tc
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .joint_prewarm_phases import phase_name
+    from .memory_management import reserve_allocation
     from .production_weight_cache import ProductionWeightCache
     from .routed_experts import PackedExpertProjection, refresh_packed_expert_projections
     from . import format_registry as fr
@@ -1065,12 +1066,36 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                 unit_load_execution = {}
                 try:
                     if guard is not None:
-                        guard.check('before_joint_qualification_unit:' + unit_names[0], reserve_bytes=
-                            2 * capture_sizes[unit_names[0]] + max_render_bytes +
-                            policy['max_load_buffer_bytes'] + 2 * max_wire_read_bytes +
-                            policy['workspace_reserve_bytes'] +
-                            (0 if capture_load_policy is None else 2 * capture_load_policy['max_buffer_bytes'] +
-                             capture_load_policy['max_scratch_bytes']))
+                        # TWO BUDGETS, ONE UNIT'S FUTURE. The unit's capture
+                        # payload, its serialized load buffers, the wire blobs
+                        # read ahead of the render and the verified-load scratch
+                        # are bytes THIS PROCESS holds, so they are charged to
+                        # the cgroup cap the kernel enforces. The unit's X/H
+                        # (moved to the device by the capture prefetch), the
+                        # render being verified and the projection's workspace
+                        # are device bytes, charged to the plan's envelope. The
+                        # render is charged to BOTH on purpose and is the one
+                        # term this adds to the old mixed number: PWC's backing
+                        # storages are the cgroup's, and the tensor handed to the
+                        # verifier is a copy of it on the device, so a bound that
+                        # named the render once was counting one of the two.
+                        # Everything else is the same total, re-labelled:
+                        # adding the device half to the 21 GiB cap is what
+                        # refused the row's first unit.
+                        capture_bytes = capture_sizes[unit_names[0]]
+                        reserve_allocation(
+                            guard.check,
+                            'before_joint_qualification_unit:' + unit_names[0],
+                            cpu_bytes=(
+                                capture_bytes + max_render_bytes +
+                                policy['max_load_buffer_bytes'] +
+                                2 * max_wire_read_bytes +
+                                (0 if capture_load_policy is None else
+                                 2 * capture_load_policy['max_buffer_bytes'] +
+                                 capture_load_policy['max_scratch_bytes'])),
+                            device_bytes=(
+                                capture_bytes + max_render_bytes +
+                                policy['workspace_reserve_bytes']))
                     (acts, hessians, _counts, _maxima), _receipt = cc.prefetch_capture(capture_path,
                         expected_sha256=capture["sha256"],
                         **({"expected_identity": expected} if metadata_owner is None else
@@ -1442,6 +1467,16 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     from .tessera_reader import load_declared_reader
 
     require_cuda_hot_path("tessera_joint_aura", "cuda")
+    # THE DEVICE ENVELOPE IS APPLIED HERE, before this process builds a CUDA
+    # context, a streamed runner, a kernel or a single allocated tensor. Both
+    # GPU commands take it -- ``prepare`` and ``run`` -- because both allocate
+    # on the device, and ``max_gpu_bytes`` was otherwise compared with
+    # ``max_memory_allocated`` only after a window had run, which on a
+    # unified-memory box is a report about memory already spent. ``synthesize``
+    # is the one CPU command and never reaches this function.
+    from .memory_management import enforce_device_envelope
+    device_envelope = enforce_device_envelope(
+        "cuda", config["max_gpu_bytes"], where=f"joint {command}")
     os.environ[ACTIVATION_SCALE_ENV] = config["execution"]["production_act_scales"]
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision("highest")
@@ -1480,7 +1515,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
                   "started_epoch": time.time(), "torch": str(torch.__version__),
                   "cuda": torch.version.cuda, "affinity": sorted(os.sched_getaffinity(0))},
-              "phases": [], "passed": False}
+              "phases": [], "passed": False, "device_envelope": device_envelope}
     result["env"]["container_content_sha256"] = executing_image()
     profile_tool = config.get("profile_tool", "cprofile")
     profiler = cProfile.Profile() if profile_tool == "cprofile" else None
@@ -1560,7 +1595,16 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 from .autoscale import require_bounded_capture_environment
                 from .memory_management import CaptureMemoryGuard
                 require_bounded_capture_environment(os.environ)
-                qualification_guard = CaptureMemoryGuard("cuda")
+                # TWO BUDGETS, TWO ENFORCEMENTS. The cgroup cap the spec declares
+                # is a CPU-accounted hard limit; the plan's ``max_gpu_bytes`` is
+                # the device envelope, already applied above before this process
+                # touched the device. The guard holds the first, that cap holds
+                # the second, and the aggregate the submission reserved from
+                # PrismaBuild is their sum -- so a row that holds 80 GiB of
+                # device residency beside a 21 GiB CPU cap is bounded rather
+                # than refused by its own arithmetic.
+                qualification_guard = CaptureMemoryGuard(
+                    "cuda", device_bytes=config["max_gpu_bytes"])
                 qualification_guard.check("before_joint_source_authentication")
             source_authentication = _prepare_source_owner(
                 config, data, resource_check=(None if qualification_guard is None

@@ -16,6 +16,7 @@ import threading
 from types import MappingProxyType
 
 from .cost_stage_checkpoint import atomic_write_bytes, prepare_journal, write_unit
+from .memory_management import reserve_allocation
 
 SCHEMA = 'prismaquant.tessera_calibration_cache.v2'
 STAGE = 'tessera_calibration_capture'
@@ -1161,15 +1162,18 @@ class _ConcurrentReservation:
         self._lock = threading.Lock()
         self._live = {}
 
-    def check(self, label, *, reserve_bytes=0):
+    def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
         if self._check is None:
             return None
         key = threading.get_ident()
         with self._lock:
-            previous = self._live.get(key, 0)
-            self._live[key] = reserve_bytes
+            previous = self._live.get(key, (0, 0))
+            self._live[key] = (reserve_bytes, reserve_device_bytes)
             try:
-                return self._check(label, reserve_bytes=sum(self._live.values()))
+                return reserve_allocation(
+                    self._check, label,
+                    cpu_bytes=sum(pair[0] for pair in self._live.values()),
+                    device_bytes=sum(pair[1] for pair in self._live.values()))
             except BaseException:
                 self._live[key] = previous
                 raise
@@ -1239,23 +1243,37 @@ def prefetch_capture(path, *, expected_identity=None, census, names, device,
                 raise RuntimeError(f'{name}: noncanonical capture artifact path')
             artifact = path.parent/relative
             file_stat = artifact.stat() if release_file_pages else None
+            # ONE LOADED UNIT, TWO BUDGETS, and the refusal comes before either
+            # allocation. The serialized payload this process is about to hold
+            # is cgroup-accounted; the X and H the call moves to ``device`` are
+            # charged to the device envelope when that device is the GPU (a CPU
+            # run moves nothing). The guard used to be handed their sum through
+            # ``reserve_bytes``, which charged device residency to the CPU cap
+            # the kernel enforces -- 80 GiB of it against a 21 GiB cap.
+            storage_bytes = _capture_storage_bytes(
+                name, census, expected_identity['max_act_rows'])
+            cuda = str(device).startswith('cuda')
+            reserve_allocation(
+                resource_check, f'before_capture_prefetch:{name}',
+                # ONE loaded unit is TWO allocations when the device is the GPU
+                # -- the serialized payload in this process, and the X/H moved
+                # onto the device -- and ONE when it is not: `_validate_tensors`
+                # hands back the payload's own tensors and ``to`` on the same
+                # device and dtype returns the same tensor, so the CPU arm's
+                # live footprint is the payload alone. The old single number
+                # charged 2x on both arms; the second copy only exists on one.
+                cpu_bytes=storage_bytes,
+                device_bytes=storage_bytes if cuda else 0)
             if execution is None:
                 if sha256(artifact, resource_check=resource_check,
                           release_read_pages=release_file_pages) != record.get('sha256'):
                     raise RuntimeError(f'{name}: capture artifact checksum mismatch')
-                if resource_check is not None:
-                    columns = int(census['unit_shapes'][name][1])
-                    resource_check(f'before_capture_prefetch:{name}', reserve_bytes=8*(
-                        columns**2+min(census['counts'][name], expected_identity['max_act_rows'])*columns))
                 payload = torch.load(artifact,map_location='cpu',weights_only=True)
             else:
                 payload, _entry_receipt = _verified_capture_entry(artifact, name, expected_sha256=record.get('sha256'),
                     census=census, max_rows=expected_identity['max_act_rows'], policy=execution['policy'],
                     execution=execution, resource_check=resource_check,
                     release_file_pages=release_file_pages, expected_stat=file_stat)
-                if resource_check is not None:
-                    resource_check(f'before_capture_prefetch:{name}', reserve_bytes=
-                        2*_capture_storage_bytes(name, census, expected_identity['max_act_rows']))
             x,h = _validate_tensors(name,payload,census,expected_identity['max_act_rows'],
                                     check_finite=execution is None)
             acts[name],hessians[name] = x.to(device),h.to(device)
@@ -1341,9 +1359,12 @@ def _parallel_prefetch_capture(path, *, manifest, expected_identity, census, nam
         for name in names:
             payload, receipt = window.popleft().result()
             fold_load_receipt(execution, receipt)
-            if resource_check is not None:
-                guard.check(f'before_capture_prefetch:{name}', reserve_bytes=
-                    2*_capture_storage_bytes(name, census, max_rows))
+            storage_bytes = _capture_storage_bytes(name, census, max_rows)
+            cuda = str(device).startswith('cuda')
+            guard.check(
+                f'before_capture_prefetch:{name}',
+                reserve_bytes=storage_bytes,
+                reserve_device_bytes=storage_bytes if cuda else 0)
             x, h = _validate_tensors(name, payload, census, max_rows, check_finite=False)
             acts[name], hessians[name] = x.to(device), h.to(device)
             counts[name], maxima[name] = payload['count'], payload['max_abs']

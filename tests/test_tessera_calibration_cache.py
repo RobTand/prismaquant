@@ -128,7 +128,12 @@ def test_selected_prefetch_guards_and_advises_verified_files(capture, monkeypatc
         census=census, names=['a'], device='cpu', expected_sha256=record['sha256'],
         release_file_pages=True, resource_check=lambda label, **kwargs: observed.append((label, kwargs)))
     assert advised == [('a.pt', (root/'inputs/a.pt').stat().st_size)]
-    assert ('before_capture_prefetch:a', {'reserve_bytes': 64}) in observed
+    # ONE allocation on a CPU device: the payload the loader returns IS the
+    # tensor handed on (`.to` on the same device and dtype returns the same
+    # tensor), so this is the storage size once rather than the 2x the single
+    # number charged for a second copy that does not exist. A device arm
+    # presents the same total as `reserve_bytes` + `reserve_device_bytes`.
+    assert ('before_capture_prefetch:a', {'reserve_bytes': 32}) in observed
     assert observed[-1] == ('after_capture_prefetch:a', {})
     assert torch.equal(values[0]['a'], acts['a'])
     assert torch.equal(values[1]['a'], hessians['a'])
