@@ -294,8 +294,13 @@ another's would defeat the current gate.
    derive a peak. Persistent bytes, activation bytes, scratch and KV may not
    reuse one physical extent in the same interval.
 
-8. Classify an allocation that no unit interval contains against the engine
-   steps the capture declares. An allocation contained in exactly one declared
+8. Ask the lifetime question before the ownership one. An owner class is an
+   invariance claim and only a composition term reads one, so a row proven live
+   during no declared engine step is classified off-step on its lifetime alone
+   and carries `owner_class: null` when no checkpoint census saw it. Every row
+   a term charges still needs a single supported class, and `shared` or
+   `unknown` still supplies none. Classify an allocation that no unit interval
+   contains against the engine steps the capture declares. An allocation contained in exactly one declared
    step is invocation-local scratch; one that overlaps a step without being
    contained in it is carried across the boundary and is an activation; one
    that overlaps no declared step is live during no engine step and belongs to
@@ -331,9 +336,12 @@ larger off-step peak. Neither side is defaulted to zero when it is not
 expressible, because an absent side is an absence of evidence and a maximum
 taken against it would read as the other side having been checked. An off-step
 price needs the same join a scratch term needs -- `history_join` and
-`external_closure` closed, and no unclassified or uncharged row, since either
-could itself be off-step -- so the price goes null while the count stays
-readable in `scope.non_step_allocation_count`.
+`external_closure` closed, and no unclassified or uncharged row -- so the price
+goes null while the count stays readable in `scope.non_step_allocation_count`.
+Since Tessera #478 an unclassified row is never itself off-step: with complete
+coverage its lifetime is decided, and an undecided lifetime leaves the off-step
+population empty. The price is published only from a partition that classifies
+every row it charges.
 
 `evaluate_measured_assignment` additionally adds the caller's explicit
 `slos.kv_bytes` and `slos.peak_scratch_bytes` reserves. Those reserves must

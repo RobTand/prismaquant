@@ -696,7 +696,10 @@ def _partition(value: Any, where: str) -> Mapping:
         _index(row["bytes"], where + " non-step bytes")
         _index(row["allocate_index"], where + " non-step allocate index")
         _optional_index(row["free_completed_index"], where + " non-step free completed index")
-        _enum(row["owner_class"], OWNER_CLASSES, where + " non-step owner class")
+        # Off-step rows are the one place a null owner class is well formed: no
+        # composition term charges them, so none reads the class (Tessera #478).
+        if row["owner_class"] is not None:
+            _enum(row["owner_class"], OWNER_CLASSES, where + " non-step owner class")
         _equal(row["lifetime_class"], "non_step", where + " non-step lifetime class")
         _optional_string(row["unit"], where + " non-step unit")
         non_step.append(row)
@@ -823,17 +826,25 @@ def _allocations_whose_unit_crosses_a_step(observations: Mapping) -> list:
 def _classify(allocation: Mapping, steps) -> tuple:
     """Return ``(owner_class, lifetime_class, unit)`` or ``(None, None, reason)``.
 
-    Ownership and lifetime are separate questions and a row needs a supported
-    answer to both. ``shared`` and ``unknown`` answer neither.
+    Ownership and lifetime are separate questions, and the lifetime one is
+    asked first because its answer decides whether the ownership one is asked
+    at all. An owner class is an invariance claim, and only a composition term
+    reads one: a row proven live during no declared engine step is charged by
+    no term, so it is classified off-step on its lifetime with
+    ``owner_class`` ``None``. Every other row needs a supported class, because
+    a term that charges it needs the claim. ``shared`` and ``unknown`` answer
+    neither question (Tessera #478).
     """
     categories = list(allocation["observed_categories"])
     freed = allocation["free_completed_index"] is not None
     scope = allocation["lifetime_scope"]
     if any(label in UNSUPPORTED_OWNER_LABELS for label in categories):
-        return None, None, "shared or unknown ownership supplies neither classification nor invariance"
-    if len(categories) != 1 or categories[0] not in OWNER_CLASSES:
-        return None, None, "no single supported owner category"
-    owner = categories[0]
+        owner, owner_reason = None, ("shared or unknown ownership supplies neither "
+                                     "classification nor invariance")
+    elif len(categories) != 1 or categories[0] not in OWNER_CLASSES:
+        owner, owner_reason = None, "no single supported owner category"
+    else:
+        owner, owner_reason = categories[0], None
     if not freed:
         # Never freed within the capture, so it is live at the terminal
         # boundary whatever scope it was allocated in. Resident bytes add.
@@ -866,6 +877,10 @@ def _classify(allocation: Mapping, steps) -> tuple:
             lifetime = "activation"
         else:
             lifetime = "non_step"
+    if lifetime != "non_step" and owner is None:
+        # The row is one some term charges, so which term is a question this
+        # consumer has to answer, and the owner class is how it is answered.
+        return None, None, owner_reason
     # The unit an allocation is charged to is the **outermost** scope it was
     # made in, not the innermost. The producer reads `unit_invocation` from the
     # outermost containing interval and decides `lifetime_scope` against that
@@ -1038,7 +1053,10 @@ def _recompute_membership(observations: Mapping) -> tuple[list[dict], list[dict]
     membership, unclassified, non_step = [], [], []
     for allocation in observations["torch_allocations"]:
         owner, lifetime, detail = _classify(allocation, steps)
-        if owner is None:
+        if lifetime is None:
+            # An unclassified row is one with no lifetime class or -- where a
+            # term charges it -- no owner class. An off-step row carries a
+            # lifetime and may carry no owner, and it is classified.
             unclassified.append({"allocation_id": allocation["allocation_id"],
                                  "bytes": allocation["bytes"], "reason": detail})
             continue
