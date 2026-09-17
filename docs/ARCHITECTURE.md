@@ -1,7 +1,21 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/bounded-capture-guard-main`. Stamps
+As of: 2026-09-17 · `flash/tessera-cached-manifest-publication-main-20260917`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/tessera-cached-manifest-publication-main-20260917`)
+for the **content-addressed selected-wire manifest** (§7.3). `write_cached_expert_units`
+wrote one fixed name (`cached_expert_units.json`) with a temp-file replace, so two
+allocations sharing the same original wires overwrote each other's selected-unit
+manifest: the second publish replaced the first, and a reader addressed by the build
+anchor could no longer find the manifest the first allocation selected. The manifest
+is now published at `cached_expert_units.<sha256-of-exact-bytes>.json` through the
+campaign's no-clobber primitive (`cluster_campaign._atomic_write_new_bytes`). Identical
+content resolves to the same address and is reused without a rewrite; bytes already
+at that address are read back and reused only when they match, and a conflicting entry
+is refused by name rather than overwritten. Nothing about the manifest's schema, the
+wire bytes, the encoder or any default changed. Gates:
+`tests/test_tessera_cached_manifest_publication.py`.
 
 Re-stamped (2026-09-17, `flash/bounded-capture-guard-main`) for **the joint
 submission adapter carrying the bounded environment**. `submit-joint` derives
