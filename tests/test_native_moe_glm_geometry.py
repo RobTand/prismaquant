@@ -370,3 +370,44 @@ def test_the_owner_execution_carries_the_geometries_own_tensor_parallel(tp):
     # And the LFM record is untouched, byte for byte.
     lfm = {"experts": 32, "hidden_size": 4, "intermediate_size": 4, "top_k": 2}
     assert panel.owner_execution(lfm, format_name=panel.FORMAT) == panel.EXECUTION
+
+
+def test_the_derived_roster_view_round_trips_to_the_same_geometry():
+    """A derived view must not read as the other geometry.
+
+    Root review of 266f80e52f/9e1f2634 found `_shape_for_roster` adding an
+    `experts` alias while `geometry_only` stripped only `format` and the
+    rank-local width, so feeding the view back to `geometry_family` classified
+    a GLM owner as LFM. The claim that the function preserves the geometry is
+    only true if that round trip holds, for both geometries.
+    """
+    glm = panel.validate_geometry(glm_shape())
+    view = panel._shape_for_roster(glm)
+    assert panel.geometry_family(view) == panel.geometry_family(glm) == "glm53_next_routed_stack_v1"
+    # And it is stable: a view of a view is the same geometry.
+    assert panel.geometry_family(panel._shape_for_roster(view)) == "glm53_next_routed_stack_v1"
+
+    lfm = {"experts": 32, "hidden_size": 4, "intermediate_size": 4, "top_k": 2}
+    lfm_view = panel._shape_for_roster(lfm)
+    assert panel.geometry_family(lfm_view) == "lfm2_moe_routed_stack_v1"
+    # LFM declares its count AS `experts`, so the view keeps the declared one.
+    assert lfm_view["experts"] == 32
+    # And the contract fields are recoverable from the view for both.
+    assert set(panel.geometry_only(view)) == set(panel.GLM_SHAPE_FIELDS)
+    assert panel.geometry_only(lfm_view) == lfm
+
+
+def test_the_alias_is_never_treated_as_a_declared_geometry_field():
+    """`experts` on a GLM shape is derived, and a GLM shape without it is valid.
+
+    The two geometries spell the count differently; the alias exists so the
+    roster walks one key. A GLM geometry that declares `n_routed_experts` and no
+    `experts` is complete, and the view adds the alias without changing which
+    geometry it is.
+    """
+    glm = glm_shape()
+    assert "experts" not in glm
+    assert panel.geometry_family(glm) == "glm53_next_routed_stack_v1"
+    view = panel._shape_for_roster(glm)
+    assert view["experts"] == view["n_routed_experts"] == 288
+    assert set(panel.geometry_only(view)) == set(panel.GLM_SHAPE_FIELDS)

@@ -361,8 +361,7 @@ def geometry_family(shape):
     coordinates: a shape that has been through `_shape_for_roster` is still the
     same geometry.
     """
-    fields = set(geometry_only(shape)) if isinstance(shape, dict) else set()
-    if fields == set(GLM_SHAPE_FIELDS):
+    if _declares_glm_fields(shape):
         return "glm53_next_routed_stack_v1"
     return "lfm2_moe_routed_stack_v1"
 
@@ -384,15 +383,44 @@ def _expect_member_roster(unit, members, shape, *, count, pattern, where):
     return members
 
 
-#: The keys a prepared owner adds to its geometry. They are not part of the
-#: geometry contract, and the roster/format views read them; a validator that
-#: saw them would refuse the owner's own shape.
-_OWNER_VIEW_KEYS = ("format", "rank_local_intermediate")
+#: The keys a prepared owner adds to its geometry, beyond the contract fields.
+#: `experts` is an ALIAS of the geometry's own expert count -- LFM spells it
+#: `experts`, GLM spells it `n_routed_experts`, and the roster walks one key.
+#: It is listed here because it is derived, not declared: treating it as a
+#: contract field made the derived view misclassify as the other geometry
+#: (root review of 266f80e52f/9e1f2634).
+_OWNER_VIEW_KEYS = ("format", "rank_local_intermediate", "experts")
 
 
 def geometry_only(shape):
-    """The geometry contract fields, without the owner-view keys."""
-    return {key: value for key, value in shape.items() if key not in _OWNER_VIEW_KEYS}
+    """The declared geometry contract fields, without any derived ones.
+
+    A shape that has been through :func:`_shape_for_roster` is still the same
+    geometry, which is the property this function exists to preserve: dropping
+    the derived keys is what makes the view round-trip. `experts` is dropped
+    only when the geometry declares its count under the other spelling, so an
+    LFM shape keeps the `experts` it actually declared.
+    """
+    if not isinstance(shape, dict):
+        return {}
+    glm = _declares_glm_fields(shape)
+    dropped = {"format", "rank_local_intermediate"}
+    if glm:
+        dropped.add("experts")
+    return {key: value for key, value in shape.items() if key not in dropped}
+
+
+def _declares_glm_fields(shape):
+    """True when the declared fields are GLM's set, ignoring derived keys.
+
+    Read without calling :func:`geometry_family`, which needs this answer; the
+    two are deliberately distinct so the predicate has no cycle.
+    """
+    if not isinstance(shape, dict):
+        return False
+    declared = {key for key in shape
+                if key not in ("format", "rank_local_intermediate", "experts")}
+    return declared == set(GLM_SHAPE_FIELDS)
 
 
 def _member_roster(unit, members, shape):
