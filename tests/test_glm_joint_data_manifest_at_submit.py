@@ -1587,14 +1587,14 @@ def test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases(scratch):
 def test_the_head_allowance_is_a_caller_input_and_the_others_are_not(
     scratch, shared_mount, capsys, monkeypatch, head_grace,
 ):
-    """A resume's head phase commits nothing, so its allowance is sized by hand.
+    """The head allowance is sized by hand; the other phases keep the constant.
 
-    ``load_measured_anchor_input`` reports a cell only when it had to
-    synthesize the render (RobTand/prismaquant#678), so a resume -- where every
-    render is already durable -- walks the whole roster in silence. The fresh
-    run's 1800 s is the wrong number for that pass and the right one for a
-    fresh one, which is exactly what makes it the caller's to state. Only the
-    head moves; every other phase keeps the constant it always had.
+    ``load_measured_anchor_input`` reports every unit it resolves since
+    RobTand/prismaquant#678, so the roster walk itself renews the allowance.
+    What remains unreported inside ``head`` -- whole-source authentication and
+    streamed model construction -- costs what the plan and the box make it
+    cost, which is what keeps the number the caller's to state. Only the head
+    moves; every other phase keeps the constant it always had.
     """
     import dispatch_tessera_campaign as dispatch
 

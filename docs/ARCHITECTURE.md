@@ -1,7 +1,37 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/d37-the-freeze-reads-a-frozen-producer-tree-20260917`.
+As of: 2026-09-17 · `flash/joint-aura-head-progress-678`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/joint-aura-head-progress-678`) for **the joint
+prepare head phase reporting the units it resolves** (#678). The measured
+anchor intake reported only a render it had to *synthesize*, so a resumed
+prepare -- where every render is already durable -- walked the whole cell
+roster in silence. Measured on the GLM-5.3 complete-512 joint panel, 36,423
+units / 197,990 cells: a warm walk of 669.97 s with `renders_synthesized_now:
+0`, and a cold action reaped at 1817 s carrying `progress_observation`
+`{"accepted_count": 0, "rejected_count": 0, "phase": "head"}` while
+`/proc/PID/io` showed the complete walk's 15.95 GB of reads. Resolving an
+existing render's origin and authenticating a unit's journal shard is work the
+action does and can prove, so `load_measured_anchor_input` now commits one
+cumulative count per **resolved unit**, after that unit's cells all carry a
+proven origin -- the same durable boundary the replay and the layer walk
+commit on, which keeps one currency in the counter and reports 36,423 times on
+this census rather than 197,990. The caller names the phase, because only the
+submission knows what it declared: `joint_prewarm_phases.HEAD_PHASE` for
+`execute`'s prepare, `tessera_joint_aura.SYNTHESIS_PHASE` for the standalone
+synthesis stage, and none for a COST run, whose counter belongs to its own
+read schedule. The old literal `synthesize` was in no joint prepare's declared
+set, so a fresh run's reports renewed nothing either. Replay and the layer
+walk continue from the intake's count (`prepare_cache(progress_base=...)`)
+instead of restarting, because a counter that goes backwards renews no
+allowance. An unsealed replay still reports nothing and cannot: a resumed pass
+carrying sealed phases without its sealed frontier is refused, so no phase
+name exists to report under there. No default, stage, format, lane, plugin
+contract, ship gate or published byte changes. Gates:
+`tests/test_joint_head_progress_678.py`,
+`tests/test_joint_qualification_windows.py`,
+`tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-17, `flash/d37-names-the-tessera-harness-change-20260917`)
 for **what D37's re-freeze was actually blocked on**. No default, stage,
@@ -1253,7 +1283,10 @@ complete unit may exceed that target.
 fresh journal and a reusable, verified source identity proof. The container
 checks the manifest's sealed digest and plan identity before running; it
 enters each phase before its first unit read and increments the cumulative
-counter only after that unit's journal write. PB's storage role can then
+counter only after that unit's journal write. The `head` phase advances the
+same way during the measured anchor intake, one count per resolved unit, and
+replay and the layer walk continue from that count rather than restarting at
+zero (#678). PB's storage role can then
 release the consumed prefix and warm the next entry-aligned ARC window.
 The source read set now includes the head's actual materialized tensor
 extents and every indexed tensor in each installed layer, including norms
@@ -1954,10 +1987,12 @@ cumulative count and rate every `--log-every` shards (default 100, ~38 s at
 the measured 2.6 cells/s and inside the two minutes a silent phase is a defect
 after), the per-run count in `results.json` as `renders_synthesized_now`
 (never inside the per-origin census, which the prepare/run boundary compares
-exactly), and a PrismaBuild `progress-v1` report after each durable shard that
-is a no-op outside an admitted action. The report names the phase
-`synthesize`, so a fanned-out row declares `--progress synthesize=<stall>`;
-an undeclared phase grants no continuation. No format, default, wire, serving gate
+exactly), and a PrismaBuild `progress-v1` report after each resolved unit that
+is a no-op outside an admitted action. The report counts every unit the walk
+resolved, not only the shards it wrote, so a retried row whose range is
+already complete reports its re-read too (#678). The phase is the caller's;
+this stage passes `SYNTHESIS_PHASE`, so a fanned-out row declares `--progress
+synthesize=<stall>`; an undeclared phase grants no continuation. No format, default, wire, serving gate
 or published byte changes. Gate: `tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-13, `claude/537-route-status-reads-the-pin`) because

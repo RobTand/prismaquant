@@ -477,6 +477,39 @@ def test_a_fully_completed_resume_verifies_and_publishes(tmp_path, monkeypatch):
                         (2, 'layer-0-part-0', None)]
 
 
+def test_the_counter_continues_from_the_head_walk_rather_than_restarting(
+    tmp_path, monkeypatch,
+):
+    """The head walk reports the units it resolved, so replay and the layer
+    walk continue from that count. Restarting at zero here would hand PB a
+    counter that goes backwards, which renews no allowance (#678).
+    """
+    from prismaquant import joint_replay_frontier as replay
+
+    runner, data, options, journal, _events = _first_pass(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.b')
+    sealed = _sealed_over(journal, data, ['model.layers.0.a'])
+    starts = {**sealed[replay.PHASE_START_UNITS_KEY],
+              'model.layers.0.b': 'layer-0-part-0'}
+    monkeypatch.setattr(bridge, 'verify_anchor_render', _passing_verify)
+    progress = []
+    monkeypatch.setattr(bridge, '_pb_commit',
+                        lambda units, phase, unit=None:
+                        progress.append((units, phase, unit)))
+    cache = bridge.prepare_cache(runner, data, **options, qualification_resume=True,
+                                 prewarm_phase_starts=starts, sealed_replay=sealed,
+                                 prewarm_phases=('head', 'replay-0000',
+                                                 'layer-0-part-0'),
+                                 progress_base=2)
+    assert set(cache.metadata['verified_cells']) == set(data.cells)
+    assert progress == [(2, 'replay-0000', 'model.layers.0.a'),
+                        (3, 'replay-0000', 'model.layers.0.a'),
+                        (3, 'layer-0-part-0', 'model.layers.0.b'),
+                        (4, 'layer-0-part-0', 'model.layers.0.b')]
+    counts = [units for units, _, _ in progress]
+    assert counts == sorted(counts) and counts[0] >= 2
+
+
 def test_an_empty_sealed_frontier_is_accepted_and_a_later_unit_is_refused(
     tmp_path, monkeypatch,
 ):
