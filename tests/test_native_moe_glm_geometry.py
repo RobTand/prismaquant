@@ -38,13 +38,13 @@ SOURCE_FACTS = {
 def glm_shape(**overrides):
     shape = {"geometry_version": panel.GEOMETRY_VERSION,
              "geometry_id": "glm53_next_routed_stack_v1", "source_id": "glm5_next",
-             "tensor_parallel": 1, "tensor_parallel_rank": 0,
+             "tensor_parallel": 1,
              "tensor_parallel_cut_axis": panel.GLM_TP_CUT_AXIS,
              **SOURCE_FACTS}
     shape.update(overrides)
     # The module's own field set decides what a GLM geometry is; the fixture is
     # built to have exactly those fields so an added field is a failing test.
-    assert set(shape) == panel.GLM_SHAPE_FIELDS, sorted(set(shape) ^ panel.GLM_SHAPE_FIELDS)
+    assert set(shape) - {"tensor_parallel_rank"} == panel.GLM_SHAPE_FIELDS
     return shape
 
 
@@ -167,6 +167,37 @@ def test_the_rank_local_cut_follows_the_declared_world(tp, expected):
     assert panel.rank_local_member_shape(shape, "w1") == [expected, 4096]
     assert panel.rank_local_member_shape(shape, "w3") == [expected, 4096]
     assert panel.rank_local_member_shape(shape, "w2") == [4096, expected]
+
+
+@pytest.mark.parametrize("world", [1, 2])
+def test_canonical_geometry_does_not_require_an_execution_rank(world):
+    shape = glm_shape(tensor_parallel=world)
+    assert "tensor_parallel_rank" not in panel.GLM_SHAPE_FIELDS
+    assert panel.validate_geometry(shape) == shape
+    view = panel._shape_for_roster(shape)
+    assert panel.geometry_only(view) == shape
+    assert panel.rank_local_intermediate(view) == 2048 // world
+    assert panel.owner_execution(view, format_name=panel.FORMAT)["tensor_parallel"] == world
+
+
+def test_tp2_slicing_requires_an_explicit_rank_but_tp1_does_not():
+    with pytest.raises(ValueError, match="explicit tensor_parallel_rank"):
+        panel.member_window(glm_shape(tensor_parallel=2), "w1")
+    assert panel.member_window(glm_shape(), "w1") == ((0, 2048), (0, 4096), "row")
+
+
+@pytest.mark.parametrize("rank", [True, 1.0, -1, 2, None])
+def test_tp2_slicing_validates_rank_even_without_prior_geometry_validation(rank):
+    with pytest.raises(ValueError, match="tensor_parallel_rank"):
+        panel.member_window(glm_shape(tensor_parallel=2, tensor_parallel_rank=rank), "w1")
+
+
+def test_rank_local_roster_view_preserves_and_validates_execution_rank():
+    shape = glm_shape(tensor_parallel=2, tensor_parallel_rank=1)
+    view = panel._shape_for_roster(shape)
+    assert panel.geometry_only(view) == shape
+    assert panel.validate_geometry(panel.geometry_only(view)) == shape
+    assert panel.member_window(view, "w1") == ((1024, 2048), (0, 4096), "row")
 
 
 def test_the_rank_window_is_this_ranks_own_range_of_the_container():

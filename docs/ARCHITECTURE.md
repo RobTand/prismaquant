@@ -1,7 +1,12 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-16 · `flash/prefill-receipt-alloc-bridge-20260916`. Stamps
+As of: 2026-09-17 · `flash/prefill-receipt-alloc-bridge-20260916`. Stamps
 follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/prefill-receipt-alloc-bridge-20260916`) for
+the canonical GLM v1 geometry compatibility repair: execution rank remains an
+optional validated coordinate, required only when selecting a TP2 wire window.
+The shared canonical field set and full-module roster do not depend on rank.
 
 Re-stamped (2026-09-17, `flash/prefill-receipt-alloc-bridge-20260916`) for the
 **four review follow-ups on the per-rank path** (§4.10/§4.11;
@@ -95,9 +100,10 @@ review named closed.
   container geometry and admits both the producer's projection spelling
   (`gate_proj`/`up_proj`/`down_proj`) and this consumer's role spelling
   (`w1`/`w3`/`w2`) -- the producer keeps the source spelling because its wire
-  record's own `identity.unit` is checked against it -- and the GLM geometry
-  declares the rank it holds (`tensor_parallel_rank`), so the cut is a stated
-  coordinate rather than an assumed even split. The wire cut itself goes
+  record's own `identity.unit` is checked against it. The shared canonical GLM
+  geometry excludes execution rank. An optional `tensor_parallel_rank` is
+  validated and retained in rank-local views; TP2 slicing requires it explicitly,
+  while TP1 can use its sole rank. The wire cut itself goes
   through `tessera.layout.can_shard`/`slice_unit`, the producer-neutral
   primitive the loader calls (including the trellis `INITIAL_STATE` a row cut
   needs); PrismaQuant never imports `tessera.serving`, and the cross-repo

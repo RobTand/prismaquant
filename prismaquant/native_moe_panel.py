@@ -90,7 +90,7 @@ GLM_SHAPE_FIELDS = {"geometry_version", "geometry_id", "source_id", "n_routed_ex
                     "top_k", "hidden_size", "intermediate_size", "shared_experts", "n_group",
                     "topk_group", "topk_method", "scoring_func", "norm_topk_prob",
                     "routed_scaling_factor", "swiglu_limit", "gated", "tensor_parallel",
-                    "tensor_parallel_cut_axis", "tensor_parallel_rank"}
+                    "tensor_parallel_cut_axis"}
 #: The producer's canonical wire spelling for each role this consumer prices,
 #: pinned from Tessera's ``MOE_SHARD_PROJECTIONS``. The serving package is not
 #: importable from here (AGENTS.md principle 5), so the table is restated and
@@ -175,7 +175,8 @@ def validate_geometry(shape):
     version and its own source facts, so widening this validator cannot make an
     LFM panel stop being an LFM panel.
     """
-    if (isinstance(shape, dict) and set(shape) == set(GLM_SHAPE_FIELDS)
+    if (isinstance(shape, dict)
+            and set(shape) - {"tensor_parallel_rank"} == GLM_SHAPE_FIELDS
             and shape.get("geometry_id") is not None):
         return validate_glm_geometry(shape)
     if not isinstance(shape, dict) or set(shape) != LFM_SHAPE_FIELDS:
@@ -195,9 +196,10 @@ def validate_glm_geometry(shape):
     claim to be the GLM owner.  `tensor_parallel` is accepted at 1 or 2 and the
     cut axis is fixed: the rank-local intermediate is
     `intermediate_size // tensor_parallel`, which is what the serving route
-    actually reads (`nvfp4_moe_route.py:374-381`).
+    actually reads (`nvfp4_moe_route.py:374-381`). Execution rank is optional
+    here, validated when supplied, and required when selecting a TP2 window.
     """
-    if set(shape) != GLM_SHAPE_FIELDS:
+    if set(shape) - {"tensor_parallel_rank"} != GLM_SHAPE_FIELDS:
         raise ValueError("GLM routed owner requires exactly the versioned geometry fields")
     if (type(shape["geometry_version"]) is not int
             or type(GEOMETRY_VERSION) is not int
@@ -230,13 +232,8 @@ def validate_glm_geometry(shape):
         raise ValueError(
             f"GLM routed owner tensor_parallel {shape['tensor_parallel']!r} is outside "
             f"the supported cuts {SUPPORTED_TP_SIZES}")
-    rank = shape["tensor_parallel_rank"]
-    if type(rank) is not int or rank < 0:
-        raise ValueError("GLM routed owner tensor_parallel_rank is not a rank index")
-    if rank >= shape["tensor_parallel"]:
-        raise ValueError(
-            f"GLM routed owner tensor_parallel_rank {rank!r} is not inside a world of "
-            f"{shape['tensor_parallel']!r}")
+    if "tensor_parallel_rank" in shape:
+        _execution_rank(shape)
     if shape["tensor_parallel_cut_axis"] != GLM_TP_CUT_AXIS:
         raise ValueError(
             "GLM routed owner declares a tensor-parallel cut this consumer does not "
@@ -244,6 +241,22 @@ def validate_glm_geometry(shape):
     if shape["intermediate_size"] % shape["tensor_parallel"]:
         raise ValueError("GLM routed owner intermediate is not divisible by its TP cut")
     return shape
+
+
+def _execution_rank(shape):
+    """Validate the execution coordinate without changing canonical geometry."""
+    if "tensor_parallel_rank" not in shape:
+        if shape["tensor_parallel"] == 1:
+            return 0
+        raise ValueError("GLM TP2 slicing requires an explicit tensor_parallel_rank")
+    rank = shape["tensor_parallel_rank"]
+    if type(rank) is not int or rank < 0:
+        raise ValueError("GLM routed owner tensor_parallel_rank is not a rank index")
+    if rank >= shape["tensor_parallel"]:
+        raise ValueError(
+            f"GLM routed owner tensor_parallel_rank {rank!r} is not inside a world of "
+            f"{shape['tensor_parallel']!r}")
+    return rank
 
 
 def rank_local_intermediate(shape):
@@ -297,7 +310,7 @@ def member_window(shape, role):
     rows, cols = container_member_shape(shape, role)
     if geometry_family(shape) != "glm53_next_routed_stack_v1":
         return (0, rows), (0, cols), ("column" if role == "w2" else "row")
-    world, rank = shape["tensor_parallel"], shape["tensor_parallel_rank"]
+    world, rank = shape["tensor_parallel"], _execution_rank(shape)
     width = shape["intermediate_size"] // world
     lo, hi = rank * width, (rank + 1) * width
     if role == "w2":
@@ -521,7 +534,7 @@ _OWNER_VIEW_KEYS = ("format", "rank_local_intermediate", "experts")
 
 
 def geometry_only(shape):
-    """The declared geometry contract fields, without any derived ones.
+    """Declared geometry and optional execution rank, without derived fields.
 
     A shape that has been through :func:`_shape_for_roster` is still the same
     geometry, which is the property this function exists to preserve: dropping
@@ -547,7 +560,8 @@ def _declares_glm_fields(shape):
     if not isinstance(shape, dict):
         return False
     declared = {key for key in shape
-                if key not in ("format", "rank_local_intermediate", "experts")}
+                if key not in ("format", "rank_local_intermediate", "experts",
+                               "tensor_parallel_rank")}
     return declared == set(GLM_SHAPE_FIELDS)
 
 
