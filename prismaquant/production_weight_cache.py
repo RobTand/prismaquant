@@ -437,6 +437,7 @@ class ProductionWeightCache:
         self._lru_bytes = 0
         self._cb_verified_keys = None
         self._file_load_receipts = None
+        self._forget_window_archive_bytes()
         return compacted
 
     def release_resident_tensors(self, keys: Sequence[tuple[str, str]] | None = None) -> int:
@@ -533,40 +534,92 @@ class ProductionWeightCache:
         before = path.lstat()
         if not stat.S_ISREG(before.st_mode):
             raise RuntimeError('PWC window requires a regular file, not a symlink')
-        storage_bytes = self._window_archive_storage_bytes(path)
-        if self._file_signature(path.lstat()) != self._file_signature(before):
-            raise RuntimeError('PWC window file changed during preflight')
+        # ONE ARCHIVE SCAN PER FILE PER LIFETIME. The storage total is a pure
+        # function of the file's bytes, and the file identity this cache
+        # already trusts for that -- the stat signature every window read
+        # re-checks -- is the memo key, so a file that changed is a miss and is
+        # rescanned. Preflight runs three times over the same key on the joint
+        # walk (the caller's plan, the window's re-plan, and the window's own
+        # file table) and each scan was a fresh open plus a central-directory
+        # read over cold NFS: 11.0% of the prepare's main-thread wall time
+        # (#693). The bytes-backed scan at ``_load_file_tensor`` is a different
+        # call on the loader thread and is never memoized.
+        memo = self._window_archive_memo()
+        signature = self._file_signature(before)
+        remembered = memo.get(str(path))
+        if remembered is not None and remembered[0] == signature:
+            storage_bytes = remembered[1]
+        else:
+            storage_bytes = self._window_archive_storage_bytes(path)
+            if self._file_signature(path.lstat()) != signature:
+                raise RuntimeError('PWC window file changed during preflight')
+            memo[str(path)] = (signature, storage_bytes)
         estimate = self.estimate_nbytes([key])
         if estimate != before.st_size or storage_bytes > estimate:
             raise RuntimeError('PWC window file storage estimate changed')
         return path, before, estimate, storage_bytes
 
-    def plan_resident_windows(self, keys, *, max_resident_bytes: int, max_workers: int):
+    def _window_archive_memo(self):
+        """Per-file archive storage totals for the current window lifetime.
+
+        One small entry per distinct backing path, so the memo cannot outgrow
+        the roster the cache already holds a path for, and it is dropped when a
+        window closes or the cache is compacted.
+        """
+        memo = getattr(self, '_window_archive_bytes', None)
+        if memo is None:
+            memo = self._window_archive_bytes = {}
+        return memo
+
+    def _forget_window_archive_bytes(self) -> None:
+        self._window_archive_bytes = None
+
+    def plan_resident_windows(self, keys, *, max_resident_bytes: int, max_workers: int,
+                              max_load_buffer_bytes: int | None = None):
         """Plan finite research quanta in input order without loading tensors.
 
         All existing PWC tensor backing storages count, including unrelated
         entries and storage hidden behind views; aliases count once. Incoming
         standard uncompressed Torch files use the existing conservative file
-        estimate. Each quantum has at most ``max_workers`` keys, bounding the
-        existing prefetch pool's futures as well as its loader concurrency.
+        estimate.
+
+        A quantum is closed by the two byte budgets its caller already admits
+        and nothing else: the resident cap covers every backing storage, and
+        the serialized cap covers the load buffers the quantum reads at once
+        (default: the resident cap, matching ``resident_window``). ``max_workers``
+        is the loader concurrency, which ``prefetch`` bounds on its own pool; it
+        is no longer a second, unpriced width cap. That cap made the width of a
+        quantum a function of the CPU count instead of the admitted bytes, and
+        on the joint-AURA walk it split every five-render unit into a four-key
+        quantum at 12.5% of its byte budget plus a one-key quantum that read a
+        single file on a single thread (#693).
+
         Plans are key-only hints; ``resident_window`` revalidates each entry.
         """
         self._window_limits(max_resident_bytes, max_workers)
+        buffer_cap = (max_resident_bytes if max_load_buffer_bytes is None
+                      else max_load_buffer_bytes)
+        if type(buffer_cap) is not int or buffer_cap <= 0:
+            raise ValueError('PWC window needs a positive serialized buffer budget')
         keys = self._window_keys(keys)
         baseline = sum(self._window_resident_storages().values())
         if baseline > max_resident_bytes:
             raise RuntimeError('PWC existing resident storage exceeds window budget')
-        windows, window, nbytes = [], [], baseline
+        windows, window, nbytes, buffer_bytes = [], [], baseline, 0
         for key in keys:
             value = self.weights[key]
             incoming = 0 if isinstance(value, torch.Tensor) else self._window_file(key)[2]
             if baseline + incoming > max_resident_bytes:
                 raise RuntimeError(f'PWC single entry exceeds resident window budget: {key}')
-            if window and (len(window) == max_workers or nbytes + incoming > max_resident_bytes):
+            if incoming > buffer_cap:
+                raise RuntimeError(f'PWC single serialized load buffer exceeds window budget: {key}')
+            if window and (nbytes + incoming > max_resident_bytes
+                           or buffer_bytes + incoming > buffer_cap):
                 windows.append(tuple(window))
-                window, nbytes = [], baseline
+                window, nbytes, buffer_bytes = [], baseline, 0
             window.append(key)
             nbytes += incoming
+            buffer_bytes += incoming
         if window:
             windows.append(tuple(window))
         return tuple(windows)
@@ -736,6 +789,7 @@ class ProductionWeightCache:
             finally:
                 self._resident_window_files = None
                 self._resident_window_receipt_keys = frozenset()
+                self._forget_window_archive_bytes()
 
     @contextmanager
     def resident_window(self, keys, *, max_resident_bytes: int, max_workers: int,
@@ -758,7 +812,8 @@ class ProductionWeightCache:
         if type(buffer_cap) is not int or buffer_cap <= 0:
             raise ValueError('PWC window needs a positive serialized buffer budget')
         windows = self.plan_resident_windows(keys, max_resident_bytes=max_resident_bytes,
-                                             max_workers=max_workers)
+                                             max_workers=max_workers,
+                                             max_load_buffer_bytes=buffer_cap)
         if len(windows) != 1:
             raise RuntimeError('PWC resident_window requires one nonempty planned quantum')
         keys = windows[0]
@@ -799,6 +854,7 @@ class ProductionWeightCache:
             self.release_resident_tensors(keys)
             self._resident_window_files = None
             self._resident_window_receipt_keys = frozenset()
+            self._forget_window_archive_bytes()
 
     def _path_for_value(self, value: object) -> str:
         path = str(value)

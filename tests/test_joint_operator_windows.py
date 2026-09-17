@@ -247,3 +247,51 @@ def test_operator_reverse_owns_exact_lookahead_when_cache_has_extra_slots(monkey
     result = _run(runner, cache, operator_windows=policy())
     assert len(result['costs']) == 4
     assert settled == [{2}, {1}, {0}, set()]
+
+
+def test_candidate_windows_hold_what_the_operator_policy_admits(tmp_path):
+    """The COST read path plans on both byte budgets, not the loader count (#693).
+
+    ``run`` reaches every render through this seam, so a quantum capped at
+    ``prefetch_workers`` keys read the campaign's 16.78 MB renders four at a
+    time while holding 12.5% of the 512 MB it was admitted for.
+    """
+    import torch
+    from prismaquant.joint_statistics_replay import resident_candidates
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    paths, weights, expected = {}, {}, {}
+    for index in range(6):
+        key = (f'unit{index}', 'TESSERA_E4M3_K1_R1024')
+        value = torch.arange(16, dtype=torch.bfloat16).reshape(4, 4) + index
+        path = tmp_path / f'render{index}.pt'
+        torch.save(value, path)
+        paths[key], weights[key], expected[key] = path, str(path), value
+    keys = tuple(weights)
+    each = max(path.stat().st_size for path in paths.values())
+
+    def windows_for(**overrides):
+        # policy() cannot re-specify a key it already names, so override the
+        # dict it returns, the way this file's other budget gates do.
+        window = policy()
+        window.update(overrides)
+        cache = ProductionWeightCache(weights=dict(weights), levers={})
+        cache.enable_lru(100000)
+        seen = []
+        with resident_candidates(cache, keys, window) as iterator:
+            for window, receipt in iterator:
+                seen.append(window)
+                assert receipt['keys'] == window
+                for pair in window:
+                    torch.testing.assert_close(cache.get_resident(*pair), expected[pair])
+        return seen
+
+    # prefetch_workers is 2 in this fixture and both budgets admit all six.
+    assert windows_for() == [keys]
+
+    # MUTATE THE DRIVER: each budget still closes a quantum on its own axis, and
+    # the residency budget is no longer shortened by the serialized one.
+    assert windows_for(max_render_resident_bytes=3 * each) == [keys[:3], keys[3:]]
+    assert windows_for(max_load_buffer_bytes=2 * each) == [keys[:2], keys[2:4], keys[4:]]
+    assert windows_for(max_render_resident_bytes=6 * each,
+                       max_load_buffer_bytes=each) == [(key,) for key in keys]

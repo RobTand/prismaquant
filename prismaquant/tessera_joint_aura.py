@@ -1355,8 +1355,23 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                         source_weight = targets[name].weight.detach()
                         anchors = [tc.CampaignAnchor(**data.cells[name, fmt]["anchor"]) for fmt in renders[name]]
                         keys = tuple((name, fmt) for fmt in renders[name])
+                        # ONE WINDOW, THE BYTES THE GUARD ALREADY RESERVED.
+                        # The reservation above prices this unit's residency at
+                        # ``max_render_bytes`` and its serialized load buffers at
+                        # ``policy['max_load_buffer_bytes']``, as two separate
+                        # terms; nothing it charges scales with how many keys a
+                        # quantum holds (the capture payload is per unit, and the
+                        # wire reader is one lookahead, hence its fixed 2x). So a
+                        # quantum planned against exactly those two budgets spends
+                        # bytes this unit was already admitted -- or refused -- for,
+                        # and the planner splits before it can exceed either one.
+                        # The old ``min()`` charged the serialized buffer cap
+                        # against residency, which is the wrong budget for it and,
+                        # with the loader-count cap, left a real quantum at 12.5%
+                        # of the residency it holds (#693).
                         windows = ((keys,) if policy is None else cache.plan_resident_windows(keys,
-                            max_resident_bytes=min(max_render_bytes, policy['max_load_buffer_bytes']),
+                            max_resident_bytes=max_render_bytes,
+                            max_load_buffer_bytes=policy['max_load_buffer_bytes'],
                             max_workers=file_load_workers))
                         with tc.bind_checkpoint_unit_identity(anchors, source_weight=source_weight,
                                 calibration_source=calibration_source, projected_unit=projected.get(name),
