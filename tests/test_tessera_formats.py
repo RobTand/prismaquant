@@ -1956,3 +1956,6 @@ def test_the_family_bound_moves_when_the_roster_moves(monkeypatch):
     assert tfm.family_cache_bound() == wide
     for name, memo in _family_keyed_memos().items():
         assert memo.cache_info().maxsize == wide, name
+
+
+from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)

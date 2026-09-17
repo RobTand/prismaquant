@@ -393,3 +393,6 @@ def test_activation_qdq_device_change_is_refused_without_cuda():
             lease.begin_probe()
             layer(torch.ones(1, 2)).sum().backward()
             lease.finish_probe()
+
+
+from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)
