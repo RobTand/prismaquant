@@ -2,8 +2,8 @@
 
 ``canonical_json_sha256`` normalizes before it hashes: one ``json.dumps``, a
 ``json.loads`` of that string, then a second ``json.dumps`` and the UTF-8
-encode. Over the joint loader's 13 GiB identity block those copies are the hot
-path, so ``canonical_json_sha256_normalized`` validates the parsed shape and
+encode. On the joint loader's identity block those copies are what the new path
+removes, so ``canonical_json_sha256_normalized`` validates the parsed shape and
 streams the encoder's own chunks into the hash. The digest must not move, and
 input the generic path would normalize must be refused rather than silently
 digested as different bytes.
@@ -128,3 +128,26 @@ def test_the_generic_helper_still_normalizes_a_non_string_key():
     assert canonical_json_sha256({1: "a"}, where="int key") == \
         canonical_json_sha256({"1": "a"}, where="string key")
     assert json.loads(json.dumps({1: "a"}, sort_keys=True)) == {"1": "a"}
+
+
+class _Str(str):
+    """A string subclass: ``json.loads`` never produces one for a parsed key."""
+
+
+class _Int(int):
+    """An int subclass whose ``__str__`` may diverge from the encoder's."""
+
+    def __str__(self):
+        return "999"
+
+
+@pytest.mark.parametrize("value, match", [
+    ({_Str("a"): 1}, "mapping key is not a string"),
+    ({"a": _Int(1)}, "_Int has no canonical JSON encoding"),
+    ({"a": _Str("x")}, "_Str has no canonical JSON encoding"),
+    ([_Int(1)], "_Int has no canonical JSON encoding"),
+])
+def test_a_subclass_is_refused_because_loads_produces_exact_types(value, match):
+    """Exact built-ins only: a subclass can encode to bytes the parse never wrote."""
+    with pytest.raises(ValueError, match=match):
+        canonical_json_sha256_normalized(value, where="subclass")
