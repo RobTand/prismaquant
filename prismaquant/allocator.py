@@ -6105,7 +6105,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         **({"tessera_activation_static_scales": priced_static_scales(
                 {name: fmt for name, fmt in assignment_expanded.items()
                  if str(fmt).startswith("TESSERA_")},
-                cost_data["costs"])}
+                cost_data["costs"],
+                # The FORMULA those values came out of, read from the table
+                # that priced them and never from this process's environment:
+                # a legacy value under a full-E4M3 label is a scale nothing
+                # served (RobTand/prismaquant#624).
+                policy=(cost_data.get("provenance", {})
+                        .get("activation_static_scales", {})
+                        .get("policy")))}
            if any(str(fmt).startswith("TESSERA_")
                   for fmt in assignment_expanded.values()) else {}),
         **({"tessera_dev_pin": dict(tessera_dev_pin)} if tessera_dev_pin else {}),

@@ -441,7 +441,9 @@ def validation_layer_config(bound_payload, proposal, *, proposal_sha256,
         'tessera_hessian': assert_uniform_hessian_identity(bound_payload['costs']),
         'tessera_activation_static_scales': priced_static_scales(
             {name: fmt for name, fmt in assignment.items() if fmt.startswith('TESSERA_')},
-            bound_payload['costs']),
+            bound_payload['costs'],
+            policy=(bound_payload['provenance']
+                    .get('activation_static_scales', {}).get('policy'))),
         **allocation_expert_projection_block(bound_payload, assignment),
         'sampled_joint_proposal': {
             'schema': 'prismaquant.tessera_sampled_validation_export_binding.v1',

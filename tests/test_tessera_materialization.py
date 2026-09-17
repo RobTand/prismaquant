@@ -37,7 +37,7 @@ def selection(case, tmp_path):
     provenance = dict(model=str(case.model), nsamples=2, seqlen=4, layer_stride=1, max_act_rows=4,
         wire_dir=str(case.wire_dir),
         hessian=dict(supplied=False, calibration_identity=census_identity, recipe={'fixture': True}),
-        activation_static_scales=dict(policy='fixture', units={n: float(i+1) for i,n in enumerate(_units())}))
+        activation_static_scales=dict(policy='legacy_6_over_calibration_amax.v1', units={n: float(i+1) for i,n in enumerate(_units())}))
     provenance.update({key: meta[key] for key in (tep.POPULATION_KEY, tep.PROJECTION_KEY)})
     cost = dict(costs=costs, provenance=provenance,
                 tessera_expert_wires={n: {FMT: r} for n,r in case.receipts.items()})
@@ -307,7 +307,8 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
         return ({n:torch.ones(4,N) for n in targets}, {}, {n:8 for n in targets}, {n:1.0 for n in targets})
     monkeypatch.setattr(tc, '_collect_activations', collect)
     monkeypatch.setattr(tc, '_static_input_scales', lambda *args, **kwargs:(
-        s.cost['provenance']['activation_static_scales']['units'], 'fixture'))
+        s.cost['provenance']['activation_static_scales']['units'],
+        s.cost['provenance']['activation_static_scales']['policy']))
     measured = []
     def measure(**kwargs):
         name = kwargs['qname']
