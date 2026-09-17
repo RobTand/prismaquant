@@ -228,13 +228,24 @@ def test_unaccountable_tensor_storages_refuse(value):
 
 
 def test_serialized_buffers_have_a_separate_aggregate_limit(tmp_path, monkeypatch):
+    # The cap is enforced where the width is now decided: the planner splits a
+    # key set its serialized budget cannot read at once, and the one-quantum
+    # window then refuses that key set rather than reading it (#693).
     cache, paths, _ = make_cache(tmp_path, 2)
+    keys = tuple(paths)
     size = sum(path.stat().st_size for path in paths.values())
     monkeypatch.setattr(cache, '_load_file_tensor', lambda *args: pytest.fail('hidden load'))
-    with pytest.raises(RuntimeError, match='serialized'):
-        with cache.resident_window(tuple(paths), max_resident_bytes=10000, max_workers=2,
+    assert cache.plan_resident_windows(keys, max_resident_bytes=10000, max_workers=2,
+                                       max_load_buffer_bytes=size - 1) == (keys[:1], keys[1:])
+    assert cache.plan_resident_windows(keys, max_resident_bytes=10000, max_workers=2,
+                                       max_load_buffer_bytes=size) == (keys,)
+    with pytest.raises(RuntimeError, match='one nonempty planned quantum'):
+        with cache.resident_window(keys, max_resident_bytes=10000, max_workers=2,
                                    max_load_buffer_bytes=size - 1):
             pytest.fail('oversize buffers')
+    with pytest.raises(RuntimeError, match='single serialized load buffer'):
+        cache.plan_resident_windows(keys, max_resident_bytes=10000, max_workers=2,
+                                    max_load_buffer_bytes=size // 2 - 1)
 
 
 def test_page_advice_uses_verified_load_stat_and_cleanup(tmp_path, monkeypatch):
@@ -334,9 +345,14 @@ def test_retained_window_keeps_more_keys_than_workers_for_repeated_passes(tmp_pa
     cache, paths, expected = make_cache(tmp_path, 5, budget=5 * 32)
     keys = tuple(paths)
     file_size = max(path.stat().st_size for path in paths.values())
+    # A resident window is still ONE quantum: it refuses a key set its budgets
+    # cannot hold at once. What no longer bounds it is the loader count, so the
+    # contrast with a retained lifetime is the budget, not the CPU count (#693).
+    assert cache.plan_resident_windows(keys, max_resident_bytes=5 * file_size,
+                                       max_workers=2) == (keys,)
     with pytest.raises(RuntimeError, match='one nonempty planned quantum'):
-        with cache.resident_window(keys, max_resident_bytes=5 * file_size, max_workers=2):
-            pytest.fail('legacy window unexpectedly retained every key')
+        with cache.resident_window(keys, max_resident_bytes=2 * file_size, max_workers=2):
+            pytest.fail('window unexpectedly retained a key set over its budget')
     cache.enable_file_load_receipts(max_file_bytes=file_size)
     original_prefetch, original_load = cache.prefetch, cache._load_file_tensor
     quanta, reads = [], []
@@ -561,3 +577,130 @@ def test_retained_window_advices_shared_file_once_after_last_read(tmp_path, monk
             release_file_pages=True) as receipt:
         assert receipt['file_pages_advised'] == 2
     assert advice == [str(paths[first]), str(paths[last])]
+
+
+def test_window_width_follows_the_admitted_bytes_not_the_loader_count(tmp_path):
+    """A quantum holds every key its two byte budgets admit (#693).
+
+    The joint-AURA walk hands one unit's five renders to the planner under a
+    budget that fits all five. Bounding the quantum by the loader count instead
+    split it into four keys at a fraction of the residency it was admitted for,
+    plus a one-key quantum that read a single file on a single thread.
+    """
+    cache, paths, expected = make_cache(tmp_path, 5, budget=100000)
+    keys = tuple(paths)
+    each = max(path.stat().st_size for path in paths.values())
+    assert all(path.stat().st_size == each for path in paths.values())
+    plenty = 5 * each
+
+    # Both budgets admit all five, and the loader count is two.
+    assert cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                       max_workers=2) == (keys,)
+    assert cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                       max_load_buffer_bytes=plenty,
+                                       max_workers=2) == (keys,)
+
+    # The full-width quantum is a window the context manager accepts, and the
+    # pool still sees exactly one call with every key in it.
+    loads = []
+    original = cache.prefetch
+    def counted(window_keys, max_workers):
+        loads.append((tuple(window_keys), max_workers))
+        return original(window_keys, max_workers=max_workers)
+    cache.prefetch = counted
+    try:
+        with cache.resident_window(keys, max_resident_bytes=plenty,
+                                   max_load_buffer_bytes=plenty,
+                                   max_workers=2) as receipt:
+            assert receipt['keys'] == keys and receipt['loaded'] == 5
+            assert receipt['resident_bytes'] == 32 * 5
+            for key in keys:
+                torch.testing.assert_close(cache.get_resident(*key), expected[key])
+    finally:
+        del cache.prefetch
+    assert loads == [(keys, 2)]
+
+    # MUTATE THE DRIVER: each budget must still bite on its own axis.
+    assert cache.plan_resident_windows(keys, max_resident_bytes=3 * each,
+                                       max_load_buffer_bytes=plenty,
+                                       max_workers=2) == (keys[:3], keys[3:])
+    assert cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                       max_load_buffer_bytes=2 * each,
+                                       max_workers=2) == (keys[:2], keys[2:4], keys[4:])
+    with pytest.raises(RuntimeError, match='single serialized load buffer'):
+        cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                    max_load_buffer_bytes=each - 1, max_workers=2)
+    with pytest.raises(RuntimeError, match='single entry exceeds resident window'):
+        cache.plan_resident_windows(keys, max_resident_bytes=each - 1, max_workers=2)
+    with pytest.raises(ValueError, match='serialized buffer budget'):
+        cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                    max_load_buffer_bytes=0, max_workers=2)
+    # A window whose serialized buffers exceed their cap is split by the plan,
+    # so the context manager refuses the oversized key set instead of loading it.
+    with pytest.raises(RuntimeError, match='one nonempty planned quantum'):
+        with cache.resident_window(keys, max_resident_bytes=plenty,
+                                   max_load_buffer_bytes=2 * each, max_workers=2):
+            pass
+
+
+def test_window_preflight_scans_each_archive_once_per_lifetime(tmp_path, monkeypatch):
+    """Preflight prices a file's archive storage once, not once per call (#693).
+
+    The joint walk reaches the same key three times before it reads anything:
+    the caller's plan, the window's own re-plan, and the window's file table.
+    Each one opened the archive and read its central directory, which over
+    cold NFS was 11.0% of the prepare's main-thread wall time.
+    """
+    from pathlib import Path as _Path
+    from prismaquant import perturbed_x_cache as pxc
+
+    cache, paths, expected = make_cache(tmp_path, 3, budget=100000)
+    keys = tuple(paths)
+    plenty = 3 * max(path.stat().st_size for path in paths.values())
+    scans = []
+    original = pxc.torch_archive_storage_bytes
+
+    def counted(source, **kwargs):
+        if isinstance(source, (str, _Path)):
+            scans.append(str(source))
+        return original(source, **kwargs)
+
+    monkeypatch.setattr(pxc, 'torch_archive_storage_bytes', counted)
+
+    windows = cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                          max_load_buffer_bytes=plenty, max_workers=2)
+    assert windows == (keys,)
+    with cache.resident_window(keys, max_resident_bytes=plenty,
+                               max_load_buffer_bytes=plenty, max_workers=2):
+        for key in keys:
+            torch.testing.assert_close(cache.get_resident(*key), expected[key])
+    assert sorted(scans) == sorted(str(path.absolute()) for path in paths.values())
+
+    # The memo does not outlive the window it served.
+    scans.clear()
+    cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                max_load_buffer_bytes=plenty, max_workers=2)
+    assert len(scans) == len(keys)
+
+    # MUTATE THE DRIVER: a same-size rewrite is a miss, and only it rescans.
+    scans.clear()
+    cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                max_load_buffer_bytes=plenty, max_workers=2)
+    assert scans == []
+    changed = keys[1]
+    size_before = paths[changed].stat().st_size
+    torch.save(expected[changed] + 100, paths[changed])
+    # Same dtype, same shape, same archive size: the stat signature's mtime and
+    # ctime are the only thing that can catch this, and they are the memo key.
+    assert paths[changed].stat().st_size == size_before
+    cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                max_load_buffer_bytes=plenty, max_workers=2)
+    assert scans == [str(paths[changed].absolute())]
+
+    # Compaction drops it too, so a pickled cache carries no file metadata.
+    scans.clear()
+    cache.compact_for_pickle()
+    assert cache._window_archive_bytes is None
+    cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                max_load_buffer_bytes=plenty, max_workers=2)
+    assert len(scans) == len(keys)
