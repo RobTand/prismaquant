@@ -600,3 +600,95 @@ def test_a_fully_completed_resume_announces_every_declared_source_phase(
         ('prefetch', 2),
         ('unload', 1),
     ]
+
+
+def _reuse_record(recorded='c' * 64, current='d' * 64):
+    """The exact record `resolve_encoder_source_reuse` returns for a substitution."""
+    return {'schema': bridge.HISTORICAL_ENCODER_REUSE_SCHEMA,
+            'status': bridge.ENCODER_REUSE_STATUS,
+            'recorded_encoder_source_sha256': recorded,
+            'observed_current_encoder_source_sha256': current,
+            'allowlist_entry': {'encoder_source_sha256': recorded,
+                                'reason': 'the historical package that priced this checkpoint',
+                                'evidence': '/dev/null',
+                                'recorded_unix': 1789625518.0,
+                                'recorded_by': 'test'}}
+
+
+def _verify_with_reuse(reuse, inner):
+    """Wrap the fixture's own verifier so its failure injection still fires."""
+    def verify(cell, source, rendered, **kwargs):
+        return {**inner(cell, source, rendered, **kwargs),
+                'current_encoding_identity_sha256': 'f' * 64,
+                'encoder_source_reuse': reuse}
+    return verify
+
+
+def test_a_replay_accepts_the_reuse_fields_its_own_writer_emits(tmp_path, monkeypatch):
+    """The receipt grammar is required-plus-optional, not set equality.
+
+    ``_verify_cell`` adds ``current_encoding_identity_sha256`` and
+    ``encoder_source_reuse`` whenever the encoder source seal was substituted.
+    The replay compared ``set(record) == required``, so under an encoder-reuse
+    allowlist every receipt the writer durably journalled was refused on the
+    next resume -- the GLM-5.3-Flash complete-512 campaign lost 19,442 units
+    to it on 2026-09-17.
+    """
+    reuse = _reuse_record()
+    runner, data, capture, _events, _live, _observed = fixture(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.b')
+    data.encoder_source_reuse = reuse
+    options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,
+                   qualification_window=policy(), qualification_journal=tmp_path/'qualification',
+                   qualification_identity={'plan_sha256': 'p' * 64})
+    monkeypatch.setattr(bridge, 'verify_anchor_render',
+                        _verify_with_reuse(reuse, bridge.verify_anchor_render))
+    with pytest.raises(RuntimeError, match='intentional verification failure'):
+        bridge.prepare_cache(runner, data, **options)
+    # The first pass durably journalled model.layers.0.a under the reuse
+    # fields. The resume replays that receipt and verifies only the unit the
+    # injected failure left unfinished, so the verifier stops failing here --
+    # exactly as the neighbouring completed-resume test does.
+    monkeypatch.setattr(bridge, 'verify_anchor_render',
+                        _verify_with_reuse(reuse, _passing_verify))
+    cache = bridge.prepare_cache(runner, data, **options, qualification_resume=True)
+    assert set(cache.metadata['verified_cells']) == set(data.cells)
+    first = next(iter(cache.metadata['verified_cells'].values()))
+    assert first['encoder_source_reuse'] == reuse
+
+
+@pytest.mark.parametrize('damage', ['other_allowlist', 'no_reuse_now', 'half_a_pair',
+                                    'unknown_field'])
+def test_a_replay_binds_the_journalled_reuse_to_this_run(tmp_path, monkeypatch, damage):
+    """Optional does not mean unchecked: the pair is bound, not merely allowed."""
+    reuse = _reuse_record()
+    runner, data, capture, _events, _live, _observed = fixture(
+        tmp_path, monkeypatch, fail_unit='model.layers.0.b')
+    data.encoder_source_reuse = reuse
+    options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,
+                   qualification_window=policy(), qualification_journal=tmp_path/'qualification',
+                   qualification_identity={'plan_sha256': 'p' * 64})
+    base = _verify_with_reuse(reuse, bridge.verify_anchor_render)
+    if damage == 'half_a_pair':
+        def verify(cell, source, rendered, **kwargs):
+            row = base(cell, source, rendered, **kwargs)
+            row.pop('current_encoding_identity_sha256')
+            return row
+    elif damage == 'unknown_field':
+        def verify(cell, source, rendered, **kwargs):
+            return {**base(cell, source, rendered, **kwargs),
+                    'a_field_no_writer_emits': 1}
+    else:
+        verify = base
+    monkeypatch.setattr(bridge, 'verify_anchor_render', verify)
+    with pytest.raises(RuntimeError, match='intentional verification failure'):
+        bridge.prepare_cache(runner, data, **options)
+    monkeypatch.setattr(bridge, 'verify_anchor_render',
+                        _verify_with_reuse(reuse, _passing_verify))
+    if damage == 'other_allowlist':
+        data.encoder_source_reuse = _reuse_record(recorded='e' * 64)
+    elif damage == 'no_reuse_now':
+        data.encoder_source_reuse = None
+    with pytest.raises(ValueError, match='incomplete qualification receipt|half a reuse receipt|'
+                                         'journalled encoder reuse'):
+        bridge.prepare_cache(runner, data, **options, qualification_resume=True)
