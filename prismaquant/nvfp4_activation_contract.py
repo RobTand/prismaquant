@@ -1797,6 +1797,13 @@ def _nvfp4_dequantize_registered_codes(
     (:meth:`StaticActivationContract.quantize_dequantize`'s oracle computes the
     same quotient at ``nvfp4_activation_qdq_served``).  Multiplying by the stored
     scale alone would be ``G`` times too large; a test pins the quotient.
+
+    ``stored_scale`` arrives from :func:`nvfp4_group_stored_scale`, which takes
+    each group's amax with ``keepdim=True`` and therefore returns
+    ``(..., groups, 1)``: one scale per group, carried with a trailing unit
+    axis.  That is the real shape from the real caller (the operator leg), so it
+    is folded onto the group axis rather than refused; any other geometry is
+    still a refusal.
     """
     # The nibble view the operator's packed output yields is uint8, and
     # ``index_select`` wants a long index: converting here is what keeps the
@@ -1809,6 +1816,8 @@ def _nvfp4_dequantize_registered_codes(
             f"{FP4_GROUP_SIZE}-element groups, got {tuple(codes.shape)}"
         )
     expected = (*codes.shape[:-1], codes.shape[-1] // FP4_GROUP_SIZE)
+    if tuple(stored_scale.shape) == (*expected, 1):
+        stored_scale = stored_scale.reshape(expected)
     if tuple(stored_scale.shape) != expected:
         raise ValueError(
             "served quantiser scale plane does not cover these codes: codes "
