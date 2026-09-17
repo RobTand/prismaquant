@@ -4,8 +4,10 @@ The guard's contract, in one place:
   * artifact absent            -> record this stage's key set, exit 0
   * recorded projection equal  -> exit 0
   * recorded projection differs-> exit 2, naming every diff
-  * no record for this stage   -> WARN and record (pre-guard artifacts are
-                                  never invalidated)
+  * no record for this stage   -> WARN, reuse, and record that the artifact's
+                                  identity is UNKNOWN (pre-guard artifacts are
+                                  still reusable, but they never acquire
+                                  today's settings as their provenance)
 Plus the property that made R5 worth doing: WHICH keys an artifact depends on
 is declared once, in `STAGE_SETTINGS_KEYS`, not re-decided at every call site.
 """
@@ -17,6 +19,30 @@ from pathlib import Path
 from prismaquant import pipeline
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+#: The on-disk key that files an unverified reuse. Read through `getattr` so
+#: the same assertions also run against a tree that predates the marker -- that
+#: is the point of the red reproduction: there the guard writes a settings
+#: projection instead, and each test below fails on the manifest's content
+#: rather than on a missing attribute.
+MARKER = getattr(pipeline, "UNVERIFIED_SETTINGS_KEY", "_unverified_settings")
+
+
+def _entry(artifact: Path, stage: str = "probe"):
+    """Whatever `artifact`'s manifest records for `stage`, or None."""
+    manifest = Path(f"{artifact}.settings.json")
+    if not manifest.exists():
+        return None
+    return (json.loads(manifest.read_text()).get("stages") or {}).get(stage)
+
+
+def _admission(artifact: Path, stage: str = "probe"):
+    """The unverified-reuse admission filed for `artifact`, or None."""
+    entry = _entry(artifact, stage)
+    if isinstance(entry, dict) and set(entry) == {MARKER}:
+        return entry[MARKER]
+    return None
 
 
 def _document(**settings):
@@ -81,6 +107,9 @@ def test_absent_artifact_records_then_matches(tmp_path):
     assert code == 0
     manifest = json.loads((tmp_path / "probe.pkl.settings.json").read_text())
     assert manifest["stages"]["probe"]["NSAMPLES"] == "8"
+    # Fresh production is the VERIFIED path: no unverified admission is filed
+    # beside a projection this run is about to produce.
+    assert _admission(artifact) is None
 
     artifact.write_bytes(b"x")
     code, messages = pipeline.check_stage_settings(artifact, "probe", doc)
@@ -200,14 +229,195 @@ def test_cb_learned_v2_receipt_and_source_identity_are_reuse_identity(tmp_path):
         assert changed_key in "\n".join(messages)
 
 
-def test_missing_manifest_only_warns(tmp_path):
+def test_missing_manifest_is_reused_unverified_and_never_stamped(tmp_path):
+    """Renamed 2026-09-16 from `test_missing_manifest_only_warns`.
+
+    Raw file presence still reuses the artifact (Rob, 2026-09-16: old data may
+    be reused while the pipeline is in flux). What changed is what the guard
+    records about it: this run's settings are NOT written as the artifact's
+    settings, because nobody compared them to the bytes.
+    """
     artifact = tmp_path / "probe.pkl"
     artifact.write_bytes(b"x")
-    code, messages = pipeline.check_stage_settings(
-        artifact, "probe", _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8",
-                                     SEQLEN="512", CALIBRATION_MODALITY="t"))
+    request = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8",
+                        SEQLEN="512", CALIBRATION_MODALITY="t")
+    code, messages = pipeline.check_stage_settings(artifact, "probe", request)
     assert code == 0
     assert "WARNING" in messages[0] and "no settings manifest" in messages[0]
+
+    admitted = _admission(artifact)
+    assert admitted is not None, "the reuse was not recorded at all"
+    assert admitted["settings_identity"] == "unknown"
+    assert admitted["attests_this_artifact"] is False
+    # The request is kept, but only ever as an observation of this run.
+    assert admitted["observed_current_request"]["NSAMPLES"] == "8"
+    stored = json.loads(
+        (tmp_path / "probe.pkl.settings.json").read_text())["stages"]["probe"]
+    assert set(stored) == {MARKER}, (
+        "the guard stamped a settings projection for an artifact it never compared"
+    )
+
+
+def test_pre_guard_stage_entry_is_not_restamped_with_today_settings(tmp_path):
+    """The pre-fix defect, pinned (RobTand/prismaquant#654).
+
+    `origin/main` at 2fa95995bd appended the CURRENT projection to a manifest
+    whose stage entry said nothing about this stage's artifact, so a cost table
+    measured under other probes/seed/dataset/menu was recorded as if this run
+    had verified it -- and every later check read that as a match.
+    """
+    base = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
+                CALIBRATION_MODALITY="text-only")
+    artifact = tmp_path / "cost_aura.pkl"
+    artifact.write_bytes(b"cost")
+    # Written by an older or partial run that never recorded this stage.
+    (tmp_path / "cost_aura.pkl.settings.json").write_text(json.dumps({
+        "schema": pipeline.STAGE_MANIFEST_SCHEMA, "stages": {"other": {"X": "1"}},
+    }))
+
+    code, messages = pipeline.check_stage_settings(
+        artifact, "probe", _document(**base))
+    assert code == 0
+    assert any("predates this stage's settings guard" in m for m in messages)
+
+    stored = json.loads((tmp_path / "cost_aura.pkl.settings.json").read_text())
+    entry = stored["stages"]["probe"]
+    assert _admission(artifact) is not None
+    assert set(entry) == {MARKER}, (
+        "today's projection was written as the artifact's settings"
+    )
+    # The stage the manifest already knew about is left exactly as it was.
+    assert stored["stages"]["other"] == {"X": "1"}
+
+
+def test_unverified_reuse_stays_unknown_across_retries_and_changed_requests(
+        tmp_path):
+    request = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
+                   CALIBRATION_MODALITY="text-only")
+    artifact = tmp_path / "cost.pkl"
+    artifact.write_bytes(b"cost")
+
+    assert pipeline.check_stage_settings(
+        artifact, "probe", _document(**request))[0] == 0
+    recorded = _admission(artifact)
+    assert recorded is not None
+
+    # A retry reads the same admission back and never upgrades it.
+    code, messages = pipeline.check_stage_settings(
+        artifact, "probe", _document(**request))
+    assert code == 0 and any("still UNVERIFIED" in m for m in messages)
+    assert _admission(artifact) == recorded
+
+    # A changed request does not make the artifact's identity known either: the
+    # run still reuses it (legacy reuse is allowed) and still records only that
+    # its settings are unknown.
+    code, messages = pipeline.check_stage_settings(
+        artifact, "probe", _document(**dict(request, NSAMPLES="64")))
+    assert code == 0
+    assert any("identity is unknown" in m for m in messages)
+    assert _admission(artifact) == recorded, (
+        "the first observation was rewritten by a later request"
+    )
+    stages = json.loads((tmp_path / "cost.pkl.settings.json").read_text())["stages"]
+    assert set(stages["probe"]) == {MARKER}
+
+
+def test_a_recorded_projection_still_refuses_a_mismatch(tmp_path):
+    """The legacy allowance is not a bypass: once a projection IS on file, a
+    different request refuses exactly as before."""
+    base = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
+                CALIBRATION_MODALITY="text-only")
+    artifact = tmp_path / "probe.pkl"
+    assert pipeline.check_stage_settings(artifact, "probe", _document(**base))[0] == 0
+    artifact.write_bytes(b"x")
+    code, messages = pipeline.check_stage_settings(
+        artifact, "probe", _document(**dict(base, NSAMPLES="32")))
+    assert code == 2
+    assert "refusing silent reuse" in "\n".join(messages)
+    assert _admission(artifact) is None, "a refused reuse filed an admission"
+
+
+def test_tessera_plan_still_refuses_and_files_no_admission(tmp_path):
+    plan = tmp_path / "tessera_plan.json"
+    plan.write_text("old translated plan")
+    code, messages = pipeline.check_stage_settings(
+        plan, "tessera-plan", _document(**_full_settings()))
+    assert code == 2
+    assert "allocation content binding" in "\n".join(messages)
+    assert not (tmp_path / "tessera_plan.json.settings.json").exists(), (
+        "a refused plan was recorded as a reusable artifact"
+    )
+
+
+def test_tessera_plan_refuses_an_unverified_admission_not_only_a_missing_one(
+        tmp_path):
+    """An admission is not a binding (root review of c45784cb, #654).
+
+    The first cut of the legacy allowance let a stage entry that holds only the
+    unverified marker take the generic "still UNVERIFIED, reuse continues" path
+    before the plan gate could see it. Tessera's gate has to refuse on the
+    marker itself: the marker says the artifact's identity is *unknown*, and a
+    translated plan needs a real allocation-content binding, so reusing it
+    would allocate against a binding nobody ever checked. Reached through
+    `check_stage_settings` so the ordering, not just the helper, is pinned.
+    """
+    plan = tmp_path / "tessera_plan.json"
+    plan.write_text("old translated plan")
+    manifest = tmp_path / "tessera_plan.json.settings.json"
+    manifest.write_text(json.dumps({
+        "schema": pipeline.STAGE_MANIFEST_SCHEMA,
+        "stages": {
+            "tessera-plan": {
+                MARKER: {
+                    "settings_identity": "unknown",
+                    "attests_this_artifact": False,
+                    "artifact": str(plan),
+                    "reason": "hand-written marker",
+                    "observed_current_request": {},
+                    "first_observed_unix": 0,
+                }
+            }
+        },
+    }))
+    before = manifest.read_text()
+
+    code, messages = pipeline.check_stage_settings(
+        plan, "tessera-plan", _document(**_full_settings()))
+    assert code == 2, messages
+    assert "unverified-reuse admission" in "\n".join(messages)
+    assert manifest.read_text() == before, (
+        "the refusal rewrote the manifest instead of leaving it alone"
+    )
+
+
+def test_the_marker_cannot_collide_with_a_declared_manifest_key():
+    declared = {mk for keys in pipeline.STAGE_SETTINGS_KEYS.values()
+                for mk, _source in keys}
+    assert MARKER not in declared
+    assert not any(key.startswith("_") for key in declared), sorted(declared)
+
+
+def test_the_admission_makes_a_projection_only_reader_refuse_rather_than_stamp(
+        tmp_path):
+    """Cross-version safety, asserted against the comparison itself.
+
+    A tree that predates this change has no idea what the marker means; it
+    compares `stages[stage]` to its declared keys and exits 2 on any diff. That
+    is the point of filing the admission under a key no projection ever
+    carries: the artifact cannot be laundered into a verified record by an
+    older reader either.
+    """
+    artifact = tmp_path / "probe.pkl"
+    artifact.write_bytes(b"x")
+    document = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
+                         CALIBRATION_MODALITY="text-only")
+    pipeline.check_stage_settings(artifact, "probe", document)
+    prev = json.loads(
+        (tmp_path / "probe.pkl.settings.json").read_text())["stages"]["probe"]
+    declared = document["artifacts"]["probe"]
+    diffs = {key for key in set(prev) | set(declared)
+             if prev.get(key) != declared.get(key)}
+    assert MARKER in diffs
 
 
 def test_legacy_flat_manifest_still_guards_its_stage(tmp_path):
@@ -240,8 +450,19 @@ def test_two_stages_can_own_one_path(tmp_path):
     assert code == 0 and any("predates this stage's" in m for m in messages)
     stored = json.loads((tmp_path / "cache.pkl.settings.json").read_text())
     assert set(stored["stages"]) == {"aura-dw-cache", "frontier-cache"}
-    # …and both keep guarding independently.
+    # The stage that recorded a projection still holds one; the second stage
+    # holds the admission that its artifact's identity is unknown, NOT a copy
+    # of the first stage's projection or of today's request.
+    assert _admission(artifact, "aura-dw-cache") is None
+    assert _admission(artifact, "frontier-cache") is not None
+    # …and both keep guarding independently: the verified one still compares
+    # (a drift refuses), the unverified one stays unverified across retries.
     assert pipeline.check_stage_settings(artifact, "aura-dw-cache", doc)[0] == 0
+    code, messages = pipeline.check_stage_settings(artifact, "frontier-cache", doc)
+    assert code == 0 and any("still UNVERIFIED" in m for m in messages)
+    assert pipeline.check_stage_settings(
+        artifact, "aura-dw-cache",
+        _document(**dict(settings, NSAMPLES="999")))[0] == 2
 
 
 def test_unsupplied_declared_key_is_a_hard_stop(tmp_path):

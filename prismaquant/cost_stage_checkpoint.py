@@ -110,6 +110,49 @@ def atomic_write_bytes(path: Path, payload: bytes) -> None:
         os.close(directory_fd)
 
 
+def publish_new_bytes(path: Path, payload: bytes) -> bool:
+    """Publish ``payload`` at ``path`` as a NEW file; never replace one already there.
+
+    ``os.link`` is the atomic no-clobber publication on one filesystem: the
+    destination appears with the complete staged inode, or the call fails with
+    ``EEXIST``.  There is no check-then-open window and no visible empty
+    placeholder, which is what a content-addressed path needs -- two writers can
+    reach one name, and :func:`atomic_write_bytes` publishes by replacement,
+    which is the wrong shape there.  The campaign writers and
+    ``export_output_safety.transactional_export_file`` make the same argument.
+
+    Returns ``True`` when this call created the file and ``False`` when one was
+    already there.  ``False`` is neither success nor failure: it means somebody
+    else's bytes are at ``path``, and the caller owns the question of whether
+    they are the bytes it wanted.  A caller that reads ``False`` as success is
+    trusting the name -- the defect this shape exists to make visible.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() or path.is_symlink():
+        return False
+    temporary = path.with_name(path.name + unique_temp_suffix())
+    try:
+        with temporary.open("wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return False
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        return True
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 #: Record fields that name one row's own seals; a merged record drops them.
 MIGRATION_ROW_FIELDS = frozenset({"old_identity_sha256", "new_identity_sha256", "shards",
                                   "receipt_seals", "cost_seals", "run_id"})
