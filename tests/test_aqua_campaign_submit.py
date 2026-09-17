@@ -13,6 +13,13 @@ What these tests pin:
   no invocation of this stage can be a campaign arm with the gate left off;
 * the requested roster is the plan's: a cost payload whose units have drifted
   from the plan's bound census refuses, in either direction;
+* the requested roster is the plan's *cells*, not the artifact's: the plan
+  binds its own cost table (``inputs.merged_cost``) by sha256, and ``--cost-in``
+  has to reproduce that table's ``(unit, format)`` cells unit for unit. A table
+  that dropped one unit's cell while another unit still carries that format is
+  the case a unit-roster check and a carried-format union check both pass, and
+  it refuses here; a unit whose entry is empty refuses too; and a cost table
+  edited after the plan was sealed refuses on the plan's own sha256;
 * ``--formats`` has to name exactly the menu the payload carries -- naming a
   subset would move the coverage denominator instead of filling it;
 * a payload whose every requested cell is already joint-priced is not
@@ -286,6 +293,88 @@ def test_a_cost_artifact_that_drifted_from_the_plan_roster_refuses(campaign):
     assert "never priced" in str(refused.value)
 
 
+def test_a_cell_dropped_from_one_unit_refuses_though_another_unit_keeps_it(
+    campaign,
+):
+    """The unit roster and the carried-format union both survive this narrowing.
+
+    Both units were priced for both formats. Deleting one unit's ``NVFP4`` cell
+    leaves every unit present and every format still carried somewhere, so a
+    check stated against the artifact's own keys reads as complete -- and an
+    all-joint remainder would then short-circuit the gate. The plan's cost table
+    is what says the cell was owed, and it is what refuses this.
+    """
+    names = campaign["names"]
+    payload = _cost_payload(names)
+    del payload["costs"][names[0]][MEASURED[0]]
+    campaign["cost_in"].write_bytes(pickle.dumps(payload))
+    with pytest.raises(RuntimeError) as refused:
+        submit_aqua(campaign, "--dry-run")
+    message = str(refused.value)
+    assert "not the plan's priced surface" in message
+    assert f"{names[0]}@{MEASURED[0]}" in message
+    assert "does not carry 1 planned (unit, format) cell(s)" in message
+
+
+def test_a_unit_whose_entry_is_empty_refuses(campaign):
+    """An entry that survived the roster but lost every cell is a hole, not a unit."""
+    names = campaign["names"]
+    payload = _cost_payload(names)
+    payload["costs"][names[0]] = {}
+    campaign["cost_in"].write_bytes(pickle.dumps(payload))
+    with pytest.raises(RuntimeError) as refused:
+        submit_aqua(campaign, "--dry-run")
+    message = str(refused.value)
+    assert "not the plan's priced surface" in message
+    assert f"{names[0]}@<entry empty>" in message
+
+
+def test_a_cost_table_edited_after_the_plan_was_sealed_refuses(campaign):
+    """The plan's sha256 is the binding, so the file it names has to be that file."""
+    names = campaign["names"]
+    payload = _cost_payload(names)
+    del payload["costs"][names[0]][MEASURED[0]]
+    merged = Path(campaign["plan"].parent / "weight-only-cost.pkl")
+    merged.write_bytes(pickle.dumps(payload))
+    with pytest.raises(RuntimeError) as refused:
+        submit_aqua(campaign, "--dry-run")
+    message = str(refused.value)
+    assert "inputs.merged_cost" in message
+    assert "not the one on disk" in message
+
+
+def test_the_plan_may_price_a_narrower_surface_than_the_census(campaign):
+    """The roster the gate reads is the plan's cells, not a cartesian product.
+
+    A campaign whose plan prices one format for one unit and two for another is
+    not narrowed *by* the artifact: the plan's own cost table says so, and the
+    artifact reproducing it is complete. This is the shape the real campaign has
+    -- dense targets carry the whole menu, routed experts only their measured
+    rungs -- and it is why the expected set is read per ``(unit, format)``
+    rather than as units times formats.
+    """
+    import dispatch_tessera_campaign as dispatch
+
+    names = campaign["names"]
+    payload = {"provenance": {},
+               "costs": {names[0]: {MEASURED[0]: {"predicted_dloss": 0.1}},
+                         names[1]: {fmt: {"predicted_dloss": 0.1}
+                                    for fmt in MEASURED}}}
+    merged = Path(campaign["plan"].parent / "weight-only-cost.pkl")
+    merged.write_bytes(pickle.dumps(payload))
+    plan = json.loads(campaign["plan"].read_text())
+    plan["inputs"]["merged_cost"] = _bind(merged)
+    campaign["plan"].write_text(json.dumps(plan))
+    campaign["cost_in"].write_bytes(pickle.dumps(payload))
+    assert submit_aqua(campaign, "--dry-run") == 0
+    record, cells = dispatch.aqua_requested_cells(
+        json.loads(campaign["plan"].read_text()), payload, list(MEASURED))
+    assert record["requested_cells"] == len(MEASURED) + 1
+    assert cells == frozenset({(names[0], MEASURED[0]),
+                               (names[1], MEASURED[0]),
+                               (names[1], MEASURED[1])})
+
+
 def test_formats_must_name_the_menu_the_payload_carries(campaign):
     """A narrowed --formats would move the denominator, not fill the hole."""
     import dispatch_tessera_campaign as dispatch
@@ -304,7 +393,10 @@ def test_formats_must_name_the_menu_the_payload_carries(campaign):
     ]
     with pytest.raises(RuntimeError) as refused:
         dispatch.main(argv)
-    assert "not the menu this artifact carries" in str(refused.value)
+    message = str(refused.value)
+    assert "is not the menu the plan prices" in message
+    # The format it left out is exactly the one whose A-side would go unchecked.
+    assert MEASURED[1] in message
 
 
 def test_an_all_joint_payload_is_not_submitted(campaign, capsys, monkeypatch):

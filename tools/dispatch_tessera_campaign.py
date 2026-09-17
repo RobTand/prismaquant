@@ -924,6 +924,37 @@ def _bound_digest(container: dict, key: str, *, label: str, where: str) -> str:
     return actual
 
 
+def _bound_pickle(container: dict, key: str, *, label: str, where: str) -> dict:
+    """The pickled artifact a plan binds by path and sha256, re-read and checked.
+
+    ``_bound_json``'s check and then the object itself, for the campaign cost
+    table: the plan's own record of which ``(unit, format)`` cells the campaign
+    priced.  The digest is what makes that record the plan's rather than the
+    caller's -- an edited table no longer hashes to what the plan declares --
+    and reading it is one sequential pass over a few hundred MiB, not the
+    multi-GiB candidate roster a per-cell re-derivation from the checkpoint
+    would need.
+    """
+    import pickle
+
+    declared = (container or {}).get(key)
+    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
+            or not isinstance(declared.get("sha256"), str) or not declared["sha256"]):
+        raise ScopeRefused(f"{label}: {where} is not a bound artifact")
+    path = Path(declared["path"])
+    actual = _sha256_of(path)
+    if actual != declared["sha256"]:
+        raise ScopeRefused(
+            f"{label}: {where} is {path}, which hashes to {actual}, not the "
+            f"bound {declared['sha256']}; the campaign cost table the plan names "
+            "is not the one on disk, so the cells it priced are not the plan's")
+    with path.open("rb") as handle:
+        blob = pickle.load(handle)
+    if not isinstance(blob, dict):
+        raise ScopeRefused(f"{label}: {where} ({path}) is not a cost payload")
+    return blob
+
+
 #: The census fields that identify the DRAW, not merely its size. ``nsamples``
 #: and ``seqlen`` say how many windows; these say which ones, over which corpus
 #: revision and which tokenizer ids, and they are exactly what
@@ -1174,69 +1205,159 @@ def verify_joint_campaign_scope(plan: dict, *, require_scope: str,
 
 
 def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
-                         *, label: str = "aqua row") -> dict:
+                         *, label: str = "aqua row") -> "tuple[dict, frozenset]":
     """The exact ``(unit, format)`` roster AQUA is asked to price, from the plan.
 
-    The stage decides what a run *requested* from the cost artifact it merges
-    into: every ``(unit, format)`` cell the payload carries for the named
-    formats. That is only the campaign's roster if the payload's units are the
-    campaign's units, so this refuses a payload that has drifted either way --
-    a unit the plan priced and the payload lacks would leave the campaign short
-    an A-side while reading as complete, and a unit the payload carries that the
-    plan never priced is not the campaign's cell at all.
+    Returns ``(record, cells)``. ``cells`` is the requested roster itself; the
+    record is the same thing as counts and a digest, so a submission can stamp
+    it without carrying hundreds of thousands of tuples in its summary.
 
-    ``formats`` is the campaign's menu and has to be exactly what the payload
-    carries. Naming a subset is the hole-hiding move this exists to refuse: the
-    stage states its acceptance against the requested cells, so a narrowed
-    ``--formats`` would move the denominator instead of filling it.
+    The roster is the **plan's**, read from the cost table the plan binds at
+    ``inputs.merged_cost`` and re-checked against the sha256 it declares there.
+    That table is the campaign's own priced surface: the cells the allocation is
+    allowed to select from. ``--cost-in`` -- the weight-only or joint-merged
+    table the stage merges an A-side into -- has to reproduce it unit for unit.
+
+    Deriving the requested set from the artifact under test is the hole this
+    closes. The stage states its acceptance against the cells it is given, so a
+    table narrowed to the cells that already carry a price leaves the gate
+    holding a denominator that the narrowing moved: deleting one unit's cell
+    while another unit still carries that format leaves the unit roster exact
+    and the carried-format union exact, and if the remainder is joint-priced the
+    run reads as complete coverage while a planned cell has no A-side at all.
+    Binding to the plan's own table makes that case a refusal, and makes a cost
+    table edited after the plan was sealed a refusal of its own.
+
+    ``formats`` is the campaign's menu and has to be exactly the union of the
+    plan's cells. Naming a subset would move the denominator the same way: the
+    cells it left out are exactly the ones whose A-side would then go unchecked.
+
+    Extra cells are read the same way round. A cell the plan never priced that
+    is *not* already joint-priced would be priced by this stage, which makes the
+    gate stricter rather than narrower -- but it is still a row the campaign's
+    own table does not have, so it refuses. A cell the plan never priced that
+    already carries its own joint A-side is a joint pass's addition: it cannot
+    hide a hole, because it brings the price the hole is about.
     """
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+
+    from prismaquant.allocator_candidates import cost_entry_is_joint_aura
 
     census = _bound_json(plan, "census", label=label)
     roster = census.get("unit_shapes")
     if not isinstance(roster, dict) or not roster:
         raise ScopeRefused(f"{label}: the plan's bound census carries no roster")
+    planned = _bound_pickle(
+        plan.get("inputs") or {}, "merged_cost", label=label,
+        where="joint plan inputs.merged_cost")
+    planned_costs = planned.get("costs")
+    if not isinstance(planned_costs, dict) or not planned_costs:
+        raise ScopeRefused(
+            f"{label}: the cost table the plan binds carries no 'costs' table, "
+            "so it does not say which cells the campaign priced")
     costs = payload.get("costs")
     if not isinstance(costs, dict) or not costs:
         raise ScopeRefused(f"{label}: the cost artifact carries no 'costs' table")
-    missing = sorted(set(roster) - set(costs))
-    extra = sorted(set(costs) - set(roster))
-    if missing or extra:
-        raise ScopeRefused(
-            f"{label}: the cost artifact is not the plan's roster -- "
-            f"{len(missing)} unit(s) the plan priced are absent (e.g. "
-            f"{missing[:3]}) and {len(extra)} unit(s) it never priced are "
-            f"carried (e.g. {extra[:3]}). AQUA's acceptance is stated against "
-            "the cells the artifact holds, so a drifted artifact decides its "
-            "own coverage.")
+    # The unit roster is checked on BOTH tables against the plan's bound census.
+    # A unit the plan priced and the artifact lacks would leave the campaign
+    # short an A-side while reading as complete; a unit the artifact carries
+    # that the plan never priced is not the campaign's cell at all.
+    for what, table in (("the cost table the plan binds", planned_costs),
+                        ("the cost artifact", costs)):
+        missing = sorted(set(roster) - set(table))
+        extra = sorted(set(table) - set(roster))
+        if missing or extra:
+            raise ScopeRefused(
+                f"{label}: {what} is not the plan's roster -- "
+                f"{len(missing)} unit(s) the plan priced are absent (e.g. "
+                f"{missing[:3]}) and {len(extra)} unit(s) it never priced are "
+                f"carried (e.g. {extra[:3]}).")
     wanted = [str(item) for item in formats]
     if len(set(wanted)) != len(wanted) or not wanted:
         raise ScopeRefused(f"{label}: --formats must name each format once")
-    present: dict = {}
-    cells = set()
+
+    cells: set = set()
+    planned_formats: set = set()
+    units_missing: list = []
+    missing_total = 0
+    units_extra: list = []
+    extra_total = 0
+    joint_extra = 0
     for name in sorted(roster):
+        planned_entry = planned_costs[name]
+        if not isinstance(planned_entry, dict):
+            raise ScopeRefused(
+                f"{label}: the cost table the plan binds has no per-format row "
+                f"for {name}")
         entry = costs[name]
         if not isinstance(entry, dict):
             raise ScopeRefused(f"{label}: {name} has no per-format row")
+        expected = {fmt for fmt, row in planned_entry.items()
+                    if isinstance(row, dict)}
         carried = {fmt for fmt, row in entry.items() if isinstance(row, dict)}
-        present[name] = carried
-        cells.update((name, fmt) for fmt in carried)
-    carried_formats = {fmt for row in present.values() for fmt in row}
-    unnamed = sorted(carried_formats - set(wanted))
-    absent = sorted(set(wanted) - carried_formats)
+        planned_formats |= expected
+        # The requested roster is the plan's cells, so it is the same digest for
+        # the same plan whether or not a joint pass has since added rows of its
+        # own.
+        cells.update((name, fmt) for fmt in expected)
+        gone = sorted(expected - carried)
+        if gone:
+            missing_total += len(gone)
+            units_missing.append(
+                # An empty entry is named as such rather than by one of the
+                # cells it lost: it is the shape a truncating write or a
+                # dropped merge produces, and the unit is present exactly as
+                # the roster demands.
+                f"{name}@<entry empty>" if not carried else f"{name}@{gone[0]}")
+        outside = carried - expected
+        invented = []
+        for fmt in sorted(outside):
+            if cost_entry_is_joint_aura(entry[fmt]):
+                joint_extra += 1
+            else:
+                invented.append(fmt)
+        if invented:
+            extra_total += len(invented)
+            units_extra.append(f"{name}@{invented[0]}")
+    if missing_total or extra_total:
+        # Bounded, like every other refusal here: a campaign has tens of
+        # thousands of units, and naming each one floods the log the operator
+        # has to read. The totals are the contract; the sample is what makes
+        # them checkable.
+        missing_units, extra_units = len(units_missing), len(units_extra)
+        units_missing, units_extra = units_missing[:5], units_extra[:5]
+        raise ScopeRefused(
+            f"{label}: the cost artifact is not the plan's priced surface -- it "
+            f"does not carry {missing_total} planned (unit, format) cell(s) "
+            f"across {missing_units} unit(s) (e.g. "
+            f"{', '.join(units_missing) or 'none'}) and carries {extra_total} "
+            f"cell(s) the plan's cost table never priced across "
+            f"{extra_units} unit(s) (e.g. "
+            f"{', '.join(units_extra) or 'none'}). The stage states its "
+            "acceptance against the requested cells, so an artifact that drops "
+            "one unit's cell while another unit still carries that format would "
+            "narrow the denominator instead of filling the hole.")
+    unnamed = sorted(planned_formats - set(wanted))
+    absent = sorted(set(wanted) - planned_formats)
     if unnamed or absent:
         raise ScopeRefused(
-            f"{label}: --formats {sorted(wanted)} is not the menu this artifact "
-            f"carries -- it holds {unnamed} that are unnamed and none of "
-            f"{absent}. The requested set is the denominator the coverage gate "
-            "reads, so it is bound to the artifact's own cells rather than "
-            "narrowed to the ones that already have a price.")
-    return {"requested_cells": len(cells),
-            "requested_units": len(roster),
-            "formats": sorted(wanted),
-            "roster_sha256": canonical_json_sha256(
-                {"units": sorted(roster), "cells": sorted(cells)},
-                where=f"{label} requested roster")}
+            f"{label}: --formats {sorted(wanted)} is not the menu the plan "
+            f"prices -- the plan's cost table holds {unnamed} that are unnamed "
+            f"and none of {absent}. The requested set is the denominator the "
+            "coverage gate reads, so it is bound to the plan's cells rather "
+            "than narrowed to the ones that already have a price.")
+    record = {"requested_cells": len(cells),
+              "requested_units": len(roster),
+              "formats": sorted(wanted),
+              # Joint rows a joint pass added beyond the plan's own table. They
+              # are not part of the requested roster -- they carry their own
+              # A-side -- and are reported so that an artifact with more cells
+              # than the plan priced is visible rather than silently accepted.
+              "joint_cells_outside_plan": joint_extra,
+              "roster_sha256": canonical_json_sha256(
+                  {"units": sorted(roster), "cells": sorted(cells)},
+                  where=f"{label} requested roster")}
+    return record, frozenset(cells)
 
 
 def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
@@ -2426,11 +2547,12 @@ def cmd_submit_aqua(args) -> int:
     requested ``(unit, format)`` cells either carry their own activation term
     or the run refuses, because a weight-only cell with a positive surrogate is
     what silently buys 4-bit on a route the lane declares W4A4. And the
-    requested roster is the plan's, not the artifact's: a cost payload whose
-    units have drifted from the plan's roster, or a ``--formats`` that does not
-    name exactly the menu the payload carries, refuses here -- the stage's
-    acceptance is stated against the cells the artifact holds, so a narrowed
-    artifact would decide its own coverage.
+    requested roster is the plan's, not the artifact's: the plan binds the
+    campaign's own cost table (``inputs.merged_cost``) by sha256, ``--cost-in``
+    has to reproduce that table's ``(unit, format)`` cells unit for unit, and
+    ``--formats`` has to name exactly the menu it prices. Any of those drifting
+    refuses here -- the stage's acceptance is stated against the cells it is
+    given, so a narrowed artifact would decide its own coverage.
 
     A campaign whose cells are ALL already joint-priced is a fulfilled
     artifact, not a nearly-empty run: nothing is submitted and the caller is
@@ -2479,15 +2601,13 @@ def cmd_submit_aqua(args) -> int:
             "the artifact's own keys")
     with cost_in.open("rb") as handle:
         payload = pickle.load(handle)
-    roster = aqua_requested_cells(plan, payload, formats,
-                                  label=f"aqua: {plan_path.name}")
+    roster, requested = aqua_requested_cells(
+        plan, payload, formats, label=f"aqua: {plan_path.name}")
     costs = payload["costs"]
     joint_cells = {(name, fmt) for name, entry in costs.items()
                    if isinstance(entry, dict)
                    for fmt, row in entry.items()
                    if isinstance(row, dict) and cost_entry_is_joint_aura(row)}
-    requested = {(name, fmt) for name in costs
-                 for fmt in formats if isinstance(costs[name].get(fmt), dict)}
     summary = {
         "entry_point": f"{AQUA_ENTRY_POINT}:{args.require_scope}",
         "plan": str(plan_path),

@@ -16,11 +16,28 @@ same frozen campaign identity and the same `--require-scope` check as
 the plan's own physical bound rather than taken from habit.
 `--require-complete-coverage` is not a flag on this submission -- it is passed
 unconditionally, so no invocation of the campaign's A-side can leave the gate
-off. The requested roster is the plan's: the payload's units have to be exactly
-the plan's bound census roster (a drifted artifact would otherwise decide its
-own coverage, because the stage states acceptance against the cells the
-artifact holds) and `--formats` has to name exactly the menu the payload
-carries, since naming a subset would move the coverage denominator instead of
+off. The requested roster is the plan's **cells**, not the artifact's: the plan
+binds the campaign's own cost table (`inputs.merged_cost`) by path and sha256,
+`--cost-in` has to reproduce that table's `(unit, format)` cells unit for unit,
+and `--formats` has to name exactly the menu that table prices. Deriving the
+requested set from the artifact under test is the hole the binding closes,
+because the stage states acceptance against the cells it is given: a table
+narrowed to the cells that already carry a price leaves every unit present and
+every format still carried somewhere, so a unit-roster check and a
+carried-format union check both pass, and an all-joint remainder then reads as
+complete while a planned cell has no A-side at all. A unit whose entry survived
+the roster but lost every cell refuses, a cost table edited after the plan was
+sealed refuses on the plan's own digest, and a cell the plan never priced
+refuses unless it already carries its own joint A-side -- a joint pass's
+addition, which cannot hide a hole because it brings the price the hole is
+about -- and is reported as `joint_cells_outside_plan` rather than silently
+accepted. The roster is read per
+`(unit, format)` rather than as units times formats -- on the real campaign the
+dense targets carry their whole menu (515 rungs) while the routed experts carry
+only their measured rungs, which is the plan's decision and not a hole. The
+bind costs one sequential read of the cost table per submission; it does not
+re-read the multi-GiB candidate roster, and `--formats` still refuses a subset
+of the menu, since naming one would move the coverage denominator instead of
 filling it. A payload whose requested cells already all carry a joint A-side is
 **not** submitted: the requirement is satisfied by that artifact, and queuing a
 stage to add nothing is redundant GPU work. The stage is still refused at run
