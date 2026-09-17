@@ -1407,7 +1407,7 @@ def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
 
 
 def _config_device_envelope(config, command):
-    """The device envelope a joint command declares, validated before any device.
+    """The device envelope a joint command declares, read before any device.
 
     ``max_gpu_bytes`` is what ``_load_plan`` requires of every admitted plan,
     and the envelope is the FIRST thing a command does that reaches the CUDA
@@ -1502,15 +1502,24 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     from .tessera_reader import load_declared_reader
 
     require_cuda_hot_path("tessera_joint_aura", "cuda")
-    # THE DEVICE ENVELOPE IS APPLIED HERE, before this process builds a CUDA
-    # context, a streamed runner, a kernel or a single allocated tensor. Both
-    # GPU commands take it -- ``prepare`` and ``run`` -- because both allocate
-    # on the device, and ``max_gpu_bytes`` was otherwise compared with
-    # ``max_memory_allocated`` only after a window had run, which on a
-    # unified-memory box is a report about memory already spent. ``synthesize``
-    # is the one CPU command and never reaches this function.
-    device_envelope = _apply_device_envelope(
-        "cuda", _config_device_envelope(config, command), where=f"joint {command}")
+    # THE ENVELOPE'S OWN CONFIG IS READ HERE, as a pure input refusal: a plan
+    # with no ``max_gpu_bytes`` is refused, by name, before this process has
+    # touched the allocator -- read with a subscript it was a ``KeyError``
+    # raised after a device allocation, indistinguishable from an admitted
+    # plan that failed later. The value's own validation (a positive byte
+    # count) and the allocator touch both belong to ``_apply_device_envelope``
+    # further down. ``synthesize`` is the one CPU command and never reaches
+    # this function.
+    #
+    # WHAT IS *NOT* PROMISED: the prepared-completion preflight compares the
+    # record against the prewarmed projection backend's identity, so it cannot
+    # run before the prewarm, and the prewarm is what allocates. A stale
+    # prepared record therefore refuses just after the envelope is set rather
+    # than before it. Both the pure refusal and the ordering are measured on a
+    # CPU-only box, with no mocked device, by
+    # ``test_a_missing_device_envelope_is_a_pure_input_refusal`` and
+    # ``test_the_declared_envelope_reaches_the_allocator_unchanged``.
+    declared_device_bytes = _config_device_envelope(config, command)
     os.environ[ACTIVATION_SCALE_ENV] = config["execution"]["production_act_scales"]
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision("highest")
@@ -1518,6 +1527,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     execution = config["execution"]
     root = Path(config["output_root"]) / command
     root.mkdir(parents=True, exist_ok=True)
+    device_envelope = None
     prewarm_phase_starts = None
     sealed_replay = None
     prewarm_phases = None
@@ -1577,8 +1587,6 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         # Every capture-free identity gate runs first: an unqualified runtime,
         # kernel source digest, build flag or binary sha256 is refused in
         # seconds rather than after hours of measured anchor input (#553).
-        projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
-        result["projection_backend"] = projection_backend.identity
         # The reader is bound first of the input owners: synthesizing an
         # adopted rung's missing render decodes its wire, and that decode must
         # come from the same bound consumer the qualification leg uses, not a
@@ -1587,6 +1595,21 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         reader_identity = None if reader is None else reader.identity
         implementation = (_aura_source_sha256() if source_transition is None
                           else source_transition.measurement_source_sha256)
+        # THE DEVICE ENVELOPE IS APPLIED HERE, after the refusals that need no
+        # device -- the envelope's own config and the declared reader -- and
+        # before the first thing that allocates on the device (the projection
+        # prewarm below). The prepared-completion preflight is the one refusal
+        # that cannot precede it: it compares the record against the prewarmed
+        # backend's identity, and the prewarm is what allocates. Both GPU
+        # commands take it, because both allocate, and ``max_gpu_bytes`` was
+        # otherwise compared with ``max_memory_allocated`` only after a window
+        # had run, which on a unified-memory box is a report about memory
+        # already spent.
+        device_envelope = _apply_device_envelope(
+            "cuda", declared_device_bytes, where=f"joint {command}")
+        result["device_envelope"] = device_envelope
+        projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
+        result["projection_backend"] = projection_backend.identity
         if command == "run":
             _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
                 implementation_sha256=implementation, reader_identity=reader_identity,

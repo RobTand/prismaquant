@@ -33,10 +33,15 @@ named it once was counting one of the two. `enforce_device_envelope` calls
 `torch.cuda.set_per_process_memory_fraction` with the plan's budget over the
 device's own reported total -- on the device's RESOLVED index, because the
 allocator api refuses the unspecified `cuda` the properties call accepts -- and
-is applied at the top of the execution path for
-`prepare` AND `run`, before a CUDA context, a streamer, a kernel or a tensor
-exists; the fraction bounds torch's caching allocator, not the CUDA context,
-NCCL or native driver allocations, and the CPU-only stage never reaches it.
+is applied on the execution path for `prepare` AND `run` after the refusals
+that need no device and before the first allocation: the plan's `max_gpu_bytes`
+is read by name, so a plan without it refuses before any allocator touch, and
+the projection prewarm -- the first thing that allocates -- follows the cap. A
+stale prepared completion is the one refusal that comes after it, because it is
+compared against the prewarmed backend's identity. No CUDA context, streamer,
+kernel or tensor exists before the cap; the fraction bounds torch's caching
+allocator, not the CUDA context, NCCL or native driver allocations, and the
+CPU-only stage never reaches it.
 PrismaBuild's `--gpu-memory-gb` is admission accounting (verified by inspection:
 no fleet runtime path sets a process-level CUDA cap in the action environment),
 so the process-level bound is the one above. The bounded capture environment
@@ -47,9 +52,9 @@ runs at the pass's first bounded step, minutes into the loader, where a missing
 name is a dead pilot rather than a refusal; a spec that declares a contradicting
 value is refused rather than overridden. Gates:
 `tests/test_capture_memory_guard.py`, `tests/test_tessera_campaign_container.py`,
-`tools/joint_prepare_startup_probe.py`. The container `--memory` cap the CPU
-budget is enforced by is RobTand/prismaquant#663's launcher change, not this
-one.
+`tests/test_tessera_joint_aura.py`, `tools/joint_prepare_startup_probe.py`. The
+container `--memory` cap the CPU budget is enforced by is
+RobTand/prismaquant#663's launcher change, not this one.
 
 Re-stamped (2026-09-16, `campaign/aqua-campaign-caller-20260916`) for **the
 campaign's A-side being a submitted stage** (§11; #655). The stage existed and

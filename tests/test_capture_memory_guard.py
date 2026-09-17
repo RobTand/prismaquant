@@ -420,18 +420,19 @@ def test_the_parallel_capture_window_sums_both_budgets(tmp_path, host):
         thread.join(5)
 
 
-def test_both_gpu_commands_are_capped_before_any_device_work(monkeypatch):
+def test_both_gpu_commands_are_capped_before_any_device_work(tmp_path, monkeypatch):
     """``run`` was uncapped: the envelope reached ``prepare`` and that was it.
 
-    ``max_gpu_bytes`` is applied at the top of the execution path -- before the
-    process builds a CUDA context, a streamed runner or a tensor -- for BOTH
-    GPU commands. ``synthesize`` is the CPU command and does not go through
-    here at all. The budget that bounds nothing refuses on both; a bounding one
-    is SET on both, which the next line's ``KeyError`` places after the cap
-    (the import happens inside the function, so the module attribute is what
-    the call sees).
+    ``max_gpu_bytes`` is applied on the execution path -- after the refusals
+    that need no device, before the process builds a CUDA context, a streamed
+    runner or a tensor -- for BOTH GPU commands. ``synthesize`` is the CPU
+    command and does not go through here at all. The budget that bounds nothing
+    refuses on both; a bounding one is SET on both, and the sentinel that stops
+    each command is the projection prewarm, which is the first thing after the
+    cap that needs the device (the import happens inside the function, so the
+    module attribute is what the call sees).
     """
-    from prismaquant import gpu_guard, tessera_joint_aura
+    from prismaquant import gpu_guard, joint_projection_backend, tessera_joint_aura
 
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path",
                         lambda *a, **k: torch.device("cuda"))
@@ -448,15 +449,24 @@ def test_both_gpu_commands_are_capped_before_any_device_work(monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "set_per_process_memory_fraction", counting_set)
 
+    class PrewarmReached(Exception):
+        pass
+
+    def prewarm(*_args, **_kwargs):
+        raise PrewarmReached
+
+    monkeypatch.setattr(joint_projection_backend, "prewarm_projection_backend", prewarm)
+    base = {"output_root": str(tmp_path), "execution": {"production_act_scales": "0"}}
+
     for command in ("prepare", "run"):
         with pytest.raises(RuntimeError, match="device envelope"):
-            tessera_joint_aura.execute(command, {"max_gpu_bytes": 200 * GiB},
+            tessera_joint_aura.execute(command, {**base, "max_gpu_bytes": 200 * GiB},
                                        plan_sha256="0" * 64)
     assert seen["calls"] == 0, "a budget that bounds nothing must not be set"
 
     for command in ("prepare", "run"):
-        with pytest.raises(KeyError):
-            tessera_joint_aura.execute(command, {"max_gpu_bytes": 80 * GiB},
+        with pytest.raises(PrewarmReached):
+            tessera_joint_aura.execute(command, {**base, "max_gpu_bytes": 80 * GiB},
                                        plan_sha256="0" * 64)
     assert seen["calls"] == 2
     assert seen["fraction"] == pytest.approx(80 / 121)
