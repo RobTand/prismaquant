@@ -250,7 +250,13 @@ def test_qualification_journal_restarts_from_durable_unit(tmp_path, monkeypatch)
     assert set(cache.metadata['verified_cells']) == set(data.cells)
     assert [row for row in events if row[0] == 'capture'] == [
         ('capture', 'model.layers.0.b')]
-    assert len(cache.metadata['prefetch'][0]['windows']) == 4
+    # One window per unit, holding that unit's whole render set: the loader
+    # count no longer decides a quantum's width, so file_load_workers=1 no
+    # longer means one key per window (#693).
+    windows = cache.metadata['prefetch'][0]['windows']
+    assert [len(window['keys']) for window in windows] == [2, 2]
+    assert [window['unit'] for window in windows] == [
+        'model.layers.0.a', 'model.layers.0.b']
     assert unit_path(journal, 'model.layers.0.b').is_file()
     assert progress == [(1, 'qualification', 'model.layers.0.a'),
                         (2, 'qualification', 'model.layers.0.b')]
@@ -466,7 +472,13 @@ def test_a_fully_completed_resume_verifies_and_publishes(tmp_path, monkeypatch):
     # own.
     assert set(cache.metadata['verified_cells']) == set(data.cells)
     assert not any(row[0] == 'capture' for row in events)
-    assert len(cache.metadata['prefetch'][0]['windows']) == 4
+    # One window per unit, holding that unit's whole render set: the loader
+    # count no longer decides a quantum's width, so file_load_workers=1 no
+    # longer means one key per window (#693).
+    windows = cache.metadata['prefetch'][0]['windows']
+    assert [len(window['keys']) for window in windows] == [2, 2]
+    assert [window['unit'] for window in windows] == [
+        'model.layers.0.a', 'model.layers.0.b']
     # One announcement per part plus one count update per durable unit; both
     # units sit in the same part, so only the first draws a transition. The
     # layer's own phase is still announced (unitless) before the walk reads the
