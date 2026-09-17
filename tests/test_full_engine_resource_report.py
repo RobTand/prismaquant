@@ -594,6 +594,10 @@ CLOSED_STEPS = [("step:0", 8, 24), ("step:1", 28, 42)]
 #: priced on its own. 7000 bytes over [2, 6) never lifts the fixture's live
 #: peak, which is 14044 and is reached later.
 NON_STEP_ROWS = [("0:12000:1", 2, 6, 7000, "outside_units", "fixed", "non_step", None)]
+#: The same row with no owner at all, which is what a startup transient that no
+#: checkpoint census was live for actually looks like. No term charges an
+#: off-step row, so no term reads its owner class (Tessera #478).
+UNOWNED_NON_STEP_ROWS = [("0:12500:1", 2, 6, 7000, "outside_units", None, "non_step", None)]
 
 
 def closed_report(*, steps=None, rows=()):
@@ -604,7 +608,7 @@ def closed_report(*, steps=None, rows=()):
     which is the state every fixture here carried before step intervals
     existed. ``rows`` appends allocations in the ``CLOSED_ROWS`` spelling.
     """
-    allocations, membership, non_step = [], [], []
+    allocations, membership, non_step, unclassified = [], [], [], []
     for index, (ident, alloc, free, size, scope, owner, lifetime, unit) in enumerate(
             list(CLOSED_ROWS) + list(rows)):
         device, address, generation = ident.split(":")
@@ -614,10 +618,22 @@ def closed_report(*, steps=None, rows=()):
             "free_completed_index": free,
             "free_requested_index": None if free is None else free - 1,
             "generation": int(generation), "lifetime_scope": scope,
-            "observed_categories": [owner], "observed_owners": [f"owner.{index}"],
+            # `owner` None is the row no checkpoint census saw: no category and
+            # no owner, which is what 19,828 of the a5 capture's rows carry.
+            "observed_categories": [] if owner is None else [owner],
+            "observed_owners": [] if owner is None else [f"owner.{index}"],
             "scope_stack": [] if unit is None else [unit],
             "unit_invocation": None if unit is None else f"{unit}:0",
         })
+        if lifetime == "unclassified":
+            # A row the producer itself could not classify. It is named, never
+            # bucketed, and it is not in `membership`, whose rows all carry a
+            # supported class.
+            unclassified.append({
+                "allocation_id": ident, "bytes": size, "lifetime_scope": scope,
+                "observed_categories": [] if owner is None else [owner],
+                "reason": "fixture row the producer could not classify"})
+            continue
         entry = {"allocate_index": alloc, "allocation_id": ident, "bytes": size,
                  "free_completed_index": free, "lifetime_class": lifetime,
                  "owner_class": owner, "unit": unit}
@@ -659,7 +675,7 @@ def closed_report(*, steps=None, rows=()):
              "invariance": "one complete assignment, one row per unit",
              "topology": "tp1_single_device_resident_eager",
              "unavailable_terms": sorted(name for name in TERMS if terms[name] is None),
-             "unclassified_allocation_count": 0, "uncharged_allocation_count": 0,
+             "unclassified_allocation_count": len(unclassified), "uncharged_allocation_count": 0,
              "non_step_allocation_count": len(non_step), "step_coverage": coverage["state"]}
     identity = {"assignment_sha256": "a" * 64, "canonical_units_sha256": "a" * 64,
                 "configuration_sha256": "a" * 64, "device_id": 0, "device_uuid": "synthetic-device",
@@ -701,7 +717,7 @@ def closed_report(*, steps=None, rows=()):
                       "schema": "tessera.full_engine_resource_partition.v1",
                       "scope": copy.deepcopy(scope), "terms": copy.deepcopy(terms),
                       "uncharged_allocations": [],
-                      "unclassified_allocations": [], "units": list(CLOSED_UNITS)},
+                      "unclassified_allocations": unclassified, "units": list(CLOSED_UNITS)},
         "derived": {"non_step_transient_peak_bytes": non_step_peak,
                     "non_step_transient_peak_scope": OPEN_STARTUP_PEAK_SCOPE,
                     "placement_obligation": PLACEMENT_OBLIGATION,
@@ -1049,6 +1065,48 @@ def test_an_allocation_live_during_no_declared_step_is_priced_but_never_charged(
     assert verdict.recomputed_terms["candidate_scratch"] == CLOSED_CANDIDATE_SCRATCH
     for scope in (report["partition"]["scope"], report["derived"]["scope"]):
         assert scope["non_step_allocation_count"] == 1
+
+
+def test_an_off_step_allocation_no_census_saw_is_classified_without_an_owner(tmp_path):
+    """An owner class is required exactly where a term reads one.
+
+    Tessera #478. A startup transient allocated and freed between two
+    checkpoints is in no census, so it carries no owner category. Its lifetime
+    is decided without one, and no composition term charges an off-step row --
+    so requiring a class refused the whole report for a field nothing reads.
+    On the a5 capture that is 19,828 of 21,104 unclassified rows, 79.5 GB of
+    80.2 GB.
+    """
+    report = closed_report(steps=CLOSED_STEPS, rows=UNOWNED_NON_STEP_ROWS)
+    assert [row["allocation_id"] for row in report["partition"]["non_step_allocations"]] == \
+        ["0:12500:1"]
+    assert report["partition"]["non_step_allocations"][0]["owner_class"] is None
+    verdict = consume(tmp_path, report)
+    assert verdict.disagreements == ()
+    assert verdict.unclassified_allocations == ()
+    assert verdict.recomputed_non_step_transient_peak_bytes == 7000
+    assert verdict.recomputed_terms["fixed_scratch"] == CLOSED_FIXED_SCRATCH
+    assert verdict.recomputed_terms["candidate_scratch"] == CLOSED_CANDIDATE_SCRATCH
+
+
+def test_an_owner_is_still_required_wherever_a_term_charges_the_row(tmp_path):
+    """The other half of the same rule. A row live while a declared step runs
+    is one some term charges, so it needs the class that says which."""
+    row = ("0:12600:1", 9, 23, 400, "outside_units", None, "unclassified", None)
+    report = closed_report(steps=CLOSED_STEPS, rows=[row])
+    verdict = consume(tmp_path, report)
+    assert verdict.unclassified_allocations == ("0:12600:1",)
+    assert verdict.recomputed_terms == {name: None for name in TERMS}
+    assert any("no single supported owner category" in reason for reason in verdict.blocking)
+
+
+def test_a_shared_owner_still_supplies_neither_classification_nor_invariance(tmp_path):
+    """`shared` is the producer saying it did not resolve the invariance. An
+    off-step row needs none; a row a term charges is refused exactly as before."""
+    row = ("0:12700:1", 9, 23, 400, "outside_units", "shared", "unclassified", None)
+    verdict = consume(tmp_path, closed_report(steps=CLOSED_STEPS, rows=[row]))
+    assert verdict.unclassified_allocations == ("0:12700:1",)
+    assert any("shared or unknown ownership" in reason for reason in verdict.blocking)
 
 
 def test_partial_step_coverage_refuses_the_same_row_the_complete_one_classifies(tmp_path):
