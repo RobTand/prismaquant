@@ -641,3 +641,66 @@ def test_window_width_follows_the_admitted_bytes_not_the_loader_count(tmp_path):
         with cache.resident_window(keys, max_resident_bytes=plenty,
                                    max_load_buffer_bytes=2 * each, max_workers=2):
             pass
+
+
+def test_window_preflight_scans_each_archive_once_per_lifetime(tmp_path, monkeypatch):
+    """Preflight prices a file's archive storage once, not once per call (#693).
+
+    The joint walk reaches the same key three times before it reads anything:
+    the caller's plan, the window's own re-plan, and the window's file table.
+    Each one opened the archive and read its central directory, which over
+    cold NFS was 11.0% of the prepare's main-thread wall time.
+    """
+    from pathlib import Path as _Path
+    from prismaquant import perturbed_x_cache as pxc
+
+    cache, paths, expected = make_cache(tmp_path, 3, budget=100000)
+    keys = tuple(paths)
+    plenty = 3 * max(path.stat().st_size for path in paths.values())
+    scans = []
+    original = pxc.torch_archive_storage_bytes
+
+    def counted(source, **kwargs):
+        if isinstance(source, (str, _Path)):
+            scans.append(str(source))
+        return original(source, **kwargs)
+
+    monkeypatch.setattr(pxc, 'torch_archive_storage_bytes', counted)
+
+    windows = cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                          max_load_buffer_bytes=plenty, max_workers=2)
+    assert windows == (keys,)
+    with cache.resident_window(keys, max_resident_bytes=plenty,
+                               max_load_buffer_bytes=plenty, max_workers=2):
+        for key in keys:
+            torch.testing.assert_close(cache.get_resident(*key), expected[key])
+    assert sorted(scans) == sorted(str(path.absolute()) for path in paths.values())
+
+    # The memo does not outlive the window it served.
+    scans.clear()
+    cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                max_load_buffer_bytes=plenty, max_workers=2)
+    assert len(scans) == len(keys)
+
+    # MUTATE THE DRIVER: a same-size rewrite is a miss, and only it rescans.
+    scans.clear()
+    cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                max_load_buffer_bytes=plenty, max_workers=2)
+    assert scans == []
+    changed = keys[1]
+    size_before = paths[changed].stat().st_size
+    torch.save(expected[changed] + 100, paths[changed])
+    # Same dtype, same shape, same archive size: the stat signature's mtime and
+    # ctime are the only thing that can catch this, and they are the memo key.
+    assert paths[changed].stat().st_size == size_before
+    cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                max_load_buffer_bytes=plenty, max_workers=2)
+    assert scans == [str(paths[changed].absolute())]
+
+    # Compaction drops it too, so a pickled cache carries no file metadata.
+    scans.clear()
+    cache.compact_for_pickle()
+    assert cache._window_archive_bytes is None
+    cache.plan_resident_windows(keys, max_resident_bytes=plenty,
+                                max_load_buffer_bytes=plenty, max_workers=2)
+    assert len(scans) == len(keys)

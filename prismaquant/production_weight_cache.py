@@ -437,6 +437,7 @@ class ProductionWeightCache:
         self._lru_bytes = 0
         self._cb_verified_keys = None
         self._file_load_receipts = None
+        self._forget_window_archive_bytes()
         return compacted
 
     def release_resident_tensors(self, keys: Sequence[tuple[str, str]] | None = None) -> int:
@@ -533,13 +534,45 @@ class ProductionWeightCache:
         before = path.lstat()
         if not stat.S_ISREG(before.st_mode):
             raise RuntimeError('PWC window requires a regular file, not a symlink')
-        storage_bytes = self._window_archive_storage_bytes(path)
-        if self._file_signature(path.lstat()) != self._file_signature(before):
-            raise RuntimeError('PWC window file changed during preflight')
+        # ONE ARCHIVE SCAN PER FILE PER LIFETIME. The storage total is a pure
+        # function of the file's bytes, and the file identity this cache
+        # already trusts for that -- the stat signature every window read
+        # re-checks -- is the memo key, so a file that changed is a miss and is
+        # rescanned. Preflight runs three times over the same key on the joint
+        # walk (the caller's plan, the window's re-plan, and the window's own
+        # file table) and each scan was a fresh open plus a central-directory
+        # read over cold NFS: 11.0% of the prepare's main-thread wall time
+        # (#693). The bytes-backed scan at ``_load_file_tensor`` is a different
+        # call on the loader thread and is never memoized.
+        memo = self._window_archive_memo()
+        signature = self._file_signature(before)
+        remembered = memo.get(str(path))
+        if remembered is not None and remembered[0] == signature:
+            storage_bytes = remembered[1]
+        else:
+            storage_bytes = self._window_archive_storage_bytes(path)
+            if self._file_signature(path.lstat()) != signature:
+                raise RuntimeError('PWC window file changed during preflight')
+            memo[str(path)] = (signature, storage_bytes)
         estimate = self.estimate_nbytes([key])
         if estimate != before.st_size or storage_bytes > estimate:
             raise RuntimeError('PWC window file storage estimate changed')
         return path, before, estimate, storage_bytes
+
+    def _window_archive_memo(self):
+        """Per-file archive storage totals for the current window lifetime.
+
+        One small entry per distinct backing path, so the memo cannot outgrow
+        the roster the cache already holds a path for, and it is dropped when a
+        window closes or the cache is compacted.
+        """
+        memo = getattr(self, '_window_archive_bytes', None)
+        if memo is None:
+            memo = self._window_archive_bytes = {}
+        return memo
+
+    def _forget_window_archive_bytes(self) -> None:
+        self._window_archive_bytes = None
 
     def plan_resident_windows(self, keys, *, max_resident_bytes: int, max_workers: int,
                               max_load_buffer_bytes: int | None = None):
@@ -756,6 +789,7 @@ class ProductionWeightCache:
             finally:
                 self._resident_window_files = None
                 self._resident_window_receipt_keys = frozenset()
+                self._forget_window_archive_bytes()
 
     @contextmanager
     def resident_window(self, keys, *, max_resident_bytes: int, max_workers: int,
@@ -820,6 +854,7 @@ class ProductionWeightCache:
             self.release_resident_tensors(keys)
             self._resident_window_files = None
             self._resident_window_receipt_keys = frozenset()
+            self._forget_window_archive_bytes()
 
     def _path_for_value(self, value: object) -> str:
         path = str(value)

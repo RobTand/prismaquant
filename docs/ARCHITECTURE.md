@@ -3,6 +3,28 @@
 As of: 2026-09-17 · `flash/693-resident-window-budget`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-17, `flash/693-resident-window-budget`) for **one archive
+scan per file per window lifetime** (#693). A window's preflight reaches the
+same key three times before anything is read -- the caller's plan, the
+window's re-plan, and the window's own file table -- and each reach opened the
+Torch archive and read its central directory. Over the joint prepare's cold
+NFS that was 11.0% of main-thread wall time, 3,305 of 29,999 py-spy samples in
+`torch_archive_storage_bytes`, every one of them under `_window_file` inside
+`plan_resident_windows` (receipt:
+`/home/rob/dq-runs/salvage/joint-aura-perf-20260917/prepare-300s.speedscope.json`).
+The total is a pure function of the file's bytes, so `_window_file` now
+remembers it under the file identity this cache already trusts for exactly
+that purpose -- the `cache_file_stat_signature` tuple every window read
+re-checks -- and a file whose signature moved is a miss and is rescanned. The
+memo is one small entry per distinct backing path, so it cannot outgrow the
+roster the cache already holds a path for, and it is dropped when a window
+closes or the cache is compacted, which keeps it out of a pickled cache. The
+bytes-backed scan inside `_load_file_tensor` is a different call on the loader
+thread against an in-memory buffer and is never memoized, so the loaded
+archive is still priced against what preflight recorded. No default, stage,
+format, lane, pin, plugin contract, ship gate or published byte changes.
+Gates: `tests/test_pwc_resident_windows.py`.
+
 Re-stamped (2026-09-17, `flash/693-resident-window-budget`) for **a PWC
 resident quantum whose width is the bytes its caller admits, not the loader
 count** (#693). `plan_resident_windows` closed a quantum at `len(window) ==
