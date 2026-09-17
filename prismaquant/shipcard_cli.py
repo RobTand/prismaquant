@@ -29,6 +29,7 @@ from prismaquant.shipcard import (
     GOLD_SLOTS,
     OPTIONAL_SLOTS,
     ROUTE_CENSUS_SLOT,
+    ROUTE_SWEEP_SLOT,
     ROUTE_TRACE_SLOT,
     UNIFORM_CONTROL_METRIC_KEYS,
     UNIFORM_CONTROL_SLOT,
@@ -482,6 +483,61 @@ def _cmd_fill_route_trace(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_fill_route_sweep(args: argparse.Namespace) -> int:
+    """Close `route.sweep` from every rank's served route sweep (#631)."""
+    from prismaquant.compressed_route_sweep_gate import (
+        CompressedRouteSweepError,
+        RouteSweepNotVerified,
+    )
+    from prismaquant.shipcard import make_route_sweep_record
+
+    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
+    card = load_shipcard(args.shipcard)
+    if ROUTE_SWEEP_SLOT not in (card.get("slots") or {}):
+        print(f"[shipcard] REFUSED: {args.shipcard} has no {ROUTE_SWEEP_SLOT} "
+              "slot; open a compressed-tensors lane card first (python -m "
+              "prismaquant.lane_shipcard open --lane compressed-tensors "
+              f"--artifact {model_dir})", file=sys.stderr)
+        return 2
+    try:
+        config_json = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
+    except (OSError, ValueError) as exc:
+        print(f"[shipcard] REFUSED: cannot read the artifact's config.json: "
+              f"{exc}", file=sys.stderr)
+        return 2
+    sweeps = []
+    for rank, path in enumerate(args.sweep):
+        label = f"rank{rank}:{Path(path).name}"
+        try:
+            sweeps.append((label, Path(path).read_bytes().decode("utf-8")))
+        except FileNotFoundError:
+            sweeps.append((label, None))
+        except (OSError, ValueError) as exc:
+            print(f"[shipcard] NOT VERIFIED: cannot read {path}: {exc}",
+                  file=sys.stderr)
+            return EXIT_NOT_VERIFIED
+    try:
+        record = make_route_sweep_record(
+            tool=args.tool or "fill-route-sweep",
+            model_sha=compute_model_sha(model_dir),
+            sweeps=sweeps,
+            expected_ranks=args.expected_ranks,
+            config_json=config_json,
+        )
+    except RouteSweepNotVerified as exc:
+        print("[shipcard] NOT VERIFIED -- route.sweep stays unfilled and the "
+              f"card stays unpublishable: {exc}", file=sys.stderr)
+        return EXIT_NOT_VERIFIED
+    except CompressedRouteSweepError as exc:
+        print(f"[shipcard] REFUSED -- route.sweep: {exc}", file=sys.stderr)
+        return 1
+    fill_slot(args.shipcard, ROUTE_SWEEP_SLOT, record)
+    print(f"[shipcard] filled {ROUTE_SWEEP_SLOT} from {len(sweeps)} rank "
+          f"sweep(s) (passed={record['passed']})")
+    print(f"[shipcard]   {record['detail']}")
+    return 0
+
+
 def _confirm_artifact_name(model_dir: str, typed: str | None) -> str | None:
     """Re-typing the basename is the confirmation, as `publish_artifact` has it."""
     expected = Path(model_dir).resolve().name
@@ -687,6 +743,25 @@ def main(argv: list[str] | None = None) -> int:
     p_trace.add_argument("--model-dir", default=None)
     p_trace.add_argument("--tool", default=None)
     p_trace.set_defaults(func=_cmd_fill_route_trace)
+
+    p_sweep = sub.add_parser(
+        "fill-route-sweep",
+        help="close route.sweep from every rank's served route sweep "
+             "(compressed-tensors lane: principle 14's serve-side leg). "
+             "Exit 0 agree, 1 refused, 2 usage, 3 not verified",
+    )
+    p_sweep.add_argument("shipcard")
+    p_sweep.add_argument(
+        "--sweep", action="append", required=True,
+        help="one rank's prismaquant.compressed_route_sweep/1 JSON, written "
+             "by `validate_native_export --route-sweep-out` (repeatable; a "
+             "path that does not exist is a missing rank)")
+    p_sweep.add_argument(
+        "--expected-ranks", type=int, default=1,
+        help="the serve's world size; fewer sweeps than this is NOT VERIFIED")
+    p_sweep.add_argument("--model-dir", default=None)
+    p_sweep.add_argument("--tool", default=None)
+    p_sweep.set_defaults(func=_cmd_fill_route_sweep)
 
     args = ap.parse_args(argv)
     return int(args.func(args))

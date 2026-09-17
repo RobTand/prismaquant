@@ -1,7 +1,73 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/693-resident-window-budget`.
+As of: 2026-09-17 · `flash/631-compressed-route-sweep-20260917`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/631-compressed-route-sweep-20260917`) for
+**principle 14's serve-side leg on the compressed-tensors lane** (§7.1, §9.1;
+RobTand/prismaquant#631, split from #575). The Tessera lane closed this leg on
+the plugin's own telemetry; stock vLLM emits none, so the served side is READ
+off the running engine instead of received from it.
+
+- **The producer.** `validate_native_export --route-sweep-out <path>` takes
+  the sweep from THE SAME loaded engine its eager smoke just generated on,
+  through vLLM's own `LLM.apply_model` (one result per rank, so this is also
+  the TP>1 shape). Per module it records the resolved `quant_method` and
+  `scheme` classes, the scheme object's own attributes, the kernel the scheme
+  selected, `isinstance(quant_method, QuantizeMethodBase)`, and a forward-hook
+  dispatch count over the generate. Only the eager arm writes one: forward
+  hooks do not run under CUDA-graph replay, and a graph-arm sweep would report
+  zeros that mean "not observed" while looking exactly like "never ran".
+- **The isinstance trap, recorded rather than inherited.** vLLM finalizes
+  weights with `isinstance(quant_method, QuantizeMethodBase)`
+  (`model_loader/utils.process_weights_after_loading`), which is nominal, not
+  structural: a method that is not a subclass is skipped in silence and dies
+  on the first forward. A sweep that filtered on the same predicate would
+  under-report and the gate would compare against a truncated histogram, so
+  this sweep filters on NOTHING and carries the predicate as a field. A
+  `false` is a refusal in the gate.
+- **The gate.** `compressed_route_sweep_gate.compare_route_sweeps` (stdlib
+  only; no torch, no vLLM) prices from the artifact's own `config.json` —
+  which is literally the input vLLM's dispatcher resolved against — and
+  compares per module. Unfused leaves (`q_proj`, `gate_proj`) are reconciled
+  through the `packed_modules_mapping` the sweep read off the live model
+  class, not a roster in this repo. A priced target that reached no served
+  module, a served module the artifact never priced, an ignored module the
+  runtime quantized, a priced module that dispatched zero forwards, and two
+  ranks with different contract maps are each REFUSED.
+- **The slot.** `lane_specs/compressed_tensors.json` declares a required
+  `route.sweep` gate; `shipcard._verify_route_sweep_record` replays it at
+  publication and refuses carried config text that is not the artifact's.
+  `python -m prismaquant.shipcard_cli fill-route-sweep` exits 0 agree, 1
+  refused, 3 NOT VERIFIED. No operator flag overrides a refusal.
+- **The exporter now stamps the lane.** `_write_shipcard` passed no `lane`,
+  so `lane_gate_slots` answered `()` for every native card and the lane's
+  declarations opened nothing. Harmless while the lane declared only base
+  slots; not harmless now, because a slot no card opens is a gate that cannot
+  bite. Cards written before this change carry no lane and keep verifying
+  against the base set they were opened with.
+- **Recorded, not judged.** The kernel class each scheme selected is in the
+  record and in the verdict's histogram, because the 2026-08-17 incident was a
+  body riding an older-architecture schedule. It is not a refusal condition:
+  vLLM publishes no machine-readable table of which kernel is native on which
+  target, and a gate that refused on a kernel name would assert exactly what
+  principle 14 forbids.
+- **Not covered, deliberately.** The activation REPRESENTATION (#567) — a
+  scheme class is a name, not the quantizer rule the kernel applied, the same
+  hole the Tessera trace has. And no packed-MoE method class is in the
+  decoder, because no small packed-MoE compressed-tensors artifact was
+  available to sweep; an MoE artifact reads NOT VERIFIED until one is
+  observed, which is the recorded gap rather than a table written from
+  reading source.
+
+Measured: the real sweep in `tests/fixtures/compressed_route_sweep_0p6b/` was
+written by this path on sparklina (GB10, sm_121) inside
+`vllm/vllm-openai@sha256:61fc8a89...` (vLLM 0.28.0) against
+`dq-runs/fc45-0p6b-nvfp4/exported`. 112 modules, all
+`CompressedTensorsW4A4Fp4(use_a16=False, group_size=16)` on
+`FlashInferCutlassNvFp4LinearKernel`, agreeing with all 252 priced targets.
+Gates: `tests/test_compressed_route_sweep_gate.py`,
+`tests/test_bite_631_route_sweep.py` (shown failing on base).
 
 Re-stamped (2026-09-17, `flash/693-resident-window-budget`) for **the COST read
 seam planning on both of its byte budgets** (#693). `resident_candidates`
@@ -14410,7 +14476,8 @@ re-render, it is the render the gate declined to keep.
 | Candidate real-KL (selection) | `validate_assignments_kl.py` | yes, only under `SELECTION_MODE=validated-surrogate` (`run-pipeline.sh:1223-1278`) | ranks, does not gate |
 | Sampled whole-stack proposal comparison | `proposal_validation.validate_sampled_proposal` over independently emitted `kl_measurement.sequence_token_nll` rows | no — explicit post-selection input only | **advisory, identity-bound**: requires matched candidate/incumbent sequence IDs and scored-token counts, retains failed/timed-out rows, and returns only an approximate paired manifest-cluster-bootstrap comparison; it cannot authorize export or assert latency |
 | Artifact survey (PPL/MMLU/end-KL) | `validation_harness.py` | no | **no thresholds at all** |
-| vLLM load + greedy smoke | `validate_native_export.py` | **echoed only** (`run-pipeline.sh:1704-1705`) | binary |
+| vLLM load + greedy smoke | `validate_native_export.py` | **echoed only** (`run-pipeline.sh:1704-1705`) | binary; `--route-sweep-out` also writes the eager arm's served route sweep from that same engine |
+| Served route sweep (compressed-tensors lane) | `validate_native_export.py --route-sweep-out` → `python -m prismaquant.shipcard_cli fill-route-sweep` | no — operator-run, inside the serving container | **binary, three-valued**: exit 0 fills `route.sweep`, 1 refuses on a served/priced disagreement, 3 is NOT VERIFIED and leaves the slot unfilled |
 | DSv4 CB exact eager + CUDA-graph load/generation | `scripts/serve_dsv4_cb_validate.sh {eager,graph}` → `validate_cb_endpoint.py` | no — operator-run, one fresh container per arm | **binary; each arm closes its matching `native_export.*` slot; eager also runs the independently recorded numeric gate before teardown** |
 | Strict Qwen3.8 RTX 4090 FP8-CB eager + mandatory full-graph proof | `SERVE_ARM=eager|graph scripts/serve_qwen38_rtx4090_fp8_cb.sh` → `validate_rtx4090_fp8_cb.py` + `rtx4090_graph_contract.py` | no — operator-run on one physical RTX 4090 per fresh arm | **blocking for an on-disk strict artifact: exact RTX 4090/sm89, 32K, seq=1, FP8 KV exactly 4 GiB, immutable released Gridbook v11/device-qualified lane-v2 receipt, deterministic generation, and graph mode 3 + explicit Inductor + `FULL_AND_PIECEWISE` captures `[1,2,4,8,16,32,64]` with `fullgraph=True,dynamic=False` and no fallback. Graph fills `native_export.graph` and `rtx4090.fp8_cb`; eager fills `native_export.eager`. No physical run exists yet.** |
 | Numeric ship gate | `validate_quantized_model.py` | never by the build pipeline; the DSv4 CB eager serve driver invokes it against its already-bound live session | yes, exit 0/1; closes `ship_gate` |
@@ -14592,6 +14659,17 @@ claim travels with its quality caveat). Known limit: `uniform_control_summary`
 prints producer-declared fields (`candidate_bpp`, `control_bpp`,
 `relative_slack_ppm`) beside the bpp rather than the replayed values; `verify`
 still refuses on the replay.
+
+**`route.sweep` (compressed-tensors-lane cards; PrismaQuant #631).** The
+serve-side leg of principle 14 on the default lane. The record carries every
+rank's `prismaquant.compressed_route_sweep/1` file, the artifact's exact
+`config.json` text and the agreeing verdict; `verify` replays the comparison
+from those bytes and refuses a `passed` flag, a hand-edited verdict, or config
+text that is not the artifact's. The comparison is per module: the activation
+contract the checkpoint prices for it against the contract the scheme vLLM
+resolved implies, read from the scheme object's own attributes. Only cards
+stamped `lane: compressed-tensors` owe it, which is every card this exporter
+opens from 2026-09-17 on.
 
 **`route.census` (Tessera-lane cards; PrismaQuant #136).** The shipcard of a
 Tessera-lane card carries the lane's required `route.census` slot: the receipt
@@ -16788,8 +16866,18 @@ PrismaQuant paths below are repo-root-relative.
 
 `export_native_compressed.py` writes a stock checkpoint: no forked runtime, no plugin, no custom
 kernel — the only lane whose correctness depends on nothing we maintain. All of §6 belongs to
-it; §7 owns its gates. Validation runs in-process (`validate_native_export.py:171` constructs
+it; §7 owns its gates. Validation runs in-process (`validate_native_export.py` constructs
 `LLM(...)`), so it needs a venv or container carrying vLLM (§10).
+
+That in-process load is also this lane's only window onto what the runtime
+actually resolved, and since 2026-09-17 it is used as one. `--route-sweep-out`
+writes a `prismaquant.compressed_route_sweep/1` record from the same engine
+the smoke generated on, and the lane declares a required `route.sweep`
+shipcard slot that `compressed_route_sweep_gate` closes only when every priced
+module served the contract it was priced on. This lane has no runtime-published
+contract table and no route telemetry, so the sweep is the attestation: what
+crosses the boundary is data the runtime's own objects reported, never an
+import (`AGENTS.md` forbids vendoring the serving runtime in a test).
 
 ### 9.2 codebook (CB) / gridbook — RETIRED 2026-09-02
 

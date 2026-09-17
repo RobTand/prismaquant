@@ -32,14 +32,19 @@ choosing a rung per Linear beats spending the same bytes everywhere:
 |---|---|
 | `uniform_control` | `python -m prismaquant.shipcard_cli fill-control` |
 
-And one lane-declared evidence slot, required of cards stamped with the lane
-that declares it — principle 12's second leg, the priced-vs-served route
-comparison (#136, Tessera #126): the exact price/artifact/runtime-bound
-census, or historical unscoped rows with their known substitute set:
+And three lane-declared evidence slots, each required of cards stamped with
+the lane that declares it. `route.census` is principle 12's second leg, the
+priced-vs-served route comparison (#136, Tessera #126): the exact
+price/artifact/runtime-bound census, or historical unscoped rows with their
+known substitute set. `route.trace` and `route.sweep` are principle 14's
+serve-side leg on their own lanes (#575, #631) — the same question asked of
+two runtimes that answer it differently, which is why they are two slots:
 
-| Slot | Filled by |
-|---|---|
-| `route.census` | `python -m prismaquant.shipcard_cli fill-route-census`, replayed from the carried records by `verify` |
+| Slot | Lane | Filled by |
+|---|---|---|
+| `route.census` | tessera | `python -m prismaquant.shipcard_cli fill-route-census`, replayed from the carried records by `verify` |
+| `route.trace` | tessera | `python -m prismaquant.shipcard_cli fill-route-trace`, from the plugin's own `TESSERA_ROUTE_TRACE` counters |
+| `route.sweep` | compressed-tensors | `python -m prismaquant.shipcard_cli fill-route-sweep`, from `validate_native_export --route-sweep-out` reading the live engine through vLLM's own `LLM.apply_model` |
 
 That claim was measured false on 2026-09-02 (2.00x worse served KL than the
 byte-matched uniform arm at 4.0 bpp) while every other check passed, so it is
@@ -112,6 +117,18 @@ ROUTE_CENSUS_SLOT = "route.census"
 #: traces and the config text, and `verify` replays the comparison against the
 #: current packaged contract (`tessera_route_trace_gate`).
 ROUTE_TRACE_SLOT = "route.trace"
+
+#: Principle 14's serve-side leg on the COMPRESSED-TENSORS lane (#631).  Stock
+#: vLLM emits no route telemetry, so this lane's served side is read off the
+#: running engine through vLLM's own ``LLM.apply_model`` by
+#: ``validate_native_export --route-sweep-out``: the resolved quantization
+#: method, scheme, scheme attributes and forward-dispatch count per module.
+#: A separate slot from `route.trace` because it is a different observation
+#: from a different producer -- a resolved-state sweep, not the serve's own
+#: counters -- and reading the two through one verifier would hide which one
+#: an artifact actually closed.  The record carries the sweeps and the config
+#: text, and `verify` replays the comparison (`compressed_route_sweep_gate`).
+ROUTE_SWEEP_SLOT = "route.sweep"
 
 #: Claims that can be attached to an already exported artifact.  Missing/null
 #: claims remain non-blocking for target-only artifacts, but every non-null
@@ -3268,9 +3285,122 @@ def _verify_route_trace_record(
     return problems
 
 
+def make_route_sweep_record(
+    *,
+    tool: str,
+    model_sha: str | None,
+    sweeps: Sequence[tuple[str, Any]],
+    expected_ranks: int,
+    config_json: str,
+    serve_fingerprint: str | None = None,
+    git_commit: str | None = None,
+) -> dict[str, Any]:
+    """Close `route.sweep` from every rank's served route sweep (#631).
+
+    Raises ``RouteSweepNotVerified`` when no usable observation exists and
+    ``CompressedRouteSweepError`` when the observation disagrees with the
+    price.  Neither produces a record, so the slot stays unfilled and
+    publication refuses; only an agreeing verdict is written, and `verify`
+    replays it from the carried bytes.
+    """
+    from copy import deepcopy
+
+    from prismaquant import compressed_route_sweep_gate as gate
+
+    try:
+        config = json.loads(config_json)
+    except ValueError as exc:
+        raise gate.CompressedRouteSweepError(
+            f"config.json is not JSON: {exc}") from exc
+    verdict = gate.compare_route_sweeps(
+        list(sweeps), expected_ranks=expected_ranks, config=config)
+    if verdict["status"] == gate.NOT_VERIFIED:
+        raise gate.RouteSweepNotVerified(verdict["detail"])
+    if verdict["status"] != gate.AGREE:
+        raise gate.CompressedRouteSweepError(verdict["detail"])
+    carried = []
+    for label, payload in sweeps:
+        if isinstance(payload, (str, bytes)):
+            payload = json.loads(payload)
+        carried.append({"rank": label, "sweep": deepcopy(payload)})
+    return make_record(
+        slot=ROUTE_SWEEP_SLOT,
+        tool=tool,
+        passed=True,
+        model_sha=model_sha,
+        metrics={
+            "n_sweeps": len(carried),
+            "n_priced_modules": sum(verdict["histogram"].values()),
+            "activation_contracts": verdict["histogram"],
+        },
+        detail=verdict["detail"],
+        serve_fingerprint=serve_fingerprint,
+        git_commit=git_commit,
+        extra={
+            "route_sweeps": carried,
+            "expected_ranks": expected_ranks,
+            "config_json": config_json,
+            "sweep_verdict": verdict,
+        },
+    )
+
+
+def _verify_route_sweep_record(
+    slot: str,
+    record: Mapping[str, Any],
+    *,
+    card: Mapping[str, Any] | None = None,
+    model_dir: str | os.PathLike | None = None,
+) -> list[str]:
+    """Replay the served-vs-priced module comparison from the carried sweeps."""
+    from prismaquant import compressed_route_sweep_gate as gate
+
+    sweeps = record.get("route_sweeps")
+    config_json = record.get("config_json")
+    expected = record.get("expected_ranks")
+    problems: list[str] = []
+    if not isinstance(sweeps, list) or not sweeps or not all(
+            isinstance(row, Mapping) and isinstance(row.get("rank"), str)
+            for row in sweeps):
+        problems.append(
+            f"{slot}: record carries no route_sweeps; an absent observation is "
+            "not a clean bill")
+    if not isinstance(config_json, str) or not config_json:
+        problems.append(f"{slot}: record carries no config_json to price against")
+    if type(expected) is not int:
+        problems.append(f"{slot}: record carries no expected_ranks")
+    if problems:
+        return problems
+    if model_dir is not None:
+        try:
+            on_disk = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
+        except (OSError, ValueError) as exc:
+            return [f"{slot}: cannot read the artifact's config.json: {exc}"]
+        if on_disk != config_json:
+            problems.append(
+                f"{slot}: carried config_json differs from the artifact's "
+                "config.json; the sweeps were compared against another price")
+    try:
+        verdict = gate.compare_route_sweeps(
+            [(row["rank"], json.dumps(row.get("sweep"))) for row in sweeps],
+            expected_ranks=expected, config=json.loads(config_json))
+    except (gate.CompressedRouteSweepError, ValueError) as exc:
+        return problems + [f"{slot}: REFUSED on replay: {exc}"]
+    if verdict["status"] != gate.AGREE:
+        problems.append(f"{slot}: {verdict['detail']}")
+    if record.get("passed") is not True:
+        problems.append(f"{slot}: record carries passed={record.get('passed')!r}")
+    if record.get("sweep_verdict") != verdict:
+        problems.append(
+            f"{slot}: carried sweep_verdict differs from the replay against "
+            "the carried sweeps and the artifact's own config.json")
+    return problems
+
+
 LANE_SLOT_VERIFIERS: dict[str, Callable[..., list[str]]] = {
     ROUTE_CENSUS_SLOT: _verify_route_census_record,
     ROUTE_TRACE_SLOT: _verify_route_trace_record,
+    ROUTE_SWEEP_SLOT: _verify_route_sweep_record,
 }
 
 

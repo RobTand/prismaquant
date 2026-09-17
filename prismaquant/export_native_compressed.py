@@ -8654,6 +8654,15 @@ def _render_lever_provenance() -> dict:
     }
 
 
+#: The container this exporter writes.  Named from the lane vocabulary rather
+#: than spelled here, so a rename cannot leave a card stamped with a lane no
+#: ``lane_specs/*.json`` declares.
+def _default_export_lane() -> str:
+    from .model_profiles.structure import DEFAULT_EXPORT_LANE
+
+    return DEFAULT_EXPORT_LANE
+
+
 def _write_shipcard(
     out_dir: Path,
     *,
@@ -8705,7 +8714,16 @@ def _write_shipcard(
         "render_levers": _render_lever_provenance(),
         "kv_shared_fisher": _shipcard.kv_shared_fisher_echo(),
     }
-    card = _shipcard.build_shipcard(out_dir, build=build)
+    # Stamp the lane the card was opened on.  This exporter writes exactly
+    # one container, and until #631 it stamped none -- so `lane_gate_slots`
+    # answered `()` for every native card and the lane's own declarations
+    # opened nothing.  That was harmless while the lane declared only base
+    # slots; it stops being harmless the moment it declares one of its own,
+    # because a slot no card opens is a gate that cannot bite.  Historical
+    # cards carry no lane and keep verifying against the base set they were
+    # opened with.
+    card = _shipcard.build_shipcard(
+        out_dir, build=build, lane=_default_export_lane())
     path = _shipcard.write_shipcard(
         out_dir / _shipcard.SHIPCARD_FILENAME, card)
     print(f"[export-stream] shipcard opened: {path}", flush=True)
