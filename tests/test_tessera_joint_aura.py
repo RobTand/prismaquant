@@ -489,6 +489,37 @@ def test_source_prefetch_refuses_implicit_or_nonresident_settings(defect):
         _source_prefetch(config)
 
 
+def test_the_checkpoint_seal_refuses_a_changed_identity(tmp_path):
+    """The loader computes the seal itself, so a rewritten one cannot pass.
+
+    The checkpoint records ``identity_sha256`` and the loader recomputes the seal
+    from the identity it read. This mutates the recorded value -- the shape a
+    tampered or stale checkpoint has -- and the load has to refuse rather than
+    carry the recorded seal forward as if it had been checked.
+    """
+    config, *_ = fixture(tmp_path)
+    checkpoint = Path(config["merged_checkpoint"]["path"])
+    manifest = json.loads(checkpoint.read_text())
+    manifest["identity_sha256"] = "0" * 64
+    checkpoint.write_text(json.dumps(manifest))
+    config["merged_checkpoint"] = bind(checkpoint)
+    with pytest.raises(ValueError, match="campaign checkpoint seal"):
+        load(config)
+
+
+def test_the_checkpoint_seal_is_the_streaming_digest(tmp_path):
+    """The recorded seal is what ``canonical_json_sha256_normalized`` returns."""
+    from prismaquant.cost_stage_checkpoint import (
+        canonical_json_sha256, canonical_json_sha256_normalized)
+    config, *_ = fixture(tmp_path)
+    manifest = json.loads(Path(config["merged_checkpoint"]["path"]).read_text())
+    identity = manifest["identity"]
+    assert canonical_json_sha256_normalized(identity, where="fixture") == \
+        manifest["identity_sha256"]
+    assert canonical_json_sha256_normalized(identity, where="fixture") == \
+        canonical_json_sha256(identity, where="fixture")
+
+
 def test_parallel_intake_hashes_independent_files_without_changing_cells(tmp_path, monkeypatch):
     import threading
     from prismaquant import tessera_joint_aura as bridge
