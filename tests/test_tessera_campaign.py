@@ -1571,3 +1571,6 @@ def test_menu_expansion_expands_once_per_distinct_shape(monkeypatch):
     assert menus["l0.attn.v"] is menus["l1.mlp.gate"]
     assert menus["l0.attn.q"] is not menus["l0.attn.v"]
     assert menus["l1.mlp.up"] == ["menu-for-4096x1024"]
+
+
+from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)
