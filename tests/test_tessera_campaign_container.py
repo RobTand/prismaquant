@@ -52,6 +52,77 @@ def test_container_uses_worker_snapshot_and_host_user_without_shell():
     assert not any(arg.startswith("--cpuset") or arg == "--cgroup-parent" for arg in argv)
 
 
+def _argv_with_budget(budget):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    declared = spec()
+    if budget is not _ABSENT:
+        declared["box_memory_gb"] = budget
+    return runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
+                                 uid=1000, gid=1000, image_id="sha256:resolved")
+
+
+_ABSENT = object()
+
+
+def test_a_declared_box_budget_becomes_the_cgroup_cap_the_guard_refuses_from():
+    """The bound has to be enforced by the kernel, not asserted in a plan.
+
+    ``CaptureMemoryGuard`` holds its margin back from a cgroup cap and refuses
+    without one; on GB10 the device and the host share one physical pool, so
+    this single number is the aggregate bound rather than 92 GiB plus a
+    resident set. The value is the spec's own ``box_memory_gb`` -- the same one
+    the demand derivation already refuses to exceed.
+    """
+    argv = _argv_with_budget(104)
+    assert argv[argv.index("--memory") + 1] == "104g"
+    # no swap headroom: the row fails rather than spilling past its budget
+    assert argv[argv.index("--memory-swap") + 1] == "104g"
+
+
+def test_a_spec_declaring_no_budget_keeps_the_previous_invocation():
+    """Every row that ran before this existed declared none."""
+    argv = _argv_with_budget(_ABSENT)
+    assert "--memory" not in argv and "--memory-swap" not in argv
+
+
+@pytest.mark.parametrize("budget", [0, -4, True, "104", float("nan")])
+def test_an_unusable_memory_budget_is_refused_not_coerced(budget):
+    """A cap that cannot be a cap is a fail-closed error, never a default."""
+    with pytest.raises(RuntimeError, match="must be a positive number of GiB"):
+        _argv_with_budget(budget)
+
+
+def _argv_with_fields(cpu_gb=_ABSENT, box_gb=_ABSENT):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    declared = spec()
+    if cpu_gb is not _ABSENT:
+        declared["cpu_memory_gb"] = cpu_gb
+    if box_gb is not _ABSENT:
+        declared["box_memory_gb"] = box_gb
+    return runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
+                                 uid=1000, gid=1000, image_id="sha256:resolved")
+
+
+def test_the_container_cap_is_the_cpu_field_not_the_box_capacity():
+    """Two fields, two meanings, and conflating them breaks one of them.
+
+    ``box_memory_gb`` is the box's total unified capacity, which the demand
+    derivation refuses to derive a row above -- for A2 that is the combined
+    physical demand a PrismaBuild row reserves. ``cpu_memory_gb`` is what the
+    container's cgroup may charge. Reading the cap out of the capacity field
+    gives a 114 GiB container cap for a row whose CPU side must fit 34 GiB.
+    """
+    argv = _argv_with_fields(cpu_gb=34, box_gb=114)
+    assert argv[argv.index("--memory") + 1] == "34g"
+    assert argv[argv.index("--memory-swap") + 1] == "34g"
+
+
+def test_a_spec_sealed_before_the_cpu_field_keeps_its_old_cap():
+    """Backwards: v3 and every earlier spec declared only box_memory_gb."""
+    argv = _argv_with_fields(cpu_gb=_ABSENT, box_gb=104)
+    assert argv[argv.index("--memory") + 1] == "104g"
+
+
 def test_host_adapter_needs_no_prismaquant_dependencies_and_forwards_progress(tmp_path):
     """The host launcher must reach Docker before importing the pinned image.
 
