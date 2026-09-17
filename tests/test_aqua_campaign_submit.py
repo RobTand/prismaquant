@@ -568,14 +568,16 @@ def test_the_submitted_summary_carries_the_unverified_reuse(
     assert "--require-complete-coverage" in command
     # The command line comes first and is not JSON; the summary is everything
     # else, which is also what a caller piping this output reads.
+    # The record travels in the submission's own ``campaign_scope`` (it is
+    # folded into the sealed manifest's annotation, so it enters the action
+    # key); the skip path is the one that prints it as ``requested_roster``.
     summary = json.loads("\n".join(line for line in lines
                                    if not line.startswith("[dry-run] ")))
-    roster = summary["requested_roster"]
-    assert roster["joint_cells_outside_plan"] == 1
-    assert roster["joint_cells_outside_plan_accepted_unverified"] is True
-    assert summary["campaign_scope"]["joint_cells_outside_plan"] == 1
-    assert (summary["campaign_scope"]
-            ["joint_cells_outside_plan_accepted_unverified"] is True)
+    scope = summary["campaign_scope"]
+    assert scope["joint_cells_outside_plan"] == 1
+    assert scope["joint_cells_outside_plan_accepted_unverified"] is True
+    assert scope["requested_cells"] == len(campaign["names"]) * len(MEASURED)
+    assert scope["kind"] == "complete_campaign"
 
 
 def test_an_existing_cost_out_refuses(campaign):

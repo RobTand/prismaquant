@@ -806,3 +806,29 @@ def test_a_name_seen_free_at_one_shape_does_not_exempt_another_shape(
     assert "1 cell(s) are free by contract AT THEIR OWN SHAPE" in message
     assert f"{even}@BF16" in message, "and it is named as the exemption it is"
     assert not cost_out.exists()
+
+
+def test_a_joint_row_donated_onto_another_cell_refuses(tmp_path, monkeypatch):
+    """A valid joint row is one cell's A-side, and the row says which cell.
+
+    Every internal check passes on this row: it is a real joint AURA row, its
+    operator and probe digests agree, and it names a real coordinate. That
+    coordinate is another unit's, so counting it as this unit's already-priced
+    cell would report an activation term nobody measured for it. The refusal is
+    the coordinate check; it must not be satisfied by a row that is merely
+    self-consistent, and it must not be the malformed-row failure either.
+    """
+    import sys
+
+    from prismaquant import aqua_activation_cost as aqc
+
+    name = "model.layers.0.mlp.down_proj"
+    donated = "model.layers.0.mlp.o_proj"
+    cost_out, argv = _cli_fixture(
+        tmp_path, {name: {"NVFP4": _joint_row(donated, "NVFP4")}},
+        [_dense_unit(name)])
+
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="produced for"):
+        aqc.main()
+    assert not cost_out.exists()
