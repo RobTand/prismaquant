@@ -191,3 +191,6 @@ def test_distinct_packed_experts_are_counted_but_exact_alias_refuses():
     modules['two'] = target('two', 0)
     with pytest.raises(ValueError, match='aliased packed'):
         plan(modules, specs, max_statistics_bytes=512)
+
+
+from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)
