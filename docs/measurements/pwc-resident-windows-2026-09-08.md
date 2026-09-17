@@ -1,5 +1,15 @@
 # Production weight-cache resident windows — 2026-09-08
 
+> **Superseded in part on 2026-09-17 (#693).** Two sentences below no longer
+> describe the code. `plan_resident_windows` now takes
+> `max_load_buffer_bytes` as well, and a quantum is no longer capped at
+> `max_workers` entries: it closes on the resident budget or on the serialized
+> buffer budget, each charged separately. The worker count bounds concurrency,
+> not quantum width. `_retained_window_preflight` keeps its own
+> `len(quantum) == max_workers` load bound, which is a different contract.
+> This record is the 2026-09-08 measurement and is left otherwise as measured;
+> `docs/ARCHITECTURE.md` carries the current rule.
+
 Issue #381; implementation `d2a9218f08`. This is an opt-in cache API and CPU
 lifecycle qualification. It changes no pipeline default, source traversal,
 quantization arithmetic, cache artifact, format menu or serving gate. No GPU
