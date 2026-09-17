@@ -10,15 +10,21 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import math
 from pathlib import Path
 import re
 
 from .joint_aura import identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import RuntimeBinding
-from .native_operator_panel import PHASES, _bytes, _equal, _number, _sha, operator_route_identity
+from .native_operator_panel import (PHASES, _bytes, _equal, _number, _sha,
+                                    operator_route_identity)
+from .tessera_formats import parse_tessera_format_name
 
 INPUT_SCHEMA = "prismaquant.native_moe_inputs.v1"
 PANEL_SCHEMA = "tessera.native_moe_panel.v1"
+#: The LFM stack this panel was built for, in the shape its validator reads.
+LFM_STACK = "lfm2_moe"
+LFM_EXPERTS = 32
 FORMAT = "TESSERA_E4M3_K1_R1024"
 ROLES = ("w1", "w3", "w2")
 EXECUTION = {"owner_kind": "complete_routed_moe", "mode": "resident",
@@ -28,21 +34,157 @@ EXECUTION = {"owner_kind": "complete_routed_moe", "mode": "resident",
 ROUTING_FIELDS = {"activation", "scoring_func", "renormalize", "routed_scaling_factor",
                   "apply_router_weight_on_input", "expert_map", "input_dtype",
                   "topk_weights_dtype", "topk_ids_dtype", "device", "weights_contract", "source_protocol"}
+#: The GLM stack's routing is a strict superset of the LFM field set: it adds
+#: the SwiGLU clamp, the expert grouping and the source's own top-k method, and
+#: the served route reads all three, so they are required rather than optional.
+GLM_ROUTING_FIELDS = ROUTING_FIELDS | {"swiglu_limit", "n_group", "topk_group", "topk_method"}
+#: GLM's router protocol differs from LFM's in what it *is*, not only in what
+#: it is called: `noaux_tc` selection carries a live FP32 correction bias, and
+#: `norm_topk_prob` decides whether the selected weights are renormalized.
+GLM_SOURCE_PROTOCOL_FIELDS = {"router_class", "router_source_sha256", "scoring_func",
+                              "topk_method", "normalization_epsilon", "correction_bias",
+                              "expert_bias_affects", "norm_topk_prob"}
+
+# --------------------------------------------------------------------------
+# Versioned native routed-owner geometries.
+#
+# v1 was LFM-only: one complete 32-expert sigmoid/SiLU unit-scale stack named
+# `model.layers.N.feed_forward.experts`, with no clamp, no grouping, no bias and
+# no tensor parallelism.  GLM-5.3-Flash is a different source protocol in every
+# one of those coordinates: 288 routed experts, top-8 selection, `noaux_tc`
+# scoring with a live FP32 correction bias, `norm_topk_prob` renormalization, a
+# routed scale of 2.5, a SwiGLU clamp at 10.0 and a served TP2 cut.  A geometry
+# is therefore an explicit, versioned object that both sides validate against,
+# not a widened constant: the LFM behavior and its refusals are preserved
+# exactly, and GLM arrives as its own id with its own facts.
+# --------------------------------------------------------------------------
+GEOMETRY_VERSION = 1
+#: The GLM-5.3-Flash routed-stack identity, read from the model config.
+GLM_SOURCE_GEOMETRY = {
+    "geometry_id": "glm53_next_routed_stack_v1",
+    "source_id": "glm5_next",
+    "n_routed_experts": 288,
+    "top_k": 8,
+    "scoring_func": "sigmoid",
+    "topk_method": "noaux_tc",
+    "norm_topk_prob": True,
+    "routed_scaling_factor": 2.5,
+    "swiglu_limit": 10.0,
+    "n_group": 1,
+    "topk_group": 1,
+    "gated": True,
+    "shared_experts": 1,
+    "intermediate_size": 2048,
+    "hidden_size": 4096,
+}
+#: The served tensor-parallel cuts.  `nvfp4_moe_route.py:374-381` divides the
+#: intermediate axis, so a rank-local stack carries `intermediate/tp` rows for
+#: gate/up and columns for down.  Why a TP=1 native owner may price TP=2 is a
+#: property of the CUT, not an assumption, and it is stated in the field.
+GLM_TP_CUT_AXIS = "intermediate"
+SUPPORTED_TP_SIZES = (1, 2)
+_LFM_UNIT = re.compile(r"model\.layers\.[0-9]+\.feed_forward\.experts")
+_GLM_UNIT = re.compile(r"model\.language_model\.layers\.[0-9]+\.mlp\.experts")
+LFM_SHAPE_FIELDS = {"experts", "hidden_size", "intermediate_size", "top_k"}
+GLM_SHAPE_FIELDS = {"geometry_version", "geometry_id", "source_id", "n_routed_experts",
+                    "top_k", "hidden_size", "intermediate_size", "shared_experts", "n_group",
+                    "topk_group", "topk_method", "scoring_func", "norm_topk_prob",
+                    "routed_scaling_factor", "swiglu_limit", "gated", "tensor_parallel",
+                    "tensor_parallel_cut_axis"}
+
+def _shape_for_roster(shape):
+    """The member roster's own view: rank-local width and one frozen format."""
+    width = (rank_local_intermediate(shape)
+             if geometry_family(shape) == "glm53_next_routed_stack_v1"
+             else shape["intermediate_size"])
+    return {**shape, "rank_local_intermediate": width, "format": FORMAT}
+
+
+def _at_or_above_one(value, name):
+    if type(value) is not int or value < 1:
+        raise ValueError(f"{name}: a positive integer is required")
+    return value
 
 
 def validate_geometry(shape):
-    if not isinstance(shape, dict) or set(shape) != {"experts", "hidden_size", "intermediate_size", "top_k"}:
+    """The complete explicit stack geometry, in the versioned shape.
+
+    The LFM shape is unchanged, field for field, and keeps its refusal text:
+    a stack that is not one complete 32-expert unit is still refused by name.
+    GLM's geometry is a *different* shape, admitted only when it states its
+    version and its own source facts, so widening this validator cannot make an
+    LFM panel stop being an LFM panel.
+    """
+    if (isinstance(shape, dict) and set(shape) == set(GLM_SHAPE_FIELDS)
+            and shape.get("geometry_id") is not None):
+        return validate_glm_geometry(shape)
+    if not isinstance(shape, dict) or set(shape) != LFM_SHAPE_FIELDS:
         raise ValueError("native MoE requires complete explicit stack geometry")
     if any(type(value) is not int or value < 1 for value in shape.values()):
         raise ValueError("native MoE geometry must be positive integers")
-    if shape["experts"] != 32 or not 1 <= shape["top_k"] <= shape["experts"]:
+    if shape["experts"] != LFM_EXPERTS or not 1 <= shape["top_k"] <= shape["experts"]:
         raise ValueError("native MoE panel supports one complete 32-expert stack")
     return shape
 
 
+def validate_glm_geometry(shape):
+    """GLM-5.3-Flash's routed stack, with every coordinate stated rather than read.
+
+    Every field is compared against the frozen source geometry above, so a
+    panel cannot quietly price `top_k=1` or a different routed scale and still
+    claim to be the GLM owner.  `tensor_parallel` is accepted at 1 or 2 and the
+    cut axis is fixed: the rank-local intermediate is
+    `intermediate_size // tensor_parallel`, which is what the serving route
+    actually reads (`nvfp4_moe_route.py:374-381`).
+    """
+    if set(shape) != GLM_SHAPE_FIELDS:
+        raise ValueError("GLM routed owner requires exactly the versioned geometry fields")
+    if shape["geometry_version"] != GEOMETRY_VERSION:
+        raise ValueError(
+            f"GLM routed owner geometry version {shape['geometry_version']!r} is not "
+            f"this consumer's {GEOMETRY_VERSION}")
+    for key, expected in (GLM_SOURCE_GEOMETRY.items()):
+        if shape[key] != expected:
+            raise ValueError(
+                f"GLM routed owner {key} is {shape[key]!r}, and this source is "
+                f"{expected!r}; refusing a stack that is not the captured one")
+    for key in ("hidden_size", "intermediate_size", "n_routed_experts", "top_k",
+                "shared_experts", "n_group", "topk_group"):
+        _at_or_above_one(shape[key], key)
+    if shape["top_k"] > shape["n_routed_experts"]:
+        raise ValueError("GLM routed owner top_k exceeds its expert count")
+    if type(shape["norm_topk_prob"]) is not bool or type(shape["gated"]) is not bool:
+        raise ValueError("GLM routed owner boolean coordinates must be booleans")
+    if (not isinstance(shape["swiglu_limit"], (int, float))
+            or not math.isfinite(shape["swiglu_limit"]) or shape["swiglu_limit"] <= 0):
+        raise ValueError("GLM routed owner needs its finite positive SwiGLU clamp")
+    if (not isinstance(shape["routed_scaling_factor"], (int, float))
+            or not math.isfinite(shape["routed_scaling_factor"])
+            or shape["routed_scaling_factor"] <= 0):
+        raise ValueError("GLM routed owner needs its finite positive routed scale")
+    if shape["tensor_parallel"] not in SUPPORTED_TP_SIZES:
+        raise ValueError(
+            f"GLM routed owner tensor_parallel {shape['tensor_parallel']!r} is outside "
+            f"the supported cuts {SUPPORTED_TP_SIZES}")
+    if shape["tensor_parallel_cut_axis"] != GLM_TP_CUT_AXIS:
+        raise ValueError(
+            "GLM routed owner declares a tensor-parallel cut this consumer does not "
+            f"implement: {shape['tensor_parallel_cut_axis']!r}, not {GLM_TP_CUT_AXIS!r}")
+    if shape["intermediate_size"] % shape["tensor_parallel"]:
+        raise ValueError("GLM routed owner intermediate is not divisible by its TP cut")
+    return shape
+
+
+def rank_local_intermediate(shape):
+    """The intermediate width one rank of this owner materializes."""
+    return shape["intermediate_size"] // shape["tensor_parallel"]
+
+
 def validate_routing(routing):
-    if not isinstance(routing, dict) or set(routing) != ROUTING_FIELDS:
+    if not isinstance(routing, dict) or set(routing) not in (ROUTING_FIELDS, GLM_ROUTING_FIELDS):
         raise ValueError("native MoE requires exact captured routing settings")
+    if set(routing) == GLM_ROUTING_FIELDS:
+        return validate_glm_routing(routing)
     if (routing["activation"] != "silu" or routing["scoring_func"] != "sigmoid"
             or type(routing["renormalize"]) is not bool
             or routing["apply_router_weight_on_input"] is not False
@@ -71,22 +213,120 @@ def validate_routing(routing):
     return routing
 
 
-def _member_roster(unit, members, shape):
-    validate_geometry(shape)
-    if not isinstance(unit, str) or re.fullmatch(r"model\.layers\.[0-9]+\.feed_forward\.experts", unit) is None:
-        raise ValueError("native MoE panel needs an exact LFM routed stack name")
+def validate_glm_routing(routing):
+    """GLM-5.3-Flash's captured routing, with its own facts checked.
+
+    Three of these are the reason a widened LFM validator would have been
+    wrong rather than merely permissive.  The source route is `noaux_tc`, not
+    LFM's plain sigmoid-and-bias selection, and it carries a live FP32
+    correction bias that changes *which* experts run.  `norm_topk_prob` is what
+    makes the top-k weights a normalized distribution before the routed scale
+    is applied, so a panel that dropped it would price a different mixture.
+    The SwiGLU clamp at 10.0 and the routed scale of 2.5 are read by the served
+    kernels (`nvfp4_moe_route.py:700,780` pass `swiglu_limit` down as
+    `gemm1_clamp_limit`), so a reference without them is not this owner.
+
+    The reference is the producer's; the shared contract here is only what the
+    two sides must agree on for a receipt to mean anything.
+    """
+    if (routing["activation"] != "silu" or routing["scoring_func"] != "sigmoid"
+            or type(routing["renormalize"]) is not bool
+            or routing["apply_router_weight_on_input"] is not False
+            or routing["expert_map"] is not None
+            or routing["input_dtype"] != "torch.bfloat16"
+            or routing["topk_weights_dtype"] not in ("torch.bfloat16", "torch.float32")
+            or routing["topk_ids_dtype"] not in ("torch.int32", "torch.int64")
+            or routing["device"] != "cuda:0"
+            or routing["weights_contract"] != "post_renormalization_and_routed_scaling"):
+        raise ValueError("GLM routed owner is outside its captured route protocol")
+    if routing["topk_method"] != GLM_SOURCE_GEOMETRY["topk_method"]:
+        raise ValueError(
+            f"GLM routed owner top-k method is {routing['topk_method']!r}, and this "
+            f"source is {GLM_SOURCE_GEOMETRY['topk_method']!r}")
+    if routing["n_group"] != GLM_SOURCE_GEOMETRY["n_group"] or routing["topk_group"] != GLM_SOURCE_GEOMETRY["topk_group"]:
+        raise ValueError("GLM routed owner group selection differs from the captured source")
+    if (not isinstance(routing["swiglu_limit"], (int, float))
+            or not math.isfinite(routing["swiglu_limit"])
+            or routing["swiglu_limit"] != GLM_SOURCE_GEOMETRY["swiglu_limit"]):
+        raise ValueError(
+            f"GLM routed owner SwiGLU clamp is {routing['swiglu_limit']!r}, and this "
+            f"source is {GLM_SOURCE_GEOMETRY['swiglu_limit']!r}")
+    if (not isinstance(routing["routed_scaling_factor"], (int, float))
+            or routing["routed_scaling_factor"] != GLM_SOURCE_GEOMETRY["routed_scaling_factor"]):
+        raise ValueError(
+            f"GLM routed owner routed scale is {routing['routed_scaling_factor']!r}, and "
+            f"this source is {GLM_SOURCE_GEOMETRY['routed_scaling_factor']!r}")
+    source = routing["source_protocol"]
+    if (not isinstance(source, dict) or set(source) != GLM_SOURCE_PROTOCOL_FIELDS
+            or not isinstance(source["router_class"], str) or not source["router_class"]
+            or source["normalization_epsilon"] != 1e-6
+            or source["expert_bias_affects"] != "selection_only"):
+        raise ValueError("GLM routed owner requires the actual GLM source router protocol")
+    if source["scoring_func"] != "sigmoid" or source["topk_method"] != GLM_SOURCE_GEOMETRY["topk_method"]:
+        raise ValueError("GLM routed owner source protocol names a different selection rule")
+    if source["norm_topk_prob"] is not True:
+        raise ValueError(
+            "GLM routed owner requires norm_topk_prob true: the served route applies "
+            "normalized top-k weights before the routed scale, and a panel without it "
+            "prices a different mixture")
+    _sha(source["router_source_sha256"], "router source")
+    correction = source["correction_bias"]
+    if correction is not None:
+        if not isinstance(correction, dict) or set(correction) != {"content_sha256", "dtype"}:
+            raise ValueError("GLM routed owner correction bias needs its content digest and dtype")
+        _sha(correction["content_sha256"], "source correction bias")
+        if correction["dtype"] != "torch.float32":
+            raise ValueError("GLM routed owner correction bias is the source's FP32 bias, not a cast")
+    return routing
+
+
+def geometry_family(shape):
+    """Which versioned geometry this shape is, by the fields it carries."""
+    if isinstance(shape, dict) and set(shape) == set(GLM_SHAPE_FIELDS):
+        return "glm53_next_routed_stack_v1"
+    return "lfm2_moe_routed_stack_v1"
+
+
+def _expect_member_roster(unit, members, shape, *, count, pattern, where):
     expected = [(expert, role, f"{unit}.{expert}.{role}")
-                for expert in range(shape["experts"]) for role in ROLES]
+                for expert in range(count) for role in ROLES]
     if not isinstance(members, list) or len(members) != len(expected):
-        raise ValueError("native MoE panel requires all 96 explicitly ordered source members")
+        raise ValueError(
+            f"native MoE panel requires all {len(expected)} explicitly ordered source members")
     for member, (expert, role, name) in zip(members, expected):
         if (type(member["expert"]) is not int or member["expert"] != expert
-                or member["role"] != role or member["unit"] != name or member["format"] != FORMAT):
+                or member["role"] != role or member["unit"] != name
+                or member["format"] != shape["format"]):
             raise ValueError("native MoE expert-role member ordering/format differs")
-        geometry = ([shape["hidden_size"], shape["intermediate_size"]] if role == "w2"
-                    else [shape["intermediate_size"], shape["hidden_size"]])
+        geometry = ([shape["hidden_size"], shape["rank_local_intermediate"]] if role == "w2"
+                    else [shape["rank_local_intermediate"], shape["hidden_size"]])
         _equal(member["shape"], geometry, f"{name} shape")
     return members
+
+
+def _member_roster(unit, members, shape):
+    """This owner's ordered members, in the geometry's own naming and shape.
+
+    An LFM unit is still named exactly as before and still carries the
+    intermediate-width member shapes; a GLM unit carries its own source name
+    and its own rank-local widths.  The two rosters share this function, not a
+    shape constant.
+    """
+    validate_geometry(shape)
+    if not isinstance(unit, str):
+        raise ValueError("native MoE panel needs an exact routed stack name")
+    if geometry_family(shape) == "glm53_next_routed_stack_v1":
+        if _GLM_UNIT.fullmatch(unit) is None:
+            raise ValueError(
+                "GLM routed owner needs its source stack name, "
+                "model.language_model.layers.<N>.mlp.experts")
+        count = shape["n_routed_experts"]
+    else:
+        if _LFM_UNIT.fullmatch(unit) is None:
+            raise ValueError("native MoE panel needs an exact LFM routed stack name")
+        count = shape["experts"]
+    return _expect_member_roster(unit, members, _shape_for_roster(shape), count=count,
+                                 pattern=None, where="native MoE members")
 
 
 def _calibration_and_capture(calibration, capture, *, unit, shape, routing):
