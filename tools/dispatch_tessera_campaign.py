@@ -902,6 +902,60 @@ def _bound_json(plan: dict, key: str, *, label: str) -> dict:
     return json.loads(path.read_text())
 
 
+def _bound_digest(container: dict, key: str, *, label: str, where: str) -> str:
+    """One artifact a plan binds by path and sha256, re-checked, as its digest.
+
+    The same check ``_bound_json`` makes, for the artifacts a scope *names* but
+    never parses: the calibration tokens, the canonical capture manifest and the
+    merged campaign checkpoint are large or non-JSON, and a digest is all the
+    identity needs.  Omitting the check would let a plan bind a digest it does
+    not hold.
+    """
+    declared = (container or {}).get(key)
+    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
+            or not isinstance(declared.get("sha256"), str) or not declared["sha256"]):
+        raise ScopeRefused(f"{label}: {where} is not a bound artifact")
+    path = Path(declared["path"])
+    actual = _sha256_of(path)
+    if actual != declared["sha256"]:
+        raise ScopeRefused(
+            f"{label}: {where} is {path}, which hashes to {actual}, not the "
+            f"bound {declared['sha256']}")
+    return actual
+
+
+#: The census fields that identify the DRAW, not merely its size. ``nsamples``
+#: and ``seqlen`` say how many windows; these say which ones, over which corpus
+#: revision and which tokenizer ids, and they are exactly what
+#: ``tessera_campaign.require_census_draw`` holds a producer run to at encode
+#: time. Two censuses with the same roster and the same window count that differ
+#: here are two different calibrations, and a scope that did not bind them would
+#: let one stand in for the other.
+CENSUS_DRAW_FIELDS = ("model", "text_sha256", "fit_ids_sha256",
+                      "seed", "layer_stride")
+
+
+def _census_draw(census: dict, *, label: str) -> dict:
+    """The frozen draw a census was taken on, or a refusal naming the field."""
+    draw: dict = {}
+    for field in ("model", "text_sha256", "fit_ids_sha256"):
+        value = census.get(field)
+        if not isinstance(value, str) or not value:
+            raise ScopeRefused(
+                f"{label}: the census declares no {field}, so the calibration "
+                "draw it was taken on is unidentified; a roster and a window "
+                "count are not a draw")
+        draw[field] = value
+    for field in ("seed", "layer_stride"):
+        value = census.get(field)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ScopeRefused(
+                f"{label}: the census declares no integer {field}, so the "
+                "calibration draw it was taken on is unidentified")
+        draw[field] = value
+    return draw
+
+
 def joint_campaign_scope(plan: dict, *, label: str = "joint row") -> dict:
     """The exact roster and window identity one joint plan evaluates.
 
@@ -985,6 +1039,31 @@ def joint_campaign_scope(plan: dict, *, label: str = "joint row") -> dict:
         raise ScopeRefused(
             f"{label}: the plan declares {declared[0]!r}/{declared[1]!r} units/groups "
             f"but bound {len(roster)}/{len(groups)}; a count is not the roster")
+    # The draw and the capture are the other half of "the same calibration
+    # contract": the roster says which Linears were priced, this says over which
+    # windows, which corpus revision and which tokenizer ids, and which captured
+    # activations were read. Read from the plan's own bound artifacts, so a plan
+    # cannot restate one it does not hold.
+    calibration_sha256 = canonical_json_sha256({
+        "census_draw": _census_draw(census, label=label),
+        "window_count": campaign_windows,
+        "calib_seqlen": seqlen,
+        "calibration_input_sha256": _bound_digest(
+            plan, "calibration_input", label=label,
+            where="joint plan calibration_input"),
+        "canonical_capture_sha256": _bound_digest(
+            plan, "canonical_capture", label=label,
+            where="joint plan canonical_capture"),
+    }, where=f"{label} calibration identity")
+    # The candidate roster is `identity.units[unit].menu` inside the campaign's
+    # merged checkpoint, and the joint loader refuses any priced rung outside
+    # it. Binding that artifact binds the exact (unit, format) roster the pass
+    # is admitted against -- a reduced or substituted menu is different bytes,
+    # so it is a different campaign -- without re-reading 6.8 GB of identity at
+    # submission time to name it twice.
+    campaign_checkpoint_sha256 = _bound_digest(
+        inputs, "merged_checkpoint", label=label,
+        where="joint plan inputs.merged_checkpoint")
     return {
         "schema": CAMPAIGN_SCOPE_SCHEMA,
         "kind": kind,
@@ -998,6 +1077,8 @@ def joint_campaign_scope(plan: dict, *, label: str = "joint row") -> dict:
         "campaign_window_count": campaign_windows,
         "calib_seqlen": seqlen,
         "selection_sha256": selection,
+        "calibration_sha256": calibration_sha256,
+        "campaign_checkpoint_sha256": campaign_checkpoint_sha256,
     }
 
 
@@ -1007,10 +1088,17 @@ CAMPAIGN_IDENTITY_SCHEMA = "prismaquant.tessera_joint_campaign_identity.v1"
 #: ``window_count`` is deliberately absent: the campaign identity names the
 #: campaign's own window total, and whether a plan evaluates all of it is the
 #: ``kind`` the caller requires, not a property of the campaign.
+#: ``selection_sha256`` is absent for the same reason -- a diagnostic subset is
+#: a different ``kind`` of the same campaign, and its panel identity travels in
+#: the scope the submission is stamped with. ``calibration_sha256`` is NOT
+#: absent: the pilot and the full continuation read one draw and one capture, so
+#: both have to reproduce it, and it deliberately excludes the panel so that
+#: they can.
 CAMPAIGN_IDENTITY_FIELDS = (
     "source_unit_count", "source_roster_sha256",
     "campaign_group_count", "campaign_group_roster_sha256",
-    "campaign_window_count", "calib_seqlen")
+    "campaign_window_count", "calib_seqlen",
+    "calibration_sha256", "campaign_checkpoint_sha256")
 
 
 def campaign_identity(scope: dict) -> dict:
@@ -1052,6 +1140,17 @@ def verify_joint_campaign_scope(plan: dict, *, require_scope: str,
             f"{label}: a joint submission must bind a {CAMPAIGN_IDENTITY_SCHEMA} "
             "campaign identity; a plan's own census cannot show its own scope is "
             "the campaign's")
+    # A field the identity does not carry cannot be compared, and "absent"
+    # compares unequal to every value -- which is how an identity sealed before
+    # the calibration and candidate-roster binding would refuse the *right*
+    # plan with a message about the wrong thing. Name the re-seal instead.
+    absent = [field for field in CAMPAIGN_IDENTITY_FIELDS if field not in campaign]
+    if absent:
+        raise ScopeRefused(
+            f"{label}: the frozen campaign identity carries no "
+            f"{', '.join(absent)}; it predates binding the calibration draw, the "
+            "capture and the campaign's candidate roster, and must be re-sealed "
+            "from a campaign-scoped plan before it can stand for the campaign")
     scope = joint_campaign_scope(plan, label=label)
     for field in CAMPAIGN_IDENTITY_FIELDS:
         declared = campaign.get(field)

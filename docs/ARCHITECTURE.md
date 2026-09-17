@@ -793,9 +793,37 @@ counts stay in the record and are checked against the identity rather than
 accepted in place of it. Gates: `tests/test_joint_campaign_scope.py` and
 `tests/test_glm_joint_data_manifest_at_submit.py`.
 
-Re-stamped (2026-09-16, `fix/joint-scope-identity-acceptance-20260916`) for the
-joint campaign-scope contract. No format menu, serving lane, allocator default or
-ship gate changes; `submit-joint` gains two required arguments, and the sealed
+**The roster and its window count are not the calibration**
+(2026-09-16, `pq-joint-aqua-serving-scale-20260916`). Two censuses with the same
+unit roster, the same anchor groups and the same `nsamples x seqlen` can be
+different draws over a different corpus revision, and the joint loader would
+verify either against its own bound bytes. The scope now derives two more
+fields, and the frozen identity has to reproduce them:
+
+* `calibration_sha256` -- over the census's draw identity (`model`,
+  `text_sha256`, `fit_ids_sha256`, `seed`, `layer_stride`), the window count and
+  sequence length, and the plan's bound `calibration_input` and
+  `canonical_capture` digests. It deliberately excludes the diagnostic panel:
+  the pilot and the full continuation read one draw and one capture, so both
+  reproduce this field, while the panel's own identity travels in the scope's
+  `selection_sha256`. A census that names no draw refuses rather than pricing
+  another one.
+* `campaign_checkpoint_sha256` -- the plan's bound merged campaign checkpoint.
+  That artifact's `identity.units[unit].menu` is the exact per-unit candidate
+  roster the pass is admitted against (the loader refuses any priced rung
+  outside it), so binding it binds the candidate roster without re-reading 6.8
+  GB of identity at submission time.
+
+A frozen identity sealed before these fields existed says so -- it must be
+re-sealed from a campaign-scoped plan -- rather than comparing against an absent
+field. The five-field roster identity is unchanged in meaning: the new fields
+are additional, so an equal-length roster substitution still refuses on
+`source_roster_sha256`.
+
+Re-stamped (2026-09-16, `pq-joint-aqua-serving-scale-20260916`) for the
+calibration and candidate-roster binding in the joint campaign-scope contract.
+No format menu, serving lane, allocator default or ship gate changes; the
+earlier seal is superseded only in that it must be re-derived, and the sealed
 joint plans' own bytes are untouched.
 
 Research acquisition bridge (2026-09-13, `codex/glm-full-domain-price-bridge-20260913`, #581):

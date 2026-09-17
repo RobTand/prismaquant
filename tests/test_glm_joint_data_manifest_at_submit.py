@@ -152,6 +152,11 @@ def _workspace(scratch: Path) -> dict:
     census = workspace / "census.json"
     census.write_text(json.dumps({
         "schema": "prismaquant.tessera_campaign_census.v1",
+        "model": str(model),
+        # The draw, not just the window count: the campaign scope binds which
+        # corpus revision and tokenizer ids the calibration windows came from.
+        "text_sha256": "a" * 64, "fit_ids_sha256": "b" * 64,
+        "seed": 0, "layer_stride": 1,
         "nsamples": 512, "seqlen": 512,
         "unit_shapes": {name: [16, 16] for name in names},
         # The scope a joint pass evaluates is its roster and its window set;
@@ -303,7 +308,14 @@ def workspace_with_sealed_checkpoint(scratch):
     The journal identity names the campaign checkpoint it was qualified
     against, and the checkpoint names its own seal, so a journal that was
     written against another merge is recognisable as one.
+
+    Sealing the checkpoint changes its bytes, so the plan is re-bound to the
+    sealed file and the campaign identity re-derived from that plan: the plan
+    has to bind the artifact it reads, and a submission that carried the
+    pre-seal digest would declare a roster the pass does not hold.
     """
+    import dispatch_tessera_campaign as dispatch
+
     fixture = _workspace(scratch)
     checkpoint = Path(fixture["checkpoint"])
     document = json.loads(checkpoint.read_text())
@@ -317,6 +329,15 @@ def workspace_with_sealed_checkpoint(scratch):
     document["identity"] = identity
     document["identity_sha256"] = canonical_sha256(identity)
     checkpoint.write_text(json.dumps(document))
+    plan_path = Path(fixture["plan"])
+    plan = json.loads(plan_path.read_text())
+    plan["inputs"]["merged_checkpoint"]["sha256"] = hashlib.sha256(
+        checkpoint.read_bytes()).hexdigest()
+    plan_path.write_text(json.dumps(plan))
+    fixture["scope"] = dispatch.joint_campaign_scope(
+        json.loads(plan_path.read_text()))
+    Path(fixture["campaign_identity"]).write_text(json.dumps(
+        dispatch.campaign_identity(fixture["scope"]), sort_keys=True))
     return fixture, document["identity_sha256"]
 
 
