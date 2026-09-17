@@ -147,9 +147,11 @@ def test_the_writer_stamps_the_arithmetic_the_contract_actually_priced_with(monk
     """
     from prismaquant import format_registry as fr
 
-    explicit = _registered_identity(vllm="build-B", image_content_sha256="f" * 64)
-    process = _registered_identity()
-    _bind(process)
+    # The contract prices with the Torch model (which a CPU box can run) while
+    # the PROCESS is bound to the registered operator: the two disagree, and the
+    # record must follow the contract that actually priced the row.
+    explicit = _model_identity()
+    _bind(_registered_identity())
     contract = owner.StaticActivationContract(
         measured_as_served=True, served_quantizer=explicit)
     monkeypatch.setattr(fr, "canonical_format_name", lambda name: name)
@@ -163,7 +165,7 @@ def test_the_writer_stamps_the_arithmetic_the_contract_actually_priced_with(monk
         activations=torch.zeros(1, 16, dtype=torch.bfloat16),
         activation_max_abs=1.0)
 
-    assert record["served_quantizer"]["vllm"] == "build-B"
+    assert record["served_quantizer"]["backend"] == owner.SERVED_QUANTIZER_BACKEND_MODEL
     assert record["served_quantizer"] == explicit.as_record()
     # ... and a run bound to that same arithmetic reuses it.
     _bind(explicit)
