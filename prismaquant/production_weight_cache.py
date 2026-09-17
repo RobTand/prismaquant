@@ -2128,9 +2128,39 @@ def _render_score_record(
         "input_global_scale_policy": (
             str(policy) if input_global_scale is not None else None
         ),
+        # ... and WHICH activation quantiser arithmetic priced it, with the build
+        # and image that arithmetic ran in.  A static-G row is scored through
+        # ``contract.quantize_dequantize``, which runs the registered served
+        # operator or this tree's Torch model depending on the process binding;
+        # a retained cost is only a cost of the arithmetic that produced it, so
+        # the identity travels with the record (RobTand/prismaquant#567).  None
+        # where no static G was priced: a dynamically scored row never touched
+        # this quantiser, and invalidating it would be the opposite error.
+        "served_quantizer": (
+            None if input_global_scale is None
+            else _scored_served_quantizer_record(contract)
+        ),
         "out_features": int(rows),
         "in_features": int(cols),
     }
+
+
+def _scored_served_quantizer_record(contract) -> "dict | None":
+    """The identity of the arithmetic THIS row was priced with.
+
+    Read through the one effective-identity accessor, so the arithmetic the row
+    ran (``contract.quantize_dequantize``) and the arithmetic it is stamped with
+    cannot be two answers: a contract carrying its own explicit binding stamps
+    that, not the process's.  Never resolved, probed or imported here -- the
+    cache records what priced the row, and an unstamped row is refused at reuse
+    rather than filled in later.
+    """
+    from prismaquant.nvfp4_activation_contract import (
+        effective_served_quantizer_identity,
+    )
+
+    identity = effective_served_quantizer_identity(contract)
+    return None if identity is None else identity.as_record()
 
 
 def _resolve_format_spec(fmt):
@@ -2298,7 +2328,7 @@ def _render_score_record_priced_scale(
     *,
     key: str,
     where: str,
-) -> tuple[str, float, float, str | None] | None:
+) -> tuple[str, float, float, str | None, object] | None:
     """``(qname, priced_G, max_abs, priced_policy)`` for a served-contract row.
 
     ``None`` for a row that carries no static G -- one scored under a dynamic
@@ -2340,7 +2370,56 @@ def _render_score_record_priced_scale(
         priced_value,
         max_abs_value,
         None if policy is None else str(policy),
+        record.get("served_quantizer"),
     )
+
+
+def _render_score_read_contract(record: Mapping[str, object]):
+    """The contract a retained render score was priced through, or ``None``.
+
+    A row's arithmetic is the CONTRACT's -- an explicit binding on the contract
+    beats the process's -- so a reader that compared every retained cost against
+    the process binding alone would refuse a row that was correctly stamped for
+    a contract-bound build.  The record names its format, and the registry is
+    the one owner of which contract that format carries, so the read resolves
+    the same object the write priced through rather than a second expectation.
+
+    ``None`` (unknown format, no contract, or a registry that cannot answer) is
+    not an error here: the caller falls back to the process binding, which is
+    what a row with no contract-bound arithmetic was priced under.
+    """
+    fmt = record.get("format")
+    if not isinstance(fmt, str) or not fmt:
+        # The one narrowed legacy case, and it is a property of the record's
+        # shape rather than of a failed lookup: ``_render_score_record`` has
+        # always stamped ``format``, so a static-G record without one was not
+        # written by this writer.  It carries no format to resolve, so the
+        # caller's process binding is the only expectation available.
+        return None
+    try:
+        from prismaquant import format_registry as fr
+
+        spec = fr.get_format(fr.canonical_format_name(fmt))
+    except Exception as exc:
+        # FAIL CLOSED.  A format this tree cannot resolve -- a missing package,
+        # a corrupt registry row, a name whose render lane is gone -- is not
+        # evidence that the row was priced under the process's arithmetic.
+        # Reinterpreting a static-G cost under the global binding is exactly how
+        # a model-priced cost would be admitted as registered-operator pricing.
+        raise RuntimeError(
+            f"render score record names format {fmt!r}, which this tree cannot "
+            f"resolve ({type(exc).__name__}: {exc}); a static-G cost cannot be "
+            "checked against the arithmetic that priced it, so it is refused "
+            "rather than reinterpreted under another binding"
+        ) from exc
+    try:
+        return _static_activation_contract_of(spec)
+    except Exception as exc:
+        raise RuntimeError(
+            f"render score record names format {fmt!r} whose activation "
+            f"contract cannot be read ({type(exc).__name__}: {exc}); refusing "
+            "to reinterpret a static-G cost under another binding"
+        ) from exc
 
 
 def _check_resumed_render_score_policies(
@@ -2366,6 +2445,7 @@ def _check_resumed_render_score_policies(
     from prismaquant.nvfp4_activation_contract import (
         input_global_scale_from_max_abs,
         require_matching_input_global_scale,
+        require_matching_served_quantizer,
     )
 
     checked = 0
@@ -2377,8 +2457,15 @@ def _check_resumed_render_score_policies(
             record, key=key, where=where)
         if priced is None:
             continue
-        qname, priced_value, max_abs_value, priced_policy = priced
+        qname, priced_value, max_abs_value, priced_policy, priced_quantizer = priced
         checked += 1
+        # The second axis of the same question: the cost must have been priced
+        # by the arithmetic this run is bound to.  Weight-only and dynamically
+        # scored rows never reach here (``priced is None`` above), which is what
+        # keeps their caches reusable.
+        require_matching_served_quantizer(
+            priced_quantizer, qname=qname, consumer=where,
+            contract=_render_score_read_contract(record))
         require_matching_input_global_scale(
             priced_value,
             input_global_scale_from_max_abs(max_abs_value, policy=policy),
@@ -2412,6 +2499,9 @@ def production_cache_priced_input_global_scales(
     if not isinstance(records, Mapping):
         return {}
     priced_scales: dict[str, float] = {}
+    from prismaquant.nvfp4_activation_contract import (
+        require_matching_served_quantizer,
+    )
     for key in sorted(records):
         record = records[key]
         if not isinstance(record, Mapping):
@@ -2420,7 +2510,13 @@ def production_cache_priced_input_global_scales(
             record, key=str(key), where=where)
         if priced is None:
             continue
-        qname, priced_value, _max_abs, _policy = priced
+        qname, priced_value, _max_abs, _policy, priced_quantizer = priced
+        # The measurement side of the same refusal: a KL hook about to measure
+        # against these costs reads them through here, so the arithmetic check
+        # belongs on this path too, not only on resume.
+        require_matching_served_quantizer(
+            priced_quantizer, qname=qname, consumer=where,
+            contract=_render_score_read_contract(record))
         previous = priced_scales.get(qname)
         if previous is not None and previous != priced_value:
             raise RuntimeError(

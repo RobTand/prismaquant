@@ -593,3 +593,6 @@ def test_the_kl_preflight_names_every_unit_priced_at_another_scale(
             model, {"proj": W4A4}, calib_ids, refs,
             work_root=tmp_path, kl_scope="full_sequence",
             production_weight_cache=_cache_priced_at(448.0, amax))
+
+
+from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)

@@ -91,3 +91,6 @@ def test_tessera_only_transient_anchor_keeps_fused_static_identity(
             consume_render=consume, consumer_identity=consumer)
         assert renderer.cache.weights == {}
     assert set(identities) == set(modules)
+
+
+from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)

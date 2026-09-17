@@ -299,3 +299,6 @@ def test_the_export_gate_does_not_import_the_tessera_package(tmp_path):
     finally:
         tr.synthesize_tessera_spec = original
     assert report["static_activation_contract_units"] == 0
+
+
+from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)
