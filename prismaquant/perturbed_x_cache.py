@@ -184,8 +184,42 @@ def activation_cache_filename(name: str) -> str:
     return _FNAME_SUB.sub("__", name) + ".pt"
 
 
+class SerializedEntryDigest:
+    """Hash a serializer's output while it is written, never on a second pass.
+
+    Torch's buffer writer only calls ``write`` and ``flush`` and never seeks,
+    so the bytes hashed here are exactly the bytes the temporary file receives
+    and the atomic rename publishes. The durable fence still fsyncs the real
+    descriptor, which this sink does not own.
+    """
+
+    def __init__(self):
+        self._hash = hashlib.sha256()
+        self._handle = None
+        self.bytes = 0
+
+    def sink(self, handle):
+        self._handle = handle
+        return self
+
+    def write(self, data):
+        view = memoryview(data).cast("B")
+        try:
+            self._hash.update(view)
+            self.bytes += view.nbytes
+            return self._handle.write(view)
+        finally:
+            view.release()
+
+    def flush(self):
+        self._handle.flush()
+
+    def hexdigest(self):
+        return self._hash.hexdigest()
+
+
 def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x",
-                                 durable=False, **metadata):
+                                 durable=False, serialized_digest=None, **metadata):
     """Atomically store already-selected rows without changing their precision."""
     import os
     path = Path(cache_dir) / activation_cache_filename(name)
@@ -193,7 +227,8 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
     temporary = path.with_suffix(".pt.tmp")
     with temporary.open("wb") as handle:
         torch.save({**metadata, "inputs": inputs.contiguous(), "name": name,
-                    "source": source}, handle)
+                    "source": source},
+                   handle if serialized_digest is None else serialized_digest.sink(handle))
         if durable:
             handle.flush()
             os.fsync(handle.fileno())
@@ -705,6 +740,12 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
 
 EXACT_ACTIVATION_SCHEMA = "prismaquant.exact_activation_entry.v1"
 
+# The block hashlib.file_digest read these entries in before the digest was
+# folded into the load (its _bufsize default, pinned by the read-amplification
+# tests). Keeping that block keeps the kernel's readahead overlapping the next
+# block with the hash of the current one; one whole-file read does not.
+_ENTRY_READ_BLOCK_BYTES = 2**18
+
 
 @dataclass(frozen=True)
 class ExactActivationReference:
@@ -756,28 +797,54 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
     try:
         compact = inputs.detach().to(device="cpu", copy=True,
             memory_format=torch.contiguous_format)
+        digest = SerializedEntryDigest()
         path = write_activation_cache_entry(cache_dir, name, compact,
-            source="exact_activation", durable=True, exact=metadata)
+            source="exact_activation", durable=True, exact=metadata,
+            serialized_digest=digest)
         del compact
         compact = None
         published_stat = path.lstat()
         signature = _activation_file_signature(path)
         if signature[2] > max_file_bytes:
             raise RuntimeError("exact activation entry exceeds file budget")
-        with path.open("rb") as handle:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        if signature[2] != digest.bytes:
+            raise RuntimeError("exact activation entry differs from its serialized bytes")
         if _activation_file_signature(path) != signature:
             raise RuntimeError("exact activation entry changed during publication")
         if release_file_pages:
             release_activation_cache_file_pages(path, expected_stat=published_stat)
         return ExactActivationReference(str(path), name, encoded, tuple(inputs.shape),
-            str(inputs.dtype), nbytes, signature[2], digest)
+            str(inputs.dtype), nbytes, signature[2], digest.hexdigest())
     except BaseException:
         path.unlink(missing_ok=True)
         path.with_suffix(".pt.tmp").unlink(missing_ok=True)
         raise
     finally:
         compact = None
+
+
+class EntryReadScratch:
+    """One reusable read buffer for exact activation entries.
+
+    The window owner holds one, so the buffer is allocated once for a
+    generation rather than once per window: measured over one window, that is
+    a Python-heap peak of 14 kB instead of 270 kB and no 16 MiB allocate/free
+    per window (RobTand/prismaquant#735). Its wall-clock effect was not
+    separable from pass-order effects in that bench, and none is claimed.
+    It hands out the bytearray, never a view, so a live export can never make
+    the next grow fail.
+    """
+
+    def __init__(self):
+        self._buffer = bytearray()
+
+    def buffer(self, size):
+        if len(self._buffer) < size:
+            self._buffer = bytearray(size)
+        return self._buffer
+
+    def release(self):
+        self._buffer = bytearray()
 
 
 class _ExactActivationPrefetch:
@@ -796,7 +863,7 @@ class _ExactActivationPrefetch:
 @contextmanager
 def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                                             expected_session, residency_check=None,
-                                            release_file_pages=True):
+                                            release_file_pages=True, scratch=None):
     """Read/verify the entire bounded window before exposing any tensor.
 
     This is the existing activation artifact owner's exact-input read seam.
@@ -813,11 +880,16 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         raise RuntimeError("exact activation prefetch exceeds tensor residency budget")
     window = _ExactActivationPrefetch()
     reserved = False
-    payload = tensor = None
+    payload = tensor = raw = reader = body = owned = None
     try:
         if residency_check is not None:
             residency_check(nbytes)
             reserved = True
+        # Each entry is hashed as it fills this buffer and deserialized from
+        # it, so it is read once instead of once to hash and once to load. The
+        # buffer holds one entry, not the window; a caller that owns an
+        # EntryReadScratch keeps it across windows.
+        owned = EntryReadScratch() if scratch is None else scratch
         for ref in references:
             metadata = json.loads(ref.metadata_json)
             if (metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
@@ -828,11 +900,33 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             signature = _activation_file_signature(path)
             if signature[2] != ref.file_bytes:
                 raise RuntimeError("exact activation entry size changed")
-            with path.open("rb") as handle:
-                digest = hashlib.file_digest(handle, "sha256").hexdigest()
-            if digest != ref.sha256 or _activation_file_signature(path) != signature:
+            raw = owned.buffer(ref.file_bytes)
+            running = hashlib.sha256()
+            consumed = 0
+            with path.open("rb", buffering=0) as handle:
+                while consumed < ref.file_bytes:
+                    view = memoryview(raw)[consumed:min(
+                        ref.file_bytes, consumed + _ENTRY_READ_BLOCK_BYTES)]
+                    try:
+                        size = handle.readinto(view)
+                        if not size:
+                            raise RuntimeError("exact activation entry size changed")
+                        running.update(view[:size])
+                    finally:
+                        view.release()
+                    consumed += size
+                if handle.read(1):
+                    raise RuntimeError("exact activation entry size changed")
+            if running.hexdigest() != ref.sha256 or _activation_file_signature(path) != signature:
                 raise RuntimeError("exact activation entry checksum changed")
-            payload = torch.load(path, map_location="cpu", weights_only=True)
+            body = memoryview(raw)[:ref.file_bytes]
+            reader = _VerifiedBufferReader(body, max_copy_bytes=ref.file_bytes)
+            try:
+                payload = torch.load(reader, map_location="cpu", weights_only=True)
+            finally:
+                reader.close()
+                body.release()
+                reader = body = None
             tensor = payload.get("inputs") if isinstance(payload, dict) else None
             if (not isinstance(tensor, torch.Tensor) or tensor.layout != torch.strided
                     or set(payload) != {"inputs", "name", "source", "exact"}
@@ -849,12 +943,15 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             payload = tensor = None
             if release_file_pages:
                 release_activation_cache_file_pages(path, expected_stat=prefetched_stat)
+            raw = None
+        if scratch is None:
+            owned.release()
         window.active = True
         yield window
     finally:
         window.active = False
         window._tensors.clear()
-        payload = tensor = None
+        payload = tensor = raw = reader = body = owned = None
         if reserved:
             residency_check(-nbytes)
 
