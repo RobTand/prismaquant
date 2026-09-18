@@ -2634,7 +2634,11 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     temporary.write_bytes(blob)
     os.replace(temporary, manifest_path)
     print(json.dumps(summary, indent=1))
-    print("[submit] " + " ".join(shlex.quote(item) for item in argv))
+    # Flush before pbrun inherits the descriptors: under redirection this
+    # stream is block-buffered, and pbrun's own stderr lines would otherwise
+    # land glued to the buffered summary in the caller's log (2026-09-18: a
+    # refusal read as a silent exit 1 and was re-run with its text in argv).
+    print("[submit] " + " ".join(shlex.quote(item) for item in argv), flush=True)
     return subprocess.run(argv, check=False).returncode
 
 
