@@ -202,6 +202,75 @@ def test_actual_image_content_cannot_be_overridden_and_cpu_mode_requests_no_gpu(
         runner.validate_container(data)
 
 
+def test_spec_cannot_supply_the_checkout_commit():
+    runner = _runner()
+    data = spec()
+    data['env'][runner.CHECKOUT_COMMIT_ENV] = 'a' * 40
+    with pytest.raises(RuntimeError, match='inspected launcher'):
+        runner.validate_container(data)
+
+
+def _git_checkout(root):
+    """A committed checkout with a tracked package file; returns its HEAD."""
+    (root / 'prismaquant').mkdir(parents=True)
+    (root / 'prismaquant' / 'x.py').write_text('X = 1\n')
+    env = {**os.environ, 'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t',
+           'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t', 'HOME': str(root)}
+    for args in (['init', '-q'], ['add', '-A'], ['commit', '-q', '-m', 'seal']):
+        subprocess.run(['git', '-C', str(root), *args], check=True, env=env, capture_output=True)
+    return subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def test_checkout_commit_is_read_on_the_host_and_refuses_changed_package_bytes(tmp_path):
+    """The container has no git; the launcher reads HEAD and performs the exactness check.
+
+    ``PRISMAQUANT_IDENTITY_GIT_COMMIT`` also disables ``aura_cost``'s own
+    ``git diff`` check inside the container, so a checkout whose tracked
+    package bytes differ from HEAD must be refused here, before a commit the
+    bytes do not match is stamped on a checkpoint.
+    """
+    runner = _runner()
+    assert runner.checkout_commit(str(tmp_path)) is None
+    root = tmp_path / 'checkout'
+    head = _git_checkout(root)
+    assert runner.checkout_commit(str(root)) == head
+    argv = runner.docker_command(spec(), ['python3'], cwd=str(root), uid=1, gid=1,
+                                 image_id='sha256:resolved', checkout_commit=head)
+    assert f'{runner.CHECKOUT_COMMIT_ENV}={head}' in argv
+    assert not any(item.startswith(runner.CHECKOUT_COMMIT_ENV) for item in
+                   runner.docker_command(spec(), ['python3'], cwd=str(root), uid=1, gid=1,
+                                         image_id='sha256:resolved'))
+    # An untracked file is not part of a commit; the package digest covers it.
+    (root / 'prismaquant' / 'untracked.py').write_text('U = 1\n')
+    assert runner.checkout_commit(str(root)) == head
+    (root / 'prismaquant' / 'x.py').write_text('X = 2\n')
+    with pytest.raises(RuntimeError, match='differ from that commit'):
+        runner.checkout_commit(str(root))
+    (root / '.git' / 'HEAD').write_text('ref: refs/heads/nowhere\n')
+    with pytest.raises(RuntimeError, match='cannot read|no commit'):
+        runner.checkout_commit(str(root))
+
+
+def test_main_hands_the_checkout_commit_to_the_container(monkeypatch, tmp_path, capsys):
+    runner = _runner()
+    launched = {}
+    monkeypatch.setattr(runner, 'inspect_or_load', lambda container: [
+        {'Id': 'sha256:' + 'c' * 64, 'RepoDigests': [], 'RootFS': {'Layers': []}}])
+    monkeypatch.setattr(runner, 'image_content_sha256', lambda inspected: 'd' * 64)
+    monkeypatch.setattr(runner, 'verify_pinned_import', lambda *args, **kwargs: {})
+    monkeypatch.setattr(runner.os, 'execvp', lambda file, argv: launched.setdefault('argv', argv))
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '')
+    data = spec()
+    data['container'].pop('archive', None)
+    root = tmp_path / 'checkout'
+    head = _git_checkout(root)
+    monkeypatch.chdir(root)
+    runner.main(['--spec', json.dumps(data), '--', 'python3', '-c', 'pass'])
+    assert f'{runner.CHECKOUT_COMMIT_ENV}={head}' in launched['argv']
+    assert json.loads(capsys.readouterr().out.splitlines()[0])['checkout_commit'] == head
+
+
 def test_image_archive_requires_content_digest_and_refuses_changed_bytes(tmp_path, monkeypatch):
     from types import SimpleNamespace
     runner = importlib.import_module('tools.tessera_campaign_container')

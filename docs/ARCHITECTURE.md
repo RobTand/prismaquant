@@ -1,7 +1,33 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-18 · `flash/d37-charge-boundary-impl-20260918`.
+As of: 2026-09-18 · `flash/run-render-proof-meta-skeleton-20260918`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-18, `flash/run-render-proof-meta-skeleton-20260918`) for
+the **run-stage render proof at install time** and the
+`meta_skeleton_render_proof_v1` source transition (§3.2 joint AURA, §12).
+`compute_aura_cost_streamed` compared every prepared render proof's dtype and
+byte count against the live parameter before any layer was installed; on the
+streamed path that parameter is the meta skeleton, which `_from_config` builds
+in float32 for a wrapper config whose `dtype` is None (GLM-5.3-Flash), so the
+GLM run refused its own prepare on the first pair. The comparison now runs per
+layer against the installed tensor, right after the packed views are refreshed
+and before any render of that layer is consumed; the up-front coverage, key,
+digest-format and shape checks stay. The skeleton dtype and the prepare path
+are unchanged. `prismaquant/joint_aura_run_transition.py` is the closed
+transition that lets the sealed prepare (`208d340d27`, package `192e73f9…`) be
+consumed by this branch: it reverses exactly the fix and the import glue,
+requires the sealed package digest, binds plan, prepared record, production
+cache and campaign identity, and binds package bytes rather than a commit,
+because every PrismaBuild snapshot is a new commit. `joint_aura_transitions.py`
+dispatches a receipt to the version that wrote it; the 2026-09-07 module is
+unchanged. `tools/tessera_campaign_container.py` now reads the sealed
+checkout's HEAD on the host, refuses a checkout whose tracked `prismaquant/`
+bytes differ from it, and hands the commit to the container as
+`PRISMAQUANT_IDENTITY_GIT_COMMIT` (the image has no git binary); a spec may
+not supply it. `submit-joint run --resume` takes `--source-transition` and
+declares the receipt as a head read. Contract, evidence and receipt:
+`docs/design/joint_run_source_transition_2026-09-18.md`.
 
 Re-stamped (2026-09-18, `flash/d37-charge-boundary-impl-20260918`) for **the
 versioned transient charge boundary, implemented** (§12 D37, §4.5;

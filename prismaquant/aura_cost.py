@@ -2000,7 +2000,7 @@ def compute_aura_cost_streamed(
                 future += retained_budget.workspace_reserve_bytes
             check_operator_allocation(operator_guard, f'admit_retained_{stage}:{layer}', reserve_bytes=future)
     if source_transition is not None:
-        from prismaquant.joint_aura_source_transition import require_verified_transition
+        from prismaquant.joint_aura_transitions import require_verified_transition
         source_transition = require_verified_transition(
             source_transition, checkpoint_dir=checkpoint_dir,
             resume=resume, joint_activation=joint_activation,
@@ -2193,6 +2193,29 @@ def compute_aura_cost_streamed(
     def _source_parameter(target):
         return target.parameter if isinstance(target, PackedExpertProjection) else target.weight
 
+    def _require_installed_render_sources(layer):
+        # Prepare compared each render with the installed source tensor. The
+        # installed dtype is the loader's decision (``_read_layer_to_device``
+        # casts to its dtype policy, ``_fast_install`` keeps the loaded dtype),
+        # not a fact the meta skeleton carries, so the dtype/byte half of the
+        # prepared proof is checked here on the tensor the layer actually
+        # holds, before any of its renders is consumed.
+        if prepared_render_identities is None:
+            return
+        for name in names_by_layer.get(layer, ()):
+            renders = joint_cache_renders.get(name)
+            if not renders:
+                continue
+            source = linears[name].weight
+            if source.is_meta:
+                raise RuntimeError(f'installed source is still a meta parameter for {name}')
+            for fmt, value in renders.items():
+                if (value['shape'] != list(source.shape)
+                        or value['dtype'] != str(source.dtype)
+                        or value['logical_bytes'] != source.numel() * source.element_size()):
+                    raise RuntimeError(
+                        f'prepared render tensor proof differs from the installed source for {name}@{fmt}')
+
     def _source_gradient(target, gradient):
         return target.gradient_view(gradient) if isinstance(target, PackedExpertProjection) else gradient
 
@@ -2262,6 +2285,13 @@ def compute_aura_cost_streamed(
         # Hash actual decoded production outputs before checkpoint admission,
         # in layer-bounded prefetch windows. This is identity preparation,
         # outside the cotangent/projection hot path; no tensor copy is retained.
+        # Before install, a streamed decoder Linear is the meta skeleton's
+        # parameter: its shape is the checkpoint's, its dtype is torch's
+        # default (``build_streaming_skeleton`` passes no dtype), so only the
+        # shape is compared here. Prepare verified every render against the
+        # INSTALLED tensor (``verify_anchor_render``); the run repeats that
+        # comparison per layer, at install, before the layer's first render is
+        # consumed (``_require_installed_render_sources``).
         if prepared_render_identities is not None:
             expected_pairs = {(name, fmt) for name in names for fmt in render_formats[name]}
             if (production_cache is None or not isinstance(prepared_render_identities, dict)
@@ -2275,8 +2305,8 @@ def compute_aura_cost_streamed(
                 if (not isinstance(value, dict) or set(value) != {
                         'shape', 'dtype', 'logical_bytes', 'content_sha256'}
                         or value['shape'] != list(source.shape)
-                        or value['dtype'] != str(source.dtype)
-                        or value['logical_bytes'] != source.numel() * source.element_size()
+                        or not isinstance(value['dtype'], str)
+                        or type(value['logical_bytes']) is not int
                         or not isinstance(value['content_sha256'], str)
                         or len(value['content_sha256']) != 64
                         or any(c not in '0123456789abcdef' for c in value['content_sha256'])
@@ -2950,6 +2980,7 @@ def compute_aura_cost_streamed(
             **({'prefetch_following': False} if operator_windows is not None else {}),
         )
         _refresh_packed_layer_views(layer)
+        _require_installed_render_sources(layer)
         # Forward boundary capture leaves the final lookahead window hot.
         # Keep that pipeline moving in the direction of this traversal: the
         # existing StreamingContext/LayerCache loads the next reverse layer

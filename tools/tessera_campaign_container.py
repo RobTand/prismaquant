@@ -36,6 +36,16 @@ TOKEN_ENV = "PRISMABUILD_ACTION_PROGRESS_TOKEN"
 #: never wins and the campaign runs the sealed checkout's code (#519).
 SAFE_PATH_ENV = "PYTHONSAFEPATH"
 
+#: The commit the sealed checkout is at, read on the host and handed to the
+#: container. The campaign image ships no git binary, and the joint pass binds
+#: every unit checkpoint to ``aura_cost._checkpoint_git_commit()``, which
+#: resolves the commit with git unless this variable names it. Inside the
+#: container the variable also skips that function's own exactness check
+#: (``git diff`` of ``aura_cost.py`` against HEAD), so the launcher performs
+#: the check here instead, over the whole ``prismaquant/`` package, and
+#: refuses a checkout whose tracked package bytes differ from HEAD.
+CHECKOUT_COMMIT_ENV = "PRISMAQUANT_IDENTITY_GIT_COMMIT"
+
 
 #: The environment a bounded capture row's process must have been started with,
 #: per ``prismaquant/autoscale.py``: torch wheels may statically link mimalloc,
@@ -196,6 +206,8 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
         raise RuntimeError('actual container content is supplied by the inspected launcher')
     if SAFE_PATH_ENV in env:
         raise RuntimeError('the import guard is supplied by the launcher, not by a spec')
+    if CHECKOUT_COMMIT_ENV in env:
+        raise RuntimeError('the checkout commit is supplied by the inspected launcher, not by a spec')
     for name, expected in BOUNDED_CAPTURE_ENV.items():
         # Declaring it is optional -- the launcher supplies it -- but a spec may
         # not weaken it, and the refusal names the field so a reader of the spec
@@ -427,7 +439,8 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
 
 def docker_command(spec: dict, command: list[str], *, cwd: str,
                    uid: int, gid: int, image_id: str, content_sha256=None,
-                   with_gpu=True, environ=None, bounded=False) -> list[str]:
+                   with_gpu=True, environ=None, bounded=False,
+                   checkout_commit=None) -> list[str]:
     validate_container(spec, bounded=bounded)
     gpu_flags = GPU_RUNTIME_FLAGS[
         spec["container"].get("gpu_runtime", DEFAULT_GPU_RUNTIME)]
@@ -479,7 +492,44 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:
         argv += ['--env', 'PRISMAQUANT_CONTAINER_CONTENT_SHA256=' + content_sha256]
+    if checkout_commit is not None:
+        argv += ['--env', f'{CHECKOUT_COMMIT_ENV}={checkout_commit}']
     return [*argv, image_id, *command]
+
+
+def checkout_commit(cwd: str) -> str | None:
+    """The commit of the git checkout at ``cwd``, or None when it is not one.
+
+    Read on the host, where git exists, for a container that has none. A
+    checkout whose tracked ``prismaquant/`` bytes differ from HEAD is refused:
+    the variable this value is handed over as also disables the joint pass's
+    own exactness check, so the launcher is where that check now happens, and
+    a commit the package bytes do not match must not be stamped on a checkpoint.
+    Untracked files are not part of a commit and are not compared here; the
+    package digest the pass stamps (``prismaquant_source_sha256``) covers them.
+    """
+    root = Path(cwd)
+    if not (root / ".git").exists():
+        return None
+
+    def _git(*args: str) -> str:
+        done = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
+                              text=True, timeout=60)
+        if done.returncode != 0:
+            raise RuntimeError(
+                f"the working directory {root} has a .git entry but git cannot read "
+                f"it ({' '.join(args)}: {done.stderr.strip() or done.returncode})")
+        return done.stdout.strip()
+
+    commit = _git("rev-parse", "HEAD").lower()
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise RuntimeError(f"the working directory {root} resolves to no commit: {commit!r}")
+    changed = _git("status", "--porcelain", "--untracked-files=no", "--", "prismaquant")
+    if changed:
+        raise RuntimeError(
+            f"the working directory {root} is at {commit} but its tracked prismaquant/ "
+            f"files differ from that commit; commit them before launching:\n{changed}")
+    return commit
 
 
 def inspect_or_load(container):
@@ -535,17 +585,20 @@ def main(argv=None) -> int:
                            f"expected {declared}, observed {content_digest}")
     with_gpu, gpu_reason = gpu_attachment(spec, cpu_only=args.cpu_only, environ=os.environ)
     imports = verify_pinned_import(spec, cwd=str(Path.cwd()))
+    commit = checkout_commit(str(Path.cwd()))
     print(json.dumps({"schema": "prismaquant.tessera_campaign_container.v1",
                       "requested_image": requested, "image_id": image_id,
                       "image_content_sha256": content_digest,
                       "declared_content_sha256": declared,
                       "uid": os.getuid(), "gid": os.getgid(),
                       "gpu_attached": with_gpu, "gpu_decision": gpu_reason,
+                      "checkout_commit": commit,
                       **imports}), flush=True)
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id,
                             content_sha256=content_digest, with_gpu=with_gpu,
-                            environ=os.environ, bounded=bounded)
+                            environ=os.environ, bounded=bounded,
+                            checkout_commit=commit)
     os.execvp(docker[0], docker)
     return 1  # exec never returns
 

@@ -1803,7 +1803,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             data_manifest_sha256=None):
     """Execute one admitted preparation or one dependent cost action."""
     if source_transition is not None:
-        from .joint_aura_source_transition import load_transition
+        from .joint_aura_transitions import load_transition
         _require(command == "run" and resume, "source transition requires run --resume")
         source_transition = load_transition(
             source_transition, config=config, plan_sha256=plan_sha256,

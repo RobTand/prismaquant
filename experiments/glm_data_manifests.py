@@ -1112,7 +1112,7 @@ def _joint_source_identity_cache_for_manifest(plan: dict, schedule: dict):
 
 
 def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
-                prepared: str | None):
+                prepared: str | None, source_transition: str | None = None):
     """The head phase: everything read before the first layer installs.
 
     Order is ``tessera_joint_aura.main`` and ``load_measured_anchor_input``:
@@ -1154,6 +1154,11 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
         prepared_cache = _bound(completion["production_cache"], "prepared production_cache")
         track.add(prepared_cache, 0,
                   _required_size(prepared_cache, "prepared production_cache"), "head")
+    if source_transition is not None:
+        # ``tessera_joint_aura.execute`` loads the receipt before it reads the
+        # prepared record it admits, so the receipt is a head read too.
+        track.add(source_transition, 0,
+                  _required_size(source_transition, "source transition receipt"), "head")
     return parts, states, prepared_cache
 
 
@@ -1187,10 +1192,12 @@ def _joint_cells(states: dict, wire_dir: str):
 
 
 def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
-                              prepared=None):
+                              prepared=None, source_transition=None):
     """The joint AURA pass's read set, in the order the pass consumes it.
 
-    ``command`` is ``prepare`` or ``run``.
+    ``command`` is ``prepare`` or ``run``. ``source_transition`` is the
+    closed receipt a resumed run consumes a prepared record under; it is a
+    head read.
 
     The head phase is everything read before the first layer installs. Then
     bounded complete-unit ``layer-<L>-part-<P>`` phases for windowed prepare,
@@ -1247,6 +1254,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         raise SystemExit(
             "the run command consumes a prepared completion; pass its path so "
             "its bytes and the production cache it names are declared")
+    if source_transition is not None and command != "run":
+        raise SystemExit("a source transition receipt is consumed by the run command only")
 
     inputs = plan["inputs"]
     campaign_plan_path = _bound(inputs["campaign_plan"], "plan inputs.campaign_plan")
@@ -1256,7 +1265,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     track.begin("head")
     _parts, states, _prepared_cache = _joint_head(
         track, plan_path, plan, roster=roster,
-        prepared=None if command == "prepare" else prepared)
+        prepared=None if command == "prepare" else prepared,
+        source_transition=source_transition)
 
     merged_cost = _bound(inputs["merged_cost"], "plan inputs.merged_cost")
     try:
