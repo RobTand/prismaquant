@@ -133,6 +133,7 @@ class StreamedBoundaryArtifacts:
         self._batches = None
         self._cotangents = None
         self._status = "unused"
+        self._scratch = None
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -309,9 +310,12 @@ class StreamedBoundaryArtifacts:
         for reference in references:
             self._entry_identity(reference)
         with torch.profiler.record_function("aura.exact_activation.prefetch"):
+            if self._scratch is None:
+                from .perturbed_x_cache import EntryReadScratch
+                self._scratch = EntryReadScratch()
             context = prefetch_exact_activation_cache_entries(references,
                 expected_session=self.session, max_tensor_bytes=self.config["max_resident_bytes"],
-                residency_check=self._reserve)
+                residency_check=self._reserve, scratch=self._scratch)
             window = context.__enter__()
         self._active_window = window
         self.telemetry["prefetch_windows"] += 1
@@ -346,6 +350,8 @@ class StreamedBoundaryArtifacts:
             self._status = "failed"
             raise
         finally:
+            if self._scratch is not None:
+                self._scratch.release()
             for batch in self._batches or ():
                 batch.activations_cpu.clear()
                 batch.input_ids = batch.position_ids = None
