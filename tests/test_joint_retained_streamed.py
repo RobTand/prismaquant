@@ -18,9 +18,11 @@ from test_streamed_cost_checkpoints import _model_identity
 
 
 def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, proof_change=None,
-          skeleton=None):
+          skeleton=None, budget=None, observed=None):
     monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1' * 40)
     model, context, runner, cache = fixture()
+    if observed is not None:
+        observed['context'] = context
     if skeleton is not None:
         skeleton(model, context)
     context.settle_prefetched_layers = lambda layers: None
@@ -44,9 +46,10 @@ def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, pro
     cache.require_file_load_sha256(file_shas, max_file_bytes=1 << 20)
     if proof_change is not None:
         proof_change(proofs, files)
-    b = RetainedWindowBudget(50 << 20, 1 << 20, 1 << 20, 1 << 20, 1 << 20,
-                            1 << 20, 1 << 20, 1 << 20, 1 << 20, 1024,
-                            2048, 4 << 20, 4)
+    b = budget if budget is not None else RetainedWindowBudget(
+        50 << 20, 1 << 20, 1 << 20, 1 << 20, 1 << 20,
+        1 << 20, 1 << 20, 1 << 20, 1 << 20, 1024,
+        2048, 4 << 20, 4)
     execution = {'schema': EXECUTION_SCHEMA, 'budget': b.as_dict(),
                  'source_reserve_bytes': 1 << 20, 'source_loading_reserve_bytes': 2 << 20}
     paths = []
@@ -184,3 +187,70 @@ def test_installed_source_that_differs_from_the_prepared_proof_is_refused_before
     with pytest.raises(RuntimeError, match='installed source'):
         _case(tmp_path, monkeypatch, True, checkpoint=tmp_path / 'ckpt', proof_change=claim_bf16,
               skeleton=lambda model, context: _meta_skeleton_until_install(model, context, torch.bfloat16))
+
+
+def test_an_inadmissible_retained_budget_is_refused_before_any_capture(tmp_path, monkeypatch):
+    """Issue #743: this refusal reads declared bytes only, so it owes t=0.
+
+    A ``candidate_delta_bytes`` one byte under a single target's fp32 delta is
+    the GLM-5.3-Flash refusal in miniature. Before the preflight it cost a full
+    boundary capture to discover; the capture is what this asserts never ran.
+    """
+    boundaries = []
+    write = StreamedBoundaryArtifacts.write
+    def recorded(self, *args, **kwargs):
+        boundaries.append(kwargs.get('boundary_index'))
+        return write(self, *args, **kwargs)
+    monkeypatch.setattr(StreamedBoundaryArtifacts, 'write', recorded)
+    observed = {}
+    inadmissible = RetainedWindowBudget(50 << 20, 1 << 20, 1 << 20, 1 << 20, 1 << 20,
+                                        1 << 20, 1 << 20, 1 << 20, 1 << 20, 1023,
+                                        2048, 4 << 20, 4)
+    with pytest.raises(RuntimeError, match='indivisible target does not fit'):
+        _case(tmp_path, monkeypatch, True, budget=inadmissible, observed=observed,
+              checkpoint=tmp_path / 'checkpoints')
+    assert boundaries == []
+    assert observed['context'].install_calls == 0
+    assert not list((tmp_path / 'boundaries').rglob('*.pt'))
+
+
+def test_an_admissible_retained_budget_still_captures_and_measures(tmp_path, monkeypatch):
+    """The preflight admits what the per-layer planner admits, and nothing else."""
+    boundaries = []
+    write = StreamedBoundaryArtifacts.write
+    def recorded(self, *args, **kwargs):
+        boundaries.append(kwargs.get('boundary_index'))
+        return write(self, *args, **kwargs)
+    monkeypatch.setattr(StreamedBoundaryArtifacts, 'write', recorded)
+    result, _, context = _case(tmp_path, monkeypatch, True,
+                               checkpoint=tmp_path / 'checkpoints')
+    assert boundaries and context.install_calls > 0 and result['costs']
+
+
+def test_a_missing_pwc_candidate_is_refused_before_any_capture_without_a_retained_budget(
+        tmp_path, monkeypatch):
+    """Issue #743: the hoist covers the windowed path's coverage check too.
+
+    ``resident_candidates`` used to be the first thing to notice a candidate
+    the production cache never rendered, one layer into the reverse replay.
+    The roster, the menu and the cache index are all declared, so the preflight
+    answers it for every layer before the boundary capture starts -- and this
+    asserts the capture is what does not run.
+    """
+    boundaries = []
+    write = StreamedBoundaryArtifacts.write
+    def recorded(self, *args, **kwargs):
+        boundaries.append(kwargs.get('boundary_index'))
+        return write(self, *args, **kwargs)
+    monkeypatch.setattr(StreamedBoundaryArtifacts, 'write', recorded)
+    dropped = []
+    def drop_one_candidate(proofs, files):
+        dropped.append(sorted(files)[0])
+        files.pop(dropped[0])
+        proofs.pop(dropped[0])
+    observed = {}
+    with pytest.raises(RuntimeError, match='PWC candidate entry missing'):
+        _case(tmp_path, monkeypatch, False, proof_change=drop_one_candidate, observed=observed)
+    assert boundaries == []
+    assert observed['context'].install_calls == 0
+    assert not list((tmp_path / 'boundaries').rglob('*.pt'))

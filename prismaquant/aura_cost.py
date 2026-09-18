@@ -1946,7 +1946,7 @@ def compute_aura_cost_streamed(
     """
     from prismaquant.joint_statistics_replay import (
         normalize_operator_windows, operator_window_guard, resident_candidates,
-        check_operator_allocation,
+        check_operator_allocation, preflight_joint_operator_admission,
         observe_and_project_windows, observe_and_project_retained_windows,
         statistics_arithmetic_identity,
     )
@@ -2245,9 +2245,25 @@ def compute_aura_cost_streamed(
     joint_source_tensors: dict[str, dict] = {}
     joint_cache_renders: dict[str, dict[str, dict]] = {}
     joint_prefetch_stats: list[dict] = []
+    preflight_retained_windows = None
     if joint_activation:
         from prismaquant.joint_projection_backend import prewarm_projection_backend
         joint_projection_backend = prewarm_projection_backend(joint_projection_backend, device=runner.device)
+        # Combined operator/loader/delta admission reads declared bytes only --
+        # the roster, each matrix's geometry, the PWC candidate file sizes and
+        # the sealed budget -- so it is answerable now, before the first
+        # boundary capture, for every layer at once. It used to run inside the
+        # reverse loop, where an inadmissible plan cost a whole capture before
+        # it refused (#743). The per-layer call still re-derives its own plan
+        # and is compared with what was admitted here through ``sealed_windows``.
+        if operator_windows is not None:
+            preflight_retained_windows = preflight_joint_operator_admission(
+                {layer: [name for name in layer_names if render_formats[name]]
+                 for layer, layer_names in names_by_layer.items()},
+                linears, render_formats, production_cache,
+                policy=operator_windows, retained_budget=retained_budget,
+                source_bytes=(None if retained_budget is None
+                              else retained_operator_windows['source_reserve_bytes']))
         from prismaquant.cost_streaming import validate_streamed_model_identity
         from prismaquant.joint_aura import (
             SignedJointProjectionLease, JointOperatorStatisticsLease, activation_identity, arithmetic_identity,
@@ -3357,8 +3373,9 @@ def compute_aura_cost_streamed(
                         collect_col_energy=collect_col_energy, backend=joint_projection_backend,
                         guard=operator_guard, source_fingerprints=source_seal,
                         completed_names=set(measured) & completed_checkpoint_units,
-                        sealed_windows=(None if cost_read_schedule is None else
-                                        cost_read_schedule.windows_for_layer(layer)),
+                        sealed_windows=(cost_read_schedule.windows_for_layer(layer)
+                                        if cost_read_schedule is not None else
+                                        (preflight_retained_windows or {}).get(layer)),
                         before_window=(None if cost_read_schedule is None else
                             lambda index, names: cost_read_schedule.enter_phase(
                                 f'cost_reverse_{layer:03d}_window_{index:03d}', len(completed_checkpoint_units))),
