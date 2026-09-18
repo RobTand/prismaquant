@@ -1,0 +1,464 @@
+"""Read declared manifest bytes from PrismaBuild's stage tier when it has them.
+
+PrismaBuild's tiered caching (RobTand/prismabuild#583) stages the byte ranges a
+consumer's data manifest names onto an SSD stage tier, composes a residency map
+from its movers' fragments and injects the map's path as
+``PRISMABUILD_RESIDENCY_MAP``. This module is the consumer half. Without a
+reader the stage is a copy nobody reads, and the before/after says exactly that.
+
+The schema is PrismaBuild's, not ours. These field rules mirror
+``src/prismabuild/residency_map.py`` at ``182166a04d`` on
+``flash/583-movers-egress-20260918``, field for field; nothing here imports
+``prismabuild``, so the rules are re-stated rather than shared, and a drift
+between the two is a refusal here rather than a wrong read.
+
+One resolver, one store (principle 8). Every read site that can be served from
+the stage asks this module, and the bytes on either side of the redirect are
+counted here, so the run's ``results.json`` can say what the stage actually
+served. The resolver owns no bytes: it answers "where do I open this", and the
+caller's own digest decides whether the answer was good.
+
+The identity rules, in order:
+
+* Without the variable the resolver is inert. No map is read, no path is
+  rewritten and the accounting block is absent, so the bytes and the behaviour
+  are what they are today.
+* A map is bound to one read set. Its ``manifest_sha256`` has to equal the
+  digest of the data manifest this process was submitted with, and a process
+  that bound no manifest digest gets no redirect at all. A map naming another
+  action's bytes is the failure this rule exists for.
+* A map that is missing, unreadable, not this schema, or carrying a field this
+  reader does not know is refused **whole**, with a reason, and every read
+  falls back to its declared path. The variable is injected at claim time while
+  movers are still running, so an absent map is ordinary: it is retried on the
+  next resolve rather than being fatal.
+* The entry key is ``(path, offset)``, spelled ``"<offset>:<path>"``, because a
+  data manifest may name one path at several offsets. The readers hooked here
+  read whole files, so they ask for offset 0 and refuse an entry that covers
+  less than the declared file.
+* An entry is used only after a per-entry check: the digest the map publishes
+  has to equal the digest the caller already requires (when it has one), the
+  staged file has to be a regular file of exactly the entry's byte count, and
+  the declared file has to be that length too. The caller then verifies the
+  bytes it actually read against the same digest and refuses the entry on a
+  mismatch.
+* A refused entry falls back to the declared path and is recorded with a
+  reason. Nothing here is silent.
+
+The map is replaced atomically as movers finish, so it is re-read when its
+identity changes rather than loaded once. Reads start on the first resident
+entry; the resolver never waits for the map to be complete.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import threading
+
+SCHEMA = "prismaquant.prismabuild.residency_map.v1"
+FRAGMENT_SCHEMA = "prismaquant.prismabuild.residency_map_fragment.v1"
+ENV_VAR = "PRISMABUILD_RESIDENCY_MAP"
+# A whole-manifest map for the GLM-5.3-Flash prepare is ~469k entries; at this
+# schema's per-entry size that is under 128 MiB. The bound exists so a wrong
+# path cannot be read without limit, not to describe an expected size.
+MAX_MAP_BYTES = 256 * 1024 * 1024
+MAX_RECORDED_FALLBACKS = 256
+
+_ROOT_KEYS = {"schema", "tier_id", "stage_root", "manifest_sha256", "leads",
+              "generation", "entries"}
+_ENTRY_KEYS = {"stage_path", "bytes", "offset", "sha256"}
+_HEX = frozenset("0123456789abcdef")
+
+
+class ResidencyMapRefused(Exception):
+    """The map named by the environment is not a map this reader can use."""
+
+
+class StagedReadRefused(Exception):
+    """The staged copy failed its identity check. Read the declared path."""
+
+
+def _is_hex64(value: object) -> bool:
+    return (type(value) is str and len(value) == 64
+            and all(char in _HEX for char in value))
+
+
+def residency_map_key(path: str, offset: int = 0) -> str:
+    """One manifest entry's identity, spelled as PrismaBuild's map spells it.
+
+    Decimal offset, then a colon, then the path. The split is on the first
+    colon and the offset is digits, so a path containing colons cannot collide
+    with another entry.
+    """
+    return f"{int(offset)}:{path}"
+
+
+def _normal(path: object) -> str:
+    """The lookup key: the manifest's own spelling, normalized, never resolved.
+
+    Data-manifest entry paths are absolute and already equal to their own
+    ``posixpath.normpath``. Resolving here would be wrong in the common case;
+    the resolved spelling is handled by a second index, built only if a lookup
+    misses (see ``_real_key``).
+    """
+    return os.path.normpath(os.fspath(path))
+
+
+def _identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+class ResidencyResolver:
+    """Where to open a declared path, and what the stage actually served."""
+
+    def __init__(self, map_path: str | Path):
+        self._map_path = str(map_path)
+        self._lock = threading.Lock()
+        self._manifest_sha256: str | None = None
+        self._identity: tuple[int, int, int, int] | None = None
+        self._entries: dict[str, dict] = {}
+        self._real_entries: dict[str, dict] | None = None
+        self._real_dirs: dict[str, str] = {}
+        self._map_sha256: str | None = None
+        self._tier_id: str | None = None
+        self._stage_root: str | None = None
+        self._leads: tuple[str, ...] = ()
+        self._generation: int | None = None
+        self._refused: str | None = None
+        self._hits = 0
+        self._misses = 0
+        self._bytes_from_stage = 0
+        self._bytes_from_pool = 0
+        self._fallbacks: list[dict] = []
+        self._fallback_count = 0
+
+    # -- binding ---------------------------------------------------------
+
+    def bind_manifest_sha256(self, digest: str) -> None:
+        """Name the read set this process was submitted with.
+
+        A map is a statement about one manifest. Until this is called the
+        resolver refuses every map, so a launcher that injected the wrong
+        action's map cannot redirect a single read.
+        """
+        if not _is_hex64(digest):
+            raise ValueError("a data manifest digest is 64 lowercase hex characters")
+        with self._lock:
+            if self._manifest_sha256 != digest:
+                self._manifest_sha256 = digest
+                self._identity = None
+                self._refused = None
+
+    # -- the map ---------------------------------------------------------
+
+    def _read_map(self) -> None:
+        """Re-read the map when its identity changed. Caller holds the lock."""
+        if self._manifest_sha256 is None:
+            self._forget("no data manifest digest is bound to this process")
+            return
+        try:
+            before = os.lstat(self._map_path)
+        except OSError as error:
+            self._forget(f"residency map is unreadable: {error.strerror}")
+            return
+        if not stat.S_ISREG(before.st_mode):
+            self._forget("residency map is not a regular file")
+            return
+        identity = _identity(before)
+        if identity == self._identity:
+            return
+        if before.st_size > MAX_MAP_BYTES:
+            self._identity = identity
+            self._forget("residency map exceeds the reader's byte bound",
+                         keep_identity=True)
+            return
+        try:
+            with open(self._map_path, "rb") as handle:
+                raw = handle.read(before.st_size + 1)
+                after = os.fstat(handle.fileno())
+        except OSError as error:
+            self._forget(f"residency map is unreadable: {error.strerror}")
+            return
+        if len(raw) != before.st_size or _identity(after) != identity:
+            # A composer replaced it mid-read. Forget the identity so the next
+            # resolve reads the replacement instead of trusting a torn copy.
+            self._forget("residency map changed during its read")
+            return
+        self._identity = identity
+        try:
+            self._adopt(json.loads(raw.decode("utf-8")), raw)
+        except (UnicodeError, json.JSONDecodeError):
+            self._forget("residency map is not valid UTF-8 JSON", keep_identity=True)
+        except ResidencyMapRefused as refusal:
+            self._forget(str(refusal), keep_identity=True)
+
+    def _forget(self, reason: str, *, keep_identity: bool = False) -> None:
+        if not keep_identity:
+            self._identity = None
+        self._entries = {}
+        self._real_entries = None
+        self._map_sha256 = None
+        self._tier_id = None
+        self._stage_root = None
+        self._leads = ()
+        self._generation = None
+        if self._refused != reason:
+            self._refused = reason
+            print(f"[residency] refused {self._map_path}: {reason}", flush=True)
+
+    def _adopt(self, payload: object, raw: bytes) -> None:
+        if type(payload) is not dict:
+            raise ResidencyMapRefused(
+                f"residency map must be an object, not {type(payload).__name__}")
+        unknown = sorted(set(payload) - _ROOT_KEYS)
+        if unknown:
+            raise ResidencyMapRefused(f"unknown residency map fields: {unknown}")
+        missing = sorted(_ROOT_KEYS - set(payload))
+        if missing:
+            raise ResidencyMapRefused(f"residency map is missing {missing}")
+        if payload["schema"] != SCHEMA:
+            raise ResidencyMapRefused(
+                f"residency map declares schema {payload['schema']!r}, not {SCHEMA}")
+        if not _is_hex64(payload["manifest_sha256"]):
+            raise ResidencyMapRefused("residency map manifest_sha256 is not a digest")
+        if payload["manifest_sha256"] != self._manifest_sha256:
+            raise ResidencyMapRefused(
+                "residency map names data manifest "
+                f"{payload['manifest_sha256'][:12]}, this run reads "
+                f"{self._manifest_sha256[:12]}")
+        stage_root = payload["stage_root"]
+        if (type(stage_root) is not str or not stage_root.startswith("/")
+                or os.path.normpath(stage_root) != stage_root):
+            raise ResidencyMapRefused("residency map stage_root is not a normalized absolute path")
+        tier_id = payload["tier_id"]
+        if type(tier_id) is not str or not tier_id or "/" in tier_id:
+            raise ResidencyMapRefused("residency map tier_id is not a tier id")
+        leads = payload["leads"]
+        if type(leads) is not list or any(not _is_hex64(lead) for lead in leads):
+            raise ResidencyMapRefused("residency map leads must be 64-character action keys")
+        if len(set(leads)) != len(leads):
+            raise ResidencyMapRefused("residency map leads repeat a key")
+        generation = payload["generation"]
+        if type(generation) is not int or isinstance(generation, bool) or generation < 0:
+            raise ResidencyMapRefused("residency map generation must be a count")
+        entries = payload["entries"]
+        if type(entries) is not dict:
+            raise ResidencyMapRefused(
+                "residency map entries must be an object keyed by '<offset>:<path>', not "
+                f"{type(entries).__name__} (a ranged roster of rows is not this schema)")
+        prefix = stage_root.rstrip("/") + "/"
+        adopted: dict[str, dict] = {}
+        for key, row in entries.items():
+            adopted[str(key)] = self._entry(str(key), row, stage_root, prefix)
+        self._entries = adopted
+        self._real_entries = None
+        self._map_sha256 = hashlib.sha256(raw).hexdigest()
+        self._tier_id = tier_id
+        self._stage_root = stage_root
+        self._leads = tuple(leads)
+        self._generation = generation
+        if self._refused is not None:
+            print(f"[residency] adopted {self._map_path}: {len(adopted)} entries "
+                  f"on {tier_id}, generation {generation}", flush=True)
+        self._refused = None
+
+    @staticmethod
+    def _entry(key: str, row: object, stage_root: str, prefix: str) -> dict:
+        head, separator, path = key.partition(":")
+        if not separator or not path or not head.isdigit():
+            raise ResidencyMapRefused(f"malformed residency map key {key!r}")
+        offset = int(head)
+        if type(row) is not dict:
+            raise ResidencyMapRefused(f"residency map entry {key!r} must be an object")
+        unknown = sorted(set(row) - _ENTRY_KEYS)
+        if unknown:
+            raise ResidencyMapRefused(f"unknown residency map entry fields: {unknown}")
+        stage_path = row.get("stage_path")
+        if (type(stage_path) is not str or not stage_path.startswith("/")
+                or os.path.normpath(stage_path) != stage_path):
+            raise ResidencyMapRefused(
+                f"residency map entry {key!r} stage_path is not a normalized absolute path")
+        if not (stage_path == stage_root or stage_path.startswith(prefix)):
+            raise ResidencyMapRefused(
+                f"residency map entry {key!r} is staged outside {stage_root!r}")
+        size = row.get("bytes")
+        if type(size) is not int or isinstance(size, bool) or size <= 0:
+            raise ResidencyMapRefused(f"residency map entry {key!r} has no positive size")
+        declared = row.get("offset", offset)
+        if type(declared) is not int or isinstance(declared, bool) or declared < 0:
+            raise ResidencyMapRefused(f"residency map entry {key!r} offset is not a count")
+        if declared != offset:
+            raise ResidencyMapRefused(
+                f"residency map entry {key!r} offset {declared} disagrees with its key")
+        if not _is_hex64(row.get("sha256")):
+            raise ResidencyMapRefused(f"residency map entry {key!r} has no SHA-256 digest")
+        return {"stage_path": stage_path, "bytes": size, "offset": offset,
+                "sha256": row["sha256"], "declared_path": path}
+
+    def _real_key(self, key: str) -> dict | None:
+        """Second index, for a caller that resolved symlinks and the map did not.
+
+        The manifest's spelling is not resolved; several PrismaQuant readers
+        spell the same file with ``Path.resolve()``. Building this index costs
+        one ``realpath`` per distinct directory in the map, and it is built only
+        after a lookup has already missed, so a run whose spellings agree never
+        pays for it.
+        """
+        if self._real_entries is None:
+            index: dict[str, dict] = {}
+            for entry in self._entries.values():
+                path = entry["declared_path"]
+                directory, name = os.path.split(path)
+                real = self._real_dirs.get(directory)
+                if real is None:
+                    try:
+                        real = os.path.realpath(directory)
+                    except OSError:
+                        real = directory
+                    self._real_dirs[directory] = real
+                index[residency_map_key(os.path.join(real, name), entry["offset"])] = entry
+            self._real_entries = index
+        return self._real_entries.get(key)
+
+    # -- the answer ------------------------------------------------------
+
+    def staged_read(self, declared: str | Path, *, offset: int = 0,
+                    expected_sha256: str | None = None) -> dict | None:
+        """Return where to open ``declared`` on the stage, or None for the pool.
+
+        The pre-open checks are the cheap half of the identity: the digest the
+        map publishes has to be the digest the caller already requires, the
+        staged file has to be a regular file of exactly the entry's size, and
+        the declared file has to be that size too, which is what binds the
+        entry to the file it claims to stand for and is the only check
+        available to a caller that has no digest yet. The caller still verifies
+        the bytes it reads; this decides which copy is worth opening.
+        """
+        path = _normal(declared)
+        key = residency_map_key(path, offset)
+        with self._lock:
+            self._read_map()
+            entry = self._entries.get(key)
+            if entry is None and self._entries:
+                entry = self._real_key(key)
+            if entry is None:
+                self._misses += 1
+                return None
+            if expected_sha256 is not None and entry["sha256"] != expected_sha256:
+                self._record_fallback(
+                    path, "map digest differs from the digest this read requires")
+                return None
+            try:
+                declared_info = os.lstat(path)
+            except OSError:
+                declared_info = None
+            if declared_info is not None and declared_info.st_size != entry["bytes"]:
+                # These readers read whole files. An entry covering part of one
+                # is a legitimate map entry and a wrong answer for this caller.
+                self._record_fallback(
+                    path, "map entry is a byte range, not the whole declared file")
+                return None
+            stage_path = entry["stage_path"]
+            try:
+                info = os.lstat(stage_path)
+            except OSError as error:
+                self._record_fallback(path, f"staged copy is unreadable: {error.strerror}")
+                return None
+            if not stat.S_ISREG(info.st_mode):
+                self._record_fallback(path, "staged copy is not a regular file")
+                return None
+            if info.st_size != entry["bytes"]:
+                self._record_fallback(path, "staged copy size differs from the map")
+                return None
+            return {"declared_path": path, "stage_path": stage_path,
+                    "bytes": entry["bytes"], "offset": entry["offset"],
+                    "sha256": entry["sha256"]}
+
+    # -- the accounting --------------------------------------------------
+
+    def _record_fallback(self, path: str, reason: str) -> None:
+        """Caller holds the lock. The list is bounded; the count is not."""
+        self._fallback_count += 1
+        if len(self._fallbacks) < MAX_RECORDED_FALLBACKS:
+            self._fallbacks.append({"path": path, "reason": reason})
+        print(f"[residency] fallback {path}: {reason}", flush=True)
+
+    def record_fallback(self, declared: str | Path, reason: str) -> None:
+        with self._lock:
+            self._record_fallback(_normal(declared), reason)
+
+    def record_stage_read(self, declared: str | Path, nbytes: int) -> None:
+        with self._lock:
+            self._hits += 1
+            self._bytes_from_stage += int(nbytes)
+
+    def record_pool_read(self, declared: str | Path, nbytes: int) -> None:
+        with self._lock:
+            self._bytes_from_pool += int(nbytes)
+
+    def report(self) -> dict:
+        """What the stage served this run, for ``results.json``."""
+        with self._lock:
+            report = {
+                "map_path": self._map_path,
+                "map_sha256": self._map_sha256,
+                "manifest_sha256": self._manifest_sha256,
+                "tier_id": self._tier_id,
+                "stage_root": self._stage_root,
+                "leads": list(self._leads),
+                "generation": self._generation,
+                "entries": len(self._entries),
+                "hits": self._hits,
+                "misses": self._misses,
+                "fallbacks": [dict(row) for row in self._fallbacks],
+                "fallback_count": self._fallback_count,
+                "bytes_from_stage": self._bytes_from_stage,
+                "bytes_from_pool": self._bytes_from_pool,
+            }
+            if self._refused is not None:
+                report["refused"] = self._refused
+            return report
+
+
+_RESOLVER_LOCK = threading.Lock()
+_RESOLVER_FOR: tuple[str | None, ResidencyResolver | None] = (None, None)
+
+
+def residency_resolver() -> ResidencyResolver | None:
+    """The process's resolver, or None when the environment names no map.
+
+    One resolver per map path, so every read site and the run's accounting see
+    the same store. Unset means inert: no file is stat'ed and no path moves.
+    """
+    named = os.environ.get(ENV_VAR)
+    if not named:
+        return None
+    global _RESOLVER_FOR
+    with _RESOLVER_LOCK:
+        path, resolver = _RESOLVER_FOR
+        if path != named or resolver is None:
+            resolver = ResidencyResolver(named)
+            _RESOLVER_FOR = (named, resolver)
+        return resolver
+
+
+def bind_residency_manifest(digest: str | None) -> None:
+    """Bind this process's read set, so a map for other bytes cannot apply."""
+    resolver = residency_resolver()
+    if resolver is not None and digest is not None:
+        resolver.bind_manifest_sha256(digest)
+
+
+def residency_report() -> dict | None:
+    """The accounting block, or None when the resolver is inert."""
+    resolver = residency_resolver()
+    return None if resolver is None else resolver.report()
+
+
+def reset_residency_resolver_for_tests() -> None:
+    global _RESOLVER_FOR
+    with _RESOLVER_LOCK:
+        _RESOLVER_FOR = (None, None)

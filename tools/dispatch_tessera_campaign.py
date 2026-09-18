@@ -2443,6 +2443,12 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
         argv += ["--cpus", str(args.cpus)]
     if args.tag:
         argv += ["--tag", args.tag]
+    residency = getattr(args, "residency", None)
+    if residency is not None:
+        # A pbrun option, so it precedes the ``--`` separator like the manifest
+        # does. PB derives the tier demand from the manifest this same command
+        # seals, which is why nothing here names bytes or a tier.
+        argv += ["--residency", str(residency)]
     argv += ["--priority", str(args.priority)]
     if args.timeout_s is not None:
         argv += ["--timeout-s", str(args.timeout_s)]
@@ -2561,8 +2567,13 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         "data_manifest": str(manifest_path),
         # What was reserved, and what the row's own plan says it holds. The
         # difference is the conservatism, stated rather than implied.
+        # ``residency`` rides here because a stage reservation is part of what
+        # this row asks the fleet for, not a comment beside it. It does not
+        # change the host demand, and ``verify_joint_submission_demand`` is
+        # unchanged: the plan's own bound still decides cpu/gpu/mem_gb.
         "resource_demand": {**demand_record,
-                            "gpu_memory_gb": gpu_memory_gb},
+                            "gpu_memory_gb": gpu_memory_gb,
+                            "residency": getattr(args, "residency", None)},
         "manifest_bytes": len(blob),
         "decoded_manifest_bytes": len(decoded),
         "manifest_sha256": hashlib.sha256(blob).hexdigest(),
@@ -2842,6 +2853,14 @@ def _add_submission_arguments(parser) -> None:
     parser.add_argument("--priority", type=int, default=-10,
                         help="queue band; agent and post-campaign work runs at "
                              "-10 so it never displaces campaign rows")
+    parser.add_argument("--residency", default=None, choices=("stage",),
+                        help="ask PrismaBuild to make this row's declared read "
+                             "set resident on its SSD stage tier before the row "
+                             "runs (RobTand/prismabuild#583). The action reads "
+                             "the stage through the residency map the launcher "
+                             "injects; omitted, nothing about the read set "
+                             "changes. Reserves cluster-scoped tier capacity, "
+                             "so it is a placement input, not a hint.")
     parser.add_argument("--timeout-s", type=int, default=None,
                         help="hard wall-clock cap for the action")
     parser.add_argument("--container-arg", action="append", default=None,

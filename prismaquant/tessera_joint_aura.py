@@ -28,6 +28,9 @@ from .cost_stage_checkpoint import (
     prepare_journal, unit_path, write_unit,
 )
 from .interned_json import load_json_file
+from .residency_map import (
+    bind_residency_manifest, residency_report, residency_resolver,
+)
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -91,8 +94,39 @@ def _read_verified_wire_blob(cell):
     size = record.get("blob_bytes")
     _require(type(size) is int and size > 0,
              f"{wire}: wire receipt needs positive blob_bytes")
+    expected = record.get("blob_sha256")
+    # PrismaBuild's stage tier, when it holds this wire. The receipt already
+    # names the digest, so the staged copy is admitted only if its bytes hash
+    # to the same value the pool copy would have to; a refused entry reads the
+    # declared path and is recorded. Unset environment, no stage, no change.
+    resolver = residency_resolver()
+    staged = (None if resolver is None
+              else resolver.staged_read(wire, expected_sha256=expected))
+    if staged is not None:
+        try:
+            blob, digest = _read_wire_bytes(Path(staged["stage_path"]), size,
+                                            expected=expected, staged=True)
+        except _StagedWireRefused as refusal:
+            resolver.record_fallback(wire, str(refusal))
+        else:
+            resolver.record_stage_read(wire, len(blob))
+            return blob, digest
+    blob, digest = _read_wire_bytes(wire, size, expected=expected, staged=False)
+    if resolver is not None:
+        resolver.record_pool_read(wire, len(blob))
+    return blob, digest
+
+
+class _StagedWireRefused(Exception):
+    """The staged wire failed its identity check; read the declared path."""
+
+
+def _read_wire_bytes(wire, size, *, expected, staged):
+    """One fenced read of ``size`` bytes, digested and bound to the receipt."""
     before = wire.lstat()
     _require(stat.S_ISREG(before.st_mode), f"{wire}: wire must be a regular file, not a symlink")
+    if staged and before.st_size != size:
+        raise _StagedWireRefused('staged wire size differs from the measured receipt')
     _same(before.st_size, size, f"{wire}: wire size differs from measured receipt")
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(wire, flags)
@@ -112,7 +146,9 @@ def _read_verified_wire_blob(cell):
     _same(_stat_signature(wire.lstat()), _stat_signature(before),
           f"{wire}: wire changed during its content read")
     digest = hashlib.sha256(blob).hexdigest()
-    _same(digest, record.get("blob_sha256"), f"{wire}: wire checksum")
+    if staged and digest != expected:
+        raise _StagedWireRefused('staged wire bytes differ from the receipt digest')
+    _same(digest, expected, f"{wire}: wire checksum")
     return blob, digest
 
 
@@ -1824,6 +1860,13 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             n_probes=execution['n_probes'],
             progress_callback=lambda phase, units: _pb_commit(units, phase))
         cost_schedule.enter_phase('cost_setup', 0)
+    # Bind the read set this pass was submitted with, so PrismaBuild's stage
+    # tier can only answer for these bytes. A residency map declares the
+    # manifest it was composed for; one naming a different manifest is refused
+    # whole and recorded. A pass that seals no manifest binds nothing and gets
+    # no redirect, which is the same behaviour as having no stage at all.
+    bind_residency_manifest(
+        (cost_read_manifest or prewarm_manifest or {}).get('sha256'))
     identity_cache_path = _seed_source_identity_cache(config, root)
     result = {"schema": "prismaquant.tessera_joint_aura.execution.v1", "command": command,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
@@ -2122,6 +2165,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         result["phases"].append({"phase": command, "kind": "profile", "start_epoch": started,
                                  "end_epoch": result["env"]["finished_epoch"]})
         result["io_before"], result["io_after"] = before_io, _io_counters()
+        # What PrismaBuild's stage tier actually served, beside the process's
+        # own read counters. A stage with no reader is a copy nobody reads, so
+        # this block is the closed loop: hits and bytes when the redirect
+        # worked, a named reason for every entry it refused. The key is absent
+        # when no map was named, which keeps an unset run's record identical to
+        # today's.
+        residency = residency_report()
+        if residency is not None:
+            result["residency"] = residency
         _json(root / "results.json", result)
         try:
             if runner is not None:

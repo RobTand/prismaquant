@@ -1263,7 +1263,23 @@ class ProductionWeightCache:
                 tensor.storage_offset(), tuple(tensor.shape), tuple(tensor.stride()),
                 str(tensor.dtype), str(tensor.device))
 
-    def _load_file_tensor(self, value):
+    def _load_file_tensor(self, value, key=None):
+        """Load one shard, from PrismaBuild's stage tier when it holds it.
+
+        The redirect lives here because this is the one place a PWC shard's
+        bytes are opened with a digest fused to the read: whatever copy is
+        read, the same SHA-256 fence decides whether it is admitted, so a
+        wrong or stale staged copy is refused exactly as a wrong pool copy
+        would be. The declared path is the fallback and the accounting says
+        so. Without ``PRISMABUILD_RESIDENCY_MAP`` nothing below runs and the
+        bytes are the pool's, as today.
+
+        The unbounded ``torch.load`` branch is deliberately not redirected: it
+        computes no digest, so a staged copy there would be admitted on the
+        map's word alone. Both joint stages take the bounded branch (prepare
+        through ``enable_file_load_receipts``, run through
+        ``require_file_load_sha256``).
+        """
         path = Path(self._path_for_value(value)).absolute()
         limit = getattr(self, "_file_load_max_bytes", 0)
         window_files = getattr(self, '_resident_window_files', None)
@@ -1275,6 +1291,41 @@ class ProductionWeightCache:
             limit = min(limit, window_entry[1]) if limit else window_entry[1]
         if not limit:
             return torch.load(path, map_location="cpu", weights_only=True), None
+        from .residency_map import StagedReadRefused, residency_resolver
+        resolver = residency_resolver()
+        staged = None
+        if resolver is not None:
+            expected = getattr(self, "_expected_file_sha256", None)
+            staged = resolver.staged_read(
+                path,
+                expected_sha256=None if expected is None or key is None
+                else expected.get(key))
+        if staged is not None:
+            try:
+                tensor, observed = self._read_file_tensor(
+                    path, limit, window_entry, staged=staged)
+            except StagedReadRefused as refusal:
+                resolver.record_fallback(path, str(refusal))
+            else:
+                resolver.record_stage_read(path, observed[0]["bytes"])
+                return tensor, observed
+        tensor, observed = self._read_file_tensor(path, limit, window_entry, staged=None)
+        if resolver is not None:
+            resolver.record_pool_read(path, observed[0]["bytes"])
+        return tensor, observed
+
+    def _read_file_tensor(self, path, limit, window_entry, *, staged):
+        """Read one shard's bytes; ``path`` is always the declared file.
+
+        A staged read opens another copy, and every fence that belongs to the
+        declared object still runs on the declared object: the window's stat
+        signature, the receipt's path, and the signature the receipt's lifetime
+        fence re-checks on every later borrow. The staged copy gets its own
+        open/read fences plus the digest the map published, and a failure of
+        any of those raises ``StagedReadRefused``, which reads the declared
+        path instead of failing the load.
+        """
+        from .residency_map import StagedReadRefused
         before = path.lstat()
         if not stat.S_ISREG(before.st_mode):
             raise RuntimeError("PWC file receipt requires a regular file, not a symlink")
@@ -1283,21 +1334,49 @@ class ProductionWeightCache:
         signature = self._file_signature(before)
         if window_entry is not None and signature != self._file_signature(window_entry[0]):
             raise RuntimeError('PWC window file changed before its content read')
-        with path.open("rb") as handle:
-            if self._file_signature(os.fstat(handle.fileno())) != signature:
-                raise RuntimeError("PWC file changed before its content read")
-            raw = handle.read(before.st_size + 1)
-            if (len(raw) != before.st_size or self._file_signature(os.fstat(handle.fileno())) != signature
-                    or self._file_signature(path.lstat()) != signature):
-                raise RuntimeError("PWC file changed during its content read")
+        source, source_before = path, before
+        if staged is not None:
+            source = Path(staged["stage_path"])
+            source_before = source.lstat()
+            if not stat.S_ISREG(source_before.st_mode):
+                raise StagedReadRefused('staged copy is not a regular file')
+            if source_before.st_size != before.st_size:
+                raise StagedReadRefused('staged copy size differs from the declared file')
+        source_signature = self._file_signature(source_before)
+
+        def changed(message):
+            return (StagedReadRefused(f'staged copy {message}') if staged is not None
+                    else RuntimeError(f"PWC file {message}"))
+
+        with source.open("rb") as handle:
+            if self._file_signature(os.fstat(handle.fileno())) != source_signature:
+                raise changed("changed before its content read")
+            raw = handle.read(source_before.st_size + 1)
+            if (len(raw) != source_before.st_size
+                    or self._file_signature(os.fstat(handle.fileno())) != source_signature
+                    or self._file_signature(source.lstat()) != source_signature):
+                raise changed("changed during its content read")
+        if staged is not None and self._file_signature(path.lstat()) != signature:
+            raise StagedReadRefused('declared file changed during the staged read')
         # The temporary serialized buffer is per loader worker and is released
         # before its result enters the existing LRU. No whole-cache byte store.
         receipt = {"path": str(path), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+        if staged is not None and receipt["sha256"] != staged["sha256"]:
+            # The read is already digested, so the staged bytes are held to the
+            # digest the map published for them. This is the check that makes
+            # the redirect safe rather than trusted, and on a prepare -- where
+            # the caller has no expected digest yet -- it is the only one.
+            raise StagedReadRefused('staged bytes differ from the map digest')
         if window_entry is not None:
             if self._window_archive_storage_bytes(io.BytesIO(raw)) != window_entry[2]:
+                if staged is not None:
+                    raise StagedReadRefused(
+                        'staged archive storage differs from the window preflight')
                 raise RuntimeError('PWC window archive storage changed during its read')
         tensor = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
         if not isinstance(tensor, torch.Tensor):
+            if staged is not None:
+                raise StagedReadRefused('staged copy is not a tensor shard')
             raise RuntimeError("PWC file receipt requires a tensor shard")
         if window_entry is not None and self._window_storage(tensor)[1] > window_entry[2]:
             raise RuntimeError('PWC loaded backing storage exceeds its archive bound')
@@ -1357,7 +1436,7 @@ class ProductionWeightCache:
             value = self.weights.get(key)
             if value is None or isinstance(value, torch.Tensor):
                 return None
-            tensor, receipt = self._load_file_tensor(value)
+            tensor, receipt = self._load_file_tensor(value, key)
             return key, value, tensor, receipt
 
         loaded_count = 0
@@ -1403,7 +1482,7 @@ class ProductionWeightCache:
                 self._lru_order.append(key)
             return v
         # Treat anything non-tensor as a filename / path.
-        loaded, receipt = self._load_file_tensor(v)
+        loaded, receipt = self._load_file_tensor(v, key)
         self._check_expected_file_sha256(key, receipt)
         self._validate_loaded_cb_pair_tensor(key, loaded)
         self.weights[key] = loaded
