@@ -462,8 +462,9 @@ FIXED_RESOURCE_REPORT_REFERENCE = ("path", "sha256")
 #: scratch charge includes its returned output, while the full-engine
 #: partition classifies bytes by lifetime inside the unit interval; the two are
 #: differently bounded, so an equality between them would either refuse every
-#: real report on a definitional gap or agree by coincidence. The design owes a
-#: versioned boundary model first ("Set native/full-engine charge boundary").
+#: real report on a definitional gap or agree by coincidence. They are compared
+#: under the versioned boundary instead (``transient_charge_boundary``, D37):
+#: an identity of ownership on the one measured assignment, never a value.
 FIXED_TERM_FIELDS = {"fixed_resident": "resident_bytes",
                      "fixed_activation": "activation_bytes",
                      "fixed_scratch": "peak_scratch_bytes",
@@ -751,8 +752,12 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
     way at import time and the other way at call time.
     """
     from .full_engine_resource_report import (
-        OWED_OBSERVATIONS, SUPPORTED_EXECUTION, consume_full_engine_resource_report,
-        read_full_engine_resource_report,
+        OWED_OBSERVATIONS, REFERENCE_BOUNDARY_FIELD, SUPPORTED_EXECUTION,
+        consume_full_engine_resource_report, read_full_engine_resource_report,
+    )
+    from .transient_charge_boundary import (
+        boundary_identity_refusals, require_boundary, reservation_slack_refusals,
+        route_class_coverage_refusals,
     )
     for key in ("runs", "full_engine_run_id", "configuration_sha256"):
         if key not in relation:
@@ -795,14 +800,20 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
         refusals.append(f"the table's batch size is {context.batch_size}, and a recomputed "
                         "partition covers only one request")
 
-    # One measured assignment establishes no fixed charge under the others.
+    # The boundary both sides name, or the named reason there is none. Under
+    # it, one measured assignment establishes the fixed charge for every
+    # assignment whose formats lie in the route classes the run exercised
+    # (route_class_coverage_refusals, below); without it, a multi-format menu
+    # is refused through require_boundary, so no path admits one without v1.
     menu = {(row.unit, row.fmt): row for row in table.rows}
     table_units = sorted({row.unit for row in table.rows})
-    alternatives = sorted(unit for unit in table_units
-                          if sum(1 for row in table.rows if row.unit == unit) > 1)
-    if alternatives:
-        refusals.append(f"the table prices more than one format for {alternatives}, and one "
-                        "measured assignment establishes no invariant fixed charge under the others")
+    boundary = None
+    try:
+        boundary = require_boundary(context.transient_charge_boundary,
+                                    partition_schema=report["partition"]["schema"],
+                                    report_boundary=report["reference"].get(REFERENCE_BOUNDARY_FIELD))
+    except RuntimePriceError as exc:
+        refusals.append(str(exc))
 
     # The reference must partition the roster this table independently supplies.
     census = report["reference"]["canonical_census"]
@@ -855,6 +866,13 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
         if report["observations"][name] is None:
             refusals.append(f"the capture observes no {name}, so {OWED_EVIDENCE[name]} "
                             "has no evidence")
+        else:
+            # v2 carries it; this consumer defines no recomputation over it
+            # yet, and a carried record nobody recomputes from is evidence of
+            # nothing here (`full_engine_resource_report.OWED_OBSERVATIONS`).
+            refusals.append(f"the capture carries {name}, and this consumer recomputes "
+                            f"{OWED_EVIDENCE[name]} from no observation at "
+                            f"{report['schema']}, so it has no evidence")
 
     # The keystone: the table's declared numbers against the recomputation.
     # "Not expressible" and "disagrees" are separate refusals -- a null term is
@@ -919,8 +937,16 @@ def _fixed_resource_refusals(table, relation, reference, *, root):
                 refusals.append(f"this table declares {unit!r} resident bytes "
                                 f"{priced.resources.resident_bytes} where the recomputed "
                                 f"candidate_resident is {resident[unit]}")
-    refusals.append("the native-row and full-engine transient charge boundary is not versioned, "
-                    "so no candidate activation or scratch term may be compared to a priced row")
+    # The candidate transients, under the boundary: an identity of ownership
+    # on the one measured assignment (design §2.3), the route-class scope of
+    # the fixed charge (§4.3) and the reserved-extent witness (§3.7). None of
+    # it compares a native peak to a partition term by value.
+    if boundary is not None:
+        refusals.extend(route_class_coverage_refusals(boundary, table, report=report,
+                                                      selected_rows=selected, menu=menu))
+        refusals.extend(boundary_identity_refusals(boundary, report, selected_rows=selected,
+                                                   menu=menu))
+        refusals.extend(reservation_slack_refusals(boundary, report))
     if fixed.serialized_bytes:
         refusals.append("the report partitions no serialized bytes, so this table's fixed "
                         f"serialized_bytes ({fixed.serialized_bytes}) has no evidence")
@@ -1295,6 +1321,11 @@ def admit_native_rows(table, relation):
                 _equal(actual["measurement"][key], measurement.as_dict()[key], "native phase samples")
             _equal(panel["phases"][phase]["m"], table.context.prompt_tokens if phase == "prefill" else 1, "native phase token scope")
             scratch.append(actual["peak_scratch_bytes"]); activation.append(actual["input_bytes"])
+            if not ranked and row.resources.output_bytes is not None:
+                # A row that names its returned output names the observation's,
+                # phase by phase; the escape check reads it as a witness.
+                _equal(row.resources.output_bytes.get(phase), actual["output_bytes"],
+                       f"native {phase} returned output bytes")
         if not ranked:
             _equal(row.resources.peak_scratch_bytes, max(scratch), "native maximum phase scratch")
             _equal(row.resources.activation_bytes, max(activation), "native maximum phase input residency")

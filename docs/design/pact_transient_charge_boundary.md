@@ -77,15 +77,34 @@ full-engine run never executed; a configuration whose KV capacity is derived
 from free memory; a lazily allocated workspace no row prices; any timing or
 serialized term the report does not observe.
 
-**The one question only you can answer.** On unified memory the box holds the
-caching allocator's *reserved* segments; the engine needs its *allocated* peak
-plus fragmentation it cannot reclaim, and the allocator releases cached
-segments only on its own failed `cudaMalloc` retry. Does
-`--serve-device-budget-bytes` mean "this serve fits" (charge allocated) or
-"this serve coexists with a neighbour on the same pool" (charge reserved)?
-v1 as written observes and publishes reservation slack and charges neither
-answer, because choosing one silently is the default principle 1 forbids.
-Everything else in this document has a derivation; this one has a policy.
+**The one question this document could not derive, answered.** On unified
+memory the box holds the caching allocator's *reserved* segments; the engine
+needs its *allocated* peak plus fragmentation it cannot reclaim, and the
+allocator releases cached segments only on its own failed `cudaMalloc` retry.
+Does `--serve-device-budget-bytes` mean "this serve fits" (charge allocated)
+or "this serve coexists with a neighbour on the same pool" (charge reserved)?
+
+**Decided 2026-09-18** (Rob: no preference; Fable consultation memo;
+coordinator's call; memo at `/home/rob/tmp/cheap-briefs/pq-d37-fable.report.md`
+§Memo): **the search charges the allocated-block composition, the ship gate
+compares the reserved extent on the exported point, and the reservation slack
+is a published witness charged to nothing.** Both producers measure allocated
+blocks — a native row's `peak_scratch_bytes` is `max_memory_allocated()`
+increments and the partition records `allocator_block_bytes_observed` per row
+— and neither measures a segment. Reserved minus allocated is a function of
+the allocation sequence and the allocator's segment policy, not of an
+assignment's bytes, so its value for an unmeasured assignment has no
+measurement and its invariance across assignments is not witnessable from one
+run: charging it in the search would be either an asserted runtime behaviour
+(principle 14) or an invented margin (principle 2). On the exported point the
+reserved extent *is* a measurement, and the box question — does this serve
+coexist with its neighbours — is the ship gate's, so it is compared there.
+Measured slack on the 2026-09-18 capture: reserved 1,201,668,096 B against
+allocated 1,098,421,248 B, a slack of 103,246,848 B (9.40% of allocated).
+The registry records the decision as data (`device_budget`, §2.2). For the
+reserved witness to transfer from capture to serve, the configuration
+document must also record `PYTORCH_CUDA_ALLOC_CONF` (absent is a value);
+that is a Tessera configuration-document field, owed.
 
 ## 1. The quantities, exactly
 
@@ -212,21 +231,34 @@ the noun is the docstring's own phrase.
     "kv": "full_engine",
     "non_step_peak": "full_engine",
     "runtime_workspace": "row_identity_once_per_rank",
-    "reservation_slack": "observed_not_charged"
+    "reservation_slack": "witnessed_at_ship_gate"
   },
   "row_terms_charged": ["resident_bytes", "peak_scratch_bytes"],
   "row_terms_witnessed": ["activation_bytes"],
   "fixed_terms_charged": ["fixed_resident", "fixed_activation", "fixed_scratch",
                           "fixed_kv", "non_step_transient_peak_bytes"],
-  "invariance": "route_class_set_of_one_full_engine_run"
+  "invariance": "route_class_set_of_one_full_engine_run",
+  "device_budget": {
+    "search_charges": "allocated_block_composition",
+    "ship_gate_compares": "reserved_peak_bytes",
+    "witness": "reservation_slack_bytes"
+  },
+  "kv_capacity_pin": {
+    "observation_field": "capacity_policy",
+    "pinned_when_any_of": ["kv_cache_memory_bytes", "num_gpu_blocks_override"]
+  }
 }
 ```
 
 This object is code, not a file: a frozen registry in a module
 `prismaquant/transient_charge_boundary.py` (§6). The table's `RuntimeContext`
-carries the name as `transient_charge_boundary`; the report carries the same
-name at `reference.transient_charge_boundary`, stamped by the #399 derivation
-layer (§5). Both are strings a gate compares verbatim.
+carries the name as `transient_charge_boundary`. The report's side of the
+pair is the rule its producer froze on the partition itself,
+`partition.schema` — the name the boundary is *defined over* — so a report
+emitted before any stamp existed (the 2026-09-18 v2 report carries none)
+still names its side; a report that also carries
+`reference.transient_charge_boundary` must name the table's boundary. All
+three are strings a gate compares verbatim (`require_boundary`).
 
 ### 2.3 What "equal" means under v1
 
@@ -356,12 +388,16 @@ adds is the invariance condition in §4.
 ### 3.7 Reservation slack
 
 Segments the caching allocator holds with no live block. Owned by nobody in
-the composition. v1 requires the report to observe it (the segment events at
-Tessera `full_engine_resources.py:931` already exist) and publish it as
-`reservation_slack_peak_bytes`, and charges it to neither the fit nor the
-coexistence obligation until Rob answers the question in §0. A report that
-does not observe it refuses by name, so the number is always there for the
-day it is charged.
+the composition. Decided 2026-09-18 (§0): the search charges the
+allocated-block composition; the ship gate compares the reserved extent on
+the exported point; the slack is a witness. v1 requires the report to observe
+both allocator readings at one instant as `observations.reservation_slack`
+(`allocated_bytes`, `reserved_bytes`, `sampled_at`, `scope`; the segment
+events at Tessera `full_engine_resources.py:931` already exist) and the
+consumer recomputes the difference (`reservation_slack_bytes`) rather than
+reading a slack the producer wrote. A report that does not observe it refuses
+by name (`reservation_slack_refusals`), so the witness the ship gate reads is
+always there. The 2026-09-18 report does not carry it yet.
 
 ### 3.8 What the allocator charges under v1
 
@@ -567,8 +603,17 @@ that a producer number is a claim the consumer recomputes and never reads.
 
 ## 6. The code delta that follows
 
-Nothing below is in this PR. It is what the decisions imply, named so the
-implementing PR can be reviewed against this document.
+Implemented 2026-09-18 on `flash/d37-charge-boundary-impl-20260918`, with
+these departures from the plan below, each on evidence: `require_boundary`
+takes the partition schema as the report's side (§2.2, the real report
+carries no reference stamp); the workspace row fields of §6.2 are not added
+(no receipt records them, and a field nothing writes is a default); §6.6
+item 3's timing refusal is the gate's existing `carries no timing partition`
+sentence; and the consumer additionally reads the
+`tessera.full_engine_resource_report.v2` envelope, which the coordinator put
+in scope because the consumer refused v2 by schema string before any boundary
+logic ran. The v2 membership recomputation from `owner_views` is not
+implemented and is named by the consumer as its own gap.
 
 ### 6.1 Module: `prismaquant/transient_charge_boundary.py`
 
@@ -683,4 +728,5 @@ sentence). The implementing PR updates them to the named refusals and says so.
   three route classes, not a rate sweep.
 - It does not change `admit_fixed_resources`, `build_runtime_resources`,
   `solve_runtime_frontier` or any test. The delta in §6 is a plan.
-- It does not decide the reservation-slack question in §0.
+- The reservation-slack question in §0 is decided (2026-09-18) and the
+  decision is data in the registry, not a constant in a gate.
