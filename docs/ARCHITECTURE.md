@@ -918,6 +918,50 @@ or serving gate changes. Regression gates:
 through the launcher's Docker argv; `tests/test_tessera_joint_aura.py` checks
 the early refusal and existing device ordering.
 
+Re-stamped (2026-09-18, `flash/derived-retained-delta-reserve-20260918`) for
+**the retained COST budget's derived caps and its preflight** (issue #743).
+Two changes, both in `execution.retained_operator_windows`'s contract.
+
+First, the five demand-driven caps are now derived from the roster they must
+admit rather than authored beside the plan.
+`joint_retained_window_plan.derive_retained_window_budget` takes the eight
+owners that belong to the box (`DECLARED_BUDGET_FIELDS`: the physical bound,
+the safety margin and the metadata, runtime, workspace, boundary, auxiliary
+and read-page reserves) and computes `candidate_delta_bytes` as the largest
+single fp32 matrix delta, `load_buffer_bytes` as the declared
+`prefetch_workers` times the largest single serialized candidate file,
+`statistics_cap_bytes` and `retained_render_cap_bytes` as the largest window
+the physical bound admits, and `max_windows_per_layer` as the worst layer's
+window count under that packing. `tools/derive_retained_window_budget.py`
+writes the plan and stamps a top-level `retained_window_budget_derivation`
+record naming the maximizing target of each cap and the sources it read. A
+budget may still be authored by hand; nothing reads the record at run time.
+The occasion was a sealed `candidate_delta_bytes` of 4 MiB against a roster
+whose smallest matrix demanded 32 MiB and whose largest demanded 192 MiB.
+
+Second, `compute_aura_cost_streamed` now runs the whole operator-window
+admission -- every layer, the per-target geometry bound and, under a retained
+budget, `plan_retained_targets` over the PWC's declared candidate file sizes --
+in `joint_statistics_replay.preflight_joint_operator_admission`, before the
+first boundary capture. It reads no captured data, so it could always have run
+there; it used to run inside the reverse loop, where an inadmissible plan cost
+a whole capture (2.6 h of GB10 time on the GLM-5.3-Flash run of 2026-09-18)
+before refusing. The decoder's weights are still the streamed meta skeleton at
+that point, so the statistics plan is built on meta twins against the torch
+reference backend, which changes nothing it computes:
+`_joint_projection_requirements` groups on the resolved `FormatSpec` and the
+calibrated activation maximum and sizes statistics from `numel`, and consults
+the backend only to refuse a device it was not prewarmed for. The admitted
+windows reach the per-layer replay through the existing `sealed_windows`
+channel, so runtime geometry that differs from what was admitted still refuses.
+A sealed PrismaBuild COST read schedule keeps precedence where one is bound.
+No format, cost arithmetic, calibration, serving lane or ship gate changed.
+Gates: `tests/test_retained_window_budget_derivation.py` carries the failing
+run's measured geometry and both refusals;
+`tests/test_joint_retained_streamed.py::test_an_inadmissible_retained_budget_is_refused_before_any_capture`
+counts boundary writes and install calls at zero (41 writes before this
+change).
+
 Re-stamped (2026-09-17, `flash/nvfp4-empty-activation-guard-20260917`) for the
 **empty activation batch** on the served static contract's registered-operator
 leg (§"Served activation quantiser"). `torch.ops._C.scaled_fp4_quant` derives

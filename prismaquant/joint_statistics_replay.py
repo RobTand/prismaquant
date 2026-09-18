@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 import os
 
 import torch
@@ -170,6 +171,115 @@ def observe_and_project_windows(modules, specs, cache, policy, *, backward,
     return results, diagnostics, dict(plan=plan.as_dict(), candidate_windows=receipts)
 
 
+@dataclass(frozen=True)
+class PreflightRetainedWindow:
+    """One admitted window, in the shape ``sealed_windows`` already compares.
+
+    A sealed PrismaBuild read schedule and this preflight answer the same
+    question from the same declared bytes, so they reach the per-layer replay
+    through one channel instead of two.
+    """
+    original_full_target_names: tuple[str, ...]
+    statistics_bytes: int
+    render_file_upper_bound_bytes: int
+    candidate_count: int
+
+
+def retained_admission_targets(statistics_plan, specs, cache):
+    """Join a statistics plan to the PWC's declared candidate file sizes.
+
+    Reads no tensor. ``resolve_key`` is an index lookup and ``estimate_nbytes``
+    is one ``stat`` per candidate file, so every byte this returns is declared
+    before any capture, probe or projection runs.
+    """
+    keys_by_name, requested_by_name = {}, {}
+    for target in statistics_plan.targets:
+        requested = tuple((target.name, fmt) for fmt in specs[target.name])
+        keys = tuple(cache.resolve_key(name, fmt) for name, fmt in requested)
+        if any(key is None for key in keys):
+            missing = [pair for pair, key in zip(requested, keys) if key is None]
+            raise RuntimeError(f'retained joint PWC candidate entry missing: {missing}')
+        keys_by_name[target.name] = keys
+        requested_by_name[target.name] = requested
+    selected_keys = tuple(key for target in statistics_plan.targets
+                          for key in keys_by_name[target.name])
+    # File length is the sealed conservative storage bound. Archive validation
+    # belongs to the existing PWC window immediately before its first read,
+    # not an all-candidate header walk ahead of the PB read frontier.
+    key_costs = {}
+    for key in selected_keys:
+        size = cache.estimate_nbytes([key])
+        key_costs[key] = {'incoming_storage_bytes': size, 'serialized_bytes': size}
+    targets = targets_from_statistics_plan(statistics_plan, keys_by_name, key_costs)
+    return keys_by_name, requested_by_name, targets
+
+
+def preflight_joint_operator_admission(names_by_layer, modules, formats_by_name, cache, *,
+                                       policy, retained_budget=None, source_bytes=None):
+    """Refuse an inadmissible operator-window plan before any capture work.
+
+    Every input is declared now: the target roster, each matrix's geometry, the
+    PWC's candidate file sizes and the sealed budget. Nothing here reads a
+    captured activation, a cotangent or a probe, which is exactly why the
+    refusals it raises do not belong after a boundary capture (#743).
+
+    The decoder's weights are still the streamed meta skeleton at this point,
+    so the statistics plan is built on meta twins of the real modules against
+    the torch reference backend. ``_joint_projection_requirements`` groups on
+    the resolved ``FormatSpec`` and the calibrated activation maximum and sizes
+    statistics from ``numel``; it consults the backend only to refuse a device
+    it was not prewarmed for. The roster it returns here is therefore the one
+    the fused backend returns on the installed tensors, and the per-layer call
+    re-derives it and compares through ``sealed_windows``.
+
+    Returns the admitted windows per layer when a retained budget is in force,
+    and ``None`` otherwise.
+    """
+    from . import format_registry as fr
+
+    if policy is None:
+        raise ValueError('joint operator admission requires an operator-window policy')
+    policy = normalize_operator_windows(policy)
+    if retained_budget is not None:
+        if isinstance(retained_budget, dict):
+            retained_budget = RetainedWindowBudget.from_dict(retained_budget)
+        if not isinstance(retained_budget, RetainedWindowBudget):
+            raise TypeError('retained joint admission requires a versioned retained budget')
+        if type(source_bytes) is not int or source_bytes < 0:
+            raise ValueError('retained joint admission requires a declared source byte cap')
+    windows_by_layer = {}
+    for layer, names in sorted(names_by_layer.items()):
+        names = tuple(names)
+        if not names:
+            continue
+        twins, specs = {}, {}
+        for name in names:
+            rows, columns = tuple(modules[name].weight.shape)
+            twins[name] = torch.nn.Linear(columns, rows, bias=False,
+                                          device='meta', dtype=torch.bfloat16)
+            specs[name] = {fmt: fr.get_format(fmt) for fmt in formats_by_name[name]}
+        # The same geometry bound ``observe_and_project_windows`` applies per
+        # layer, applied to every layer before the first of them is captured.
+        largest = max(4 * rows * columns for rows, columns in
+                      (tuple(module.weight.shape) for module in twins.values()))
+        if largest > min(policy['max_candidate_bytes'], policy['workspace_reserve_bytes']):
+            raise RuntimeError('joint single target exceeds candidate or matrix workspace budget')
+        if retained_budget is None:
+            continue
+        statistics_plan = plan_joint_statistics_target_windows(
+            twins, specs, max_statistics_bytes=retained_budget.statistics_cap_bytes,
+            activation_max_abs=cache.activation_max_abs, projection_backend=None)
+        _, _, targets = retained_admission_targets(statistics_plan, specs, cache)
+        plan = plan_retained_targets(targets, budget=retained_budget,
+                                     source_bytes=source_bytes,
+                                     footprint_scope='pwc_serialized_upper_bound')
+        windows_by_layer[layer] = tuple(
+            PreflightRetainedWindow(window.names, window.statistics_bytes,
+                                    window.render_bytes, window.candidate_count)
+            for window in plan.windows)
+    return None if retained_budget is None else windows_by_layer
+
+
 def observe_and_project_retained_windows(
         modules, specs, cache, policy, *, retained_budget, n_probes,
         source_bytes, backward, record_operator, consume_probe,
@@ -231,25 +341,8 @@ def observe_and_project_retained_windows(
     if cache._window_resident_storages():
         raise RuntimeError('retained joint replay requires an empty PWC resident baseline')
 
-    keys_by_name, requested_by_name = {}, {}
-    for target in statistics_plan.targets:
-        requested = tuple((target.name, fmt) for fmt in specs[target.name])
-        keys = tuple(cache.resolve_key(name, fmt) for name, fmt in requested)
-        if any(key is None for key in keys):
-            missing = [pair for pair, key in zip(requested, keys) if key is None]
-            raise RuntimeError(f'retained joint PWC candidate entry missing: {missing}')
-        keys_by_name[target.name] = keys
-        requested_by_name[target.name] = requested
-    selected_keys = tuple(key for target in statistics_plan.targets
-                          for key in keys_by_name[target.name])
-    # File length is the sealed conservative storage bound. Archive validation
-    # belongs to the existing PWC window immediately before its first read,
-    # not an all-candidate header walk ahead of the PB read frontier.
-    key_costs = {}
-    for key in selected_keys:
-        size = cache.estimate_nbytes([key])
-        key_costs[key] = {'incoming_storage_bytes': size, 'serialized_bytes': size}
-    targets = targets_from_statistics_plan(statistics_plan, keys_by_name, key_costs)
+    keys_by_name, requested_by_name, targets = retained_admission_targets(
+        statistics_plan, specs, cache)
     retained_plan = plan_retained_targets(
         targets, budget=retained_budget, source_bytes=source_bytes,
         footprint_scope='pwc_serialized_upper_bound')
