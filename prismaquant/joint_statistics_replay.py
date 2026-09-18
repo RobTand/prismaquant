@@ -36,13 +36,29 @@ def statistics_arithmetic_identity(dtype, backend):
     return result
 
 
-def operator_window_guard(device):
+def operator_window_guard(device, *, device_bytes=None):
+    """The capture guard the joint replay charges its phases to.
+
+    With ``device_bytes`` -- the plan's ``max_gpu_bytes``, the envelope
+    ``enforce_device_envelope`` already holds on the allocator -- the guard is
+    an AGGREGATE one: every phase reservation below is the plan's conservative
+    sum (a resident window, a statistics lease, a boundary reserve: none of them
+    says which side of a unified-memory box it lands on), and the retained COST
+    budget states its ``physical_limit_bytes`` as ``cpu cap + device envelope``.
+    A cgroup-only cap refused that sum at 24 GiB against 104 GiB on the
+    GLM-5.3-Flash run stage (2026-09-18). Without ``device_bytes`` the guard is
+    the original conservative one against the cgroup cap, unchanged.
+    """
     if torch.device(device).type != 'cuda':
         return None
     from .autoscale import require_bounded_capture_environment
     from .memory_management import CaptureMemoryGuard
     require_bounded_capture_environment(os.environ)
-    guard = CaptureMemoryGuard(device)
+    if device_bytes is None:
+        guard = CaptureMemoryGuard(device)
+    else:
+        guard = CaptureMemoryGuard(device, device_bytes=device_bytes,
+                                   aggregate_envelope=True)
     guard.check('before_joint_operator_identity')
     return guard
 

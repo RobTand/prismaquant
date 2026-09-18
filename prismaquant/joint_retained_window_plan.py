@@ -68,6 +68,24 @@ class RetainedWindowBudget:
             raise RuntimeError('retained COST fixed owners exhaust the physical budget before statistics/PWC')
         return available
 
+    def require_physical_guard(self, guard):
+        """Refuse unless the live guard bounds at least what this plan states.
+
+        ``physical_limit_bytes`` is the plan's whole physical bound -- on the
+        joint replay path the cgroup cap plus the device envelope -- so it is
+        compared with the guard's ``physical_cap_bytes``, which is that same
+        sum for an aggregate guard and the cgroup cap for a plain one. A plan
+        wider than the guard, or a plan holding back less margin than the
+        guard refuses at, cannot run under that guard.
+        """
+        cap = int(guard.physical_cap_bytes)
+        margin = int(guard.margin_bytes)
+        if self.physical_limit_bytes > cap or self.safety_margin_bytes < margin:
+            raise RuntimeError(
+                f'retained COST plan exceeds the actual PB physical guard: plan '
+                f'{self.physical_limit_bytes} bytes less {self.safety_margin_bytes} '
+                f'margin against a {cap}-byte guard less {margin} margin')
+
     def require_observed_baseline(self, *, observed_bytes, source_bytes, label, actual_auxiliary_bytes=0):
         _integer(observed_bytes, 'observed_bytes')
         _integer(actual_auxiliary_bytes, 'actual_auxiliary_bytes')
