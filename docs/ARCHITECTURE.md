@@ -28,6 +28,7 @@ bytes differ from it, and hands the commit to the container as
 not supply it. `submit-joint run --resume` takes `--source-transition` and
 declares the receipt as a head read. Contract, evidence and receipt:
 `docs/design/joint_run_source_transition_2026-09-18.md`.
+
 Re-stamped (2026-09-18, `flash/d37-charge-boundary-impl-20260918`) for **the
 versioned transient charge boundary, implemented** (§12 D37, §4.5;
 `prismaquant/transient_charge_boundary.py`, design
