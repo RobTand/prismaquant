@@ -1920,6 +1920,7 @@ def compute_aura_cost_streamed(
     device_envelope_bytes=None,
     prepared_render_identities=None,
     cost_read_schedule=None,
+    progress_base: int = 0,
     profile=None,
 ) -> dict:
     """Layer-streamed KL-adjoint with identity-bound per-Linear shards.
@@ -2889,6 +2890,29 @@ def compute_aura_cost_streamed(
             "temperature": temperature, "execution_partition": execution_partition,
             "joint_probe_identity": joint_probe_identity,
         }, n_probes=n_probes, check_memory=check_boundary_memory)
+        # Every published entry file is a durable unit and the only thing the
+        # window can advance on. The reporter owns the clock; the writer only
+        # tells it a file landed. With no channel in the environment this is a
+        # log line and nothing else, which is what every run submitted without
+        # the transport keeps getting.
+        from prismaquant.joint_run_progress import JointRunProgress
+        run_progress = JointRunProgress(layers=runner.num_layers,
+                                        partitions=len(row_offsets),
+                                        base_units=progress_base, log=_log)
+        run_progress.priced_units(len(completed_checkpoint_units))
+        boundary_storage.watch_progress(run_progress)
+    else:
+        run_progress = None
+
+    def _report_units(phase_hint=None):
+        """Fold the cost stage's journalled units into the run's one counter."""
+        if run_progress is None:
+            return
+        run_progress.priced_units(len(completed_checkpoint_units))
+        if phase_hint is not None:
+            run_progress.enter(phase_hint)
+        run_progress.flush(force=True)
+
     def capture_source_phase(stage, layer, actual_auxiliary_bytes):
         if cost_read_schedule is not None and stage == 'source_loading':
             cost_read_schedule.enter_phase(f'cost_capture_{layer:03d}', len(completed_checkpoint_units))
@@ -2929,6 +2953,7 @@ def compute_aura_cost_streamed(
                 batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows],
                     boundary_writer=write_boundary, resource_check=check_capture_state))
                 boundary_storage.check_auxiliary(batches)
+    _report_units()
     _log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} "
          f"min; starting {n_probes}-probe tail cotangents")
     device = runner.device
@@ -2949,6 +2974,7 @@ def compute_aura_cost_streamed(
         boundary_storage.check_auxiliary(batches, cotangents=cotangents)
     if cost_read_schedule is not None:
         cost_read_schedule.enter_phase('cost_tail', len(completed_checkpoint_units))
+    _report_units()
     if retained_budget is not None:
         retained_source_phase('tail', runner.num_layers,
             boundary_storage.actual_auxiliary_bytes(batches, cotangents=cotangents))
@@ -2982,11 +3008,13 @@ def compute_aura_cost_streamed(
             finally:
                 tail_cpu = logits = probe = tail = None
 
+    _report_units()
     reverse_started = time.time()
     reverse_layers_done = 0
     for layer in reversed(range(runner.num_layers)):
         if cost_read_schedule is not None:
             cost_read_schedule.enter_phase(f'cost_reverse_{layer:03d}_source', len(completed_checkpoint_units))
+        _report_units()
         if retained_budget is not None:
             retained_source_phase('source_loading', layer,
                 boundary_storage.actual_auxiliary_bytes(batches, cotangents=cotangents))
