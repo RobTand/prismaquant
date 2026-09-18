@@ -1958,13 +1958,21 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         # above), so any shard it still has to synthesize decodes on that
         # device rather than on one CPU core beside an idle GPU. The standalone
         # ``synthesize`` stage normally leaves nothing to do here.
-        # The head walk reports under the one phase every joint prepare
-        # manifest declares. A COST run's counter belongs to its own read
-        # schedule, so intake there reports nothing rather than under a name
-        # that schedule did not declare.
+        # The head walk reports under the one phase every joint pass manifest
+        # declares -- prepare and run both open on ``head``. A run whose read
+        # schedule is sealed separately (the V2 cost read plan) declares
+        # ``cost_setup``/``cost_head`` instead and no ``head``, so intake there
+        # reports nothing rather than under a name that schedule did not
+        # declare and the worker would refuse.
+        #
+        # Why this is not cosmetic: on ``ad8803aa`` the run's head resolved its
+        # 512-entry anchor roster between the 12:10:14 claim and the 16:24:17
+        # capture line -- 4 h 14 min in which the loop knew its own count at
+        # every step and committed none of it, so the residency window had
+        # nothing to advance on before the capture had even started.
         data = load_measured_anchor_input(config["inputs"], reader=reader,
             synthesis_device="cuda",
-            progress_phase=(HEAD_PHASE if command == "prepare" else None),
+            progress_phase=(None if cost_read_manifest is not None else HEAD_PHASE),
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
             **({} if config.get("historical_encoder_reuse") is None else
                {"historical_encoder_reuse": config["historical_encoder_reuse"]}),
@@ -2132,6 +2140,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 seed_base=execution["seed_base"], token_scope="all", temperature=1.0,
                 production_cache=cache, require_production_cache=True, joint_activation=True,
                 cost_read_schedule=cost_schedule,
+                # The count PrismaBuild accepts is cumulative across phases, so
+                # the capture continues from what the head already committed
+                # rather than restarting at zero, which is a regression and
+                # buys no time.
+                progress_base=data.progress_committed,
                 prepared_render_identities={pair: cache.metadata["verified_cells"][pair]["rendered_weight"]
                                             for pair in data.cells},
                 joint_projection_backend=projection_backend,

@@ -85,6 +85,18 @@ _replay_spec = importlib.util.spec_from_file_location(
 _replay_module = importlib.util.module_from_spec(_replay_spec)
 _replay_spec.loader.exec_module(_replay_module)
 
+#: The run's own layer phase name, loaded the same torch-free way. The joint
+#: run reports its committed units under exactly these names, and the window
+#: advances by matching the name it reports against the phase table sealed
+#: here; a second spelling of the convention is how a consumer ends up
+#: committing a name the plan cannot match, which reads as no progress at all.
+_run_progress_spec = importlib.util.spec_from_file_location(
+    "joint_run_progress",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "prismaquant",
+                 "joint_run_progress.py"))
+_run_progress_module = importlib.util.module_from_spec(_run_progress_spec)
+_run_progress_spec.loader.exec_module(_run_progress_module)
+
 #: ``prismabuild.core._DATA_MANIFEST_KEYS`` and ``_DATA_MANIFEST_ENTRY_KEYS``,
 #: restated because PrismaBuild is not importable from the environments that
 #: build a manifest.  ``validate_data_manifest`` builds both through
@@ -1415,7 +1427,7 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             # is the point -- the phases it does seal are the reads it makes.
             continue
         track.begin(_phase_module.phase_name(layer, part) if command == "prepare" and per_unit_window
-                    else f"layer-{layer}")
+                    else _run_progress_module.layer_phase_name(layer))
         for source_layer in source_layers:
             if source_schedule is not None and source_cache is None:
                 for path, size in source_schedule["layers"][source_layer]:

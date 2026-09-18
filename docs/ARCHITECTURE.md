@@ -1,7 +1,49 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-18 · `flash/732-resolver-routed-shard-reads-20260918`.
+As of: 2026-09-18 · `flash/741-joint-run-progress-v1-20260918`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-18, `flash/741-joint-run-progress-v1-20260918`) for **the
+joint run reporting the units it commits** (§3.2 joint AURA, § container
+launch; PQ #741, PB #632). The run's two longest stretches reported nothing:
+on action `ad8803aa` the head walk ran from the 12:10:14 claim to the 16:24:17
+capture line (4 h 14 min) and the boundary capture then wrote 23 040 durable
+entry files in 137.4 min behind a single line at each end. PrismaBuild's
+residency window publishes the next phase's movers and releases the finished
+ones on the consumer's **accepted progress**, matched by phase *name* against
+the plan the submission sealed, so it advanced on nothing: 19 of 46 phases
+staged, 1 egressed, and the 744 GB stage reached 0 B available.
+
+Three changes, and neither half is useful alone. *The run reports*:
+`prismaquant/joint_run_progress.py` is a time-interval reporter — one log line
+and one `progress-v1` commit every `PRISMAQUANT_JOINT_PROGRESS_INTERVAL_S`
+seconds (default 60, half the two-minute silence rule), carrying layers and
+partitions done, entries written, entries/s, and the residency resolver's
+`hits`/`misses`/`range_hits`/`range_misses`/`fallback_count` **since the last
+line**, which is the counter that says whether a run read the stage or the
+pool. A unit is one published exact-boundary entry file, counted by
+`StreamedBoundaryArtifacts.write` at publication and nowhere else, so the
+count moves only on durable work (PB #480). It is cumulative across phases:
+the head walk's roster count is the base the capture continues from
+(`compute_aura_cost_streamed(progress_base=...)`), and `load_measured_anchor_input`
+now reports under `head` for a `run` as well as a `prepare` — none only when a
+V2 cost read schedule is sealed, which declares `cost_setup`/`cost_head`
+instead. *The submission declares*: `submit-joint run` now seals the read
+set's own phase names as the PB progress policy, through the one
+`_declared_phase_names` both joint commands use, so the table the window walks
+and the names the action may report are one list; `layer_phase_name` has one
+definition, shared by the manifest builder and the reporter. *The container
+carries the list*: `tools/tessera_campaign_container.py` forwards
+`PRISMABUILD_ACTION_PROGRESS_PHASES` beside the path and token, so a row
+inside refuses a mistyped phase where the typo is rather than being refused
+quietly until its allowance runs out. A phase the launch did not declare is
+logged and not committed, and a launch with no channel is byte-identical to
+before. No format, lane, plugin contract, ship gate or published byte changes.
+Not covered here: the reverse pass's own read order (the V1 read plan is
+written forward, so the window releases a layer the reverse pass then re-reads
+from the pool — stated in `build_joint_pass_manifest` and unchanged), and the
+`prepare` command's phase declaration, which keeps its existing frontier
+condition. Gates: `tests/test_joint_run_progress.py`.
 
 Re-stamped (2026-09-18, `flash/732-resolver-routed-shard-reads-20260918`) for
 **source-shard reads going through the residency resolver, byte ranges
@@ -558,7 +600,11 @@ this census rather than 197,990. The caller names the phase, because only the
 submission knows what it declared: `joint_prewarm_phases.HEAD_PHASE` for
 `execute`'s prepare, `tessera_joint_aura.SYNTHESIS_PHASE` for the standalone
 synthesis stage, and none for a COST run, whose counter belongs to its own
-read schedule. The old literal `synthesize` was in no joint prepare's declared
+read schedule. *(Superseded 2026-09-18 by PQ #741: a COST run reports under
+`head` too, because the V1 joint read set a run is submitted with declares
+`head` as its first phase; only a run carrying a sealed V2 cost read schedule
+— which declares `cost_setup`/`cost_head` instead — still reports nothing
+there.)* The old literal `synthesize` was in no joint prepare's declared
 set, so a fresh run's reports renewed nothing either. Replay and the layer
 walk continue from the intake's count (`prepare_cache(progress_base=...)`)
 instead of restarting, because a counter that goes backwards renews no
@@ -1829,7 +1875,8 @@ ordered entries and divides windowed qualification at complete-unit
 boundaries, targeting 32 GiB of newly declared bytes per phase; the last
 complete unit may exceed that target.
 `submit-joint prepare` seals these names as PB progress phases only for a
-fresh journal and a reusable, verified source identity proof. The container
+fresh journal and a reusable, verified source identity proof; `submit-joint
+run` seals its own read set's phase names unconditionally (PQ #741). The container
 checks the manifest's sealed digest and plan identity before running; it
 enters each phase before its first unit read and increments the cumulative
 counter only after that unit's journal write. The `head` phase advances the
