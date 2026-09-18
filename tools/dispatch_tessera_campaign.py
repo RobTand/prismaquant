@@ -2670,9 +2670,9 @@ def cmd_submit_joint(args) -> int:
     if args.resume:
         inner += ["--resume"]
     source_transition = None
-    if bool(args.source_transition) != bool(args.source_transition_sha256):
+    if args.source_transition_sha256 and not args.source_transition:
         raise RuntimeError(
-            "--source-transition and --source-transition-sha256 are required together")
+            "--source-transition-sha256 names a digest for no receipt; pass --source-transition")
     if args.source_transition:
         # A source transition is a run-only, resume-only admission (the pass
         # refuses it otherwise), so the submission refuses the same shapes here

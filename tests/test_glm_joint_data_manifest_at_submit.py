@@ -1106,7 +1106,7 @@ def test_a_resumed_run_forwards_the_source_transition_and_reads_it_in_the_head(
     # refuses the other shapes and a wrong digest before any manifest is built.
     with pytest.raises(RuntimeError, match="run --resume"):
         dispatch.main([*common, "--source-transition", str(receipt)])
-    with pytest.raises(RuntimeError, match="required together"):
+    with pytest.raises(RuntimeError, match="for no receipt"):
         dispatch.main([*common, "--resume", "--source-transition-sha256", digest])
     with pytest.raises(RuntimeError, match="hashes to"):
         dispatch.main([*common, "--resume", "--source-transition", str(receipt),
