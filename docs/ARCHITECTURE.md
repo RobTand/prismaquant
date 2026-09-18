@@ -1,7 +1,12 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-18 · `flash/715-panel-image-scope-20260918`.
+As of: 2026-09-18 · `flash/driver-scope-noop-20260918`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-18, `flash/driver-scope-noop-20260918`) for **the driver
+ruling on the panel execution scope**: a driver change never invalidates an
+attestation (Rob, 2026-09-18); the scope record keeps both drivers for the
+card and no gate compares them. Wording only; no gate, default or format changed.
 
 Re-stamped (2026-09-18, `flash/715-panel-image-scope-20260918`) for **the panel
 activation stamp's generated-image scope and the consume-time refusal**
@@ -5049,12 +5054,13 @@ verified either, because a tag moves. **What is compared is the image digest
 alone.** `vllm` and `torch` are inside the image, so the digest pins them.
 `driver`, `device` and `compute_capability` are host facts *outside* it — the
 09-18 cell ran on driver `595.91.07` under a table generated on `595.84` — so
-the digest pins nothing about them and their effect on the attested rounding
-rule is not established. The scope record
+the digest pins nothing about them. **By ruling (Rob, 2026-09-18) a driver
+change never invalidates an attestation**: drivers move all the time and
+nothing is revalidated for one, so no gate compares the driver, the device or
+its compute capability, and no table is regenerated for a driver. The scope record
 (`prismaquant.panel_execution_scope.v2`) carries both sides of all three
 (`attested_*` / `executing_*`, the executing side read from
-`panel["runtime"]["gpu"]`, absent as `None`) and compares neither, which leaves
-the decision to compare them reversible and evidenced rather than defaulted. A dynamic-scale stamp
+`panel["runtime"]["gpu"]`, absent as `None`) for the card and compares neither. A dynamic-scale stamp
 (`activation_contract: null`, the fp8 and bf16 lanes) attests no rounding rule,
 so there is nothing to scope and the check returns `None` -- its absence is
 stamped with its reason rather than inferred. What this cost, measured: the

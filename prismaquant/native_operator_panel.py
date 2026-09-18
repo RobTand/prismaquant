@@ -579,9 +579,10 @@ def require_panel_execution_scope(panel, *, executing_image):
                 "host_facts_outside_the_image":
                     "the driver, the device and its compute capability are "
                     "host facts outside the image, so the digest pins nothing "
-                    "about them, and their effect on the attested rounding "
-                    "rule is not established; both sides are recorded here "
-                    "and left for a gate that can establish it"}}
+                    "about them; by ruling (Rob, 2026-09-18) a driver change "
+                    "never invalidates an attestation -- drivers move all "
+                    "the time and nothing is revalidated for one -- so both "
+                    "sides are recorded for the card and never compared"}}
 
 
 def validate_native_numerics(error, numerics, *, phase, kind, exact=False):
