@@ -162,9 +162,12 @@ def _run_case(root, monkeypatch, *, checkpoint, resume=False, completed=()):
                                          completed, events)
         holder["schedule"] = schedule
         loaded = cache._load_file_tensor
-        def read(path):
+        def read(path, key=None):
+            # ``_load_file_tensor`` takes the cache key positionally (#707); it
+            # selects the expected SHA-256 for the digest fence, so the spy
+            # forwards it rather than dropping it.
             events.append(("render_read", str(path), schedule.current_phase))
-            return loaded(path)
+            return loaded(path, key)
         cache._load_file_tensor = read
         install = runner.context.install
         def source_install(layer, **options):
