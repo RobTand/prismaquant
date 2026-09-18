@@ -324,10 +324,20 @@ within 1–2%. The decision-unit *framing* from CLADO is kept
     `TESSERA_ROUTE_TRACE` telemetry), refuses on disagreement, and reads a
     missing rank trace as not verified (`tessera_route_trace_gate`, #575). The
     trace names no modules, so that comparison is a histogram, not a
-    per-module map. The compressed-tensors lane has no route telemetry, so
-    this leg is open there; `validate_native_export` does not perform it. The test may not
+    per-module map. The compressed-tensors lane has no route telemetry at all,
+    so its served side is READ off the running engine instead: the required
+    `route.sweep` slot compares, per module, the activation contract the
+    artifact's own `config.json` prices with the scheme vLLM resolved from that
+    same `config.json`, plus a forward-hook dispatch count, taken inside the
+    eager load smoke's own process through vLLM's `LLM.apply_model`
+    (`compressed_route_sweep_gate`, #631). A missing, non-eager or
+    unrecognized sweep is not verified, never a pass. It sees neither the
+    activation representation (#567) nor whether a kernel is native on the
+    target: the kernel each scheme selected is recorded and not judged,
+    because vLLM publishes no table to judge it against. The test may not
     import the serving runtime (`AGENTS.md` principle 5 forbids vendoring it); the
-    attestation travels in the contract file. **Corollary for prose:** a
+    attestation travels as data — a contract file on one lane, a sweep record
+    on the other. **Corollary for prose:** a
     recorded blocker or capability claim inherits the scope of the artifact it
     was measured on — record the scope or do not record the claim. *Two of our
     own spec files disagreed about one runtime; the runtime was never

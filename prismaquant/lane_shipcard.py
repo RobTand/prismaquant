@@ -162,9 +162,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         "slots", help="print the slots a lane's card must close")
     p_slots.add_argument("--lane", required=True)
 
+    # `shipcard_cli show` names the OPEN slots; only the lane declaration says
+    # what closes them.  Printing that from the lane spec keeps one source of
+    # truth: a lane that adds a gate prints its recipe with no edit here, and a
+    # slot a run opens is never a slot the run prints no way to close (#631).
+    p_gates = sub.add_parser(
+        "gates", help="print what each of a lane's gates would close, and "
+                      "which are still open on an existing card")
+    p_gates.add_argument("--lane", required=True)
+    p_gates.add_argument("--shipcard", required=True)
+
     args = p.parse_args(argv)
 
     try:
+        if args.cmd == "gates":
+            spec = lane_spec_for_lane(args.lane)
+            card = load_shipcard(args.shipcard)
+            for line in open_gate_report(spec, card):
+                print(line)
+            return 0
+
         if args.cmd == "slots":
             spec = lane_spec_for_lane(args.lane)
             for slot in lane_gate_slots(spec.export_container):

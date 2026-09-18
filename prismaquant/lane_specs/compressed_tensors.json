@@ -4,7 +4,9 @@
   "export_container": "compressed-tensors",
   "runtime": "vllm",
   "description": "The default lane: a stock compressed-tensors checkpoint that vanilla vLLM serves with no forked runtime and no custom kernels. This is the only lane whose correctness depends on nothing we maintain, which is why it is the default even where CB wins the matched-byte accuracy pair.",
-  "wired_architectures": ["*"],
+  "wired_architectures": [
+    "*"
+  ],
   "wired_architectures_note": "The default lane: `*` means every registered model profile, because every architecture ships through compressed-tensors (`DEFAULT_EXPORT_LANE`) and enumerating them here would be a second roster to keep in step with model_profiles/registry.py. A NON-default lane names its architectures explicitly.",
   "serving_profiles": [
     "vllm_packed_moe",
@@ -75,6 +77,12 @@
       "description": "Same, with CUDA-graph capture on (a format may load eager and fail capture)."
     },
     {
+      "id": "route.sweep",
+      "runner": "python -m prismaquant.validate_native_export --model <artifact> --route-sweep-out <sweep-rank0.json> [--shipcard <shipcard.json>], then python -m prismaquant.shipcard_cli fill-route-sweep <shipcard.json> --sweep <sweep-rank0.json> [--sweep <sweep-rank1.json> ...] --expected-ranks <world-size>",
+      "shipcard_slot": "route.sweep",
+      "description": "Principle 14's serve-side leg on this lane (PrismaQuant #631). Stock vLLM emits no route telemetry, so the served side is READ off the running engine through vLLM's own LLM.apply_model inside the eager load smoke's own process: the resolved quantization method, scheme, scheme attributes and kernel per module, plus a forward-hook dispatch count over the generate that smoke already runs. fill-route-sweep compares that, per module and per rank, with the activation contract the artifact's own config.json prices for it, reconciling unfused leaves through the packed_modules_mapping the sweep read off the live model class. Exit 0 agree, 1 refused, 3 NOT VERIFIED (a missing, unreadable, non-eager, spec-decoded or unrecognized sweep). No operator flag overrides a refusal. The kernel each scheme selected is RECORDED AND NOT JUDGED: vLLM publishes no table of which kernel is native on which target, and a gate that refused on a kernel name would assert exactly what principle 14 forbids."
+    },
+    {
       "id": "ship_gate.ppl_p99nll",
       "runner": "prismaquant.validate_quantized_model --base-url http://127.0.0.1:8000 --shipcard",
       "shipcard_slot": "ship_gate",
@@ -102,8 +110,9 @@
   "notes": [
     "Nothing in run-pipeline.sh blocks on a quality number on ANY lane, native included: `vllm` is not importable in the build venv, so the build tool would have to own the serving stack. The shipcard is the refusal contract instead (R13).",
     "Whether these gates become BLOCKING is the open half of R16's verdict and is deferred to Robert.",
-    "2026-08-14: the serve image was `vllm-fresh-b12x:latest`, which does NOT exist on this box (CLAUDE.md §7 is stale on it) — corrected to gridbook:0.8.6-clean-dde15e0 (vLLM 0.26.1rc1, compressed-tensors 0.17.0, transformers 5.15.0), verified serving Qwen3.8-27B. Its ENTRYPOINT is nvidia_entrypoint.sh, which passes argv through rather than prepending `vllm serve`, so the command carries `vllm serve` explicitly. The gold.ppl runner was also a dead path: the file is tools/measure_vllm_wikitext_ppl.py.",
-    "Both gold runners import vLLM directly (offline LLM API), so they run INSIDE the serving container against the artifact path — they do not talk to the endpoint above. Only ship_gate.ppl_p99nll uses base_url.",
-    "2026-08-14: `endpoint.base_url` is the OpenAI API root and is right for a client, but validate_quantized_model's --base-url is the SERVER root (it appends /v1/completions itself and reads /health + /metrics off the root). Passing the /v1 spelling made the gate poll /v1/health (404) for its full 900s timeout without sending one prompt, so the ship_gate runner now spells the root explicitly. run_validation also normalizes a trailing /v1 now, and the spec-decode guard was changed to FAIL CLOSED — it had been swallowing the 404 and returning 'no spec-decode detected', i.e. the guard against publishing the draft model's NLL was issuing a confident all-clear it had no basis for."
+    "2026-08-14: the serve image was `vllm-fresh-b12x:latest`, which does NOT exist on this box (CLAUDE.md \u00a77 is stale on it) \u2014 corrected to gridbook:0.8.6-clean-dde15e0 (vLLM 0.26.1rc1, compressed-tensors 0.17.0, transformers 5.15.0), verified serving Qwen3.8-27B. Its ENTRYPOINT is nvidia_entrypoint.sh, which passes argv through rather than prepending `vllm serve`, so the command carries `vllm serve` explicitly. The gold.ppl runner was also a dead path: the file is tools/measure_vllm_wikitext_ppl.py.",
+    "Both gold runners import vLLM directly (offline LLM API), so they run INSIDE the serving container against the artifact path \u2014 they do not talk to the endpoint above. Only ship_gate.ppl_p99nll uses base_url.",
+    "2026-08-14: `endpoint.base_url` is the OpenAI API root and is right for a client, but validate_quantized_model's --base-url is the SERVER root (it appends /v1/completions itself and reads /health + /metrics off the root). Passing the /v1 spelling made the gate poll /v1/health (404) for its full 900s timeout without sending one prompt, so the ship_gate runner now spells the root explicitly. run_validation also normalizes a trailing /v1 now, and the spec-decode guard was changed to FAIL CLOSED \u2014 it had been swallowing the 404 and returning 'no spec-decode detected', i.e. the guard against publishing the draft model's NLL was issuing a confident all-clear it had no basis for.",
+    "2026-09-17 (#631): this lane gained route.sweep, principle 14's serve-side leg. The lane spec's served_activation_quantization block above is the PRODUCER leg and is derived from the exporter's scheme table; route.sweep is the other leg and is about one artifact on one box. Its 'why_this_matters' line said there is no serve-side check here to catch a producer-side mistake after the fact; there is now, for the scheme classes a sweep has observed. No MoE method class has been observed, so a packed-MoE artifact reads NOT VERIFIED until one is."
   ]
 }

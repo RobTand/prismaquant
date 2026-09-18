@@ -198,11 +198,84 @@ def _speculative_config_uses_embedded_mtp(spec: dict) -> bool:
     return method == "mtp" or method.endswith("_mtp")
 
 
+def _install_route_sweep_hooks(llm, sweep_path: Path | None):
+    """Attach the per-module forward counters before the generate runs."""
+    if sweep_path is None:
+        return None
+    from .compressed_route_sweep import install_route_sweep_hooks
+
+    apply_model = getattr(llm, "apply_model", None)
+    if apply_model is None:
+        print("[validate] route sweep: this vLLM build has no "
+              "LLM.apply_model; the sweep will record that and the gate "
+              "reads it as NOT VERIFIED", flush=True)
+        return None
+    counts = apply_model(install_route_sweep_hooks)
+    print(f"[validate] route sweep: dispatch counters on {counts} module(s) "
+          f"per rank", flush=True)
+    return counts
+
+
+def _write_route_sweep(llm, sweep_path: Path | None, hooks, *, model_dir: Path,
+                       spec, enforce_eager: bool, args, prompt_ran: bool):
+    """Write this arm's served-route sweep beside the smoke's verdict.
+
+    The sweep is taken from THE SAME loaded engine that just generated, so the
+    routes recorded are the routes that ran -- principle 8's execution
+    identity, not a second load that might resolve differently.
+    """
+    if sweep_path is None:
+        return None
+    from .compressed_route_sweep import sweep_via_apply_model, write_sweep
+
+    load = {
+        "model_dir": str(model_dir),
+        "quantization": NATIVE_QUANTIZATION,
+        "enforce_eager": bool(enforce_eager),
+        "speculative_config": spec is not None,
+        "gpu_memory_utilization": args.gpu_memory_utilization,
+        "max_model_len": args.max_model_len,
+        "prompt": args.prompt,
+        "max_new_tokens": args.max_new_tokens,
+        "hooks_attached": hooks,
+    }
+    record = sweep_via_apply_model(llm, load=load, prompt_ran=prompt_ran)
+    sweep_path.parent.mkdir(parents=True, exist_ok=True)
+    write_sweep(str(sweep_path), record)
+    print(f"[validate] route sweep written: {sweep_path}", flush=True)
+    print("[validate]   close route.sweep with: python -m "
+          "prismaquant.shipcard_cli fill-route-sweep <shipcard.json> "
+          f"--sweep {sweep_path}", flush=True)
+    return sweep_path
+
+
+def _route_sweep_path(args, arm: str) -> Path | None:
+    """Where this arm writes its served-route sweep, if asked for one.
+
+    Only the EAGER arm writes one.  The sweep's dispatch counts come from
+    forward hooks, and a CUDA-graph replay does not run them, so a graph-arm
+    sweep would report zeros that mean "not observed" while looking exactly
+    like "priced but never ran".  Refusing to write it is how that stays
+    unambiguous (`compressed_route_sweep_gate` reads a non-eager load as NOT
+    VERIFIED for the same reason).
+    """
+    if not getattr(args, "route_sweep_out", None) or arm != "eager":
+        return None
+    return Path(args.route_sweep_out)
+
+
 def _run_arm(args, model_dir: Path, spec: dict | None, *,
              enforce_eager: bool) -> dict:
     """One load+generate smoke. Returns a shipcard-shaped verdict block."""
     arm = "eager" if enforce_eager else "graph"
     print(f"[validate] starting vLLM ({arm} arm) ...", flush=True)
+    sweep_path = _route_sweep_path(args, arm)
+    if sweep_path is not None:
+        # vLLM V1 runs EngineCore in a subprocess; `LLM.apply_model` reaches
+        # the workers either way, but keeping it in-process is what the
+        # archived Gridbook probe learned to do and it keeps the sweep's
+        # objects the same objects the generate ran on.
+        os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     from vllm import LLM, SamplingParams
 
     llm = None
@@ -217,6 +290,7 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             max_num_seqs=1,
             speculative_config=spec,
         )
+        hooks = _install_route_sweep_hooks(llm, sweep_path)
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new_tokens)
         out = llm.generate([args.prompt], sp)
         print(f"[validate] generated ({arm}):", flush=True)
@@ -227,13 +301,20 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             print(f"  prompt: {o.prompt!r}", flush=True)
             print(f"  output: {text!r}", flush=True)
         produced = sum(len(t) for t in texts)
+        sweep_written = _write_route_sweep(
+            llm, sweep_path, hooks,
+            model_dir=model_dir, spec=spec, enforce_eager=enforce_eager,
+            args=args, prompt_ran=produced > 0)
+        metrics = {"arm": arm, "generated_chars": produced,
+                   "enforce_eager": enforce_eager,
+                   "max_new_tokens": args.max_new_tokens}
+        if sweep_written is not None:
+            metrics["route_sweep"] = str(sweep_written)
         return {
             "passed": produced > 0,
             "detail": (f"{arm}: generated {produced} chars"
                        if produced else f"{arm}: generated NOTHING"),
-            "metrics": {"arm": arm, "generated_chars": produced,
-                        "enforce_eager": enforce_eager,
-                        "max_new_tokens": args.max_new_tokens},
+            "metrics": metrics,
         }
     except Exception as exc:
         print(f"[validate] {arm} arm FAILED: {exc!r}", flush=True)
@@ -320,6 +401,16 @@ def main():
                          "invocation and fill both shipcard slots. The "
                          "two-arm rule used to live only in this help text; "
                          "this is it in code.")
+    ap.add_argument("--route-sweep-out", default=None,
+                    help="Write the EAGER arm's served-route sweep here "
+                         "(prismaquant.compressed_route_sweep/1). Principle "
+                         "14's serve-side leg on this lane: the resolved "
+                         "quantization method, scheme and kernel per module, "
+                         "read off the live engine through vLLM's own "
+                         "LLM.apply_model, plus a forward-hook dispatch "
+                         "count. Close the card's route.sweep slot from it "
+                         "with `python -m prismaquant.shipcard_cli "
+                         "fill-route-sweep`.")
     ap.add_argument("--shipcard", default=None,
                     help="Path to the artifact's shipcard.json; the arm's "
                          "verdict is appended to native_export.<arm> "

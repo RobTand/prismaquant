@@ -28,6 +28,7 @@ from prismaquant.shipcard import (
     compute_model_sha,
     fill_slot,
     kv_shared_fisher_echo,
+    lane_gate_slots,
     load_shipcard,
     make_record,
     required_slots,
@@ -658,7 +659,15 @@ def test_export_writes_a_card_with_build_facts_and_empty_slots(tmp_path):
     )
 
     card = load_shipcard(model_dir / "shipcard.json")
-    assert unfilled_slots(card) == list(REQUIRED_SLOTS)
+    # The card is stamped with the lane it was opened on (#631), so it owes the
+    # base set AND whatever that lane's own gates declare. Asserting the union
+    # rather than `REQUIRED_SLOTS` keeps this biting: dropping the lane stamp,
+    # or the lane's `route.sweep` declaration, changes this list.
+    assert card["lane"] == "compressed-tensors"
+    assert unfilled_slots(card) == list(REQUIRED_SLOTS) + ["route.sweep"]
+    assert lane_gate_slots("compressed-tensors") == (
+        "native_export.eager", "native_export.graph", "route.sweep",
+        "ship_gate", "gold.kl", "gold.ppl")
     build = card["build"]
     assert build["achieved_bpp"]["value"] == pytest.approx(4.7513)
     assert build["achieved_bpp"]["source"] == "pareto.knees.json:log_error"

@@ -2833,6 +2833,14 @@ echo "  Artifact: ${WORK_DIR}/exported"
 SHIPCARD_JSON="${WORK_DIR}/exported/shipcard.json"
 if [[ -f "$SHIPCARD_JSON" ]]; then
   python3 -m prismaquant.shipcard_cli show "$SHIPCARD_JSON" || true
+  # `show` names the OPEN slots; only the lane declaration says what closes
+  # them. Printing that is the point: the card now opens `route.sweep`
+  # (principle 14's serve-side leg, #631), and a slot a run opens and prints
+  # no way to close is how an operator learns to reach for
+  # --force-unverified. Read from the lane spec, never respelled here.
+  echo "  Gates (lane_specs/compressed_tensors.json):"
+  python3 -m prismaquant.lane_shipcard gates \
+    --lane compressed-tensors --shipcard "$SHIPCARD_JSON" || true
 else
   echo "  WARNING: no shipcard at ${SHIPCARD_JSON} — the export did not open a ship record."
 fi
