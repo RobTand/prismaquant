@@ -1,5 +1,6 @@
 """A portable tag may resolve differently, but its executable content is fixed."""
 from copy import deepcopy
+from pathlib import Path
 from subprocess import CompletedProcess
 import json
 
@@ -43,14 +44,25 @@ def test_incomplete_inspection_cannot_mint_content_identity(field, value):
 def test_resolved_image_is_executed_after_content_check(monkeypatch, capsys):
     observed = inspection()
     digest = identity.image_content_sha256(observed)
+    head = "9" * 40
     inspected, executed = [], []
-    def inspect(argv, **kwargs):
-        inspected.append(argv)
-        return CompletedProcess(argv, 0, stdout=json.dumps([observed]), stderr="")
+    def run(argv, **kwargs):
+        # The launcher also reads the checkout's HEAD on the host (#728), so
+        # the double answers per binary instead of answering every call as
+        # Docker. Answering git as Docker is what made this test red on any
+        # working directory that is a checkout. Whether git is called at all
+        # depends on the cwd, so the assertions below cover the Docker calls.
+        if argv[0] == "git":
+            return CompletedProcess(argv, 0, stdout=head if "rev-parse" in argv else "",
+                                    stderr="")
+        if argv[0] == "docker":
+            inspected.append(argv)
+            return CompletedProcess(argv, 0, stdout=json.dumps([observed]), stderr="")
+        pytest.fail(f"unexpected subprocess call: {argv}")
     def execute(binary, argv):
         executed.append(argv)
         raise SystemExit(0)
-    monkeypatch.setattr(runner.subprocess, "run", inspect)
+    monkeypatch.setattr(runner.subprocess, "run", run)
     monkeypatch.setattr(runner.os, "execvp", execute)
     spec = {"container": {"image": "qualified:portable", "content_sha256": digest}}
     with pytest.raises(SystemExit) as stopped:
@@ -61,6 +73,9 @@ def test_resolved_image_is_executed_after_content_check(monkeypatch, capsys):
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["image_id"] == observed["Id"]
     assert receipt["image_content_sha256"] == digest
+    # The launcher reads HEAD only when the working directory is a checkout;
+    # either way the value on the receipt is the one the host reported.
+    assert receipt["checkout_commit"] == (head if (Path.cwd() / ".git").exists() else None)
 
 
 def test_changed_portable_tag_refuses_before_container_launch(monkeypatch):
