@@ -2000,7 +2000,7 @@ def compute_aura_cost_streamed(
                 future += retained_budget.workspace_reserve_bytes
             check_operator_allocation(operator_guard, f'admit_retained_{stage}:{layer}', reserve_bytes=future)
     if source_transition is not None:
-        from prismaquant.joint_aura_source_transition import require_verified_transition
+        from prismaquant.joint_aura_transitions import require_verified_transition
         source_transition = require_verified_transition(
             source_transition, checkpoint_dir=checkpoint_dir,
             resume=resume, joint_activation=joint_activation,
