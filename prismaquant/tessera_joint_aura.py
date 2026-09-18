@@ -103,14 +103,31 @@ def _read_verified_wire_blob(cell):
     staged = (None if resolver is None
               else resolver.staged_read(wire, expected_sha256=expected))
     if staged is not None:
-        try:
-            blob, digest = _read_wire_bytes(Path(staged["stage_path"]), size,
-                                            expected=expected, staged=True)
-        except _StagedWireRefused as refusal:
-            resolver.record_fallback(wire, str(refusal))
-        else:
-            resolver.record_stage_read(wire, len(blob))
-            return blob, digest
+        # The ram copy first, the stage copy second, the declared path last.
+        # PrismaBuild's ram tier (#640) promotes a staged range onto a tmpfs
+        # and the resolver offers the copy only while the epoch the map dates
+        # it with is the one the pool's tier record announces, so a dead tmpfs
+        # never reaches this loop. A ram read that refuses -- released between
+        # the stat and the open, or bytes that do not hash to the receipt --
+        # is a miss on the ram half alone: the stage copy the map vouches for
+        # serves next, and only its refusal reads the declared path.
+        copies = ([("ram", staged["ram_path"])] if "ram_path" in staged else []) \
+            + [("stage", staged["stage_path"])]
+        for half, copy in copies:
+            try:
+                blob, digest = _read_wire_bytes(Path(copy), size,
+                                                expected=expected, staged=True)
+            except _StagedWireRefused as refusal:
+                if half == "ram":
+                    resolver.record_ram_fallback(wire, str(refusal))
+                    continue
+                resolver.record_fallback(wire, str(refusal))
+            else:
+                if half == "ram":
+                    resolver.record_ram_read(wire, len(blob))
+                else:
+                    resolver.record_stage_read(wire, len(blob))
+                return blob, digest
     blob, digest = _read_wire_bytes(wire, size, expected=expected, staged=False)
     if resolver is not None:
         resolver.record_pool_read(wire, len(blob))
