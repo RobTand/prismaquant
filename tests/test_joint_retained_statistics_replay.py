@@ -112,9 +112,9 @@ def test_retained_replay_matches_probe_major_signed_components_and_loads_once(
     modules, specs, cache, paths, policy, budget = _fixture(tmp_path)
     original_load = cache._load_file_tensor
     loaded = []
-    def read_once(value):
+    def read_once(value, key=None):
         loaded.append(str(value))
-        return original_load(value)
+        return original_load(value, key)
     monkeypatch.setattr(cache, '_load_file_tensor', read_once)
     result, calls, consumed, records = _run_retained(
         modules, specs, cache, policy, budget)
@@ -238,9 +238,9 @@ def test_resume_keeps_original_windows_and_only_final_active_updates_cotangents(
     modules, specs, cache, paths, policy, budget = _fixture(tmp_path)
     loads, entered, committed = [], [], []
     loader = cache._load_file_tensor
-    def load(path):
+    def load(path, key=None):
         loads.append(str(path))
-        return loader(path)
+        return loader(path, key)
     monkeypatch.setattr(cache, '_load_file_tensor', load)
     result, calls, consumed, _ = _run_retained(modules, specs, cache, policy, budget,
         completed_names={'first'},

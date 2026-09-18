@@ -153,7 +153,11 @@ def test_a_staged_render_is_read_from_the_stage_and_counted(tmp_path, monkeypatc
     for key in paths:
         tensor = cache.get(*key)
         assert torch.equal(tensor, tensors[key])
-        assert cache.file_load_receipt(key, tensor)['path'] == str(staged[key])
+        # The receipt is about the declared object, so its path and the
+        # signature its lifetime fence re-checks stay the pool's even when the
+        # bytes came from the stage. Which copy served them is the residency
+        # report's business, not the content receipt's.
+        assert cache.file_load_receipt(key, tensor)['path'] == str(paths[key])
     report = residency_report()
     assert report['hits'] == 2 and report['misses'] == 0 and report['fallbacks'] == []
     assert report['bytes_from_stage'] == sum(p.stat().st_size for p in paths.values())
@@ -226,7 +230,7 @@ def test_a_map_digest_that_differs_refuses_that_entry_before_opening_it(tmp_path
     root, staged = _stage(tmp_path, paths)
     map_path = _write_map(tmp_path, root, paths, staged)
     body = json.loads(map_path.read_text())
-    body['entries'][str(path)]['sha256'] = '0' * 64
+    body['entries'][residency_map_key(str(path), 0)]['sha256'] = '0' * 64
     map_path.write_text(json.dumps(body))
     monkeypatch.setenv(ENV_VAR, str(map_path))
     _bind()

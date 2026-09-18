@@ -361,9 +361,9 @@ def test_retained_window_keeps_more_keys_than_workers_for_repeated_passes(tmp_pa
         assert len(selected) <= max_workers == 2
         assert sum(paths[key].stat().st_size for key in selected) <= 2 * file_size
         return original_prefetch(selected, max_workers=max_workers)
-    def counted_load(value):
+    def counted_load(value, key=None):
         reads.append(str(value))
-        return original_load(value)
+        return original_load(value, key)
     monkeypatch.setattr(cache, 'prefetch', bounded_prefetch)
     monkeypatch.setattr(cache, '_load_file_tensor', counted_load)
     aliases = [(name + '.weight', fmt) for name, fmt in keys]
@@ -538,9 +538,9 @@ def test_retained_window_midload_guard_refusal_releases_selected_owners(tmp_path
     cache.enable_file_load_receipts(max_file_bytes=size)
     original_load = cache._load_file_tensor
     reads, advice, guards = [], [], []
-    def load(value):
+    def load(value, key=None):
         reads.append(str(value))
-        return original_load(value)
+        return original_load(value, key)
     def advise(path, *, expected_stat):
         advice.append(path)
     def guard(state):

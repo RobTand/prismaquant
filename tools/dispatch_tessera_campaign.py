@@ -2573,7 +2573,8 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         # unchanged: the plan's own bound still decides cpu/gpu/mem_gb.
         "resource_demand": {**demand_record,
                             "gpu_memory_gb": gpu_memory_gb,
-                            "residency": getattr(args, "residency", None)},
+                            **({"residency": args.residency}
+                               if getattr(args, "residency", None) else {})},
         "manifest_bytes": len(blob),
         "decoded_manifest_bytes": len(decoded),
         "manifest_sha256": hashlib.sha256(blob).hexdigest(),
