@@ -1,7 +1,14 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-18 · `flash/run-render-proof-meta-skeleton-20260918`.
+As of: 2026-09-18 · `flash/732-container-forwards-residency-20260918`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-18, `flash/732-container-forwards-residency-20260918`) for
+**the residency map crossing the container boundary** (§ container launch):
+`tools/tessera_campaign_container.py` forwards `PRISMABUILD_RESIDENCY_MAP` and
+binds the map's `stage_root` read-only at the same path, refusing at launch a
+map outside every declared mount or a stage root that is not mounted on the
+host (PQ #732, blockers 1 and 2 of 4).
 
 Re-stamped (2026-09-18, `flash/run-render-proof-meta-skeleton-20260918`) for
 the **run-stage render proof at install time** and the
@@ -938,6 +945,18 @@ the container is actually started from. Gates:
 `tests/test_tessera_joint_aura.py`, `tools/joint_prepare_startup_probe.py`. The
 container `--memory` cap the CPU budget is enforced by is
 RobTand/prismaquant#663's launcher change, not this one.
+
+**The residency map crosses the same boundary, with its stage (PQ #732).**
+`docker run` inherits nothing from the launcher, so the wrapper forwards
+`PRISMABUILD_RESIDENCY_MAP` explicitly (`residency_environment`) and binds the
+map's `stage_root` read-only into the container at the same path, after
+triggering the automount and requiring `os.path.ismount`. It refuses at launch
+when the map is not inside a declared mount, cannot be read, names no absolute
+root, or the root is not mounted here: on 2026-09-18 the GLM-5.3-Flash joint
+run's launcher held the variable, its argv named it nowhere, its container
+mounted no stage, and every shard read went to the pool while the claim record
+said `resident`. An action outside the residency contract keeps a byte-identical
+argv. Gate: `tests/test_tessera_campaign_container.py` (the residency tests).
 
 Re-stamped (2026-09-17, `campaign/identity-and-coverage-main-20260916`) for
 **a joint AURA row being only its own cell**. The per-cell AQUA coverage
