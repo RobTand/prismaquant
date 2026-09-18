@@ -130,6 +130,27 @@ def _require_unclipped_policy():
                          "the native FP8 operator executes the unclipped per-token dynamic contract")
 
 
+def bind_priced_arithmetic():
+    """Declare, once, the activation arithmetic this process prices rows with.
+
+    A cell whose rung quantises its input is priced against the operator a serve
+    runs, not against a re-implementation of it: ``quantize_dequantize`` refuses
+    an unbound priced path rather than falling back to PrismaQuant's Torch model,
+    because the two disagreed on 24 of 172,032 probed elements by one E2M1 code
+    (RobTand/prismaquant#567).  The binding is the caller's declaration -- the
+    contract chooses nothing -- and this driver is the caller, so it says so here,
+    before any render, score or cache work.
+
+    ``require=True`` is the point: an image that cannot register
+    ``torch.ops._C.scaled_fp4_quant`` cannot price these rows, and that is a
+    refusal with a name rather than a panel measured on the wrong arithmetic.
+    """
+    from prismaquant.nvfp4_activation_contract import bind_served_quantizer_identity
+
+    return bind_served_quantizer_identity(
+        require=True, context="native dense cell preparation")
+
+
 def prepare(args):
     import torch
     from safetensors import safe_open
@@ -145,6 +166,7 @@ def prepare(args):
     from prismaquant.perturbed_x_cache import activation_cache_filename
 
     _require_unclipped_policy()
+    served_quantizer = bind_priced_arithmetic()
     if not torch.cuda.is_available():
         raise RuntimeError("native cell preparation requires an admitted GPU action")
     plan = json.loads(Path(args.cells).read_text())
@@ -179,6 +201,11 @@ def prepare(args):
                 "activation_scale_policy": {"PRISMAQUANT_PROD_ACT_SCALES": os.environ.get("PRISMAQUANT_PROD_ACT_SCALES")},
                 "torch": torch.__version__, "cuda": torch.version.cuda, "device": torch.cuda.get_device_name(),
                 "arithmetic": arithmetic_identity(torch.bfloat16), "start_unix": start,
+                # Which activation arithmetic priced these rows.  A row priced by
+                # the registered operator and a row priced by the Torch model are
+                # different objects (#567), so the answer travels with the run
+                # rather than being inferred from the image name.
+                "served_quantizer": served_quantizer.as_record(),
                 "scope": "layer-0 cells of served Qwen3-0.6B artifacts; fresh renders, real joint AURA rows; "
                          "no served timing, no promotion"}
     dump(out / "identity.json", identity)
