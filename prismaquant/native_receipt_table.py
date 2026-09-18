@@ -28,8 +28,17 @@ text, and the CLI's exit code says which of the three answers it got:
 =====  ================================================================
 exit   what the table is
 =====  ================================================================
-``0``  both gates admitted. Unreachable while debt D37 stands, because
-       ``admit_fixed_resources`` cannot pass for any v2 table.
+``0``  both gates admitted: the table names a transient charge boundary
+       (``transient_charge_boundary.BOUNDARY_V1``, stamped by
+       ``derive_context`` from the receipts' own bound composition), the
+       report names the same one, the identity, route-class coverage and
+       reserved-witness checks pass, and the report carries every owed
+       observation. The boundary no longer stands in the way (D37); what
+       still does is the report consumer: it recomputes nothing from
+       ``timing_captures``, ``owner_views``, ``runtime_provenance_relation``
+       or ``observer_qualification`` (null in a v1 report, carried in a v2
+       one), so every report refuses on those four by name until the
+       consumer recomputes from them (tessera#399 / #556).
 ``3``  the rows are admitted and priced; the fixed charge is refused,
        and ``admission.refusal`` is the gate's reason for it verbatim.
 ``2``  the loader refused the table outright, so no row is priced and
@@ -404,7 +413,11 @@ def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: st
                       "decode_ms": float(statistics.median(measurements["decode"]["samples_ms"])),
                       "serialized_bytes": observation["serialized_unit_bytes"],
                       "resident_bytes": observation["resident_bytes"],
-                      "peak_scratch_bytes": max(scratch), "activation_bytes": max(activation), "kv_bytes": 0},
+                      "peak_scratch_bytes": max(scratch), "activation_bytes": max(activation), "kv_bytes": 0,
+                      # The returned output per phase, the witness the boundary's
+                      # escape check identifies the escaping allocation by.
+                      "output_bytes": {phase: observation["phases"][phase]["output_bytes"]
+                                       for phase in PHASES}},
         "prefill": measurements["prefill"], "decode": measurements["decode"],
     }
     binding = {"unit": unit, "format": fmt, "run_id": run_id,
@@ -467,15 +480,40 @@ def unshared_native_libraries(panels: list[Mapping]) -> list[dict]:
             for panel in panels]
 
 
-def derive_context(panels: list[Mapping], *, relation: Mapping) -> dict:
+def derive_context(panels: list[Mapping], *, relation: Mapping,
+                   observations: list[Mapping] | None = None) -> dict:
     """The one workload/runtime context every bound panel was frozen under.
 
     "One runtime" means one box, one image, one package and one execution mode
     -- not one set of loaded kernels. See :data:`PER_ROUTE_RUNTIME_FIELD` for
     why those are two questions and where the second one is answered.
+
+    ``observations`` are the consumed receipts beside the panels. When they
+    are given, the context is stamped with the transient charge boundary whose
+    native side every phase's bound declares (``resource_bound.composition``),
+    and refused when any bound declares another composition; when they are
+    not, the context names no boundary and the table's fixed charge refuses
+    by name downstream. Nothing here defaults the stamp.
     """
     if not panels:
         raise RuntimePriceError("no native receipts were bound; a table needs at least one row")
+    boundary = None
+    if observations is not None:
+        from .transient_charge_boundary import BOUNDARY_V1, NATIVE_BOUND_COMPOSITION
+        if len(observations) != len(panels):
+            raise RuntimePriceError("derive_context needs one observation per bound panel")
+        compositions = {}
+        for observation in observations:
+            for phase in PHASES:
+                bound = observation["phases"][phase].get("resource_bound")
+                composition = bound.get("composition") if isinstance(bound, Mapping) else None
+                compositions.setdefault(composition, []).append(f"{observation['unit']}@{observation['format']}:{phase}")
+        if set(compositions) != {NATIVE_BOUND_COMPOSITION}:
+            raise RuntimePriceError(
+                "native receipts declare resource bound compositions "
+                f"{sorted(map(str, compositions))}; boundary {BOUNDARY_V1} is defined over "
+                f"{NATIVE_BOUND_COMPOSITION!r} only")
+        boundary = BOUNDARY_V1
     first = panels[0]
     _require_one_runtime(panels)
     structures = {PANEL_STRUCTURE[panel["schema"]] for panel in panels}
@@ -510,6 +548,7 @@ def derive_context(panels: list[Mapping], *, relation: Mapping) -> dict:
         "prompt_tokens": first["phases"]["prefill"]["m"], "batch_size": 1,
         "tensor_parallel": execution["tensor_parallel"], "graph_mode": execution["execution_mode"],
         "operator_routes": {},
+        **({"transient_charge_boundary": boundary} if boundary is not None else {}),
     }
 
 
@@ -607,7 +646,8 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
             raise RuntimePriceError(f"duplicate native receipt for {key[0]}@{key[1]}")
         seen.add(key)
         bound.append(item)
-    context = derive_context([item["panel"] for item in bound], relation=relation_payload)
+    context = derive_context([item["panel"] for item in bound], relation=relation_payload,
+                             observations=[item["observation"] for item in bound])
     routes: dict[str, dict[str, str]] = {}
     for item in bound:
         routes.setdefault(item["row"]["unit"], {})[item["row"]["format"]] = item["row"]["binding"]["operator_route"]

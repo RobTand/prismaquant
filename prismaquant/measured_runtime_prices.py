@@ -43,6 +43,15 @@ RESOURCE_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes", "resident_byte
 #: existed keeps its digest.
 OFF_STEP_FIELD = "non_step_transient_peak_bytes"
 RESOURCE_FIELDS_WITH_OFF_STEP = RESOURCE_FIELDS + (OFF_STEP_FIELD,)
+#: A native row's returned output per measured phase, in logical bytes -- the
+#: observation's ``output_bytes`` (``native_operator_panel.consume_native_receipt``).
+#: Under ``transient_charge_boundary`` v1 the returned output is native-row-owned
+#: and already inside ``peak_scratch_bytes``; this field is the witness the
+#: escape check (design §2.3 item 3) identifies it by, never a charge. Optional
+#: on the wire so every table emitted before it existed keeps its digest.
+OUTPUT_BYTES_FIELD = "output_bytes"
+#: The transient charge boundary a context names (``RuntimeContext``).
+CONTEXT_BOUNDARY_FIELD = "transient_charge_boundary"
 
 #: The per-rank spelling of a row's resources, for a serving unit measured
 #: under tensor parallelism. One ranked MoE owner has no single scalar answer
@@ -199,6 +208,12 @@ class RuntimeContext:
     graph_mode: str
     operator_routes: Mapping[str, Mapping[str, str]]
     runtime_identity_kind: str | None = None
+    #: The native/full-engine transient charge boundary every row of the table
+    #: was priced under (``transient_charge_boundary.BOUNDARIES``). Appears in
+    #: ``as_dict`` only when set, so a context emitted before the field existed
+    #: re-emits byte-identically and keeps its digest. A table that names none
+    #: prices operators and nothing else: its fixed charge refuses by name.
+    transient_charge_boundary: str | None = None
 
     def __post_init__(self):
         if not isinstance(self.serving_context, ServingContext):
@@ -206,6 +221,8 @@ class RuntimeContext:
         _string(self.gpu_identity, "gpu_identity")
         if self.runtime_identity_kind not in (None, PROVENANCE_IDENTITY_KIND):
             raise RuntimePriceError("unknown measured runtime identity kind")
+        if self.transient_charge_boundary is not None:
+            _string(self.transient_charge_boundary, CONTEXT_BOUNDARY_FIELD)
         for name in ("runtime_sha256", "source_sha256", "calibration_sha256"):
             _sha(getattr(self, name), name)
         for name in ("prompt_tokens", "batch_size", "tensor_parallel"):
@@ -235,7 +252,9 @@ class RuntimeContext:
                 **{name: getattr(self, name) for name in (
                     "gpu_identity", "runtime_sha256", "source_sha256", "calibration_sha256",
                     "prompt_tokens", "batch_size", "tensor_parallel", "graph_mode")},
-                "operator_routes": {unit: dict(formats) for unit, formats in self.operator_routes.items()}}
+                "operator_routes": {unit: dict(formats) for unit, formats in self.operator_routes.items()},
+                **({CONTEXT_BOUNDARY_FIELD: self.transient_charge_boundary}
+                   if self.transient_charge_boundary is not None else {})}
 
 
 def parse_runtime_context(payload: Mapping) -> RuntimeContext:
@@ -247,6 +266,11 @@ def parse_runtime_context(payload: Mapping) -> RuntimeContext:
         fields += ("runtime_identity_kind",)
         if payload.get("runtime_identity_kind") != PROVENANCE_IDENTITY_KIND:
             raise RuntimePriceError("v2 runtime context requires an explicit provenance relation identity")
+    if CONTEXT_BOUNDARY_FIELD in payload:
+        # Optional on the wire, never defaulted: a context that omits it names
+        # no boundary, and a null value is refused rather than read as none.
+        fields += (CONTEXT_BOUNDARY_FIELD,)
+        _string(payload[CONTEXT_BOUNDARY_FIELD], "runtime context " + CONTEXT_BOUNDARY_FIELD)
     _object(payload, fields, "runtime context")
     if payload["schema"] not in (CONTEXT_SCHEMA, PROVENANCE_CONTEXT_SCHEMA):
         raise RuntimePriceError(f"runtime context schema must be {CONTEXT_SCHEMA}")
@@ -279,6 +303,7 @@ class RuntimeResources:
     activation_bytes: int
     kv_bytes: int = 0
     non_step_transient_peak_bytes: int | None = None
+    output_bytes: Mapping[str, int] | None = None
 
     def __post_init__(self):
         _number(self.prefill_ms, "prefill_ms")
@@ -288,20 +313,31 @@ class RuntimeResources:
             _integer(getattr(self, name), name)
         if self.non_step_transient_peak_bytes is not None:
             _integer(self.non_step_transient_peak_bytes, OFF_STEP_FIELD)
+        if self.output_bytes is not None:
+            if not isinstance(self.output_bytes, Mapping) or not self.output_bytes:
+                raise RuntimePriceError(f"{OUTPUT_BYTES_FIELD} must be a nonempty phase -> bytes mapping")
+            phases = {}
+            for phase, size in sorted(self.output_bytes.items()):
+                phases[_string(phase, OUTPUT_BYTES_FIELD + " phase")] = _integer(size, f"{OUTPUT_BYTES_FIELD} {phase}")
+            object.__setattr__(self, "output_bytes", MappingProxyType(phases))
 
     def as_dict(self) -> dict:
-        # The off-step field appears only when priced, so a table emitted
-        # before it existed re-emits byte-identically and keeps its digest.
+        # The off-step and output fields appear only when priced, so a table
+        # emitted before either existed re-emits byte-identically and keeps
+        # its digest.
         payload = {field: getattr(self, field) for field in RESOURCE_FIELDS}
         if self.non_step_transient_peak_bytes is not None:
             payload[OFF_STEP_FIELD] = self.non_step_transient_peak_bytes
+        if self.output_bytes is not None:
+            payload[OUTPUT_BYTES_FIELD] = dict(self.output_bytes)
         return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping) -> RuntimeResources:
-        fields = (RESOURCE_FIELDS_WITH_OFF_STEP
-                  if isinstance(payload, Mapping) and OFF_STEP_FIELD in payload
-                  else RESOURCE_FIELDS)
+        fields = RESOURCE_FIELDS
+        if isinstance(payload, Mapping):
+            fields += (OFF_STEP_FIELD,) if OFF_STEP_FIELD in payload else ()
+            fields += (OUTPUT_BYTES_FIELD,) if OUTPUT_BYTES_FIELD in payload else ()
         return cls(**_object(payload, fields, "resources"))
 
 
@@ -816,6 +852,29 @@ def admitted_fixed_resources(table: MeasuredRuntimeTable) -> RuntimeResources:
             "v2 fixed runtime resources require full-engine producer admission: "
             + (table.fixed_resources_refusal or "the loader performed no admission"))
     return table.fixed_resources
+
+
+def admitted_charge_boundary(table: MeasuredRuntimeTable):
+    """The boundary the admitted fixed charge composes under, or the refusal.
+
+    A fixed charge has no composition without a boundary: which row terms the
+    DP adds and which it reads as witnesses is the boundary's
+    ``row_terms_charged``, so the solver takes the spec beside the charge
+    (``allocator_solver.solve_runtime_frontier``). It is read through the same
+    gate as the charge, and a table whose context names no boundary cannot
+    have been admitted, so this never returns a default.
+    """
+    from .transient_charge_boundary import BOUNDARIES
+    admitted_fixed_resources(table)
+    name = table.context.transient_charge_boundary
+    if name is None:
+        raise RuntimePriceError(
+            "the table declares no transient charge boundary, so its fixed charge has no "
+            "composition")
+    spec = BOUNDARIES.get(name)
+    if spec is None:
+        raise RuntimePriceError(f"transient charge boundary {name!r} is not a registered boundary")
+    return spec
 
 
 #: The one scope under which a table whose fixed charge is refused may still be

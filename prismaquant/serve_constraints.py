@@ -804,8 +804,16 @@ def evaluate_measured_assignment(
     slos: ServeSLOs,
     table_identity: Mapping[str, Any],
     fixed_resource_scope: str | None = None,
+    boundary=None,
 ) -> ServeFeasibility:
     """Reprice the full expanded assignment using exact measured group rows.
+
+    ``boundary`` is the ``transient_charge_boundary.BoundarySpec`` the fixed
+    charge composes under, the same object the exact search was handed. A
+    device budget evaluated against a nonzero fixed device charge with no
+    boundary refuses: the charge has no composition. Under v1 a row's
+    ``activation_bytes`` is not added into ``device_memory_bytes`` (it is the
+    input the fixed terms already hold); it stays in ``coverage`` as a witness.
 
     A whole fused/packed operator is charged once. Its measured row must
     describe precisely the selected member formats; leaf measurements never
@@ -879,9 +887,18 @@ def evaluate_measured_assignment(
         resident = activation = scratch = kv = None
         device = None
     else:
+        fixed_device_charge = (fixed_resources.resident_bytes + fixed_resources.activation_bytes
+                               + fixed_resources.peak_scratch_bytes + fixed_resources.kv_bytes
+                               + (getattr(fixed_resources, "non_step_transient_peak_bytes", None) or 0))
+        if (boundary is None and fixed_resource_scope is None and fixed_device_charge
+                and slos.device_budget_bytes is not None):
+            raise ServeConstraintError(
+                "a fixed device charge was supplied with no transient charge boundary, so it "
+                "has no composition with the priced rows")
+        charge_row_activation = True if boundary is None else bool(boundary.charges_row_activation)
+        row_activation = max((row.activation_bytes for row in selected), default=0)
         resident = fixed_resources.resident_bytes + sum(row.resident_bytes for row in selected)
-        activation = fixed_resources.activation_bytes + max(
-            (row.activation_bytes for row in selected), default=0)
+        activation = fixed_resources.activation_bytes + (row_activation if charge_row_activation else 0)
         scratch = fixed_resources.peak_scratch_bytes + max(
             (row.peak_scratch_bytes for row in selected), default=0)
         kv = fixed_resources.kv_bytes + slos.kv_bytes
@@ -944,6 +961,13 @@ def evaluate_measured_assignment(
                              if per_rank is not None else
                              {"resident_bytes": resident, "activation_bytes": activation,
                               "peak_scratch_bytes": scratch, "kv_bytes": kv,
+                              # The row-side input peak, published as the shape
+                              # witness it is under v1 whether or not it was
+                              # added into `activation_bytes` above.
+                              "row_activation_bytes_witness": row_activation,
+                              "row_activation_charged": charge_row_activation,
+                              "transient_charge_boundary": (None if boundary is None
+                                                            else boundary.name),
                               "operator_scratch_reserve_bytes": slos.peak_scratch_bytes,
                               "serialized_bytes": fixed_resources.serialized_bytes
                               + sum(row.serialized_bytes for row in selected),

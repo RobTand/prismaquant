@@ -9,8 +9,7 @@ Each test below is a discrimination, not an assertion that a refusal exists:
 it names a refusal the agreeing baseline does not carry and shows it appears
 only when its property is broken. A check that cannot fail is not a check, so
 the refusals this schema version can never lift -- the absent timing
-partition, the unversioned native/full-engine charge boundary, the fixed
-member roster the partition does not name -- are asserted as *disclosures* in
+partition, the fixed member roster the partition does not name -- are asserted as *disclosures* in
 one test that says so, never dressed up as checks.
 """
 import copy
@@ -255,14 +254,17 @@ def test_an_unsupported_boundary_refuses(tmp_path, overrides, expected):
 # Assignment-dependent shared state, and the roster the reference partitions.
 # --------------------------------------------------------------------------
 
-def test_a_second_priced_format_for_one_unit_refuses(tmp_path):
-    """One measured assignment cannot establish that shared workspace, cache
-    policy or persistent buffers stay unchanged under an alternative."""
+def test_a_second_priced_format_for_one_unit_is_the_boundary_question(tmp_path):
+    """One measured assignment prices an alternative only under a named
+    transient charge boundary, whose route-class scope decides it
+    (`test_transient_charge_boundary`). Without one, the multi-format menu is
+    refused through the same one sentence as everything else the boundary
+    owns, never through a sentence of its own."""
     rows = [("unit.a", "NVFP4"), ("unit.a", "FP8_DYNAMIC"), ("unit.b", "NVFP4")]
-    expected = ("the table prices more than one format for ['unit.a'], and one measured "
-                "assignment establishes no invariant fixed charge under the others")
-    assert expected not in refusals(tmp_path)
-    assert expected in refusals(tmp_path, rows=rows)
+    reasons = refusals(tmp_path, rows=rows)
+    assert not any("prices more than one format" in reason for reason in reasons)
+    assert ("the table declares no transient charge boundary, so no candidate activation or "
+            "scratch term may be compared to a priced row") in reasons
 
 
 def test_a_census_that_omits_a_priced_unit_refuses(tmp_path):
@@ -388,8 +390,8 @@ def test_the_gate_names_what_the_producer_still_owes(tmp_path):
             # the open domain rather than an observation nothing can read.
             "domain worker_startup is not closed, so every term depending on it stays null",
             "domain cache_capacity is not closed, so every term depending on it stays null",
-            "the native-row and full-engine transient charge boundary is not versioned, so no "
-            "candidate activation or scratch term may be compared to a priced row",
+            "the table declares no transient charge boundary, so no candidate activation or "
+            "scratch term may be compared to a priced row",
             "the partition names no fixed member, so this table's fixed_assignment binds to no "
             "observed allocation"]
     for reason in owed:

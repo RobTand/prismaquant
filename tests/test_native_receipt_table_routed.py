@@ -502,6 +502,7 @@ def _routed_gate(joined_cell, tmp_path, *, world_size=1, samples=None, tensor_pa
                                        manifest_dir=tmp_path, table_dir=tmp_path)
     context = parse_runtime_context({
         "schema": PROVENANCE_CONTEXT_SCHEMA, "runtime_identity_kind": PROVENANCE_IDENTITY_KIND,
+        "transient_charge_boundary": "prismaquant.transient_charge_boundary.v1",
         "serving_context": {"platform": "sm_121", "structure": "routed_moe", "residency": "resident",
                             "runtime_image": panel["runtime"]["image"], "execution_mode": "eager"},
         "gpu_identity": "synthetic-gpu", "runtime_sha256": "b" * 64,
@@ -1067,6 +1068,9 @@ def _glm_cli_fixture(tmp_path, *, budgets=GLM_CLI_BUDGETS):
     receipt.write_text("Synthetic CPU test fixture, not GPU measurement evidence.\n")
     receipt_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
     context = {"schema": CONTEXT_SCHEMA,
+        # The fixture declares a fixed charge inline; it composes with the
+        # priced rows only under a named transient charge boundary.
+        "transient_charge_boundary": "prismaquant.transient_charge_boundary.v1",
         "serving_context": {"platform": "sm_121", "structure": "routed_moe",
                             "residency": "resident",
                             "runtime_image": panel["runtime"]["image"], "execution_mode": "eager"},

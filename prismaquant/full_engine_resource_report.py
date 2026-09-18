@@ -1,4 +1,4 @@
-"""Pure artifact consumer for ``tessera.full_engine_resource_report.v1``.
+"""Pure artifact consumer for ``tessera.full_engine_resource_report.v1`` and ``.v2``.
 
 This module reads one producer-emitted JSON report and nothing else. It does
 not import, vendor, launch or link the serving runtime, and it adds no
@@ -35,6 +35,14 @@ from .measured_runtime_prices import RuntimePriceError, _integer, _object, _sha,
 from .runtime_provenance import ArtifactReader, _equal
 
 REPORT_SCHEMA = "tessera.full_engine_resource_report.v1"
+#: The producer's second envelope (the runtime's PR 556): the same seven members, plus
+#: an observer-allocation class in the partition and three producer-derived
+#: blocks (``admission``, ``fixed_resources``, ``timing_terms``) this consumer
+#: validates as carried and reads nothing from. The four observations v1 owed
+#: as null may be carried; this consumer recomputes no term and closes no
+#: domain from them, and says so by name where a domain is closed on one.
+REPORT_SCHEMA_V2 = "tessera.full_engine_resource_report.v2"
+REPORT_SCHEMAS = (REPORT_SCHEMA, REPORT_SCHEMA_V2)
 IDENTITY_SCHEMA = "tessera.full_engine_resource_identity.v1"
 PARTITION_SCHEMA = "tessera.full_engine_resource_partition.v1"
 
@@ -223,6 +231,13 @@ _RUN_DIGESTS = ("assignment_sha256", "canonical_units_sha256", "configuration_sh
                 "model_sha256", "runtime_manifest_sha256", "workload_sha256")
 _EXECUTION_FIELDS = ("graph_mode", "residency", "topology")
 _REFERENCE_FIELDS = ("canonical_census", "runtime_binding", "selected_rows")
+#: The boundary the partition was classified against (design §2.2). Optional
+#: on the wire; compared verbatim by the admission gate.
+REFERENCE_BOUNDARY_FIELD = "transient_charge_boundary"
+#: The reserved-extent witness (design §3.7): both allocator readings at one
+#: instant. Optional on the wire; a boundary that requires it refuses by name.
+RESERVATION_SLACK_FIELD = "reservation_slack"
+RESERVATION_SLACK_FIELDS = ("allocated_bytes", "reserved_bytes", "sampled_at", "scope")
 _WORKLOAD_FIELDS = ("calibration", "prompt_ids", "sampling")
 _OBSERVATION_FIELDS = ("artifacts", "capture_sha256", "checkpoints", "cuda_argument_domains",
                        "external_native_peak_bytes", "issues", "kv_observations",
@@ -270,6 +285,12 @@ _SCOPE_FIELDS = ("allocation_scope", "expressible", "invariance",
                  "unavailable_terms", "uncharged_allocation_count",
                  "unclassified_allocation_count")
 _DOMAIN_FIELDS = ("evidence", "reason", "state")
+#: What v2 adds to each member, by name. ``observer_allocations`` is the
+#: producer's own observer's allocations, set aside from every class; this
+#: consumer defines no shape for one, so a non-empty list refuses by name.
+_PARTITION_FIELDS_V2 = _PARTITION_FIELDS + ("observer_allocations",)
+_SCOPE_FIELDS_V2 = _SCOPE_FIELDS + ("observer_allocation_count",)
+_DERIVED_FIELDS_V2 = _DERIVED_FIELDS + ("admission", "fixed_resources", "timing_terms")
 
 
 # --------------------------------------------------------------------------
@@ -373,8 +394,11 @@ def _terms(value: Any, where: str) -> dict[str, Any]:
             for name in TERMS}
 
 
-def _scope(value: Any, where: str) -> Mapping:
-    scope = _object(value, _SCOPE_FIELDS, where)
+def _scope(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
+    scope = _object(value, _SCOPE_FIELDS_V2 if schema == REPORT_SCHEMA_V2 else _SCOPE_FIELDS,
+                    where)
+    if schema == REPORT_SCHEMA_V2:
+        _index(scope["observer_allocation_count"], where + " observer allocation count")
     for key, supported in SUPPORTED_SCOPE.items():
         _string(scope[key], f"{where} {key}")
         if scope[key] != supported:
@@ -556,8 +580,35 @@ def _checkpoint(value: Any, where: str) -> Mapping:
     return row
 
 
-def _observations(value: Any, where: str) -> Mapping:
-    observations = _object(value, _OBSERVATION_FIELDS, where)
+def _reservation_slack(value: Any, where: str) -> Mapping:
+    """One instant's two allocator readings, so the slack is recomputable.
+
+    ``reserved_bytes`` is what the caching allocator holds in segments and what
+    the box holds; ``allocated_bytes`` is the live block extent at the same
+    instant. The consumer recomputes their difference and never reads a slack
+    the producer wrote.
+    """
+    record = _object(value, RESERVATION_SLACK_FIELDS, where)
+    allocated = _index(record["allocated_bytes"], where + " allocated bytes")
+    reserved = _index(record["reserved_bytes"], where + " reserved bytes")
+    if reserved < allocated:
+        raise RuntimePriceError(
+            f"{where}: reserved bytes {reserved} are below allocated bytes {allocated}; every "
+            "allocated block lives inside a reserved segment")
+    _string(record["sampled_at"], where + " sampled at")
+    _string(record["scope"], where + " scope")
+    return record
+
+
+def _observations(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
+    # `reservation_slack` is optional on the wire for the same reason the
+    # reference boundary is: a report emitted before it existed still reads,
+    # and a boundary that requires it refuses its absence by name.
+    fields = _OBSERVATION_FIELDS + (
+        (RESERVATION_SLACK_FIELD,) if isinstance(value, Mapping) and RESERVATION_SLACK_FIELD in value else ())
+    observations = _object(value, fields, where)
+    if RESERVATION_SLACK_FIELD in observations and observations[RESERVATION_SLACK_FIELD] is not None:
+        _reservation_slack(observations[RESERVATION_SLACK_FIELD], where + " reservation slack")
     _sha(observations["capture_sha256"], where + " capture digest")
     _list(observations["artifacts"], where + " artifacts")
     _list(observations["issues"], where + " issues")
@@ -595,10 +646,19 @@ def _observations(value: Any, where: str) -> Mapping:
                 f"{where}: step coverage claims {coverage['state']!r} where its own declared "
                 f"and executed counts support {recomputed!r}")
     for name in OWED_OBSERVATIONS:
-        if observations[name] is not None:
+        if observations[name] is None:
+            continue
+        if schema != REPORT_SCHEMA_V2:
             raise RuntimePriceError(
                 f"{where}: {name} is not null, but this schema version defines no shape for it, "
                 "so nothing here can recompute a term or close a domain from it")
+        # v2 carries these as the producer's own records. They are read as
+        # carried -- a record naming its own schema -- and nothing below
+        # recomputes a term or closes a domain from one.
+        record = observations[name]
+        if not isinstance(record, Mapping) or not isinstance(record.get("schema"), str):
+            raise RuntimePriceError(
+                f"{where}: {name} is carried but names no schema, so it cannot be identified")
     startup = observations["worker_startup_records"]
     if startup is not None:
         for item in _list(startup, where + " worker startup records"):
@@ -650,8 +710,19 @@ def _resolved_evidence(domains: Mapping, observations: Mapping, where: str) -> N
                     f"{where} {name}: evidence {item!r} names no observation this report carries")
 
 
-def _partition(value: Any, where: str) -> Mapping:
-    partition = _object(value, _PARTITION_FIELDS, where)
+def _partition(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
+    partition = _object(value, _PARTITION_FIELDS_V2 if schema == REPORT_SCHEMA_V2
+                        else _PARTITION_FIELDS, where)
+    if schema == REPORT_SCHEMA_V2:
+        observer = _list(partition["observer_allocations"], where + " observer allocations")
+        if observer:
+            raise RuntimePriceError(
+                f"{where}: carries {len(observer)} observer allocations, and this consumer "
+                "defines no shape for one, so it cannot tell them from the classes it recomputes")
+        if partition["scope"].get("observer_allocation_count") != len(observer):
+            raise RuntimePriceError(
+                f"{where}: scope claims another observer allocation count than the partition "
+                "carries")
     _equal(partition["schema"], PARTITION_SCHEMA, where + " schema")
     _sha(partition["capture_sha256"], where + " capture digest")
     _run_identity(partition["identity"], where + " identity")
@@ -667,7 +738,7 @@ def _partition(value: Any, where: str) -> Mapping:
             f"domains are {ADMITTED_DOMAINS_SOURCE!r}, because supplied domains close on a "
             f"caller's word rather than on evidence")
     _terms(partition["terms"], where + " terms")
-    _scope(partition["scope"], where + " scope")
+    _scope(partition["scope"], where + " scope", schema=schema)
     _string_list(partition["units"], where + " units")
     rows = []
     for item in _list(partition["membership"], where + " membership"):
@@ -738,10 +809,11 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
     the outer hash to reach the semantic checks below.
     """
     _, report = ArtifactReader(Path(root)).json(reference, "full-engine resource report")
-    if report.get("schema") != REPORT_SCHEMA:
+    schema = report.get("schema")
+    if schema not in REPORT_SCHEMAS:
         raise RuntimePriceError(
-            f"full-engine resource report: unsupported schema {report.get('schema')!r}; "
-            f"this consumer reads only {REPORT_SCHEMA}")
+            f"full-engine resource report: unsupported schema {schema!r}; "
+            f"this consumer reads only {', '.join(REPORT_SCHEMAS)}")
     missing = [name for name in ENVELOPE_MEMBERS if name not in report]
     if missing:
         raise RuntimePriceError("full-engine resource report: missing envelope member "
@@ -757,16 +829,34 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
             raise RuntimePriceError(
                 f"report execution: unsupported {key} {execution[key]!r}; the scalar device budget "
                 f"covers only {supported!r}")
-    reference_member = _object(report["reference"], _REFERENCE_FIELDS, "report reference")
+    # The boundary name is optional on the wire so every report emitted before
+    # it existed still reads; a report that carries it names the owner map its
+    # partition was classified against, and the admission gate compares it
+    # verbatim to the table's (`transient_charge_boundary.require_boundary`).
+    reference_fields = _REFERENCE_FIELDS + (
+        (REFERENCE_BOUNDARY_FIELD,) if REFERENCE_BOUNDARY_FIELD in report["reference"] else ())
+    reference_member = _object(report["reference"], reference_fields, "report reference")
     _list(reference_member["selected_rows"], "report reference selected rows")
+    if REFERENCE_BOUNDARY_FIELD in reference_member:
+        _optional_string(reference_member[REFERENCE_BOUNDARY_FIELD],
+                         "report reference transient charge boundary")
     workload = _object(report["workload"], _WORKLOAD_FIELDS, "report workload")
     _list(workload["prompt_ids"], "report workload prompt ids")
-    observations = _observations(report["observations"], "report observations")
-    partition = _partition(report["partition"], "report partition")
+    observations = _observations(report["observations"], "report observations", schema=schema)
+    partition = _partition(report["partition"], "report partition", schema=schema)
     _resolved_evidence(partition["domains"], observations, "report partition domain")
-    derived = _object(report["derived"], _DERIVED_FIELDS, "report derived")
+    derived = _object(report["derived"],
+                      _DERIVED_FIELDS_V2 if schema == REPORT_SCHEMA_V2 else _DERIVED_FIELDS,
+                      "report derived")
+    if schema == REPORT_SCHEMA_V2:
+        # The producer's own admission verdict, fixed-resource composition and
+        # timing terms. Carried, and read by nothing here: every number this
+        # consumer admits is its own recomputation.
+        for name in ("admission", "fixed_resources", "timing_terms"):
+            if not isinstance(derived[name], Mapping):
+                raise RuntimePriceError(f"report derived {name}: expected an object")
     _terms(derived["terms"], "report derived terms")
-    _scope(derived["scope"], "report derived scope")
+    _scope(derived["scope"], "report derived scope", schema=schema)
     _optional_index(derived["scalar_budget_bytes"], "report derived scalar budget bytes")
     _optional_index(derived["non_step_transient_peak_bytes"],
                     "report derived non-step transient peak bytes")
@@ -1352,6 +1442,22 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
         claimed = claimed_membership.get(allocation_id)
         if claimed is not None and any(claimed[key] != row[key] for key in _MEMBERSHIP_FIELDS):
             disagree(f"allocation {allocation_id} is partitioned differently than it recomputes")
+    if (report["schema"] == REPORT_SCHEMA_V2 and observations["owner_views"] is not None
+            and (set(by_id) != set(claimed_membership)
+                 or any(claimed_membership[key][field] != by_id[key][field]
+                        for key in set(by_id) & set(claimed_membership)
+                        for field in _MEMBERSHIP_FIELDS))):
+        # A v2 producer classifies on its ownership observation (site and
+        # history rules over `owner_views`); this consumer recomputes
+        # membership from `observed_categories` and `lifetime_scope` alone.
+        # The disagreements above are that gap, named once so they are not
+        # read as the producer contradicting its own ledger.
+        views = observations["owner_views"].get("views")
+        rules = sorted((views or {}).get("rules") or ()) if isinstance(views, Mapping) else []
+        blocking.append(f"the partition classifies on owner_views (rules {rules}), which this "
+                        f"consumer recomputes no membership from at {report['schema']}, so its "
+                        "membership disagreements are this consumer's gap rather than the "
+                        "producer's contradiction")
     claimed_unclassified = {row["allocation_id"]: row for row in partition["unclassified_allocations"]}
     if {row["allocation_id"] for row in unclassified} != set(claimed_unclassified):
         disagree("the partition's unclassified allocations are not the ones this consumer cannot classify")
@@ -1397,10 +1503,25 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
     closed = _recompute_domains(observations, identity)
     for name in DOMAINS:
         claimed = partition["domains"][name]
-        if (claimed["state"] == "closed") != closed[name]:
-            disagree(f"the partition block calls domain {name} {claimed['state']} "
-                     f"where this consumer recomputes it as "
-                     f"{'closed' if closed[name] else 'not closed'}")
+        if (claimed["state"] == "closed") == closed[name]:
+            continue
+        # Only an observation v1 owed as null and v2 carries counts: a domain
+        # closed on a checked observation this consumer does read is compared
+        # as a claim, exactly as before.
+        carried = [item for item in claimed["evidence"]
+                   if item in OWED_OBSERVATIONS and observations.get(item) is not None]
+        if claimed["state"] == "closed" and name not in CHECKABLE_DOMAINS and carried:
+            # The producer closed it on an observation it carries and this
+            # consumer defines no recomputation for. That is not the producer
+            # contradicting itself; it is a closure this side cannot verify,
+            # and it stays not closed here for that reason.
+            blocking.append(f"domain {name} is closed by the producer on {carried}, which this "
+                            f"consumer recomputes nothing from at {report['schema']}, so it "
+                            "stays not closed here")
+            continue
+        disagree(f"the partition block calls domain {name} {claimed['state']} "
+                 f"where this consumer recomputes it as "
+                 f"{'closed' if closed[name] else 'not closed'}")
     open_domains = tuple(name for name in DOMAINS if not closed[name])
     for name in open_domains:
         blocking.append(f"domain {name} is not closed, so every term depending on it stays null")
@@ -1465,7 +1586,7 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
     if obligation is None:
         blocking.append("no placement obligation is recomputable from this report")
 
-    return ReportVerdict(schema=REPORT_SCHEMA, fixture_provenance=identity["fixture_provenance"],
+    return ReportVerdict(schema=report["schema"], fixture_provenance=identity["fixture_provenance"],
                          recomputed_terms=terms, recomputed_scalar_budget_bytes=budget,
                          recomputed_non_step_transient_peak_bytes=non_step_peak,
                          recomputed_placement_obligation_bytes=obligation,
