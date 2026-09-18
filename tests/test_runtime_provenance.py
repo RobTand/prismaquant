@@ -616,3 +616,74 @@ def test_a_declared_plugin_source_is_recomputed_not_accepted(relation_fixture, m
         _refresh_embedded_package(evidence, relation)
     with pytest.raises(RuntimePriceError):
         relation_load(relation_fixture)
+
+
+ROUTE_LIBRARY = "/cache/extensions/tessera_nvfp4_synthetic/tessera_nvfp4_synthetic.so"
+
+
+def _native_loads_route_library(evidence, relation):
+    """The native run loads a route-specific JIT library, as every fp4 cell of
+    2026-09-13 loaded ``tessera_nvfp4_84439e84….so`` (#570)."""
+    run = relation["runs"]["native"]
+    raw = evidence.get(run["runtime"])
+    raw["native_libraries"][ROUTE_LIBRARY] = "9" * 64
+    evidence.replace(run["runtime"], raw)
+    relation["production_dependencies"].append({
+        "native_run_id": "native", "native_path": ROUTE_LIBRARY,
+        "full_engine_path": ROUTE_LIBRARY, "sha256": "9" * 64})
+
+
+def _full_engine_run_loading_route_library(evidence, relation, name):
+    """A full-engine observation equal to ``engine`` in every common coordinate
+    (image, GPU, package, contract, core, plugin) that also loaded the library."""
+    run = copy.deepcopy(relation["runs"]["engine"])
+    raw = evidence.get(run["runtime"])
+    raw["base"]["native_libraries"][ROUTE_LIBRARY] = "9" * 64
+    run["runtime"] = evidence.put(name + "-runtime.json", raw)
+    return run
+
+
+def test_one_full_engine_run_that_loaded_the_route_library_binds_it(relation_fixture):
+    """#570 leg (b), option A: the coverage rule is satisfiable in the schema
+    as it stands. One full-engine serve whose artifact exercises the route
+    loads that route's library, and the native cell's bytes bind to it."""
+    evidence, relation, _ = relation_fixture
+    _native_loads_route_library(evidence, relation)
+    relation["runs"]["engine"] = _full_engine_run_loading_route_library(evidence, relation, "engine")
+    admitted = relation_load(relation_fixture)
+    assert admitted["runs"]["engine"]["production"][ROUTE_LIBRARY] == "9" * 64
+    assert admitted["runs"]["native"]["production"][ROUTE_LIBRARY] == "9" * 64
+
+
+def test_a_route_library_the_full_engine_run_never_loaded_refuses_by_name(relation_fixture):
+    """The 2026-09-13 refusal: ``engine-a5`` served a uniform ``TESSERA_FP8``
+    artifact and never loaded the nvfp4 extension the fp4 cells did."""
+    evidence, relation, _ = relation_fixture
+    _native_loads_route_library(evidence, relation)
+    with pytest.raises(RuntimePriceError, match="missing or changed full-engine production dependency"):
+        relation_load(relation_fixture)
+
+
+def test_a_second_full_engine_run_cannot_supply_the_missing_coverage(relation_fixture):
+    """#570 leg (b), decided 2026-09-17: option B is refused as a design.
+
+    ``common`` (image, GPU, versions, arithmetic, package, contract, core
+    manifest, plugin files) is equal across every run by construction, so it
+    cannot tell two full-engine runs apart; what a second run would bring is a
+    library set no single serve produced, under a configuration the native
+    cell was not launched against. The relation keeps ONE full-engine
+    observation, so a native library either binds to the serve that priced the
+    table or is reported unbound -- even when another engine run, equal in
+    every common coordinate, did load those bytes."""
+    evidence, relation, _ = relation_fixture
+    _native_loads_route_library(evidence, relation)
+    relation["runs"]["engine2"] = _full_engine_run_loading_route_library(evidence, relation, "engine2")
+    with pytest.raises(RuntimePriceError, match="full-engine observation coverage"):
+        relation_load(relation_fixture)
+    # Naming the second run as THE full-engine run does not help either: the
+    # first is then an undeclared full-engine observation, and the relation
+    # refuses on the same rule rather than silently adopting whichever run
+    # happens to cover the library.
+    relation["full_engine_run_id"] = "engine2"
+    with pytest.raises(RuntimePriceError, match="full-engine observation coverage"):
+        relation_load(relation_fixture)
