@@ -1076,9 +1076,11 @@ def test_the_priced_static_scales_follow_the_selected_rows():
         "m.0.up": "TESSERA_E2M1_K2_R896", "m.1.up": "TESSERA_E2M1_K2_R512",
         "m.2.up": "TESSERA_E4M3_K1_R1024", "m.3.up": "TESSERA_E2M1_K2_R896",
         "m.4.up": "FP8",
-    }, costs)
+    }, costs, policy="legacy_6_over_calibration_amax.v1")
     assert got == {"schema": PRICED_STATIC_SCALES_SCHEMA,
-                   "units": {"m.0.up": 71.68}}
+                   "units": {"m.0.up": 71.68},
+                   "input_global_scale_policy":
+                       "legacy_6_over_calibration_amax.v1"}
     # The selected RUNG's row, not any row of the unit: m.1.up selected a
     # rung its table did not price, so it carries no priced scale.
     assert "m.1.up" not in got["units"]

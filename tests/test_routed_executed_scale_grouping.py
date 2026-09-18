@@ -22,6 +22,7 @@ from prismaquant import tessera_export_lane as export
 ROUTED_FMT = "TESSERA_E2M1_K2_R896"
 A8_FMT = "TESSERA_E4M3_K1_R1024"
 DENSE = "model.layers.0.self_attn.o_proj"
+POLICY = nac.LEGACY_INPUT_GLOBAL_SCALE_POLICY
 
 
 def _expert(layer, index, proj):
@@ -88,7 +89,8 @@ def _layer_config(tmp_path, *, units, grouping, fmt=ROUTED_FMT):
     payload = {name: {"data_type": "tessera", "bits": 4,
                       "tessera_format": fmt} for name in units}
     scales_block = {"schema": export.PRICED_STATIC_SCALES_SCHEMA,
-                    "units": dict(units)}
+                    "units": dict(units),
+                    "input_global_scale_policy": POLICY}
     if grouping is not None:
         scales_block["activation_scale_grouping"] = grouping
     payload["__prismaquant__"] = {
@@ -107,7 +109,7 @@ def _scales_file(tmp_path, units):
     _capture, scales, _digest = write_export_inputs(
         tmp_path, hessians=None, hessian_rows={}, hessian_identity={},
         static_scales=dict(units),
-        static_scale_policy="legacy_6_over_calibration_amax.v1")
+        static_scale_policy=POLICY)
     return scales
 
 
@@ -227,14 +229,14 @@ def test_the_allocator_block_declares_per_unit_for_routed_static_rows_only():
     assignment = {routed: ROUTED_FMT, DENSE: ROUTED_FMT}
     costs = {routed: {ROUTED_FMT: {"input_global_scale": 0.5}},
              DENSE: {ROUTED_FMT: {"input_global_scale": 0.25}}}
-    assert priced_static_scales(assignment, costs)[
+    assert priced_static_scales(assignment, costs, policy=POLICY)[
         "activation_scale_grouping"] == _per_unit_stamp()
     # Dense-only: one scale per executed tensor already, no declaration.
     assert "activation_scale_grouping" not in priced_static_scales(
-        {DENSE: ROUTED_FMT}, costs)
+        {DENSE: ROUTED_FMT}, costs, policy=POLICY)
     # An A8 routed row carries no static scale, so the block is unchanged.
     a8 = {routed: {A8_FMT: {"output_mse": 0.1}}}
-    assert priced_static_scales({routed: A8_FMT}, a8) == {
+    assert priced_static_scales({routed: A8_FMT}, a8, policy=POLICY) == {
         "schema": export.PRICED_STATIC_SCALES_SCHEMA, "units": {}}
 
 

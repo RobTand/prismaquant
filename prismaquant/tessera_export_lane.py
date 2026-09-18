@@ -1396,6 +1396,10 @@ def require_priced_export_inputs(
         "static_activation_contract_units": 0,
         "input_scales_bound_units": 0,
         "input_global_scales": {},
+        # ``None`` means "this preflight asked and there were no static-contract
+        # units", never "the policy is the default".  A legacy value carrying a
+        # full-E4M3 label is a scale nothing served (#624).
+        "input_global_scale_policy": None,
     }
     if not selected:
         return report
@@ -1630,6 +1634,8 @@ def require_priced_export_inputs(
                 report["input_global_scales"][name + ".input_global_scale"] = priced
         report["input_scales"] = str(input_scales_path)
         report["input_scales_bound_units"] = len(static_contract_units)
+        report["input_global_scale_policy"] = _require_input_global_scale_policy(
+            header, priced_block, input_scales_path=input_scales_path)
         # Per-expert routed static scales are priced one per expert; the routed
         # stage they would execute on takes one per (module, stage).  Such an
         # allocation must declare which grouping its scales carry, and a
@@ -1652,6 +1658,86 @@ def require_priced_export_inputs(
                 priced_block.get("activation_scale_grouping"),
                 routed_units=routed_units, report=report)
     return report
+
+
+def _require_input_global_scale_policy(header, priced_block, *,
+                                      input_scales_path) -> str:
+    """The one ``input_global_scale`` policy the file and the allocation agree on.
+
+    The value check above binds the ARITHMETIC: the F32 scalar the exporter
+    writes is the F32 scalar the costs were priced against.  It cannot bind the
+    FORMULA, because a scale alone does not say which numerator produced it --
+    ``6/amax`` (``legacy_6_over_calibration_amax.v1``) and ``448*6/amax``
+    (``full_e4m3_range_448x6_over_calibration_amax.v1``) are the same tensor
+    shape carrying different headroom, and the pinned runtime executes whichever
+    it is handed: its attested table publishes the block-scale arithmetic around
+    ``G`` (underflow to zero at ``block_amax/6*G = 2**-10``, saturation at 448)
+    and no policy for ``G`` itself.  So the label is the producer's claim, and
+    until now it travelled only in the campaign's own files and was dropped
+    before the artifact: a reader holding the checkpoint had to chase an
+    absolute path on a shared mount to learn which of two policies priced it.
+
+    Two stamps must therefore agree and both must exist:
+
+    * the scale file's own ``__metadata__`` (written by
+      ``tessera_campaign.write_export_inputs`` beside the values), and
+    * the allocation's ``tessera_activation_static_scales.
+      input_global_scale_policy`` (stamped by ``tessera_menu.
+      priced_static_scales`` from the cost table's provenance).
+
+    An ABSENT stamp on either side is refused, not defaulted: the two policies
+    differ by 448x and "nobody said" is not "legacy".  The value returned lands
+    on the export report, the build anchor and the ship record, so the artifact
+    states its own policy (RobTand/prismaquant#624).
+    """
+    from .nvfp4_activation_contract import (
+        INPUT_GLOBAL_SCALE_POLICY_METADATA_KEY,
+        NVFP4_INPUT_GLOBAL_SCALE_POLICIES,
+        resolve_input_global_scale_policy,
+    )
+
+    metadata = header.get("__metadata__")
+    served = (metadata.get(INPUT_GLOBAL_SCALE_POLICY_METADATA_KEY)
+              if isinstance(metadata, Mapping) else None)
+    if served is None:
+        raise TesseraExportLaneError(
+            f"--input-scales {input_scales_path} carries no "
+            f"__metadata__[{INPUT_GLOBAL_SCALE_POLICY_METADATA_KEY!r}], so the "
+            "formula behind its scalars is unknown. 6/amax and 448*6/amax are "
+            "the same tensor with 448x different serve-time block-scale "
+            "headroom, and a file that does not say which it is cannot be "
+            "stamped onto the artifact. Hand the campaign's own "
+            "input_scales.safetensors (tessera_campaign.write_export_inputs "
+            "labels it)."
+        )
+    declared = priced_block.get("input_global_scale_policy") if isinstance(
+        priced_block, Mapping) else None
+    if declared is None:
+        raise TesseraExportLaneError(
+            "the allocation's tessera_activation_static_scales block declares "
+            "no input_global_scale_policy, so the formula its priced scalars "
+            "came out of is unbound and the file's label has nothing to be "
+            "checked against. Re-allocate: the allocator stamps the cost "
+            "table's own provenance.activation_static_scales.policy "
+            "(RobTand/prismaquant#624)."
+        )
+    for value, where in ((served, f"--input-scales {input_scales_path}"),
+                         (declared, "the allocation")):
+        if value not in NVFP4_INPUT_GLOBAL_SCALE_POLICIES:
+            raise TesseraExportLaneError(
+                f"{where} names input_global_scale policy {value!r}, which is "
+                f"not one of {sorted(NVFP4_INPUT_GLOBAL_SCALE_POLICIES)}")
+    canonical = resolve_input_global_scale_policy(declared)
+    if resolve_input_global_scale_policy(served) != canonical:
+        raise TesseraExportLaneError(
+            f"--input-scales {input_scales_path} is labelled "
+            f"{served!r} but the allocation priced under {declared!r}. The "
+            "two differ by 448x in serve-time block-scale headroom, so one of "
+            "these two records is wrong about the artifact -- exporting would "
+            "stamp a policy onto the ship record that did not price these "
+            "costs (RobTand/prismaquant#624)."
+        )
+    return canonical
 
 
 def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
@@ -1816,6 +1902,16 @@ def preflight(model_path: str | Path, *, target=None,
                    if priced_inputs.get('hessian_reference_binding') is not None else {}),
             },
         }
+        if priced_inputs.get("input_global_scale_policy") is not None:
+            # The formula the artifact's own activation scalars came out of.
+            # BESIDE priced_inputs for the same reason the grouping block is:
+            # Tessera's exporter reads that block as a closed key set.  Until
+            # #624 the policy travelled only in the campaign's cache directory,
+            # so a reader holding the checkpoint had to chase an absolute path
+            # on a shared mount to learn which of two 448x-apart headroom
+            # conventions priced and serves it.
+            build["tessera_activation_input_global_scale_policy"] = (
+                priced_inputs["input_global_scale_policy"])
         if priced_inputs.get("activation_scale_grouping") is not None:
             # BESIDE priced_inputs, never inside it: Tessera's exporter reads
             # that block as a closed key set and refuses any other key.  The

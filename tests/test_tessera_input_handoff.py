@@ -14,6 +14,7 @@ from prismaquant import tessera_export_lane as lane
 from prismaquant.tessera_campaign import write_export_inputs
 
 UNIT = "model.layers.0.self_attn.o_proj"
+POLICY = "legacy_6_over_calibration_amax.v1"
 TRIPLE = {"text_sha256": "a" * 64, "fit_ids_sha256": "b" * 64, "fit_tokens": 4096}
 
 
@@ -42,7 +43,7 @@ def _write(root, h=1.0, scale=1.0):
         root, hessians={UNIT: torch.eye(32) * h} if h is not None else None,
         hessian_rows={UNIT: 4}, hessian_identity=TRIPLE,
         static_scales={UNIT: scale} if scale is not None else {},
-        static_scale_policy="legacy_6_over_calibration_amax.v1")
+        static_scale_policy=POLICY)
 
 
 def _case(tmp_path, monkeypatch, capsys, *, h=1.0, scale=1.0, bf16=False):
@@ -54,7 +55,8 @@ def _case(tmp_path, monkeypatch, capsys, *, h=1.0, scale=1.0, bf16=False):
         "__prismaquant__": {
             "tessera_hessian": {"supplied": h is not None, **TRIPLE, "capture_sha256": digest},
             "tessera_activation_static_scales": {"schema": lane.PRICED_STATIC_SCALES_SCHEMA,
-                                                "units": {UNIT: scale} if scale is not None else {}}}}))
+                                                "units": {UNIT: scale} if scale is not None else {},
+                                                "input_global_scale_policy": POLICY}}}))
     # Scope/ship gates have their own tests; keep the real input validation,
     # preflight build assembly, CLI publication and producer intake here.
     monkeypatch.setattr(lane, "require_declared_structure", lambda _: "dense")

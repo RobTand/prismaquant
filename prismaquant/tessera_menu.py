@@ -2025,15 +2025,26 @@ def assert_uniform_hessian_identity(costs: "dict") -> dict:
 
 
 def priced_static_scales(assignment: "Mapping[str, str]",
-                         costs: "Mapping") -> dict:
+                         costs: "Mapping", *, policy) -> dict:
     """The static A-side scale VALUE each selected Tessera unit was priced under.
 
-    ``{"schema": PRICED_STATIC_SCALES_SCHEMA, "units": {unit: scale}}`` for
-    every unit the assignment gives a Tessera format whose cost row carries
-    ``input_global_scale`` (the campaign stamps it on every row whose route
-    executes the static NVFP4 contract, measured and interpolated alike).
+    ``{"schema": PRICED_STATIC_SCALES_SCHEMA, "units": {unit: scale},
+    "input_global_scale_policy": policy}`` for every unit the assignment gives
+    a Tessera format whose cost row carries ``input_global_scale`` (the
+    campaign stamps it on every row whose route executes the static NVFP4
+    contract, measured and interpolated alike).
     Empty ``units`` when no selected row carries one -- still a claim, and a
     different one from the block being absent.
+
+    ``policy`` is the FORMULA those values came out of, and it is an argument
+    rather than a live resolution on purpose: the value is a function of the
+    policy (``6/amax`` under ``legacy_6_over_calibration_amax.v1``, ``448*6/
+    amax`` under ``full_e4m3_range_448x6_over_calibration_amax.v1``), so an
+    allocator that read its own environment could stamp one label on the other
+    policy's numbers.  The caller passes the cost table's own
+    ``provenance.activation_static_scales.policy`` -- what actually priced the
+    rows -- and a table that carries none is refused rather than defaulted
+    (RobTand/prismaquant#624).
 
     The allocator stamps this beside ``tessera_hessian`` in the layer_config
     metadata; the export gate (``tessera_export_lane.
@@ -2047,7 +2058,9 @@ def priced_static_scales(assignment: "Mapping[str, str]",
     out rather than given a default: the gate refuses it by name as unbound,
     which is the honest answer for a row that never said what priced it.
     """
-    from .nvfp4_activation_contract import routed_static_scale_grouping
+    from .nvfp4_activation_contract import (
+        resolve_input_global_scale_policy, routed_static_scale_grouping,
+    )
     from .tessera_export_lane import PRICED_STATIC_SCALES_SCHEMA
 
     units: dict[str, float] = {}
@@ -2063,6 +2076,20 @@ def priced_static_scales(assignment: "Mapping[str, str]",
             continue
         units[name] = float(scale)
     block = {"schema": PRICED_STATIC_SCALES_SCHEMA, "units": units}
+    # Named only when there IS a priced scalar to name a formula for.  A
+    # selection that priced none (every route dynamic, or a static row that
+    # never said what priced it) has no policy to declare, and the export gate
+    # refuses that unit as unbound before it ever asks for one.
+    if units:
+        if policy is None:
+            raise ValueError(
+                "the cost table carries no activation_static_scales.policy, "
+                "so the input_global_scale formula its rows were priced under "
+                "is unknown; the export gate would then stamp an unbound "
+                "policy onto the ship record. Re-run the campaign, whose "
+                "provenance names it (RobTand/prismaquant#624).")
+        block["input_global_scale_policy"] = (
+            resolve_input_global_scale_policy(policy))
     # A selection with per-expert routed static scales declares the grouping
     # they were priced under -- per_unit.v1, the only one the campaign prices --
     # so the export gate reads an answer rather than an absence (#624).  Derived
