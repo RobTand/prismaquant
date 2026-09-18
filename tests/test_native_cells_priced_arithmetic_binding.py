@@ -13,6 +13,9 @@ register and assert the driver's own answer moves with it.
 """
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from experiments import pq_frontier_native_cells as driver
@@ -26,21 +29,33 @@ def _fresh_process_binding():
     owner._reset_served_quantizer_identity_for_tests()
 
 
-def test_the_driver_binds_the_registered_operator_when_it_registers(monkeypatch):
+def _registers(monkeypatch):
+    """Everything a box that CAN price these rows reports, and nothing more.
+
+    The axes are stubbed because a CPU test box has no sm_121 device and no vLLM
+    build; what is under test is the driver's declaration, not this host.
+    """
     monkeypatch.setattr(owner, "_register_served_quantizer_op", lambda: True)
+    monkeypatch.setattr(owner, "_served_quantizer_platform", lambda: "sm_121")
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(__version__="0.28.1rc1"))
     monkeypatch.setenv("PRISMAQUANT_CONTAINER_CONTENT_SHA256", "a" * 64)
+
+
+def test_the_driver_binds_the_registered_operator_when_it_registers(monkeypatch):
+    _registers(monkeypatch)
 
     bound = driver.bind_priced_arithmetic()
 
     assert bound.backend == owner.SERVED_QUANTIZER_BACKEND_REGISTERED_OP
     assert bound.op == owner.SERVED_QUANTIZER_OP
     assert bound.image_content_sha256 == "a" * 64
+    assert bound.platform == "sm_121"
     assert owner.active_served_quantizer_identity() == bound
 
 
 def test_the_driver_refuses_rather_than_pricing_under_its_own_model(monkeypatch):
+    _registers(monkeypatch)
     monkeypatch.setattr(owner, "_register_served_quantizer_op", lambda: False)
-    monkeypatch.setenv("PRISMAQUANT_CONTAINER_CONTENT_SHA256", "a" * 64)
 
     with pytest.raises(owner.ServedQuantizerUnboundError) as refusal:
         driver.bind_priced_arithmetic()
@@ -51,7 +66,7 @@ def test_the_driver_refuses_rather_than_pricing_under_its_own_model(monkeypatch)
 
 def test_an_unstamped_image_is_refused_not_published(monkeypatch):
     """A binding that cannot name the image it ran in is unusable, not weaker."""
-    monkeypatch.setattr(owner, "_register_served_quantizer_op", lambda: True)
+    _registers(monkeypatch)
     monkeypatch.delenv("PRISMAQUANT_CONTAINER_CONTENT_SHA256", raising=False)
 
     with pytest.raises(owner.ServedQuantizerUnboundError) as refusal:
