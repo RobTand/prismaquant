@@ -47,10 +47,14 @@ says exactly that.
   `leads`, `generation`, `entries`, `hits`, `misses`, `fallbacks` (path and
   reason), `fallback_count`, `bytes_from_stage`, `bytes_from_pool` — and the
   key is **absent** when no map was named, so an unset run's record is what it
-  was. `dispatch_tessera_campaign.py` gained `--residency stage` on every GPU
-  submission, passed through to `pbrun` before the action separator and
-  stamped into `resource_demand`; `verify_joint_submission_demand` is
-  unchanged.
+  was. `dispatch_tessera_campaign.py` gained `--residency stage`, passed
+  through to `pbrun` before the action separator and stamped into
+  `resource_demand`; `verify_joint_submission_demand` is unchanged. The flag
+  is **joint-only**: `submit-allocation`, `submit-export` and `submit-aqua`
+  share the submission arguments but read every byte from the pool, so they
+  refuse it rather than reserve cluster-scoped tier capacity nothing consumes
+  (`_submit_gpu_action`; a reservation no read redeems is the failure this
+  reader exists to end).
 - **Measured, on one file, at the read layer.** One declared 5.37 GB shard
   (`models/GLM-5.3-Flash-BF16/model-00005-of-00120.safetensors`), read whole on
   sparky through PrismaBuild, bytes bit-identical on every path: **cold pool
@@ -13623,11 +13627,21 @@ load, and records the reason. On a run the map's digest is additionally
 compared with `_expected_file_sha256` before the file is opened at all; on a
 prepare, where no expected digest exists yet, the map's digest checked against
 the bytes read is the only identity, and the declared file's own length is
-what binds the entry to the file it stands for. The unbounded `torch.load`
+what binds the entry to the file it stands for — so a declared file that
+cannot be stat'ed is itself a recorded fallback, not a skipped check: without
+that length a byte-range entry would be served as a whole file, and a pool
+path that has gone away would succeed from the stage where reading it
+directly fails closed. The unbounded `torch.load`
 branch (no receipts enabled) is deliberately **not** redirected: it computes no
 digest, so a staged copy there would be admitted on the map's word alone.
 Both joint stages take the bounded branch. Accounting is in the joint run's
 `results.json` under `residency`.
+
+Only the joint pass asks for a stage. `--residency stage` reserves
+cluster-scoped tier capacity and narrows placement to the boxes that mount the
+tier, and the allocation handoff, the export and the AQUA stage read every
+byte from the pool, so `_submit_gpu_action` refuses the flag for them by name
+rather than buying a reservation no read redeems.
 
 ### 5.5 Named invariants
 

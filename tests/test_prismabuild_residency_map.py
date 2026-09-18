@@ -7,6 +7,7 @@ reader's own check bit, not that a fixture happened to agree with itself.
 import hashlib
 import json
 import os
+import shlex
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,10 @@ from prismaquant.residency_map import (
     ENV_VAR, SCHEMA, bind_residency_manifest, residency_map_key,
     residency_report, residency_resolver, reset_residency_resolver_for_tests,
 )
+# The submitter tests at the end of this file run one real submit-joint dry
+# run rather than a hand-built namespace, so what they assert is the argv the
+# tool builds.
+from test_glm_joint_data_manifest_at_submit import scratch, shared_mount  # noqa: F401
 
 
 MANIFEST = 'a' * 64
@@ -460,6 +465,32 @@ def test_a_byte_range_entry_is_refused_for_a_whole_file_read(tmp_path, monkeypat
     assert 'byte range' in report['fallbacks'][0]['reason']
 
 
+def test_a_declared_file_that_cannot_be_stated_is_a_fallback_not_a_shortcut(
+    tmp_path, monkeypatch,
+):
+    """The declared file's own length is what binds a whole-file entry.
+
+    Without it a byte-range entry would be served as a whole file, and a pool
+    path that has gone away would succeed from the stage where reading it
+    directly fails closed. The map redirects a read; it does not stand in for
+    one that no longer has an object to redirect.
+    """
+    cache, paths, tensors = _pool_cache(tmp_path)
+    key, path = next(iter(paths.items()))
+    root, staged = _stage(tmp_path, paths)
+    map_path = _write_map(tmp_path, root, paths, staged)
+    monkeypatch.setenv(ENV_VAR, str(map_path))
+    _bind()
+    resolver = residency_resolver()
+    path.unlink()
+    assert resolver.staged_read(str(path)) is None
+    report = residency_report()
+    assert report['hits'] == 0 and report['bytes_from_stage'] == 0
+    assert report['fallbacks'][0]['path'] == str(path)
+    assert report['fallbacks'][0]['reason'] == (
+        'declared file is unstatable, cannot bind the entry to it')
+
+
 def test_an_entry_at_another_offset_is_not_a_whole_file_answer(tmp_path, monkeypatch):
     cache, paths, tensors = _pool_cache(tmp_path)
     key, path = next(iter(paths.items()))
@@ -598,16 +629,16 @@ def test_a_staged_wire_released_between_the_stat_and_the_open_falls_back(tmp_pat
 # the submitter flag
 # --------------------------------------------------------------------------
 
-def _argv(residency):
+def _argv(residency, *, on_args=None):
     import types
     from tools.dispatch_tessera_campaign import _pbrun_argv
     spec = Path('/dev/null')
     args = types.SimpleNamespace(
         spec=spec, pbrun='/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py',
         demand='gpu=1,mem_gb=101', cpus=6, tag='sparky', priority=-10,
-        timeout_s=None, container_arg=None, residency=residency, head_grace_s=None)
-    return _pbrun_argv(args, manifest=Path('/tmp/m.json.gz'), inner=['--resume'],
-                       container_spec={'image': 'x'})
+        timeout_s=None, container_arg=None, residency=on_args, head_grace_s=None)
+    return _pbrun_argv(args, manifest=Path('/dev/null'), inner=['--resume'],
+                       residency=residency, container_spec={'image': 'x'})
 
 
 def test_the_submitter_passes_residency_stage_through_to_pbrun():
@@ -622,7 +653,125 @@ def test_the_submitter_omits_the_flag_by_default():
     assert '--residency' not in _argv(None)
 
 
+def test_the_flag_on_the_namespace_alone_emits_nothing():
+    """Only the caller knows the entry point, so only the caller may ask.
+
+    ``--residency`` is shared by four subcommands and read through the
+    resolver by one. If the argv builder took it off the namespace, adding a
+    subcommand would silently opt it into a tier reservation nothing consumes.
+    """
+    assert '--residency' not in _argv(None, on_args='stage')
+
+
 def test_a_binding_that_is_not_a_digest_is_refused(tmp_path, monkeypatch):
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency.json'))
     with pytest.raises(ValueError, match='64 lowercase hex'):
         bind_residency_manifest('not-a-digest')
+
+
+def test_a_non_joint_submission_refuses_the_flag_and_says_why(monkeypatch):
+    """A reservation nothing reads is the failure this change exists to stop.
+
+    ``--residency stage`` reserves cluster-scoped tier capacity and narrows
+    placement to the boxes that mount the tier. Allocation, export and AQUA
+    read every byte from the pool, so for them the flag would buy that
+    narrowing and be consumed by nothing at all.
+    """
+    import types
+    from tools.dispatch_tessera_campaign import (
+        ALLOCATION_ENTRY_POINT, AQUA_ENTRY_POINT, EXPORT_ENTRY_POINT,
+        _submit_gpu_action,
+    )
+    args = types.SimpleNamespace(residency='stage', spec='/dev/null')
+
+    def unreachable():
+        raise AssertionError('the manifest was built for a refused submission')
+
+    for entry_point in (ALLOCATION_ENTRY_POINT, EXPORT_ENTRY_POINT, AQUA_ENTRY_POINT):
+        with pytest.raises(RuntimeError, match='joint-only') as refusal:
+            _submit_gpu_action(args, entry_point=entry_point, command='handoff',
+                               inner=[], plan={}, build=unreachable)
+        # The message names the row that asked, so the operator sees which
+        # submission to resubmit without it.
+        assert entry_point in str(refusal.value)
+        assert 'from the pool' in str(refusal.value)
+
+
+def test_a_non_joint_submission_without_the_flag_passes_the_gate():
+    """The gate bites on the flag, not on the entry point."""
+    import types
+    from tools.dispatch_tessera_campaign import ALLOCATION_ENTRY_POINT, _submit_gpu_action
+    args = types.SimpleNamespace(residency=None, spec=str(Path('/dev/null')))
+    # Past the gate it fails on the spec, which is the next thing it reads --
+    # any failure but the residency refusal proves the gate let it through.
+    with pytest.raises(Exception) as outcome:
+        _submit_gpu_action(args, entry_point=ALLOCATION_ENTRY_POINT,
+                           command='handoff', inner=[], plan={},
+                           build=lambda: None)
+    assert 'joint-only' not in str(outcome.value)
+
+
+def _dry_run_joint(scratch, monkeypatch, capsys, *, residency):
+    """One real submit-joint dry run, so the argv asserted is the argv built."""
+    import dispatch_tessera_campaign as dispatch
+    from experiments import glm_data_manifests
+    import test_glm_joint_data_manifest_at_submit as fixtures
+
+    fixture = fixtures._workspace(scratch)
+    spec = scratch / 'spec.joint.json'
+    spec.write_text(json.dumps({'container': {'image': 'x'}}))
+    monkeypatch.setattr(dispatch, '_manifest_producer', lambda: glm_data_manifests)
+    argv = [
+        'submit-joint', 'prepare',
+        '--plan', str(fixture['plan']),
+        *fixtures._scope_args(fixture),
+        '--spec', str(spec),
+        '--demand', 'gpu=1,mem_gb=104',
+        '--cpus', '6', '--tag', 'gb10', '--priority', '-10',
+        '--manifest-dir', str(scratch / 'manifests'),
+        '--dry-run',
+    ]
+    if residency is not None:
+        argv += ['--residency', residency]
+    assert dispatch.main(argv) == 0
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    at = next(n for n, line in enumerate(lines) if line.startswith('[dry-run] '))
+    # The command is shlex-quoted and the container spec inside it is itself
+    # JSON, so the summary is the object printed *after* that line, not the
+    # first brace in the output.
+    command = shlex.split(lines[at][len('[dry-run] '):])
+    rest = '\n'.join(lines[at + 1:])
+    summary, _ = json.JSONDecoder().raw_decode(rest[rest.index('{'):])
+    return command, summary
+
+
+def test_the_joint_row_carries_the_manifest_digest_it_was_submitted_with(
+    scratch, shared_mount, monkeypatch, capsys,
+):
+    """The identity half of the design: unbound, the reader serves nothing.
+
+    ``bind_manifest_sha256`` refuses every map until the pass says which read
+    set it holds, and the only place that digest exists at submit time is
+    here. Without this argv the resolver is inert on exactly the gated stage.
+    """
+    argv, summary = _dry_run_joint(scratch, monkeypatch, capsys, residency='stage')
+    assert '--data-manifest-sha256' in argv
+    digest = argv[argv.index('--data-manifest-sha256') + 1]
+    # The digest is the manifest's own -- the one pbrun seals into the action
+    # key -- so the action is told a fact it already runs under.
+    assert digest == summary['manifest_sha256']
+    # It is an argument of the action, not of pbrun.
+    assert argv.index('--') < argv.index('--data-manifest-sha256')
+    assert argv.index('--residency') < argv.index('--')
+    assert summary['resource_demand']['residency'] == 'stage'
+
+
+def test_a_joint_row_that_asks_for_no_stage_keeps_the_argv_it_has_today(
+    scratch, shared_mount, monkeypatch, capsys,
+):
+    """No flag, no digest, no demand key: the action key is unchanged."""
+    argv, summary = _dry_run_joint(scratch, monkeypatch, capsys, residency=None)
+    assert '--data-manifest-sha256' not in argv
+    assert '--residency' not in argv
+    assert 'residency' not in summary['resource_demand']

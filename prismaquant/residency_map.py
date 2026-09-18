@@ -354,8 +354,16 @@ class ResidencyResolver:
             try:
                 declared_info = os.lstat(path)
             except OSError:
-                declared_info = None
-            if declared_info is not None and declared_info.st_size != entry["bytes"]:
+                # The declared file's own length is what binds a whole-file
+                # entry to this caller's read; without it the entry could be a
+                # byte range served as a whole file, and a pool path that has
+                # gone away would succeed from the stage where reading it
+                # directly fails closed. The map redirects a read; it does not
+                # substitute for one.
+                self._record_fallback(
+                    path, "declared file is unstatable, cannot bind the entry to it")
+                return None
+            if declared_info.st_size != entry["bytes"]:
                 # These readers read whole files. An entry covering part of one
                 # is a legitimate map entry and a wrong answer for this caller.
                 self._record_fallback(
