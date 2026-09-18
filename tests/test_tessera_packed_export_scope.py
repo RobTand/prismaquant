@@ -118,6 +118,7 @@ def test_packed_static_scales_bind_each_source_member(case, tmp_path, defect):
     values = {name: float(i + 1) for i, name in enumerate(sorted(_units()))}
     _meta(case)['tessera_activation_static_scales'] = {
         'schema': export.PRICED_STATIC_SCALES_SCHEMA, 'units': values,
+        'input_global_scale_policy': nac.LEGACY_INPUT_GLOBAL_SCALE_POLICY,
         # This selection is per-expert and per-unit by construction (#624); the
         # export gate refuses a routed allocation whose semantics are unstated,
         # so declare them here as the producer does.
@@ -133,7 +134,11 @@ def test_packed_static_scales_bind_each_source_member(case, tmp_path, defect):
     elif defect == 'mismatch':
         tensors[key] = tensors[key] + 1
     scales = tmp_path / 'scales.safetensors'
-    save_file(tensors, str(scales))
+    # The label the campaign's writer puts on its own file; the gate binds it
+    # to the allocation's declared policy (#624).
+    save_file(tensors, str(scales), metadata={
+        nac.INPUT_GLOBAL_SCALE_POLICY_METADATA_KEY:
+            nac.LEGACY_INPUT_GLOBAL_SCALE_POLICY})
     if defect:
         with pytest.raises(export.TesseraExportLaneError, match='carries no input_global_scale|but the allocation priced'):
             export.require_priced_export_inputs(case.assignment, input_scales_path=scales)

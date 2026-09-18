@@ -34,6 +34,7 @@ from prismaquant.nvfp4_activation_contract import (  # noqa: E402
 TRIPLE = {"text_sha256": "a" * 64, "fit_ids_sha256": "b" * 64,
           "fit_tokens": 4096}
 SCALE = float(input_global_scale_tensor(448.0 * 6.0 / 37.5).item())
+POLICY = "legacy_6_over_calibration_amax.v1"
 UNITS = (DENSE, EXPERT, SHARED)
 
 
@@ -57,6 +58,13 @@ def _stamp_rows(argv, *, fmt, capture_sha256, scale):
     """Give the fixture cost table what the campaign's rows carry."""
     costs_path = Path(argv[argv.index("--costs") + 1])
     payload = pickle.loads(costs_path.read_bytes())
+    # The campaign's provenance names the FORMULA its per-row scalars came out
+    # of; the allocator stamps it on the allocation so the export gate can bind
+    # the file's label to it (#624).
+    payload.setdefault("provenance", {})["activation_static_scales"] = {
+        "policy": POLICY,
+        "units": {name: scale for name in UNITS} if scale is not None else {},
+    }
     for rows in payload["costs"].values():
         rows[fmt]["hessian_identity"] = {
             "supplied": True, **TRIPLE, "capture_sha256": capture_sha256}
@@ -89,6 +97,9 @@ def test_the_allocation_carries_the_digest_and_the_priced_scales(
     assert metadata["tessera_activation_static_scales"] == {
         "schema": export.PRICED_STATIC_SCALES_SCHEMA,
         "units": {name: SCALE for name in UNITS},
+        # The formula those values came out of, read from the cost table's own
+        # provenance rather than from the allocator's environment (#624).
+        "input_global_scale_policy": POLICY,
         # The allocation declares the semantics it priced (#624): a routed
         # per-expert selection says per-unit, EXPLICITLY and unqualified, so
         # the export gate has an answer instead of an absence.

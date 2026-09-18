@@ -1,7 +1,57 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-17 · `flash/anchor-slot-encoder-working-set-20260917`.
+As of: 2026-09-17 · `flash/624-a4-input-global-scale-20260917`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-17, `flash/624-a4-input-global-scale-20260917`) for **the
+A4 `input_global_scale` POLICY travelling with the artifact** (#624). No
+default, stage, format menu, lane, pin or plugin contract changes, and no
+exported weight byte moves: `legacy_6_over_calibration_amax.v1` remains the
+resolved default (`nvfp4_activation_contract.resolve_input_global_scale_policy`,
+`PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE` unset).
+
+What was read, not asserted. The census prices every static-contract rung with
+the scalar `_static_input_scales` resolves (`tessera_campaign.py:3332-3361`)
+and writes it to `input_scales.safetensors` with the policy in the container's
+`__metadata__` (`:4801-4813`); the export gate compares the file's F32 scalar
+against the allocation's priced value and refuses any difference
+(`tessera_export_lane.py:1595-1630`). So priced == served on the VALUE, and
+this was never an identity bug. The pinned Tessera contract
+(`4c384e6049dc…`, `src/tessera/serving/runtime_contract.json`, v29) attests
+`activation_quantizers.platforms.sm_121.contracts.e2m1_group16_ue4m3_static`:
+`torch.ops._C.scaled_fp4_quant`, group 16, UE4M3 block scale, round-to-nearest
+ties to the even encoded index, block scale tying to **zero** at
+`block_amax/6*G = 2**-10` and **saturating to 448** (byte `0x7e`) at 512. It
+attests the arithmetic AROUND `G` and publishes **no policy for `G`**: the
+numerator is a producer choice, and its own prose scopes the table to exactly
+representable scales. So `6/amax` is legacy-and-correct for the artifacts it
+priced, and the open question is measured headroom, not correctness.
+
+What was missing. The policy was written twice by the campaign (the cost
+table's `provenance.activation_static_scales.policy` and the scale file's
+`__metadata__`) and then dropped: `tessera_menu.priced_static_scales` and
+`tessera_materialization` built `tessera_activation_static_scales` from values
+alone, and the export gate never read either stamp. A reader holding the
+checkpoint had to follow `tessera_serving_manifest.json` -> `input_scales_from`
+-> an absolute path on a shared mount to learn which of two 448x-apart
+conventions priced and serves it. The block now carries
+`input_global_scale_policy` whenever it prices at least one scalar, sourced
+from the cost table rather than from the allocator's environment;
+`require_priced_export_inputs` refuses an unlabelled scale file, an allocation
+that declares no policy, an unknown policy name, and any disagreement between
+the two, and reports the bound value; `preflight` stamps
+`tessera_activation_input_global_scale_policy` on the build anchor beside the
+closed `priced_inputs` block, whence `lane_shipcard open --build-json` puts it
+on the ship record. A selection that priced no static scalar names no policy —
+the gate already refuses such a unit as unbound before it would ask. New
+fields: layer_config `__prismaquant__.tessera_activation_static_scales.
+input_global_scale_policy`; preflight report `input_global_scale_policy`; build
+anchor `tessera_activation_input_global_scale_policy`. Consequence: a W4A4
+allocation built before this change refuses at export until re-allocated from
+the same cost table (allocation only — no re-census, no re-encode). Gate:
+`tests/test_input_global_scale_policy_binding.py` (before the change, 9 of its
+10 cases fail on `origin/main`, including a scale file labelled the other
+policy exporting silently).
 
 Re-stamped (2026-09-17, `flash/anchor-slot-encoder-working-set-20260917`)
 for the per-slot anchor-batch charge in `autoscale.selected_anchor_resources`
@@ -6129,7 +6179,8 @@ sidecar can sit beside a payload it does not describe; it returns the digest.
 (2) `tessera_menu.priced_static_scales` reduces the selected units' rows to
 `tessera_activation_static_scales` (`{"schema":
 "prismaquant.tessera_activation_static_scales.v1", "units": {unit:
-input_global_scale}}`), emitted in `layer_config.json` metadata whenever a
+input_global_scale}}`, plus `input_global_scale_policy` since #624 whenever
+`units` is non-empty), emitted in `layer_config.json` metadata whenever a
 Tessera unit is selected; the gate reads each selected W4A4 unit's F32 scalar
 from the file and refuses a value that is not the priced one, an allocation
 without the block (unbound), and a unit the block prices no scale for. Stock

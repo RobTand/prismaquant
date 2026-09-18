@@ -4802,14 +4802,17 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
     if static_scales:
         from safetensors.torch import save_file
 
-        from .nvfp4_activation_contract import input_global_scale_tensor
+        from .nvfp4_activation_contract import (
+            INPUT_GLOBAL_SCALE_POLICY_METADATA_KEY, input_global_scale_tensor,
+        )
 
         input_scales_path = cache_dir / "input_scales.safetensors"
         save_file(
             {f"{name}.input_global_scale": input_global_scale_tensor(value)
              for name, value in static_scales.items()},
             str(input_scales_path),
-            metadata={"input_global_scale_policy": str(static_scale_policy)},
+            metadata={INPUT_GLOBAL_SCALE_POLICY_METADATA_KEY:
+                      str(static_scale_policy)},
         )
         print(f"[campaign] wrote {input_scales_path} "
               f"({len(static_scales)} static input scales)", flush=True)

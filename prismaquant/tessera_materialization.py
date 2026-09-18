@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 from . import tessera_expert_projection as tep
 from .cost_stage_checkpoint import atomic_write_bytes
+from .nvfp4_activation_contract import resolve_input_global_scale_policy
 
 REQUEST_SCHEMA = "prismaquant.tessera_selected_wire_request.v1"
 PLAN_SCHEMA = "prismaquant.tessera_selected_wire_plan.v1"
@@ -470,6 +471,9 @@ def finalize(plan_path):
     meta = config['__prismaquant__']
     meta.update(tep.allocation_expert_projection_block(completed_cost, request['assignment']))
     static_block = dict(schema=export.PRICED_STATIC_SCALES_SCHEMA, units=dict(scales['units']))
+    if static_block['units']:
+        static_block['input_global_scale_policy'] = resolve_input_global_scale_policy(
+            scales['policy'])
     grouping = _static_scale_grouping(scales['units'], expanded)
     if grouping is not None:
         static_block['activation_scale_grouping'] = grouping

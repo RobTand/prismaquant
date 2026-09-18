@@ -69,6 +69,12 @@ FULL_E4M3_INPUT_GLOBAL_SCALE_POLICY = (
     "full_e4m3_range_448x6_over_calibration_amax.v1"
 )
 MSE_GRID_INPUT_GLOBAL_SCALE_POLICY = "mse_grid_calibrated.v1"
+#: The key the campaign's ``input_scales.safetensors`` carries its policy under
+#: in the container's ``__metadata__``, and the key the export gate reads it
+#: back from.  Spelled once so the writer and the reader cannot drift: a scale
+#: file whose label and whose values were produced by two different policies is
+#: exactly what RobTand/prismaquant#624 asks a gate to refuse.
+INPUT_GLOBAL_SCALE_POLICY_METADATA_KEY = "input_global_scale_policy"
 NVFP4_INPUT_GLOBAL_SCALE_POLICIES = frozenset({
     LEGACY_INPUT_GLOBAL_SCALE_POLICY,
     FULL_E4M3_INPUT_GLOBAL_SCALE_POLICY,
@@ -2468,6 +2474,7 @@ __all__ = [
     "nvfp4_activation_qdq_served",
     "require_matching_input_global_scale",
     "resolve_input_global_scale_policy",
+    "INPUT_GLOBAL_SCALE_POLICY_METADATA_KEY",
     "resolve_input_global_scale_value",
     "is_routed_expert_projection_name",
     "routed_expert_scale_group",

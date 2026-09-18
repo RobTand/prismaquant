@@ -25,6 +25,7 @@ DENSE_E2M1 = "model.layers.0.mlp.up_proj"
 
 TRIPLE = {"text_sha256": "a" * 64, "fit_ids_sha256": "b" * 64,
           "fit_tokens": 4096}
+POLICY = "legacy_6_over_calibration_amax.v1"
 #: The capture the fixtures below write, so an assignment can be stamped with
 #: the digest of exactly that payload (what the campaign's cost rows carry).
 HESSIANS = {DENSE_E4M3: torch.eye(4)}
@@ -67,7 +68,10 @@ def _assignment(tmp_path, *, formats, hessian_block="modern-supplied",
                   if executes(fmt)}
                  if scales == "own" else dict(scales))
         meta["tessera_activation_static_scales"] = {
-            "schema": export.PRICED_STATIC_SCALES_SCHEMA, "units": units}
+            "schema": export.PRICED_STATIC_SCALES_SCHEMA, "units": units,
+            # The formula the values came out of; the gate binds it to the
+            # scale file's own label (#624).
+            "input_global_scale_policy": POLICY}
     payload["__prismaquant__"] = meta
     path = tmp_path / "layer_config.json"
     path.write_text(json.dumps({
@@ -108,7 +112,7 @@ def _scales_file(tmp_path, units, value=SCALE):
     _capture_path, scales, _digest = write_export_inputs(
         tmp_path, hessians=None, hessian_rows={}, hessian_identity={},
         static_scales={name: value for name in units},
-        static_scale_policy="legacy_6_over_calibration_amax.v1")
+        static_scale_policy=POLICY)
     return scales
 
 
@@ -443,7 +447,8 @@ def test_an_allocation_with_no_tessera_units_needs_nothing(tmp_path):
                       "input_scales_required": False, "input_scales": None,
                       "static_activation_contract_units": 0,
                       "input_scales_bound_units": 0,
-                      "input_global_scales": {}}
+                      "input_global_scales": {},
+                      "input_global_scale_policy": None}
 
 
 def test_the_priced_input_triple_matches_tesseras_roster():
