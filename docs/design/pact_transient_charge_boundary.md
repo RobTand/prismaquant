@@ -67,7 +67,7 @@ rebuilds it by accident.
 
 **What it costs.** One full-engine run per (model, configuration) on a mixed
 artifact, in both `resources` and `timings` observation modes, plus the #399
-derivation layer in Tessera (§5). No new GPU measurement is claimed here.
+derivation layer in Tessera (§5). No GPU measurement is claimed here.
 
 **What it refuses.** A table or report with no boundary, or with different
 boundaries; a report whose partition classifies a fixed-owned allocation inside
@@ -222,7 +222,7 @@ the noun is the docstring's own phrase.
 }
 ```
 
-This object is code, not a file: a frozen registry in a new module
+This object is code, not a file: a frozen registry in a module
 `prismaquant/transient_charge_boundary.py` (§6). The table's `RuntimeContext`
 carries the name as `transient_charge_boundary`; the report carries the same
 name at `reference.transient_charge_boundary`, stamped by the #399 derivation
@@ -494,7 +494,7 @@ PrismaQuant side already refuses `prefill_ms`, `decode_ms` and
 `tessera.full_engine_resource_report.v1`, extended in place (same schema
 name; the consumer's `_OBSERVATION_FIELDS` and `_PARTITION_FIELDS` grow, so
 an older report refuses on its missing fields by name rather than being read
-as a newer one):
+as a later one):
 
 - `reference.transient_charge_boundary`: the boundary name the partition was
   classified against (§2.2).
@@ -566,7 +566,7 @@ that a producer number is a claim the consumer recomputes and never reads.
 Nothing below is in this PR. It is what the decisions imply, named so the
 implementing PR can be reviewed against this document.
 
-### 6.1 New module: `prismaquant/transient_charge_boundary.py`
+### 6.1 Module: `prismaquant/transient_charge_boundary.py`
 
 - `BOUNDARY_V1 = "prismaquant.transient_charge_boundary.v1"`.
 - `BOUNDARIES: Mapping[str, BoundarySpec]`, a frozen registry holding the
@@ -625,7 +625,7 @@ that says it is unreachable while D37 stands is updated in the same commit.
 
 ### 6.6 Tests, mutating the driver
 
-New, in `tests/test_transient_charge_boundary.py` and additions to
+Added in `tests/test_transient_charge_boundary.py` and additions to
 `tests/test_runtime_fixed_resource_admission.py`:
 
 1. A table declaring v1 and a report declaring v1 whose partition satisfies
