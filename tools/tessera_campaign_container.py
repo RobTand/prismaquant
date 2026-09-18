@@ -28,6 +28,20 @@ from tools.container_runtime_identity import (
 PATH_ENV = "PRISMABUILD_ACTION_PROGRESS_PATH"
 TOKEN_ENV = "PRISMABUILD_ACTION_PROGRESS_TOKEN"
 
+#: PrismaBuild's residency map (RobTand/prismabuild#583): where this action's
+#: declared inputs were staged.  The consumer half is
+#: ``prismaquant.residency_map`` (``ENV_VAR`` there); the literal is repeated
+#: here for the same reason as the progress names above.  ``docker run``
+#: inherits nothing from the launcher, so a map that stops at this boundary
+#: leaves the resolver inside inert and every read on the pool -- which is
+#: exactly what the GLM-5.3-Flash joint run did for its whole life on
+#: 2026-09-18 (PQ #732): the launcher held the variable, its argv named it
+#: nowhere.
+RESIDENCY_MAP_ENV = "PRISMABUILD_RESIDENCY_MAP"
+#: The key of the map whose value is the directory every staged copy lives
+#: under, bound read-only into the container at the same path.
+STAGE_ROOT_KEY = "stage_root"
+
 
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
 #: ``python -m`` sets to the working directory.  The container's working
@@ -282,6 +296,98 @@ def progress_environment(spec: dict, environ) -> dict:
         "and would be ended as a stall; declare a mount covering it")
 
 
+def _read_residency_map(path: str) -> dict:
+    """The map's JSON object, or raise ``RuntimeError`` with the reason."""
+
+    try:
+        with open(path) as stream:
+            payload = json.load(stream)
+    except OSError as exc:
+        raise RuntimeError(
+            f"the PrismaBuild residency map {path} cannot be read on this host "
+            f"({exc.strerror}); the launcher named it, so this row's staged inputs "
+            "cannot be located and it would read the pool for its whole life") from exc
+    except ValueError as exc:
+        raise RuntimeError(
+            f"the PrismaBuild residency map {path} is not JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"the PrismaBuild residency map {path} is not a JSON object")
+    return payload
+
+
+def _stage_root_mounted(stage_root: str) -> bool:
+    """Whether the stage root is a mounted directory here, triggering autofs.
+
+    The Sparks reach ``/stage/prewarm`` through an automount; binding an
+    untriggered placeholder hands the container an empty directory and every
+    staged read falls back to the pool with the map looking perfectly healthy.
+    Listing the directory triggers the mount; ``ismount`` is the fact.
+    """
+
+    try:
+        os.listdir(stage_root)
+    except OSError:
+        return False
+    return os.path.ismount(stage_root)
+
+
+def residency_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
+    """The residency map this container reads, and the stage mount it needs.
+
+    Returns the environment to forward and the mounts to add.  Both are empty
+    when the launcher named no map: an action outside PrismaBuild's residency
+    contract keeps a byte-identical ``docker run``.
+
+    Refused at launch, never dropped, when the map is not inside a declared
+    mount (the resolver inside opens it by this same path), when it cannot be
+    read or names no absolute ``stage_root``, or when that root is not a
+    mounted directory on this host.  A row whose stage is invisible reads the
+    pool for hours while its receipts say ``resident``; Rob's ruling for the
+    campaign is stage-fed only, so a launch that cannot be is a refusal, like
+    the progress channel's.  Per-file misses stay the resolver's own fallback.
+    """
+
+    named = environ.get(RESIDENCY_MAP_ENV)
+    if not named:
+        return {}, []
+    map_path = PurePosixPath(named)
+    if not map_path.is_absolute():
+        raise RuntimeError(
+            f"the PrismaBuild residency map path {named!r} is not absolute")
+    mounts = spec["container"].get("mounts", [])
+    inside = None
+    for mount in mounts:
+        source = PurePosixPath(mount["source"])
+        if map_path == source or source in map_path.parents:
+            inside = PurePosixPath(mount["target"]) / map_path.relative_to(source)
+            break
+    if inside is None:
+        raise RuntimeError(
+            f"the PrismaBuild residency map {named} is not inside any declared "
+            "container mount, so the resolver inside the container could not open "
+            "it and every staged input would be read from the pool; declare a mount "
+            "covering it")
+    payload = _read_residency_map(named)
+    stage_root = payload.get(STAGE_ROOT_KEY)
+    if not isinstance(stage_root, str) or not PurePosixPath(stage_root).is_absolute():
+        raise RuntimeError(
+            f"the PrismaBuild residency map {named} names no absolute "
+            f"{STAGE_ROOT_KEY!r}, so the staged copies it points at cannot be "
+            "mounted into the container")
+    if not _stage_root_mounted(stage_root):
+        raise RuntimeError(
+            f"the stage root {stage_root} named by the PrismaBuild residency map "
+            "is not a mounted directory on this host; binding it would hand the "
+            "container an empty directory and every staged read would fall back "
+            "to the pool")
+    root = PurePosixPath(stage_root)
+    extra: list[dict] = []
+    if not any(PurePosixPath(m["target"]) == root or PurePosixPath(m["target"]) in root.parents
+               for m in mounts):
+        extra.append({"source": stage_root, "target": stage_root, "readonly": True})
+    return {RESIDENCY_MAP_ENV: str(inside)}, extra
+
+
 def host_path(container_path: str, *, cwd: str, mounts: list) -> "Path | None":
     """The host path Docker binds behind one absolute container path.
 
@@ -474,7 +580,9 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
         # the number enforced are one number. ``--memory-swap`` equal to the
         # limit stops the container growing into swap instead of failing.
         argv += ["--memory", f"{budget_gb:g}g", "--memory-swap", f"{budget_gb:g}g"]
-    for mount in spec["container"].get("mounts", []):
+    residency_env, residency_mounts = residency_environment(
+        spec, environ if environ is not None else {})
+    for mount in [*spec["container"].get("mounts", []), *residency_mounts]:
         value = f"type=bind,src={mount['source']},dst={mount['target']}"
         if mount.get("readonly", False):
             value += ",readonly"
@@ -487,7 +595,8 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
     bounded_defaults = BOUNDED_CAPTURE_ENV if bounded else {}
     forwarded = {SAFE_PATH_ENV: "1", **spec.get("env", {}),
                  **bounded_defaults,
-                 **progress_environment(spec, environ if environ is not None else {})}
+                 **progress_environment(spec, environ if environ is not None else {}),
+                 **residency_env}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:

@@ -1,6 +1,7 @@
 """The fanout must execute the sealed source in its declared Docker runtime."""
 import importlib
 import json
+import re
 import os
 from pathlib import Path
 import subprocess
@@ -478,3 +479,125 @@ def test_a_spec_that_contradicts_the_bounded_capture_contract_refuses():
     # The same spec on the legacy path is untouched: the rule is the bounded
     # capture path's, and applying it everywhere was refusing unrelated work.
     _runner().validate_container(data)
+
+
+# -- the residency map crosses the docker boundary (PQ #732) ------------------
+
+
+def _residency_spec(tmp_path):
+    """A spec whose one declared mount is ``tmp_path`` at the same path."""
+
+    declared = spec()
+    declared["container"]["mounts"] = [{"source": str(tmp_path), "target": str(tmp_path)}]
+    return declared
+
+
+def _residency_map(tmp_path, stage_root=None):
+    stage = Path(stage_root) if stage_root is not None else tmp_path / "stage"
+    stage.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "queue" / "k.map.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema": "prismabuild.residency-map.v1",
+                                "stage_root": str(stage), "entries": {}}))
+    return path, stage
+
+
+def _argv(tmp_path, environ, declared=None):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    return runner.docker_command(declared or _residency_spec(tmp_path), ["python3"],
+                                 cwd="/snapshot", uid=1, gid=1,
+                                 image_id="sha256:resolved", environ=environ)
+
+
+def test_the_residency_map_crosses_with_its_stage_mounted_read_only(tmp_path, monkeypatch):
+    """PrismaBuild names the map; the container must see the map and the stage.
+
+    2026-09-18: the launcher held ``PRISMABUILD_RESIDENCY_MAP`` and built a
+    ``docker run`` naming it nowhere, so the resolver inside was inert and the
+    joint run read the pool for its whole life while every receipt said
+    ``resident`` (PQ #732).  The stage root the map names is on a different
+    mount from the map, so it is bound too.
+    """
+
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: True)
+    # The stage lives outside the declared mount, as /stage/prewarm does.
+    map_path, stage = _residency_map(tmp_path, stage_root=tmp_path.parent / f"{tmp_path.name}-stage")
+
+    argv = _argv(tmp_path, {"PRISMABUILD_RESIDENCY_MAP": str(map_path)})
+
+    assert f"PRISMABUILD_RESIDENCY_MAP={map_path}" in argv
+    mounts = [argv[i + 1] for i, flag in enumerate(argv) if flag == "--mount"]
+    assert f"type=bind,src={stage},dst={stage},readonly" in mounts
+
+
+def test_without_a_map_the_argv_is_byte_identical(tmp_path):
+    """``docker_command`` serves more than PrismaBuild launches."""
+
+    assert _argv(tmp_path, {}) == _argv(tmp_path, None)
+    assert not any("RESIDENCY" in flag or "/stage" in flag for flag in _argv(tmp_path, {}))
+
+
+def test_a_map_outside_every_declared_mount_is_refused(tmp_path, monkeypatch):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: True)
+    map_path, _ = _residency_map(tmp_path)
+    declared = _residency_spec(tmp_path)
+    declared["container"]["mounts"] = [{"source": "/elsewhere", "target": "/elsewhere"}]
+
+    with pytest.raises(RuntimeError, match="not inside any declared container mount"):
+        _argv(tmp_path, {"PRISMABUILD_RESIDENCY_MAP": str(map_path)}, declared)
+
+
+def test_an_unmounted_stage_root_is_refused_not_bound(tmp_path, monkeypatch):
+    """An untriggered automount binds as an empty directory: every read falls back."""
+
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: False)
+    map_path, stage = _residency_map(tmp_path)
+
+    with pytest.raises(RuntimeError, match=f"{stage}.*not a mounted directory"):
+        _argv(tmp_path, {"PRISMABUILD_RESIDENCY_MAP": str(map_path)})
+
+
+def test_a_map_that_cannot_be_read_or_names_no_root_is_refused(tmp_path, monkeypatch):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: True)
+    missing = tmp_path / "queue" / "gone.map.json"
+    with pytest.raises(RuntimeError, match="cannot be read on this host"):
+        _argv(tmp_path, {"PRISMABUILD_RESIDENCY_MAP": str(missing)})
+
+    missing.parent.mkdir(parents=True, exist_ok=True)
+    missing.write_text(json.dumps({"schema": "prismabuild.residency-map.v1", "entries": {}}))
+    with pytest.raises(RuntimeError, match="names no absolute 'stage_root'"):
+        _argv(tmp_path, {"PRISMABUILD_RESIDENCY_MAP": str(missing)})
+
+
+def test_a_declared_mount_already_covering_the_stage_is_not_bound_twice(tmp_path, monkeypatch):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: True)
+    map_path, stage = _residency_map(tmp_path)   # the stage sits under tmp_path, the declared mount
+
+    argv = _argv(tmp_path, {"PRISMABUILD_RESIDENCY_MAP": str(map_path)})
+
+    mounts = [argv[i + 1] for i, flag in enumerate(argv) if flag == "--mount"]
+    assert sum(1 for m in mounts if f"dst={stage}" in m) == 0
+    assert sum(1 for m in mounts if f"dst={tmp_path}" in m) == 1
+
+
+def test_the_stage_root_is_mounted_by_fact_not_by_path(tmp_path):
+    """A plain directory is not a mount; the check is ``ismount`` after a listing."""
+
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    assert runner._stage_root_mounted(str(tmp_path)) is False
+    assert runner._stage_root_mounted(str(tmp_path / "absent")) is False
+    assert runner._stage_root_mounted("/") is True
+
+
+def test_host_residency_name_matches_the_consumer():
+    """Forwarded name and the in-container resolver remain one PB contract."""
+
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    source = (Path(__file__).resolve().parents[1] / "prismaquant" / "residency_map.py").read_text()
+    match = re.search(r'^ENV_VAR = "([A-Z_]+)"$', source, re.M)
+    assert match and match.group(1) == runner.RESIDENCY_MAP_ENV
