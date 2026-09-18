@@ -85,12 +85,22 @@ except ModuleNotFoundError:
         raise AttributeError(f"{tensor_name!r} is not a parameter or buffer")
 from safetensors import safe_open
 
+from .residency_shard_reader import staged_shard_opener
+
 
 def _source_safe_open(path, *, source_authentication=None, **kwargs):
-    """Use the existing reader, optionally through its complete-capture owner."""
+    """Use the existing reader, optionally through its complete-capture owner.
+
+    PrismaBuild stages the byte ranges this run's data manifest declares, and
+    a shard's tensors are served off that stage when its residency map covers
+    them (PQ #732). With no map, or none naming this shard, the opener is
+    ``safe_open`` itself and both branches below are what they have always
+    been -- the redirect is a different reader, never a different call.
+    """
+    opener = staged_shard_opener(path, safe_open)
     if source_authentication is None:
-        return safe_open(path, **kwargs)
-    return source_authentication.safe_open(safe_open, path, **kwargs)
+        return opener(path, **kwargs)
+    return source_authentication.safe_open(opener, path, **kwargs)
 
 
 def _source_json(path, source_authentication=None):
@@ -1335,7 +1345,7 @@ def fill_packed_experts_from_source(
             continue
         target_dtype = p0.dtype
         for shard, keys in by_shard.items():
-            with safe_open(str(src / shard), framework="pt") as f:
+            with _source_safe_open(str(src / shard), framework="pt") as f:
                 for k in keys:
                     out[k] = f.get_tensor(k).to(target_dtype)
         live_shapes = {
