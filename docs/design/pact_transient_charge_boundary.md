@@ -403,7 +403,11 @@ fixed charge under the others. Term by term:
   manifest) proves every route class ran in the same process.
 - `fixed_kv`: **not invariant by default.** vLLM sizes the KV pool from the
   memory left after the model loads and the profile run peaks, so a smaller
-  assignment gets a larger cache. It becomes invariant exactly when the
+  assignment gets a larger cache. That rule is stated from vLLM's documented
+  `gpu_memory_utilization` behaviour, not re-read from the pinned image's
+  source for this design; the refusal it motivates fails closed either way,
+  so a wrong reading makes v1 over-cautious, never permissive. It becomes
+  invariant exactly when the
   configuration pins capacity (`num_gpu_blocks_override` or
   `kv_cache_memory_bytes`), which the report's `kv_observations` can be
   checked against (`num_blocks`, `group_page_size_bytes`,
