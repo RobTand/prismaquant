@@ -112,6 +112,7 @@ __all__ = [
     "TesseraRouteCell",
     "cell_activation_projection",
     "ActivationQuantizerAttestation",
+    "ActivationQuantizerGeneration",
     "ActivationQuantizerVector",
     "ACTIVATION_QUANTIZER_SCHEMA",
     "contract_answer",
@@ -2270,6 +2271,17 @@ _ACTIVATION_CONTRACT_MEMBERS = (
 _ACTIVATION_VECTOR_MEMBERS = (
     "id", "boundary", "global_scale", "input", "stored_scale", "codes",
 )
+#: The vocabulary of ``platforms[p]``.  ``generated`` is the scope the table
+#: was taken under and is read here (RobTand/prismaquant#715); a third member
+#: is a review, for the same reason a contract entry's is.
+_ACTIVATION_PLATFORM_MEMBERS = ("contracts", "generated")
+#: Every field of ``platforms[p].generated``.  All of them, exactly: a table
+#: that names its box but not its build, or its build but not its image, does
+#: not say what a consumer has to compare against.
+_ACTIVATION_GENERATED_MEMBERS = (
+    "image", "vllm", "torch", "device", "compute_capability", "driver",
+    "generator_sha256",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2307,6 +2319,40 @@ class ActivationQuantizerVector:
 
 
 @dataclass(frozen=True, slots=True)
+class ActivationQuantizerGeneration:
+    """``activation_quantizers.platforms[p].generated``: the table's scope.
+
+    The vectors say what the kernel emitted.  This says WHICH kernel: the
+    image the runtime ran to emit them, and the build inside it.  The two are
+    one claim -- principle 14's corollary is that a capability claim inherits
+    the scope of the artifact it was measured on -- and until #715 this
+    producer read the vectors and dropped the scope, so a cell measured in
+    another build of the same operator carried an attestation that did not
+    cover it.
+
+    Published at the PLATFORM level, not per contract: #715's text quotes it
+    under ``contracts[...]``, but the pinned bytes (``db9ca4c0…``, Tessera
+    ``4c384e6049``) and master both publish it beside ``contracts``, one
+    generation for every contract the platform attests.  Each row for the
+    platform carries it, which is the same fact addressed the way a consumer
+    reads it.
+    """
+
+    image: str
+    vllm: str
+    torch: str
+    device: str
+    compute_capability: str
+    driver: str
+    generator_sha256: str
+
+    def as_stamp(self) -> dict:
+        """The scope, as a producer freezes it beside the attestation."""
+        return {field: getattr(self, field)
+                for field in _ACTIVATION_GENERATED_MEMBERS}
+
+
+@dataclass(frozen=True, slots=True)
 class ActivationQuantizerAttestation:
     """One ``activation_quantizers.platforms[p].contracts[c]`` entry.
 
@@ -2333,6 +2379,11 @@ class ActivationQuantizerAttestation:
     #: How the global scale is supplied, as the runtime names it.
     global_scale: str
     vectors: tuple[ActivationQuantizerVector, ...]
+    #: The platform's ``generated`` block, or ``None`` when the table
+    #: publishes none.  ``None`` is not a pass: it travels into the stamp as
+    #: an explicit absence and the consumer refuses an unscoped attestation
+    #: (RobTand/prismaquant#715).
+    generated: "ActivationQuantizerGeneration | None" = None
 
     def answer(self) -> list:
         """The gate-read projection, for :func:`contract_answer`.
@@ -2382,20 +2433,63 @@ def _parse_activation_quantizers(payload: Mapping[str, Any], path: str
         spot = f"{where}.platforms[{platform}]"
         if not isinstance(published, Mapping):
             raise TesseraContractError(f"{spot} must be a JSON object")
+        unknown = sorted(set(published) - set(_ACTIVATION_PLATFORM_MEMBERS))
+        if unknown:
+            raise TesseraContractError(
+                f"{spot} publishes {unknown} which this reader does not know. "
+                "A field beside a platform's quantiser tables that nothing "
+                "here reads is either a value a gate should decide on or "
+                "prose that does not belong; either way it is a review.")
         contracts = _require(published, "contracts", spot)
         if not isinstance(contracts, Mapping):
             raise TesseraContractError(f"{spot}.contracts must be a JSON object")
+        generated = _parse_activation_generated(published.get("generated"),
+                                                f"{spot}.generated")
         rows: dict[str, ActivationQuantizerAttestation] = {}
         for name, entry in contracts.items():
             rows[str(name)] = _parse_activation_contract(
                 entry, platform=str(platform), name=str(name),
-                where=f"{spot}.contracts[{name}]")
+                where=f"{spot}.contracts[{name}]", generated=generated)
         table[str(platform)] = rows
     return table
 
 
+def _parse_activation_generated(entry: Any, where: str
+                                ) -> "ActivationQuantizerGeneration | None":
+    """Read the table's scope, or read that it publishes none.
+
+    Absence returns ``None`` rather than refusing, for the same reason
+    :func:`_parse_activation_quantizers` permits a missing block: every other
+    gate on this contract was sound before the scope existed.  The refusal
+    lives where the claim is consumed -- an attested stamp with no scope is
+    ``not verified`` at
+    :func:`native_operator_panel.require_panel_execution_scope` -- so a
+    missing scope can never become a silent pass.
+
+    A PRESENT block is read strictly: exactly the published vocabulary, every
+    value a non-empty string.  A half-written scope is worse than none,
+    because it looks like an answer.
+    """
+    if entry is None:
+        return None
+    if not isinstance(entry, Mapping):
+        raise TesseraContractError(f"{where} must be a JSON object")
+    if set(entry) != set(_ACTIVATION_GENERATED_MEMBERS):
+        raise TesseraContractError(
+            f"{where} must publish exactly "
+            f"{sorted(_ACTIVATION_GENERATED_MEMBERS)}, got {sorted(entry)}")
+    for field, value in entry.items():
+        if not isinstance(value, str) or not value.strip():
+            raise TesseraContractError(
+                f"{where}.{field} must be a non-empty string, got {value!r}")
+    return ActivationQuantizerGeneration(
+        **{field: str(entry[field]) for field in _ACTIVATION_GENERATED_MEMBERS})
+
+
 def _parse_activation_contract(entry: Any, *, platform: str, name: str,
-                               where: str) -> ActivationQuantizerAttestation:
+                               where: str,
+                               generated: "ActivationQuantizerGeneration | None" = None,
+                               ) -> ActivationQuantizerAttestation:
     if not isinstance(entry, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
     unknown = sorted(set(entry) - set(_ACTIVATION_CONTRACT_MEMBERS))
@@ -2450,6 +2544,7 @@ def _parse_activation_contract(entry: Any, *, platform: str, name: str,
         block_scale=str(_require(entry, "block_scale", where)),
         global_scale=str(_require(entry, "global_scale", where)),
         vectors=tuple(vectors),
+        generated=generated,
     )
 
 
@@ -2681,6 +2776,16 @@ def require_activation_quantizer_attested(
         "elements": sum(len(v.codes) for v in row.vectors),
         "boundaries": sorted({v.boundary for v in row.vectors}),
         "contract_sha256": sha,
+        # WHICH kernel emitted the vectors this stamp reproduces: read from
+        # the contract bytes, never from the driver or the environment.  A
+        # consumer compares the executing image against this one and refuses
+        # a cell measured on another build of the same operator (#715).
+        "generated": row.generated.as_stamp() if row.generated else None,
+        "generated_absent_because": None if row.generated else (
+            "the pinned contract publishes no activation_quantizers"
+            ".platforms[<platform>].generated block, so the table states no "
+            "image or build it was taken under; an attestation with no scope "
+            "is not verified (RobTand/prismaquant#715)"),
         "oracle": "prismaquant.nvfp4_activation_contract",
         "attests": ["amax_to_ue4m3_stored_scale", "value_to_code_rounding"],
         "does_not_attest": ["non_dyadic_used_scale"],
