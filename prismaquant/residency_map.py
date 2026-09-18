@@ -33,9 +33,12 @@ The identity rules, in order:
   movers are still running, so an absent map is ordinary: it is retried on the
   next resolve rather than being fatal.
 * The entry key is ``(path, offset)``, spelled ``"<offset>:<path>"``, because a
-  data manifest may name one path at several offsets. The readers hooked here
-  read whole files, so they ask for offset 0 and refuse an entry that covers
-  less than the declared file.
+  data manifest may name one path at several offsets. A reader of whole files
+  asks ``staged_read`` for offset 0 and is refused an entry covering less than
+  the declared file. A reader of one tensor's span out of a shard asks
+  ``staged_range`` for that span and is served the single entry covering it
+  outright, or none: a span straddling two staged ranges is a miss here, and
+  the caller reads its declared path rather than a concatenation nobody fenced.
 * An entry is used only after a per-entry check: the digest the map publishes
   has to equal the digest the caller already requires (when it has one), the
   staged file has to be a regular file of exactly the entry's byte count, and
@@ -130,6 +133,11 @@ class ResidencyResolver:
         self._refused: str | None = None
         self._hits = 0
         self._misses = 0
+        self._range_hits = 0
+        self._range_misses = 0
+        self._intervals: dict[str, list[dict]] = {}
+        self._real_intervals: dict[str, list[dict]] = {}
+        self._intervals_for: dict[str, dict] | None = None
         self._bytes_from_stage = 0
         self._bytes_from_pool = 0
         self._fallbacks: list[dict] = []
@@ -385,6 +393,118 @@ class ResidencyResolver:
                     "bytes": entry["bytes"], "offset": entry["offset"],
                     "sha256": entry["sha256"]}
 
+    def _interval_index(self) -> tuple[dict, dict]:
+        """The map's entries grouped by declared path. Caller holds the lock.
+
+        The map is keyed by an exact offset, which answers "is this whole file
+        staged" and not "which staged range covers these bytes". This is that
+        second question's index, built once per adopted map -- ``_adopt`` and
+        ``_forget`` both install a new ``_entries``, so the identity check below
+        is what invalidates it -- and built for both spellings at once, since
+        the realpath pass costs one ``realpath`` per distinct directory and
+        ``_real_dirs`` already caches those.
+        """
+        if self._intervals_for is self._entries:
+            return self._intervals, self._real_intervals
+        declared_index: dict[str, list[dict]] = {}
+        real_index: dict[str, list[dict]] = {}
+        for entry in self._entries.values():
+            path = entry["declared_path"]
+            declared_index.setdefault(path, []).append(entry)
+            directory, name = os.path.split(path)
+            real = self._real_dirs.get(directory)
+            if real is None:
+                try:
+                    real = os.path.realpath(directory)
+                except OSError:
+                    real = directory
+                self._real_dirs[directory] = real
+            if real != directory:
+                real_index.setdefault(os.path.join(real, name), []).append(entry)
+        for rows in declared_index.values():
+            rows.sort(key=lambda row: row["offset"])
+        for rows in real_index.values():
+            rows.sort(key=lambda row: row["offset"])
+        self._intervals = declared_index
+        self._real_intervals = real_index
+        self._intervals_for = self._entries
+        return declared_index, real_index
+
+    def stages(self, declared: str | Path) -> bool:
+        """Does the map name this declared file at any offset?
+
+        The question a reader asks before it wraps anything. A file the map
+        never names is read exactly as it is read without a map, so nothing
+        pays for a redirect that cannot happen.
+        """
+        path = _normal(declared)
+        with self._lock:
+            self._read_map()
+            index, real = self._interval_index()
+            return bool(index.get(path) or real.get(path))
+
+    def staged_range(self, declared: str | Path, start: int, end: int, *,
+                     declared_size: int | None = None) -> dict | None:
+        """Where to open the staged copy of ``declared``'s ``[start, end)``.
+
+        ``staged_read``'s pre-open checks, asked of a byte range. One entry has
+        to cover the span outright; the staged copy has to be a regular file of
+        exactly the entry's length; and the entry has to fit inside the declared
+        file, which is what binds it to the file it stands for and is the check
+        ``staged_read`` spells as an equality because its callers read the whole
+        thing. A caller that already holds the declared file's length passes it
+        as ``declared_size`` rather than making this stat a shard's worth of
+        NFS getattrs.
+
+        A span no entry covers is a miss, counted and silent: a half-staged
+        shard is the ordinary mid-flight state, not a refusal worth a line per
+        tensor. An entry that covers it and then fails a check is a fallback,
+        counted and printed, exactly as a whole-file refusal is.
+
+        The read position inside the staged file is ``start - entry["offset"]``:
+        PrismaBuild's mover writes a range as a file of its own, from byte 0.
+        """
+        if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start <= end:
+            raise ValueError("a staged range is a non-negative [start, end) span")
+        path = _normal(declared)
+        with self._lock:
+            self._read_map()
+            index, real = self._interval_index()
+            rows = index.get(path) or real.get(path)
+            entry = None
+            for row in rows or ():
+                if row["offset"] <= start and end <= row["offset"] + row["bytes"]:
+                    entry = row
+                    break
+            if entry is None:
+                self._range_misses += 1
+                return None
+            if declared_size is None:
+                try:
+                    declared_size = os.lstat(path).st_size
+                except OSError:
+                    self._record_fallback(
+                        path, "declared file is unstatable, cannot bind the entry to it")
+                    return None
+            if entry["offset"] + entry["bytes"] > declared_size:
+                self._record_fallback(path, "map entry runs past the declared file")
+                return None
+            stage_path = entry["stage_path"]
+            try:
+                info = os.lstat(stage_path)
+            except OSError as error:
+                self._record_fallback(path, f"staged copy is unreadable: {error.strerror}")
+                return None
+            if not stat.S_ISREG(info.st_mode):
+                self._record_fallback(path, "staged copy is not a regular file")
+                return None
+            if info.st_size != entry["bytes"]:
+                self._record_fallback(path, "staged copy size differs from the map")
+                return None
+            return {"declared_path": path, "stage_path": stage_path,
+                    "bytes": entry["bytes"], "offset": entry["offset"],
+                    "sha256": entry["sha256"]}
+
     # -- the accounting --------------------------------------------------
 
     def _record_fallback(self, path: str, reason: str) -> None:
@@ -401,6 +521,19 @@ class ResidencyResolver:
     def record_stage_read(self, declared: str | Path, nbytes: int) -> None:
         with self._lock:
             self._hits += 1
+            self._bytes_from_stage += int(nbytes)
+
+    def record_stage_range_read(self, declared: str | Path, nbytes: int) -> None:
+        """One read the stage served out of a byte range.
+
+        Counted in ``hits`` too, so ``hits`` stays the number of reads the
+        stage served and ``range_hits`` says how many of those came out of a
+        range rather than a whole staged file. A run whose journal shows
+        ``range_hits`` above zero read shard bytes off the stage.
+        """
+        with self._lock:
+            self._hits += 1
+            self._range_hits += 1
             self._bytes_from_stage += int(nbytes)
 
     def record_pool_read(self, declared: str | Path, nbytes: int) -> None:
@@ -421,6 +554,8 @@ class ResidencyResolver:
                 "entries": len(self._entries),
                 "hits": self._hits,
                 "misses": self._misses,
+                "range_hits": self._range_hits,
+                "range_misses": self._range_misses,
                 "fallbacks": [dict(row) for row in self._fallbacks],
                 "fallback_count": self._fallback_count,
                 "bytes_from_stage": self._bytes_from_stage,
