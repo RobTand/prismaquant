@@ -69,10 +69,15 @@ def _announce(tmp_path, epoch=EPOCH, *, tier=RAM_TIER, name='tiers', body=None):
 
 
 def _write_ram_map(tmp_path, stage_root, paths, staged, ram, ram_root, *,
-                   epoch=EPOCH, tier=RAM_TIER, announce=('ram_tier_id', 'ram_root',
-                                                         'ram_epoch'),
+                   epoch=EPOCH, tier=RAM_TIER, announce=None,
                    ram_path_of=None, name='consumer.map.json'):
-    """A map of the ram-overlay generation, filed beside a ``tiers`` sibling."""
+    """A map of the ram-overlay generation, filed beside a ``tiers`` sibling.
+
+    ``announce`` names the header fields to carry: all three by default
+    (``None``), none for an old-format map (``()``), or a partial set for a
+    header that says less than its entries do.
+    """
+    announce = ('ram_tier_id', 'ram_root', 'ram_epoch') if announce is None else announce
     entries = {}
     for key in paths:
         entry = {
@@ -102,7 +107,7 @@ def _write_ram_map(tmp_path, stage_root, paths, staged, ram, ram_root, *,
     return path
 
 
-def _ram_wire(tmp_path, *, corrupt_ram=(), announce=None):
+def _ram_wire(tmp_path, *, corrupt_ram=(), announce=None, ram_path_of=None):
     """A wire, its stage copy, its ram copy, a map naming both, and a record.
 
     The map and the record share one epoch, which is the live state; a test
@@ -117,7 +122,7 @@ def _ram_wire(tmp_path, *, corrupt_ram=(), announce=None):
         ram[key].write_bytes(blob_bytes[:-1] + bytes([blob_bytes[-1] ^ 0xFF]))
     _announce(tmp_path)
     map_path = _write_ram_map(tmp_path, root, {'w': wire}, staged, ram, ram_root,
-                              announce=announce)
+                              announce=announce, ram_path_of=ram_path_of)
     return cell, wire, blob, staged, ram, map_path
 
 
@@ -404,6 +409,9 @@ def test_an_entry_naming_a_ram_path_without_the_announced_header_refuses_whole(
     cell, wire, blob, staged, ram, map_path = _ram_wire(tmp_path, announce=())
     monkeypatch.setenv(ENV_VAR, str(map_path))
     _bind()
+    # The map is read on the first lookup; a refusal there falls to the pool.
+    assert residency_resolver().staged_read(
+        wire, expected_sha256=cell['record']['blob_sha256']) is None
     report = residency_report()
     assert report['entries'] == 0
     assert 'ram root' in report['refused']
@@ -415,6 +423,8 @@ def test_a_header_announcing_only_part_of_the_ram_half_with_entries_refuses_whol
         tmp_path, announce=('ram_tier_id', 'ram_root'))
     monkeypatch.setenv(ENV_VAR, str(map_path))
     _bind()
+    assert residency_resolver().staged_read(
+        wire, expected_sha256=cell['record']['blob_sha256']) is None
     report = residency_report()
     assert report['entries'] == 0
     assert 'epoch' in report['refused']
