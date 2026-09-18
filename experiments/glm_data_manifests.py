@@ -1947,7 +1947,7 @@ def build_export_manifest(plan, *, assignment, allocation_cost, produced_by,
         by_layer.setdefault(layer_of[name], []).append(name)
     passthrough = []
     for layer in sorted(by_layer):
-        track.begin(f"layer-{layer}")
+        track.begin(_run_progress_module.layer_phase_name(layer))
         wired = []
         for name in sorted(by_layer[layer]):
             fmt = selected[name]
@@ -2058,7 +2058,7 @@ def build_aqua_manifest(plan, *, card, cost_in, act_dir, produced_by, argv=None)
     for name in roster:
         by_layer.setdefault(layer_of[name], []).append(name)
     for layer in sorted(by_layer):
-        track.begin(f"layer-{layer}")
+        track.begin(_run_progress_module.layer_phase_name(layer))
         for path, offset, length in campaign.weight_extents_for(
                 sorted(by_layer[layer])):
             track.add(path, offset, length, "source_extents")

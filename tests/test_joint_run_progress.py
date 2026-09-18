@@ -289,6 +289,23 @@ def test_the_manifest_and_the_reporter_share_one_layer_phase_name():
     assert jrp.layer_phase_name(7) == "layer-7"
 
 
+def test_the_joint_pass_builder_names_its_layers_through_that_function():
+    """The phase table the window walks, checked where the run is submitted."""
+    import ast
+
+    path = REPO / "experiments" / "glm_data_manifests.py"
+    source = path.read_text()
+    tree = ast.parse(source)
+    builder = next(node for node in tree.body
+                   if isinstance(node, ast.FunctionDef)
+                   and node.name == "build_joint_pass_manifest")
+    body = ast.get_source_segment(source, builder)
+    assert "_run_progress_module.layer_phase_name(layer)" in body
+    assert 'f"layer-' not in body and "'layer-" not in body, (
+        "the builder spells a layer phase name itself; the reporter would then "
+        "commit under the other spelling and the window would match neither")
+
+
 def test_a_joint_run_submission_declares_the_manifest_s_own_phase_names():
     manifest = {"annotations": {"phases": [
         {"name": name} for name in run_phases(3)]}}

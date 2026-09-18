@@ -83,10 +83,12 @@ HEAD_PHASE = "head"
 def layer_phase_name(layer: int) -> str:
     """The joint read set's phase name for one layer of a ``run``.
 
-    One definition, two readers: the manifest builder writes the phase table
-    with it and this reporter reports under it. Two spellings of the same
-    convention is how a consumer ends up committing names the window cannot
-    match, which reads as no progress at all.
+    One definition, several readers: the joint pass, export and AQUA read sets
+    all write their layer phases with it and this reporter reports under it.
+    Two spellings of the same convention is how a consumer ends up committing a
+    name the window cannot match, which reads as no progress at all. Only the
+    joint run reports today; the other two declare no progress phases, and the
+    shared name is what keeps that a choice rather than a divergence.
     """
     return f"layer-{int(layer)}"
 
