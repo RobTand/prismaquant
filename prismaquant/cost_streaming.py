@@ -128,6 +128,7 @@ class StreamedBoundaryArtifacts:
         self._slots = {}
         self._active_window = None
         self._check_memory = None
+        self._progress = None
         self._n_probes = 0
         self._batches = None
         self._cotangents = None
@@ -218,6 +219,17 @@ class StreamedBoundaryArtifacts:
         self._batches = batches
         self._cotangents = cotangents
 
+    def watch_progress(self, reporter):
+        """Report each published entry to ``joint_run_progress``, or to nothing.
+
+        Publication is where a unit becomes durable, so it is the only place
+        the count may move: PB #480 buys a long run time on committed work and
+        a counter that ticked on intent would keep a wedged run alive. The
+        reporter is optional so a legacy or standalone caller keeps today's
+        behaviour byte for byte.
+        """
+        self._progress = reporter
+
     def _entry_identity(self, reference):
         from .perturbed_x_cache import ExactActivationReference
         if (not isinstance(reference, ExactActivationReference)
@@ -270,6 +282,8 @@ class StreamedBoundaryArtifacts:
             self.telemetry["live_artifact_bytes"], self.telemetry["peak_artifact_bytes"])
         if previous is not None:
             self._retire(previous)
+        if self._progress is not None:
+            self._progress.entry(layer=boundary_index, partition=batch_index, kind=kind)
         if self._check_memory is not None:
             self._check_memory("exact activation publication")
         return reference
