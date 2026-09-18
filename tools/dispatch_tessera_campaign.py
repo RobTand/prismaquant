@@ -2669,6 +2669,24 @@ def cmd_submit_joint(args) -> int:
         prepared = str(prepared_path)
     if args.resume:
         inner += ["--resume"]
+    source_transition = None
+    if bool(args.source_transition) != bool(args.source_transition_sha256):
+        raise RuntimeError(
+            "--source-transition and --source-transition-sha256 are required together")
+    if args.source_transition:
+        # A source transition is a run-only, resume-only admission (the pass
+        # refuses it otherwise), so the submission refuses the same shapes here
+        # rather than after the GPU window has been reserved.
+        if args.command != "run" or not args.resume:
+            raise RuntimeError(
+                "--source-transition is admitted only by `run --resume`; the pass "
+                "loads it as a resume under a receipt that binds the sealed prepare")
+        transition_path = Path(args.source_transition).resolve()
+        transition_sha256 = _bound_sha256(transition_path, args.source_transition_sha256,
+                                          label="source transition receipt")
+        inner += ["--source-transition", str(transition_path),
+                  "--source-transition-sha256", transition_sha256]
+        source_transition = str(transition_path)
     provenance = producer.deterministic_entry_provenance(
         f"{JOINT_ENTRY_POINT}:{args.command}", plan=str(plan_path),
         plan_sha256=plan_sha256,
@@ -2678,7 +2696,7 @@ def cmd_submit_joint(args) -> int:
         plan=plan, scope=scope,
         build=lambda: producer.build_joint_pass_manifest(
             str(plan_path), command=args.command, produced_by=provenance,
-            argv=inner, prepared=prepared))
+            argv=inner, prepared=prepared, source_transition=source_transition))
 
 
 def cmd_submit_aqua(args) -> int:
@@ -3815,6 +3833,15 @@ def main(argv=None) -> int:
     joint.add_argument("--resume", action="store_true",
                        help="forwarded to the pass, which resumes from its "
                             "identity-bound checkpoints")
+    joint.add_argument("--source-transition", default=None,
+                       help="run --resume only: the closed source-transition "
+                            "receipt (prismaquant.joint_aura_transitions) under "
+                            "which this checkout may consume a prepared record "
+                            "sealed by an earlier implementation; forwarded to "
+                            "the pass and declared in the head of the read set")
+    joint.add_argument("--source-transition-sha256", default=None,
+                       help="the digest the receipt is bound by; computed when "
+                            "omitted and checked when given")
     joint.add_argument("--require-scope", required=True,
                        choices=CAMPAIGN_SCOPE_KINDS,
                        help="what this submission is for. The scope itself is "

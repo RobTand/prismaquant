@@ -1047,6 +1047,77 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
         line for line in printed.splitlines() if line.startswith("[submit] "))
 
 
+def _prepared_fixture(scratch):
+    prepared = scratch / "prepared.json"
+    cache = scratch / "production.pkl"
+    cache.write_bytes(b"p" * 5000)
+    prepared.write_text(json.dumps({
+        "schema": glm_data_manifests.JOINT_PREPARED_SCHEMA,
+        "status": "complete",
+        "production_cache": {"path": str(cache), "sha256": None},
+    }))
+    return prepared, cache
+
+
+def test_a_resumed_run_forwards_the_source_transition_and_reads_it_in_the_head(
+    scratch, shared_mount, capsys, monkeypatch,
+):
+    """The receipt reaches the pass by path and digest, and the fleet warms it."""
+    import dispatch_tessera_campaign as dispatch
+
+    fixture = _workspace(scratch)
+    prepared, cache = _prepared_fixture(scratch)
+    receipt = scratch / "transition.json"
+    receipt.write_bytes(b'{"schema": "receipt fixture"}\n')
+    digest = hashlib.sha256(receipt.read_bytes()).hexdigest()
+    spec = scratch / "spec.joint.json"
+    spec.write_text(json.dumps({"container": {"image": "x"}}))
+    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    built = {}
+    real = glm_data_manifests.build_joint_pass_manifest
+
+    def build(*args, **kwargs):
+        built.update(kwargs)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", build)
+    common = ["submit-joint", "run", "--plan", str(fixture["plan"]), *_scope_args(fixture),
+              "--prepared", str(prepared), "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+              "--manifest-dir", str(scratch / "manifests"), "--dry-run"]
+    assert dispatch.main([*common, "--resume", "--source-transition", str(receipt)]) == 0
+    line = next(line for line in capsys.readouterr().out.splitlines()
+                if line.startswith("[dry-run] "))
+    submitted = shlex.split(line[len("[dry-run] "):])
+    inner = submitted[submitted.index("prismaquant.tessera_joint_aura"):]
+    assert inner[inner.index("--source-transition") + 1] == str(receipt.resolve())
+    assert inner[inner.index("--source-transition-sha256") + 1] == digest
+    assert "--resume" in inner
+    assert built["source_transition"] == str(receipt.resolve())
+
+    manifest = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="run", produced_by=PRODUCED_BY,
+        prepared=str(prepared), source_transition=str(receipt))
+    assert str(receipt) in _paths(manifest, "head")
+    with pytest.raises(SystemExit, match="run command only"):
+        glm_data_manifests.build_joint_pass_manifest(
+            str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY,
+            source_transition=str(receipt))
+
+    # The pass admits a transition only under ``run --resume``; the submission
+    # refuses the other shapes and a wrong digest before any manifest is built.
+    with pytest.raises(RuntimeError, match="run --resume"):
+        dispatch.main([*common, "--source-transition", str(receipt)])
+    with pytest.raises(RuntimeError, match="required together"):
+        dispatch.main([*common, "--resume", "--source-transition-sha256", digest])
+    with pytest.raises(RuntimeError, match="hashes to"):
+        dispatch.main([*common, "--resume", "--source-transition", str(receipt),
+                       "--source-transition-sha256", "0" * 64])
+    with pytest.raises(RuntimeError, match="run --resume"):
+        dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
+                       *_scope_args(fixture), "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
+                       "--manifest-dir", str(scratch / "manifests"), "--dry-run",
+                       "--resume", "--source-transition", str(receipt)])
+
+
 @pytest.mark.parametrize("mode", ["qualification", "retained", "legacy"])
 @pytest.mark.parametrize("original_env", [{}, {"PRISMAQUANT_RELEASE_SOURCE_PAGES": "1"}])
 def test_joint_submit_environment_reaches_launcher_argv(
@@ -1082,6 +1153,7 @@ def test_joint_submit_environment_reaches_launcher_argv(
     monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [{"Id": "sha256:" + "a" * 64}])
     monkeypatch.setattr(launcher, "image_content_sha256", lambda _: "b" * 64)
     monkeypatch.setattr(launcher, "verify_pinned_import", lambda *args, **kwargs: {})
+    monkeypatch.setattr(launcher, "checkout_commit", lambda cwd: None)
     monkeypatch.setattr(launcher, "gpu_attachment", lambda *args, **kwargs: (False, "CPU test"))
     executed = []
     monkeypatch.setattr(launcher.os, "execvp", lambda binary, argv: executed.append(argv))
