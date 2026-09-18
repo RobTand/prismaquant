@@ -41,6 +41,17 @@ before its first tensor could be served. So on this path the map's own check is
 the only check, which is the coverage decision ``docs/ARCHITECTURE.md`` §12 D43
 names and this reader makes explicit rather than quiet.
 
+**How a span is read.** One tensor's payload is one span, and until PQ #746 it
+was one sequential ``preadv`` loop on one descriptor -- one stream, whatever the
+link underneath could carry. It is now cut on the mount's ``rsize`` and read on
+at most the mount's ``nconnect`` threads into disjoint slices of the tensor's own
+buffer, so the bytes are what the sequential loop produced and the wait is not.
+Both numbers come from the mount rather than from us (principle 2); a mount that
+is not NFS, or one publishing neither, is read the way it was. The threads are
+one process-wide pool, so the layer gather's own reader threads
+(``layer_streaming.layer_read_threads``) and this split cannot multiply into
+more in-flight reads than the client has transports.
+
 That has one consequence worth stating where it is made: under
 ``source_authentication`` (``tessera_calibration_cache``'s
 ``_CaptureSourceSafeOpen``) the payload the caller receives may come from the
@@ -50,10 +61,13 @@ run; the bytes handed over are the stage's, admitted on the map.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import errno
 import json
 import os
+import re
 import stat
+import threading
 
 import torch
 
@@ -70,6 +84,158 @@ except ImportError:  # pragma: no cover - a safetensors that moved the table
 # The same bound ``layer_streaming._advise_consumed_safetensors_pages`` puts on
 # the same structure.
 MAX_HEADER_BYTES = 100_000_000
+
+
+#: The environment's override for the number of concurrent reads one staged
+#: span is split into. ``1`` restores the single-stream read this reader
+#: shipped with; unset takes the mount's own ``nconnect``.
+STREAMS_ENV = "PRISMAQUANT_STAGED_READ_STREAMS"
+
+#: Where the kernel publishes the mount table this reader reads its two numbers
+#: from. Named so a test can point it at a table of its own.
+MOUNTS_PATH = "/proc/self/mounts"
+
+#: ``/proc/self/mounts`` escapes space, tab, newline and backslash in a mount
+#: point as a backslash and three octal digits. Decoded in one pass, so a mount
+#: point holding a literal backslash cannot be decoded twice.
+_OCTAL = re.compile(r"\\([0-7]{3})")
+
+_READ_SHAPE_LOCK = threading.Lock()
+_READ_SHAPE_CACHE: dict[str, tuple[int, int] | None] = {}
+_CHUNK_POOL_LOCK = threading.Lock()
+_CHUNK_POOL: ThreadPoolExecutor | None = None
+_CHUNK_POOL_SIZE = 0
+
+
+def _mount_options(path: str) -> tuple[str, str, str] | None:
+    """``(mount point, fstype, options)`` of the mount ``path`` is on.
+
+    The longest mount point that prefixes the path wins, and on a tie the one
+    later in the table does, because that is how the kernel resolves it: mounts
+    stack, and the last one on a point is the one a read reaches. The tie is
+    not hypothetical -- ``/stage/prewarm`` is an autofs trigger with the NFS
+    mount on top of it, and reading the autofs row's options instead of the
+    NFS row's is a mount with no ``nconnect``, which is a reader that quietly
+    stays serial. ``/proc/self/mounts`` escapes space, tab, newline and
+    backslash in the mount point as octal, so they are decoded before the
+    comparison rather than compared raw.
+    """
+    target = os.path.abspath(path)
+    best: tuple[int, str, str, str] | None = None
+    try:
+        with open(MOUNTS_PATH) as handle:
+            rows = handle.read().splitlines()
+    except OSError:
+        return None
+    for row in rows:
+        fields = row.split(" ")
+        if len(fields) < 4:
+            continue
+        point = _OCTAL.sub(lambda m: chr(int(m.group(1), 8)), fields[1])
+        if target == point or target.startswith(point.rstrip("/") + "/"):
+            if best is None or len(point) >= best[0]:
+                best = (len(point), point, fields[2], fields[3])
+    if best is None:
+        return None
+    return best[1], best[2], best[3]
+
+
+def _read_shape_for(mount: tuple[str, str, str]) -> tuple[int, int] | None:
+    """``(streams, chunk_bytes)`` for reads on ``mount``, or None to stay serial.
+
+    Both numbers are the mount's, not ours (principle 2). ``nconnect`` is how
+    many transports the NFS client actually holds open to the server, so it is
+    the ceiling on how many of this span's reads can be in flight at once;
+    ``rsize`` is the size of the read the client issues, so it is the unit a
+    span is cut on and a cut anywhere else only splits one wire read in two.
+
+    ``None`` -- a mount that is not NFS, or an NFS mount publishing neither --
+    means there is no explicit to read, and a reader with no explicit reads the
+    way it read before. ``STREAMS_ENV`` overrides the stream count for an A/B;
+    ``1`` is the single-stream read and is what the before arm sets.
+    """
+    _, fstype, raw = mount
+    if not fstype.startswith("nfs"):
+        return None
+    streams = chunk = 0
+    for option in raw.split(","):
+        name, _, value = option.partition("=")
+        if name == "nconnect" and value.isdigit():
+            streams = int(value)
+        elif name == "rsize" and value.isdigit():
+            chunk = int(value)
+    override = str(os.environ.get(STREAMS_ENV, "")).strip()
+    if override:
+        try:
+            streams = max(1, int(override))
+        except ValueError:
+            pass
+    if streams <= 1 or chunk <= 0:
+        return None
+    return streams, chunk
+
+
+def _read_shape(path: str) -> tuple[int, int] | None:
+    """The read shape for ``path``, deriving it once per mount point.
+
+    The mount table is read either way -- it is what says which mount the path
+    is on -- and the cache saves the option parse and the environment read, not
+    the table read.
+    """
+    mount = _mount_options(path)
+    if mount is None:
+        return None
+    with _READ_SHAPE_LOCK:
+        if mount[0] in _READ_SHAPE_CACHE:
+            return _READ_SHAPE_CACHE[mount[0]]
+    shape = _read_shape_for(mount)
+    with _READ_SHAPE_LOCK:
+        _READ_SHAPE_CACHE[mount[0]] = shape
+    return shape
+
+
+def reset_read_shape_cache_for_tests() -> None:
+    with _READ_SHAPE_LOCK:
+        _READ_SHAPE_CACHE.clear()
+
+
+def _chunk_pool(streams: int) -> ThreadPoolExecutor:
+    """One pool for the whole process, sized by the mount's transport count.
+
+    Shared on purpose. ``layer_streaming.read_prefix_tensors`` already reads a
+    layer's tensors on several threads, so a per-reader pool would multiply
+    (gather threads x chunk threads) into more in-flight reads than the client
+    has transports to carry. The chunk tasks submit nothing themselves, so a
+    gather thread waiting on this pool cannot deadlock against it.
+    """
+    global _CHUNK_POOL, _CHUNK_POOL_SIZE
+    with _CHUNK_POOL_LOCK:
+        if _CHUNK_POOL is None or _CHUNK_POOL_SIZE < streams:
+            if _CHUNK_POOL is not None:
+                _CHUNK_POOL.shutdown(wait=False)
+            _CHUNK_POOL = ThreadPoolExecutor(
+                max_workers=streams, thread_name_prefix="pq-staged-read")
+            _CHUNK_POOL_SIZE = streams
+        return _CHUNK_POOL
+
+
+def _cuts(offset: int, count: int, chunk: int) -> list[tuple[int, int]]:
+    """``[(offset, length), ...]`` covering ``[offset, offset + count)`` exactly.
+
+    Aligned to ``chunk`` in the staged file's own offset space, so every read
+    but the first and last is one whole ``rsize`` request. The pieces are
+    disjoint and their lengths sum to ``count``; nothing is read twice and no
+    byte is left out.
+    """
+    cuts = []
+    position = offset
+    end = offset + count
+    while position < end:
+        boundary = ((position // chunk) + 1) * chunk
+        stop = min(boundary, end)
+        cuts.append((position, stop - position))
+        position = stop
+    return cuts
 
 
 def _signature(info: os.stat_result) -> tuple[int, int, int, int, int]:
@@ -108,22 +274,57 @@ def _read_shard_header(path: str) -> tuple[dict, int, int]:
         os.close(handle)
 
 
-def _pread_exact(fd: int, count: int, offset: int) -> bytearray:
-    """``count`` bytes at ``offset``, in as many reads as the kernel needs.
+def _pread_into(fd: int, view: memoryview, offset: int) -> None:
+    """Fill ``view`` from ``offset``, in as many reads as the kernel needs.
 
     A single ``pread`` is capped near 2 GiB on Linux and an NFS read can be
     short for its own reasons, so the loop is the contract rather than an
-    optimization. The buffer is writable, which is what ``torch.frombuffer``
-    wants, and it is the tensor's own storage afterwards.
+    optimization.
     """
-    buffer = bytearray(count)
-    view = memoryview(buffer)
+    count = len(view)
     done = 0
     while done < count:
         moved = os.preadv(fd, [view[done:]], offset + done)
         if moved <= 0:
             raise OSError(errno.EIO, "staged range ended before the tensor's bytes")
         done += moved
+
+
+def _read_span(fd: int, count: int, offset: int,
+               shape: tuple[int, int] | None) -> bytearray:
+    """``count`` bytes at ``offset``, on as many streams as the mount holds.
+
+    One buffer, cut into disjoint pieces that are read at the same time and
+    written straight into their own slice of it, so the bytes are the bytes a
+    single sequential read would have produced, piece by piece and offset by
+    offset. The buffer is writable, which is what ``torch.frombuffer`` wants,
+    and it is the tensor's own storage afterwards.
+
+    A span shorter than one read per stream is read on one stream: splitting it
+    would hand some streams nothing and cost a round trip to find out. Every
+    piece is waited for before the result is looked at, including on a failure,
+    so no thread is still writing into the buffer -- or reading the descriptor
+    the caller is about to close -- when this returns.
+    """
+    buffer = bytearray(count)
+    view = memoryview(buffer)
+    if shape is None or count < shape[0] * shape[1]:
+        _pread_into(fd, view, offset)
+        return buffer
+    streams, chunk = shape
+    cuts = _cuts(offset, count, chunk)
+    pool = _chunk_pool(streams)
+    futures = [pool.submit(_pread_into, fd, view[at - offset:at - offset + size], at)
+               for at, size in cuts]
+    failure = None
+    for future in futures:
+        try:
+            future.result()
+        except BaseException as error:  # noqa: BLE001 - re-raised after the join
+            if failure is None:
+                failure = error
+    if failure is not None:
+        raise failure
     return buffer
 
 
@@ -150,6 +351,7 @@ class StagedShardReader:
         self._base = 0
         self._declared_size = 0
         self._parsed = False
+        self._shape: tuple[int, int] | None = None
         self._bound: list[tuple] = []
 
     # -- the handle interface --------------------------------------------
@@ -277,6 +479,10 @@ class StagedShardReader:
             os.close(fd)
             self._resolver.record_fallback(self._declared, f"staged range {error}")
             return None
+        if not self._bound:
+            # Every range of one declared shard is staged under the same root,
+            # so the mount's read shape is read once per reader, not per tensor.
+            self._shape = _read_shape(entry["stage_path"])
         row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
                _signature(info), entry)
         self._bound.append(row)
@@ -303,7 +509,7 @@ class StagedShardReader:
             return None
         fd, signature, entry = row[2], row[3], row[4]
         try:
-            raw = _pread_exact(fd, end - start, start - entry["offset"])
+            raw = _read_span(fd, end - start, start - entry["offset"], self._shape)
             if _signature(os.fstat(fd)) != signature:
                 raise ValueError("changed during its content read")
         except (OSError, ValueError) as error:
