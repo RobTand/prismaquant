@@ -2559,6 +2559,15 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
                 raise RuntimeError("joint prepare read plan exceeds 2048 sealed PB phases")
             inner = [*inner, "--prewarm-manifest", str(manifest_path),
                      "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
+    if getattr(args, "residency", None) and entry_point == JOINT_ENTRY_POINT:
+        # The action has to know which read set it was submitted with, or a
+        # residency map composed for another manifest could answer for it. The
+        # digest is the manifest's own, the one pbrun seals into the action
+        # key, so this adds no fact -- it puts a fact the action could not see
+        # where the action can see it. Added only under --residency, so a
+        # submission that asks for no stage keeps the argv, and therefore the
+        # action key, it has today.
+        inner = [*inner, "--data-manifest-sha256", hashlib.sha256(blob).hexdigest()]
     argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
                        progress_phases=phase_names,
                        gpu_memory_gb=gpu_memory_gb, container_spec=container_spec)

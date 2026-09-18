@@ -547,6 +547,53 @@ def test_the_wire_reader_is_unchanged_without_the_variable(tmp_path):
     assert residency_report() is None
 
 
+def test_a_staged_copy_released_between_the_stat_and_the_open_falls_back(tmp_path, monkeypatch):
+    """PrismaBuild recomposes after every egress; a vanished copy is a miss."""
+    cache, paths, tensors = _pool_cache(tmp_path)
+    key, path = next(iter(paths.items()))
+    root, staged = _stage(tmp_path, paths)
+    map_path = _write_map(tmp_path, root, paths, staged)
+    monkeypatch.setenv(ENV_VAR, str(map_path))
+    _bind()
+    original = Path.open
+
+    def vanishing(candidate, *args, **kwargs):
+        if candidate == staged[key]:
+            candidate.unlink()
+        return original(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'open', vanishing)
+    _prepare(cache, paths)
+    assert cache.prefetch([key], max_workers=1) == 1
+    assert torch.equal(cache.get(*key), tensors[key])
+    report = residency_report()
+    assert report['hits'] == 0 and report['bytes_from_pool'] == path.stat().st_size
+    assert 'unreadable' in report['fallbacks'][0]['reason']
+
+
+def test_a_staged_wire_released_between_the_stat_and_the_open_falls_back(tmp_path, monkeypatch):
+    from prismaquant.tessera_joint_aura import _read_verified_wire_blob
+    cell, wire, blob = _wire_cell(tmp_path)
+    paths = {'w': wire}
+    root, staged = _stage(tmp_path, paths)
+    map_path = _write_map(tmp_path, root, paths, staged)
+    monkeypatch.setenv(ENV_VAR, str(map_path))
+    _bind()
+    original = os.open
+
+    def vanishing(candidate, *args, **kwargs):
+        if str(candidate) == str(staged['w']):
+            staged['w'].unlink()
+        return original(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(os, 'open', vanishing)
+    read, digest = _read_verified_wire_blob(cell)
+    assert read == blob and digest == cell['record']['blob_sha256']
+    report = residency_report()
+    assert report['hits'] == 0 and report['bytes_from_pool'] == len(blob)
+    assert 'unreadable' in report['fallbacks'][0]['reason']
+
+
 # --------------------------------------------------------------------------
 # the submitter flag
 # --------------------------------------------------------------------------
@@ -573,3 +620,9 @@ def test_the_submitter_passes_residency_stage_through_to_pbrun():
 
 def test_the_submitter_omits_the_flag_by_default():
     assert '--residency' not in _argv(None)
+
+
+def test_a_binding_that_is_not_a_digest_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency.json'))
+    with pytest.raises(ValueError, match='64 lowercase hex'):
+        bind_residency_manifest('not-a-digest')

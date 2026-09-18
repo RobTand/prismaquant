@@ -1336,8 +1336,15 @@ class ProductionWeightCache:
             raise RuntimeError('PWC window file changed before its content read')
         source, source_before = path, before
         if staged is not None:
+            # PrismaBuild recomposes the map after every egress, so a staged
+            # copy can be released between the resolver's stat and this open.
+            # That is an ordinary fallback, not a failed load.
             source = Path(staged["stage_path"])
-            source_before = source.lstat()
+            try:
+                source_before = source.lstat()
+            except OSError as error:
+                raise StagedReadRefused(
+                    f'staged copy is unreadable: {error.strerror}') from None
             if not stat.S_ISREG(source_before.st_mode):
                 raise StagedReadRefused('staged copy is not a regular file')
             if source_before.st_size != before.st_size:
@@ -1348,14 +1355,20 @@ class ProductionWeightCache:
             return (StagedReadRefused(f'staged copy {message}') if staged is not None
                     else RuntimeError(f"PWC file {message}"))
 
-        with source.open("rb") as handle:
-            if self._file_signature(os.fstat(handle.fileno())) != source_signature:
-                raise changed("changed before its content read")
-            raw = handle.read(source_before.st_size + 1)
-            if (len(raw) != source_before.st_size
-                    or self._file_signature(os.fstat(handle.fileno())) != source_signature
-                    or self._file_signature(source.lstat()) != source_signature):
-                raise changed("changed during its content read")
+        try:
+            with source.open("rb") as handle:
+                if self._file_signature(os.fstat(handle.fileno())) != source_signature:
+                    raise changed("changed before its content read")
+                raw = handle.read(source_before.st_size + 1)
+                if (len(raw) != source_before.st_size
+                        or self._file_signature(os.fstat(handle.fileno())) != source_signature
+                        or self._file_signature(source.lstat()) != source_signature):
+                    raise changed("changed during its content read")
+        except OSError as error:
+            if staged is None:
+                raise
+            raise StagedReadRefused(
+                f'staged copy is unreadable: {error.strerror}') from None
         if staged is not None and self._file_signature(path.lstat()) != signature:
             raise StagedReadRefused('declared file changed during the staged read')
         # The temporary serialized buffer is per loader worker and is released

@@ -122,24 +122,46 @@ class _StagedWireRefused(Exception):
 
 
 def _read_wire_bytes(wire, size, *, expected, staged):
-    """One fenced read of ``size`` bytes, digested and bound to the receipt."""
-    before = wire.lstat()
-    _require(stat.S_ISREG(before.st_mode), f"{wire}: wire must be a regular file, not a symlink")
-    if staged and before.st_size != size:
-        raise _StagedWireRefused('staged wire size differs from the measured receipt')
-    _same(before.st_size, size, f"{wire}: wire size differs from measured receipt")
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(wire, flags)
+    """One fenced read of ``size`` bytes, digested and bound to the receipt.
+
+    A staged read refuses instead of failing: PrismaBuild recomposes the map
+    after every egress, so a staged copy can be released between the
+    resolver's stat and this open, and every fence below is then a reason to
+    read the declared wire rather than a reason to stop. The declared wire's
+    own refusals are unchanged.
+    """
     try:
-        with os.fdopen(fd, "rb", closefd=True) as handle:
-            fd = None
-            _same(_stat_signature(os.fstat(handle.fileno())), _stat_signature(before),
-                  f"{wire}: wire changed before its content read")
-            blob = handle.read(size + 1)
-            after_open = os.fstat(handle.fileno())
-    finally:
-        if fd is not None:
-            os.close(fd)
+        before = wire.lstat()
+        if staged and not stat.S_ISREG(before.st_mode):
+            raise _StagedWireRefused('staged wire is not a regular file')
+        _require(stat.S_ISREG(before.st_mode),
+                 f"{wire}: wire must be a regular file, not a symlink")
+        if staged and before.st_size != size:
+            raise _StagedWireRefused('staged wire size differs from the measured receipt')
+        _same(before.st_size, size, f"{wire}: wire size differs from measured receipt")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(wire, flags)
+        try:
+            with os.fdopen(fd, "rb", closefd=True) as handle:
+                fd = None
+                if staged and _stat_signature(os.fstat(handle.fileno())) != _stat_signature(before):
+                    raise _StagedWireRefused('staged wire changed before its content read')
+                _same(_stat_signature(os.fstat(handle.fileno())), _stat_signature(before),
+                      f"{wire}: wire changed before its content read")
+                blob = handle.read(size + 1)
+                after_open = os.fstat(handle.fileno())
+        finally:
+            if fd is not None:
+                os.close(fd)
+    except OSError as error:
+        if not staged:
+            raise
+        raise _StagedWireRefused(
+            f'staged wire is unreadable: {error.strerror}') from None
+    if staged and (len(blob) != size
+                   or _stat_signature(after_open) != _stat_signature(before)
+                   or _stat_signature(wire.lstat()) != _stat_signature(before)):
+        raise _StagedWireRefused('staged wire changed during its content read')
     _require(len(blob) == size, f"{wire}: wire changed during its content read")
     _same(_stat_signature(after_open), _stat_signature(before),
           f"{wire}: wire changed during its content read")
@@ -1777,7 +1799,8 @@ def _restores_activation_scale_env(function):
 
 @_restores_activation_scale_env
 def execute(command, config, *, plan_sha256, prepared=None, resume=False,
-            source_transition=None, prewarm_manifest=None, cost_read_manifest=None, plan_path=None):
+            source_transition=None, prewarm_manifest=None, cost_read_manifest=None, plan_path=None,
+            data_manifest_sha256=None):
     """Execute one admitted preparation or one dependent cost action."""
     if source_transition is not None:
         from .joint_aura_source_transition import load_transition
@@ -1865,8 +1888,12 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     # manifest it was composed for; one naming a different manifest is refused
     # whole and recorded. A pass that seals no manifest binds nothing and gets
     # no redirect, which is the same behaviour as having no stage at all.
+    # A pass that seals a read schedule already names its manifest; one that
+    # does not (a fresh prepare, or a run whose schedule is not sealed) is
+    # told the digest explicitly by the submitter that asked for the stage.
     bind_residency_manifest(
-        (cost_read_manifest or prewarm_manifest or {}).get('sha256'))
+        data_manifest_sha256
+        or (cost_read_manifest or prewarm_manifest or {}).get('sha256'))
     identity_cache_path = _seed_source_identity_cache(config, root)
     result = {"schema": "prismaquant.tessera_joint_aura.execution.v1", "command": command,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
@@ -2286,6 +2313,11 @@ def main(argv=None):
     parser.add_argument("--cost-read-manifest", type=Path)
     parser.add_argument("--cost-read-manifest-sha256")
     parser.add_argument("--cost-read-manifest-bytes", type=int)
+    parser.add_argument("--data-manifest-sha256",
+                        help="the digest of the PrismaBuild data manifest this "
+                             "pass was submitted with. It binds the read set a "
+                             "residency map may answer for and nothing else; a "
+                             "map composed for another manifest is refused.")
     parser.add_argument("--source-transition", type=Path)
     parser.add_argument("--source-transition-sha256")
     parser.add_argument("--units", help="synthesize: lo:hi over the sorted census roster. "
@@ -2315,6 +2347,10 @@ def main(argv=None):
         parser.error('--cost-read-manifest applies only to run')
     if bool(args.prewarm_manifest) != bool(args.prewarm_manifest_sha256):
         parser.error("--prewarm-manifest and --prewarm-manifest-sha256 are required together")
+    if args.data_manifest_sha256 is not None and (
+            len(args.data_manifest_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in args.data_manifest_sha256)):
+        parser.error("--data-manifest-sha256 takes a 64-character lowercase digest")
     # ``synthesize`` constructs no lease and loads no backend: it decodes wires
     # and publishes the canonical CPU BF16 shard, whose bytes are measured
     # identical across x86/aarch64 and CPU/CUDA. It is the one command that
@@ -2336,6 +2372,7 @@ def main(argv=None):
              'plan_path': str(args.plan)} if args.cost_read_manifest is not None else {}),
         prepared=None if args.prepared is None else {"path": str(args.prepared), "sha256": args.prepared_sha256},
         resume=args.resume,
+        data_manifest_sha256=args.data_manifest_sha256,
         **({"prewarm_manifest": {"path": str(args.prewarm_manifest),
                                    "sha256": args.prewarm_manifest_sha256}}
            if args.prewarm_manifest is not None else {}),
