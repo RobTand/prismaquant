@@ -2460,6 +2460,19 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         from .measured_runtime_prices import admitted_fixed_resources
         return admitted_fixed_resources(measured_runtime_table)
 
+    def _measured_charge_boundary():
+        """The boundary the admitted fixed charge composes under.
+
+        Under a scope no device term is read, so no composition is needed and
+        none is named. Otherwise it is read through the same gate as the
+        charge (`admitted_charge_boundary`), so a table whose fixed charge is
+        refused never reaches the solver with a boundary either.
+        """
+        if scoped_fixed_resources is not None:
+            return None
+        from .measured_runtime_prices import admitted_charge_boundary
+        return admitted_charge_boundary(measured_runtime_table)
+
     try:
         serve_dispatch = (
             load_dispatch_table(args.serve_dispatch_table)
@@ -4049,6 +4062,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     slos=serve_slos,
                     table_identity=measured_runtime_table.identity(),
                     fixed_resource_scope=fixed_resource_scope,
+                    boundary=_measured_charge_boundary(),
                 )
             except ServeConstraintError as exc:
                 raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
@@ -4210,7 +4224,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     fixed_device_bytes=fixed_device,
                     fixed_non_step_peak_bytes=fixed.non_step_transient_peak_bytes,
                     rank_devices=rank_devices,
-                    diagnostics=diag)
+                    diagnostics=diag,
+                    boundary=_measured_charge_boundary())
             except RuntimeFrontierLimitError as exc:
                 # Inside a sweep one grid point over the exact-search bound is
                 # that point's recorded refusal, not the end of the sweep; a

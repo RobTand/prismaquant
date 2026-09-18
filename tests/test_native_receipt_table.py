@@ -324,7 +324,8 @@ def test_two_routes_that_load_different_kernels_admit_into_one_table(emitted, jo
                                          expected_cost_sha256=cost_sha256, now=NOW, source_path=str(emitted.out))
     admit_native_rows(table, relation_load(emitted.relation_fixture))
     assert [row.unit for row in table.rows] == ["fixture.dense", "fixture.dense2"]
-    # Past the relation and past the native rows: the only refusal left is D37's.
+    # Past the relation and past the native rows: the refusal left is the fixed
+    # charge's (the owed observations no v1 fixture carries), never a row's.
     emission = json.loads((emitted.root / "table.emission.json").read_text())
     assert emission["admission"]["refusal"].startswith(FIXED_PREFIX), emission["admission"]["refusal"]
     # The kernel that varies is named per row, read off each panel's own record.
@@ -353,12 +354,13 @@ def test_the_emitter_never_reports_an_admission_it_does_not_have(emitted, capsys
 
     `admit_runtime_provenance` raises on the native-row gate and *returns* the
     fixed-resource refusal. A caller that reads only the exception therefore
-    sees a table it was never told about: this one, whose fixed charge no v2
-    table can have admitted while D37 stands.
+    sees a table it was never told about: this one, whose fixed charge no v1
+    report can have admitted while the four observations v1 owes stay null
+    (the transient charge boundary is versioned now and is not what blocks it).
     """
     code = emitter.main(_argv(emitted))
     admission = json.loads(capsys.readouterr().out)["admission"]
-    assert admission["status"] != "admitted", "no v2 table's fixed charge is admitted while D37 stands"
+    assert admission["status"] != "admitted", "no v1 report's fixed charge is admitted while its owed observations are null"
     assert admission["refusal"], "and the report says why, verbatim from the gate"
     assert (admission["refusal"] is None) == (admission["status"] == "admitted")
     assert (code == emitter.EXIT_ADMITTED) == (admission["status"] == "admitted")

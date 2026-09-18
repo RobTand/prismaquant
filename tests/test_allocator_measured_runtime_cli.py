@@ -15,6 +15,7 @@ from prismaquant import allocator
 from prismaquant.serve_constraints import (
     ServeConstraintError, ServeSLOs, evaluate_measured_assignment,
 )
+from prismaquant.transient_charge_boundary import BOUNDARIES, BOUNDARY_V1
 
 
 def _resources(**updates):
@@ -34,9 +35,13 @@ def test_expanded_group_and_fixed_auxiliary_resource_accounting():
                                   activation_bytes=10, peak_scratch_bytes=30, kv_bytes=50),
         slos=ServeSLOs(p95_ttft_ms=4, p95_itl_ms=3, device_budget_bytes=1400,
                       kv_bytes=5, peak_scratch_bytes=6), table_identity={"synthetic": True},
+        boundary=BOUNDARIES[BOUNDARY_V1],
     )
+    # 1461 charged the row's 40 activation bytes; under boundary v1 they are a
+    # witness (`coverage["memory"]["row_activation_bytes_witness"]`), not a term.
     assert verdict.predicted == {"operator_sum_prefill_ms": 5,
-        "operator_sum_decode_ms": 3, "device_memory_bytes": 1461}
+        "operator_sum_decode_ms": 3, "device_memory_bytes": 1421}
+    assert verdict.coverage["memory"]["row_activation_bytes_witness"] == 40
     assert verdict.violation_names() == ("operator_sum_prefill_ms", "device_memory_bytes")
     assert verdict.coverage["units_priced"] == 1
     assert verdict.as_dict()["certifies_p95"] is False
@@ -141,7 +146,9 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
     receipt = tmp_path / "synthetic-receipt.txt"
     receipt.write_text("Synthetic CPU test fixture, not GPU measurement evidence.\n")
     receipt_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
-    context = {"schema": CONTEXT_SCHEMA,
+    # The fixture declares a fixed device charge inline, and a charge composes
+    # with the priced rows only under a named transient charge boundary.
+    context = {"schema": CONTEXT_SCHEMA, "transient_charge_boundary": BOUNDARY_V1,
         "serving_context": {"platform": "sm_121", "structure": "dense", "residency": "resident",
                             "runtime_image": "fixture@sha256:" + "a" * 64, "execution_mode": "eager"},
         "gpu_identity": "synthetic", "runtime_sha256": "a" * 64,

@@ -271,7 +271,8 @@ def _runtime_float(value, label: str, *, nonnegative: bool = True) -> float:
     return float(value)
 
 
-def _placement_bytes(totals, fixed_device_bytes, fixed_non_step_peak_bytes):
+def _placement_bytes(totals, fixed_device_bytes, fixed_non_step_peak_bytes, *,
+                     charge_activation=True):
     """`max(scalar_budget_bytes, non_step_transient_peak_bytes)`, the obligation.
 
     The per-step composition prices one engine step. The off-step peak prices
@@ -279,8 +280,14 @@ def _placement_bytes(totals, fixed_device_bytes, fixed_non_step_peak_bytes):
     both. A `None` off-step peak is an absence of evidence and never a zero, so
     it leaves this arithmetic exactly as it was; so does an off-step peak the
     per-step composition already covers.
+
+    ``charge_activation`` is the boundary's ``row_terms_charged`` decision:
+    under ``transient_charge_boundary`` v1 a row's ``activation_bytes`` is the
+    logical input the fixed terms already hold, so it stays a frontier
+    coordinate and is not added here (design §3.8). With no boundary -- a table
+    that carries no fixed charge -- the three row axes compose as before.
     """
-    step = sum(totals[4:]) + fixed_device_bytes
+    step = totals[4] + totals[5] + (totals[6] if charge_activation else 0) + fixed_device_bytes
     if fixed_non_step_peak_bytes is None:
         return step
     return max(step, fixed_non_step_peak_bytes)
@@ -300,8 +307,18 @@ def solve_runtime_frontier(
     max_states: int = 100_000,
     max_transitions: int = 8_000_000,
     diagnostics: dict | None = None,
+    boundary=None,
 ) -> list[RuntimeAllocation]:
     """Exact discrete bytes/quality/prefill frontier under declared budgets.
+
+    ``boundary`` is the ``transient_charge_boundary.BoundarySpec`` the fixed
+    charge composes under. A fixed charge (``fixed_device_bytes`` or
+    ``fixed_non_step_peak_bytes``) with no boundary has no composition and
+    refuses; no default makes one pass. Under v1 the row axis
+    ``activation_bytes`` is not added into the placement (it is the input the
+    fixed terms already hold) but stays a frontier coordinate and a
+    ``dimensions`` entry, so the diagnostics still show it. Without a fixed
+    charge and without a boundary the three row axes compose as they always did.
 
     This opt-in alternative to :func:`solve_allocation` charges exact integer
     ``Candidate.memory_bytes`` and preserves nondominance, including nonconvex
@@ -375,8 +392,15 @@ def solve_runtime_frontier(
     fixed_device_bytes = _runtime_int(fixed_device_bytes, "fixed_device_bytes")
     max_states = _runtime_int(max_states, "max_states", positive=True)
     max_transitions = _runtime_int(max_transitions, "max_transitions", positive=True)
+    if boundary is None and (fixed_device_bytes or fixed_non_step_peak_bytes is not None):
+        raise ValueError(
+            "a fixed device charge was supplied with no transient charge boundary, so it has "
+            "no composition with the priced rows (transient_charge_boundary.BOUNDARIES)")
+    charge_activation = True if boundary is None else bool(boundary.charges_row_activation)
     diag.update(max_states=max_states, max_transitions=max_transitions,
-                intermediate_tie_coordinate=True)
+                intermediate_tie_coordinate=True,
+                transient_charge_boundary=None if boundary is None else boundary.name,
+                row_activation_charged=charge_activation)
 
     if any(not isinstance(name, str) or not name for name in candidates):
         raise ValueError("candidate unit names must be nonempty strings")
@@ -546,7 +570,8 @@ def solve_runtime_frontier(
                     continue
                 if (max_device_bytes is not None
                         and _placement_bytes(totals, fixed_device_bytes,
-                                             fixed_non_step_peak_bytes) > max_device_bytes):
+                                             fixed_non_step_peak_bytes,
+                                             charge_activation=charge_activation) > max_device_bytes):
                     continue
                 workspace = (_merge_workspace(state.workspace, b[7], name=name)
                              if ranked_world else ())
@@ -634,7 +659,8 @@ def solve_runtime_frontier(
             peak_scratch_bytes=None if ranked else a[5],
             activation_bytes=None if ranked else a[6],
             device_bytes=None if ranked else _placement_bytes(
-                a, fixed_device_bytes, fixed_non_step_peak_bytes),
+                a, fixed_device_bytes, fixed_non_step_peak_bytes,
+                charge_activation=charge_activation),
             rank_workspace_bytes=(None if not ranked else
                                   tuple(_workspace_bytes(state.workspace, rank)
                                         for rank in range(ranked_world)))))

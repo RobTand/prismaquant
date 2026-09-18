@@ -1,10 +1,10 @@
 """A named scope that reads none of the fixed terms no gate admits.
 
-`admit_fixed_resources` refuses every v2 table at the producer's current schema
-version (PQ debt D37: the native-row and full-engine transient charge boundary
-is not versioned), so the prefill frontier sweep -- which reaches the solver
-through three consumers of `fixed_resources` -- has never emitted a curve from
-a real table.
+`admit_fixed_resources` refuses every real table today (PQ debt D37: the
+transient charge boundary is versioned now, and what still refuses is the four
+observations the report consumer recomputes nothing from), so the prefill
+frontier sweep -- which reaches the solver through three consumers of
+`fixed_resources` -- has never emitted a curve from a real table.
 
 `--measured-runtime-fixed-scope shape-only` is not a relaxation of that gate.
 The gate still refuses, `fixed_resources_admitted` stays false everywhere it is
@@ -37,11 +37,12 @@ from prismaquant.serve_constraints import (
 from test_allocator_measured_runtime_cli import _resources
 from test_prefill_frontier import _curve_fixture
 
-#: What `admit_fixed_resources` actually says about every v2 table today: the
-#: unconditional D37 sentence, wrapped in the gate's own preamble.
+#: What `admit_fixed_resources` says about a v2 table that names no transient
+#: charge boundary, wrapped in the gate's own preamble (D37: the boundary is
+#: versioned now, and a table that carries no name is refused by this one).
 D37 = ("no qualified recomputable full-engine resource partition: "
-       "the native-row and full-engine transient charge boundary is not versioned, "
-       "so no candidate activation or scratch term may be compared to a priced row")
+       "the table declares no transient charge boundary, so no candidate activation or "
+       "scratch term may be compared to a priced row")
 
 
 def _stand_in_for_the_gates(monkeypatch, *, fixed_refusal=D37):

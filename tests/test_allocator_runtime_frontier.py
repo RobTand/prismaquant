@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from prismaquant import allocator_solver as solver
+from prismaquant.transient_charge_boundary import BOUNDARIES, BOUNDARY_V1
 
 
 def candidate(fmt, memory, loss):
@@ -61,7 +62,10 @@ def _oracle(candidates, resources, memory, prefill, decode, device, fixed=0):
             continue
         if decode is not None and dc > decode:
             continue
-        if device is not None and resident + scratch + activation + fixed > device:
+        # Under transient_charge_boundary v1 a row's activation bytes are a
+        # witness the search tracks and never adds (the returned output is
+        # native-row-owned and already inside peak_scratch_bytes).
+        if device is not None and resident + scratch + fixed > device:
             continue
         vector = (serialized, loss, pf)
         if decode is not None:
@@ -97,7 +101,7 @@ def test_matches_exhaustive_multiresource_frontier(seed, decode, device):
                 rng.randint(0, 10))
     results = solver.solve_runtime_frontier(candidates, resources,
         max_memory_bytes=25, max_prefill_ms=15, max_decode_ms=decode,
-        max_device_bytes=device, fixed_device_bytes=3)
+        max_device_bytes=device, fixed_device_bytes=3, boundary=BOUNDARIES[BOUNDARY_V1])
     actual = set()
     for r in results:
         vector = (r.memory_bytes, r.predicted_dloss, r.prefill_ms)
@@ -106,7 +110,7 @@ def test_matches_exhaustive_multiresource_frontier(seed, decode, device):
         if device is not None:
             vector += (r.resident_bytes, r.peak_scratch_bytes, r.activation_bytes)
         actual.add((vector, tuple(r.assignment[n] for n in sorted(candidates))))
-        assert r.device_bytes == r.resident_bytes + r.peak_scratch_bytes + r.activation_bytes + 3
+        assert r.device_bytes == r.resident_bytes + r.peak_scratch_bytes + 3
     assert actual == _oracle(candidates, resources, 25, 15, decode, device, 3)
     assert [r.predicted_dloss for r in results] == sorted(r.predicted_dloss for r in results)
 

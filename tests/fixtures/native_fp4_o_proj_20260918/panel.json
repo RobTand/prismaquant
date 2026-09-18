@@ -1,0 +1,522 @@
+{
+  "activation_quantizer_attestation": {
+    "activation_contract": "e2m1_group16_ue4m3_static",
+    "attests": [
+      "amax_to_ue4m3_stored_scale",
+      "value_to_code_rounding"
+    ],
+    "boundaries": [
+      "block_scale_overflow",
+      "block_scale_underflow_above",
+      "block_scale_underflow_tie",
+      "e2m1_code_identity",
+      "e2m1_midpoint_dyadic",
+      "e2m1_midpoint_global_scale",
+      "e2m1_midpoint_reciprocal",
+      "e2m1_midpoint_ulp_above",
+      "e2m1_midpoint_ulp_below",
+      "e2m1_saturation"
+    ],
+    "contract_sha256": "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3",
+    "does_not_attest": [
+      "non_dyadic_used_scale"
+    ],
+    "elements": 176,
+    "op": "torch.ops._C.scaled_fp4_quant",
+    "oracle": "prismaquant.nvfp4_activation_contract",
+    "platform": "sm_121",
+    "schema": "prismaquant.activation_quantizer_attestation.v1",
+    "vectors": 11
+  },
+  "calibration_sha256": "5f92bfdd51549668f8ba576137c9597707bc13c52bf4f6fca99af9f4ef3a9b36",
+  "cost_sha256": "3103c4cf5ed846dea69859f7b9fdfb94403881d0a97c2698393bc8b168b47172",
+  "execution": {
+    "bias": false,
+    "execution_mode": "eager",
+    "mode": "resident",
+    "owner_kind": "single_dense",
+    "tensor_parallel": 1
+  },
+  "format": "TESSERA_E2M1_K2_R896",
+  "joint_operator_identity": {
+    "activation": {
+      "act_bits": 4,
+      "act_dtype_name": "fp4_e2m1",
+      "act_group_size": 16,
+      "activation_max_abs": 2.296875,
+      "clip_enabled": false,
+      "input_global_scale": 2.6122448444366455,
+      "quantizer": "prismaquant.nvfp4_activation_contract.StaticActivationContract.quantize_dequantize",
+      "quantizes_input": true,
+      "schema": "prismaquant.joint_aura.activation.v1",
+      "served_scales_enabled": false,
+      "static_contract": {
+        "execution": "e2m1_group16_ue4m3_static",
+        "group_size": 16,
+        "measured_as_served": true
+      }
+    },
+    "arithmetic": {
+      "aggregation": "sum_signed_invocations_then_square",
+      "allow_tf32": false,
+      "delta_dtype": "torch.float32",
+      "matmul_precision": "highest",
+      "measurement_dtype": "torch.bfloat16",
+      "projection_backend": {
+        "expression": "(left * right).sum()",
+        "name": "torch",
+        "schema": "prismaquant.joint_projection_backend.v1"
+      },
+      "projection_dtype": "torch.float32",
+      "residual": "X_dW_T+dX_W_T+dX_dW_T",
+      "weight_projection": "output_cotangent_fp32_gemm"
+    },
+    "format": "TESSERA_E2M1_K2_R896",
+    "probe_identity_sha256": "4ada5d70504061bb543e7a9d24469513b2db542e3cf1c4fb21957ac408dd547c",
+    "qname": "model.layers.0.self_attn.o_proj",
+    "rendered_weight": {
+      "content_sha256": "5a5ab2fe73c81d323b1021ae1a65ab2ac9e9bccd1dfa8054e0bc49e5f840d17c",
+      "dtype": "torch.bfloat16",
+      "logical_bytes": 4194304,
+      "shape": [
+        1024,
+        2048
+      ]
+    },
+    "schema": "prismaquant.joint_aura.operator.v2",
+    "source_weight": {
+      "content_sha256": "803995a9d5abb24c72d3ddabd50f4e656fc5eff26efaf3b626f175fc706ab499",
+      "dtype": "torch.bfloat16",
+      "logical_bytes": 4194304,
+      "shape": [
+        1024,
+        2048
+      ]
+    }
+  },
+  "joint_operator_identity_sha256": "cc4ed76d4943eb664b97084dcab81a3afd48c255d0f2bf5b51a15c8041b5a648",
+  "native_tensors_sha256": "0ab493e2a29168a8d825d4a1b48a2486eaa53081d757baa6c2af2d6d65689aab",
+  "numerics": {
+    "atol": 0.1782359427306801,
+    "rtol": 0.0
+  },
+  "numerics_derivation": {
+    "bound": "(4*u_bf16 + 2*K*u_fp32) * max_j sum_i |qx_i||w_ij|",
+    "coefficient": 0.015869140625,
+    "k": 2048,
+    "operand_magnitude": 11.231606483459473,
+    "rtol_is_zero_because": "the bound is proportional to the operand magnitude sum, not to |expected|",
+    "schema": "prismaquant.native_gemm_tolerance.v1",
+    "scope": "gemm_output_only",
+    "u_bf16": 0.00390625,
+    "u_fp32": 5.960464477539063e-08
+  },
+  "phases": {
+    "decode": {
+      "expected_route": {
+        "contract": "e2m1_group16_ue4m3_static",
+        "decoder": "native_span2",
+        "kind": "dense",
+        "policy": "TESSERA_NVFP4:resident",
+        "symbol": "torch._scaled_mm"
+      },
+      "input": {
+        "content_sha256": "594a619ed6bbd4acb2666d2cb55776a5a282c984343756ed50f0bd8ec61175dc",
+        "dtype": "torch.bfloat16",
+        "logical_bytes": 4096,
+        "shape": [
+          1,
+          2048
+        ]
+      },
+      "m": 1,
+      "reference_output": {
+        "content_sha256": "2820372578360725bb8206c424f54098d7c8195be9fdc64cd767fa2d982848c5",
+        "dtype": "torch.bfloat16",
+        "logical_bytes": 2048,
+        "shape": [
+          1,
+          1024
+        ]
+      },
+      "reference_qdq": {
+        "content_sha256": "8e7fa7c3ad5b45f041500daffb9c4fb61616ec17f2f881a18a703d3fcd8881dc",
+        "dtype": "torch.bfloat16",
+        "logical_bytes": 4096,
+        "shape": [
+          1,
+          2048
+        ]
+      }
+    },
+    "prefill": {
+      "expected_route": {
+        "contract": "e2m1_group16_ue4m3_static",
+        "decoder": "native_span2",
+        "kind": "dense",
+        "policy": "TESSERA_NVFP4:resident",
+        "symbol": "torch._scaled_mm"
+      },
+      "input": {
+        "content_sha256": "eb32911fb835fe4499534e0f42768b7836e62d6b70a1faf6dc64c1b9df4d4181",
+        "dtype": "torch.bfloat16",
+        "logical_bytes": 2097152,
+        "shape": [
+          512,
+          2048
+        ]
+      },
+      "m": 512,
+      "reference_output": {
+        "content_sha256": "f723d8bd4f608f0a8fb2de13dc43db2995980318cf0b86295ab9370a88496cc7",
+        "dtype": "torch.bfloat16",
+        "logical_bytes": 1048576,
+        "shape": [
+          512,
+          1024
+        ]
+      },
+      "reference_qdq": {
+        "content_sha256": "6117db114a28e2118266fea3a5b0175c9f7ffe9eee978152e7993186fedb267c",
+        "dtype": "torch.bfloat16",
+        "logical_bytes": 2097152,
+        "shape": [
+          512,
+          2048
+        ]
+      }
+    }
+  },
+  "probe_identity_sha256": "4ada5d70504061bb543e7a9d24469513b2db542e3cf1c4fb21957ac408dd547c",
+  "runtime": {
+    "arithmetic": {
+      "allow_bf16_reduced_precision_reduction": true,
+      "allow_fp16_reduced_precision_reduction": true,
+      "allow_tf32": false,
+      "deterministic_algorithms": false,
+      "deterministic_warn_only": false,
+      "float32_matmul_precision": "highest"
+    },
+    "execution": {
+      "bias": false,
+      "execution_mode": "eager",
+      "mode": "resident",
+      "owner_kind": "single_dense",
+      "tensor_parallel": 1
+    },
+    "gpu": {
+      "capability": [
+        12,
+        1
+      ],
+      "driver_version": "595.91.07",
+      "name": "NVIDIA GB10",
+      "total_memory": 130593968128,
+      "uuid": "GPU-b1eceeea-fec7-371e-2cf3-cd10f2e7b705"
+    },
+    "image": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+    "image_declaration": {
+      "env": [
+        "TESSERA_CENSUS_RUNTIME_IMAGE",
+        "TESSERA_CENSUS_RUNTIME_IMAGE_DECLARATION"
+      ],
+      "image": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+      "record": {
+        "fix": null,
+        "gated": true,
+        "local_id": "sha256:44426342348a2fb1ae1191e09e5d4e19ab1231ab6dbdf0e17e8192bfdbeff025",
+        "pinned": "vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14",
+        "present": true,
+        "reason": "explicit_digest",
+        "refused": false,
+        "repo_digests": [
+          "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c"
+        ],
+        "requested": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+        "requested_tag": null,
+        "required": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+        "resolved_digest": "sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+        "resolved_reference": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+        "schema": "tessera.runtime_image/1",
+        "selection": {
+          "configuration_sha256": "0f5c2dbb005768096ce6b65ed398d5de6c676ca26fa7be827a0405c3066e5889",
+          "packaged_default_reference": "vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14",
+          "scope": "explicit_research_configuration_not_packaged_default_or_cell_promotion"
+        }
+      },
+      "schema": "tessera.runtime-image-declaration/1",
+      "source": "launcher_repo_digests"
+    },
+    "native_libraries": {
+      "/mnt/shared/tessera-runs/receipts/399-qwen3-0.6b-20260913/observer-build/cupti-memory-arguments.so": "f426062d84dfc40608e71040aa945e36c7746d4b73bc8c53974c1b9538f4d961",
+      "/out/cache/extensions/tessera_nvfp4_8c28063c922648b8d3d035e482586ca472601462066ed9cbf74f2ccc199ebe00/tessera_nvfp4_8c28063c922648b8d3d035e482586ca472601462066ed9cbf74f2ccc199ebe00.so": "739a00fd7e834f1f38fbb263daad2014e5e8ef812906b8a793bda94961ff74e0",
+      "/out/cache/triton/ZUTMPTWYPTVDRKRHMR4T65HTCKNM4ONG2RWJAJT3QJI2I6LACKPA/cuda_utils.cpython-312-aarch64-linux-gnu.so": "8b26958870b46e322209e98b6f5d545de2c0c4f08e2b64c15728980e5a73753f",
+      "/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1": "f572bd122e2b3b14d2f9d8d4345e1351fd9fbf26f9402e3e42ef36b65f833411",
+      "/usr/lib/aarch64-linux-gnu/libbz2.so.1.0.4": "89a72a9874f39034ece340558678398522a05d143541659b7dcc1f7b8cfbc145",
+      "/usr/lib/aarch64-linux-gnu/libc.so.6": "2fd7c8f96a208532befb77cec1cfee8a08217a97b77d8eed382537fa6cc6e72c",
+      "/usr/lib/aarch64-linux-gnu/libcrypto.so.3": "90b9521a9b393f57a03614adf6f86ab12c31483bffa74ceb385352da5af788f6",
+      "/usr/lib/aarch64-linux-gnu/libcuda.so.595.91.07": "2e161ee243d2955b51bfe659c772b1f6e28cc3b741c2d5621161c8c16dd6a70d",
+      "/usr/lib/aarch64-linux-gnu/libdl.so.2": "6726df9a1328c8f61ab561e72234800a59554806d1bcd78786a04ef8e3685a67",
+      "/usr/lib/aarch64-linux-gnu/libexpat.so.1.9.1": "f53b44564070acc56dcae4af78869a7c1338a9a818b1a71015afd388f23c66bd",
+      "/usr/lib/aarch64-linux-gnu/libffi.so.8.1.4": "9dd873a938c4d7df76912d01f6a28aa4aa73d583bd20485a0dbfe5aa9673a191",
+      "/usr/lib/aarch64-linux-gnu/libgcc_s.so.1": "1a8c3655af0173b4dd4a3444233778098f2e1a4c33bcc65752f3342f9eeae9a5",
+      "/usr/lib/aarch64-linux-gnu/liblzma.so.5.4.5": "cb4d37d810d354f1c3be46bd2897ba47c9f7388da7e6470a79e3accfa8e81f41",
+      "/usr/lib/aarch64-linux-gnu/libm.so.6": "ac92dc80c7d902e3852986e858ba682a981c15a12ec0e163bd4d56dde9b3dd6e",
+      "/usr/lib/aarch64-linux-gnu/libnccl.so.2.31.2": "4587300ff409f393198eb5bcc320f9b27320f99cff57d1109063aa10eb36aa01",
+      "/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.595.91.07": "010a3e72716ede40e7d9d5d4c1aac6281fb472a8e1dffa4d4e31b6597c7366b2",
+      "/usr/lib/aarch64-linux-gnu/libpthread.so.0": "0d87e0528f5f7fefe091d92d8779b2cf403d2a043e5a10aa5ec1138afd26b3d7",
+      "/usr/lib/aarch64-linux-gnu/librt.so.1": "03f523a621ea63aa8f1b746f24519f1822a1d71e0a5423a37b5b11de11db0523",
+      "/usr/lib/aarch64-linux-gnu/libsqlite3.so.0.8.6": "43ba1659a6113bb4360f4a6da9e465bca6403d7d1f376015d5a57901ee5639b6",
+      "/usr/lib/aarch64-linux-gnu/libssl.so.3": "ff32868c17ae1f3df951839604e7f8e022c06c938e104106a0833c80f86a0f8c",
+      "/usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.33": "3f0d3c8aa8284c6d268e3f6984f43e5905ddb92d695db9571fd762e8eac3ad5c",
+      "/usr/lib/aarch64-linux-gnu/libz.so.1.3": "e3bc90ee8cce46778c2f46c2a3e580d3b930f7b455910f25ea400a0b797fb9dc",
+      "/usr/lib/python3.12/lib-dynload/_asyncio.cpython-312-aarch64-linux-gnu.so": "e73e5b0b1827941446060dc875031b851609e199bb83fd3f008ac48a44a18a06",
+      "/usr/lib/python3.12/lib-dynload/_bz2.cpython-312-aarch64-linux-gnu.so": "1240859f8d2808eee22cd973c720fd52a2c472b30e8942c5f6381d65fa3db3a7",
+      "/usr/lib/python3.12/lib-dynload/_codecs_cn.cpython-312-aarch64-linux-gnu.so": "7dad875908c388f4634f20eb84e0510400cea29033b997803f997777c1754dcd",
+      "/usr/lib/python3.12/lib-dynload/_codecs_hk.cpython-312-aarch64-linux-gnu.so": "33cc0a51d33a69524056448f3d5a4d29c4ee62a0ce6f7507d06bb7ab9ead37f0",
+      "/usr/lib/python3.12/lib-dynload/_codecs_iso2022.cpython-312-aarch64-linux-gnu.so": "dcc8270cffde87ec759729ce3c66d342f387d6900b859091c46a146357b3356a",
+      "/usr/lib/python3.12/lib-dynload/_codecs_jp.cpython-312-aarch64-linux-gnu.so": "842511a75d128e4fc190e230ad7413400ca22cb76e9bf54a644c066b40c8fd0b",
+      "/usr/lib/python3.12/lib-dynload/_codecs_kr.cpython-312-aarch64-linux-gnu.so": "c71e3fd7c615266f32a0a80a2890610c1cf4185c50aca290b7b5135ebcbb4056",
+      "/usr/lib/python3.12/lib-dynload/_codecs_tw.cpython-312-aarch64-linux-gnu.so": "1cef658500ce2bb10231e3354685484cccdf6bcbea6ff29d525f3d2d091eec8b",
+      "/usr/lib/python3.12/lib-dynload/_contextvars.cpython-312-aarch64-linux-gnu.so": "17ce6e63a7f123f9f56259b4f6f65575ffad4c69fc22035fa4fe6d0e8fe68bf1",
+      "/usr/lib/python3.12/lib-dynload/_ctypes.cpython-312-aarch64-linux-gnu.so": "0973e6539ebf21b25a24eb06027054f619b19f5f83565a080eb6b1c1f9602a49",
+      "/usr/lib/python3.12/lib-dynload/_decimal.cpython-312-aarch64-linux-gnu.so": "b31e0122ffddd465c241e387beb85444739bb9fd42c5fc266e25ae11a8ef675d",
+      "/usr/lib/python3.12/lib-dynload/_hashlib.cpython-312-aarch64-linux-gnu.so": "6cb3e43bb4d47309c17a550f5d30aac5c4afd5910ab8c71c8b737b2ff7deacf4",
+      "/usr/lib/python3.12/lib-dynload/_json.cpython-312-aarch64-linux-gnu.so": "9c0bfa0965a233b304bc56bf0d8f9f10db068179fd6c0642a6224697c97fa797",
+      "/usr/lib/python3.12/lib-dynload/_lsprof.cpython-312-aarch64-linux-gnu.so": "184309cc84104563dc63358d36bc7323afb240defd8aa3549766fe30bada59a4",
+      "/usr/lib/python3.12/lib-dynload/_lzma.cpython-312-aarch64-linux-gnu.so": "32d1870aba4dd39ae74e79d93200a45858883c1522373e702a3ff3817fcb44d9",
+      "/usr/lib/python3.12/lib-dynload/_multibytecodec.cpython-312-aarch64-linux-gnu.so": "ead338fa0c9db77215098641df999467aa42bf7794d149058fe99d16d8831282",
+      "/usr/lib/python3.12/lib-dynload/_multiprocessing.cpython-312-aarch64-linux-gnu.so": "b81faf4e7f6e91f68a33183801fecb7d689c4e5e8184b38b4f367065d48cc44a",
+      "/usr/lib/python3.12/lib-dynload/_posixshmem.cpython-312-aarch64-linux-gnu.so": "2192c9cf9f887d7b2418209a3c05c234939346b95ddf5fc98e671f5561d861fb",
+      "/usr/lib/python3.12/lib-dynload/_queue.cpython-312-aarch64-linux-gnu.so": "d1769cbe1a83d75ca67709e82774edceccf42ebf05ec990e85cd0a739ad4de67",
+      "/usr/lib/python3.12/lib-dynload/_sqlite3.cpython-312-aarch64-linux-gnu.so": "b87d127606abf9418fe57a81089d7d4040f05e26c959d65c46d2758a9cd17b47",
+      "/usr/lib/python3.12/lib-dynload/_ssl.cpython-312-aarch64-linux-gnu.so": "75ee0e7d6bfd063db82e5dbfcccd6cccd676b1031cc526c1da6ac2bbf97c139c",
+      "/usr/lib/python3.12/lib-dynload/_zoneinfo.cpython-312-aarch64-linux-gnu.so": "76c5e87079c32d49ce56bf21815a3f6ca73b8b3d453dc39cbaa32c8ca466da88",
+      "/usr/lib/python3.12/lib-dynload/mmap.cpython-312-aarch64-linux-gnu.so": "08564ec59702b8a233e1610321c6e692d8ea7cda0422f8b85ccfcefe3461bad7",
+      "/usr/lib/python3.12/lib-dynload/resource.cpython-312-aarch64-linux-gnu.so": "afd238fed41af2a25c534186104ca0264e22cba0588058d996ccc8c226459aa0",
+      "/usr/lib/python3.12/lib-dynload/termios.cpython-312-aarch64-linux-gnu.so": "6a33c2ea1d4eff3870ba487c95bf8a357b38e3e6e4c7baa9f9477638dcb9f7e7",
+      "/usr/local/cuda-13.0/targets/sbsa-linux/lib/libcupti.so.2025.3.1": "a55e03ccab21830f5b9d1ca7a02ecd59c557e0d54c769a181ad1140a3cff8ac1",
+      "/usr/local/lib/python3.12/dist-packages/PIL/_imaging.cpython-312-aarch64-linux-gnu.so": "2bdbf62e38af4c59c6563b9391f11d411e42f5ced5dc0991aaf31bdda72928a8",
+      "/usr/local/lib/python3.12/dist-packages/PIL/_imagingft.cpython-312-aarch64-linux-gnu.so": "b86397d8f807f381a7623f49ed717d6e94d072f7bd4959d9d1b4edeefd060dba",
+      "/usr/local/lib/python3.12/dist-packages/aiohttp/_http_parser.cpython-312-aarch64-linux-gnu.so": "60cfc9be143c0f3858e8413f40ab8e33e45c2a8a5ac64adc044cb58c51a41f25",
+      "/usr/local/lib/python3.12/dist-packages/aiohttp/_http_writer.cpython-312-aarch64-linux-gnu.so": "7b0d6f3ef8c56a8725622ee9b51d1acb655cbf45ccabd5477d7825f16dfcf42e",
+      "/usr/local/lib/python3.12/dist-packages/aiohttp/_websocket/mask.cpython-312-aarch64-linux-gnu.so": "f46df98b1f5df3c4302375e0ebb413aa8ce3857d3e13e6d2b0859cbd917f6a0f",
+      "/usr/local/lib/python3.12/dist-packages/aiohttp/_websocket/reader_c.cpython-312-aarch64-linux-gnu.so": "aa9e7b003b45c9cd10feeaed812510747198d6daf95326ec50ff2563bde7416c",
+      "/usr/local/lib/python3.12/dist-packages/cbor2/_cbor2.cpython-312-aarch64-linux-gnu.so": "a5ad8ce4366fd806ffff660c71afd1a194b790b77acd5c413ce399044e451c1c",
+      "/usr/local/lib/python3.12/dist-packages/charset_normalizer/cd.cpython-312-aarch64-linux-gnu.so": "21f9ca6dcd07f65a7ceec131140cd23d388bc09b2b377e83ff03fb6669974553",
+      "/usr/local/lib/python3.12/dist-packages/charset_normalizer/md.cpython-312-aarch64-linux-gnu.so": "9d96946330b650acbad4ab917f5cf37f1c7d3a7fada1563d166513e09c2ee3cf",
+      "/usr/local/lib/python3.12/dist-packages/cuda/bindings/_bindings/cydriver.cpython-312-aarch64-linux-gnu.so": "6ae437b694ad31accb9cd8745fa5dd9e52e11af045e0da683966be7b3341e67e",
+      "/usr/local/lib/python3.12/dist-packages/cuda/bindings/_bindings/cyruntime.cpython-312-aarch64-linux-gnu.so": "eacbaa17b3bb3d294d7521b84960493fd5e36f190f1c5e80b6a66b0e4c869ca4",
+      "/usr/local/lib/python3.12/dist-packages/cuda/bindings/_bindings/cyruntime_ptds.cpython-312-aarch64-linux-gnu.so": "8f1654828d0364d9db7a019eaa6dbc4694cf6d6eb0f0364878275dade9bfd27a",
+      "/usr/local/lib/python3.12/dist-packages/cuda/bindings/cydriver.cpython-312-aarch64-linux-gnu.so": "5857b6562621feebcea2ba13df1a236068cc4aa7e049ce9e8a944e452deb34bf",
+      "/usr/local/lib/python3.12/dist-packages/cuda/bindings/cyruntime.cpython-312-aarch64-linux-gnu.so": "d00704811789360b62fd9af11ac8a8e85326eba00944244b3af31d33d4c1c95b",
+      "/usr/local/lib/python3.12/dist-packages/cuda/bindings/driver.cpython-312-aarch64-linux-gnu.so": "23596c158b5ef437517605405aa25978d7a442fa1c222d59a392300bc39a0119",
+      "/usr/local/lib/python3.12/dist-packages/cuda/bindings/runtime.cpython-312-aarch64-linux-gnu.so": "9c7dad2e1b498c3c8d46446c2ac35ed06d4910f9a9baec3a5a14d7a70cd058fd",
+      "/usr/local/lib/python3.12/dist-packages/cv2/cv2.abi3.so": "b69eef7f164dd20965ee3d88221d041c58d8f6a1e18c4c3bc29588286a7d6eee",
+      "/usr/local/lib/python3.12/dist-packages/frozenlist/_frozenlist.cpython-312-aarch64-linux-gnu.so": "111659811c862ca6e80545ceb2de3437fe4550a7dda72333e425aa3ec0b38c15",
+      "/usr/local/lib/python3.12/dist-packages/google/_upb/_message.abi3.so": "7c77f52d9dc889946b1ff9c2e31cbb6475ed9b301cf5469421d82af6133adf6d",
+      "/usr/local/lib/python3.12/dist-packages/grpc/_cython/cygrpc.cpython-312-aarch64-linux-gnu.so": "c2ae6a3cfb4f65a59cea2412b227e1d456873f8ab4cb469518190513064ea5e1",
+      "/usr/local/lib/python3.12/dist-packages/llguidance/_lib.abi3.so": "786d0153545a45c844da01ec30c2583e0a8486c1a75be6bd6c1a58bfb0c1c5d8",
+      "/usr/local/lib/python3.12/dist-packages/markupsafe/_speedups.cpython-312-aarch64-linux-gnu.so": "68f3ea306612ebbe28af4b27b85869d1a194f53aa9807f23cf4946254d8c45a2",
+      "/usr/local/lib/python3.12/dist-packages/ml_dtypes/_ml_dtypes_ext.cpython-312-aarch64-linux-gnu.so": "88da6392003e04ad1d79762b8df72b6070d5c5914438b8ef083fbf1531448558",
+      "/usr/local/lib/python3.12/dist-packages/msgspec/_core.cpython-312-aarch64-linux-gnu.so": "8fa0236ac1b241503baf9d06b4ceaaa3d7e0b54dd8671bd4fea702c2a3b3a430",
+      "/usr/local/lib/python3.12/dist-packages/multidict/_multidict.cpython-312-aarch64-linux-gnu.so": "743f50d31ee7400e3e60b4e562ff1c5111eb092f9b44b416d891df8726e1ef3e",
+      "/usr/local/lib/python3.12/dist-packages/numpy.libs/libgfortran-daac5196-038a5e3c.so.5.0.0": "8c13f44b44e4dd0005632ea4173f5f5014d2829d50aa12b2054034297c07f233",
+      "/usr/local/lib/python3.12/dist-packages/numpy.libs/libscipy_openblas64_-1f73132b.so": "44036351a8be520596441657e7b206cd2bc79db857b4d3574fab9ef522d696bd",
+      "/usr/local/lib/python3.12/dist-packages/numpy/_core/_multiarray_umath.cpython-312-aarch64-linux-gnu.so": "007d08e06411101df3ac09a660c0f05568e2823fdf9680b60d6ef9e8d41c896b",
+      "/usr/local/lib/python3.12/dist-packages/numpy/fft/_pocketfft_umath.cpython-312-aarch64-linux-gnu.so": "facf38b13715c39563f2fb2058c632751f2b052b88481d6f25297d95bc9ae4c1",
+      "/usr/local/lib/python3.12/dist-packages/numpy/linalg/_umath_linalg.cpython-312-aarch64-linux-gnu.so": "0b88028aa3282964824b7542b9145649f5d4b528e06678ada3db3f5603a603fb",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/_bounded_integers.cpython-312-aarch64-linux-gnu.so": "c8948811cf0518448b9106bd02ec5912831174a762546e7b058d9a5925730685",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/_common.cpython-312-aarch64-linux-gnu.so": "66059f69b40e06643fd41f3117f5e92aef93508221584c7c1fe5f9cac1da9dda",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/_generator.cpython-312-aarch64-linux-gnu.so": "433a43fda250362ff9e75312d5558425fe91ddd16c9bdb3da91e3e31c39f8579",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/_mt19937.cpython-312-aarch64-linux-gnu.so": "edf5aebd4c28221aeda53c5fca97faaa79bedc68fc7923cef717d30199cf6eec",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/_pcg64.cpython-312-aarch64-linux-gnu.so": "2dccdc9516df79f9bac3c74e125ce8b15284f569fb46b7214c129c94c96cf56f",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/_philox.cpython-312-aarch64-linux-gnu.so": "8e5478d19a16c7b20004e162ba3a2d42985cf51715eaf7c444a8706cf1b166a5",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/_sfc64.cpython-312-aarch64-linux-gnu.so": "20e84d23d5e087b01612b691eba29bbcff0f136151f73de5ad25f45c781817d9",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/bit_generator.cpython-312-aarch64-linux-gnu.so": "8cb3b9728b6e46202e70123f44060b355c2ac25f251822618449057b36eac48b",
+      "/usr/local/lib/python3.12/dist-packages/numpy/random/mtrand.cpython-312-aarch64-linux-gnu.so": "dd33a0c20f35fc04746077a093f974fd0a677972473ce635d96ce6e074887761",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcublas.so.13": "4e346a7b60a01552bd9bf4bbc6c862e11eb851559c3da3572293345de6aaed75",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcublasLt.so.13": "930418840b747413584867cb7167dd5911dcf4184135589e0334527e9abbac9f",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcudart.so.13": "7bdba2b5b08cbdc85203c41cc94598adedb1bcfea7cb574ca693ac73599e4e63",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcufft.so.12": "58d0f3c53a56aa8e407df4a53be21969b60fa464b4dfa71631188f4e13596c28",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcufile.so.0": "0dc9520a096013cc4009564dcd7824923eb2850fc35dc5812efe3ec9fa4d0068",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcupti.so.13": "a55e03ccab21830f5b9d1ca7a02ecd59c557e0d54c769a181ad1140a3cff8ac1",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcurand.so.10": "80aedb15af13cf3b43cf8394fc9b5f9f299d6eaa5d2ddd6411b26af25b5334a2",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcusolver.so.12": "84a09b45594744af44ecf19011e70b43d33fd2e0fd7e8474b7213bf0039256cf",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libcusparse.so.12": "a6643e78b7f002021a5e8d3b64a3ef7ce7caf8b9d05758cfee7e2b53f13d8988",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libnvJitLink.so.13": "7cc44a1d3b61de747f8aedb0f69c4e0e1f4a293b43ebd5f8414bfe3ca176608a",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libnvrtc-builtins.so.13.0": "84f1c5031bfe1146375b367b2c7fb8d31ea00430be7172177eeb5d04ab813b69",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib/libnvrtc.so.13": "64db9c3fc128f4a57a22c314fda08831a8e3a725d439a70076a0fb98f7bea1b7",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cudnn/lib/libcudnn.so.9": "119059d6ad15f576608a0daa547444538062bf5e6be970f090298b50636e13b6",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/cusparselt/lib/libcusparseLt.so.0": "fbb03bbf8d2238670f24256c5452281c2a660162899b838bb4d0cc06dad027df",
+      "/usr/local/lib/python3.12/dist-packages/nvidia/nvshmem/lib/libnvshmem_host.so.3": "868de4fbf53f19f0a2537e42c70d77396db981475303f3c57ce40e82653c8bba",
+      "/usr/local/lib/python3.12/dist-packages/openai_harmony/openai_harmony.abi3.so": "0c53f6076191620a9b705297bd294b22b541455cba7acf53f014871d1279a59b",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libaom-f737b1d9.so.3.14.1": "607cfcf72ad3b2529d31992b98e1f6e1777d68a152c8c80752e8c52e8fc8636a",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libavcodec-72930352.so.62.28.101": "6dd6da6d2ebc28a8810d2c4b7cabdc33161bf4181056d556ed23aba2e7487056",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libavformat-3d8eec66.so.62.12.101": "7c5ebf9c374f1e86f6a6da854ce982f4819f7f276edd537cdcf38d081eb6dec5",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libavif-96469e55.so.16.4.2": "b2b7c5766e153215584b3c81db97f5717e193e08b41c3deb620fddaec339c424",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libavutil-8f5e7298.so.60.26.101": "eaabd9641a06b7b35fea38ee8bbfe07cf81f6324f6d20afed89fa3b7fe631735",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libcrypto-6aa7cfbd.so.1.1.1k": "812beb4bad6faa3bf1e191ad301f7a5a55bbcae360b63dca50ad262f585c4e2d",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libdrm-7ea97f77.so.2.4.0": "548959f8c1aff2d53eec841be97c849536ff304fbd72d2f5bf35b50bc4f52344",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libgfortran-e1b7dfc8.so.5.0.0": "296e40e3d92d0c4377e1f8b40a929045fee6bc5686226faf940fc824e469a7be",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libopenblasp-r0-e3ea6fd1.3.15.so": "009cfa8a38d4e2c680427370d3d6ee65834318785e81aea3e0aa4d08e573e9f3",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libpng16-5dd41f4d.so.16.58.0": "153d3996f7dbb4c064992022ba35e581787b3b0f58c3717faaa87d42fe0cb11b",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libssl-f4f30056.so.1.1.1k": "f59ed54eda2ae8bd74d22c5c11d3414a458a6b5a27e3db15859ef1146a4de60d",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libswresample-4e764699.so.6.3.101": "b49ea4decddd913997d5f9a4af781d2ffdbf26d422f9e80f2d3193f0cd0f8092",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libswscale-9061c2fd.so.9.5.101": "0ad2f960751357d39b1e73023c0cb7927888d1e8f0bb6c82a340b5e47e9d8346",
+      "/usr/local/lib/python3.12/dist-packages/opencv_python_headless.libs/libvpx-ac54ea65.so.11.0.1": "9478625225654ab8da71b264b1d1c121f707f65093d3d79f6b6601f42f2b20e9",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libXau-7926f62a.so.6.0.0": "c7088cf9b8e8043b951c8cdcef1c2a1707d7952546e8d142545d5db5abd5a92b",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libbrotlicommon-f79e5820.so.1.2.0": "4fdb2876b5b6ff2aa5068e33fcb3cfe031f76b3a2863e7070e2268ca7278e8e0",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libbrotlidec-53ab751a.so.1.2.0": "209889d4e37718e8c2dc21d446a0ae8b7c21bd44ef5dd88a22854c81e912b4f6",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libfreetype-c6d69da6.so.6.20.6": "f6f00e7b1e0219e3562f6bbc85184a5237e59b7ee9acd731ed3a5d9f9cfbd301",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libharfbuzz-905f7917.so.0.61421.0": "82dac4dd891dce97aa695d920ae66da99af7a3ee5559197f49484292bd47aca8",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libjpeg-f7df23c0.so.62.4.0": "543efcabfed7699011cd724e1631429a711e780a011885a68a25fe8078861d5d",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/liblzma-d6711707.so.5.8.3": "e75533349dd5aafd624f883fef265be5f8bebbd51bd9cd72ae645f3f1a17fabb",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libopenjp2-0ec72a70.so.2.5.4": "2b64551d10c8475dbde5ae9be1baa2055efe55de3b5c12a41567e28354960caf",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libpng16-5a20c924.so.16.58.0": "2c9b85d06704c3cbe603fa13f9a754de50651b49d42d76eb32ab0806cce56ce1",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libtiff-fb36a6b9.so.6.2.0": "73d459525e34ce575e0ab576672feb5f67c67a9780fad642adc3ab63b39d3ca5",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libxcb-d77ff8de.so.1.1.0": "451478f6c0feb09e1637bde9e5f670f342b5299e68c2f8848f6cf3ae964c431d",
+      "/usr/local/lib/python3.12/dist-packages/pillow.libs/libzstd-a93d6be8.so.1.5.7": "1e08e46977ddc422e2e055e7d009ae36159cf762d2762a45a4599869007c13f9",
+      "/usr/local/lib/python3.12/dist-packages/propcache/_helpers_c.cpython-312-aarch64-linux-gnu.so": "17d92e6996da0e3b11e3126e8d96fa36fdb8014268472f57a971d6b4fe333b92",
+      "/usr/local/lib/python3.12/dist-packages/psutil/_psutil_linux.abi3.so": "463d351dd4b4d93957d30a7b645dd0bccd09276fd5d26c0ebd8c10e5088ba1a3",
+      "/usr/local/lib/python3.12/dist-packages/pybase64/_pybase64.cpython-312-aarch64-linux-gnu.so": "d5d41c5569877b0ec3772cf11c243601dd256f3c4029c94a62145f856e2e2363",
+      "/usr/local/lib/python3.12/dist-packages/pydantic_core/_pydantic_core.cpython-312-aarch64-linux-gnu.so": "5903e485a03d700822d5a4a69d23aeb6535b77f2a862cd09b94bf0deb56b77fe",
+      "/usr/local/lib/python3.12/dist-packages/pyzmq.libs/libsodium-eabbd940.so.26.4.0": "ef67d029dcb7bf1114cb6d72243919e75567f8310920df65d1a50670672334ee",
+      "/usr/local/lib/python3.12/dist-packages/pyzmq.libs/libzmq-97580724.so.5.2.5": "ba802cf11006dc56414357d87cba8b2e57e6a210b6eca56d3a109ad7ac25b975",
+      "/usr/local/lib/python3.12/dist-packages/regex/_regex.cpython-312-aarch64-linux-gnu.so": "39f3c29302989a33ce388df3e98ed8cce0ddaa62ce911166d3a223373c16b039",
+      "/usr/local/lib/python3.12/dist-packages/rpds/rpds.cpython-312-aarch64-linux-gnu.so": "28cc4787f93b10bb501a0a67bf1ba50b244771fb305ec9072ee3b8b4e74f2891",
+      "/usr/local/lib/python3.12/dist-packages/safetensors/_safetensors_rust.abi3.so": "8c623b2077a05539bbdeb345edf3970a33597fbda0e3c9f3e1377865c55b3873",
+      "/usr/local/lib/python3.12/dist-packages/sentencepiece/_sentencepiece.cpython-312-aarch64-linux-gnu.so": "da980d0c5187cd27ab206fa6ef629424b5f92b2d847ab6902d8bc0338343d847",
+      "/usr/local/lib/python3.12/dist-packages/tiktoken/_tiktoken.cpython-312-aarch64-linux-gnu.so": "dc2eb4793ab4927487a3abdcbffd0f648cb5d46df8f234b1601b0d319bc61b16",
+      "/usr/local/lib/python3.12/dist-packages/tokenizers/tokenizers.abi3.so": "999ab0b786c4c73eeadda6420e6048b22e0c465fc06587aa8eb0d341a287c1f3",
+      "/usr/local/lib/python3.12/dist-packages/torch/_C.cpython-312-aarch64-linux-gnu.so": "575d3e4b00f6766f1ea5139b9e2b533c6e768d02cb8b20077a5ca576f83d208a",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libarm_compute.so": "8a2b4e76bc23c5fc5cc0a56bb2840df5cfa0a631995863326f8b88cd7b4c0098",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libarm_compute_graph.so": "98b45299d32d2027c46f07bf413aa55832b88f6ffa40cb7f50345417cf990aab",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libc10.so": "a3af71199fbaedb8ee7ffcf3339f65ea15ed85176bc74238e8494895731a923b",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libc10_cuda.so": "0bf57e79c9094924e8184f6fc265f3e4850e1eb6a50a4f1427255e8a9a30d2b2",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libgomp.so.1": "dfee810d70d5df631d5cbf4170273938cf0ab5756caa65c7cd264746cdf886ad",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libnvpl_blas_core.so.0": "5d74d2a7d48ace2b563405d42695053f8dd058a92db19a5e54ecdeab21a3f6d5",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libnvpl_blas_lp64_gomp.so.0": "4ba3cde968a086163fcfc923c0fabcfb43be2cfbea7662399889b3cf086f4077",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libnvpl_lapack_core.so.0": "10ef87919b461fe818a9bfabf149526150cf463d938ad1aa0863311ea4a10c15",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libnvpl_lapack_lp64_gomp.so.0": "0e02dc39b705e466bb887d6967140ff4c02595f0e10b1865adb012fc232352de",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libshm.so": "684e3903a59e48cba59e49667f22151b5a1a9e2fe5c5a9aa7fadbcf1f92c4646",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libtorch.so": "bbbb6e1a709677f5435b2f7fbbe263f27a2cc6ddf6009ea1285449bab9861dd8",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_cpu.so": "c5d3223ce4222decdc23ed7c8491c62b546cd34487e7adf2daacebacdd086799",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_cuda.so": "3db19ad428ce41d67d5267cae04872e101a4cf72449eee27cfc4c424f6eb50b7",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_cuda_linalg.so": "c2f2509155ffb85059f7dc9457a9680ba4469d16bc3126844c98db65ffba903e",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_global_deps.so": "03301852e6bf75fa1c57009e0822526fada43202a8f2d81976d407e8671f4f49",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_nvshmem.so": "697f0b9bbd258e843d76e8488a2b16a839a530aeb7c63223b731fc2bd2720d08",
+      "/usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_python.so": "05ef284b3b06690ef230ee7989e7db1cb86608647169ca8a7fe81cc7b214b418",
+      "/usr/local/lib/python3.12/dist-packages/torchaudio/lib/_torchaudio.abi3.so": "516a0a6c155b6c0a61d8caeb2aff7779d5ca15bcde014d07c588794ca2baef4f",
+      "/usr/local/lib/python3.12/dist-packages/torchaudio/lib/libtorchaudio.abi3.so": "f42d6d3825c592ff796d95b14f0b7714458182a97951036b18f3175eb52cf211",
+      "/usr/local/lib/python3.12/dist-packages/torchvision.libs/ld-linux-aarch64.5cbc5e90.so.1": "116052616cb03339aca764d610291380525e57f33cecc75fc6be7075358ececa",
+      "/usr/local/lib/python3.12/dist-packages/torchvision.libs/libcudart.faf08d9a.so.13": "7bdba2b5b08cbdc85203c41cc94598adedb1bcfea7cb574ca693ac73599e4e63",
+      "/usr/local/lib/python3.12/dist-packages/torchvision.libs/libjpeg.21c11dd8.so.8": "fcd0224a79da269108569fa4e9bf4bcb9266505ba07227012910280fd4355560",
+      "/usr/local/lib/python3.12/dist-packages/torchvision.libs/libnvjpeg.36e11081.so.13": "ae5a5fd164f93b3ccd12e6017270a17c08acc156adfcf991e81fcc3ac859fe14",
+      "/usr/local/lib/python3.12/dist-packages/torchvision.libs/libpng16.1fc16489.so.16": "eea09a93309bf9416e240ef72aa9212a18e140de53fbf8afc3fddaeb15439202",
+      "/usr/local/lib/python3.12/dist-packages/torchvision.libs/libsharpyuv.7df76598.so.0": "9aa1bdd4f746bb36d5c52216e2108096b200b05ae09d30a93c0aef9b710914e4",
+      "/usr/local/lib/python3.12/dist-packages/torchvision.libs/libwebp.6bcc97c8.so.7": "3a8dac381893c14b4a8c844904282ad2150ecce91bd78e42a06dfcb8cd5adda1",
+      "/usr/local/lib/python3.12/dist-packages/torchvision.libs/libz.75f4ef3d.so.1": "8efad8c97e94a208cc343bde44dcc8ee9595615112ddfa62a059159658ad2dbd",
+      "/usr/local/lib/python3.12/dist-packages/torchvision/_C.so": "a244f1338fc5ceba868a834dae6d4d6775e4a945253d35038ff38c02f88d4f38",
+      "/usr/local/lib/python3.12/dist-packages/torchvision/image.so": "f4226626679db6a25a61f7698667dbcef239e17334025528dd7f207bb8dccde7",
+      "/usr/local/lib/python3.12/dist-packages/triton/_C/libtriton.so": "cb4a967264210c849e7f9225c880ad11cb2005450dd2651bdf9b55c757d11220",
+      "/usr/local/lib/python3.12/dist-packages/tvm_ffi/core.abi3.so": "be27a2a5776eb716e907dd842f4296c1c2abdf140a48737c406a17250d473d4c",
+      "/usr/local/lib/python3.12/dist-packages/tvm_ffi/lib/libtvm_ffi.so": "2e6d4cf943adf53f6283f92b9961ea391f95ee51a291357aacbe5906aa65f75d",
+      "/usr/local/lib/python3.12/dist-packages/tvm_ffi/lib/libtvm_ffi_testing.so": "28fb7b8bad8a46f84f858fdeac1c6e5ceb9e88d191588fbc71f4ad8e8b064348",
+      "/usr/local/lib/python3.12/dist-packages/uvloop/loop.cpython-312-aarch64-linux-gnu.so": "4598b87add17d5d379ec12c6101dd68fc0da28945b623603ab732aea1fa6df88",
+      "/usr/local/lib/python3.12/dist-packages/vllm/_C_stable_libtorch.abi3.so": "4874833ae2f6cc553224fad7330bc84aaa065b3dd5af85ad566b1611752c2996",
+      "/usr/local/lib/python3.12/dist-packages/vllm/_moe_C_stable_libtorch.abi3.so": "82ece66378489bf76b92cb20f93df8d2857aebb03cec718ea8d33ffbe0740c3c",
+      "/usr/local/lib/python3.12/dist-packages/vllm/_qutlass_C.abi3.so": "ee8c6953cb944caeb976d153d32cf4514022b6d25539fc85d9b3263b559edabb",
+      "/usr/local/lib/python3.12/dist-packages/xgrammar/libxgrammar_bindings.so": "55a529af2b0502e69ca83fac71cc6278ea56155d0e5370eaf23bf5df64928f16",
+      "/usr/local/lib/python3.12/dist-packages/yaml/_yaml.cpython-312-aarch64-linux-gnu.so": "edc51c14c75bd17789a97020a8472e051b5adce1a7667d63edc27e4825c23cf2",
+      "/usr/local/lib/python3.12/dist-packages/yarl/_quoting_c.cpython-312-aarch64-linux-gnu.so": "389de300cd60c6f0b1e08b3e7fbaf304870e892421ef96aa52413768b3d390c7",
+      "/usr/local/lib/python3.12/dist-packages/zmq/backend/cython/_zmq.abi3.so": "85bb47987867b115df4c30efdb6bc06e1bc0aec7980cb549b2313abf0ac6975a"
+    },
+    "resource_collector": {
+      "analysis_source_sha256": "1bae7dc9f730a6a5616cb96d9b67aa2f891fd340780c3bb9b00bc68c90879db5",
+      "library_sha256": "f426062d84dfc40608e71040aa945e36c7746d4b73bc8c53974c1b9538f4d961"
+    },
+    "schema": "tessera.native_dense_runtime.v1",
+    "source": {
+      "harness_sha256": "7f25dae06cf5798addb47c6168191be3a29a4fc61071cbc554c42c89ea3527ee",
+      "runtime_contract_sha256": "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3",
+      "tessera_package_sha256": "8d0b966b184b7e100e0f89e6fd89869b4e6b3540e2efc12369edefc7dc04e544"
+    },
+    "versions": {
+      "cuda": "13.0",
+      "torch": "2.13.0+cu130",
+      "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904"
+    }
+  },
+  "schema": "tessera.native_dense_panel.v1",
+  "scheme_sha256": "f5bcb6f9da20c1c77c013ecaa5e36c8a6a75e23f73edff916393b601ba6fe007",
+  "shape": [
+    1024,
+    2048
+  ],
+  "source_sha256": "665160a182a42a16cf5e6b33ed6a405e525823194daa431ced57699dea5bde49",
+  "unit": "model.layers.0.self_attn.o_proj",
+  "wire": {
+    "blob_bytes": 1049810,
+    "blob_sha256": "b1a4e12510def717fc272a46f22ecf3757282aed14c2987d100174d582e9ee07",
+    "record": {
+      "blob_bytes": 1049810,
+      "blob_sha256": "b1a4e12510def717fc272a46f22ecf3757282aed14c2987d100174d582e9ee07",
+      "file": "model__layers__0__self_attn__o_proj__TESSERA_E2M1_K2_R896.tessera",
+      "identity": {
+        "calibration": {
+          "hessian": {
+            "algorithm": "sha256.dtype_shape_contiguous.v1",
+            "dtype": "torch.float32",
+            "sha256": "a0f140c9d1035bfd3e994d8cd0a21cba164d09ce6d4d1513dbb42cc0ecd21dc2",
+            "shape": [
+              2048,
+              2048
+            ]
+          },
+          "settings": {
+            "hessian": {
+              "fit_ids_sha256": "b39b77e212deccd2f3a997ca9044a844943cfd68fe5ee3bd2a4d2714acc2f358",
+              "fit_tokens": 2048,
+              "text_sha256": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5"
+            },
+            "ldlq_block": 32,
+            "ldlq_sigma": 1.0,
+            "refit_gauss_seidel": false,
+            "refit_objective": {
+              "channel": "hessian",
+              "lut16": "h^1.0",
+              "s6b": "plain"
+            },
+            "refit_objective_trailing": null,
+            "refit_reach_floor": false
+          }
+        },
+        "encoder_fixture_id": "03bbc5b1c56d55e1d7f5f0d1baa1107e462d5bad18a412d0c232c78d04c95519",
+        "encoder_source_sha256": "f7cba4410921f983ca1248fb8bb821a142eba19a5470bf719743e3afffe83e27",
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "grid": "E2M1x2",
+          "plane": "lut16",
+          "q256": 896,
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "schema": "tessera.encoding_inputs.v1",
+        "source": {
+          "algorithm": "sha256.dtype_shape_contiguous.v1",
+          "dtype": "torch.bfloat16",
+          "sha256": "3f2884a3fb552cc8d4f970eaf5cd48148daffa2a6f5a670f3b91d3628e92cbc9",
+          "shape": [
+            1024,
+            2048
+          ]
+        },
+        "unit": "model.layers.0.self_attn.o_proj"
+      }
+    }
+  }
+}
