@@ -40,6 +40,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import torch
+from safetensors import safe_open
 
 try:
     from accelerate import init_empty_weights
@@ -68,7 +69,6 @@ from .layer_streaming import (
     _model_tensor_dtypes,
     _source_tensor_dtypes,
     _source_json,
-    _source_safe_open,
     _build_expert_packer,
     _build_install_resolver,
     _build_weight_map,
@@ -440,8 +440,8 @@ def _estimate_layer_cache_bytes(
     sizes = [0 for _ in range(num_layers)]
     try:
         for shard, pairs in by_shard.items():
-            context = _source_safe_open(shard, framework="pt",
-                                        source_authentication=source_authentication)
+            context = (safe_open(shard, framework="pt") if source_authentication is None else
+                       source_authentication.safe_open(safe_open, shard, framework="pt"))
             with context as f:
                 for idx, ckpt_name, fp4_packed, load_dtype in pairs:
                     sl = f.get_slice(ckpt_name)
