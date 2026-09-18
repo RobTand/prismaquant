@@ -44,6 +44,18 @@ The identity rules, in order:
   mismatch.
 * A refused entry falls back to the declared path and is recorded with a
   reason. Nothing here is silent.
+* A map of the ram-overlay generation (RobTand/prismabuild#640) adds the
+  optional halves: the header may announce ``ram_tier_id``, ``ram_root`` and
+  ``ram_epoch``, and an entry may name a ``ram_path`` under that root -- the
+  tmpfs copy of a range the stage entry already vouches for. A tmpfs empties
+  on reboot while the map survives on the shared mount, so the ram half is
+  offered only while the map's ``ram_epoch`` equals the epoch the pool's tier
+  record announces for ``ram_tier_id``. No record, an unreadable record, a
+  missing epoch or a mismatched one fails closed **on the ram half only**: the
+  entry still answers from its stage copy, then the declared path, exactly the
+  chain above. The ram file passes the same pre-open fence as the stage copy,
+  and a caller whose ram read refuses falls back to the stage copy before the
+  declared path -- a dead tmpfs is a cache miss, never an ENOENT.
 
 The map is replaced atomically as movers finish, so it is re-read when its
 identity changes rather than loaded once. Reads start on the first resident
@@ -61,6 +73,14 @@ import threading
 SCHEMA = "prismaquant.prismabuild.residency_map.v1"
 FRAGMENT_SCHEMA = "prismaquant.prismabuild.residency_map_fragment.v1"
 ENV_VAR = "PRISMABUILD_RESIDENCY_MAP"
+#: Where the pool's tier records are read from, ``<queue>/tiers`` by default
+#: (the map lives at ``<queue>/residency/<consumer>.map.json``, so the tiers
+#: directory is its sibling's sibling). The variable names it outright for a
+#: layout -- or a test -- that does not match the queue's own.
+TIERS_DIR_ENV_VAR = "PRISMABUILD_RESIDENCY_TIERS_DIR"
+#: The schema of the tier records in that directory (PrismaBuild's
+#: ``storage_tiers.TIER_RECORD_SCHEMA_V1``, restated rather than imported).
+TIER_RECORD_SCHEMA = "prismabuild.storage_tier.v1"
 # A whole-manifest map for the GLM-5.3-Flash prepare is ~469k entries; at this
 # schema's per-entry size that is under 128 MiB. The bound exists so a wrong
 # path cannot be read without limit, not to describe an expected size.
@@ -69,7 +89,11 @@ MAX_RECORDED_FALLBACKS = 256
 
 _ROOT_KEYS = {"schema", "tier_id", "stage_root", "manifest_sha256", "leads",
               "generation", "entries"}
-_ENTRY_KEYS = {"stage_path", "bytes", "offset", "sha256"}
+#: The ram overlay's optional header: which tier, under which root, in which
+#: epoch. A map naming ram paths must announce all three (PrismaBuild's
+#: ``validate_map`` refuses less), and a map naming none may carry them anyway.
+_RAM_ROOT_KEYS = {"ram_tier_id", "ram_root", "ram_epoch"}
+_ENTRY_KEYS = {"stage_path", "bytes", "offset", "sha256", "ram_path"}
 _HEX = frozenset("0123456789abcdef")
 
 
@@ -112,10 +136,14 @@ def _identity(info: os.stat_result) -> tuple[int, int, int, int]:
 
 
 class ResidencyResolver:
-    """Where to open a declared path, and what the stage actually served."""
+    """Where to open a declared path, and what each tier actually served."""
 
-    def __init__(self, map_path: str | Path):
+    def __init__(self, map_path: str | Path, tiers_dir: str | Path | None = None):
         self._map_path = str(map_path)
+        override = os.environ.get(TIERS_DIR_ENV_VAR)
+        self._tiers_dir = str(tiers_dir if tiers_dir is not None else
+                              override if override else
+                              Path(self._map_path).parent.parent / "tiers")
         self._lock = threading.Lock()
         self._manifest_sha256: str | None = None
         self._identity: tuple[int, int, int, int] | None = None
@@ -128,9 +156,21 @@ class ResidencyResolver:
         self._leads: tuple[str, ...] = ()
         self._generation: int | None = None
         self._refused: str | None = None
+        # The ram half's state: what the map announced, and (identity-cached)
+        # what the pool's tier record answers for the announced epoch.
+        self._ram_tier_id: str | None = None
+        self._ram_root: str | None = None
+        self._ram_epoch: str | None = None
+        self._ram_refusal: str | None = None
+        self._tier_record_identity: tuple[int, int, int, int] | None = None
+        self._tier_record: tuple[str | None, str | None] | None = None
         self._hits = 0
         self._misses = 0
         self._bytes_from_stage = 0
+        self._bytes_from_ram = 0
+        self._ram_hits = 0
+        self._ram_fallbacks: list[dict] = []
+        self._ram_fallback_count = 0
         self._bytes_from_pool = 0
         self._fallbacks: list[dict] = []
         self._fallback_count = 0
@@ -205,15 +245,25 @@ class ResidencyResolver:
         self._stage_root = None
         self._leads = ()
         self._generation = None
+        self._forget_ram_half()
         if self._refused != reason:
             self._refused = reason
             print(f"[residency] refused {self._map_path}: {reason}", flush=True)
+
+    def _forget_ram_half(self) -> None:
+        """Drop the ram half's state. Caller holds the lock."""
+        self._ram_tier_id = None
+        self._ram_root = None
+        self._ram_epoch = None
+        self._ram_refusal = None
+        self._tier_record_identity = None
+        self._tier_record = None
 
     def _adopt(self, payload: object, raw: bytes) -> None:
         if type(payload) is not dict:
             raise ResidencyMapRefused(
                 f"residency map must be an object, not {type(payload).__name__}")
-        unknown = sorted(set(payload) - _ROOT_KEYS)
+        unknown = sorted(set(payload) - _ROOT_KEYS - _RAM_ROOT_KEYS)
         if unknown:
             raise ResidencyMapRefused(f"unknown residency map fields: {unknown}")
         missing = sorted(_ROOT_KEYS - set(payload))
@@ -244,6 +294,7 @@ class ResidencyResolver:
         generation = payload["generation"]
         if type(generation) is not int or isinstance(generation, bool) or generation < 0:
             raise ResidencyMapRefused("residency map generation must be a count")
+        ram_tier_id, ram_root, ram_epoch = self._ram_header(payload)
         entries = payload["entries"]
         if type(entries) is not dict:
             raise ResidencyMapRefused(
@@ -252,7 +303,16 @@ class ResidencyResolver:
         prefix = stage_root.rstrip("/") + "/"
         adopted: dict[str, dict] = {}
         for key, row in entries.items():
-            adopted[str(key)] = self._entry(str(key), row, stage_root, prefix)
+            adopted[str(key)] = self._entry(str(key), row, stage_root, prefix, ram_root)
+        if any("ram_path" in entry for entry in adopted.values()) and (
+                ram_tier_id is None or ram_root is None or ram_epoch is None):
+            # A ram copy nobody can date is not resident (#640): the tmpfs
+            # empties on reboot while the map survives, so an entry naming a
+            # ram path without the tier, root and epoch that place it in time
+            # is refused the way any other entry that says too little is.
+            raise ResidencyMapRefused(
+                "a residency map naming ram paths must announce its "
+                "ram tier, root and epoch")
         self._entries = adopted
         self._real_entries = None
         self._map_sha256 = hashlib.sha256(raw).hexdigest()
@@ -260,13 +320,48 @@ class ResidencyResolver:
         self._stage_root = stage_root
         self._leads = tuple(leads)
         self._generation = generation
+        self._ram_tier_id = ram_tier_id
+        self._ram_root = ram_root
+        self._ram_epoch = ram_epoch
+        self._ram_refusal = None
+        self._tier_record_identity = None
+        self._tier_record = None
         if self._refused is not None:
             print(f"[residency] adopted {self._map_path}: {len(adopted)} entries "
                   f"on {tier_id}, generation {generation}", flush=True)
         self._refused = None
 
     @staticmethod
-    def _entry(key: str, row: object, stage_root: str, prefix: str) -> dict:
+    def _ram_header(payload: dict) -> tuple[str | None, str | None, str | None]:
+        """The map's optional ram announcement, with PrismaBuild's own rules.
+
+        The three fields are independent optionals in the writer's schema --
+        only an entry naming a ``ram_path`` requires all three -- and each is
+        validated the way ``prismabuild.residency_map.validate_map`` validates
+        it: the root a normalized absolute path, the tier id and the epoch
+        non-empty strings without ``/``, because the epoch is a filename-safe
+        identity the tier loop mints.
+        """
+
+        ram_root = payload.get("ram_root")
+        if ram_root is not None and (
+                type(ram_root) is not str or not ram_root.startswith("/")
+                or os.path.normpath(ram_root) != ram_root):
+            raise ResidencyMapRefused(
+                "residency map ram_root is not a normalized absolute path")
+        ram_tier_id = payload.get("ram_tier_id")
+        if ram_tier_id is not None and (
+                type(ram_tier_id) is not str or not ram_tier_id or "/" in ram_tier_id):
+            raise ResidencyMapRefused("residency map ram_tier_id is not a tier id")
+        ram_epoch = payload.get("ram_epoch")
+        if ram_epoch is not None and (
+                type(ram_epoch) is not str or not ram_epoch or "/" in ram_epoch):
+            raise ResidencyMapRefused("residency map ram_epoch is not an epoch")
+        return ram_tier_id, ram_root, ram_epoch
+
+    @staticmethod
+    def _entry(key: str, row: object, stage_root: str, prefix: str,
+               ram_root: str | None = None) -> dict:
         head, separator, path = key.partition(":")
         if not separator or not path or not head.isdigit():
             raise ResidencyMapRefused(f"malformed residency map key {key!r}")
@@ -295,8 +390,30 @@ class ResidencyResolver:
                 f"residency map entry {key!r} offset {declared} disagrees with its key")
         if not _is_hex64(row.get("sha256")):
             raise ResidencyMapRefused(f"residency map entry {key!r} has no SHA-256 digest")
-        return {"stage_path": stage_path, "bytes": size, "offset": offset,
-                "sha256": row["sha256"], "declared_path": path}
+        checked = {"stage_path": stage_path, "bytes": size, "offset": offset,
+                   "sha256": row["sha256"], "declared_path": path}
+        ram_path = row.get("ram_path")
+        if ram_path is not None:
+            if ram_root is None:
+                # PrismaBuild's own compose refuses this shape; a map that
+                # carries it is a map this reader refuses whole, like every
+                # other entry that does not say what the schema requires.
+                raise ResidencyMapRefused(
+                    f"residency map entry {key!r} names a ram_path, "
+                    "but the map announces no ram root")
+            if (type(ram_path) is not str or not ram_path.startswith("/")
+                    or os.path.normpath(ram_path) != ram_path):
+                raise ResidencyMapRefused(
+                    f"residency map entry {key!r} ram_path is not a normalized absolute path")
+            ram_prefix = ram_root.rstrip("/") + "/"
+            if not (ram_path == ram_root or ram_path.startswith(ram_prefix)):
+                # A map that could name a path outside the announced ram tier
+                # is a map that could redirect a consumer's read anywhere.
+                raise ResidencyMapRefused(
+                    f"residency map entry {key!r} ram_path is outside "
+                    f"the map's ram root {ram_root!r}")
+            checked["ram_path"] = ram_path
+        return checked
 
     def _real_key(self, key: str) -> dict | None:
         """Second index, for a caller that resolved symlinks and the map did not.
@@ -322,6 +439,110 @@ class ResidencyResolver:
                 index[residency_map_key(os.path.join(real, name), entry["offset"])] = entry
             self._real_entries = index
         return self._real_entries.get(key)
+
+    # -- the ram half -----------------------------------------------------
+
+    def _announced_ram_epoch(self) -> tuple[str | None, str | None]:
+        """The epoch the pool currently announces for the map's ram tier.
+
+        Caller holds the lock. The record is the tier loop's own announcement
+        (``<tiers>/<ram tier id>.json``, ``prismabuild.storage_tier.v1``), and
+        its ``epoch`` is what the map's ``ram_epoch`` is compared against --
+        the marker file it dates from dies with the tmpfs on reboot, so a
+        record the map's generation predates announces an epoch the map's
+        bytes cannot be in. The record is re-read when its stat identity
+        changes rather than per lookup, so noticing a reboot costs one lstat.
+
+        Any failure is a refusal naming why, never a guess: an epoch nobody
+        announces is an epoch the ram half is not resident in.
+        """
+
+        record_path = Path(self._tiers_dir) / f"{self._ram_tier_id}.json"
+        try:
+            before = os.lstat(record_path)
+        except OSError as error:
+            return None, f"ram tier record is unreadable: {error.strerror}"
+        if not stat.S_ISREG(before.st_mode):
+            return None, "ram tier record is not a regular file"
+        identity = _identity(before)
+        if identity == self._tier_record_identity and self._tier_record is not None:
+            return self._tier_record
+        try:
+            with open(record_path, "rb") as handle:
+                raw = handle.read(MAX_MAP_BYTES + 1)
+                after = os.fstat(handle.fileno())
+        except OSError as error:
+            return None, f"ram tier record is unreadable: {error.strerror}"
+        if _identity(after) != identity:
+            # Announced by atomic replace; a torn read is not a verdict.
+            return None, "ram tier record changed during its read"
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError):
+            return None, "ram tier record is not valid UTF-8 JSON"
+        if type(payload) is not dict or payload.get("schema") != TIER_RECORD_SCHEMA:
+            return None, "ram tier record is not a storage tier record"
+        if payload.get("tier_id") != self._ram_tier_id:
+            return None, "ram tier record names another tier than the map announced"
+        epoch = payload.get("epoch")
+        if type(epoch) is not str or not epoch or "/" in epoch:
+            return None, "ram tier record announces no epoch"
+        self._tier_record_identity = identity
+        self._tier_record = (epoch, None)
+        return self._tier_record
+
+    def _ram_live(self) -> bool:
+        """Is the map's ram half resident in the epoch the pool announces?
+
+        Caller holds the lock. Only entries that carry a ``ram_path`` ask;
+        a map that announces no ram half, or whose entries name none, never
+        reads a tier record at all.
+        """
+
+        if self._ram_tier_id is None or self._ram_epoch is None:
+            return False
+        epoch, refusal = self._announced_ram_epoch()
+        if epoch is None:
+            reason = refusal
+        elif epoch != self._ram_epoch:
+            reason = (f"ram epoch {self._ram_epoch} is stale: "
+                      f"the pool announces {epoch}")
+        else:
+            reason = None
+        if reason != self._ram_refusal:
+            self._ram_refusal = reason
+            if reason is None:
+                print(f"[residency] ram half resident on {self._ram_tier_id}, "
+                      f"epoch {epoch}", flush=True)
+            else:
+                print(f"[residency] ram half not resident: {reason}", flush=True)
+        return reason is None
+
+    def _ram_offer(self, entry: dict, path: str) -> str | None:
+        """The live ram copy of a bound entry, or None. Caller holds the lock.
+
+        The pre-open fence is the stage copy's own: a regular file of exactly
+        the entry's byte count. The digest need not be re-checked here -- it is
+        the same entry, and the caller verifies the bytes it reads against the
+        same digest either way. A refusal is recorded and falls through to the
+        stage copy; it never fails the read.
+        """
+
+        ram_path = entry.get("ram_path")
+        if ram_path is None or not self._ram_live():
+            return None
+        try:
+            info = os.lstat(ram_path)
+        except OSError as error:
+            self._record_ram_fallback(path, f"ram copy is unreadable: {error.strerror}")
+            return None
+        if not stat.S_ISREG(info.st_mode):
+            self._record_ram_fallback(path, "ram copy is not a regular file")
+            return None
+        if info.st_size != entry["bytes"]:
+            self._record_ram_fallback(path, "ram copy size differs from the map")
+            return None
+        return ram_path
 
     # -- the answer ------------------------------------------------------
 
@@ -369,21 +590,36 @@ class ResidencyResolver:
                 self._record_fallback(
                     path, "map entry is a byte range, not the whole declared file")
                 return None
+            ram_path = self._ram_offer(entry, path)
             stage_path = entry["stage_path"]
             try:
                 info = os.lstat(stage_path)
             except OSError as error:
-                self._record_fallback(path, f"staged copy is unreadable: {error.strerror}")
-                return None
-            if not stat.S_ISREG(info.st_mode):
-                self._record_fallback(path, "staged copy is not a regular file")
-                return None
-            if info.st_size != entry["bytes"]:
-                self._record_fallback(path, "staged copy size differs from the map")
-                return None
-            return {"declared_path": path, "stage_path": stage_path,
-                    "bytes": entry["bytes"], "offset": entry["offset"],
-                    "sha256": entry["sha256"]}
+                stage_refusal = f"staged copy is unreadable: {error.strerror}"
+            else:
+                if not stat.S_ISREG(info.st_mode):
+                    stage_refusal = "staged copy is not a regular file"
+                elif info.st_size != entry["bytes"]:
+                    stage_refusal = "staged copy size differs from the map"
+                else:
+                    stage_refusal = None
+            if stage_refusal is not None:
+                if ram_path is None:
+                    self._record_fallback(path, stage_refusal)
+                    return None
+                # The stage copy failed its fence but the entry is bound and
+                # the ram copy is current: the ram half answers on its own,
+                # and the caller that cannot use it falls back to the declared
+                # path through the stage_path it still holds.
+                return {"declared_path": path, "stage_path": stage_path,
+                        "ram_path": ram_path, "bytes": entry["bytes"],
+                        "offset": entry["offset"], "sha256": entry["sha256"]}
+            answer = {"declared_path": path, "stage_path": stage_path,
+                      "bytes": entry["bytes"], "offset": entry["offset"],
+                      "sha256": entry["sha256"]}
+            if ram_path is not None:
+                answer["ram_path"] = ram_path
+            return answer
 
     # -- the accounting --------------------------------------------------
 
@@ -394,21 +630,49 @@ class ResidencyResolver:
             self._fallbacks.append({"path": path, "reason": reason})
         print(f"[residency] fallback {path}: {reason}", flush=True)
 
+    def _record_ram_fallback(self, path: str, reason: str) -> None:
+        """Caller holds the lock. Bounded like the stage's own."""
+        self._ram_fallback_count += 1
+        if len(self._ram_fallbacks) < MAX_RECORDED_FALLBACKS:
+            self._ram_fallbacks.append({"path": path, "reason": reason})
+        print(f"[residency] ram fallback {path}: {reason}", flush=True)
+
     def record_fallback(self, declared: str | Path, reason: str) -> None:
         with self._lock:
             self._record_fallback(_normal(declared), reason)
+
+    def record_ram_fallback(self, declared: str | Path, reason: str) -> None:
+        """One ram copy that did not serve the read it was offered for.
+
+        The read continues from the stage copy or the declared path; this is
+        the record of the ram half's own miss, kept beside ``fallbacks`` so
+        the two chains stay separately readable in ``results.json``.
+        """
+        with self._lock:
+            self._record_ram_fallback(_normal(declared), reason)
 
     def record_stage_read(self, declared: str | Path, nbytes: int) -> None:
         with self._lock:
             self._hits += 1
             self._bytes_from_stage += int(nbytes)
 
+    def record_ram_read(self, declared: str | Path, nbytes: int) -> None:
+        """One read the ram tier served, counted beside the stage's own.
+
+        Not inside ``hits``: ``hits`` stays the number of reads the stage
+        copy served, so a run's accounting can say what each tier served
+        without subtracting. ``ram_hits`` is the ram tier's own count.
+        """
+        with self._lock:
+            self._ram_hits += 1
+            self._bytes_from_ram += int(nbytes)
+
     def record_pool_read(self, declared: str | Path, nbytes: int) -> None:
         with self._lock:
             self._bytes_from_pool += int(nbytes)
 
     def report(self) -> dict:
-        """What the stage served this run, for ``results.json``."""
+        """What each tier served this run, for ``results.json``."""
         with self._lock:
             report = {
                 "map_path": self._map_path,
@@ -424,8 +688,20 @@ class ResidencyResolver:
                 "fallbacks": [dict(row) for row in self._fallbacks],
                 "fallback_count": self._fallback_count,
                 "bytes_from_stage": self._bytes_from_stage,
+                "ram_hits": self._ram_hits,
+                "ram_fallbacks": [dict(row) for row in self._ram_fallbacks],
+                "ram_fallback_count": self._ram_fallback_count,
+                "bytes_from_ram": self._bytes_from_ram,
                 "bytes_from_pool": self._bytes_from_pool,
             }
+            if self._ram_tier_id is not None:
+                # The ram half's own header and verdict, present only when a
+                # map of the overlay generation was adopted at all.
+                report["ram_tier_id"] = self._ram_tier_id
+                report["ram_root"] = self._ram_root
+                report["ram_epoch"] = self._ram_epoch
+                if self._ram_refusal is not None:
+                    report["ram_refused"] = self._ram_refusal
             if self._refused is not None:
                 report["refused"] = self._refused
             return report
