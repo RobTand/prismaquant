@@ -1935,6 +1935,20 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         reader_identity = None if reader is None else reader.identity
         implementation = (_aura_source_sha256() if source_transition is None
                           else source_transition.measurement_source_sha256)
+        # THE PLAN DIGEST THE PREPARED RECORD MUST CARRY. Normally the running
+        # plan's: a prepared record made against another plan is a stale record.
+        # An admitted transition may state another one, and exactly one kind
+        # does -- the retained-budget transition, whose own proof holds the two
+        # plans byte-identical outside the budget keys its contract enumerates,
+        # which is what makes every other prepared field the checks below
+        # re-derive from the plan still the same field. The dispatcher answers
+        # per capability type from a literal table, so a transition that was
+        # never taught this refuses rather than silently reusing the run's.
+        prepared_plan_sha256 = plan_sha256
+        if source_transition is not None:
+            from .joint_aura_transitions import transition_prepared_plan_sha256
+            prepared_plan_sha256 = transition_prepared_plan_sha256(
+                source_transition, plan_sha256=plan_sha256)
         # THE DEVICE ENVELOPE IS APPLIED HERE, after the refusals that need no
         # device -- the envelope's own config and the declared reader -- and
         # before the first thing that allocates on the device (the projection
@@ -1951,7 +1965,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
         result["projection_backend"] = projection_backend.identity
         if command == "run":
-            _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
+            _preflight_run_prepared(prepared, plan_sha256=prepared_plan_sha256,
                 implementation_sha256=implementation, reader_identity=reader_identity,
                 projection_backend=projection_backend.identity)
         # The command holds a CUDA reservation (``require_cuda_hot_path``
@@ -2091,7 +2105,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             _same(completion.get("schema"), PREPARED_SCHEMA,
                   "prepared v3 schema required; legacy preparation requires fresh prepare and recompute")
             _same(completion.get("status"), "complete", "prepared completion")
-            for key, value in (("plan_sha256", plan_sha256), ("implementation_sha256", implementation),
+            for key, value in (("plan_sha256", prepared_plan_sha256), ("implementation_sha256", implementation),
                                ("source_model_identity", source), ("source_execution", source_execution),
                                ("calibration_input", calibration), ("measured_cells", len(data.cells)),
                                ("reader_identity", reader_identity),
