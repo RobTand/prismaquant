@@ -17,9 +17,12 @@ from test_layer_major_boundary_capture import fixture, policy as boundary_policy
 from test_streamed_cost_checkpoints import _model_identity
 
 
-def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, proof_change=None):
+def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, proof_change=None,
+          skeleton=None):
     monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1' * 40)
     model, context, runner, cache = fixture()
+    if skeleton is not None:
+        skeleton(model, context)
     context.settle_prefetched_layers = lambda layers: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         'owners': [], 'unique_storage_bytes': sum(p.numel() * p.element_size() for p in model.parameters())}
@@ -60,6 +63,30 @@ def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, pro
         boundary_storage=boundary_policy(tmp_path / 'boundaries'), checkpoint_dir=checkpoint, resume=resume,
         **({'retained_operator_windows': execution} if retained else {}))
     return result, paths, context
+
+
+def _meta_skeleton_until_install(model, context, skeleton_dtype):
+    """Model the streamed source: every decoder Linear is a meta parameter until install.
+
+    ``build_streaming_skeleton`` instantiates the model on meta with no dtype,
+    so the skeleton's parameters carry torch's default dtype, not the
+    checkpoint's; ``_fast_install`` then replaces each meta slot with a fresh
+    Parameter of the loaded tensor's dtype. The property modelled here is only
+    that the skeleton dtype differs from the installed dtype (production: a
+    float32 skeleton over a bf16 checkpoint; this fp32 fixture inverts the pair).
+    """
+    installed = {}
+    for index, layer in enumerate(model.model.layers):
+        installed[index] = layer.proj.weight
+        layer.proj.weight = torch.nn.Parameter(
+            torch.empty(installed[index].shape, device='meta', dtype=skeleton_dtype),
+            requires_grad=False)
+    install = context.install
+    def install_from_checkpoint(layer, *, require_prefetched=False, prefetch_following=True):
+        model.model.layers[int(layer)].proj.weight = installed[int(layer)]
+        return install(layer, require_prefetched=require_prefetched,
+                       prefetch_following=prefetch_following)
+    context.install = install_from_checkpoint
 
 
 def test_full_streamed_retained_path_matches_each_probe_and_reads_once(tmp_path, monkeypatch):
@@ -133,3 +160,27 @@ def test_prepared_identity_reuse_refuses_changed_proof_or_file(tmp_path, monkeyp
     with pytest.raises(RuntimeError, match=match):
         _case(tmp_path, monkeypatch, True, checkpoint=tmp_path / 'checkpoint',
               proof_change=change)
+
+
+def test_prepared_proof_is_compared_with_the_installed_source_not_the_meta_skeleton(tmp_path, monkeypatch):
+    """The prepared render identity was verified against the INSTALLED source (prepare's
+    ``verify_anchor_render``). Before install the live slot is the meta skeleton, whose dtype
+    is not the checkpoint's, so the dtype/byte comparison belongs to install time, per layer,
+    before that layer's first render is consumed."""
+    expected, _, _ = _case(tmp_path / 'resident', monkeypatch, True, checkpoint=tmp_path / 'resident-ckpt')
+    actual, _, context = _case(tmp_path / 'skeleton', monkeypatch, True, checkpoint=tmp_path / 'skeleton-ckpt',
+                               skeleton=lambda model, context: _meta_skeleton_until_install(model, context, torch.bfloat16))
+    assert context.install_calls > 0
+    assert actual['costs'] == expected['costs']
+
+
+def test_installed_source_that_differs_from_the_prepared_proof_is_refused_before_any_render(tmp_path, monkeypatch):
+    """A proof the skeleton agrees with but the installed tensor does not is refused at install,
+    before that layer's first render is consumed (the up-front check cannot see it)."""
+    def claim_bf16(proofs, files):
+        for value in proofs.values():
+            value['dtype'] = str(torch.bfloat16)
+            value['logical_bytes'] = value['logical_bytes'] // 2
+    with pytest.raises(RuntimeError, match='installed source'):
+        _case(tmp_path, monkeypatch, True, checkpoint=tmp_path / 'ckpt', proof_change=claim_bf16,
+              skeleton=lambda model, context: _meta_skeleton_until_install(model, context, torch.bfloat16))
