@@ -421,12 +421,15 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     term below names the line that allocates what it bounds and the shape and
     dtype that line allocates, so a reviewer can read the charge against the
     code rather than against a multiplier's plausibility
-    (RobTand/prismaquant#390). Two terms are not traceable from this
-    repository and stay as the conservative bounds they were, each with a
-    comment naming its gap: the export archive's pickle-and-directory
-    metadata, whose size is a function of pickle framing rather than of any
-    shape or dtype, and the producer's own encoder working set inside
-    ``tessera.export.encode_linear``.
+    (RobTand/prismaquant#390). One term is not traceable from this repository
+    and stays as the conservative bound it was, with a comment naming its
+    gap: the export archive's pickle-and-directory metadata, whose size is a
+    function of pickle framing rather than of any shape or dtype. The
+    producer's own encoder working set was the second such term until
+    RobTand/prismaquant#639; it is now read off the pinned producer's own
+    allocating lines, like every other charge here, because a bound that
+    named no line was also a bound nobody could check -- and it was low by
+    2.3x against a measured batch-width sweep.
 
     **What this plan cannot measure, and says which term it has instead.** A
     delta plan is over a process floor -- interpreter, torch, the CUDA runtime,
@@ -485,7 +488,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     prefix = source['live_layer_prefix']
     layers = sorted({str(int(name[len(prefix):].split('.', 1)[0])) for name in unit_shapes}, key=int)
     weights = sum(source['unit_source_weight_bytes'].values())
-    widest_weight = max(math.prod(shape)*4 for shape in unit_shapes.values())
+    widest_elements = max(math.prod(shape) for shape in unit_shapes.values())
+    widest_weight = widest_elements*4
     widest_h = max(shape[1]**2*4 for shape in unit_shapes.values())
     # One capture entry as the loader holds it, in the loader's own arithmetic:
     # tessera_calibration_cache._capture_storage_bytes, which is the FP32 H
@@ -527,16 +531,72 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # [in, block] FP32 output, block <= in. Each stage peaks at two FP32
         # copies of the widest H.
         factorization_scratch_bytes=2*widest_h,
-        # GAP, left at its previous bound. The PrismaQuant-side copies are
-        # traceable and come to eight bytes an element: the BF16 device copy
-        # at the anchor call site, the FP32 reconstruction
+        # The PrismaQuant-side copies, and only those: the BF16 device copy at
+        # the anchor call site, the FP32 reconstruction
         # tessera.decode.reconstruct_unit returns, and the BF16 cast in
-        # tessera_render.encode_tessera_unit. What is NOT traceable from here
-        # is the producer's own working set inside encode_linear, so the
-        # sixteen bytes an element this has always charged stays as the
-        # conservative bound rather than being replaced by a smaller number
-        # that omits the encoder (RobTand/prismaquant#390).
-        compatible_batch_weight_bytes=anchor_batch_size*widest_weight*4,
+        # tessera_render.encode_tessera_unit. Eight bytes an element, which is
+        # what this term always meant; the other eight it used to carry stood
+        # for the producer, and the producer is now charged by its own lines
+        # below rather than by a bound nobody could read against the code
+        # (RobTand/prismaquant#639).
+        compatible_batch_weight_bytes=anchor_batch_size*widest_weight*2,
+        # The producer's per-unit working set, per slot, from the lines that
+        # allocate it. tessera.encode.encode_units drives one
+        # _encode_unit_steps generator per unit through _drive_in_step and
+        # advances them in lock step, so every unit of the batch holds its
+        # working set at the same time -- which is what makes this term scale
+        # with the batch width rather than being one unit's transient. Inside
+        # the LDLQ pass, seven FP32 [rows, cols] tensors are live together
+        # (tessera.encode line numbers at the pinned producer,
+        # tessera_runtime/tessera_serving_runtime_pin.json):
+        #   :3377  scale        = current_scale()
+        #   :3384  weights      = (scale / scale.amax(0)) ** 2, the trellis
+        #                        weighting, which export.py:125 defaults to
+        #                        "scale" and PrismaQuant never overrides
+        #   :3395  base         = work.float()
+        #   :3396  ldlq_target  = base.clone()
+        #   :3397  recon        = torch.zeros_like(base)
+        #   :3398  targets      = torch.empty_like(base)
+        #   :3401  residual     = base[:, stop:] - recon[:, stop:], which
+        #                        reaches [rows, cols - ldl_block] on the last
+        #                        block of the descending schedule
+        # Twenty-eight bytes an element. The producer states the same scaling
+        # itself, in encode_units' docstring: "Memory is B times one unit's
+        # working set (work, the LDLQ base / ldlq_target / recon / targets in
+        # fp32) plus the joined call's own buffers".
+        encoder_working_set_bytes=anchor_batch_size*28*widest_elements,
+        # The producer's per-unit code planes. Allocated at
+        # tessera.encode:2987-2990 and RETAINED on the EncodedUnit the
+        # generator returns (:3527-3532), so they are live from the first
+        # trellis call until the batch's artifacts are built, alongside the
+        # working set above: anchors, completion_bits and codes are int64
+        # [steps, cols] and body_bits is [steps, cols] of uint8 (:2986
+        # widens it to int32 only past eight bits a code), for
+        # 8 + 8 + 8 + 1 = 25 bytes a POSITION. A code covers arity
+        # consecutive rows, so steps = rows // arity (:2976). This is the
+        # one term here that is a bound rather than the allocation: a plan
+        # built from argv does not know the grid, arity is at least 1, and a
+        # k-tuple grid halves steps faster than :2986 widens body_bits, so
+        # twenty-five bytes an ELEMENT bounds every grid. It is not the
+        # number on the grid that was measured -- TESSERA_E2M1_K2_R896 is a
+        # tuple_grid(E2M1, 2) (tessera_formats._build_grid), so the census
+        # pays half of this.
+        encoder_code_plane_bytes=anchor_batch_size*25*widest_elements,
+        # What this sum does NOT attribute, stated rather than folded into a
+        # term. encode_units' own docstring ends "plus the joined call's own
+        # buffers", and those -- the _TCQPlan state over [rows, B*ldl_block],
+        # the LUT plane's candidate tables in _pack_scales_lut/_fit_lut --
+        # are not enumerated here. On the measured shapes and grid the terms
+        # that ARE enumerated and concurrent come to about 0.395 GiB a slot
+        # (28 + 12.5 at arity 2, plus the BF16 weight in and the memo)
+        # against a measured 0.4302 GiB, so roughly four and a half bytes an
+        # element of the producer's peak has no line named for it. The charge
+        # covers the measurement at 0.5391 GiB a slot, but it covers that
+        # residual through the arity-1 bound above and through
+        # PrismaQuant-side copies the batch path builds only after the
+        # producer releases its working set -- not through a term that means
+        # it. Enumerate the joined call before tightening either
+        # (RobTand/prismaquant#639).
         # tessera_calibration_cache.prefetch_capture's legacy branch: one
         # entry's CPU payload from torch.load and the device copy made by
         # 'acts[name], hessians[name] = x.to(device), h.to(device)' are both
@@ -659,6 +719,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                 encoder_hessian_copy_bytes=memo_capacity*widest_h,
                 factorization_scratch_bytes=encoding['factorization_scratch_bytes'],
                 compatible_batch_weight_bytes=encoding['compatible_batch_weight_bytes'],
+                encoder_working_set_bytes=encoding['encoder_working_set_bytes'],
+                encoder_code_plane_bytes=encoding['encoder_code_plane_bytes'],
                 # activations=acts[name].to(device) for each unit of the batch.
                 batch_activation_bytes=anchor_batch_size*widest_prefix,
                 publication_staging_bytes=int(publication_overlap_bytes),

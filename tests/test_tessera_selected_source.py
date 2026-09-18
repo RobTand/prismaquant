@@ -159,6 +159,68 @@ def test_selected_plan_terms_follow_the_allocations_they_bound(monkeypatch):
     # says which pre-run term it has instead of inventing one.
     assert plan['baseline_policy'] == 'declared-headroom-pre-run-measured-in-row'
     assert anchors['declared_headroom_bytes'] == 200
+    # The per-slot encoder charge, term by term. The PrismaQuant-side copies
+    # are the BF16 device copy in, the FP32 reconstruction and the BF16 cast
+    # out: eight bytes an element and no more, because the producer is
+    # charged by its own lines.
+    widest_elements = 3*6
+    assert anchors['compatible_batch_weight_bytes'] == 3*8*widest_elements
+    # Seven live FP32 [rows, cols] tensors inside the LDLQ pass
+    # (tessera.encode:3377, :3384, :3395-3398, :3401).
+    assert anchors['encoder_working_set_bytes'] == 3*28*widest_elements
+    # Three int64 [steps, cols] planes and one uint8 one, allocated at
+    # tessera.encode:2987-2990 and retained on the EncodedUnit (:3527-3532),
+    # at the arity-1 bound on steps.
+    assert anchors['encoder_code_plane_bytes'] == 3*25*widest_elements
+
+
+def test_anchor_slot_charge_covers_the_encoder_peak_a_measured_sweep_read(monkeypatch):
+    """The width slope bounds the encoder peak measured across three widths.
+
+    The plan charged 0.1875 GiB an anchor-batch slot while a three-width
+    sweep on the GLM-5.3 E2M1 census read 0.4302 GiB a slot
+    (RobTand/prismaquant#639): row-0055 layer 20, 192 units at widths
+    8/16/32, ``torch.cuda.max_memory_allocated`` 3.535 / 6.970 / 13.853 GiB,
+    producer ``a4c92094``, sparky. The charge is derived from the producer's
+    allocating lines rather than fitted to that number, so this asserts both:
+    the derivation, exactly, and that the derivation covers what was
+    measured.
+    """
+    from prismaquant import autoscale
+    monkeypatch.setattr(autoscale, 'streamed_calibration_resources', lambda *a, **k: dict(
+        live_layer_prefix='layers.', terms=dict(nonbody_source_bytes=0, declared_headroom_bytes=0),
+        body_layer_bytes={'20': 0}, body_loader_transient_bytes={'20': 0},
+        body_source_file_bytes={'20': 0},
+        unit_source_weight_bytes={'layers.20.gate_proj': 0, 'layers.20.down_proj': 0},
+        full_hessian_bytes=0, full_prefix_bytes=0, source_header_sha256='a'*64))
+    # The sweep's own shapes: a GLM-5.3 routed expert's gate/up [2048, 4096]
+    # and down [4096, 2048], both 2**23 elements.
+    shapes = {'layers.20.gate_proj': [2048, 4096], 'layers.20.down_proj': [4096, 2048]}
+    counts = dict.fromkeys(shapes, 1)
+
+    def resident_at(width):
+        plan = autoscale.selected_anchor_resources('/source', unit_shapes=shapes,
+            counts=counts, max_act_rows=1, cache_slots=1, prefetch_workers=1,
+            headroom_gb=0, anchor_batch_size=width)
+        return sum(plan['phases']['resident_anchors'].values())
+
+    # Mutate the driver's width, not a stored plan: the slope is what an
+    # admission over-subscribes when it is wrong, and it must be the same
+    # between any two widths.
+    slope_8_16 = (resident_at(16) - resident_at(8))//8
+    slope_16_32 = (resident_at(32) - resident_at(16))//16
+    assert slope_8_16 == slope_16_32
+    elements = 2048*4096
+    widest_in = 4096
+    per_slot = (
+        widest_in**2*4 + widest_in*8   # encoder_memo_bytes: the retained LDL factor
+        + 8*elements                   # compatible_batch_weight_bytes
+        + 28*elements                  # encoder_working_set_bytes
+        + 25*elements)                 # encoder_code_plane_bytes
+    assert slope_8_16 == per_slot
+    measured_gib = (13.853 - 6.970)/16
+    assert measured_gib == pytest.approx(0.4302, abs=5e-5)
+    assert per_slot/1024**3 >= measured_gib
 
 
 def test_selected_guard_measures_its_own_process_floor(tmp_path, monkeypatch):
