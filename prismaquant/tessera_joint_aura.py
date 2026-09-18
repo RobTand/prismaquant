@@ -28,6 +28,9 @@ from .cost_stage_checkpoint import (
     prepare_journal, unit_path, write_unit,
 )
 from .interned_json import load_json_file
+from .residency_map import (
+    bind_residency_manifest, residency_report, residency_resolver,
+)
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -91,28 +94,83 @@ def _read_verified_wire_blob(cell):
     size = record.get("blob_bytes")
     _require(type(size) is int and size > 0,
              f"{wire}: wire receipt needs positive blob_bytes")
-    before = wire.lstat()
-    _require(stat.S_ISREG(before.st_mode), f"{wire}: wire must be a regular file, not a symlink")
-    _same(before.st_size, size, f"{wire}: wire size differs from measured receipt")
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(wire, flags)
+    expected = record.get("blob_sha256")
+    # PrismaBuild's stage tier, when it holds this wire. The receipt already
+    # names the digest, so the staged copy is admitted only if its bytes hash
+    # to the same value the pool copy would have to; a refused entry reads the
+    # declared path and is recorded. Unset environment, no stage, no change.
+    resolver = residency_resolver()
+    staged = (None if resolver is None
+              else resolver.staged_read(wire, expected_sha256=expected))
+    if staged is not None:
+        try:
+            blob, digest = _read_wire_bytes(Path(staged["stage_path"]), size,
+                                            expected=expected, staged=True)
+        except _StagedWireRefused as refusal:
+            resolver.record_fallback(wire, str(refusal))
+        else:
+            resolver.record_stage_read(wire, len(blob))
+            return blob, digest
+    blob, digest = _read_wire_bytes(wire, size, expected=expected, staged=False)
+    if resolver is not None:
+        resolver.record_pool_read(wire, len(blob))
+    return blob, digest
+
+
+class _StagedWireRefused(Exception):
+    """The staged wire failed its identity check; read the declared path."""
+
+
+def _read_wire_bytes(wire, size, *, expected, staged):
+    """One fenced read of ``size`` bytes, digested and bound to the receipt.
+
+    A staged read refuses instead of failing: PrismaBuild recomposes the map
+    after every egress, so a staged copy can be released between the
+    resolver's stat and this open, and every fence below is then a reason to
+    read the declared wire rather than a reason to stop. The declared wire's
+    own refusals are unchanged.
+    """
     try:
-        with os.fdopen(fd, "rb", closefd=True) as handle:
-            fd = None
-            _same(_stat_signature(os.fstat(handle.fileno())), _stat_signature(before),
-                  f"{wire}: wire changed before its content read")
-            blob = handle.read(size + 1)
-            after_open = os.fstat(handle.fileno())
-    finally:
-        if fd is not None:
-            os.close(fd)
+        before = wire.lstat()
+        if staged and not stat.S_ISREG(before.st_mode):
+            raise _StagedWireRefused('staged wire is not a regular file')
+        _require(stat.S_ISREG(before.st_mode),
+                 f"{wire}: wire must be a regular file, not a symlink")
+        if staged and before.st_size != size:
+            raise _StagedWireRefused('staged wire size differs from the measured receipt')
+        _same(before.st_size, size, f"{wire}: wire size differs from measured receipt")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(wire, flags)
+        try:
+            with os.fdopen(fd, "rb", closefd=True) as handle:
+                fd = None
+                if staged and _stat_signature(os.fstat(handle.fileno())) != _stat_signature(before):
+                    raise _StagedWireRefused('staged wire changed before its content read')
+                _same(_stat_signature(os.fstat(handle.fileno())), _stat_signature(before),
+                      f"{wire}: wire changed before its content read")
+                blob = handle.read(size + 1)
+                after_open = os.fstat(handle.fileno())
+        finally:
+            if fd is not None:
+                os.close(fd)
+    except OSError as error:
+        if not staged:
+            raise
+        raise _StagedWireRefused(
+            f'staged wire is unreadable: {error.strerror}') from None
+    if staged and (len(blob) != size
+                   or _stat_signature(after_open) != _stat_signature(before)
+                   or _stat_signature(wire.lstat()) != _stat_signature(before)):
+        raise _StagedWireRefused('staged wire changed during its content read')
     _require(len(blob) == size, f"{wire}: wire changed during its content read")
     _same(_stat_signature(after_open), _stat_signature(before),
           f"{wire}: wire changed during its content read")
     _same(_stat_signature(wire.lstat()), _stat_signature(before),
           f"{wire}: wire changed during its content read")
     digest = hashlib.sha256(blob).hexdigest()
-    _same(digest, record.get("blob_sha256"), f"{wire}: wire checksum")
+    if staged and digest != expected:
+        raise _StagedWireRefused('staged wire bytes differ from the receipt digest')
+    _same(digest, expected, f"{wire}: wire checksum")
     return blob, digest
 
 
@@ -1741,7 +1799,8 @@ def _restores_activation_scale_env(function):
 
 @_restores_activation_scale_env
 def execute(command, config, *, plan_sha256, prepared=None, resume=False,
-            source_transition=None, prewarm_manifest=None, cost_read_manifest=None, plan_path=None):
+            source_transition=None, prewarm_manifest=None, cost_read_manifest=None, plan_path=None,
+            data_manifest_sha256=None):
     """Execute one admitted preparation or one dependent cost action."""
     if source_transition is not None:
         from .joint_aura_source_transition import load_transition
@@ -1824,6 +1883,17 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             n_probes=execution['n_probes'],
             progress_callback=lambda phase, units: _pb_commit(units, phase))
         cost_schedule.enter_phase('cost_setup', 0)
+    # Bind the read set this pass was submitted with, so PrismaBuild's stage
+    # tier can only answer for these bytes. A residency map declares the
+    # manifest it was composed for; one naming a different manifest is refused
+    # whole and recorded. A pass that seals no manifest binds nothing and gets
+    # no redirect, which is the same behaviour as having no stage at all.
+    # A pass that seals a read schedule already names its manifest; one that
+    # does not (a fresh prepare, or a run whose schedule is not sealed) is
+    # told the digest explicitly by the submitter that asked for the stage.
+    bind_residency_manifest(
+        data_manifest_sha256
+        or (cost_read_manifest or prewarm_manifest or {}).get('sha256'))
     identity_cache_path = _seed_source_identity_cache(config, root)
     result = {"schema": "prismaquant.tessera_joint_aura.execution.v1", "command": command,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
@@ -2122,6 +2192,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         result["phases"].append({"phase": command, "kind": "profile", "start_epoch": started,
                                  "end_epoch": result["env"]["finished_epoch"]})
         result["io_before"], result["io_after"] = before_io, _io_counters()
+        # What PrismaBuild's stage tier actually served, beside the process's
+        # own read counters. A stage with no reader is a copy nobody reads, so
+        # this block is the closed loop: hits and bytes when the redirect
+        # worked, a named reason for every entry it refused. The key is absent
+        # when no map was named, which keeps an unset run's record identical to
+        # today's.
+        residency = residency_report()
+        if residency is not None:
+            result["residency"] = residency
         _json(root / "results.json", result)
         try:
             if runner is not None:
@@ -2234,6 +2313,11 @@ def main(argv=None):
     parser.add_argument("--cost-read-manifest", type=Path)
     parser.add_argument("--cost-read-manifest-sha256")
     parser.add_argument("--cost-read-manifest-bytes", type=int)
+    parser.add_argument("--data-manifest-sha256",
+                        help="the digest of the PrismaBuild data manifest this "
+                             "pass was submitted with. It binds the read set a "
+                             "residency map may answer for and nothing else; a "
+                             "map composed for another manifest is refused.")
     parser.add_argument("--source-transition", type=Path)
     parser.add_argument("--source-transition-sha256")
     parser.add_argument("--units", help="synthesize: lo:hi over the sorted census roster. "
@@ -2263,6 +2347,10 @@ def main(argv=None):
         parser.error('--cost-read-manifest applies only to run')
     if bool(args.prewarm_manifest) != bool(args.prewarm_manifest_sha256):
         parser.error("--prewarm-manifest and --prewarm-manifest-sha256 are required together")
+    if args.data_manifest_sha256 is not None and (
+            len(args.data_manifest_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in args.data_manifest_sha256)):
+        parser.error("--data-manifest-sha256 takes a 64-character lowercase digest")
     # ``synthesize`` constructs no lease and loads no backend: it decodes wires
     # and publishes the canonical CPU BF16 shard, whose bytes are measured
     # identical across x86/aarch64 and CPU/CUDA. It is the one command that
@@ -2284,6 +2372,7 @@ def main(argv=None):
              'plan_path': str(args.plan)} if args.cost_read_manifest is not None else {}),
         prepared=None if args.prepared is None else {"path": str(args.prepared), "sha256": args.prepared_sha256},
         resume=args.resume,
+        data_manifest_sha256=args.data_manifest_sha256,
         **({"prewarm_manifest": {"path": str(args.prewarm_manifest),
                                    "sha256": args.prewarm_manifest_sha256}}
            if args.prewarm_manifest is not None else {}),

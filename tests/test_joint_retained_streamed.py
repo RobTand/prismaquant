@@ -48,9 +48,9 @@ def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, pro
                  'source_reserve_bytes': 1 << 20, 'source_loading_reserve_bytes': 2 << 20}
     paths = []
     load = cache._load_file_tensor
-    def recorded(path):
+    def recorded(path, key=None):
         paths.append(path)
-        return load(path)
+        return load(path, key)
     cache._load_file_tensor = recorded
     result = aura.compute_aura_cost_streamed(runner, draw(),
         ['FP8_DYNAMIC', 'NVFP4A16', 'BF16'], n_probes=4, probe_microbatch=1,

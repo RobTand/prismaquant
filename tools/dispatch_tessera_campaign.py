@@ -2422,7 +2422,8 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
 
 
 def _pbrun_argv(args, *, manifest: Path, inner: list[str],
-                progress_phases=(), gpu_memory_gb=None, container_spec=None) -> list[str]:
+                progress_phases=(), gpu_memory_gb=None, container_spec=None,
+                residency=None) -> list[str]:
     """The submission command, with ``--data-manifest`` before ``--detach``.
 
     Everything after ``--`` is the action; ``--data-manifest`` is an option of
@@ -2443,6 +2444,14 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
         argv += ["--cpus", str(args.cpus)]
     if args.tag:
         argv += ["--tag", args.tag]
+    if residency is not None:
+        # A pbrun option, so it precedes the ``--`` separator like the manifest
+        # does. PB derives the tier demand from the manifest this same command
+        # seals, which is why nothing here names bytes or a tier. It is a
+        # parameter rather than a read of ``args`` because only the caller
+        # knows which entry point is being submitted, and only one of them
+        # reads through the stage.
+        argv += ["--residency", str(residency)]
     argv += ["--priority", str(args.priority)]
     if args.timeout_s is not None:
         argv += ["--timeout-s", str(args.timeout_s)]
@@ -2493,6 +2502,21 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     manifest is built, so a plan whose inputs are not on disk yet still shows
     what would be submitted.
     """
+    residency = getattr(args, "residency", None)
+    if residency is not None and entry_point != JOINT_ENTRY_POINT:
+        # ``--residency stage`` is not advice. It reserves cluster-scoped tier
+        # capacity and narrows placement to the boxes that mount the tier, and
+        # it is paid for by reads that go through the residency map. Only the
+        # joint pass reads through the resolver today
+        # (``prismaquant/residency_map.py``, wired into
+        # ``ProductionWeightCache._load_file_tensor`` and the Tessera wire
+        # reader); allocation, export and AQUA read every byte from the pool.
+        # Accepting the flag for them would buy a reservation nothing consumes
+        # and hide it, which is the failure this whole change exists to stop.
+        raise RuntimeError(
+            f"--residency is joint-only; {entry_point}:{command} reads every "
+            "byte from the pool, so a stage reservation would narrow its "
+            "placement and be read by nothing. Submit it without --residency")
     container_spec = json.loads(Path(args.spec).read_text())
     if (entry_point == JOINT_ENTRY_POINT
             and (plan.get("qualification_window") is not None
@@ -2553,16 +2577,31 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
                 raise RuntimeError("joint prepare read plan exceeds 2048 sealed PB phases")
             inner = [*inner, "--prewarm-manifest", str(manifest_path),
                      "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
+    if residency is not None:
+        # The action has to know which read set it was submitted with, or a
+        # residency map composed for another manifest could answer for it. The
+        # digest is the manifest's own, the one pbrun seals into the action
+        # key, so this adds no fact -- it puts a fact the action could not see
+        # where the action can see it. Added only under --residency, so a
+        # submission that asks for no stage keeps the argv, and therefore the
+        # action key, it has today.
+        inner = [*inner, "--data-manifest-sha256", hashlib.sha256(blob).hexdigest()]
     argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
-                       progress_phases=phase_names,
+                       progress_phases=phase_names, residency=residency,
                        gpu_memory_gb=gpu_memory_gb, container_spec=container_spec)
     summary = {
         "entry_point": f"{entry_point}:{command}",
         "data_manifest": str(manifest_path),
         # What was reserved, and what the row's own plan says it holds. The
         # difference is the conservatism, stated rather than implied.
+        # ``residency`` rides here because a stage reservation is part of what
+        # this row asks the fleet for, not a comment beside it. It does not
+        # change the host demand, and ``verify_joint_submission_demand`` is
+        # unchanged: the plan's own bound still decides cpu/gpu/mem_gb.
         "resource_demand": {**demand_record,
-                            "gpu_memory_gb": gpu_memory_gb},
+                            "gpu_memory_gb": gpu_memory_gb,
+                            **({"residency": residency}
+                               if residency is not None else {})},
         "manifest_bytes": len(blob),
         "decoded_manifest_bytes": len(decoded),
         "manifest_sha256": hashlib.sha256(blob).hexdigest(),
@@ -2842,6 +2881,18 @@ def _add_submission_arguments(parser) -> None:
     parser.add_argument("--priority", type=int, default=-10,
                         help="queue band; agent and post-campaign work runs at "
                              "-10 so it never displaces campaign rows")
+    parser.add_argument("--residency", default=None, choices=("stage",),
+                        help="submit-joint only: ask PrismaBuild to make this "
+                             "row's declared read set resident on its SSD "
+                             "stage tier before the row runs "
+                             "(RobTand/prismabuild#583). The action reads the "
+                             "stage through the residency map the launcher "
+                             "injects; omitted, nothing about the read set "
+                             "changes. Reserves cluster-scoped tier capacity, "
+                             "so it is a placement input, not a hint -- which "
+                             "is why submit-allocation, submit-export and "
+                             "submit-aqua refuse it: they read every byte "
+                             "from the pool.")
     parser.add_argument("--timeout-s", type=int, default=None,
                         help="hard wall-clock cap for the action")
     parser.add_argument("--container-arg", action="append", default=None,
