@@ -132,10 +132,10 @@ def test_the_host_facts_are_recorded_on_both_sides_and_compared_on_neither(tmp_p
     """The digest pins what is inside the image, and nothing outside it.
 
     This cell ran on driver 595.91.07; the table was generated on 595.84. The
-    two disagree, the image digests agree, and the panel is admitted -- because
-    whether a driver difference can move the rounding rule is not established.
-    Both sides are recorded so the day it is established, the evidence is
-    already in every observation.
+    two disagree, the image digests agree, and the panel is admitted -- by
+    ruling (Rob, 2026-09-18): a driver change never invalidates an attestation,
+    drivers move all the time and nothing is revalidated for one. Both sides
+    are recorded for the card and never compared.
     """
     panel_path, digest, panel = _cell(tmp_path, stamp=_stamp(),
                                       executing_image=ATTESTED)
