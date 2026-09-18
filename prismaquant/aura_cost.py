@@ -1917,6 +1917,7 @@ def compute_aura_cost_streamed(
     boundary_storage=None,
     operator_windows=None,
     retained_operator_windows=None,
+    device_envelope_bytes=None,
     prepared_render_identities=None,
     cost_read_schedule=None,
     profile=None,
@@ -1963,7 +1964,7 @@ def compute_aura_cost_streamed(
             raise ValueError('joint operator windows require joint AURA with a materialized PWC')
         if any(module.training for module in runner.model.modules()):
             raise ValueError('joint operator replay requires an eval source')
-        operator_guard = operator_window_guard(runner.device)
+        operator_guard = operator_window_guard(runner.device, device_bytes=device_envelope_bytes)
     if retained_budget is not None:
         if checkpoint_dir is None:
             raise ValueError('retained COST requires existing durable unit checkpoints')
@@ -1972,10 +1973,8 @@ def compute_aura_cost_streamed(
         # This is a COST lifetime, not a change to the serialized PREPARE
         # policy or its source/render qualification evidence.
         production_cache.enable_lru(retained_budget.retained_render_cap_bytes)
-        if operator_guard is not None and (
-                retained_budget.physical_limit_bytes > operator_guard.cap_bytes or
-                retained_budget.safety_margin_bytes < operator_guard.margin_bytes):
-            raise RuntimeError('retained COST plan exceeds the actual PB physical guard')
+        if operator_guard is not None:
+            retained_budget.require_physical_guard(operator_guard)
 
     def retained_source_phase(stage, layer, actual_auxiliary_bytes):
         if retained_budget is None:

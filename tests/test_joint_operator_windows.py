@@ -199,7 +199,7 @@ def test_guarded_operator_phases_release_inactive_allocator_reservation(tmp_path
         state['inactive'] = 2*1024**3
         return result
     monkeypatch.setattr(guard, 'check', check)
-    monkeypatch.setattr(replay, 'operator_window_guard', lambda device: guard)
+    monkeypatch.setattr(replay, 'operator_window_guard', lambda device, **envelope: guard)
     _, _, runner, cache = _fixture()
     result = _run(runner, cache, operator_windows=policy())
     assert result['costs']
