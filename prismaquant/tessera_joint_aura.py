@@ -1560,6 +1560,40 @@ def _source_prefetch(config):
     return dict(prefetch)
 
 
+def recommend_source_prefetch(*, cache_bytes, layer_bytes, cpu_count,
+                              cache_headroom_gb, prefetch_min_available_gb):
+    """Derive explicit ``source_prefetch`` numbers from measured budgets.
+
+    The sealed plan still carries the explicit six fields -- nothing here
+    changes what ``execute`` admits, and a seal over these numbers keeps the
+    exact bytes it has today (PQ #737). What changes is where the numbers
+    come from: instead of a pinned ``max_cache_slots: 2 /
+    prefetch_workers: 1`` carried across seals, the operator seals the depth
+    the measured budget admits -- ``cache_bytes // layer_bytes`` slots and
+    up to four readers bounded by CPUs and slots, with the lookahead the
+    slot count fits. The headroom and minimum-available floors stay operator
+    policy: they are passed through, not derived. The result is validated
+    through :func:`_source_prefetch`, so a recommendation that cannot run
+    refuses here instead of inside the action.
+    """
+    for label, value in (("cache_bytes", cache_bytes), ("layer_bytes", layer_bytes),
+                         ("cpu_count", cpu_count)):
+        _require(type(value) is int and value > 0,
+                 f"recommended source_prefetch requires positive {label}")
+    slots = max(2, int(cache_bytes // layer_bytes))
+    workers = max(1, min(4, slots, int(cpu_count)))
+    lookahead = max(1, min(workers, slots - 1))
+    recommendation = {
+        "max_cache_slots": slots,
+        "prefetch_workers": workers,
+        "prefetch_lookahead": lookahead,
+        "cache_headroom_gb": cache_headroom_gb,
+        "prefetch_min_available_gb": prefetch_min_available_gb,
+        "require_prefetched_residency": True,
+    }
+    return _source_prefetch({"source_prefetch": recommendation})
+
+
 def _operator_window_policy(config):
     from .joint_statistics_replay import normalize_operator_windows
     policy = normalize_operator_windows(config['execution'].get('operator_windows'))
