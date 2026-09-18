@@ -2459,10 +2459,13 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     for name in progress_phases:
         # The allowance bounds an uncommitted unit, not an arbitrary number of
         # logging lines. The head walk reports one unit per resolved anchor
-        # roster entry since #678, so the allowance no longer has to cover a
-        # silent pass over the whole roster. It still covers what stays
-        # unreported inside `head`: whole-source authentication and streamed
-        # model construction. Their cost is a property of the plan and the
+        # roster entry since #678 -- for a run as well as a prepare since #741,
+        # where that walk measurably took 4 h 14 min of the 6 h 30 min before
+        # the first capture line on ``ad8803aa`` -- so the allowance no longer
+        # has to cover a silent pass over the whole roster. It still covers
+        # what stays unreported inside `head`: whole-source authentication,
+        # streamed model construction and, on a run, the production cache's
+        # unpickle between the last roster entry and the first boundary write. Their cost is a property of the plan and the
         # box, so the allowance stays a caller input rather than a constant
         # sized from one run.
         argv += ["--progress-phase",
@@ -2472,6 +2475,21 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     argv += list(args.container_arg or [])
     argv += ["--spec", spec, "--", *inner]
     return argv
+
+
+def _declared_phase_names(manifest: dict) -> tuple[str, ...]:
+    """The phase names of a sealed read set, for the progress policy.
+
+    One reader for both joint commands, because the property that matters is
+    that the names the action may report are the names the residency plan
+    carries: ``residency_plan.remaining`` reads a name its plan does not hold
+    as "the consumer has passed nothing", so a second list built any other way
+    is a window that never advances.
+    """
+    names = tuple(row["name"] for row in manifest["annotations"]["phases"])
+    if len(names) > 2048:
+        raise RuntimeError("joint read plan exceeds 2048 sealed PB phases")
+    return names
 
 
 def _manifest_path(args, plan: dict, *, entry_point: str, command: str) -> Path:
@@ -2564,6 +2582,17 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     blob = (gzip.compress(decoded, mtime=0) if manifest_path.suffix == ".gz"
             else decoded)
     phase_names = ()
+    if entry_point == JOINT_ENTRY_POINT and command == "run":
+        # The run declares the phase table it will read, for the same reason
+        # the prepare does and for one more: PrismaBuild's residency window
+        # publishes the next phase's movers and releases the finished ones on
+        # the consumer's *accepted progress*, matched by phase NAME against
+        # this very table (``residency_plan.remaining``). Submitted without it,
+        # ``ad8803aa`` staged 19 of 46 phases, egressed 1, and filled a 744 GB
+        # stage to 0 B available (RobTand/prismabuild#632). The names come from
+        # the manifest this same call seals, so the table the window walks and
+        # the names the action may report are one list.
+        phase_names = _declared_phase_names(manifest)
     if entry_point == JOINT_ENTRY_POINT and command == "prepare":
         # A resumed submission seals the order it will actually read -- the
         # qualification journal's units in their replay parts, then the layer
@@ -2572,9 +2601,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         if (manifest["annotations"].get("phase_start_units")
                 and manifest["annotations"].get("source_authentication_mode") ==
                     "verified_streamed_identity_cache"):
-            phase_names = tuple(row["name"] for row in manifest["annotations"]["phases"])
-            if len(phase_names) > 2048:
-                raise RuntimeError("joint prepare read plan exceeds 2048 sealed PB phases")
+            phase_names = _declared_phase_names(manifest)
             inner = [*inner, "--prewarm-manifest", str(manifest_path),
                      "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
     if residency is not None:

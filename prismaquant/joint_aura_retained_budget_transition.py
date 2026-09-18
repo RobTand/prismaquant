@@ -111,13 +111,20 @@ _RECORD_KEYS = tuple(tuple(path) for path in _CONTRACT["admitted_record_keys"])
 # The three files that did not exist in the sealed package. Reconstruction
 # omits them; all three must be present, and nothing else new may be.
 _NEW_FILES = frozenset({"joint_aura_run_transition.py", "joint_aura_transitions.py",
-                        "joint_aura_retained_budget_transition.py"})
+                        "joint_aura_retained_budget_transition.py",
+                        "joint_run_progress.py"})
 # Exact old/new snippets, this module's own and not a reference to the sibling
 # transition's: an edit there must never move this proof. Reverse these, omit
 # the new files, and the entire old package must hash to the contract's
 # source_sha256. Regenerate with tools/generate_transition_rewrites.py.
 # BEGIN GENERATED REWRITES
-_SOURCE_REWRITES = {'aura_cost.py': [('        from prismaquant.joint_aura_source_transition import '
+_SOURCE_REWRITES = {'aura_cost.py': [('    cost_read_schedule=None,\n    profile=None,\n',
+                   '    cost_read_schedule=None,\n'
+                   '    progress_base: int = 0,\n'
+                   '    profile=None,\n'),
+                  ('        check_operator_allocation,\n',
+                   '        check_operator_allocation, preflight_joint_operator_admission,\n'),
+                  ('        from prismaquant.joint_aura_source_transition import '
                    'require_verified_transition\n',
                    '        from prismaquant.joint_aura_transitions import '
                    'require_verified_transition\n'),
@@ -151,6 +158,40 @@ _SOURCE_REWRITES = {'aura_cost.py': [('        from prismaquant.joint_aura_sourc
                    "installed source for {name}@{fmt}')\n"
                    '\n'
                    '    def _source_gradient(target, gradient):\n'),
+                  ('    joint_prefetch_stats: list[dict] = []\n    if joint_activation:\n',
+                   '    joint_prefetch_stats: list[dict] = []\n'
+                   '    preflight_retained_windows = None\n'
+                   '    if joint_activation:\n'),
+                  ('        joint_projection_backend = '
+                   'prewarm_projection_backend(joint_projection_backend, device=runner.device)\n'
+                   '        from prismaquant.cost_streaming import '
+                   'validate_streamed_model_identity\n',
+                   '        joint_projection_backend = '
+                   'prewarm_projection_backend(joint_projection_backend, device=runner.device)\n'
+                   '        # Combined operator/loader/delta admission reads declared bytes only '
+                   '--\n'
+                   "        # the roster, each matrix's geometry, the PWC candidate file sizes "
+                   'and\n'
+                   '        # the sealed budget -- so it is answerable now, before the first\n'
+                   '        # boundary capture, for every layer at once. It used to run inside '
+                   'the\n'
+                   '        # reverse loop, where an inadmissible plan cost a whole capture '
+                   'before\n'
+                   '        # it refused (#743). The per-layer call still re-derives its own plan\n'
+                   '        # and is compared with what was admitted here through '
+                   '``sealed_windows``.\n'
+                   '        if operator_windows is not None:\n'
+                   '            preflight_retained_windows = preflight_joint_operator_admission(\n'
+                   '                {layer: [name for name in layer_names if '
+                   'render_formats[name]]\n'
+                   '                 for layer, layer_names in names_by_layer.items()},\n'
+                   '                linears, render_formats, production_cache,\n'
+                   '                policy=operator_windows, retained_budget=retained_budget,\n'
+                   '                source_bytes=(None if retained_budget is None\n'
+                   '                              else '
+                   "retained_operator_windows['source_reserve_bytes']))\n"
+                   '        from prismaquant.cost_streaming import '
+                   'validate_streamed_model_identity\n'),
                   ('        # outside the cotangent/projection hot path; no tensor copy is '
                    'retained.\n'
                    '        if prepared_render_identities is not None:\n',
@@ -170,11 +211,632 @@ _SOURCE_REWRITES = {'aura_cost.py': [('        from prismaquant.joint_aura_sourc
                    'source.element_size()\n',
                    "                        or not isinstance(value['dtype'], str)\n"
                    "                        or type(value['logical_bytes']) is not int\n"),
+                  ('        }, n_probes=n_probes, check_memory=check_boundary_memory)\n'
+                   '    def capture_source_phase(stage, layer, actual_auxiliary_bytes):\n',
+                   '        }, n_probes=n_probes, check_memory=check_boundary_memory)\n'
+                   '        # Every published entry file is a durable unit and the only thing the\n'
+                   '        # window can advance on. The reporter owns the clock; the writer only\n'
+                   '        # tells it a file landed. With no channel in the environment this is '
+                   'a\n'
+                   '        # log line and nothing else, which is what every run submitted '
+                   'without\n'
+                   '        # the transport keeps getting.\n'
+                   '        from prismaquant.joint_run_progress import JointRunProgress\n'
+                   '        run_progress = JointRunProgress(layers=runner.num_layers,\n'
+                   '                                        partitions=len(row_offsets),\n'
+                   '                                        base_units=progress_base, log=_log)\n'
+                   '        run_progress.priced_units(len(completed_checkpoint_units))\n'
+                   '        boundary_storage.watch_progress(run_progress)\n'
+                   '    else:\n'
+                   '        run_progress = None\n'
+                   '\n'
+                   '    def _report_units(phase_hint=None):\n'
+                   '        """Fold the cost stage\'s journalled units into the run\'s one '
+                   'counter."""\n'
+                   '        if run_progress is None:\n'
+                   '            return\n'
+                   '        run_progress.priced_units(len(completed_checkpoint_units))\n'
+                   '        if phase_hint is not None:\n'
+                   '            run_progress.enter(phase_hint)\n'
+                   '        run_progress.flush(force=True)\n'
+                   '\n'
+                   '    def capture_source_phase(stage, layer, actual_auxiliary_bytes):\n'),
+                  ('                boundary_storage.check_auxiliary(batches)\n'
+                   '    _log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} '
+                   '"\n',
+                   '                boundary_storage.check_auxiliary(batches)\n'
+                   '    _report_units()\n'
+                   '    _log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} '
+                   '"\n'),
+                  ("        cost_read_schedule.enter_phase('cost_tail', "
+                   'len(completed_checkpoint_units))\n'
+                   '    if retained_budget is not None:\n',
+                   "        cost_read_schedule.enter_phase('cost_tail', "
+                   'len(completed_checkpoint_units))\n'
+                   '    _report_units()\n'
+                   '    if retained_budget is not None:\n'),
+                  ('\n    reverse_started = time.time()\n',
+                   '\n    _report_units()\n    reverse_started = time.time()\n'),
+                  ("            cost_read_schedule.enter_phase(f'cost_reverse_{layer:03d}_source', "
+                   'len(completed_checkpoint_units))\n'
+                   '        if retained_budget is not None:\n',
+                   "            cost_read_schedule.enter_phase(f'cost_reverse_{layer:03d}_source', "
+                   'len(completed_checkpoint_units))\n'
+                   '        _report_units()\n'
+                   '        if retained_budget is not None:\n'),
                   ('        _refresh_packed_layer_views(layer)\n'
                    '        # Forward boundary capture leaves the final lookahead window hot.\n',
                    '        _refresh_packed_layer_views(layer)\n'
                    '        _require_installed_render_sources(layer)\n'
-                   '        # Forward boundary capture leaves the final lookahead window hot.\n')],
+                   '        # Forward boundary capture leaves the final lookahead window hot.\n'),
+                  ('                        sealed_windows=(None if cost_read_schedule is None '
+                   'else\n'
+                   '                                        '
+                   'cost_read_schedule.windows_for_layer(layer)),\n',
+                   '                        '
+                   'sealed_windows=(cost_read_schedule.windows_for_layer(layer)\n'
+                   '                                        if cost_read_schedule is not None '
+                   'else\n'
+                   '                                        (preflight_retained_windows or '
+                   '{}).get(layer)),\n')],
+ 'cost_streaming.py': [('        self._check_memory = None\n        self._n_probes = 0\n',
+                        '        self._check_memory = None\n'
+                        '        self._progress = None\n'
+                        '        self._n_probes = 0\n'),
+                       ('\n    def _entry_identity(self, reference):\n',
+                        '\n'
+                        '    def watch_progress(self, reporter):\n'
+                        '        """Report each published entry to ``joint_run_progress``, or to '
+                        'nothing.\n'
+                        '\n'
+                        '        Publication is where a unit becomes durable, so it is the only '
+                        'place\n'
+                        '        the count may move: PB #480 buys a long run time on committed '
+                        'work and\n'
+                        '        a counter that ticked on intent would keep a wedged run alive. '
+                        'The\n'
+                        '        reporter is optional so a legacy or standalone caller keeps '
+                        "today's\n"
+                        '        behaviour byte for byte.\n'
+                        '        """\n'
+                        '        self._progress = reporter\n'
+                        '\n'
+                        '    def _entry_identity(self, reference):\n'),
+                       ('            self._retire(previous)\n'
+                        '        if self._check_memory is not None:\n',
+                        '            self._retire(previous)\n'
+                        '        if self._progress is not None:\n'
+                        '            self._progress.entry(layer=boundary_index, '
+                        'partition=batch_index, kind=kind)\n'
+                        '        if self._check_memory is not None:\n')],
+ 'joint_retained_window_plan.py': [('from dataclasses import asdict, dataclass\n',
+                                    'from dataclasses import asdict, dataclass, replace\n'),
+                                   ("EXECUTION_SCHEMA = 'prismaquant.joint_retained_execution.v1'\n"
+                                    '\n',
+                                    "EXECUTION_SCHEMA = 'prismaquant.joint_retained_execution.v1'\n"
+                                    'DERIVATION_SCHEMA = '
+                                    "'prismaquant.joint_retained_window_budget_derivation.v1'\n"
+                                    '\n'
+                                    '#: The owners an operator declares: a physical bound and the '
+                                    'reserves that are\n'
+                                    '#: properties of the box, the runtime and the capture, not of '
+                                    'the roster.\n'
+                                    "DECLARED_BUDGET_FIELDS = ('physical_limit_bytes', "
+                                    "'safety_margin_bytes',\n"
+                                    "                          'metadata_reserve_bytes', "
+                                    "'runtime_reserve_bytes',\n"
+                                    "                          'workspace_reserve_bytes', "
+                                    "'boundary_reserve_bytes',\n"
+                                    "                          'auxiliary_reserve_bytes', "
+                                    "'read_page_reserve_bytes')\n"
+                                    '#: The caps that are a function of the roster the budget must '
+                                    'admit. Every one\n'
+                                    '#: of these is a maximum over declared bytes, so none of them '
+                                    'is a judgement\n'
+                                    '#: call and none of them belongs in a hand-written plan.\n'
+                                    "DERIVED_BUDGET_FIELDS = ('load_buffer_bytes', "
+                                    "'candidate_delta_bytes',\n"
+                                    "                         'statistics_cap_bytes', "
+                                    "'retained_render_cap_bytes',\n"
+                                    "                         'max_windows_per_layer')\n"
+                                    '#: The owners that land on the HOST side of a unified-memory '
+                                    'box, which the\n'
+                                    "#: kernel bounds with the container's own cgroup cap whatever "
+                                    'the aggregate\n'
+                                    '#: says (``CaptureMemoryGuard._check`` holds '
+                                    '``memory.current`` against\n'
+                                    '#: ``cap - margin`` in aggregate mode too). Retained renders '
+                                    'belong here:\n'
+                                    '#: ``ProductionWeightCache._load_file_tensor`` reads every '
+                                    'candidate with\n'
+                                    '#: ``map_location="cpu"`` and the retained window holds those '
+                                    'CPU tensors for\n'
+                                    '#: the whole window, while the fp32 delta and the statistics '
+                                    'matrices are\n'
+                                    '#: built on the device.\n'
+                                    "HOST_RESIDENT_BUDGET_FIELDS = ('safety_margin_bytes', "
+                                    "'metadata_reserve_bytes',\n"
+                                    "                               'load_buffer_bytes', "
+                                    "'read_page_reserve_bytes')\n"
+                                    '\n'),
+                                   ("            'source_reserve_bytes': source, "
+                                    "'source_loading_reserve_bytes': load}\n",
+                                    "            'source_reserve_bytes': source, "
+                                    "'source_loading_reserve_bytes': load}\n"
+                                    '\n'
+                                    '\n'
+                                    'def _roster_maximum(targets, field):\n'
+                                    '    """The largest declared value of ``field``, and the '
+                                    'target that sets it."""\n'
+                                    '    winner = max(targets, key=lambda target: (getattr(target, '
+                                    'field), target.name))\n'
+                                    '    return getattr(winner, field), winner.name\n'
+                                    '\n'
+                                    '\n'
+                                    'def derive_retained_window_budget(targets_by_layer, *, '
+                                    'declared, source_bytes,\n'
+                                    '                                  prefetch_workers, '
+                                    'host_cap_bytes,\n'
+                                    '                                  '
+                                    "footprint_scope='pwc_serialized_upper_bound'):\n"
+                                    '    """Derive every demand-driven cap from the roster the '
+                                    'budget must admit.\n'
+                                    '\n'
+                                    '    An operator declares the physical bound and the reserves '
+                                    'that belong to\n'
+                                    '    the box, the runtime and the capture '
+                                    '(``DECLARED_BUDGET_FIELDS``). The\n'
+                                    '    five caps in ``DERIVED_BUDGET_FIELDS`` are not judgement '
+                                    'calls: each is a\n'
+                                    '    maximum over bytes the roster already states, so each is '
+                                    'computed here and\n'
+                                    '    the maximizing target is recorded beside it.\n'
+                                    '\n'
+                                    '    * ``candidate_delta_bytes`` is one FP32 delta over one '
+                                    'whole matrix.\n'
+                                    '      ``JointOperatorStatisticsLease.project`` charges the '
+                                    'storages of a single\n'
+                                    '      quantum and the replay hands it one ``(name, format)`` '
+                                    'pair at a time, so\n'
+                                    '      the demand is the largest single matrix in the roster, '
+                                    'not a sum.\n'
+                                    '    * ``load_buffer_bytes`` bounds the serialized bytes one '
+                                    'load quantum reads\n'
+                                    '      *at once*, and '
+                                    '``ProductionWeightCache.plan_resident_windows`` closes a\n'
+                                    '      quantum on it while ``prefetch_workers`` sets the '
+                                    'loader concurrency. Its\n'
+                                    '      floor is the single largest candidate file; at exactly '
+                                    'that floor the\n'
+                                    '      declared concurrency cannot be reached, because one '
+                                    'file fills the\n'
+                                    '      buffer. The derived value is therefore the declared '
+                                    'concurrency times\n'
+                                    "      that floor -- the smallest buffer at which the policy's "
+                                    'own\n'
+                                    '      ``prefetch_workers`` is honest.\n'
+                                    '    * ``statistics_cap_bytes`` and '
+                                    '``retained_render_cap_bytes`` bound one\n'
+                                    '      window. The statistics matrices are device-side, so the '
+                                    'aggregate\n'
+                                    '      ``available_window_bytes`` is their only bound and the '
+                                    "packer's\n"
+                                    '      ``statistics + renders > available`` refusal already '
+                                    'holds it. Retained\n'
+                                    '      renders are host-side, so they are bounded twice: by '
+                                    'that same aggregate\n'
+                                    '      window and by ``host_cap_bytes`` less the host-resident '
+                                    'owners\n'
+                                    '      (``HOST_RESIDENT_BUDGET_FIELDS``), because the kernel '
+                                    'holds the\n'
+                                    "      container's cgroup cap whatever the aggregate says. The "
+                                    'packing is\n'
+                                    '      solved against both, and each cap is then set to the '
+                                    'largest window the\n'
+                                    '      packing actually produces. Tightening a cap to a '
+                                    'maximum the packing\n'
+                                    '      already satisfies cannot change a packing decision, and '
+                                    'the fixed point\n'
+                                    '      is asserted below rather than assumed.\n'
+                                    "    * ``max_windows_per_layer`` is the worst layer's window "
+                                    'count under that\n'
+                                    '      packing, i.e. the fewest retained windows the physical '
+                                    'budget admits. It\n'
+                                    '      remains a refusal -- runtime geometry needing more '
+                                    'windows than the\n'
+                                    '      sealed packing still stops -- but it is no longer free '
+                                    'headroom, and the\n'
+                                    '      replay multiplier it implies is recorded so the cost is '
+                                    'visible.\n'
+                                    '\n'
+                                    '    Returns ``(budget, derivation_record)``. The record is '
+                                    "data for a plan's\n"
+                                    '    top level; it is deliberately not a field of the budget, '
+                                    'whose ``from_dict``\n'
+                                    '    admits exactly its own keys.\n'
+                                    '    """\n'
+                                    '    if (not isinstance(declared, Mapping)\n'
+                                    '            or set(declared) != '
+                                    'set(DECLARED_BUDGET_FIELDS)):\n'
+                                    "        raise ValueError('retained budget derivation requires "
+                                    "exactly the declared owners')\n"
+                                    '    for name in DECLARED_BUDGET_FIELDS:\n'
+                                    '        _integer(declared[name], name,\n'
+                                    '                 positive=name not in '
+                                    "('boundary_reserve_bytes', 'auxiliary_reserve_bytes'))\n"
+                                    "    _integer(source_bytes, 'source_bytes')\n"
+                                    "    _integer(prefetch_workers, 'prefetch_workers', "
+                                    'positive=True)\n'
+                                    "    _integer(host_cap_bytes, 'host_cap_bytes', "
+                                    'positive=True)\n'
+                                    '    if not isinstance(targets_by_layer, Mapping) or not '
+                                    'targets_by_layer:\n'
+                                    "        raise ValueError('retained budget derivation requires "
+                                    "a nonempty per-layer roster')\n"
+                                    '    roster = []\n'
+                                    '    for layer, targets in sorted(targets_by_layer.items()):\n'
+                                    '        targets = tuple(targets)\n'
+                                    '        if not targets or any(not isinstance(target, '
+                                    'RetainedTarget) for target in targets):\n'
+                                    "            raise ValueError(f'layer {layer} has no declared "
+                                    "retained targets')\n"
+                                    '        roster.extend(targets)\n'
+                                    '    if len({target.name for target in roster}) != '
+                                    'len(roster):\n'
+                                    "        raise ValueError('retained budget derivation requires "
+                                    "one owner per target name')\n"
+                                    '\n'
+                                    '    candidate_delta_bytes, candidate_delta_target = '
+                                    "_roster_maximum(roster, 'candidate_delta_bytes')\n"
+                                    '    largest_serialized_bytes, load_buffer_target = '
+                                    "_roster_maximum(roster, 'largest_serialized_bytes')\n"
+                                    '    load_buffer_bytes = prefetch_workers * '
+                                    'largest_serialized_bytes\n'
+                                    '    # Neither window cap enters ``fixed_bytes``, so the '
+                                    'window space is settled\n'
+                                    '    # once the two per-quantum owners above are.\n'
+                                    '    probe = RetainedWindowBudget(\n'
+                                    '        **declared, load_buffer_bytes=load_buffer_bytes,\n'
+                                    '        candidate_delta_bytes=candidate_delta_bytes, '
+                                    'statistics_cap_bytes=1,\n'
+                                    '        retained_render_cap_bytes=1, '
+                                    'max_windows_per_layer=1)\n'
+                                    '    available = probe.available_window_bytes(source_bytes)\n'
+                                    '    host_render_bound = host_cap_bytes - sum(getattr(probe, '
+                                    'name)\n'
+                                    '                                             for name in '
+                                    'HOST_RESIDENT_BUDGET_FIELDS)\n'
+                                    '    if host_render_bound <= 0:\n'
+                                    "        raise RuntimeError('retained COST host owners exhaust "
+                                    "the container cap before renders')\n"
+                                    '    open_budget = replace(probe, '
+                                    'statistics_cap_bytes=available,\n'
+                                    '                          '
+                                    'retained_render_cap_bytes=min(available, host_render_bound),\n'
+                                    '                          '
+                                    'max_windows_per_layer=max(len(tuple(targets))\n'
+                                    '                                                    for '
+                                    'targets in targets_by_layer.values()))\n'
+                                    '    plans = {layer: plan_retained_targets(targets, '
+                                    'budget=open_budget,\n'
+                                    '                                          '
+                                    'source_bytes=source_bytes,\n'
+                                    '                                          '
+                                    'footprint_scope=footprint_scope)\n'
+                                    '             for layer, targets in '
+                                    'sorted(targets_by_layer.items())}\n'
+                                    '    windows = [window for plan in plans.values() for window '
+                                    'in plan.windows]\n'
+                                    '    budget = replace(open_budget,\n'
+                                    '                     '
+                                    'statistics_cap_bytes=max(window.statistics_bytes for window '
+                                    'in windows),\n'
+                                    '                     '
+                                    'retained_render_cap_bytes=max(window.render_bytes for window '
+                                    'in windows),\n'
+                                    '                     '
+                                    'max_windows_per_layer=max(len(plan.windows) for plan in '
+                                    'plans.values()))\n'
+                                    '    settled = {layer: plan_retained_targets(targets, '
+                                    'budget=budget, source_bytes=source_bytes,\n'
+                                    '                                            '
+                                    'footprint_scope=footprint_scope)\n'
+                                    '               for layer, targets in '
+                                    'sorted(targets_by_layer.items())}\n'
+                                    '    if any(settled[layer].windows != plan.windows for layer, '
+                                    'plan in plans.items()):\n'
+                                    "        raise RuntimeError('retained budget derivation did "
+                                    "not reach a fixed point')\n"
+                                    '\n'
+                                    '    record = {\n'
+                                    "        'schema': DERIVATION_SCHEMA,\n"
+                                    "        'footprint_scope': footprint_scope,\n"
+                                    "        'source_bytes': source_bytes,\n"
+                                    "        'declared': {name: declared[name] for name in "
+                                    'DECLARED_BUDGET_FIELDS},\n'
+                                    "        'prefetch_workers': prefetch_workers,\n"
+                                    "        'host_cap_bytes': host_cap_bytes,\n"
+                                    "        'host_render_bound_bytes': host_render_bound,\n"
+                                    "        'roster': {'targets': len(roster), 'layers': "
+                                    'len(targets_by_layer),\n'
+                                    "                   'targets_by_layer': {str(layer): "
+                                    'len(tuple(targets))\n'
+                                    '                                        for layer, targets in '
+                                    'sorted(targets_by_layer.items())}},\n'
+                                    "        'demand': {\n"
+                                    "            'candidate_delta_bytes': {'bytes': "
+                                    'candidate_delta_bytes,\n'
+                                    "                                      'maximizing_target': "
+                                    'candidate_delta_target,\n'
+                                    "                                      'basis': 'one fp32 "
+                                    "delta over one whole matrix'},\n"
+                                    "            'load_buffer_bytes': {'bytes': "
+                                    'load_buffer_bytes,\n'
+                                    "                                  'maximizing_target': "
+                                    'load_buffer_target,\n'
+                                    "                                  'largest_serialized_bytes': "
+                                    'largest_serialized_bytes,\n'
+                                    "                                  'prefetch_workers': "
+                                    'prefetch_workers,\n'
+                                    "        'host_cap_bytes': host_cap_bytes,\n"
+                                    "        'host_render_bound_bytes': host_render_bound,\n"
+                                    "                                  'basis': 'declared loader "
+                                    "concurrency times the largest '\n"
+                                    "                                           'single serialized "
+                                    "candidate file'},\n"
+                                    "            'statistics_cap_bytes': {'bytes': "
+                                    'budget.statistics_cap_bytes,\n'
+                                    "                                     'basis': 'largest packed "
+                                    "window statistics'},\n"
+                                    "            'retained_render_cap_bytes': {'bytes': "
+                                    'budget.retained_render_cap_bytes,\n'
+                                    "                                          'host_cap_bytes': "
+                                    'host_cap_bytes,\n'
+                                    '                                          '
+                                    "'host_render_bound_bytes': host_render_bound,\n"
+                                    '                                          '
+                                    "'aggregate_window_bytes': available,\n"
+                                    "                                          'basis': 'largest "
+                                    "packed window render files, under the '\n"
+                                    "                                                   'smaller "
+                                    "of the aggregate window and the '\n"
+                                    '                                                   '
+                                    '"container\'s host-side headroom"},\n'
+                                    "            'max_windows_per_layer': {'windows': "
+                                    'budget.max_windows_per_layer,\n'
+                                    "                                      'basis': 'worst layer "
+                                    "under the physical window bound'},\n"
+                                    '        },\n'
+                                    "        'fixed_bytes': budget.fixed_bytes(source_bytes),\n"
+                                    "        'available_window_bytes': "
+                                    'budget.available_window_bytes(source_bytes),\n'
+                                    "        'windows_by_layer': {str(layer): len(plan.windows) "
+                                    'for layer, plan in sorted(settled.items())},\n'
+                                    "        'peak_planned_bytes': max(window.peak_planned_bytes\n"
+                                    '                                  for plan in '
+                                    'settled.values() for window in plan.windows),\n'
+                                    "        'retained_window_replay_multiplier': "
+                                    '(sum(len(plan.windows) for plan in settled.values())\n'
+                                    '                                              / '
+                                    'len(settled)),\n'
+                                    "        'budget': budget.as_dict(),\n"
+                                    '    }\n'
+                                    '    return budget, record\n')],
+ 'joint_statistics_replay.py': [('from contextlib import contextmanager\nimport os\n',
+                                 'from contextlib import contextmanager\n'
+                                 'from dataclasses import dataclass\n'
+                                 'import os\n'),
+                                ('\ndef observe_and_project_retained_windows(\n',
+                                 '\n'
+                                 '@dataclass(frozen=True)\n'
+                                 'class PreflightRetainedWindow:\n'
+                                 '    """One admitted window, in the shape ``sealed_windows`` '
+                                 'already compares.\n'
+                                 '\n'
+                                 '    A sealed PrismaBuild read schedule and this preflight answer '
+                                 'the same\n'
+                                 '    question from the same declared bytes, so they reach the '
+                                 'per-layer replay\n'
+                                 '    through one channel instead of two.\n'
+                                 '    """\n'
+                                 '    original_full_target_names: tuple[str, ...]\n'
+                                 '    statistics_bytes: int\n'
+                                 '    render_file_upper_bound_bytes: int\n'
+                                 '    candidate_count: int\n'
+                                 '\n'
+                                 '\n'
+                                 'def retained_admission_targets(statistics_plan, specs, cache):\n'
+                                 '    """Join a statistics plan to the PWC\'s declared candidate '
+                                 'file sizes.\n'
+                                 '\n'
+                                 '    Reads no tensor. ``resolve_key`` is an index lookup and '
+                                 '``estimate_nbytes``\n'
+                                 '    is one ``stat`` per candidate file, so every byte this '
+                                 'returns is declared\n'
+                                 '    before any capture, probe or projection runs.\n'
+                                 '    """\n'
+                                 '    keys_by_name, requested_by_name = {}, {}\n'
+                                 '    for target in statistics_plan.targets:\n'
+                                 '        requested = tuple((target.name, fmt) for fmt in '
+                                 'specs[target.name])\n'
+                                 '        keys = tuple(cache.resolve_key(name, fmt) for name, fmt '
+                                 'in requested)\n'
+                                 '        if any(key is None for key in keys):\n'
+                                 '            missing = [pair for pair, key in zip(requested, '
+                                 'keys) if key is None]\n'
+                                 "            raise RuntimeError(f'retained joint PWC candidate "
+                                 "entry missing: {missing}')\n"
+                                 '        keys_by_name[target.name] = keys\n'
+                                 '        requested_by_name[target.name] = requested\n'
+                                 '    selected_keys = tuple(key for target in '
+                                 'statistics_plan.targets\n'
+                                 '                          for key in keys_by_name[target.name])\n'
+                                 '    # File length is the sealed conservative storage bound. '
+                                 'Archive validation\n'
+                                 '    # belongs to the existing PWC window immediately before its '
+                                 'first read,\n'
+                                 '    # not an all-candidate header walk ahead of the PB read '
+                                 'frontier.\n'
+                                 '    key_costs = {}\n'
+                                 '    for key in selected_keys:\n'
+                                 '        size = cache.estimate_nbytes([key])\n'
+                                 "        key_costs[key] = {'incoming_storage_bytes': size, "
+                                 "'serialized_bytes': size}\n"
+                                 '    targets = targets_from_statistics_plan(statistics_plan, '
+                                 'keys_by_name, key_costs)\n'
+                                 '    return keys_by_name, requested_by_name, targets\n'
+                                 '\n'
+                                 '\n'
+                                 'def preflight_joint_operator_admission(names_by_layer, modules, '
+                                 'formats_by_name, cache, *,\n'
+                                 '                                       policy, '
+                                 'retained_budget=None, source_bytes=None):\n'
+                                 '    """Refuse an inadmissible operator-window plan before any '
+                                 'capture work.\n'
+                                 '\n'
+                                 '    Every input is declared now: the target roster, each '
+                                 "matrix's geometry, the\n"
+                                 "    PWC's candidate file sizes and the sealed budget. Nothing "
+                                 'here reads a\n'
+                                 '    captured activation, a cotangent or a probe, which is '
+                                 'exactly why the\n'
+                                 '    refusals it raises do not belong after a boundary capture '
+                                 '(#743).\n'
+                                 '\n'
+                                 "    The decoder's weights are still the streamed meta skeleton "
+                                 'at this point,\n'
+                                 '    so the statistics plan is built on meta twins of the real '
+                                 'modules against\n'
+                                 '    the torch reference backend. '
+                                 '``_joint_projection_requirements`` groups on\n'
+                                 '    the resolved ``FormatSpec`` and the calibrated activation '
+                                 'maximum and sizes\n'
+                                 '    statistics from ``numel``; it consults the backend only to '
+                                 'refuse a device\n'
+                                 '    it was not prewarmed for. The roster it returns here is '
+                                 'therefore the one\n'
+                                 '    the fused backend returns on the installed tensors, and the '
+                                 'per-layer call\n'
+                                 '    re-derives it and compares through ``sealed_windows``.\n'
+                                 '\n'
+                                 '    Returns the admitted windows per layer when a retained '
+                                 'budget is in force,\n'
+                                 '    and ``None`` otherwise.\n'
+                                 '    """\n'
+                                 '    from . import format_registry as fr\n'
+                                 '\n'
+                                 '    if policy is None:\n'
+                                 "        raise ValueError('joint operator admission requires an "
+                                 "operator-window policy')\n"
+                                 '    policy = normalize_operator_windows(policy)\n'
+                                 '    if retained_budget is not None:\n'
+                                 '        if isinstance(retained_budget, dict):\n'
+                                 '            retained_budget = '
+                                 'RetainedWindowBudget.from_dict(retained_budget)\n'
+                                 '        if not isinstance(retained_budget, '
+                                 'RetainedWindowBudget):\n'
+                                 "            raise TypeError('retained joint admission requires a "
+                                 "versioned retained budget')\n"
+                                 '        if type(source_bytes) is not int or source_bytes < 0:\n'
+                                 "            raise ValueError('retained joint admission requires "
+                                 "a declared source byte cap')\n"
+                                 '    windows_by_layer = {}\n'
+                                 '    for layer, names in sorted(names_by_layer.items()):\n'
+                                 '        names = tuple(names)\n'
+                                 '        if not names:\n'
+                                 '            continue\n'
+                                 '        twins, specs = {}, {}\n'
+                                 '        for name in names:\n'
+                                 '            rows, columns = tuple(modules[name].weight.shape)\n'
+                                 '            twins[name] = torch.nn.Linear(columns, rows, '
+                                 'bias=False,\n'
+                                 "                                          device='meta', "
+                                 'dtype=torch.bfloat16)\n'
+                                 '            specs[name] = {fmt: fr.get_format(fmt) for fmt in '
+                                 'formats_by_name[name]}\n'
+                                 '        # The same geometry bound '
+                                 '``observe_and_project_windows`` applies per\n'
+                                 '        # layer, applied to every layer before the first of them '
+                                 'is captured.\n'
+                                 '        largest = max(4 * rows * columns for rows, columns in\n'
+                                 '                      (tuple(module.weight.shape) for module in '
+                                 'twins.values()))\n'
+                                 "        if largest > min(policy['max_candidate_bytes'], "
+                                 "policy['workspace_reserve_bytes']):\n"
+                                 "            raise RuntimeError('joint single target exceeds "
+                                 "candidate or matrix workspace budget')\n"
+                                 '        # Both replay paths need every candidate to have a PWC '
+                                 'entry, and both\n'
+                                 '        # used to find out per layer: the retained one through\n'
+                                 '        # ``retained_admission_targets`` and the windowed one '
+                                 'when\n'
+                                 '        # ``resident_candidates`` planned its first quantum.\n'
+                                 '        missing = [(name, fmt) for name in names for fmt in '
+                                 'formats_by_name[name]\n'
+                                 '                   if cache.resolve_key(name, fmt) is None]\n'
+                                 '        if missing:\n'
+                                 "            raise RuntimeError('joint operator-window PWC "
+                                 "candidate entry missing: '\n"
+                                 "                               f'{len(missing)} of "
+                                 "{sum(len(formats_by_name[n]) for n in names)}, '\n"
+                                 "                               f'first {missing[:8]}')\n"
+                                 '        if retained_budget is None:\n'
+                                 '            continue\n'
+                                 '        statistics_plan = plan_joint_statistics_target_windows(\n'
+                                 '            twins, specs, '
+                                 'max_statistics_bytes=retained_budget.statistics_cap_bytes,\n'
+                                 '            activation_max_abs=cache.activation_max_abs, '
+                                 'projection_backend=None)\n'
+                                 '        _, _, targets = '
+                                 'retained_admission_targets(statistics_plan, specs, cache)\n'
+                                 '        plan = plan_retained_targets(targets, '
+                                 'budget=retained_budget,\n'
+                                 '                                     source_bytes=source_bytes,\n'
+                                 '                                     '
+                                 "footprint_scope='pwc_serialized_upper_bound')\n"
+                                 '        windows_by_layer[layer] = tuple(\n'
+                                 '            PreflightRetainedWindow(window.names, '
+                                 'window.statistics_bytes,\n'
+                                 '                                    window.render_bytes, '
+                                 'window.candidate_count)\n'
+                                 '            for window in plan.windows)\n'
+                                 '    return None if retained_budget is None else '
+                                 'windows_by_layer\n'
+                                 '\n'
+                                 '\n'
+                                 'def observe_and_project_retained_windows(\n'),
+                                ('    keys_by_name, requested_by_name = {}, {}\n'
+                                 '    for target in statistics_plan.targets:\n'
+                                 '        requested = tuple((target.name, fmt) for fmt in '
+                                 'specs[target.name])\n'
+                                 '        keys = tuple(cache.resolve_key(name, fmt) for name, fmt '
+                                 'in requested)\n'
+                                 '        if any(key is None for key in keys):\n'
+                                 '            missing = [pair for pair, key in zip(requested, '
+                                 'keys) if key is None]\n'
+                                 "            raise RuntimeError(f'retained joint PWC candidate "
+                                 "entry missing: {missing}')\n"
+                                 '        keys_by_name[target.name] = keys\n'
+                                 '        requested_by_name[target.name] = requested\n'
+                                 '    selected_keys = tuple(key for target in '
+                                 'statistics_plan.targets\n'
+                                 '                          for key in keys_by_name[target.name])\n'
+                                 '    # File length is the sealed conservative storage bound. '
+                                 'Archive validation\n'
+                                 '    # belongs to the existing PWC window immediately before its '
+                                 'first read,\n'
+                                 '    # not an all-candidate header walk ahead of the PB read '
+                                 'frontier.\n'
+                                 '    key_costs = {}\n'
+                                 '    for key in selected_keys:\n'
+                                 '        size = cache.estimate_nbytes([key])\n'
+                                 "        key_costs[key] = {'incoming_storage_bytes': size, "
+                                 "'serialized_bytes': size}\n"
+                                 '    targets = targets_from_statistics_plan(statistics_plan, '
+                                 'keys_by_name, key_costs)\n',
+                                 '    keys_by_name, requested_by_name, targets = '
+                                 'retained_admission_targets(\n'
+                                 '        statistics_plan, specs, cache)\n')],
  'tessera_joint_aura.py': [('        from .joint_aura_source_transition import load_transition\n',
                             '        from .joint_aura_transitions import load_transition\n'),
                            ('                          else '
@@ -213,10 +875,57 @@ _SOURCE_REWRITES = {'aura_cost.py': [('        from prismaquant.joint_aura_sourc
                             'plan_sha256=plan_sha256,\n',
                             '            _preflight_run_prepared(prepared, '
                             'plan_sha256=prepared_plan_sha256,\n'),
+                           ('        # The head walk reports under the one phase every joint '
+                            'prepare\n'
+                            "        # manifest declares. A COST run's counter belongs to its own "
+                            'read\n'
+                            '        # schedule, so intake there reports nothing rather than under '
+                            'a name\n'
+                            '        # that schedule did not declare.\n',
+                            '        # The head walk reports under the one phase every joint pass '
+                            'manifest\n'
+                            '        # declares -- prepare and run both open on ``head``. A run '
+                            'whose read\n'
+                            '        # schedule is sealed separately (the V2 cost read plan) '
+                            'declares\n'
+                            '        # ``cost_setup``/``cost_head`` instead and no ``head``, so '
+                            'intake there\n'
+                            '        # reports nothing rather than under a name that schedule did '
+                            'not\n'
+                            '        # declare and the worker would refuse.\n'
+                            '        #\n'
+                            "        # Why this is not cosmetic: on ``ad8803aa`` the run's head "
+                            'resolved its\n'
+                            '        # 512-entry anchor roster between the 12:10:14 claim and the '
+                            '16:24:17\n'
+                            '        # capture line -- 4 h 14 min in which the loop knew its own '
+                            'count at\n'
+                            '        # every step and committed none of it, so the residency '
+                            'window had\n'
+                            '        # nothing to advance on before the capture had even '
+                            'started.\n'),
+                           ('            progress_phase=(HEAD_PHASE if command == "prepare" else '
+                            'None),\n',
+                            '            progress_phase=(None if cost_read_manifest is not None '
+                            'else HEAD_PHASE),\n'),
                            ('            for key, value in (("plan_sha256", plan_sha256), '
                             '("implementation_sha256", implementation),\n',
                             '            for key, value in (("plan_sha256", prepared_plan_sha256), '
-                            '("implementation_sha256", implementation),\n')]}
+                            '("implementation_sha256", implementation),\n'),
+                           ('                cost_read_schedule=cost_schedule,\n'
+                            '                prepared_render_identities={pair: '
+                            'cache.metadata["verified_cells"][pair]["rendered_weight"]\n',
+                            '                cost_read_schedule=cost_schedule,\n'
+                            '                # The count PrismaBuild accepts is cumulative across '
+                            'phases, so\n'
+                            '                # the capture continues from what the head already '
+                            'committed\n'
+                            '                # rather than restarting at zero, which is a '
+                            'regression and\n'
+                            '                # buys no time.\n'
+                            '                progress_base=data.progress_committed,\n'
+                            '                prepared_render_identities={pair: '
+                            'cache.metadata["verified_cells"][pair]["rendered_weight"]\n')]}
 # END GENERATED REWRITES
 _COMMIT = r"[0-9a-f]{40}|[0-9a-f]{64}"
 _BYTES = ("producer_source_sha256", "reconstructed_source_sha256", "transition_module_sha256")

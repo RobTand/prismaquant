@@ -1920,6 +1920,7 @@ def compute_aura_cost_streamed(
     device_envelope_bytes=None,
     prepared_render_identities=None,
     cost_read_schedule=None,
+    progress_base: int = 0,
     profile=None,
 ) -> dict:
     """Layer-streamed KL-adjoint with identity-bound per-Linear shards.
@@ -1945,7 +1946,7 @@ def compute_aura_cost_streamed(
     """
     from prismaquant.joint_statistics_replay import (
         normalize_operator_windows, operator_window_guard, resident_candidates,
-        check_operator_allocation,
+        check_operator_allocation, preflight_joint_operator_admission,
         observe_and_project_windows, observe_and_project_retained_windows,
         statistics_arithmetic_identity,
     )
@@ -2244,9 +2245,25 @@ def compute_aura_cost_streamed(
     joint_source_tensors: dict[str, dict] = {}
     joint_cache_renders: dict[str, dict[str, dict]] = {}
     joint_prefetch_stats: list[dict] = []
+    preflight_retained_windows = None
     if joint_activation:
         from prismaquant.joint_projection_backend import prewarm_projection_backend
         joint_projection_backend = prewarm_projection_backend(joint_projection_backend, device=runner.device)
+        # Combined operator/loader/delta admission reads declared bytes only --
+        # the roster, each matrix's geometry, the PWC candidate file sizes and
+        # the sealed budget -- so it is answerable now, before the first
+        # boundary capture, for every layer at once. It used to run inside the
+        # reverse loop, where an inadmissible plan cost a whole capture before
+        # it refused (#743). The per-layer call still re-derives its own plan
+        # and is compared with what was admitted here through ``sealed_windows``.
+        if operator_windows is not None:
+            preflight_retained_windows = preflight_joint_operator_admission(
+                {layer: [name for name in layer_names if render_formats[name]]
+                 for layer, layer_names in names_by_layer.items()},
+                linears, render_formats, production_cache,
+                policy=operator_windows, retained_budget=retained_budget,
+                source_bytes=(None if retained_budget is None
+                              else retained_operator_windows['source_reserve_bytes']))
         from prismaquant.cost_streaming import validate_streamed_model_identity
         from prismaquant.joint_aura import (
             SignedJointProjectionLease, JointOperatorStatisticsLease, activation_identity, arithmetic_identity,
@@ -2873,6 +2890,29 @@ def compute_aura_cost_streamed(
             "temperature": temperature, "execution_partition": execution_partition,
             "joint_probe_identity": joint_probe_identity,
         }, n_probes=n_probes, check_memory=check_boundary_memory)
+        # Every published entry file is a durable unit and the only thing the
+        # window can advance on. The reporter owns the clock; the writer only
+        # tells it a file landed. With no channel in the environment this is a
+        # log line and nothing else, which is what every run submitted without
+        # the transport keeps getting.
+        from prismaquant.joint_run_progress import JointRunProgress
+        run_progress = JointRunProgress(layers=runner.num_layers,
+                                        partitions=len(row_offsets),
+                                        base_units=progress_base, log=_log)
+        run_progress.priced_units(len(completed_checkpoint_units))
+        boundary_storage.watch_progress(run_progress)
+    else:
+        run_progress = None
+
+    def _report_units(phase_hint=None):
+        """Fold the cost stage's journalled units into the run's one counter."""
+        if run_progress is None:
+            return
+        run_progress.priced_units(len(completed_checkpoint_units))
+        if phase_hint is not None:
+            run_progress.enter(phase_hint)
+        run_progress.flush(force=True)
+
     def capture_source_phase(stage, layer, actual_auxiliary_bytes):
         if cost_read_schedule is not None and stage == 'source_loading':
             cost_read_schedule.enter_phase(f'cost_capture_{layer:03d}', len(completed_checkpoint_units))
@@ -2913,6 +2953,7 @@ def compute_aura_cost_streamed(
                 batches.append(runner.capture_boundaries(calib_ids[offset:offset + batch_rows],
                     boundary_writer=write_boundary, resource_check=check_capture_state))
                 boundary_storage.check_auxiliary(batches)
+    _report_units()
     _log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} "
          f"min; starting {n_probes}-probe tail cotangents")
     device = runner.device
@@ -2933,6 +2974,7 @@ def compute_aura_cost_streamed(
         boundary_storage.check_auxiliary(batches, cotangents=cotangents)
     if cost_read_schedule is not None:
         cost_read_schedule.enter_phase('cost_tail', len(completed_checkpoint_units))
+    _report_units()
     if retained_budget is not None:
         retained_source_phase('tail', runner.num_layers,
             boundary_storage.actual_auxiliary_bytes(batches, cotangents=cotangents))
@@ -2966,11 +3008,13 @@ def compute_aura_cost_streamed(
             finally:
                 tail_cpu = logits = probe = tail = None
 
+    _report_units()
     reverse_started = time.time()
     reverse_layers_done = 0
     for layer in reversed(range(runner.num_layers)):
         if cost_read_schedule is not None:
             cost_read_schedule.enter_phase(f'cost_reverse_{layer:03d}_source', len(completed_checkpoint_units))
+        _report_units()
         if retained_budget is not None:
             retained_source_phase('source_loading', layer,
                 boundary_storage.actual_auxiliary_bytes(batches, cotangents=cotangents))
@@ -3329,8 +3373,9 @@ def compute_aura_cost_streamed(
                         collect_col_energy=collect_col_energy, backend=joint_projection_backend,
                         guard=operator_guard, source_fingerprints=source_seal,
                         completed_names=set(measured) & completed_checkpoint_units,
-                        sealed_windows=(None if cost_read_schedule is None else
-                                        cost_read_schedule.windows_for_layer(layer)),
+                        sealed_windows=(cost_read_schedule.windows_for_layer(layer)
+                                        if cost_read_schedule is not None else
+                                        (preflight_retained_windows or {}).get(layer)),
                         before_window=(None if cost_read_schedule is None else
                             lambda index, names: cost_read_schedule.enter_phase(
                                 f'cost_reverse_{layer:03d}_window_{index:03d}', len(completed_checkpoint_units))),

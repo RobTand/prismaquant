@@ -27,6 +27,14 @@ from tools.container_runtime_identity import (
 # this adapter only carries the two sealed channel values across the boundary.
 PATH_ENV = "PRISMABUILD_ACTION_PROGRESS_PATH"
 TOKEN_ENV = "PRISMABUILD_ACTION_PROGRESS_TOKEN"
+#: The phase names the submission sealed.  Carried across the boundary too,
+#: because a phase the submission did not declare is refused by the worker and
+#: an action reporting only refused names is indistinguishable from one
+#: reporting nothing.  Inside the container this is the only way to know the
+#: list: ``PRISMABUILD_ACTION_PROGRESS_HELPER`` names a file on the fleet mount
+#: that the qualified image does not bind, which is also why the record is
+#: written by ``prismaquant.prismabuild_progress`` rather than by that helper.
+PHASES_ENV = "PRISMABUILD_ACTION_PROGRESS_PHASES"
 
 
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
@@ -275,7 +283,14 @@ def progress_environment(spec: dict, environ) -> dict:
     for mount in spec["container"].get("mounts", []):
         target = PurePosixPath(mount["target"])
         if (directory == target or target in directory.parents) and not mount.get("readonly", False):
-            return {PATH_ENV: str(path), TOKEN_ENV: str(token)}
+            channel = {PATH_ENV: str(path), TOKEN_ENV: str(token)}
+            phases = environ.get(PHASES_ENV)
+            # A string, not a file: it needs no mount and it is what lets the
+            # row inside check a phase name where the typo is instead of being
+            # refused quietly until the allowance runs out.
+            if phases:
+                channel[PHASES_ENV] = str(phases)
+            return channel
     raise RuntimeError(
         f"the PrismaBuild progress file {path} is not inside any writable "
         "container mount, so this row could not report the anchors it commits "
