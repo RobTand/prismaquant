@@ -141,3 +141,79 @@ a new receipt.
 `--source-transition PATH` (digest computed, or checked when given), forwards
 both to the pass, and declares the receipt as a head read of the joint pass
 manifest (`experiments/glm_data_manifests.py`).
+
+# The ram half of the residency map, carried to this branch (PQ #751)
+
+## What this branch now carries, and why
+
+PrismaBuild's ram tier (RobTand/prismabuild#640) promotes staged ranges onto a
+`noswap` tmpfs and overlays the composed residency map with the tmpfs copies:
+an entry keeps the `stage_path` it already had and gains `ram_path`, and the
+map's header gains `ram_tier_id`, `ram_root` and `ram_epoch`. The sealed-era
+reader this branch carried until now refuses such a map whole — the header
+fields are `unknown residency map fields` and the per-entry `ram_path` is an
+unknown entry field — which is the ordinary fail-open: every read falls to the
+declared pool path at full pool cost, behind an ARC the same cutover shrank to
+22 GiB. A campaign resubmitted under the #640 generation would have paid the
+whole cost of a tier it was holding a map for. PQ #751 (merged to main as
+`b568539262..55fc60c8ad`) teaches the reader the ram half; this branch now
+carries it, re-tabled, so the resubmitted campaign can actually reach the tmpfs.
+
+The semantics are exactly the merged reader's: the header trio and the
+per-entry `ram_path` are validated the way PrismaBuild's own `validate_map`
+validates them (a map naming ram paths must announce tier, root and epoch
+together, and a `ram_path` outside `ram_root` refuses the map whole); a ram
+copy is offered only while the map's `ram_epoch` equals the epoch the pool's
+tier record (`<queue>/tiers/<ram tier id>.json`, `prismabuild.storage_tier.v1`,
+re-read when its stat identity changes) currently announces, because a tmpfs
+empties on reboot while the map survives on the shared mount; and every ram
+failure — no record, an unreadable record, a missing or stale epoch, a ram
+file that fails its fence — fails closed **on the ram half only**, falling back
+ram → stage → declared. `residency_report()` records `ram_hits`,
+`bytes_from_ram`, `ram_fallbacks` and `ram_fallback_count` beside the stage's
+own counters, plus the ram header and any `ram_refused` reason, so the run's
+`results.json` says what each tier served.
+
+## What was adapted, and what did not travel
+
+This branch's `prismaquant/residency_map.py` is the sealed-era reader: it has
+the whole-file `staged_read` and predates the ranged shard reader
+(`staged_range`, `_interval_index`) that main gained later, and nothing on this
+branch calls the ranged half. The ram half therefore landed on the structures
+that exist here — the header and entry validation in `_adopt`/`_entry`, the
+epoch check (`_announced_ram_epoch`/`_ram_live`/`_ram_offer`), the ram-aware
+fence inside `staged_read`, `record_ram_read`/`record_ram_fallback`, and the
+per-tier `report()` — byte-identical to the merged reader where the two
+structures agree. `tessera_joint_aura._read_verified_wire_blob` reads ram, then
+stage, then the declared path, counting each half separately; the transition
+wiring (`prepared_plan_sha256` at both its call sites) is untouched.
+
+What did not travel: the merged reader's `staged_range` fence and its test
+(`test_a_staged_range_offers_the_ram_copy_and_retires_it_with_the_epoch`) —
+there is no `staged_range` on this branch to fence. The epoch retirement that
+test proves is covered on the whole-file path by
+`test_an_epoch_rollover_between_lookups_switches_the_ram_half_off`, which is
+carried. `tests/test_prismabuild_ram_tier_residency.py` otherwise travels
+verbatim from the merge.
+
+`residency_map.py` is not a `_NEW_FILES` entry — the sealed package has the
+file — so the ram half travels through the rewrite table like every other
+sealed-file change: the regenerated `_SOURCE_REWRITES` below carries its
+hunks, `source_proof` still reconstructs the sealed package byte-for-byte, and
+the producer digest changes, which is why carrying this needs a new receipt
+before the resubmission.
+
+## The measurement D44 still owes
+
+Main's `docs/ARCHITECTURE.md` §12 D44 records it and this carry does not
+discharge it: no consumer-side ram read has ever been measured, and no
+`bytes_from_ram` number has been written by a run. The fences and the epoch
+gate are proven by the carried tests, but the ram tier's payoff is a design
+claim until one joint pass on the #640 generation reports its per-tier
+counters. The campaign run this branch is composed for is exactly that
+instrument; read its `residency` block — `ram_hits`, `bytes_from_ram`,
+`bytes_from_stage`, `bytes_from_pool` — against the stage-only arm before
+extending the preference to any other read site. D44(b) applies here too: only
+the wire reader prefers the ram copy; the production weight cache's shard load
+still reads `stage_path` unchanged, so a fully ram-promoted window serves that
+site from the SSD.
