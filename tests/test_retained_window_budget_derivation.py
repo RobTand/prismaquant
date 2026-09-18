@@ -9,7 +9,8 @@ geometry, so a budget that cannot admit it fails here in milliseconds.
 import pytest
 
 from prismaquant.joint_retained_window_plan import (
-    DECLARED_BUDGET_FIELDS, DERIVATION_SCHEMA, RetainedTarget, RetainedWindowBudget,
+    DECLARED_BUDGET_FIELDS, DERIVATION_SCHEMA, HOST_RESIDENT_BUDGET_FIELDS,
+    RetainedTarget, RetainedWindowBudget,
     derive_retained_window_budget, plan_retained_targets,
 )
 from test_joint_replay_aggregate_guard import CAMPAIGN_BUDGET
@@ -18,6 +19,10 @@ from test_joint_replay_aggregate_guard import CAMPAIGN_BUDGET
 SOURCE_RESERVE_BYTES = 33285996544
 #: ``execution.operator_windows.prefetch_workers`` of the same plan.
 PREFETCH_WORKERS = 4
+#: ``physical_limit_bytes`` less the plan's ``max_gpu_bytes`` (80 GiB): the
+#: container's own cgroup cap, which the aggregate capture guard still holds
+#: on its own and which therefore bounds the host-resident retained renders.
+HOST_CAP_BYTES = 111669149696 - 85899345920
 SCOPE = 'pwc_serialized_upper_bound'
 
 #: Measured over the campaign roster of plan ``0b2cc0066bb612e3…``: 36,423
@@ -82,7 +87,7 @@ def test_repairing_only_the_delta_reserve_moves_the_refusal_to_the_window_cap():
 def test_the_derivation_admits_every_target_class_of_this_model():
     budget, record = derive_retained_window_budget(
         _roster(), declared=_declared(), source_bytes=SOURCE_RESERVE_BYTES,
-        prefetch_workers=PREFETCH_WORKERS, footprint_scope=SCOPE)
+        prefetch_workers=PREFETCH_WORKERS, host_cap_bytes=HOST_CAP_BYTES, footprint_scope=SCOPE)
     assert record['schema'] == DERIVATION_SCHEMA
     # Exactly the demand: one fp32 delta over the largest matrix in the roster.
     assert budget.candidate_delta_bytes == 4 * 12288 * 4096 == 201_326_592
@@ -109,7 +114,7 @@ def test_the_derivation_admits_every_target_class_of_this_model():
 def test_the_derived_window_caps_are_the_packing_s_own_maxima():
     budget, record = derive_retained_window_budget(
         _roster(), declared=_declared(), source_bytes=SOURCE_RESERVE_BYTES,
-        prefetch_workers=PREFETCH_WORKERS, footprint_scope=SCOPE)
+        prefetch_workers=PREFETCH_WORKERS, host_cap_bytes=HOST_CAP_BYTES, footprint_scope=SCOPE)
     windows = [window for targets in _roster().values()
                for window in plan_retained_targets(
                    targets, budget=budget, source_bytes=SOURCE_RESERVE_BYTES,
@@ -117,6 +122,10 @@ def test_the_derived_window_caps_are_the_packing_s_own_maxima():
     assert budget.statistics_cap_bytes == max(window.statistics_bytes for window in windows)
     assert budget.retained_render_cap_bytes == max(window.render_bytes for window in windows)
     assert budget.retained_render_cap_bytes <= budget.available_window_bytes(SOURCE_RESERVE_BYTES)
+    # Renders are host-resident, so the container's own cgroup cap bounds them
+    # whatever the aggregate window allows.
+    assert budget.retained_render_cap_bytes <= HOST_CAP_BYTES - sum(
+        getattr(budget, name) for name in HOST_RESIDENT_BUDGET_FIELDS)
     assert record['available_window_bytes'] == budget.available_window_bytes(SOURCE_RESERVE_BYTES)
 
 
@@ -126,7 +135,7 @@ def test_a_roster_that_cannot_fit_the_physical_budget_is_refused_not_rounded():
     with pytest.raises(RuntimeError, match='indivisible target does not fit'):
         derive_retained_window_budget({0: [huge]}, declared=_declared(),
                                       source_bytes=SOURCE_RESERVE_BYTES,
-                                      prefetch_workers=PREFETCH_WORKERS, footprint_scope=SCOPE)
+                                      prefetch_workers=PREFETCH_WORKERS, host_cap_bytes=HOST_CAP_BYTES, footprint_scope=SCOPE)
 
 
 def test_the_derivation_refuses_a_partial_owner_declaration():
@@ -135,4 +144,31 @@ def test_the_derivation_refuses_a_partial_owner_declaration():
     with pytest.raises(ValueError, match='exactly the declared owners'):
         derive_retained_window_budget(_roster(), declared=declared,
                                       source_bytes=SOURCE_RESERVE_BYTES,
-                                      prefetch_workers=PREFETCH_WORKERS, footprint_scope=SCOPE)
+                                      prefetch_workers=PREFETCH_WORKERS, host_cap_bytes=HOST_CAP_BYTES, footprint_scope=SCOPE)
+
+
+def test_the_host_cap_not_the_aggregate_window_bounds_retained_renders():
+    """Renders load with ``map_location="cpu"``, so the cgroup cap binds them.
+
+    The sealed plan's own 2 GiB render cap is exactly this arithmetic --
+    24 GiB container cap less the 2 GiB safety margin less the 20 GiB metadata
+    reserve -- which is why it was so much smaller than the aggregate window
+    the same budget declares. What the sealed plan then got wrong was
+    ``max_windows_per_layer``: a cap that small needs far more than two windows
+    to carry a sparse layer's renders.
+    """
+    budget, record = derive_retained_window_budget(
+        _roster(), declared=_declared(), source_bytes=SOURCE_RESERVE_BYTES,
+        prefetch_workers=PREFETCH_WORKERS, host_cap_bytes=HOST_CAP_BYTES,
+        footprint_scope=SCOPE)
+    demand = record['demand']['retained_render_cap_bytes']
+    assert demand['host_render_bound_bytes'] < demand['aggregate_window_bytes']
+    assert budget.retained_render_cap_bytes <= demand['host_render_bound_bytes']
+    # A larger container host cap buys back windows, and so buys back replay.
+    roomier, roomier_record = derive_retained_window_budget(
+        _roster(), declared=_declared(), source_bytes=SOURCE_RESERVE_BYTES,
+        prefetch_workers=PREFETCH_WORKERS, host_cap_bytes=64 * 1024 ** 3,
+        footprint_scope=SCOPE)
+    assert roomier.max_windows_per_layer < budget.max_windows_per_layer
+    assert (roomier_record['retained_window_replay_multiplier']
+            < record['retained_window_replay_multiplier'])

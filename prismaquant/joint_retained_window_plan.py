@@ -26,6 +26,16 @@ DECLARED_BUDGET_FIELDS = ('physical_limit_bytes', 'safety_margin_bytes',
 DERIVED_BUDGET_FIELDS = ('load_buffer_bytes', 'candidate_delta_bytes',
                          'statistics_cap_bytes', 'retained_render_cap_bytes',
                          'max_windows_per_layer')
+#: The owners that land on the HOST side of a unified-memory box, which the
+#: kernel bounds with the container's own cgroup cap whatever the aggregate
+#: says (``CaptureMemoryGuard._check`` holds ``memory.current`` against
+#: ``cap - margin`` in aggregate mode too). Retained renders belong here:
+#: ``ProductionWeightCache._load_file_tensor`` reads every candidate with
+#: ``map_location="cpu"`` and the retained window holds those CPU tensors for
+#: the whole window, while the fp32 delta and the statistics matrices are
+#: built on the device.
+HOST_RESIDENT_BUDGET_FIELDS = ('safety_margin_bytes', 'metadata_reserve_bytes',
+                               'load_buffer_bytes', 'read_page_reserve_bytes')
 
 
 def _integer(value, name, *, positive=False):
@@ -264,7 +274,7 @@ def _roster_maximum(targets, field):
 
 
 def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
-                                  prefetch_workers,
+                                  prefetch_workers, host_cap_bytes,
                                   footprint_scope='pwc_serialized_upper_bound'):
     """Derive every demand-driven cap from the roster the budget must admit.
 
@@ -287,13 +297,17 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
       that floor -- the smallest buffer at which the policy's own
       ``prefetch_workers`` is honest.
     * ``statistics_cap_bytes`` and ``retained_render_cap_bytes`` bound one
-      window. Below ``available_window_bytes`` neither has an independent
-      physical meaning -- the packer already refuses ``statistics + renders >
-      available`` -- so the packing is solved against the physical bound alone
-      and each cap is then set to the largest window the packing actually
-      produces. Tightening a cap to a maximum the packing already satisfies
-      cannot change a packing decision, and the fixed point is asserted below
-      rather than assumed.
+      window. The statistics matrices are device-side, so the aggregate
+      ``available_window_bytes`` is their only bound and the packer's
+      ``statistics + renders > available`` refusal already holds it. Retained
+      renders are host-side, so they are bounded twice: by that same aggregate
+      window and by ``host_cap_bytes`` less the host-resident owners
+      (``HOST_RESIDENT_BUDGET_FIELDS``), because the kernel holds the
+      container's cgroup cap whatever the aggregate says. The packing is
+      solved against both, and each cap is then set to the largest window the
+      packing actually produces. Tightening a cap to a maximum the packing
+      already satisfies cannot change a packing decision, and the fixed point
+      is asserted below rather than assumed.
     * ``max_windows_per_layer`` is the worst layer's window count under that
       packing, i.e. the fewest retained windows the physical budget admits. It
       remains a refusal -- runtime geometry needing more windows than the
@@ -312,6 +326,7 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                  positive=name not in ('boundary_reserve_bytes', 'auxiliary_reserve_bytes'))
     _integer(source_bytes, 'source_bytes')
     _integer(prefetch_workers, 'prefetch_workers', positive=True)
+    _integer(host_cap_bytes, 'host_cap_bytes', positive=True)
     if not isinstance(targets_by_layer, Mapping) or not targets_by_layer:
         raise ValueError('retained budget derivation requires a nonempty per-layer roster')
     roster = []
@@ -333,8 +348,12 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
         candidate_delta_bytes=candidate_delta_bytes, statistics_cap_bytes=1,
         retained_render_cap_bytes=1, max_windows_per_layer=1)
     available = probe.available_window_bytes(source_bytes)
+    host_render_bound = host_cap_bytes - sum(getattr(probe, name)
+                                             for name in HOST_RESIDENT_BUDGET_FIELDS)
+    if host_render_bound <= 0:
+        raise RuntimeError('retained COST host owners exhaust the container cap before renders')
     open_budget = replace(probe, statistics_cap_bytes=available,
-                          retained_render_cap_bytes=available,
+                          retained_render_cap_bytes=min(available, host_render_bound),
                           max_windows_per_layer=max(len(tuple(targets))
                                                     for targets in targets_by_layer.values()))
     plans = {layer: plan_retained_targets(targets, budget=open_budget,
@@ -358,6 +377,8 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
         'source_bytes': source_bytes,
         'declared': {name: declared[name] for name in DECLARED_BUDGET_FIELDS},
         'prefetch_workers': prefetch_workers,
+        'host_cap_bytes': host_cap_bytes,
+        'host_render_bound_bytes': host_render_bound,
         'roster': {'targets': len(roster), 'layers': len(targets_by_layer),
                    'targets_by_layer': {str(layer): len(tuple(targets))
                                         for layer, targets in sorted(targets_by_layer.items())}},
@@ -369,12 +390,19 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                                   'maximizing_target': load_buffer_target,
                                   'largest_serialized_bytes': largest_serialized_bytes,
                                   'prefetch_workers': prefetch_workers,
+        'host_cap_bytes': host_cap_bytes,
+        'host_render_bound_bytes': host_render_bound,
                                   'basis': 'declared loader concurrency times the largest '
                                            'single serialized candidate file'},
             'statistics_cap_bytes': {'bytes': budget.statistics_cap_bytes,
                                      'basis': 'largest packed window statistics'},
             'retained_render_cap_bytes': {'bytes': budget.retained_render_cap_bytes,
-                                          'basis': 'largest packed window render files'},
+                                          'host_cap_bytes': host_cap_bytes,
+                                          'host_render_bound_bytes': host_render_bound,
+                                          'aggregate_window_bytes': available,
+                                          'basis': 'largest packed window render files, under the '
+                                                   'smaller of the aggregate window and the '
+                                                   "container's host-side headroom"},
             'max_windows_per_layer': {'windows': budget.max_windows_per_layer,
                                       'basis': 'worst layer under the physical window bound'},
         },

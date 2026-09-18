@@ -930,9 +930,25 @@ the safety margin and the metadata, runtime, workspace, boundary, auxiliary
 and read-page reserves) and computes `candidate_delta_bytes` as the largest
 single fp32 matrix delta, `load_buffer_bytes` as the declared
 `prefetch_workers` times the largest single serialized candidate file,
-`statistics_cap_bytes` and `retained_render_cap_bytes` as the largest window
-the physical bound admits, and `max_windows_per_layer` as the worst layer's
-window count under that packing. `tools/derive_retained_window_budget.py`
+`statistics_cap_bytes` as the largest window the aggregate physical bound
+admits, `retained_render_cap_bytes` as the largest window the *smaller* of
+that bound and the container's host-side headroom admits, and
+`max_windows_per_layer` as the worst layer's window count under that packing.
+Renders are bounded twice because they are host-resident --
+`ProductionWeightCache._load_file_tensor` reads every candidate with
+`map_location="cpu"` and the retained window holds those CPU tensors for the
+window's whole life, while the fp32 delta and the statistics matrices are
+built on the device -- and `CaptureMemoryGuard._check` holds `memory.current`
+against `cap - margin` on its own even in aggregate mode, because the kernel
+enforces the container's cgroup cap whatever the aggregate says.
+`RetainedWindowBudget` states one `physical_limit_bytes` and cannot say which
+side an owner lands on, so `HOST_RESIDENT_BUDGET_FIELDS` names the host-side
+owners and `host_cap_bytes` is a derivation input rather than a budget field.
+The host cap sets the replay multiplier, because each retained window replays
+every probe's reverse pass: on the GLM-5.3-Flash roster a 24 GiB container
+admits 78 windows on the worst layer, 32 GiB admits 13, and 48 GiB admits 7,
+where the aggregate window becomes binding and the multiplier floors at
+4.98. `tools/derive_retained_window_budget.py`
 writes the plan and stamps a top-level `retained_window_budget_derivation`
 record naming the maximizing target of each cap and the sources it read. A
 budget may still be authored by hand; nothing reads the record at run time.

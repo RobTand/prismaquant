@@ -56,6 +56,11 @@ def main(argv=None):
                         help='campaign census.json, for unit_shapes and max_abs')
     parser.add_argument('--out', required=True, type=Path,
                         help='the new plan JSON; never the input path')
+    parser.add_argument('--host-cap-bytes', type=int,
+                        help="the container's own memory cgroup cap, which bounds the "
+                             'host-resident retained renders. Defaults to the plan\'s '
+                             'physical_limit_bytes less max_gpu_bytes, the same split the '
+                             'aggregate capture guard holds.')
     parser.add_argument('--render-size-cache', type=Path,
                         help='read/write the per-key candidate file sizes here, so a '
                              'rerun does not restat every prepared render')
@@ -147,10 +152,16 @@ def main(argv=None):
             activation_max_abs={name: maxima[name] for name in names})
         targets_by_layer[layer] = targets_from_statistics_plan(statistics, keys_by_name, costs)
 
+    host_cap_bytes = args.host_cap_bytes
+    if host_cap_bytes is None:
+        host_cap_bytes = sealed.physical_limit_bytes - plan['max_gpu_bytes']
+        if host_cap_bytes <= 0:
+            raise SystemExit('plan states no host side; pass --host-cap-bytes')
     declared = {name: getattr(sealed, name) for name in DECLARED_BUDGET_FIELDS}
     budget, record = derive_retained_window_budget(
         targets_by_layer, declared=declared, source_bytes=source_bytes,
         prefetch_workers=execution['operator_windows']['prefetch_workers'],
+        host_cap_bytes=host_cap_bytes,
         footprint_scope='pwc_serialized_upper_bound')
     record['derived_from'] = {
         'plan': {'path': str(args.plan.resolve()), 'sha256': plan_sha256},
@@ -180,6 +191,8 @@ def main(argv=None):
                     for name in budget.as_dict()
                     if sealed.as_dict()[name] != budget.as_dict()[name]},
         'available_window_bytes': record['available_window_bytes'],
+        'host_cap_bytes': host_cap_bytes,
+        'host_render_bound_bytes': record['host_render_bound_bytes'],
         'windows_by_layer_max': max(record['windows_by_layer'].values()),
         'retained_window_replay_multiplier': record['retained_window_replay_multiplier'],
         'candidate_files_measured': len(sizes),
