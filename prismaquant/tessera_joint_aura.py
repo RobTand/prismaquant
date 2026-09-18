@@ -2223,12 +2223,13 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         result["phases"].append({"phase": command, "kind": "profile", "start_epoch": started,
                                  "end_epoch": result["env"]["finished_epoch"]})
         result["io_before"], result["io_after"] = before_io, _io_counters()
-        # What PrismaBuild's stage tier actually served, beside the process's
-        # own read counters. A stage with no reader is a copy nobody reads, so
-        # this block is the closed loop: hits and bytes when the redirect
-        # worked, a named reason for every entry it refused. The key is absent
-        # when no map was named, which keeps an unset run's record identical to
-        # today's.
+        # What PrismaBuild's tiers actually served, beside the process's own
+        # read counters: the stage's bytes and, on a map of the ram-overlay
+        # generation, the tmpfs's own. A stage with no reader is a copy nobody
+        # reads, so this block is the closed loop: hits and bytes per tier when
+        # the redirect worked, a named reason for every entry it refused. The
+        # key is absent when no map was named, which keeps an unset run's
+        # record identical to today's.
         residency = residency_report()
         if residency is not None:
             result["residency"] = residency
