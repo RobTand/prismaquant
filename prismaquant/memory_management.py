@@ -166,8 +166,32 @@ class CaptureMemoryGuard:
     def __init__(self, device, *, cgroup_root=Path('/sys/fs/cgroup'),
                  membership=Path('/proc/self/cgroup'),
                  device_bytes: "int | None" = None,
+                 aggregate_envelope: bool = False,
                  host_floor_bytes: int = DEFAULT_HOST_FLOOR_BYTES):
         """``device_bytes`` splits the guard; without it, nothing changes.
+
+        THE AGGREGATE. ``aggregate_envelope=True`` (only with a declared
+        ``device_bytes``) is the third shape, for a caller whose plan was
+        written against the CONSERVATIVE SUM ``cgroup + cuda_reserved`` rather
+        than against the two sides apart: the retained COST plan
+        (``joint_retained_window_plan.RetainedWindowBudget``) states one
+        ``physical_limit_bytes`` that is ``cpu cap + device envelope`` and
+        charges every reservation it makes to that one number, because it does
+        not know -- on a unified-memory box it cannot know -- which side a
+        resident render or a statistics window lands on. Comparing that sum with
+        the cgroup cap alone refused the GLM-5.3-Flash run stage on 2026-09-18
+        (``104 GiB > 24 GiB``) after a 9.9 h prepare, on a check that had never
+        passed since it landed (``c6baaeb70a``). In this mode ``check`` holds:
+
+          * ``memory.current + cuda_reserved + every reservation`` against
+            ``cpu cap + device_bytes - MARGIN_BYTES``, the plan's own arithmetic;
+          * ``memory.current`` alone against ``cpu cap - MARGIN_BYTES``, because
+            the kernel still enforces that cap whatever the sum says;
+          * ``cuda_reserved + device reservation`` against ``device_bytes``;
+          * the host's available memory against ``host_floor_bytes``.
+
+        It does NOT hold the two sides apart, so ``separate_reservations`` is
+        False and :func:`reserve_allocation` charges the conservative sum.
 
         THE SPLIT. A bounded row holds two budgets that are enforced by two
         different things, and a guard that adds them into one number against the
@@ -206,7 +230,12 @@ class CaptureMemoryGuard:
             raise RuntimeError(
                 f'capture guard device envelope must be a positive number of '
                 f'bytes when declared, got {device_bytes!r}')
+        if aggregate_envelope and device_bytes is None:
+            raise RuntimeError(
+                'an aggregate capture envelope needs a declared device envelope; '
+                'without one there is nothing to add to the cgroup cap')
         self.device_bytes = device_bytes
+        self.aggregate_envelope = bool(aggregate_envelope)
         root = Path(cgroup_root)
         entries = [line.split(':', 2)[2] for line in Path(membership).read_text().splitlines()
                    if line.startswith('0::')]
@@ -253,7 +282,7 @@ class CaptureMemoryGuard:
         def check(label, *, reserve_bytes=0, reserve_device_bytes=0):
             return self._check(label, reserve_bytes=reserve_bytes,
                                reserve_device_bytes=reserve_device_bytes)
-        check.separates_cpu_and_device_reservations = self.device_bytes is not None
+        check.separates_cpu_and_device_reservations = self.separate_reservations
         check.__name__ = "check"
         check.__qualname__ = f"{type(self).__name__}.check"
         check.__doc__ = ("Refuse the moment either budget or the host floor is "
@@ -269,7 +298,19 @@ class CaptureMemoryGuard:
         one, so a caller routing through :func:`reserve_allocation` gets the
         conservative sum exactly as every caller did before the split.
         """
-        return self.device_bytes is not None
+        return self.device_bytes is not None and not self.aggregate_envelope
+
+    @property
+    def physical_cap_bytes(self) -> int:
+        """The one number a plan's ``physical_limit_bytes`` is compared with.
+
+        The cgroup cap alone unless this guard holds an aggregate envelope, in
+        which case it is ``cpu cap + device_bytes``: the same sum the plan
+        states and the same threshold ``check`` refuses against.
+        """
+        if self.aggregate_envelope:
+            return self.cpu_cap_bytes + self.device_bytes
+        return self.cap_bytes
 
     def _check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
         """Refuse the moment either budget or the host floor is exceeded.
@@ -319,6 +360,23 @@ class CaptureMemoryGuard:
                 over_budget = current+reserved+reserve_bytes > cap-self.margin_bytes
                 over_device = False
                 host_need = self.host_floor_bytes+reserve_bytes
+            elif self.aggregate_envelope:
+                # The aggregate guard: the plan's conservative sum against the
+                # sum of the two envelopes, plus the cgroup cap the kernel holds
+                # on its own and the device envelope the allocator holds.
+                self.last.update(enforced='cgroup-plus-cuda-reserved-against-aggregate',
+                    device_envelope_bytes=self.device_bytes,
+                    aggregate_envelope_bytes=cap+self.device_bytes,
+                    aggregate_refusal_threshold_bytes=cap+self.device_bytes-self.margin_bytes,
+                    device_refusal_threshold_bytes=self.device_bytes,
+                    host_floor_bytes=self.host_floor_bytes,
+                    cpu_refusal_threshold_bytes=cap-self.margin_bytes)
+                over_budget = (current+reserved+reserve_bytes+reserve_device_bytes
+                               > cap+self.device_bytes-self.margin_bytes
+                               or current > cap-self.margin_bytes)
+                over_device = reserved+reserve_device_bytes > self.device_bytes
+                host_need = (self.host_floor_bytes+reserve_bytes
+                             +reserve_device_bytes)
             else:
                 # The split guard: the kernel's own CPU budget, the device's own
                 # envelope, and the host floor are three separate refusals. The
@@ -360,6 +418,14 @@ class CaptureMemoryGuard:
                 self.peak_by_checkpoint_prefix.get(prefix, 0), current+reserved)
             self.min_available_bytes = (available if self.min_available_bytes is None
                                        else min(self.min_available_bytes, available))
+            if over_budget and self.aggregate_envelope:
+                raise RuntimeError(
+                    f'capture aggregate memory refusal: the cgroup has '
+                    f'{current} bytes charged, {reserved} bytes are reserved on '
+                    f'{self.device} and {reserve_bytes+reserve_device_bytes} more '
+                    f'is requested against a {cap+self.device_bytes}-byte aggregate '
+                    f'envelope ({cap}-byte cgroup cap) less a '
+                    f'{self.margin_bytes}-byte margin')
             if over_budget:
                 raise RuntimeError(
                     f'capture CPU memory refusal: the cgroup has '
@@ -380,6 +446,9 @@ class CaptureMemoryGuard:
 
     def snapshot(self):
         return dict(scope=str(self.scope), budget_bytes=self.cap_bytes,
+            physical_cap_bytes=self.physical_cap_bytes,
+            device_envelope_bytes=self.device_bytes,
+            aggregate_envelope=self.aggregate_envelope,
             margin_bytes=self.margin_bytes, host_floor_bytes=self.host_floor_bytes,
             peak_conservative_bytes=self.peak_bytes,
             peak_checkpoint=self.peak_checkpoint,
