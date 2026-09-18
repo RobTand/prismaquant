@@ -1,7 +1,38 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-18 · `flash/ram-aware-residency-reader-20260918`.
+As of: 2026-09-18 · `flash/747-retained-budget-transition-20260918`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-18, `flash/747-retained-budget-transition-20260918`) for
+**a run transition that admits a retained-budget-only plan correction**
+(§3.2 joint AURA, §12; PQ #747, after #743/#745).
+`prismaquant/joint_aura_retained_budget_transition.py` is a second closed run
+transition beside `meta_skeleton_render_proof_v1`, which is untouched. It binds
+**two** plans: the one the sealed prepare was made against, pinned by its
+contract as a literal, and the one the run executes, pinned by its receipt.
+Admission is a proof about their contents. Each key the contract enumerates --
+the thirteen `RetainedWindowBudget` fields under
+`execution.retained_operator_windows.budget`, and the
+`retained_window_budget_derivation` record `tools/derive_retained_window_budget.py`
+stamps -- is removed from both parsed plans, one whole key at a time, and the
+residues must be identical; a difference anywhere else in the nested structure
+refuses. The paths are literals in the contract: no pattern, no prefix rule.
+The receipt records both digests and the per-key old/new values, and the loader
+re-derives that difference and requires the recorded one to equal it. The
+residue proof is also why substituting `plan_sha256` is sound: every prepared
+field the run re-derives from the plan (`source_model_identity`,
+`source_execution`, `calibration_input`, `measured_cells`, `reader_identity`,
+`encoder_source_reuse`, the render census, `projection_backend`,
+`formats_by_qname`) comes from plan bytes the proof holds identical, so
+`plan_sha256` is the only prepared field a budget-only change can reach.
+`tessera_joint_aura.execute` asks `joint_aura_transitions`
+`transition_prepared_plan_sha256` -- a literal per-capability-type table --
+which plan digest the prepared record must carry, at both places that compared
+it. `tools/generate_transition_rewrites.py` writes a transition's literal
+rewrite table from the sealed package and the executing one and verifies the
+table reconstructs the sealed digest. No pipeline default, stage, format, lane,
+pin or ship gate changed. Contract and evidence:
+`docs/design/joint_run_source_transition_2026-09-18.md`.
 
 Re-stamped (2026-09-18, `flash/ram-aware-residency-reader-20260918`) for
 **the residency-map reader's ram half** (§5.4, §12 D44; RobTand/prismaquant#750,
