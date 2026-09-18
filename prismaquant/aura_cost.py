@@ -3347,7 +3347,7 @@ def compute_aura_cost_streamed(
                         completed_names=set(measured) & completed_checkpoint_units,
                         sealed_windows=(cost_read_schedule.windows_for_layer(layer)
                                         if cost_read_schedule is not None else
-                                        preflight_retained_windows.get(layer)),
+                                        (preflight_retained_windows or {}).get(layer)),
                         before_window=(None if cost_read_schedule is None else
                             lambda index, names: cost_read_schedule.enter_phase(
                                 f'cost_reverse_{layer:03d}_window_{index:03d}', len(completed_checkpoint_units))),

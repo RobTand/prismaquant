@@ -225,3 +225,32 @@ def test_an_admissible_retained_budget_still_captures_and_measures(tmp_path, mon
     result, _, context = _case(tmp_path, monkeypatch, True,
                                checkpoint=tmp_path / 'checkpoints')
     assert boundaries and context.install_calls > 0 and result['costs']
+
+
+def test_a_missing_pwc_candidate_is_refused_before_any_capture_without_a_retained_budget(
+        tmp_path, monkeypatch):
+    """Issue #743: the hoist covers the windowed path's coverage check too.
+
+    ``resident_candidates`` used to be the first thing to notice a candidate
+    the production cache never rendered, one layer into the reverse replay.
+    The roster, the menu and the cache index are all declared, so the preflight
+    answers it for every layer before the boundary capture starts -- and this
+    asserts the capture is what does not run.
+    """
+    boundaries = []
+    write = StreamedBoundaryArtifacts.write
+    def recorded(self, *args, **kwargs):
+        boundaries.append(kwargs.get('boundary_index'))
+        return write(self, *args, **kwargs)
+    monkeypatch.setattr(StreamedBoundaryArtifacts, 'write', recorded)
+    dropped = []
+    def drop_one_candidate(proofs, files):
+        dropped.append(sorted(files)[0])
+        files.pop(dropped[0])
+        proofs.pop(dropped[0])
+    observed = {}
+    with pytest.raises(RuntimeError, match='PWC candidate entry missing'):
+        _case(tmp_path, monkeypatch, False, proof_change=drop_one_candidate, observed=observed)
+    assert boundaries == []
+    assert observed['context'].install_calls == 0
+    assert not list((tmp_path / 'boundaries').rglob('*.pt'))

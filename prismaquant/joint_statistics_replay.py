@@ -264,6 +264,16 @@ def preflight_joint_operator_admission(names_by_layer, modules, formats_by_name,
                       (tuple(module.weight.shape) for module in twins.values()))
         if largest > min(policy['max_candidate_bytes'], policy['workspace_reserve_bytes']):
             raise RuntimeError('joint single target exceeds candidate or matrix workspace budget')
+        # Both replay paths need every candidate to have a PWC entry, and both
+        # used to find out per layer: the retained one through
+        # ``retained_admission_targets`` and the windowed one when
+        # ``resident_candidates`` planned its first quantum.
+        missing = [(name, fmt) for name in names for fmt in formats_by_name[name]
+                   if cache.resolve_key(name, fmt) is None]
+        if missing:
+            raise RuntimeError('joint operator-window PWC candidate entry missing: '
+                               f'{len(missing)} of {sum(len(formats_by_name[n]) for n in names)}, '
+                               f'first {missing[:8]}')
         if retained_budget is None:
             continue
         statistics_plan = plan_joint_statistics_target_windows(
