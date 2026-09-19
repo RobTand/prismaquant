@@ -1,7 +1,25 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-19 · `flash/754-resumable-parallel-head-walk-20260919`.
+As of: 2026-09-19 · `flash/backlog-709-705-687-560-20260919`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-19, `flash/backlog-709-705-687-560-20260919`) for
+**the v1 measured-runtime table pricing and budgeting nothing**
+(RobTand/prismaquant#560 defect 3, the last of its three). Defects 1 and 2
+landed 2026-09-13 (two flags, not one; the off-step peak carried into the
+solver); defect 3 was pinned as recorded-not-endorsed behavior
+(`test_a_v1_table_carries_no_provenance_and_is_returned_unchanged`) and is now
+decided: a v1 table carries no `runtime_provenance` and calls no gate, so
+`build_runtime_resources` and `admitted_fixed_resources` refuse it by name
+rather than pricing the DP or lending the device budget unattested. The v1
+schema stays parseable so history remains readable — `parse`,
+`native_receipt_table.assess` and `shape_only_fixed_resources` (which already
+refused v1) are unchanged — and re-emission through
+`native_receipt_table.emit_native_receipt_table` as v2 is the way back. No
+pipeline default, stage, format, lane, pin or ship gate changed; the
+mechanics tests in `tests/test_measured_runtime_prices.py` carry explicit
+admission for the pricing they exercise. Gates:
+`tests/test_runtime_admission_split.py` (one refusal per consumer).
 
 Re-stamped (2026-09-19, `flash/754-resumable-parallel-head-walk-20260919`) for
 **the joint head walk banking its verified units and fanning out over
