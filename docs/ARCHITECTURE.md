@@ -24,6 +24,95 @@ no sealed surface moves without GLM sign-off. Gates:
 `tests/test_docs_staleness.py`, `tests/test_architecture_doc.py`
 (prose-only change; both green through PrismaBuild).
 
+Re-stamped (2026-09-19, `flash/dev-mode-provenance-at-artifact-gate-20260919`)
+for **`PRISMAQUANT_DEV_MODE`, the owner's rapid-iteration switch: the seal
+returns at the artifact gate, not the run gate** (§3.4; RobTand/prismaquant#771;
+Rob's directive, 2026-09-19 night: "a dev mode that turns all this shit off.
+It buys me nothing... It's just a massive tax right now."). Pre-enterprise,
+every iteration paid provenance tax at the run gate with no consumer of the
+certification yet: the sealed-prepare source proof refused any changed
+package, the run refused a prepared record whose plan/implementation digests
+differed, and a checkpoint-lineage identity mismatch refused reuse AND
+recompute (2026-09-19's 752 s failure: `stored=4194304
+current=201326592; refusing reuse or recompute`). One environment variable,
+`PRISMAQUANT_DEV_MODE=1`, read at the gates (`prismaquant/dev_mode.py`), turns
+those walls into stamps:
+
+- `joint_aura_run_transition.source_proof` and the loader identity family
+  accept any executing package; the record carries the package's ACTUAL tree
+  digest — a record, never a gate.
+- The prepared-record digest comparisons in the run path
+  (`_preflight_run_prepared` and the post-intake loop, one shared reader
+  `_prepared_digest_recorded`) warn with BOTH digests and continue for
+  `plan_sha256`/`implementation_sha256` only; every other prepared field
+  (model identity, calibration, roster, reader, backend) stays a wall in dev
+  mode — a stale record naming a different measurement is stale whatever the
+  mode.
+- `_prepare_aura_checkpoints` archives a mismatched lineage whole (rename
+  `<dir>.dev-archived-<iso>`, the house pattern used manually that night) and
+  starts a fresh one; nothing mismatched is ever silently reused, and corrupt
+  (not identity-mismatched) checkpoints still refuse.
+- `dispatch_tessera_campaign` treats declared digests as records under dev
+  mode (`_bound_sha256` warns and uses the actual digest), a resumed
+  `submit-joint run` needs no `--source-transition` receipt, and the variable
+  travels to the container exactly as `PRISMAQUANT_LAYER_READ_THREADS` does —
+  sealed by `_submit_gpu_action` into the spec env the launcher receives
+  (`tessera_campaign_container.DEV_MODE_ENV`), changing the action key so a
+  dev submission is never a certified action's cache hit.
+- Every dev run writes `{"dev_uncertified": true, "dev_mode": {...actual
+  tree digest, timestamp...}}` at the TOP LEVEL of `results.json` (including
+  refusal paths — `execute` stamps before the `finally` publishes) and into
+  every progress record; PrismaBuild's `ProgressWatch` ignores the extra
+  keys, and every suspended gate prints a grep-able `[DEV-MODE]` line.
+
+Certified mode with the variable unset is byte-identical: every gate above
+still refuses under the same fixtures, proven by
+`tests/test_dev_mode_provenance_gates.py` (RED-first: the same run's
+certified half passed before the implementation existed). PrismaBuild's
+sealed actions, the CAS and the v1/v2 proof machinery are untouched — dev
+mode bypasses AT THE GATE, it never weakens a proof. No pipeline default,
+stage, format, lane, pin or ship gate changed.
+
+Re-stamped (2026-09-19, `flash/joint-cost-quantum-runtime-20260919`) for
+**the distributed joint-AURA cost campaign's per-box runtime** (PQ #778,
+contract `docs/design/distributed_campaign_2026-09-19.md`). Two new
+dev-mode-only execution entry points shard the complete-512 cost run across
+both Sparks as PrismaBuild quanta, without touching the single-consumer
+campaign of record: `python3 -m prismaquant.joint_cost_stage_a` (lane alias
+`prismaquant.joint_adjoint_capture`, the plan block's sealed entry name) runs
+the sequential adjoint capture — the single run's forward boundary capture and
+tail cotangents, then a render-free cotangent chain that publishes a strided
+checkpoint every S layers (S=8 derived, §3.4 of the contract) and seals
+`layer-quanta/adjoint/adjoint-capture.json` atomically, first writer wins —
+and `python3 -m prismaquant.joint_cost_quantum` runs one layer quantum:
+four digest-checked inputs (`--quantum/--plan/--prepared/--adjoint` plus
+sha256s; any mismatch is exit 3 `quantum_identity_refused` with nothing
+written), head inputs via the same verified loaders, the incoming cotangent
+rebuilt by chaining ≤ S−1 render-free source backwards from the nearest
+strided checkpoint through
+`joint_adjoint_checkpoints.render_free_layer_roll` (the completed-layer leg
+of `compute_aura_cost_streamed`'s reverse walk, reused rather than
+reimplemented), then the layer's sealed retained windows replayed in sealed
+index order through `joint_statistics_replay.observe_and_project_retained_windows`
+and PWC verified loads — the same kernels and call order as the single run,
+which the §9.3 cutover gate judges bitwise
+(`tools/compare_joint_layer_gate.py`). A quantum writes only under
+`<output_root>/layer-quanta/layer-NNN/` (cost.pkl, results.json,
+counters.json, checkpoints/, status.json), reports accepted progress at chunk
+granularity through the declared phase names, and carries §8.1 counters
+(bytes_from_ram/stage/pool per chunk and per window from the residency map,
+GPU joules and watts from a 1 Hz power sampler, kernel_active_s/wall_s —
+utilization percentages are never recorded, they are non-diagnostic on
+GB10). Boundary entries are read back through the existing
+`StreamedBoundaryArtifacts` reader via a new read-only `attach()` (an
+attached owner cannot write, retire or re-publish); shared-state cotangents
+cross the checkpoint boundary through new
+`SharedStateCotangents.state_dict()/load_state_dict()`. Both entry points
+require `PRISMAQUANT_DEV_MODE=1` and stamp `dev_uncertified` (the certified
+N-consumer grammar is deliberately deferred, contract §10). No pipeline
+default, stage order, format, lane, plugin contract or ship gate changes.
+Gates: `tests/test_joint_cost_quantum_runtime.py`.
+
 Re-stamped (2026-09-19, `flash/backlog-709-705-687-560-20260919`) for
 **the v1 measured-runtime table pricing and budgeting nothing**
 (RobTand/prismaquant#560 defect 3, the last of its three). Defects 1 and 2
@@ -10366,6 +10455,18 @@ An explicit `SELECTION_MODE`/`VALIDATED_FRONTIER_PICK` still wins. §4.6 owns th
 semantics; §4 owns the cost-mode semantics; §5 owns the lever semantics.
 
 ### 3.4 Reuse guards and the silent-reuse class
+
+**`PRISMAQUANT_DEV_MODE=1` suspends the run-gate half of this class, never
+the reuse half (2026-09-19, #771).** The identity guards below exist so a
+certified artifact is reproducible; before enterprise certification has a
+consumer, iterating under them is tax. Under dev mode the joint pass's
+source-proof family, the prepared-record digest comparisons and the
+checkpoint-lineage identity mismatch become stamps — loudly recorded, never
+silently reused: a mismatched checkpoint lineage is archived
+(`<dir>.dev-archived-<iso>`) and recomputed fresh, and every dev run carries a
+top-level `dev_uncertified` stamp in `results.json` and its progress records.
+With the variable unset, every one of these guards refuses exactly as before
+(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-19 stamp above.
 
 **The key set is `pipeline.py`'s job; the values are the shell's.** `STAGE_SETTINGS_KEYS`
 (`pipeline.py`) declares, per artifact, which settings that artifact's identity depends on.

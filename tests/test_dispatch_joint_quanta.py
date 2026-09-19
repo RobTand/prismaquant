@@ -41,6 +41,8 @@ def campaign():
     scope = {"campaign": "dispatch-fixture", "layers": list(range(N_LAYERS))}
     return {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
             "manifest_sha256": "c" * 64, "scope": scope,
+            "plan_path": "/fixture/plan.json",
+            "prepared_path": "/fixture/prepare/prepared.json",
             "roster_sha256": hashlib.sha256(b"roster\n").hexdigest()}
 
 
@@ -52,6 +54,8 @@ def _record(campaign, layer, receipts_root="adjoint-receipt.json"):
         "campaign": {
             "plan_sha256": campaign["plan_sha256"],
             "prepared_sha256": campaign["prepared_sha256"],
+            "plan_path": campaign["plan_path"],
+            "prepared_path": campaign["prepared_path"],
             "read_manifest_sha256": campaign["manifest_sha256"],
             "campaign_scope": campaign["scope"],
             "unit_roster_sha256": campaign["roster_sha256"],
@@ -136,14 +140,26 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     assert f"layer-001-chunk-000={CHUNK_PROGRESS_GRACE_S}" in phases
     assert CHUNK_PROGRESS_GRACE_S == 900
     assert argv[argv.index("--priority") + 1] == str(SUBMISSION_PRIORITY)
+    # The GPU envelope: the capture and the quanta are GPU-or-bust
+    # (require_cuda_hot_path refused the c94602e9d63c run whose rows
+    # demanded no device).
+    assert argv[argv.index("--demand") + 1] == "gpu=1,mem_gb=104"
     assert argv[argv.index("--env") + 1] == "PRISMAQUANT_DEV_MODE=1"
     assert "--detach" in argv
     assert "--" in argv
     tail = argv[argv.index("--") + 1:]
-    assert tail[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
-    assert tail[tail.index("--quantum") + 1] == str(record_path)
-    assert tail[tail.index("--quantum-sha256") + 1] == record["identity_sha256"]
-    assert tail[tail.index("--output-root") + 1] == "/out/root"
+    # The payload runs inside the qualified campaign container: the
+    # projection backend's runtime identity (and the workload's own
+    # torch/CUDA) qualify one image, and a bare python3 -m refuses as
+    # unidentified (the 31bab41cc812 failure).
+    assert tail[:3] == ["python3", "-m", "tools.tessera_campaign_container"]
+    spec = json.loads(tail[tail.index("--spec") + 1])
+    assert spec["container"]["image"].startswith("sha256:")
+    inner = tail[tail.index("--", tail.index("--spec")) + 1:]
+    assert inner[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
+    assert inner[inner.index("--quantum") + 1] == str(record_path)
+    assert inner[inner.index("--quantum-sha256") + 1] == record["identity_sha256"]
+    assert inner[inner.index("--output-root") + 1] == "/out/root"
 
 
 def test_publication_order_is_descending_layer_id(tmp_path, campaign, records_dir):
