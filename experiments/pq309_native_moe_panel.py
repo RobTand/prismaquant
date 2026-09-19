@@ -32,6 +32,47 @@ def dump(path, value):
         stream.write(json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n")
 
 
+def quality_binding(args, plan, *, shape):
+    """The independently bound full-quality preparation rank-local work needs.
+
+    Above a world of one, ``prepare_moe_inputs`` requires ``quality_prepared``
+    / ``quality_source_model`` (#667) and the pq309 driver never supplied them
+    (RobTand/prismaquant#681): a GLM TP>1 preparation was unreachable from the
+    only driver. The binding rides the hash-pinned preparation plan
+    (``quality_prepared`` as a ``{'path', 'sha256'}`` bound record,
+    ``quality_source_model`` as the inline source-model identity the plan's own
+    digest authenticates); explicit CLI bytes override the plan. At a world of
+    one the container and the cut are the same tensor, so no second
+    preparation is bound and this returns ``(None, None)``.
+    """
+    if int(shape.get("tensor_parallel", 1)) <= 1:
+        return None, None
+    binding = None
+    if args.quality_prepared is not None:
+        if not args.quality_prepared_sha256:
+            raise ValueError("native rank-local preparation needs --quality-prepared-sha256 "
+                             "beside --quality-prepared")
+        binding = {"path": str(args.quality_prepared), "sha256": args.quality_prepared_sha256}
+    elif isinstance(plan.get("quality_prepared"), dict):
+        binding = plan["quality_prepared"]
+    source_model = None
+    if args.quality_source_model is not None:
+        if not args.quality_source_model_sha256:
+            raise ValueError("native rank-local preparation needs --quality-source-model-sha256 "
+                             "beside --quality-source-model")
+        source_model = json.loads(checked(args.quality_source_model,
+                                          args.quality_source_model_sha256).read_text())
+    elif plan.get("quality_source_model") is not None:
+        source_model = plan["quality_source_model"]
+    if binding is None or source_model is None:
+        raise ValueError(
+            "native rank-local (TP>1) preparation requires the independently bound "
+            "full-quality preparation: pass --quality-prepared/--quality-prepared-sha256 and "
+            "--quality-source-model/--quality-source-model-sha256, or carry quality_prepared "
+            "and quality_source_model in the preparation plan (RobTand/prismaquant#681)")
+    return binding, source_model
+
+
 def prepare(args):
     import torch
     import transformers
@@ -39,7 +80,7 @@ def prepare(args):
     from tessera import cached_unit
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.native_moe_panel import (EXECUTION, FORMAT, ROLES, _equal, _member_roster,
-        prepare_moe_inputs, routed_boundary_inputs, verified_probe_subset)
+        _shape_for_roster, prepare_moe_inputs, routed_boundary_inputs, verified_probe_subset)
     from prismaquant.model_profiles import profile_from_model
     from prismaquant.tessera_calibration_cache import require_capture_contract, prefetch_capture
     from prismaquant.tessera_formats import parse_tessera_format_name
@@ -76,6 +117,9 @@ def prepare(args):
                                                         capture_manifest=capture, device="cuda:0")
     unit, shape = routed["unit"], routed["shape"]
     _equal(unit, plan["unit"], "planned routed unit")
+    # Rank-local preparation binds its historical full-container proof here so
+    # the TP>1 refusal #667 added is reachable from this driver (#681).
+    quality_prepared, quality_source_model = quality_binding(args, plan, shape=shape)
     _equal(routed["producer_source"], census["expert_projection"]["producer"]["source"], "boundary/census source")
     source, projected_units, stack_of = carried_units(census["expert_projection"])
     _equal(source, routed["producer_source"], "validated projected source")
@@ -90,14 +134,19 @@ def prepare(args):
     for key, value in (("torch", str(torch.__version__)), ("cuda", torch.version.cuda),
                        ("transformers", transformers.__version__)):
         _equal(routed["capture_runtime"][key], value, f"reference runtime {key}")
+    # The roster walks the geometry's own expert count -- ``experts`` for LFM,
+    # ``n_routed_experts`` for GLM -- through the shared view, so this driver
+    # is not LFM-shaped (RobTand/prismaquant#681).
+    roster_shape = _shape_for_roster(shape)
     members = [{"unit": f"{unit}.{expert}.{role}", "expert": expert, "role": role, "format": FORMAT,
                 "shape": ([shape["hidden_size"], shape["intermediate_size"]] if role == "w2"
                           else [shape["intermediate_size"], shape["hidden_size"]])}
-               for expert in range(shape["experts"]) for role in ROLES]
+               for expert in range(roster_shape["experts"]) for role in ROLES]
     _member_roster(unit, members, shape)
     names = [member["unit"] for member in members]
     if set(plan["wires"]) != set(names):
-        raise ValueError("preparation plan must cover exactly all 96 original wires")
+        raise ValueError(
+            f"preparation plan must cover exactly all {len(names)} original wires")
     with checked(plan["production_cache"], plan["production_cache_sha256"]).open("rb") as stream:
         cache = pickle.load(stream)
     weights = {}
@@ -142,7 +191,8 @@ def prepare(args):
         encoding_identities=encodings, numerics=plan["numerics"], max_resident_bytes=plan["max_resident_bytes"],
         max_temporary_bytes=plan["max_temporary_bytes"], runtime_image=plan["runtime_image"],
         serving_config_sha256=plan["serving_config_sha256"], probe_request=request,
-        probe_calibration_receipt=probe_calibration, probe_scope=probe_scope)
+        probe_calibration_receipt=probe_calibration, probe_scope=probe_scope,
+        quality_prepared=quality_prepared, quality_source_model=quality_source_model)
     tensors["routing_bias"] = bias
     args.out.mkdir(parents=True, exist_ok=False)
     dump(args.out / "preparation-plan.json", plan)
@@ -170,6 +220,14 @@ def main():
     prep.add_argument("--plan", required=True, type=Path)
     prep.add_argument("--plan-sha256", required=True)
     prep.add_argument("--out", required=True, type=Path)
+    prep.add_argument("--quality-prepared", type=Path, default=None,
+        help="historical full-quality preparation bytes for rank-local (TP>1) runs; "
+             "overrides the plan's quality_prepared binding")
+    prep.add_argument("--quality-prepared-sha256", default=None)
+    prep.add_argument("--quality-source-model", type=Path, default=None,
+        help="JSON source-model identity for rank-local (TP>1) runs; "
+             "overrides the plan's quality_source_model")
+    prep.add_argument("--quality-source-model-sha256", default=None)
     for command, names in (("freeze", ("inputs", "preflight", "cost")), ("consume", ("receipt", "panel"))):
         operation = sub.add_parser(command)
         for name in names:
