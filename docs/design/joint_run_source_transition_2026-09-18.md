@@ -217,3 +217,80 @@ extending the preference to any other read site. D44(b) applies here too: only
 the wire reader prefers the ram copy; the production weight cache's shard load
 still reads `stage_path` unchanged, so a fully ram-promoted window serves that
 site from the SSD.
+
+# The resumable parallel head walk, carried to this branch (PQ #754/#763)
+
+## What this branch now carries, and why
+
+The withdrawn campaign night paid the joint command's head walk —
+`tessera_joint_aura.load_measured_anchor_input` reading and verifying the
+whole measured-anchor roster — and then paid it again on every restart:
+`c5c88680bd86` walked 54m37s, committed its progress, and lost all of it
+when the action was withdrawn; the resubmission re-paid the walk before
+its first unit of new work. A resubmitted campaign must not open that
+way, so this branch now carries #754's walk machinery (main `f1b4ab1d7a`):
+every verified unit is banked under the campaign's own checkpoint
+machinery (`prepare_journal`/`write_unit`) into `<output
+root>/head-walk`, the journal's identity binding the exact input set
+(plan, census, receipts, merged cost and checkpoint digests), the
+checkpoint seal, `roster_sha256`, the render mirror root and the admitted
+encoder reuse; a resume re-verifies the banked prefix against the very
+bytes it was banked from — the journal shard's file digest plus each
+render/marker/wire stat fence — truncating at the first drift, and a
+journal that fails its own checks is moved aside (`.stale`) and the walk
+restarts fresh: ignored, never reused, never a refusal that blocks the
+run. The verification fans out over threads — the count is the CPU set
+PrismaBuild assigned this container (`os.sched_getaffinity`, capped at
+16, `PRISMAQUANT_HEAD_WALK_WORKERS` to lower it or force the serial path)
+— while commitment stays in the roster's one deterministic order, so a
+parallel walk's durable state, progress sequence and final input are
+identical to the serial one's, and the one thread-unsafe step (a missing
+render's synthesis through the bound single-threaded reader) holds a
+lock. The two gate test fixes ride along: the gate's roster order is
+`sorted(names)`, and the interrupted run's own report is held.
+
+## What was adapted, and what did not travel
+
+Nothing was adapted: the carry is byte-identical to the merge. The
+ram-reader carry had already made this branch's `tessera_joint_aura.py`
+equal to main's pre-walk file, so the walk hunks applied with zero
+conflicts, and the walk banks through `cost_stage_checkpoint`, which the
+sealed-era package has carried all along. It touches no reader structure
+— `residency_map.py` is untouched by it — so nothing here depends on
+main's interval machinery, and the sealed-era whole-file reader with the
+ram half keeps serving the wire reads exactly as the ram carry left
+them. `tests/test_joint_head_walk_754.py` (12 tests) and the three small
+gate fixes travel verbatim. What did not travel is main's
+`docs/ARCHITECTURE.md` D45 stamp: it belongs to the merge this carries
+from, and this note is the branch's record of the same debt.
+
+`tessera_joint_aura.py` is a sealed file, so the walk travels through the
+rewrite table like every other sealed-file change: the regenerated
+`_SOURCE_REWRITES` below carries its hunks (6 rewritten files, 73 hunks,
+4 new files), `source_proof` on the live tree still reconstructs
+`192e73f9d2388a80caa3a4b9da3a59fda74530bb1949fcf7b9aeadad86c52a8f`
+byte-for-byte, and the producer package digest moves, so the
+resubmission needs a new receipt before it runs — the coordinator's, not
+this carry's.
+
+## The measurements D45's campaign run still owes
+
+D45's open half is discharged by no test and not by this carry: the
+mechanism is gated (`test_joint_head_walk_754.py`: resumed equals fresh,
+parallel equals serial, workers never exceed the assignment, unverifiable
+journal state discarded fail-closed) but its payoff on the real campaign
+is unmeasured, because no flagship joint pass has run since it landed.
+The campaign this branch is composed for is the instrument, and it owes
+three readings: (a) the parallel/serial A/B of the walk itself —
+`PRISMAQUANT_HEAD_WALK_WORKERS=1` against the affinity default under the
+same reservation, head-phase wall time and `/proc/PID/io` either side
+(threads bet on I/O latency; the unpickle half of each unit still holds
+the GIL, so expect a partial, not linear, speedup); (b) a restart
+mid-walk resuming from the journal rather than zero —
+`head_walk_resumed_units` in `results.json` beside the resumed wall
+time; (c) whether the 4-CPU reservation the withdrawn submission carried
+should be raised — PB's placement already prefers physical cores and
+demotes SMT siblings and E-cores on both boxes, applied with taskset
+before exec, so a larger reservation lands on P cores by construction
+and the only open question is its size, to be repriced from the measured
+bottleneck.
