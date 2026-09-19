@@ -725,6 +725,9 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
     assert state["commit"] in {
         "387eda36fd410d6b2a4fb86b22285eab2a5e072c",
         "d403cc5a3199a348cc7ee6262f4adbdab8138745",
+        # The 2026-09-19 union-head pin: #563's rework moved export.py's
+        # docstrings, so the pin resolves under its own additive state.
+        "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab",
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -773,10 +776,14 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
     (The equivalence is an ``export.py`` fact: at the 2026-09-19 pin the
     pin's ``grammar.py`` is the memoised ``9ae1f824…``, not the frozen
     states' ``f2545274…`` -- one acceptance predicate, re-derived equal by
-    the audit walk -- so it is ``export.py`` that carries this identity.)
+    the audit walk -- so it is ``export.py`` that carries this identity.
+    The union-head state ``reader-pin-cc739a55`` joins the equivalence as
+    of the same re-pin: its ``export.py`` moved by docstrings only, so the
+    wire bytes are the same and the equivalence claim survives verbatim.)
     """
     assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
         "reader-pin-387eda36", "study-producer-d403cc5a",
+        "reader-pin-cc739a55",
     }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)
