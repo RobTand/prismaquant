@@ -142,3 +142,11 @@ carry one non-native wire. `run-pipeline.sh` refuses `EXPORT_CONTAINER=nvfp4_cb`
 with `exit 2` pointing here, in the same shape as the archived cost modes.
 Reviving it means re-litigating the decision with Robert first, not restoring a
 file.
+
+## Late arrival, archived 2026-09-19
+
+`tools/dsv4_onlaw_book_select.py` — the routed book selector, the selection
+half of the burn/select pair whose burn producer was archived with the lane.
+It survived the original archival because it imports its producer
+(`dsv4_onlaw_book_burn`), so it has been broken on main since 2026-09-02
+(#811). Retired here by the coordinator's discretion, per Rob.
