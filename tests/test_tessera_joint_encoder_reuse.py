@@ -302,7 +302,7 @@ def test_execute_passes_the_plan_policy_to_the_intake(tmp_path, monkeypatch, com
         seen.append(kwargs)
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
             cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
-            encoder_source_reuse=None,
+            encoder_source_reuse=None, head_walk_workers=None, head_walk_resumed_units=0,
             payload={"provenance": {"hessian": {"calibration_identity": draw}}})
 
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
