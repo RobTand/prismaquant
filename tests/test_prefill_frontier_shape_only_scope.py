@@ -128,19 +128,24 @@ def test_the_scope_changes_no_chosen_assignment(tmp_path, monkeypatch):
     answer: the fixed timing terms are zero and cancel on the SLO axis anyway,
     and every device filter in `allocator_solver` is guarded on
     `max_device_bytes is not None`, which no budget leaves unset. So the same
-    table, priced once with no provenance at all and once at v2 under the
-    scope, must return the same assignments at the same budgets. Everything
-    but the withheld device number is compared.
+    table, priced once with its fixed charge admitted and once at v2 under
+    the scope, must return the same assignments at the same budgets (PQ #560
+    defect 3: pricing with no provenance at all is refused, so the plain arm
+    carries admission too). Everything but the withheld device number is
+    compared.
     """
     plain, scoped = tmp_path / "plain", tmp_path / "scoped"
     plain.mkdir(), scoped.mkdir()
     _, plain_argv = _curve_fixture(plain)
     _, scoped_argv = _curve_fixture(scoped)
+    _promote_to_v2(plain)
     _promote_to_v2(scoped)
     _stand_in_for_the_gates(monkeypatch)
-
-    _, without = _sweep(plain, plain_argv, scope=False)
     _, under = _sweep(scoped, scoped_argv, scope=True)
+    # The plain arm reads the fixed charge, so it needs the admission the
+    # scope arm is defined by refusing; re-stub between the two sweeps.
+    _stand_in_for_the_gates(monkeypatch, fixed_refusal=None)
+    _, without = _sweep(plain, plain_argv, scope=False)
 
     compared = ("slo_ms", "feasible", "predicted_dloss", "achieved_bits", "payload_bytes",
                 "attained_prefill_ms", "attained_decode_ms", "assignment_sha256", "nondominated")

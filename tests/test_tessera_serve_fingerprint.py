@@ -132,8 +132,12 @@ def test_the_contracts_own_rows_are_what_the_refusal_compares():
      "publishes no such extension"),
     # A glob that still matches a library the load path can produce -- so the
     # parser accepts it -- and is a DIFFERENT predicate than the pinned one.
+    # (At v29 the witness was the nvfp4 row's own glob; v31 retires that row,
+    # so the window-GEMV row carries it with a 16-hex-narrowed glob. The load
+    # path produces ``<prefix><build identity>.so`` with no separator, so a
+    # narrowed glob keeps the prefix glued to the identity.)
     (lambda rows: rows.__setitem__(
-        0, dict(rows[0], filename_glob="tessera_nvfp4_*")),
+        0, dict(rows[0], filename_glob="tessera_window_gemv" + "?" * 16 + ".so")),
      "filename_glob"),
     (lambda rows: rows.append(
         dict(rows[0], module_name_prefix="tessera_second_",
@@ -232,14 +236,17 @@ def test_the_extension_table_is_part_of_the_reviewed_answer():
     # Move ONE field of one row and keep the rest of the table: since contract
     # v20 the lane table's cells launch through these rows, and a table that
     # drops the window-GEMV row is refused at parse (a launch through an
-    # undeclared extension) before any drift can be read off it.
+    # undeclared extension) before any drift can be read off it. The glob
+    # still matches a library the load path can produce (16-hex-narrowed, no
+    # separator -- the load path glues the identity to the prefix), so the
+    # drift -- not the parse -- names it.
     first, *rest = moved["native_extensions"]
-    moved["native_extensions"] = [dict(first, filename_glob="tessera_nvfp4_*"), *rest]
+    moved["native_extensions"] = [dict(first, filename_glob="tessera_window_gemv" + "?" * 16 + ".so"), *rest]
     drift = trc._answer_drift(
         trc.TESSERA_DEV_PIN_ANSWER,
         trc.contract_answer(
             trc._parse(moved, commit="t", sha="t", path="<moved>")))
-    assert any("native_extensions[tessera_nvfp4_].filename_glob" in line
+    assert any("native_extensions[tessera_window_gemv].filename_glob" in line
                for line in drift), drift
 
 
@@ -494,13 +501,15 @@ def test_the_tool_applies_the_rule_the_contract_names():
 
 
 @pytest.mark.parametrize("mapped", [
-    "/root/.cache/torch_extensions/py312_cu130/tessera_nvfp4_9f2c/"
-    "tessera_nvfp4_9f2c.so",
-    "/dqruns/ext/tessera_nvfp4_abcdef01/tessera_nvfp4_abcdef01.so",
+    "/root/.cache/torch_extensions/py312_cu130/tessera_window_gemv9f2c/"
+    "tessera_window_gemv9f2c.so",
+    "/dqruns/ext/tessera_window_gemvabcdef01/tessera_window_gemvabcdef01.so",
 ])
 def test_a_resident_tessera_decoder_is_matched(mapped):
     """The `.so` the plugin JIT-builds carries a build-identity suffix, so the
-    rule has to be applied to the glob the contract publishes."""
+    rule has to be applied to the glob the contract publishes. (At v29 the
+    witness paths were the retired nvfp4 row's; v31 carries only the
+    window-GEMV row.)"""
     assert _serve_fingerprint().matches_tracked_extension(mapped) is True
 
 

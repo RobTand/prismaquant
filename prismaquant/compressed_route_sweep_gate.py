@@ -69,9 +69,16 @@ What this leg does NOT see
   question is visible; answering it needs an attested table this lane does not
   have.
 * **MoE method classes.** No small packed-MoE compressed-tensors artifact was
-  available to sweep, so no MoE method class is in the table and an MoE
+  available to sweep, so :data:`METHOD_ACTIVATION` is empty and an MoE
   artifact reads NOT VERIFIED until one is observed.  That is the recorded
-  gap, deliberately, rather than a table written from reading source.
+  gap, deliberately, rather than a table written from reading source (#706).
+  Closing it takes one observation: run
+  ``validate_native_export --route-sweep-out`` in the pinned serving image
+  against any packed-MoE compressed-tensors artifact, read the resolved
+  ``quant_method`` class off the ``FusedMoE`` rows together with the method
+  object's own attributes, and add the entry with a test on the recorded
+  sweep as a fixture -- the same shape as
+  ``tests/fixtures/compressed_route_sweep_0p6b/``.
 * **A compiled or graph-captured forward.** Forward hooks do not run under
   CUDA-graph replay, so a sweep whose load was not ``enforce_eager`` is NOT
   VERIFIED rather than trusted with zeros.
@@ -204,6 +211,21 @@ SCHEME_ACTIVATION = {
     "CompressedTensorsW8A16Fp8": _weight_only,
     "CompressedTensorsWNA16": _weight_only,
 }
+
+#: Method classes that carry their OWN activation contract, for served modules
+#: whose ``quant_method`` resolves with NO ``scheme`` object (PQ #706).  Each
+#: entry reads the contract off the row the sweep took -- the method class and
+#: module plus the method object's own attributes -- exactly as
+#: :data:`SCHEME_ACTIVATION` does for schemes.  Adding a class means having
+#: SWEPT it on a real serve in the pinned image
+#: (``validate_native_export --route-sweep-out`` against a packed-MoE
+#: compressed-tensors artifact); a method class absent here is NOT VERIFIED
+#: and says so by name.  No packed-MoE artifact has been swept, so this table
+#: is empty by deliberation rather than by omission, and an MoE artifact reads
+#: NOT VERIFIED until one is observed -- never a pass and never a guess from
+#: reading vLLM's source.
+METHOD_ACTIVATION: dict[str, Any] = {}
+
 
 #: Quantization-method classes that carry NO weight contract from
 #: ``config_groups`` and are therefore neither priced nor a refusal.  The KV
@@ -394,11 +416,20 @@ def _served_activation(row: Mapping[str, Any]) -> tuple[dict | None, str]:
         method = row.get("quant_method")
         if method in UNQUANTIZED_METHODS:
             return _descriptor(False), "unquantized"
+        reader = METHOD_ACTIVATION.get(str(method))
+        if reader is not None:
+            descriptor = reader(row)
+            if descriptor is None:
+                return None, (
+                    f"module {row.get('name')!r} resolved quant_method "
+                    f"{method!r} but its own fields do not carry the numbers "
+                    "the activation descriptor is read from")
+            return descriptor, "method"
         return None, (
             f"module {row.get('name')!r} resolved quant_method "
             f"{method!r} with no scheme, and this gate has observed no "
             "activation contract for that method class (no packed-MoE "
-            "artifact has been swept)")
+            "artifact has been swept; see METHOD_ACTIVATION)")
     reader = SCHEME_ACTIVATION.get(str(scheme))
     if reader is None:
         return None, (

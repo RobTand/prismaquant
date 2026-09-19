@@ -14,6 +14,13 @@ Every field here is derived from bytes on disk, never declared:
     one source archive plus the roster the installer excludes; the loader
     recomputes the installer's identity, the producer's source-tree seal and
     the installed seal from those bytes.
+``image_manifest`` / ``image_platform_manifest``
+    the pinned image bytes, plus -- when the pin is a multi-platform index
+    rather than a concrete platform manifest -- the platform manifest this
+    host resolved, named by the plan and verified against the index's own
+    entry before emission.  The loader re-verifies the whole chain from the
+    bytes; the executing container's image ID may then be the index digest,
+    the platform manifest digest, or the config digest.
 ``production_dependencies``
     one entry per (native run, production library it actually loaded), bound
     to a full-engine library with the same bytes. A native library whose bytes
@@ -38,7 +45,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.measured_runtime_prices import RuntimePriceError, parse_runtime_context  # noqa: E402
-from prismaquant.runtime_provenance import SCHEMA, identity_sha256, load_runtime_relation  # noqa: E402
+from prismaquant.runtime_provenance import (  # noqa: E402
+    INDEX_IMAGE_MANIFEST_TYPES, SCHEMA, _resolve_image_index_entry,
+    identity_sha256, load_runtime_relation,
+)
 
 INSTRUMENTATION_ROLES = ("resource_collector", "blas_workspace_observer")
 
@@ -176,6 +186,25 @@ def build(args) -> int:
                 "image_manifest": reference(plan["image_manifest"]), "package_source": package_source,
                 "runs": runs, "full_engine_run_id": full_id,
                 "production_dependencies": dependencies, "full_engine_extra_libraries": extras}
+    if plan.get("image_platform_manifest") is not None:
+        # An index pin resolves its platform manifest on the executing host,
+        # which is this process: verify the linkage now (the loader
+        # re-verifies it from the bytes) rather than emitting a relation the
+        # loader must refuse.
+        relation["image_platform_manifest"] = reference(plan["image_platform_manifest"])
+        index = read(plan["image_manifest"])
+        if index.get("mediaType") not in INDEX_IMAGE_MANIFEST_TYPES:
+            raise RuntimePriceError(
+                "the plan names a platform manifest beside a concrete pinned manifest")
+        platform = read(plan["image_platform_manifest"])
+        entry = _resolve_image_index_entry(
+            index, "sha256:" + relation["image_platform_manifest"]["sha256"],
+            "plan image index")
+        if platform.get("mediaType") != entry["mediaType"]:
+            raise RuntimePriceError(
+                "the plan's platform manifest is not the index entry it names")
+        if not isinstance(platform.get("config"), dict) or "digest" not in platform["config"]:
+            raise RuntimePriceError("the plan's platform manifest names no config digest")
     out.write_text(json.dumps(relation, indent=1, sort_keys=True, allow_nan=False) + "\n")
 
     report = {"schema": "prismaquant.runtime_relation_emission.v1", "relation_path": str(out),

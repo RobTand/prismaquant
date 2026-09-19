@@ -846,8 +846,18 @@ def admitted_fixed_resources(table: MeasuredRuntimeTable) -> RuntimeResources:
     Anything that adds `fixed_resources` to a device budget reads it through
     here, so a fixed-resource refusal is spent where the fixed resources are
     used rather than where the priced rows are.
+
+    A v1 table carries no `runtime_provenance` and calls no gate, so it is
+    refused here rather than lent an unattested charge (PQ #560 defect 3: the
+    v1 schema stays parseable so history remains readable, but it prices
+    nothing and budgets nothing; re-emit through
+    `native_receipt_table.emit_native_receipt_table` as v2).
     """
-    if table.runtime_provenance is not None and not table.fixed_resources_admitted:
+    if table.runtime_provenance is None:
+        raise RuntimePriceError(
+            "v1 fixed runtime resources carry no producer admission: this table names no "
+            "runtime provenance, so no gate attested its fixed charge")
+    if not table.fixed_resources_admitted:
         raise RuntimePriceError(
             "v2 fixed runtime resources require full-engine producer admission: "
             + (table.fixed_resources_refusal or "the loader performed no admission"))
@@ -1097,7 +1107,16 @@ def build_runtime_resources(table: MeasuredRuntimeTable, candidates: Mapping[str
     # `table.fixed_resources`, and `admit_native_rows` is what attests those
     # rows against their receipts. The fixed charge is gated at its own
     # consumer, `admitted_fixed_resources`.
-    if table.runtime_provenance is not None and not table.native_rows_admitted:
+    #
+    # A v1 table carries no `runtime_provenance` and calls no gate, so it is
+    # refused here rather than priced unattested (PQ #560 defect 3: the v1
+    # schema stays parseable so history remains readable, but it prices
+    # nothing and budgets nothing).
+    if table.runtime_provenance is None:
+        raise RuntimePriceError(
+            "v1 runtime prices carry no producer admission: this table names no runtime "
+            "provenance, so no gate attested its rows")
+    if not table.native_rows_admitted:
         raise RuntimePriceError(
             "v2 runtime prices require native-row producer admission through the loader")
     rows = {row.key: row for row in table.rows}

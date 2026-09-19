@@ -293,16 +293,19 @@ def test_admission_is_true_under_a_released_pin_on_the_real_packaged_contract(
     """The other half of "False by the pin".
 
     With ONLY the release boundary satisfied -- the real packaged contract,
-    the real parser, the real cell logic -- both receipted rungs are admitted
+    the real parser, the real cell logic -- the receipted rung is admitted
     and a rate the contract does not publish is not. That is what proves the
     refusal above is the pin's and not an artefact of an unreadable table.
+    (At v29 two dense rungs were receipted; v31 withdraws the dense E4M3
+    cells with the retired window-GEMV dispatch, so E4M3 R1024 now reads
+    False beside the admitted E2M1 R896.)
     """
     assert tr._release_pin_satisfied() is True
     context = _dense_context()
     assert tr.tessera_lane_attested(
         "TESSERA_E2M1_K2_R896", serving_context=context) is True
     assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=context) is True
+        "TESSERA_E4M3_K1_R1024", serving_context=context) is False
     # a serialisable rate no cell names, on a published family
     assert tr.tessera_lane_attested(
         "TESSERA_E2M1_K2_R512", serving_context=context) is False
@@ -325,8 +328,10 @@ def test_the_synthesized_spec_reads_the_same_lookup(released_pin):
     context = _dense_context()
     assert tr.synthesize_tessera_spec(
         "TESSERA_E2M1_K2_R896", serving_context=context).producer_eligible is True
+    # v31 withdraws the dense E4M3 cells: the wire can still carry the rung,
+    # but no runtime serves it, so the AND fails on the second conjunct.
     assert tr.synthesize_tessera_spec(
-        "TESSERA_E4M3_K1_R1024", serving_context=context).producer_eligible is True
+        "TESSERA_E4M3_K1_R1024", serving_context=context).producer_eligible is False
     assert tr.synthesize_tessera_spec(
         "TESSERA_E2M1_K2_R512", serving_context=context).producer_eligible is False
     assert tr.synthesize_tessera_spec(

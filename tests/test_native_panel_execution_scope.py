@@ -46,8 +46,10 @@ def _scope(panel, executing_image):
 
 CONTRACT = "e2m1_group16_ue4m3_static"
 PLATFORM = "sm_121"
-#: The pinned contract's digest, as the 09-18 cells stamped it.
-PIN_SHA256 = "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
+#: The pinned contract's digest, as the cells stamped it. Re-pinned with the
+#: v31 contract (Tessera #551, PrismaQuant #699); the quantizer table fixture
+#: is byte-identical there, so only the digest moves.
+PIN_SHA256 = "80d58f1a528638339a2d74c6e5b97a9a8f0458687515db531a4685489aa05809"
 EXECUTED = ("eugr/spark-vllm@sha256:"
             "0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c")
 ATTESTED = ("vllm/vllm-openai@sha256:"

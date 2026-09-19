@@ -65,7 +65,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Mapping, Sequence, TYPE_CHECKING
 
 from tessera.errors import GrammarError
 
@@ -97,6 +97,8 @@ __all__ = [
     "leave_one_anchor_out",
     "predict_stack_rates",
     "rate_surface_solver_menu",
+    "selective_encode_plan",
+    "stack_transfer_regret_gate",
     "uniform_column_schedule",
 ]
 
@@ -467,6 +469,59 @@ def leave_one_anchor_out(
     }
 
 
+def _greedy_allocate(score: Mapping[str, Mapping[int, float]],
+                     unit_bytes: Mapping[str, Mapping[int, int]],
+                     byte_budget: int) -> dict[str, int]:
+    """Greedy marginal allocation: the rule the lambda path uses.
+
+    Factored out of :func:`allocation_regret` so the stack regret gate runs
+    the identical allocator rather than a second implementation of it.  Exact
+    only for separable convex per-unit curves; the regret comparison stays
+    valid because both arms run this same rule.
+    """
+    chosen: dict[str, int] = {}
+    for unit_name in sorted(score):
+        rates = sorted(score[unit_name])
+        chosen[unit_name] = rates[0]
+    spent = sum(
+        unit_bytes[unit_name][rate] for unit_name, rate in chosen.items()
+    )
+    if spent > byte_budget:
+        raise TesseraFormatError(
+            f"the cheapest assignment already costs {spent} bytes, over "
+            f"the {byte_budget}-byte budget"
+        )
+    while True:
+        best_unit = None
+        best_rate = None
+        best_gain = 0.0
+        for unit_name, rate in chosen.items():
+            rates = sorted(score[unit_name])
+            position = rates.index(rate)
+            for candidate in rates[position + 1:]:
+                delta_bytes = (
+                    unit_bytes[unit_name][candidate]
+                    - unit_bytes[unit_name][rate]
+                )
+                if delta_bytes <= 0 or spent + delta_bytes > byte_budget:
+                    continue
+                delta_loss = (
+                    score[unit_name][rate] - score[unit_name][candidate]
+                )
+                gain = delta_loss / delta_bytes
+                if gain > best_gain:
+                    best_gain = gain
+                    best_unit = unit_name
+                    best_rate = candidate
+        if best_unit is None:
+            return chosen
+        spent += (
+            unit_bytes[best_unit][best_rate]
+            - unit_bytes[best_unit][chosen[best_unit]]
+        )
+        chosen[best_unit] = best_rate
+
+
 def allocation_regret(
     surfaces: Mapping[str, TesseraRateSurface],
     truth: Mapping[str, Mapping[int, float]],
@@ -492,49 +547,6 @@ def allocation_regret(
     if type(byte_budget) is not int or byte_budget <= 0:
         raise TesseraFormatError("byte_budget must be a positive integer")
 
-    def allocate(score: Mapping[str, Mapping[int, float]]) -> dict[str, int]:
-        chosen: dict[str, int] = {}
-        for unit_name in sorted(score):
-            rates = sorted(score[unit_name])
-            chosen[unit_name] = rates[0]
-        spent = sum(
-            unit_bytes[unit_name][rate] for unit_name, rate in chosen.items()
-        )
-        if spent > byte_budget:
-            raise TesseraFormatError(
-                f"the cheapest assignment already costs {spent} bytes, over "
-                f"the {byte_budget}-byte budget"
-            )
-        while True:
-            best_unit = None
-            best_rate = None
-            best_gain = 0.0
-            for unit_name, rate in chosen.items():
-                rates = sorted(score[unit_name])
-                position = rates.index(rate)
-                for candidate in rates[position + 1:]:
-                    delta_bytes = (
-                        unit_bytes[unit_name][candidate]
-                        - unit_bytes[unit_name][rate]
-                    )
-                    if delta_bytes <= 0 or spent + delta_bytes > byte_budget:
-                        continue
-                    delta_loss = (
-                        score[unit_name][rate] - score[unit_name][candidate]
-                    )
-                    gain = delta_loss / delta_bytes
-                    if gain > best_gain:
-                        best_gain = gain
-                        best_unit = unit_name
-                        best_rate = candidate
-            if best_unit is None:
-                return chosen
-            spent += (
-                unit_bytes[best_unit][best_rate]
-                - unit_bytes[best_unit][chosen[best_unit]]
-            )
-            chosen[best_unit] = best_rate
-
     predicted_score = {
         unit_name: {
             rate: surfaces[unit_name].predict(rate)
@@ -542,8 +554,8 @@ def allocation_regret(
         }
         for unit_name in surfaces
     }
-    on_interpolated = allocate(predicted_score)
-    on_truth = allocate(truth)
+    on_interpolated = _greedy_allocate(predicted_score, unit_bytes, byte_budget)
+    on_truth = _greedy_allocate(truth, unit_bytes, byte_budget)
     loss_interpolated = sum(
         truth[unit_name][rate] for unit_name, rate in on_interpolated.items()
     )
@@ -1010,4 +1022,225 @@ def predict_stack_rates(
         "intercept_sample_size": int(n),
         "model_error": errors,
         "currency": stack.currency,
+    }
+
+
+def _percentile(sorted_values: Sequence[float], percent: float) -> float:
+    """Linear-interpolation percentile of an already sorted sample."""
+    if not sorted_values:
+        raise TesseraFormatError("no draws to take a percentile of")
+    rank = (len(sorted_values) - 1) * percent / 100.0
+    low = int(math.floor(rank))
+    high = int(math.ceil(rank))
+    if low == high:
+        return float(sorted_values[low])
+    weight = rank - low
+    return float(sorted_values[low] * (1.0 - weight) + sorted_values[high] * weight)
+
+
+def stack_transfer_regret_gate(
+    records: Mapping[str, StackRateSample],
+    *,
+    unit_bytes: Mapping[str, Mapping[int, int]],
+    byte_budget: int,
+    draws: int = 64,
+    seed: int = 0,
+    max_regret_pct: float = 0.1,
+    budget_sensitivity: Sequence[float] = (0.5, 0.75, 1.0, 1.25),
+) -> dict:
+    """The study's regret estimate on the campaign's own data (PQ #495.5).
+
+    For each stack a hold-out law is fitted over every OTHER stack and the
+    base prediction made from this stack's own sample.  Each draw then
+    resamples that stack's intercept experts WITH replacement, refits the
+    intercept on the draw, and predicts every expert from its own measured
+    reference value; the resampled totals are that draw's truth.  Both arms
+    -- deciding on the base prediction, deciding on the draw's truth -- run
+    the identical greedy allocator at the run's byte budget and both are
+    scored on truth, so each draw's ``regret_pct`` is the cost of deciding on
+    predicted values under intercept noise the campaign actually measured.
+
+    The gate is p90 over ``draws`` (at least 50, per the study) against
+    ``max_regret_pct``.  A stack that fails falls back to the full three-anchor
+    schedule; that fallback lives in the driver, not here.  ``sensitivity``
+    replays the same draws at scaled budgets and is REPORTED, never gated on.
+
+    This is a decision instrument, not a measurement: it emits no price, and
+    nothing here encodes, allocates, or serves.  No KL or served-quality claim
+    rides on it.
+    """
+    import random
+
+    samples = _stack_rate_samples(records)
+    if len(samples) < 2:
+        raise TesseraFormatError(
+            "the regret gate needs at least two stack records: a pooled slope "
+            "fitted on the stack it predicts is not a hold-out")
+    if type(draws) is not int or draws < 50:
+        raise TesseraFormatError(
+            f"draws must be an integer of at least 50 (the study's floor), "
+            f"got {draws!r}")
+    if type(byte_budget) is not int or byte_budget <= 0:
+        raise TesseraFormatError("byte_budget must be a positive integer")
+    if not math.isfinite(max_regret_pct) or max_regret_pct < 0.0:
+        raise TesseraFormatError("max_regret_pct must be a finite nonnegative number")
+    factors = tuple(budget_sensitivity)
+    if (not factors or any(not math.isfinite(f) or f <= 0.0 for f in factors)):
+        raise TesseraFormatError("budget_sensitivity must be nonempty positive factors")
+
+    references = {int(sample.reference_q256) for sample in samples.values()}
+    if len(references) != 1:
+        raise TesseraFormatError(
+            f"the stacks disagree about the reference rung ({sorted(references)})")
+    reference = references.pop()
+    targets = sorted(set.intersection(
+        *(set(sample.target_q256) for sample in samples.values())))
+    if not targets:
+        raise TesseraFormatError("the stacks share no predictable target rung")
+    menus = {name: tuple(sorted((reference, *targets))) for name in samples}
+    for name, menu in menus.items():
+        costs = unit_bytes.get(name) if isinstance(unit_bytes, Mapping) else None
+        missing = [rate for rate in menu
+                   if not isinstance(costs, Mapping) or costs.get(rate) is None]
+        if missing:
+            raise TesseraFormatError(
+                f"{name}: no byte cost for rung(s) {missing}; regret at a byte "
+                "budget is meaningless without the bytes")
+
+    laws, base_predicted = {}, {}
+    for name in sorted(samples):
+        law = fit_stack_transfer_law(samples, hold_out=name)
+        laws[name] = law
+        prediction = predict_stack_rates(samples[name], law)
+        base_predicted[name] = {reference: samples[name].reference_total(),
+                                **prediction["predicted"]}
+
+    rng = random.Random(seed)
+    draw_scores: list[dict[str, dict[int, float]]] = []
+    for _ in range(draws):
+        truth: dict[str, dict[int, float]] = {}
+        for name in sorted(samples):
+            sample = samples[name]
+            resampled = rng.choices(list(sample.sampled_experts),
+                                    k=len(sample.sampled_experts))
+            perturbed = StackRateSample(
+                stack=sample.stack, projections=sample.projections,
+                experts=sample.experts, reference_q256=sample.reference_q256,
+                reference_mse=sample.reference_mse,
+                sampled_experts=tuple(resampled),
+                sampled_mse=sample.sampled_mse, weights=sample.weights,
+                currency=sample.currency)
+            redrawn = predict_stack_rates(perturbed, laws[name])
+            truth[name] = {reference: sample.reference_total(),
+                           **redrawn["predicted"]}
+        draw_scores.append(truth)
+
+    def regrets_at(budget: int) -> list[float]:
+        values = []
+        for truth in draw_scores:
+            on_predicted = _greedy_allocate(base_predicted, unit_bytes, budget)
+            on_truth = _greedy_allocate(truth, unit_bytes, budget)
+            loss_predicted = math.fsum(
+                truth[unit][rate] for unit, rate in on_predicted.items())
+            loss_truth = math.fsum(
+                truth[unit][rate] for unit, rate in on_truth.items())
+            values.append((loss_predicted / loss_truth - 1.0) * 100.0)
+        return sorted(values)
+
+    ordered = regrets_at(byte_budget)
+    cheapest = sum(min(unit_bytes[name][rate] for rate in menus[name])
+                   for name in samples)
+    sensitivity = {}
+    for factor in factors:
+        budgeted = max(1, int(byte_budget * factor))
+        if budgeted < cheapest:
+            sensitivity[str(factor)] = {
+                "byte_budget": budgeted,
+                "feasible": False,
+            }
+            continue
+        curve = regrets_at(budgeted)
+        sensitivity[str(factor)] = {
+            "byte_budget": budgeted,
+            "feasible": True,
+            "p50_regret_pct": _percentile(curve, 50.0),
+            "p90_regret_pct": _percentile(curve, 90.0),
+            "max_regret_pct": curve[-1],
+        }
+    p90 = _percentile(ordered, 90.0)
+    return {
+        "schema": "prismaquant.stack_transfer_regret_gate.v1",
+        "stacks": sorted(samples),
+        "reference_q256": reference,
+        "target_q256": targets,
+        "currency": samples[sorted(samples)[0]].currency,
+        "draws": draws,
+        "seed": seed,
+        "byte_budget": byte_budget,
+        "max_regret_pct": float(max_regret_pct),
+        "regrets_pct": ordered,
+        "p50_regret_pct": _percentile(ordered, 50.0),
+        "p90_regret_pct": p90,
+        "max_regret_pct_observed": ordered[-1],
+        "passes": bool(p90 <= max_regret_pct),
+        "predicted_assignment": _greedy_allocate(base_predicted, unit_bytes, byte_budget),
+        "sensitivity": sensitivity,
+    }
+
+
+def selective_encode_plan(
+    winners: Mapping[str, int],
+    *,
+    stack_experts: Mapping[str, Sequence[int]],
+    measured_cells: Sequence[tuple[str, int, int]],
+) -> dict:
+    """The selective encode of the allocated winners, as data (PQ #495.4).
+
+    After the scalar allocation picks one rate per stack, every stack whose
+    winner is not already encoded on every expert needs its remaining experts
+    encoded at that one rate before joint AURA runs
+    (``load_measured_anchor_input`` admits exact measured wires only).  This
+    function emits those missing ``(stack, expert, rate)`` cells; the driver
+    encodes them on the existing anchor path and the repair loop re-solves on
+    truth-where-known.  A winner the census already covers emits nothing: a
+    reference-rate winner needs no pass by construction, not by special case.
+    """
+    if not isinstance(winners, Mapping) or not winners:
+        raise TesseraFormatError("winners must name at least one stack rate")
+    if not isinstance(stack_experts, Mapping):
+        raise TesseraFormatError("stack_experts must map each stack to its experts")
+    measured = set()
+    for cell in measured_cells:
+        if (not isinstance(cell, (tuple, list)) or len(cell) != 3
+                or not isinstance(cell[0], str)
+                or type(cell[1]) is not int or type(cell[2]) is not int):
+            raise TesseraFormatError(
+                f"measured cell {cell!r} is not a (stack, expert, rate) triple")
+        measured.add((cell[0], cell[1], cell[2]))
+    rows: list[dict[str, Any]] = []
+    covered = 0
+    for stack in sorted(winners):
+        rate = winners[stack]
+        if type(rate) is not int:
+            raise TesseraFormatError(f"{stack}: winner rate {rate!r} is not an integer")
+        experts = stack_experts.get(stack)
+        if experts is None:
+            raise TesseraFormatError(
+                f"{stack}: no expert frame; a winner without a frame encodes nothing")
+        unique = sorted(set(experts))
+        if any(type(expert) is not int for expert in unique) or len(unique) != len(
+                list(experts)):
+            raise TesseraFormatError(f"{stack}: the expert frame is not unique integers")
+        for expert in unique:
+            if (stack, expert, rate) in measured:
+                covered += 1
+            else:
+                rows.append({"stack": stack, "expert": expert,
+                             "rate_q256": rate, "reason": "winner_not_encoded"})
+    return {
+        "schema": "prismaquant.stack_selective_encode_plan.v1",
+        "winners": {stack: winners[stack] for stack in sorted(winners)},
+        "rows": rows,
+        "missing_cell_count": len(rows),
+        "already_measured_cell_count": covered,
     }
