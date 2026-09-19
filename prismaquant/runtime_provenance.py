@@ -65,20 +65,35 @@ class ArtifactReader:
 
     def json(self, reference, where):
         path, raw = self.bytes(reference, where)
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise RuntimePriceError(f"{where}: duplicate JSON key {key!r}")
-                result[key] = value
-            return result
-        def nonfinite(value):
-            raise ValueError("nonfinite JSON number " + value)
-        try:
-            value = json.loads(raw, object_pairs_hook=unique, parse_constant=nonfinite)
-        except (ValueError, UnicodeError) as exc:
-            raise RuntimePriceError(f"{where}: invalid JSON artifact {path}: {exc}") from exc
-        return path, _mapping(value, where)
+        return path, _strict_json(raw, path, where)
+
+
+def _unique_json_object(pairs, where):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise RuntimePriceError(f"{where}: duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite(value):
+    raise ValueError("nonfinite JSON number " + value)
+
+
+def _strict_json(raw, path, where):
+    """Producer JSON with the same bar as every other artifact read here.
+
+    Duplicate keys and nonfinite numbers are refused rather than resolved by
+    last-wins or float parsing, so a manifest that carries a family's name
+    twice or through a NaN cannot slip past the coverage check below.
+    """
+    try:
+        value = json.loads(raw, object_pairs_hook=lambda pairs: _unique_json_object(pairs, where),
+                           parse_constant=_reject_nonfinite)
+    except (ValueError, UnicodeError) as exc:
+        raise RuntimePriceError(f"{where}: invalid JSON artifact {path}: {exc}") from exc
+    return _mapping(value, where)
 
 
 def _source_digest(files):
@@ -1293,6 +1308,78 @@ def _native_world_size(panel):
     return world
 
 
+def _served_artifact_families(relation):
+    """Route families the full-engine run's served artifact exercises.
+
+    D39 leg (b) residual (#570): byte coverage cannot see a route class that
+    loads no library -- the bf16 rows of the 2026-09-13 control were admitted
+    against engine-a5, which served a uniform-FP8 artifact and never ran a
+    bf16 route. The relation's configuration names the served artifact, so its
+    serving manifest must carry every priced route's family.
+
+    The manifest is read, not bound: the configuration bytes naming it are
+    digest-bound, and this check only adds refusals -- a manifest that listed
+    a family the serve never exercised would degrade to today's byte-coverage
+    behavior, never weaker. A missing configuration field, a missing or
+    unreadable manifest, or a module naming no family refuses rather than
+    passing silently.
+    """
+    record, reader = relation["record"], relation["reader"]
+    _, configuration = reader.json(record["configuration"], "selected serving configuration")
+    artifact = configuration.get("artifact")
+    if not isinstance(artifact, Mapping):
+        raise RuntimePriceError("selected serving configuration names no served artifact")
+    path = artifact.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise RuntimePriceError("selected serving configuration names no served artifact path")
+    manifest_path = Path(path)
+    if not manifest_path.is_absolute():
+        manifest_path = reader.root / manifest_path
+    manifest_path = manifest_path / "tessera_serving_manifest.json"
+    try:
+        raw = manifest_path.read_bytes()
+    except OSError as exc:
+        raise RuntimePriceError(
+            f"served artifact manifest: cannot read artifact {manifest_path}: {exc}") from exc
+    manifest = _strict_json(raw, manifest_path, "served artifact manifest")
+    modules = manifest.get("modules")
+    if not isinstance(modules, Mapping) or not modules:
+        raise RuntimePriceError("served artifact manifest names no modules, so it exercises no route family")
+    served = set()
+    for name, module in modules.items():
+        family = _mapping(module, f"served artifact module {name!r}").get("family")
+        if not isinstance(family, str) or not family.strip():
+            raise RuntimePriceError(f"served artifact module {name!r} names no route family")
+        served.add(family)
+    return served
+
+
+def _require_served_route_family(row, served):
+    """A row may only price a route family the served artifact exercised.
+
+    The family is read off the row binding's own declared route policy
+    (`TESSERA_NVFP4:resident`, `TESSERA_FP8:resident`, ...) -- the contract's
+    route vocabulary, shared with the manifest's per-module `family` field --
+    never derived through a second mapping in this repo. A binding that names
+    no family, or one the manifest does not carry, is a price for a serve
+    nobody ran and is refused by name.
+    """
+    try:
+        route = json.loads(row.binding.as_dict()["operator_route"])
+    except (ValueError, TypeError, KeyError) as exc:
+        raise RuntimePriceError(
+            f"native row {row.unit} names no served route family in its binding operator_route") from exc
+    policy = route.get("policy") if isinstance(route, Mapping) else None
+    family = policy.split(":")[0] if isinstance(policy, str) else ""
+    if not family:
+        raise RuntimePriceError(
+            f"native row {row.unit} names no served route family in its binding operator_route")
+    if family not in served:
+        raise RuntimePriceError(
+            f"native row {row.unit} prices route family {family!r}, which the served artifact "
+            f"never exercised (manifest families: {sorted(served)})")
+
+
 def admit_native_rows(table, relation):
     """Reuse exact same-panel producer gates before accepting v2 table rows."""
     from .native_moe_panel import consume_moe_receipt
@@ -1426,6 +1513,12 @@ def admit_native_rows(table, relation):
         if not ranked:
             _equal(row.resources.peak_scratch_bytes, max(scratch), "native maximum phase scratch")
             _equal(row.resources.activation_bytes, max(activation), "native maximum phase input residency")
+    # D39 leg (b) residual (#570): byte coverage cannot see a route class that
+    # loads no library, so the served artifact's manifest must carry every
+    # priced route's family. Read-only -- this adds refusals, never admission.
+    served = _served_artifact_families(relation)
+    for row in table.rows:
+        _require_served_route_family(row, served)
 
 
 def admit_runtime_provenance(table):
