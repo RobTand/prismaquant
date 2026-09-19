@@ -41,6 +41,14 @@ def _live_manifest_sha256():
 
 GIB = 1024 ** 3
 
+# The sealed hostcap32 campaign lives on the fleet's shared mount; skip --
+# never fail -- where it is absent (GitHub CI has no /mnt/shared, the
+# convention tests/test_glm_campaign_streaming.py:188 established).
+real_plan = pytest.mark.skipif(
+    not os.path.exists(PLAN_PATH),
+    reason=f"the sealed campaign {PLAN_PATH} is absent (GitHub CI has no "
+           f"/mnt/shared)")
+
 
 def _sha_file(path):
     digest = hashlib.sha256()
@@ -140,6 +148,7 @@ def _campaign_of(records):
 # The sealed file digests are the campaign binding: if these move, every
 # record's campaign block must move with them (checked again inside T2/T8).
 
+@real_plan
 def test_sealed_inputs_are_the_contract_campaign():
     assert _sha_file(PLAN_PATH) == PLAN_SHA256
     assert _sha_file(PREPARED_PATH) == PREPARED_SHA256
@@ -153,6 +162,7 @@ def test_sealed_inputs_are_the_contract_campaign():
     assert manifest["annotations"]["counts"]["renders"] == 197990
 
 
+@real_plan
 def test_determinism_real_plan_byte_identical():
     first = _build_real()
     second = _build_real()
@@ -166,6 +176,7 @@ def test_determinism_real_plan_byte_identical():
             == jl.seal_manifest_bytes(second["adjoint_manifest"]))
 
 
+@real_plan
 def test_real_plan_45_quanta_shape():
     built = _build_real()
     records = built["records"]
@@ -204,6 +215,7 @@ def test_real_plan_45_quanta_shape():
     assert built["coverage"]["coverage_sha256"] == coverage["coverage_sha256"]
 
 
+@real_plan
 def test_real_plan_chunk_derivation_pinned():
     built = _build_real()
     assert built["derivation"]["chunk_target_bytes"] == 40 * GIB
@@ -228,6 +240,7 @@ def test_real_plan_chunk_derivation_pinned():
         assert manifest["total_bytes"] == total
 
 
+@real_plan
 def test_real_plan_stride_derivation_pinned():
     built = _build_real()
     assert built["derivation"]["stride"] == 8
@@ -246,6 +259,7 @@ def test_real_plan_stride_derivation_pinned():
         assert len(record["adjoint"]["chain_layers"]) <= 7
 
 
+@real_plan
 def test_real_plan_read_sets_pairwise_disjoint():
     built = _build_real()
     seen = {}
@@ -275,6 +289,7 @@ def test_real_plan_read_sets_pairwise_disjoint():
             os.path.join("layer-quanta", record["quantum_id"]))
 
 
+@real_plan
 def test_real_plan_output_space_layout():
     built = _build_real()
     record = built["records"][13]
@@ -290,6 +305,7 @@ def test_real_plan_output_space_layout():
     assert record["read_set"]["source_phase"]["name"] == "layer-13"
 
 
+@real_plan
 def test_real_plan_slice_manifests_are_standalone_v1():
     built = _build_real()
     for quantum_id, manifest in built["slice_manifests"].items():
@@ -334,6 +350,7 @@ def test_real_plan_slice_manifests_are_standalone_v1():
         assert len(blob) <= 64 * 1024 * 1024
 
 
+@real_plan
 def test_real_plan_adjoint_manifest():
     built = _build_real()
     manifest = built["adjoint_manifest"]
@@ -365,6 +382,7 @@ def test_real_plan_adjoint_manifest():
         "source_extents"]
 
 
+@real_plan
 def test_schema_every_record_real_plan():
     built = _build_real()
     for record in built["records"]:
@@ -403,6 +421,7 @@ def test_schema_every_record_real_plan():
         assert jl.canonical_sha256(headless) == record["identity_sha256"]
 
 
+@real_plan
 def test_check_quantum_for_campaign_real_plan():
     built = _build_real()
     campaign = _campaign_of(built["records"])
@@ -504,6 +523,7 @@ def test_synthetic_windows_union_checked_against_plan():
         "receipt_sha256": None}
 
 
+@real_plan
 def test_canonical_identity_matches_cost_stage_checkpoint():
     from prismaquant import cost_stage_checkpoint
     built = _build_real()
