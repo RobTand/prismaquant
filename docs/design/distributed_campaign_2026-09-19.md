@@ -253,9 +253,18 @@ Rules a builder implements without asking:
   boundary on an entry boundary (the same rule `residency_plan.validate_plan`
   enforces; a cut through an entry would hand a mover more bytes than its
   tokens reserved). Derivation in §5.3.
-- `windows` is the layer's slice of the plan's sealed retained-window
-  partition (`windows_by_layer`), copied verbatim with the window order
-  preserved — the quantum replays windows in this order and no other.
+- `windows` is the layer's slice of the sealed retained-window partition
+  (`windows_by_layer`), copied verbatim with the window order preserved —
+  the quantum replays windows in this order and no other. The partition is
+  sealed at derivation from one of exactly two sources: the plan's
+  `retained_window_budget_derivation` block (its original home), or — when
+  the run plan deliberately carries none because it is the single-run plan
+  the prepared completion binds — an explicit `window_partition` derivation
+  input carrying the same sealed record. Two sealed sources that disagree
+  refuse; neither source refuses; there is no default and no silent
+  override. The derivation envelope (v2) records which source was used and
+  the partition's own canonical digest, and each record's `windows` field
+  remains identity-sealed regardless of source.
 - `adjoint` names the nearest strided checkpoint boundary at or above L+1,
   the chain layers it must walk (descending, exclusive of the checkpoint,
   down to and including L+1's producing layer set — §6.2), the stage-A
