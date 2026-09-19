@@ -355,7 +355,7 @@ def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypat
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
         census={"model": "fixture", "attention_implementation": "eager"}, cells={},
         unit_scope=None, render_mirror_root=None, synthesized_now=0,
-        encoder_source_reuse=None,
+        encoder_source_reuse=None, head_walk_workers=None, head_walk_resumed_units=0,
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     # Called after the write, so it is where the live value can be read.
     during = {}
@@ -388,7 +388,7 @@ def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypat
     monkeypatch.setattr(bridge, "load_measured_anchor_input", lambda _inputs, **_kwargs: SimpleNamespace(
         census={"model": "fixture", "attention_implementation": "eager"}, cells={},
         unit_scope=None, render_mirror_root=None, synthesized_now=0,
-        encoder_source_reuse=None,
+        encoder_source_reuse=None, head_walk_workers=None, head_walk_resumed_units=0,
         payload={"provenance": {"hessian": {"calibration_identity": draw}}}))
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_args, **_kwargs:
         (torch.zeros((1, 512), dtype=torch.int64), {"provenance": {**draw, "nsamples": 1}}))
@@ -429,16 +429,23 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
     def intake(_inputs, **kwargs):
         # The command holds the CUDA reservation, so any shard it still has to
         # synthesize decodes on that device rather than on one CPU core (#549).
-        # The head walk reports under the one phase every joint prepare
-        # declares; a COST run's counter belongs to its own read schedule and
-        # intake reports nothing there (#678).
+        # The head walk reports under the one phase every joint pass read set
+        # opens on. Both commands declare `head` (#678, #741); only a run
+        # carrying a sealed V2 cost read schedule reports nothing here,
+        # because that schedule declares `cost_setup`/`cost_head` instead and
+        # the worker refuses a name the submission did not seal. The walk
+        # banks its verified units under the command's own root and reuses
+        # them only when the submission said --resume (#754).
         assert kwargs == {"reader": None, "synthesis_device": "cuda",
-                          "progress_phase": "head" if command == "prepare" else None,
+                          "progress_phase": "head",
+                          "head_checkpoint": tmp_path / command / "head-walk",
+                          "head_resume": False,
                           **({"verify_payloads": False} if command == "prepare" else
                              {"verify_payloads": False, "require_existing_renders": True})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
             cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
             progress_committed=0, encoder_source_reuse=None,
+            head_walk_workers=None, head_walk_resumed_units=0,
             payload={"provenance": {"hessian": {"calibration_identity": draw}}})
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
     if command == "run":

@@ -39,7 +39,7 @@ from prismaquant.native_moe_panel import FORMAT
 from prismaquant.native_operator_panel import operator_route_identity
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity as tensor_id
 from prismaquant.runtime_provenance import (
-    LATENCY_SCOPE_KIND, RUNTIME_COLLECTIVE_OP, RUNTIME_COLLECTIVE_SITE, admit_native_rows,
+    LATENCY_SCOPE_KIND, RUNTIME_COLLECTIVE_OP, RUNTIME_COLLECTIVE_SITE, ArtifactReader, admit_native_rows,
     routed_rank_bound,
 )
 from test_native_moe_panel import joined, receipt_fixture  # noqa: F401 - fixtures
@@ -490,8 +490,10 @@ def _routed_gate(joined_cell, tmp_path, *, world_size=1, samples=None, tensor_pa
     """An emitted routed row, plus the two inputs the loader's gate reads.
 
     The relation here is the minimum the intake gate consults for a native row:
-    the run it prices, the producer source-tree seal its wires must carry, and
-    the serving configuration whose digest the panel publishes. Whether the
+    the run it prices, the producer source-tree seal its wires must carry, the
+    serving configuration whose digest the panel publishes, and the served
+    artifact manifest that configuration names, which must carry the row's
+    route family (#570 leg (b) residual). Whether the
     relation is a complete device account is `load_runtime_relation`'s verdict,
     reported by the loader rather than re-derived here.
     """
@@ -513,8 +515,27 @@ def _routed_gate(joined_cell, tmp_path, *, world_size=1, samples=None, tensor_pa
         "operator_routes": {panel["unit"]: {panel["format"]: item["row"]["binding"]["operator_route"]}}})
     relation = {"configuration_sha256": panel["serving_config_sha256"], "full_engine_run_id": "engine",
                 "runs": {"native": {"raw": panel["runtime"],
-                                    "common": {"producer_source_tree_sha256": WIRE_SEAL}}}}
+                                    "common": {"producer_source_tree_sha256": WIRE_SEAL}}},
+                "record": {"configuration": _served_config(tmp_path)},
+                "reader": ArtifactReader(tmp_path)}
     return item, context, relation, panel, receipts
+
+
+def _served_config(tmp_path):
+    """The served artifact manifest the intake gate's family check reads.
+
+    The routed cell declares `TESSERA_FP8:resident`, so the manifest exercises
+    that family; a test that needs another roster rewrites the manifest file,
+    which carries no digest and is read, never bound.
+    """
+    artifact = tmp_path / "served-artifact"
+    artifact.mkdir(exist_ok=True)
+    (artifact / "tessera_serving_manifest.json").write_text(json.dumps(
+        {"modules": {"synthetic-module": {"family": "TESSERA_FP8"}}}))
+    config = {"artifact": {"path": str(artifact), "scope": "synthetic served artifact"}}
+    path = tmp_path / "served-config.json"
+    path.write_text(json.dumps(config, sort_keys=True))
+    return {"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def _gate_table(item, context, tmp_path, *, resources=None):
@@ -570,6 +591,18 @@ def test_the_intake_gate_refuses_a_world_the_context_does_not_price(joined, tmp_
     item, context, relation, _panel, _receipts = _routed_gate(joined, tmp_path, world_size=2,
                                                               tensor_parallel=1)
     with pytest.raises(RuntimePriceError, match="cover a world of 2"):
+        admit_native_rows(_gate_table(item, context, tmp_path), relation)
+
+
+def test_the_intake_gate_refuses_a_route_family_the_served_artifact_never_exercised(
+        joined, tmp_path):
+    """#570 leg (b) residual on the routed path: the cell declares
+    `TESSERA_FP8:resident`, so a manifest exercising only another family
+    refuses naming `TESSERA_FP8`, even though every receipt rehashes."""
+    item, context, relation, _panel, _receipts = _routed_gate(joined, tmp_path)
+    (tmp_path / "served-artifact" / "tessera_serving_manifest.json").write_text(json.dumps(
+        {"modules": {"synthetic-module": {"family": "TESSERA_BF16"}}}))
+    with pytest.raises(RuntimePriceError, match="TESSERA_FP8"):
         admit_native_rows(_gate_table(item, context, tmp_path), relation)
 
 

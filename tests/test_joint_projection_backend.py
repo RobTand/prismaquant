@@ -195,7 +195,8 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     data = SimpleNamespace(census={'model': 'fixture', 'attention_implementation': 'eager'},
         payload={'provenance': {'hessian': {'calibration_identity': draw}}},
         layer_render_bytes=lambda _: {0: 64}, formats_by_qname={'unit': ['BF16']}, cells={('unit', 'BF16'): {'render_origin': 'encoded'}},
-        unit_scope=None, render_mirror_root=None, synthesized_now=0)
+        unit_scope=None, render_mirror_root=None, synthesized_now=0,
+        head_walk_workers=None, head_walk_resumed_units=0)
     monkeypatch.setattr(bridge, 'load_measured_anchor_input', lambda *_args, **_kwargs: data)
     monkeypatch.setattr(calibration_data, 'load_calibration_input', lambda *_args, **_kwargs:
         (torch.zeros((512, 512), dtype=torch.int64), calibration))

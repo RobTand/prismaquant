@@ -14,6 +14,7 @@ served the wrong bytes.
 import hashlib
 import json
 import os
+import threading
 
 import pytest
 import torch
@@ -456,3 +457,182 @@ def test_the_reader_module_reads_safetensors_own_dtype_table():
     """No hand-rolled dtype map: the format's own spelling or no staged read."""
     assert residency_shard_reader._SAFETENSORS_DTYPES is not None
     assert residency_shard_reader._SAFETENSORS_DTYPES['BF16'] is torch.bfloat16
+
+
+# -- the span read: one stream or the mount's own (PQ #746) ------------------
+
+NFS_OPTIONS = ('rw,noatime,vers=4.2,rsize=1048576,wsize=1048576,namlen=255,hard,'
+               'proto=rdma,nconnect=16,port=20049,timeo=600,retrans=2,sec=sys')
+
+
+@pytest.fixture(autouse=True)
+def _forget_read_shape():
+    residency_shard_reader.reset_read_shape_cache_for_tests()
+    yield
+    residency_shard_reader.reset_read_shape_cache_for_tests()
+
+
+def _mount_table(tmp_path, rows, *, name='mounts'):
+    """A mount table of our own, in the kernel's own spelling."""
+    path = tmp_path / name
+    path.write_text(''.join(f'{device} {point} {fstype} {options} 0 0\n'
+                            for device, point, fstype, options in rows))
+    return path
+
+
+def _use_table(monkeypatch, table):
+    monkeypatch.setattr(residency_shard_reader, 'MOUNTS_PATH', str(table))
+    residency_shard_reader.reset_read_shape_cache_for_tests()
+
+
+def test_the_read_shape_is_the_mounts_own_two_numbers(tmp_path, monkeypatch):
+    """nconnect streams, rsize chunks -- neither one a constant of ours."""
+    _use_table(monkeypatch, _mount_table(tmp_path, [
+        ('/dev/root', '/', 'ext4', 'rw'),
+        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS),
+    ]))
+    assert residency_shard_reader._read_shape(
+        '/stage/prewarm/model-00001.safetensors.pbrange/0-100') == (16, 1048576)
+
+
+def test_the_nfs_mount_on_top_of_its_autofs_trigger_is_the_one_read(tmp_path, monkeypatch):
+    """The live table, not a tidied one: two rows, same point, NFS on top.
+
+    The first sweep of this change measured nothing because the autofs row
+    answered first and publishes no transport count. The table below is the
+    one /stage/prewarm actually has.
+    """
+    _use_table(monkeypatch, _mount_table(tmp_path, [
+        ('systemd-1', '/stage/prewarm', 'autofs',
+         'rw,relatime,fd=97,pgrp=1,timeout=0,minproto=5,maxproto=5,direct'),
+        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS),
+    ]))
+    assert residency_shard_reader._mount_options('/stage/prewarm/x')[1] == 'nfs4'
+    assert residency_shard_reader._read_shape('/stage/prewarm/x') == (16, 1048576)
+
+
+def test_a_mount_that_publishes_no_transport_count_stays_serial(tmp_path, monkeypatch):
+    """No explicit, no split: the read is the one it has always been."""
+    for options in ('rw,rsize=1048576,vers=4.2',          # NFS without nconnect
+                    'rw,nconnect=16,vers=4.2'):           # NFS without rsize
+        _use_table(monkeypatch, _mount_table(tmp_path, [
+            ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', options)]))
+        assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+    _use_table(monkeypatch, _mount_table(tmp_path, [
+        ('/dev/sda1', '/stage/prewarm', 'ext4', 'rw,rsize=1048576,nconnect=16')]))
+    assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+
+
+def test_the_longest_mount_point_wins_and_octal_is_decoded(tmp_path, monkeypatch):
+    """The kernel resolves a path to its longest matching mount point."""
+    _use_table(monkeypatch, _mount_table(tmp_path, [
+        ('10.100.99.3:/shared', '/stage', 'nfs4', 'rw,rsize=4096,nconnect=2'),
+        ('10.100.99.3:/prewarm', '/stage/pre\\040warm', 'nfs4', NFS_OPTIONS),
+    ]))
+    assert residency_shard_reader._read_shape('/stage/other') == (2, 4096)
+    assert residency_shard_reader._read_shape('/stage/pre warm/x') == (16, 1048576)
+
+
+def test_the_environment_can_put_the_read_back_on_one_stream(tmp_path, monkeypatch):
+    """The before arm of an A/B, and the way out if a mount misreports."""
+    table = _mount_table(tmp_path, [
+        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS)])
+    monkeypatch.setenv(residency_shard_reader.STREAMS_ENV, '1')
+    _use_table(monkeypatch, table)
+    assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+    monkeypatch.setenv(residency_shard_reader.STREAMS_ENV, '4')
+    residency_shard_reader.reset_read_shape_cache_for_tests()
+    assert residency_shard_reader._read_shape('/stage/prewarm/x') == (4, 1048576)
+
+
+def test_the_cuts_cover_the_span_exactly_and_align_to_the_chunk():
+    """Disjoint, contiguous, summing to the span, cut on the mount's own grid."""
+    for offset in (0, 1, 4095, 4096, 1048576, 1048577):
+        for count in (1, 4095, 4096, 4097, 100000, 1 << 21):
+            for chunk in (4096, 1 << 20):
+                cuts = residency_shard_reader._cuts(offset, count, chunk)
+                assert cuts[0][0] == offset
+                assert sum(size for _, size in cuts) == count
+                for (at, size), (next_at, _) in zip(cuts, cuts[1:]):
+                    assert at + size == next_at
+                    assert (at + size) % chunk == 0
+                assert cuts[-1][0] + cuts[-1][1] == offset + count
+
+
+def _big_shard(tmp_path):
+    """A shard whose one tensor is many chunks wide at the sizes below."""
+    pool = tmp_path / 'pool'
+    pool.mkdir(parents=True, exist_ok=True)
+    tensors = {'w': torch.arange(1 << 19, dtype=torch.int32).to(torch.float32).reshape(512, 1024)}
+    path = pool / 'model-00001-of-00001.safetensors'
+    save_file(tensors, str(path))
+    return path, tensors
+
+
+def test_a_span_read_on_several_streams_is_the_bytes_one_stream_read(tmp_path, monkeypatch):
+    """The claim the whole change rests on: same bytes, more streams."""
+    path, tensors = _big_shard(tmp_path)
+    root = _stage_root(tmp_path)
+    staged = _stage_whole(root, path)
+    _use_table(monkeypatch, _mount_table(tmp_path, [
+        ('10.100.99.3:/prewarm', str(root), 'nfs4', 'rw,rsize=4096,nconnect=4')]))
+    resolver = _bind(monkeypatch, _write_map(
+        tmp_path, root, [(path, 0, path.stat().st_size, staged)]))
+    calls = []
+    real = os.preadv
+    monkeypatch.setattr(os, 'preadv', lambda fd, bufs, off: (calls.append(off), real(fd, bufs, off))[1])
+    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
+        _identical(reader, path, tensors)
+    assert resolver.report()['range_hits'] == 1
+    # The span really was cut: one stream would have issued one read.
+    assert len(calls) > 4
+
+
+def test_a_failed_chunk_falls_the_whole_tensor_back_to_the_pool(tmp_path, monkeypatch, capsys):
+    """A partial buffer is never handed out, and the pool's bytes are."""
+    path, tensors = _big_shard(tmp_path)
+    root = _stage_root(tmp_path)
+    staged = _stage_whole(root, path)
+    _use_table(monkeypatch, _mount_table(tmp_path, [
+        ('10.100.99.3:/prewarm', str(root), 'nfs4', 'rw,rsize=4096,nconnect=4')]))
+    resolver = _bind(monkeypatch, _write_map(
+        tmp_path, root, [(path, 0, path.stat().st_size, staged)]))
+    real, seen = os.preadv, []
+
+    def flaky(fd, bufs, off):
+        seen.append(off)
+        if len(seen) > 3:
+            raise OSError(5, 'Input/output error')
+        return real(fd, bufs, off)
+
+    monkeypatch.setattr(os, 'preadv', flaky)
+    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
+        _identical(reader, path, tensors)
+    report = resolver.report()
+    assert report['fallback_count'] == 1
+    assert report['bytes_from_stage'] == 0
+    assert report['bytes_from_pool'] == tensors['w'].numel() * 4
+
+
+def test_one_process_wide_pool_carries_every_readers_chunks(tmp_path, monkeypatch):
+    """The transports are the client's, not each reader's."""
+    path, _ = _big_shard(tmp_path)
+    root = _stage_root(tmp_path)
+    staged = _stage_whole(root, path)
+    _use_table(monkeypatch, _mount_table(tmp_path, [
+        ('10.100.99.3:/prewarm', str(root), 'nfs4', 'rw,rsize=4096,nconnect=4')]))
+    _bind(monkeypatch, _write_map(
+        tmp_path, root, [(path, 0, path.stat().st_size, staged)]))
+    threads = set()
+    real = os.preadv
+
+    def named(fd, bufs, off):
+        threads.add(threading.current_thread().name)
+        return real(fd, bufs, off)
+
+    monkeypatch.setattr(os, 'preadv', named)
+    for _ in range(2):
+        with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
+            reader.get_tensor('w')
+    workers = {name for name in threads if name.startswith('pq-staged-read')}
+    assert 0 < len(workers) <= 4
