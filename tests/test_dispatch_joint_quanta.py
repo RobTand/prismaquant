@@ -36,6 +36,19 @@ RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 N_LAYERS = 3
 
 
+@pytest.fixture(autouse=True)
+def _portable_spec(tmp_path, monkeypatch):
+    """A mount-independent spec: the default SPEC_PATH lives on Rob's shared
+    mount, which CI runners cannot see.  Every argv built in these tests
+    inlines the spec content, so the content -- not the path -- is the
+    contract under test."""
+    spec = tmp_path / "spec-hostcap32-ram-dev.json"
+    spec.write_text(json.dumps(
+        {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    import dispatch_joint_quanta
+    monkeypatch.setattr(dispatch_joint_quanta, "SPEC_PATH", spec)
+
+
 @pytest.fixture
 def campaign(tmp_path):
     scope = {"campaign": "dispatch-fixture", "layers": list(range(N_LAYERS))}
