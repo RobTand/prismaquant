@@ -319,28 +319,26 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: PR #441, which this pin supersedes without changing any priced byte: the
 #: producer source identity changes and existing priced bytes keep their seal.
 #: No release tag names this development commit.
-#: Re-pinned 2026-09-19 to e4a3a7d45 (the head of Tessera #562, D2/D2b,
-#: stacked on #560's flash/506-routed-full-domain-rates-20260918) for the
-#: coordinated post-#560-lineage bump (PrismaQuant #760).  Contract v32, lane
-#: schema still v10.  The digest is bound by the one command against the
-#: canonical remote, never an installed copy.  THIS PIN IS THE PREREQUISITE
-#: HALF OF A GATED LANDING: #563 (docs fix-forward, pin-coupled) rewrites the
-#: v32 changelog entry and nothing the answer projects, so when #562 and #563
-#: have BOTH landed the bytes at master's head are the three-way union of
-#: their contract edits -- sha256
-#: 712a15e4cb6015e28cb206e82aba542c8af78d8e0e4efda34f78841226e8c61c --
-#: which is NOT this digest.  Merging the PrismaQuant side before repointing
-#: commit and digest to that final head (answer unchanged; see the pull
-#: request's DO-NOT-MERGE note) would leave main refusing the Tessera master
-#: it is pinned to.
-TESSERA_DEV_PIN_COMMIT = "e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf"
+#: Re-pinned 2026-09-19 to cc739a55c -- Tessera master's merge of #563,
+#: the head at which the #562 (D2/D2b, stacked on #560's
+#: flash/506-routed-full-domain-rates-20260918) union with #563's docs
+#: fix-forward is complete -- for the coordinated post-#560-lineage bump
+#: (PrismaQuant #760).  Contract v32, lane schema still v10.  The digest is
+#: bound by the one command against the canonical remote, never an
+#: installed copy.  THE GATED LANDING IS EXECUTED: the union digest
+#: predicted while the gate was written (`712a15e4…`) went stale because
+#: #563's rework resolved two master conflicts on its branch; the measured
+#: bytes at the union head are what this pin names.  Tessera master has
+#: since advanced to contract v33 (#568); the v33 reader migration belongs
+#: to the next bump, not this one.
+TESSERA_DEV_PIN_COMMIT = "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780"
+    "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION

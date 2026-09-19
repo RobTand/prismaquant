@@ -230,6 +230,11 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "b1b04f269edc137b7d4b2195b332a647501ace067ecb8eb7304d05eab5b8950d",
     },
+    "reader-pin-cc739a55": {
+        "commit": "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab",
+        "export.py":
+            "d9c89d926328dcd2fe12c1a4bce45129a2c25774230d8d5c7e65f430254b53c9",
+    },
     "unpinned-working-checkout-a9eb572e": {
         "commit": "a9eb572e1b90b17f716562192910681e65430fba",
         "export.py":
@@ -262,7 +267,7 @@ TESSERA_GRAMMAR_DIGEST = (
 #: So a number derived through either is derived through both, and this module
 #: says so from the bytes rather than repeating the audit's prose.
 TESSERA_EQUIVALENT_SOURCE_STATES = (
-    "reader-pin-387eda36", "study-producer-d403cc5a",
+    "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
 )
 
 
@@ -404,40 +409,48 @@ def live_pins() -> DomainPins:
 #:
 #: **Re-taken 2026-09-19 for the v32 pin, and for the first time the grammar
 #: moved -- as a re-transcription carried by a test, not by prose.**  The pin
-#: moved ``4c384e60`` -> ``e4a3a7d4`` (the head of Tessera #562 on #560's
-#: lineage; contract v29 -> v32), and both deciding files were again hashed
-#: at the new commit:
+#: moved ``4c384e60`` -> ``cc739a55`` (Tessera master's merge of the #562
+#: D2/D2b head stacked on #560's lineage, then #563's docs fix-forward;
+#: contract v29 -> v32), and both deciding files were hashed at the final
+#: union head (``e4a3a7d4`` was the pre-#562-merge intermediate; the pin's
+#: own gated-landing note required repointing to the union before merge):
 #:
-#: * ``src/tessera/export.py`` is STILL ``b1b04f26…`` -- byte-identical to the
-#:   frozen study producer ``d403cc5a`` -- so :func:`tessera_source_state`
-#:   keeps naming an import at the current pin ``study-producer-d403cc5a`` and
-#:   no new :data:`TESSERA_SOURCE_STATES` entry belongs (state identity is the
-#:   ``export.py`` digest, and a second entry carrying the same one would make
-#:   the match ambiguous).
-#: * ``src/tessera/grammar.py`` is NEW bytes, ``9ae1f824…``: the inter-pin
-#:   history added caller-owned memoisation to the completion and
-#:   rate-schedule walks and an O(1) range-membership fast path whose
-#:   acceptance predicate is spelled as keeping the ORIGINAL domain semantics
-#:   exactly.  The rate-range and whole-unit-quota refusals that set this
-#:   module's endpoints are therefore claimed unchanged BYTES-ASIDE, which is
-#:   not this module's standard of proof -- so the standard is met the only
-#:   way it can be: ``test_legal_rate_count_is_the_audited_count`` re-derives
-#:   the frozen counts through the new grammar at the new pin, and its pass
-#:   IS the re-transcription.  If that walk ever disagrees with
+#: * ``src/tessera/export.py`` moved to ``d9c89d92…`` at the union: #563's
+#:   rework carries docstring corrections into the exporter, so the bytes
+#:   are no longer the frozen study producer's ``b1b04f26…`` and state
+#:   identity moves with them -- :func:`tessera_source_state` names an
+#:   import at the current pin ``reader-pin-cc739a55``, the new
+#:   :data:`TESSERA_SOURCE_STATES` entry this re-pin adds.  The edits are
+#:   comments and docstrings only; every rate/grammar decision the domain
+#:   reads is unchanged by them, which is why the entry is additive and
+#:   ``study-producer-d403cc5a`` stays for the checkouts that still carry
+#:   those bytes.
+#: * ``src/tessera/grammar.py`` is NEW bytes relative to the v29 pin,
+#:   ``9ae1f824…``, and UNCHANGED between ``e4a3a7d4`` and the union head:
+#:   the inter-pin history added caller-owned memoisation to the completion
+#:   and rate-schedule walks and an O(1) range-membership fast path whose
+#:   acceptance predicate is spelled as keeping the ORIGINAL domain
+#:   semantics exactly.  The rate-range and whole-unit-quota refusals that
+#:   set this module's endpoints are therefore claimed unchanged
+#:   BYTES-ASIDE, which is not this module's standard of proof -- so the
+#:   standard is met the only way it can be:
+#:   ``test_legal_rate_count_is_the_audited_count`` re-derives the frozen
+#:   counts through the new grammar at the new pin, and its pass IS the
+#:   re-transcription.  If that walk ever disagrees with
 #:   :data:`AUDITED_RATE_COUNTS` under ``9ae1f824…``, this is a
 #:   re-measurement, not a transcription, and the counts move by review.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf",
+    reader_dev_pin_commit="cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab",
     reader_dev_pin_contract_sha256=(
-        "14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780"
+        "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
     ),
-    serving_runtime_pinned_commit="e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf",
+    serving_runtime_pinned_commit="cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780"
+        "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
     ),
     producer_installed_contract_sha256=(
-        "14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780"
+        "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
     ),
 )
 

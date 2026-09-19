@@ -40,7 +40,7 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf`, the
+The current pin is Tessera `cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab` (the #562/#563 union head), the
 head of Tessera #562 (D2/D2b, stacked on #560's
 `flash/506-routed-full-domain-rates-20260918`), re-pinned 2026-09-19 for the
 coordinated post-#560-lineage bump (PrismaQuant #760). Install that revision
@@ -79,25 +79,25 @@ Nothing else moved: lane schema v10, the TP ceiling stays 2 on the same
 receipt, the quantiser table is byte-identical, and `TESSERA_E4M3_K1`'s
 family row is unchanged.
 
-**Gated landing (PrismaQuant #760).** This pin is the prerequisite half of a
-coordinated two-repo change. #563 (docs fix-forward, pin-coupled) edits only
-the contract changelog, so once #562 AND #563 have both landed, the contract
-at Tessera master's head is the three-way union of their edits --
+**Gated landing (PrismaQuant #760), executed.** The pin is repointed to
+Tessera master's merge of #563 -- the head at which the #562/#563 union is
+complete -- and the digest is the measured hash at that commit:
 
 ```
 union contract sha256
-712a15e4cb6015e28cb206e82aba542c8af78d8e0e4efda34f78841226e8c61c
+3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34
 ```
 
--- which is NOT this pin's digest. Before the PrismaQuant side merges,
-repoint `commit` and `contract_sha256` (both files, one commit) to that
-final head and re-verify; the admission answer is already the union's,
-because #563 projects nothing the answer reads.
+The union digest predicted while the gate was written (`712a15e4…`) went
+stale: #563's rework resolved two master conflicts on its branch, so the
+landed union bytes differ from the prediction. Verified by the `git
+cat-file` command below. Tessera master has since advanced to contract v33
+(#568); this pin deliberately does not chase it.
 
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -196,8 +196,8 @@ Verified against `RobTand/tessera` (branch head of #562, stacked on #560's
 lineage) on 2026-09-19:
 
 ```
-commit           e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf
-contract_sha256  14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780
+commit           cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab
+contract_sha256  3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34
 versions.tessera 0.1.0
 contract_version 32
 lane schema      tessera.lane-eligibility.v10

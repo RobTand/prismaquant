@@ -710,11 +710,13 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
     coincidence.  This test refuses that silently happening: it hashes the
     bytes actually imported and requires them to be one of the two pins.
 
-    State identity is the ``export.py`` digest, and ``export.py`` at the
-    2026-09-19 pin (Tessera ``e4a3a7d4``) is byte-identical to the frozen
-    study producer's, so an install at that pin resolves under the
-    ``study-producer-d403cc5a`` name: same wire bytes, different commit.
-    The grammar the pin carries is checked separately, one test down.
+    State identity is the ``export.py`` digest.  ``export.py`` moved at the
+    2026-09-19 union-head pin (Tessera ``cc739a55``): #563's rework carries
+    docstring corrections into the exporter, so an install at the pin
+    resolves under the ``reader-pin-cc739a55`` name -- the additive state
+    this re-pin records.  The edits are prose-only; the wire bytes they
+    document are the frozen study producer's, and the grammar the pin
+    carries is checked separately, one test down.
     """
     state = domain.tessera_source_state()
     assert state["state"] is not None, state["verdict"]

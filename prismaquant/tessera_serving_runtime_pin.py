@@ -224,10 +224,11 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: and ``smoke.status: not_recorded`` (v28), which ``cell_evidence_admits``
 #: does not refuse. The digest is from ``git cat-file`` on the canonical
 #: remote's object, never from an installed copy.
-#: Re-pinned 2026-09-19 to e4a3a7d45 -- the head of Tessera #562 (D2/D2b,
-#: stacked on #560's flash/506-routed-full-domain-rates-20260918) -- for the
-#: coordinated post-#560-lineage bump (PrismaQuant #760): contract v32, lane
-#: schema still v10. Master-side history since v29 withdrew the eight
+#: Re-pinned 2026-09-19 to cc739a55c -- Tessera master's merge of #563, the
+#: head at which the #562 (D2/D2b, stacked on #560's
+#: flash/506-routed-full-domain-rates-20260918) union with the docs
+#: fix-forward is complete -- for the coordinated post-#560-lineage bump
+#: (PrismaQuant #760): contract v32, lane schema still v10. Master-side history since v29 withdrew the eight
 #: non-E2M1_K2 dense cells (its #538 and the A4 retirement; the four
 #: ``recorded`` TESSERA_BF16_K1 rows among them) and retired the span-2 CUDA
 #: decoder, so the pin's ``serving_native_extensions`` drops the
@@ -237,19 +238,22 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: the rung they measured (the ``q256`` key this reader now parses and
 #: projects). The routed-MoE ``recorded`` pair (E4M3_K1, q1024) is
 #: byte-identical, so the status-only evidence gate admits the same scope.
-#: GATED LANDING, stated here because the pin is the contract: #563 (docs
-#: fix-forward, pin-coupled) edits only the contract changelog, so once #562
-#: and #563 have both landed the bytes at Tessera master's head are the
-#: three-way union of their edits, sha256
-#: 712a15e4cb6015e28cb206e82aba542c8af78d8e0e4efda34f78841226e8c61c --
-#: NOT this digest. Repoint commit and digest to that final head before the
-#: PrismaQuant side merges; the admission answer is already the union's.
+#: GATED LANDING, executed 2026-09-19: the pin is repointed to
+#: ``cc739a55c`` -- Tessera master's merge of #563, the head at which the
+#: #562/#563 union is complete and no v33 work has landed -- and the digest
+#: is the MEASURED hash of that commit's contract, taken by ``git show``
+#: after both tessera PRs merged.  The union digest predicted while the
+#: gate was written (``712a15e4…``) went stale: #563's rework resolved two
+#: master conflicts on its branch, so the landed union bytes differ from
+#: the prediction.  Master has since advanced to contract v33 (tessera
+#: #568, activation-quantizer schema v2); this pin does NOT chase it -- the
+#: v33 reader migration is owed to the NEXT bump, not folded into this one.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf"
+    "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780"
+    "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the
