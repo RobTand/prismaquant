@@ -125,6 +125,16 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
 
 
 
+
+def _plan_output_root(campaign: Mapping) -> Path:
+    """The plan's sealed output_root: the only root the stage-A capture will
+    write into (its identity guard refuses any other --output-root), and the
+    root whose ``layer-quanta/adjoint/adjoint-capture.json`` is the receipt
+    this dispatcher validates."""
+    plan = json.loads(Path(campaign["plan_path"]).read_text())
+    return Path(plan["output_root"])
+
+
 def _container_wrap(spec_path: Path, payload: list[str]) -> list[str]:
     """Run a payload inside the qualified campaign container.
 
@@ -187,7 +197,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                 "--plan-sha256", str(campaign["plan_sha256"]),
                 "--prepared", str(campaign["prepared_path"]),
                 "--prepared-sha256", str(campaign["prepared_sha256"]),
-                "--output-root", str(adjoint_manifest.parent.parent),
+                "--output-root", str(_plan_output_root(campaign)),
                 "--resume"])]
 
 
@@ -342,7 +352,9 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
     stage_a_keys = [event.get("action_key") for event in events
                     if event.get("event") == "stage-a-submitted"]
 
-    receipt_path = Path(args.adjoint_receipt) if args.adjoint_receipt else None
+    receipt_path = (Path(args.adjoint_receipt) if args.adjoint_receipt
+                    else _plan_output_root(records[0][1]["campaign"])
+                    / "layer-quanta" / "adjoint" / "adjoint-capture.json")
     receipt_ok = False
     if receipt_path is not None:
         try:
