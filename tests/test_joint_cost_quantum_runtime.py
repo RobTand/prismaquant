@@ -427,12 +427,12 @@ def _prefetch_budget(**overrides):
 
 
 def _override_document(tmp_path, budget, *, reason="v10 IO widening (#819)",
-                       schema=None):
+                       schema=None, name="prefetch-override.json"):
     from prismaquant.joint_cost_stage_a import PREFETCH_OVERRIDE_INPUT_SCHEMA
 
     document = {"schema": schema or PREFETCH_OVERRIDE_INPUT_SCHEMA,
                 "reason": reason, "source_prefetch": budget}
-    path = tmp_path / "prefetch-override.json"
+    path = tmp_path / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document))
     return path
@@ -528,6 +528,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
                             "n_calib_samples": 4, "calib_seqlen": 512},
               "inputs": {}, "output_root": str(out_root),
               "model": "/models/x",
+              "canonical_capture": None,
               "calibration_input": {"path": str(tmp_path / "cal.json"),
                                     "sha256": _hex("3")},
               "max_gpu_bytes": 1 << 50}
@@ -597,21 +598,23 @@ def test_prefetch_override_document_grammar_refuses(tmp_path):
     path = _override_document(tmp_path, _prefetch_budget(
         max_cache_slots=7, prefetch_workers=8, prefetch_lookahead=4))
     resolved = resolve_prefetch_override(
-        config, path, environ={PREFETCH_OVERRIDE_ENV: str(path)})
+        config, None, environ={PREFETCH_OVERRIDE_ENV: str(path)})
     assert resolved["override"]["source"] == "env"
     assert resolved["run_used"]["prefetch_workers"] == 8
 
     defects = {
         "missing field": _override_document(
-            tmp_path, {k: v for k, v in _prefetch_budget().items()
-                       if k != "max_cache_slots"}),
+            tmp_path / "d0", {k: v for k, v in _prefetch_budget().items()
+                              if k != "max_cache_slots"}),
         "lookahead beyond slots": _override_document(
-            tmp_path, _prefetch_budget(max_cache_slots=2, prefetch_lookahead=2)),
+            tmp_path / "d1", _prefetch_budget(max_cache_slots=2,
+                                              prefetch_lookahead=2)),
         "residency not required": _override_document(
-            tmp_path, _prefetch_budget(require_prefetched_residency=False)),
-        "no reason": _override_document(tmp_path, _prefetch_budget(), reason="  "),
+            tmp_path / "d2", _prefetch_budget(require_prefetched_residency=False)),
+        "no reason": _override_document(tmp_path / "d3", _prefetch_budget(),
+                                        reason="  "),
         "wrong schema": _override_document(
-            tmp_path, _prefetch_budget(), schema="prismaquant.other.v1"),
+            tmp_path / "d4", _prefetch_budget(), schema="prismaquant.other.v1"),
     }
     for label, document in defects.items():
         # Either grammar's own refusal message: the document-level checks
@@ -730,8 +733,13 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
              "recorded_unix": 1789625518.0}
     reuse_block = {"schema": aura.HISTORICAL_ENCODER_REUSE_SCHEMA,
                    "allowlist": [entry]}
+    # Every sealed plan carries a source_prefetch block (mandatory since the
+    # #816 seam; _load_plan refuses without one), and the capture validates
+    # it up front now that the #819 override resolves beside it -- so the
+    # fixture config carries one like any real plan.
     config = {"execution": {"production_act_scales": "scales"},
               "inputs": {}, "output_root": str(tmp_path),
+              "source_prefetch": _prefetch_budget(),
               "historical_encoder_reuse": reuse_block}
 
     with pytest.raises(_Done):
