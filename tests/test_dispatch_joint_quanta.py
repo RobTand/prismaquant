@@ -140,6 +140,10 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     assert f"layer-001-chunk-000={CHUNK_PROGRESS_GRACE_S}" in phases
     assert CHUNK_PROGRESS_GRACE_S == 900
     assert argv[argv.index("--priority") + 1] == str(SUBMISSION_PRIORITY)
+    # The GPU envelope: the capture and the quanta are GPU-or-bust
+    # (require_cuda_hot_path refused the c94602e9d63c run whose rows
+    # demanded no device).
+    assert argv[argv.index("--demand") + 1] == "gpu=1,mem_gb=104"
     assert argv[argv.index("--env") + 1] == "PRISMAQUANT_DEV_MODE=1"
     assert "--detach" in argv
     assert "--" in argv
