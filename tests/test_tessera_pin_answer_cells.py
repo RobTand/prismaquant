@@ -47,7 +47,10 @@ from prismaquant.tessera_serving_runtime_pin import (
 #: The smallest roster this pin is allowed to carry. A floor rather than an
 #: equality so that a contract which ADDS a cell fails the identity assertion
 #: below -- which names what moved -- instead of failing a count that does not.
-MINIMUM_CELLS = 14
+#: Lowered 14 -> 6 with the 2026-09-19 re-pin: Tessera master's #538 and the
+#: A4 retirement withdrew all eight non-E2M1_K2 dense cells, so the six rows
+#: this pin carries are the whole published roster.
+MINIMUM_CELLS = 6
 
 EVIDENCE_KEYS = {"artifact", "grade", "kl", "smoke"}
 
@@ -79,18 +82,27 @@ def test_the_answers_cells_are_the_documents_cells():
     assert len(answer) >= MINIMUM_CELLS, sorted(answer)
 
 
-def test_the_answer_carries_more_than_one_platform():
+def test_the_answer_names_the_platform_every_cell_was_measured_on():
     """Why the platform column is load-bearing rather than decorative.
 
     Before contract v24 every cell was ``sm_121`` and the column could have
-    been dropped without any row becoming ambiguous. It cannot now: the
-    document publishes cells on two platforms, so a roster keyed on the id
-    alone would be a roster whose reader cannot say where a row was measured.
+    been dropped without any row becoming ambiguous. It could not between
+    v24 and v31, when the document published cells on two platforms. The
+    v31 withdrawals (Tessera #538 and the A4 retirement, absorbed by the
+    2026-09-19 pin) emptied ``gfx1201`` again, so today the roster is
+    ``sm_121``-only -- and the column stays because a roster keyed on the
+    id alone is a roster whose reader cannot say WHERE a row was measured,
+    which is exactly the ambiguity that returns the day a second platform
+    ships a cell. The assert is therefore the honest one for a
+    single-platform roster: the answer's platform set is non-empty and is
+    the document's own, no more and no less.
     """
     platforms = {str(row[1]) for row in contract.TESSERA_DEV_PIN_ANSWER["cells"]}
-    assert len(platforms) >= 2, sorted(platforms)
+    assert platforms, sorted(platforms)
     declared = set(_packaged()["lane_eligibility"]["platforms"])
     assert platforms <= declared, sorted(platforms - declared)
+    documents = {str(row["platform"]) for row in _document_cells()}
+    assert platforms == documents, sorted(platforms ^ documents)
 
 
 def test_every_cell_id_follows_the_derived_grammar():

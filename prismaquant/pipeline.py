@@ -1,11 +1,12 @@
 """Typed pipeline, artifact, resource, and gate contracts.
 
-This module is descriptive about stage *shape* and authoritative about one
-thing: **which settings each build artifact's identity is keyed on** (re-vet
-R5).  ``run-pipeline.sh`` executes; this module decides what a reuse of
-``cost.pkl`` (or a 90 GB production cache) is allowed to mean.  Everything
-else here — the artifact/stage/gate declarations — remains a documented view
-of the production flow, not an executor (re-vet R23: no python port).
+Three duties here are code, not prose: the settings identity and reuse
+contract (``STAGE_SETTINGS_KEYS`` plus ``--check-stage-settings``, re-vet R5),
+the frontier materialization guard (``check_frontier_materialization``), and
+the shared metric comparison type (``MetricGateSpec``) that
+``artifact_registry`` builds its comparisons on.  The stage and artifact
+declarations describe the shell's execution order; ``run-pipeline.sh``
+executes them, and this module is not an executor (re-vet R23: no python port).
 """
 from __future__ import annotations
 
@@ -1118,82 +1119,6 @@ class PipelineValidation:
 
 
 @dataclass(frozen=True)
-class PipelineComponentSpec:
-    """A named, opt-in pipeline extension.
-
-    Components are contract fragments: they can declare artifacts, gates, and
-    stages without taking over core execution.  This is the integration point
-    for archived or experimental methods that need to be wired into the
-    pluggable pipeline while remaining explicit and off by default.
-    """
-
-    id: str
-    stages: tuple[PipelineStageSpec, ...]
-    artifacts: tuple[ArtifactSpec, ...] = ()
-    gates: tuple[MetricGateSpec, ...] = ()
-    insert_after: str | None = None
-    status: str = "research"
-    default_enabled: bool = False
-    description: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not self.id:
-            raise ValueError("component id must be non-empty")
-        if self.status not in {
-            "research",
-            "candidate",
-            "production_recipe",
-            "default_on",
-        }:
-            raise ValueError(f"{self.id}: invalid component status {self.status!r}")
-        if self.default_enabled and self.status in {"research", "candidate"}:
-            raise ValueError(
-                f"{self.id}: {self.status} components must be opt-in"
-            )
-
-    @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "PipelineComponentSpec":
-        return cls(
-            id=str(payload["id"]),
-            stages=tuple(
-                PipelineStageSpec.from_dict(entry)
-                for entry in payload.get("stages", ())
-            ),
-            artifacts=tuple(
-                ArtifactSpec.from_dict(entry)
-                for entry in payload.get("artifacts", ())
-            ),
-            gates=tuple(
-                MetricGateSpec.from_dict(entry)
-                for entry in payload.get("gates", ())
-            ),
-            insert_after=(
-                None
-                if payload.get("insert_after") is None
-                else str(payload.get("insert_after"))
-            ),
-            status=str(payload.get("status", "research")),
-            default_enabled=bool(payload.get("default_enabled", False)),
-            description=str(payload.get("description", "")),
-            metadata=dict(payload.get("metadata", {})),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "description": self.description,
-            "status": self.status,
-            "default_enabled": self.default_enabled,
-            "insert_after": self.insert_after,
-            "metadata": dict(self.metadata),
-            "artifacts": [artifact.to_dict() for artifact in self.artifacts],
-            "gates": [gate.to_dict() for gate in self.gates],
-            "stages": [stage.to_dict() for stage in self.stages],
-        }
-
-
-@dataclass(frozen=True)
 class PipelineSpec:
     """A declarative PrismaQuant pipeline plan."""
 
@@ -1305,40 +1230,6 @@ class PipelineSpec:
         )
 
 
-_STAGES: dict[str, PipelineStageSpec] = {}
-_COMPONENTS: dict[str, PipelineComponentSpec] = {}
-_BUILTINS_REGISTERED = False
-_BUILTIN_COMPONENTS_REGISTERED = False
-
-
-def register_pipeline_stage(spec: PipelineStageSpec) -> None:
-    _STAGES[spec.name] = spec
-
-
-def register_pipeline_component(spec: PipelineComponentSpec) -> None:
-    _COMPONENTS[spec.id] = spec
-
-
-def pipeline_stage(name: str) -> PipelineStageSpec:
-    _ensure_builtins_registered()
-    return _STAGES[str(name)]
-
-
-def pipeline_component(name: str) -> PipelineComponentSpec:
-    _ensure_components_registered()
-    return _COMPONENTS[str(name)]
-
-
-def registered_pipeline_stages() -> Mapping[str, PipelineStageSpec]:
-    _ensure_builtins_registered()
-    return dict(_STAGES)
-
-
-def registered_pipeline_components() -> Mapping[str, PipelineComponentSpec]:
-    _ensure_components_registered()
-    return dict(_COMPONENTS)
-
-
 def load_pipeline_spec(path: str | Path) -> PipelineSpec:
     with open(path) as f:
         payload = json.load(f)
@@ -1388,7 +1279,6 @@ def production_pipeline_spec_from_config(
     selection_mode: str | None = None,
     production_cache: str | bool | None = None,
     production_recache: str | bool | None = None,
-    components: Iterable[str | PipelineComponentSpec] | None = None,
 ) -> PipelineSpec:
     """Build the production contract for one configured run."""
 
@@ -1403,22 +1293,11 @@ def production_pipeline_spec_from_config(
     # run-pipeline.sh records the vLLM smoke command for manual execution; it
     # does not execute that stage as part of the default production run.
     omitted_stages.append("validate.vllm_smoke")
-    if omitted_stages:
-        omitted = set(omitted_stages)
-        spec = PipelineSpec(
-            id=spec.id,
-            artifacts=spec.artifacts,
-            gates=spec.gates,
-            stages=tuple(stage for stage in spec.stages if stage.name not in omitted),
-            description=spec.description,
-            metadata=dict(spec.metadata),
-        )
-    component_specs = tuple(_resolve_pipeline_component(c) for c in (components or ()))
-    if component_specs:
-        spec = compose_pipeline_spec(spec, component_specs)
+    omitted = set(omitted_stages)
+    stages = tuple(stage for stage in spec.stages if stage.name not in omitted)
     ordered_mechanisms = tuple(
         str(stage.metadata["mechanism"])
-        for stage in spec.stages
+        for stage in stages
         if stage.name.startswith("render.") and "mechanism" in stage.metadata
     )
     metadata = {
@@ -1432,86 +1311,15 @@ def production_pipeline_spec_from_config(
         "selection_mode": selection_mode,
         "production_cache": production_cache,
         "production_recache": production_recache,
+        "omitted_unexecuted_stages": list(omitted_stages),
     }
-    if omitted_stages:
-        metadata["omitted_unexecuted_stages"] = list(omitted_stages)
-    if component_specs:
-        metadata["components"] = list(spec.metadata.get("components", ()))
     return PipelineSpec(
         id=spec.id,
         artifacts=spec.artifacts,
         gates=spec.gates,
-        stages=spec.stages,
+        stages=stages,
         description=spec.description,
         metadata={k: v for k, v in metadata.items() if v is not None},
-    )
-
-
-def compose_pipeline_spec(
-    base: PipelineSpec,
-    components: Iterable[str | PipelineComponentSpec],
-) -> PipelineSpec:
-    """Return ``base`` plus opt-in component contract fragments."""
-
-    artifacts = list(base.artifacts)
-    gates = list(base.gates)
-    stages = list(base.stages)
-    artifact_by_name = {artifact.name: artifact for artifact in artifacts}
-    gate_by_name = {gate.name: gate for gate in gates}
-    enabled_components: list[dict[str, Any]] = []
-
-    for raw_component in components:
-        component = _resolve_pipeline_component(raw_component)
-        for artifact in component.artifacts:
-            existing = artifact_by_name.get(artifact.name)
-            if existing is not None:
-                if existing.to_dict() != artifact.to_dict():
-                    raise ValueError(
-                        f"{component.id}: artifact {artifact.name!r} conflicts "
-                        "with the base pipeline"
-                    )
-                continue
-            artifacts.append(artifact)
-            artifact_by_name[artifact.name] = artifact
-        for gate in component.gates:
-            existing = gate_by_name.get(gate.name)
-            if existing is not None:
-                if existing.to_dict() != gate.to_dict():
-                    raise ValueError(
-                        f"{component.id}: gate {gate.name!r} conflicts "
-                        "with the base pipeline"
-                    )
-                continue
-            gates.append(gate)
-            gate_by_name[gate.name] = gate
-
-        insert_at = len(stages)
-        if component.insert_after:
-            for idx, stage in enumerate(stages):
-                if stage.name == component.insert_after:
-                    insert_at = idx + 1
-                    break
-            else:
-                raise ValueError(
-                    f"{component.id}: insert_after stage "
-                    f"{component.insert_after!r} was not found"
-                )
-        stages[insert_at:insert_at] = component.stages
-        enabled_components.append({
-            "id": component.id,
-            "status": component.status,
-            "default_enabled": component.default_enabled,
-        })
-
-    metadata = dict(base.metadata)
-    metadata["components"] = list(metadata.get("components", ())) + enabled_components
-    return PipelineSpec(
-        id=base.id,
-        artifacts=tuple(artifacts),
-        gates=tuple(gates),
-        stages=tuple(stages),
-        description=base.description,
-        metadata=metadata,
     )
 
 
@@ -1837,42 +1645,6 @@ def _split_csv(values: str | Iterable[str] | None) -> tuple[str, ...]:
     return tuple(out)
 
 
-def _register_builtins() -> None:
-    for stage in default_production_pipeline_spec(render_mechanisms=()).stages:
-        register_pipeline_stage(stage)
-
-
-def _register_builtin_components() -> None:
-    # Research components live in archive until explicitly revived.  The
-    # component registry remains available for programmatic opt-in specs, but
-    # production imports do not load shelved cross-layer methods.
-    return
-
-
-def _ensure_builtins_registered() -> None:
-    global _BUILTINS_REGISTERED
-    if _BUILTINS_REGISTERED:
-        return
-    _register_builtins()
-    _BUILTINS_REGISTERED = True
-
-
-def _ensure_components_registered() -> None:
-    global _BUILTIN_COMPONENTS_REGISTERED
-    if _BUILTIN_COMPONENTS_REGISTERED:
-        return
-    _register_builtin_components()
-    _BUILTIN_COMPONENTS_REGISTERED = True
-
-
-def _resolve_pipeline_component(
-    component: str | PipelineComponentSpec,
-) -> PipelineComponentSpec:
-    if not isinstance(component, str) and hasattr(component, "id"):
-        return component
-    return pipeline_component(str(component))
-
-
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Write or validate PrismaQuant pipeline contracts."
@@ -1903,17 +1675,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--selection-mode", default=None)
     ap.add_argument("--production-cache", default=None)
     ap.add_argument("--production-recache", default=None)
-    ap.add_argument(
-        "--include-component",
-        action="append",
-        default=[],
-        help="Opt-in pipeline component id to compose into the contract.",
-    )
-    ap.add_argument(
-        "--list-components",
-        action="store_true",
-        help="List registered opt-in pipeline components and exit.",
-    )
     ap.add_argument(
         "--check-frontier-materialization",
         metavar="MODEL_PATH",
@@ -1994,14 +1755,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[pipeline-spec] wrote {out}")
         return 0
 
-    if args.list_components:
-        for component in registered_pipeline_components().values():
-            print(
-                f"{component.id}\t{component.status}\t"
-                f"default_enabled={int(component.default_enabled)}"
-            )
-        return 0
-
     if args.input:
         spec = load_pipeline_spec(args.input)
     else:
@@ -2017,7 +1770,6 @@ def main(argv: list[str] | None = None) -> int:
             selection_mode=args.selection_mode,
             production_cache=args.production_cache,
             production_recache=args.production_recache,
-            components=args.include_component,
         )
 
     validation = spec.validate()

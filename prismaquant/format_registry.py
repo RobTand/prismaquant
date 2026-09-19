@@ -1258,8 +1258,12 @@ register_format(_make_gguf_spec("IQ4_XS", 4, 256, 64))    # 136 B / 256 = 4.25
 register_format(_make_gguf_spec("IQ4_NL", 4, 32, 16))     # 18 B / 32 = 4.5
 
 
-# NVFP4-CB / FP8-CB vector-quantization codebook family (custom out-of-tree
-# vLLM plugin lane; NOT stock compressed-tensors — see docs/lanes/nvfp4-cb).
+# NVFP4-CB / FP8-CB vector-quantization codebook family (NOT stock
+# compressed-tensors).  The out-of-tree plugin lane these once fed — Gridbook
+# — was retired 2026-09-02 and archived whole under
+# archive/gridbook_lane_2026-09-02/ (its docs/ holds the lane documents the
+# older `docs/lanes/nvfp4-cb` pointers cite); no sanctioned lane serves these
+# bytes.  The specs stay registered as reader/reporting rows only.
 # The k-bit VQ index stream lives in scale_bits (fp4 family, weight_bits=0,
 # group_size=256).  FormatSpec retains the legacy-v1 4k+16 nominal field for
 # old generic consumers; exact producer paths use CBSerializationContext and

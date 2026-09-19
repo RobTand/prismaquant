@@ -66,7 +66,7 @@ def _default_serve_image() -> str:
 
 
 def _dense_context():
-    """The scope the eight dense cells of the pinned (v8) table publish.
+    """The scope the two dense E2M1 cells of the pinned (v10) table publish.
 
     The table is scoped: a cell attests a rung only at an exact platform,
     image, execution mode and residency, so an admission is asked at one --
@@ -77,6 +77,24 @@ def _dense_context():
     return ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=_default_serve_image(), execution_mode="eager")
+
+
+def _routed_context(family):
+    """The scope a routed-MoE cell of the pinned table publishes.
+
+    Since the v31 withdrawals the routed pairs are the only cells carrying
+    ``TESSERA_E4M3_K1``, and the routed rows publish their OWN serve images
+    (the spark-NCCL and eugr stacks), not the contract's default -- so the
+    scope is derived from the cell the way production admission does, from
+    the packaged contract's own bytes.
+    """
+    from prismaquant.lane_eligibility import ServingContext
+    cell = next(c for c in _packaged_contract()["lane_eligibility"]["cells"]
+                if c["family"] == family and c["structure"] == "routed_moe")
+    return ServingContext(
+        platform=cell["platform"], structure="routed_moe",
+        residency="resident", runtime_image=cell["runtime"]["image"],
+        execution_mode=cell["runtime"]["execution_modes"][0])
 
 
 def _packaged_contract() -> dict:
@@ -120,16 +138,20 @@ def released_pin(tmp_path, monkeypatch):
         "plugin_entry_point": "tessera = tessera.serving:register",
         "serving_residency_env": TESSERA_SERVING_RESIDENCY_ENV,
         "serving_native_extensions": [
-            {"module_name_prefix": "tessera_nvfp4_",
-             "filename_glob": "tessera_nvfp4_*.so",
+            {"module_name_prefix": "tessera_window_gemv",
+             "filename_glob": "tessera_window_gemv*.so",
              "match": "basename_fnmatch",
              # A synthetic released pin, not a transcription of the runtime:
              # the release gate under test reads commit/version, never this
-             # block.  It carries the contracted shape so the fixture parses.
+             # block.  It carries the contracted shape so the fixture parses
+             # -- and, since the v32 withdrawals left the window-GEMV row the
+             # contract's only one, the shape the native-extension comparison
+             # in require_pin_native_extensions_match_contract accepts.
              "when_unavailable": {
                  "resident": {"status": "substituted",
-                              "decoder": "torch_materialize_stock"},
-                 "streamed": {"status": "refused", "decoder": None}}},
+                              "decoder": "torch_window"},
+                 "streamed": {"status": "substituted",
+                              "decoder": "torch_window"}}},
         ],
     }
     path = tmp_path / "released_pin.json"
@@ -293,25 +315,30 @@ def test_admission_is_true_under_a_released_pin_on_the_real_packaged_contract(
     """The other half of "False by the pin".
 
     With ONLY the release boundary satisfied -- the real packaged contract,
-    the real parser, the real cell logic -- the receipted rung is admitted
+    the real parser, the real cell logic -- both receipted rungs are admitted
     and a rate the contract does not publish is not. That is what proves the
     refusal above is the pin's and not an artefact of an unreadable table.
-    (At v29 two dense rungs were receipted; v31 withdraws the dense E4M3
-    cells with the retired window-GEMV dispatch, so E4M3 R1024 now reads
-    False beside the admitted E2M1 R896.)
     """
     assert tr._release_pin_satisfied() is True
     context = _dense_context()
+    e2m1_routed = _routed_context("TESSERA_E2M1_K2")
+    e4m3_routed = _routed_context("TESSERA_E4M3_K1")
     assert tr.tessera_lane_attested(
         "TESSERA_E2M1_K2_R896", serving_context=context) is True
+    # E4M3's cells are routed-only since the v31 withdrawals, so the family
+    # is asked at the routed scope.
     assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=context) is False
-    # a serialisable rate no cell names, on a published family
+        "TESSERA_E4M3_K1_R1024", serving_context=e4m3_routed) is True
+    # a serialisable rate no DENSE cell names, on a published family
     assert tr.tessera_lane_attested(
         "TESSERA_E2M1_K2_R512", serving_context=context) is False
+    # ...and since #560 the ROUTED reader domain names it: the full-domain
+    # widen is admitted, not just published.
+    assert tr.tessera_lane_attested(
+        "TESSERA_E2M1_K2_R512", serving_context=e2m1_routed) is True
     # the family's own terminal rate, which the reader range excludes
     assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R2048", serving_context=context) is False
+        "TESSERA_E4M3_K1_R2048", serving_context=e4m3_routed) is False
     # a family the contract does not publish at all
     assert tr.tessera_lane_attested(
         "TESSERA_E2M1_K1_R640", serving_context=context) is False
@@ -328,10 +355,10 @@ def test_the_synthesized_spec_reads_the_same_lookup(released_pin):
     context = _dense_context()
     assert tr.synthesize_tessera_spec(
         "TESSERA_E2M1_K2_R896", serving_context=context).producer_eligible is True
-    # v31 withdraws the dense E4M3 cells: the wire can still carry the rung,
-    # but no runtime serves it, so the AND fails on the second conjunct.
     assert tr.synthesize_tessera_spec(
-        "TESSERA_E4M3_K1_R1024", serving_context=context).producer_eligible is False
+        "TESSERA_E4M3_K1_R1024",
+        serving_context=_routed_context("TESSERA_E4M3_K1"),
+    ).producer_eligible is True
     assert tr.synthesize_tessera_spec(
         "TESSERA_E2M1_K2_R512", serving_context=context).producer_eligible is False
     assert tr.synthesize_tessera_spec(
@@ -359,6 +386,70 @@ def test_the_lookup_fails_closed_on_every_cell_axis(
     table, formats = _load(_write(tmp_path, contract, f"{name}.json"))
     assert tr.tessera_lane_attested(
         "TESSERA_E2M1_K2_R896", table=table, formats=formats) is False
+
+
+# ---------------------------------------------------------------------------
+# The v32 KL-receipt rung scoping (D2b): the ``q256`` key
+# ---------------------------------------------------------------------------
+def _dense_batch_cell(contract):
+    return next(cell for cell in contract["lane_eligibility"]["cells"]
+                if cell["id"] == "tessera_e2m1_k2_dense_sm121_batch")
+
+
+def test_the_pinned_kl_receipts_carry_the_rung_they_measured():
+    """D2b: a cell whose family covers rungs must say which one each KL
+    measured.  The dense batch cell is the pinned table's one carrier, and
+    its receipts parse with their rung attached and project it into the
+    reviewed answer's kl token -- the widened projection first exercised by
+    this pin.
+    """
+    import prismaquant.tessera_runtime_contract as trc
+
+    contract = _packaged_contract()
+    entry = _dense_batch_cell(contract)["evidence"]["kl"][0]
+    assert entry["q256"] == 896
+    parsed = trc._parse(contract, commit="t", sha="t", path="<packaged>")
+    cell = next(c for c in parsed.cells
+                if c.cell_id == "tessera_e2m1_k2_dense_sm121_batch")
+    kl = cell.evidence.kl[0]
+    assert kl.q256 == 896
+    assert kl.as_dict()["q256"] == 896
+    assert cell.evidence.answer()[2] == ["topk_intersection_lower_bound@1024@q896"]
+
+
+@pytest.mark.parametrize("q256, names", [
+    # A bound scored at a rate the cell does not cover is another cell's
+    # evidence, exactly as a mismatched regime is.
+    (512, ("q256", "not a rung this cell covers")),
+    # The rung is a rung, not a label.
+    (0, ("q256", "positive integer")),
+    ("896", ("q256", "positive integer")),
+])
+def test_a_kl_receipt_scoped_outside_the_cells_rungs_is_refused(
+        tmp_path, released_pin, q256, names):
+    contract = _packaged_contract()
+    _dense_batch_cell(contract)["evidence"]["kl"][0]["q256"] = q256
+    with pytest.raises(LaneEligibilityError) as refused:
+        _load(_write(tmp_path, contract, "kl_rung.json"))
+    for name in names:
+        assert name in str(refused.value), (name, str(refused.value))
+
+
+def test_a_kl_receipt_without_a_rung_still_parses(tmp_path, released_pin):
+    """``q256`` is the v32 grammar, not a v10 obligation: the pinned table's
+    every OTHER receipt carries none, and a pre-v32 table is not refused for
+    the field's absence -- the answer's token simply carries no rung.
+    Stated on the one cell that carries the key, with the key removed."""
+    import prismaquant.tessera_runtime_contract as trc
+
+    contract = _packaged_contract()
+    del _dense_batch_cell(contract)["evidence"]["kl"][0]["q256"]
+    parsed = trc._parse(contract, commit="t", sha="t", path="<no-rung>")
+    cell = next(c for c in parsed.cells
+                if c.cell_id == "tessera_e2m1_k2_dense_sm121_batch")
+    assert cell.evidence.kl[0].q256 is None
+    assert "q256" not in cell.evidence.kl[0].as_dict()
+    assert cell.evidence.answer()[2] == ["topk_intersection_lower_bound@1024"]
 
 
 def test_the_rungs_a_cell_names_are_the_whole_admitted_set(tmp_path,
