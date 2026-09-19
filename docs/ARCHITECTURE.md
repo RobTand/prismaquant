@@ -50,6 +50,32 @@ for **the correctness/env pentad** (RobTand/prismaquant#717, #578, #634,
 changes; the gates refuse exactly what they refused before, and say more
 about what they saw:
 
+- **Native observations carry the executed kernel schedule** (§4.x native
+  panels; #578). `consume_native_receipt` retains an observed
+  `kernel_schedule` per phase, classifies it against the route platform
+  (`native` for the sm_120 family on sm_121, `older_arch` for an sm80
+  schedule there, `unknown` when nothing names one), and a price measured
+  on an older-architecture schedule disclaims the native-hardware price in
+  the observation's own `unknown` list. Promoting that disclaimer to a
+  refusal waits on a measured sm80/sm_120 delta, which nobody has taken.
+- **The pq309 driver reaches rank-local preparation** (§4.x native MoE;
+  #681). The `quality_prepared`/`quality_source_model` binding rides the
+  hash-pinned `prismaquant.native_moe_preparation.v1` plan (explicit CLI
+  bytes override it), and the roster walks the geometry's own expert count
+  instead of assuming LFM's 32.
+- **Order/host-fragile tests are hermetic** (#634): the two CUDA-preflight
+  tests run in a fresh interpreter, and the capture observer test samples
+  canned Netdata.
+- **The September-18 q/k/v refusals stand locked** (#717): a 0.015625
+  one-code flip stays refused, 0.0 stays admitted; the unrun
+  swizzle/trellis probe is recorded in
+  `docs/measurements/717-qkv-one-code-flip-2026-09-19.md`.
+- **pq-cpu312 is still a local-directory install** (#753, env behind a
+  working gate): re-provisioning the shared interpreter needs an idle pool
+  and was not done here; the command is
+  `tools/provision_tessera_pin.py --python
+  /home/rob/venvs/pq-cpu312/bin/python` on the x86 worker.
+
 **The gated two-repo landing (#760) is executed.** The pin is repointed to
 Tessera master's merge of #563 and the digest is the MEASURED hash of that
 commit's contract. The union digest predicted while the gate was written
