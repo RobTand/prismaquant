@@ -117,10 +117,12 @@ ports and run notes live under `archive/cross_layer_2026-05-09/`:
 - `docs/qwen3_4b_smrf_optimization.md`
 - `docs/qwen3_27b_smrf_validation.md`
 
-`prismaquant.pipeline` still supports programmatic `PipelineComponentSpec`
-composition, but it does not import or register these archived components.
-Reviving one should be treated as a new research effort: port it from archive
-into an explicit opt-in component, keep rendered weights in
+`prismaquant.pipeline` has no component-composition or stage-registry surface:
+the empty `PipelineComponentSpec` registry and its composition API were deleted
+on 2026-09-19 (`astra/simplify-redundant-machinery-20260919`) once it was clear
+that no live component existed and the only callers were synthetic tests.
+Reviving a shelved method is a new research effort on an explicit opt-in
+research path, not a registry toggle: port it from archive, keep rendered weights in
 `ProductionWeightCache`, keep activation replay in `PerturbedActivationCache`,
 and clear the measured KL/PPL/log-likelihood/ToolEvalBench gate before any
 candidate can feed export.

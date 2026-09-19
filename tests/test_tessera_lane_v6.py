@@ -291,9 +291,19 @@ def test_the_export_gate_refuses_the_routed_moe_unit_and_names_the_cell(payload)
 
 
 def test_the_dense_unit_still_resolves_backed_with_its_grade_recorded(table, payload):
-    image = _cell(payload, "tessera_e4m3_k1_dense_sm121_decode_resident")["runtime"]["image"]
+    """The dense pair's grades ride its route; asked of the surviving family.
+
+    The dense E4M3 cells this test used until the v31 withdrawals are gone,
+    and the dense E2M1 pair carries the same principle-12 obligation.
+    """
+    image = _cell(payload, "tessera_e2m1_k2_dense_sm121_decode")["runtime"]["image"]
+    facts = lane.UnitStructuralFacts(
+        qname="fixture.weight", format_name="TESSERA_E2M1_K2_R896",
+        payload_family="TESSERA_E2M1_K2",
+        k=None, n_sub=None, rate_q256=896, structure="dense",
+        role_split=False, in_features=1024, out_features=1024)
     route = lane.resolve_unit_route(
-        _facts("dense"), table, platform="sm_121", residency="resident",
+        facts, table, platform="sm_121", residency="resident",
         runtime_image=image, execution_mode="eager")
     assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
     grades = {r.evidence_grade for r in route.regimes}

@@ -2785,12 +2785,6 @@ def _is_cb_format_name(fmt: str) -> bool:
         "nvfp4_cb", "fp8_cb"}
 
 
-def _cb_qnames_in_render_scope(
-    formats_by_qname: Mapping[str, str | Sequence[str]],
-) -> list[str]:
-    return list(_canonical_cb_render_scope(formats_by_qname))
-
-
 def _canonical_cb_render_scope(
     formats_by_qname: Mapping[str, str | Sequence[str]],
 ) -> dict[str, list[str]]:
