@@ -551,7 +551,7 @@ def record_window_indices(record: dict) -> list[int]:
     sizes are never read from the record -- see :func:`resolve_quantum_windows`.
     """
     windows = record["windows"]
-    indices = [window["window_index"] if isinstance(window, Mapping) else None
+    indices = [window.get("window_index") if isinstance(window, Mapping) else None
                for window in windows]
     if indices != list(range(len(windows))):
         raise QuantumIdentityRefused(
@@ -641,7 +641,7 @@ def quantum_retained_state(execution):
         operator_windows=operator_windows,
         boundary_storage=(None if execution.get("boundary_storage") is None else
                           normalize_boundary_storage(
-                              execution["boundary_storage"]).config),
+                              execution["boundary_storage"])),
     )
     return SimpleNamespace(
         operator_windows=operator_windows,
