@@ -311,11 +311,42 @@ def _plan_block(plan: Mapping) -> dict:
     return block
 
 
-def _windows_by_layer(plan: Mapping) -> dict[int, int]:
+def _canonical_partition_bytes(value) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _windows_by_layer(plan: Mapping, window_partition: Mapping | None = None) -> dict[int, int]:
+    """The sealed retained-window partition, from the plan or an explicit input.
+
+    The plan remains the source when it carries ``retained_window_budget_derivation``
+    (its §4.1 home).  A plan that does not -- the single-run plan the prepared
+    completion binds, whose re-plan sibling exists only to carry this partition --
+    may name the same record explicitly as a derivation input.  The two sources
+    never disagree silently: a plan that carries the block and an explicit input
+    that differs from it refuses, and the derivation envelope (v2) records which
+    source was used.
+    """
+    in_plan = plan.get("retained_window_budget_derivation")
+    if in_plan is not None and window_partition is not None:
+        if (_canonical_partition_bytes(in_plan)
+                != _canonical_partition_bytes(window_partition)):
+            raise ValueError(
+                "the plan's sealed retained-window partition and the explicit "
+                "window_partition input disagree: refusing to choose between "
+                "two sealed sources")
+        record = in_plan
+    elif in_plan is not None:
+        record = in_plan
+    elif window_partition is not None:
+        record = window_partition
+    else:
+        raise ValueError(
+            "no sealed retained-window partition: the plan carries none and "
+            "no explicit window_partition input was given")
     try:
-        counts = plan["retained_window_budget_derivation"]["windows_by_layer"]
+        counts = record["windows_by_layer"]
     except (KeyError, TypeError) as exc:
-        raise ValueError("the plan has no sealed retained-window partition") from exc
+        raise ValueError("the retained-window partition record has no windows_by_layer") from exc
     if not isinstance(counts, dict) or not counts:
         raise ValueError("the plan retained-window partition is not an object")
     ordered = {}
@@ -364,6 +395,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                  parent_manifest_sha256: str,
                  ram_window_gib: int | float | None = None,
                  max_resident_consumers: int | None = None,
+                 window_partition: Mapping | None = None,
                  adjoint_receipt: Mapping | None = None) -> dict:
     """Cut the sealed campaign into per-layer quantum records (§4.1).
 
@@ -431,7 +463,8 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         raise ValueError("the prepared completion has no unit roster")
     digest = roster_digest(roster)
     by_layer = _layer_qnames(prepared)
-    counts = _windows_by_layer(plan)
+    partition_from_plan = plan.get("retained_window_budget_derivation") is not None
+    counts = _windows_by_layer(plan, window_partition)
     ranges = {row["name"]: row for row in phase_ranges(parent_manifest)}
     entries = parent_manifest["entries"]
     if "head" not in ranges:
@@ -553,11 +586,19 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         plan_path=plan_path, plan_sha256=plan_sha256, prepared_path=prepared_path,
         prepared_sha256=prepared_sha256, parent_manifest_sha256=parent_manifest_sha256,
         output_root=output_root)
-    coverage = verify_quanta_coverage(records, parent_manifest, plan=plan)
+    coverage = verify_quanta_coverage(records, parent_manifest, plan=plan,
+                                      window_partition=window_partition)
     return {"records": records, "slice_manifests": slices,
             "adjoint_manifest": adjoint_manifest, "coverage": coverage,
             "derivation": {
-                "schema": "prismaquant.joint_layer_quanta.derivation.v1",
+                "schema": "prismaquant.joint_layer_quanta.derivation.v2",
+                "window_partition": {
+                    "source": "plan" if partition_from_plan else "explicit",
+                    "sha256": hashlib.sha256(_canonical_partition_bytes(
+                        plan.get("retained_window_budget_derivation")
+                        if partition_from_plan else window_partition)).hexdigest(),
+                    "windows_total": sum(counts.values()),
+                },
                 "chunk_target_bytes": chunk_target_bytes,
                 "ram_window_gib": ram_window_gib,
                 "max_resident_consumers": max_resident_consumers,
@@ -718,7 +759,8 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
 # Coverage and campaign binding (§3.2).
 
 def verify_quanta_coverage(records: Sequence[Mapping], parent_manifest: Mapping, *,
-                           plan: Mapping | None = None) -> dict:
+                           plan: Mapping | None = None,
+                           window_partition: Mapping | None = None) -> dict:
     """Prove the quanta tile the parent run manifest exactly once.
 
     Checks unique quantum ids covering every parent layer, one shared campaign
@@ -815,8 +857,8 @@ def verify_quanta_coverage(records: Sequence[Mapping], parent_manifest: Mapping,
         raise ValueError(f"quantum tiling stops at {previous_end} of {total}: "
                          f"gap, refusing")
     window_total = sum(item["windows"] for item in layer_table)
-    if plan is not None:
-        counts = _windows_by_layer(plan)
+    if plan is not None or window_partition is not None:
+        counts = _windows_by_layer(plan or {}, window_partition)
         for item in layer_table:
             if counts.get(item["layer"]) != item["windows"]:
                 raise ValueError(
