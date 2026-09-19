@@ -69,6 +69,21 @@ SAFE_PATH_ENV = "PYTHONSAFEPATH"
 CHECKOUT_COMMIT_ENV = "PRISMAQUANT_IDENTITY_GIT_COMMIT"
 
 
+#: The owner's rapid-iteration switch (Rob, 2026-09-19): when the submitting
+#: environment holds ``PRISMAQUANT_DEV_MODE=1``, the provenance gates inside
+#: the container -- the joint pass's source-proof, prepared-digest and
+#: checkpoint-lineage gates -- stamp and record instead of refusing. The
+#: submitter (``dispatch_tessera_campaign._submit_gpu_action``) seals it into
+#: the spec env it hands this launcher, which is exactly how
+#: ``PRISMAQUANT_LAYER_READ_THREADS`` travels: a hand-sealed spec that
+#: declares it reaches the container the same way, with no dispatch-side
+#: merge. The launcher itself neither requires nor interprets the value; the
+#: gates in ``prismaquant.dev_mode`` do. The name is held together with
+#: ``prismaquant.dev_mode.DEV_MODE_ENV`` by
+#: ``tests/test_dev_mode_provenance_gates.py``.
+DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE"
+
+
 #: The environment a bounded capture row's process must have been started with,
 #: per ``prismaquant/autoscale.py``: torch wheels may statically link mimalloc,
 #: whose delayed purge otherwise retains completed H/X after every owner is
