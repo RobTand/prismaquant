@@ -24,12 +24,16 @@ development contract (``TesseraContract.native_cells``) and the per-unit
 export gate (``resolve_unit_route``).
 
 Consequence on the pinned table, stated because it is what a reviewer needs:
-the cells that execute the ``window_gemv`` lane are the two E4M3 STREAMED
-cells, this producer plans rate (4,), window 14, WINDOW/CHANNEL, undecorated,
-arity 1 for them, and the predicate passes.  Nothing is refused today.  The
-BF16 rung the lane's ``routes`` also names would NOT pass -- rung 1792 plans
-rate 7 -- and no BF16 cell claims that launch; the test below pins that a
-cell which did would be refused by name at all three legs.
+since the v31 withdrawals NO pinned cell launches through an extension -- the
+streamed E4M3 cells that executed the ``window_gemv`` lane are withdrawn, and
+the dense E2M1 pair's span-2 provider retired with the CUDA decoder -- so the
+pinned table's every cell reads the gate as admitted and the lane-gated shapes
+these tests decide are synthesised (see ``_claiming_lane``/``_gated_carrier``
+below).  Nothing is refused today.  The BF16 rung the lane's ``routes`` also
+names would NOT pass -- rung 1792 plans rate 7 -- and no BF16 cell exists to
+claim that launch at all; the test below pins that a cell which did would be
+refused by name at all three legs, on the E2M1 dense pair, whose rung 896
+plans rate 7 for the same reason.
 """
 import copy
 import dataclasses
@@ -47,19 +51,44 @@ from prismaquant import tessera_runtime_contract as contract
 
 
 WINDOW_LANE = "tessera_window_gemv"
-NVFP4_LANE = "tessera_nvfp4_"
 E4M3 = "TESSERA_E4M3_K1"
 E4M3_NAME = "TESSERA_E4M3_K1_R1024"
 E4M3_RATE = 1024
 BF16 = "TESSERA_BF16_K1"
 BF16_NAME = "TESSERA_BF16_K1_R1792"
 BF16_RATE = 1792
-BF16_DECODE = "tessera_bf16_k1_dense_sm121_decode"
-STREAMED = (
-    "tessera_e4m3_k1_dense_sm121_decode_streamed",
-    "tessera_e4m3_k1_dense_sm121_batch_streamed",
-)
+#: Since the v31 withdrawals no pinned cell launches through an extension:
+#: the routed rows decode ``torch_materialize_stock`` and the dense E2M1 pair
+#: rides ``torch._scaled_mm``/``native_span2``, whose providing row retired
+#: with the span-2 CUDA decoder.  The lane-gated shape the tests below need
+#: is therefore SYNTHESISED two ways: a carrier whose plan passes (the routed
+#: E4M3 decode cell claiming the window lane at rate 4) and a claimer whose
+#: plan refuses (the dense E2M1 decode cell claiming it at rate 7).
+GATED_CARRIER = "tessera_e4m3_k1_routed_moe_sm121_decode_resident"
+CLAIMING = "tessera_e2m1_k2_dense_sm121_decode"
+CLAIMING_BATCH = "tessera_e2m1_k2_dense_sm121_batch"
+CLAIMING_FAMILY = "TESSERA_E2M1_K2"
+CLAIMING_NAME = "TESSERA_E2M1_K2_R896"
+CLAIMING_RATE = 896
 WINDOW_LAUNCH = {"symbol": "tessera_window_gemv::gemv", "decoder": "window_gemv"}
+
+
+def _claiming_lane(payload):
+    """A copy of the pinned payload whose dense E2M1 decode cell claims the
+    window-GEMV lane: rung 896 plans rate 7, which the predicate refuses, so
+    the cell is a claim the lane will not honour."""
+    moved = copy.deepcopy(payload)
+    _cell(moved, CLAIMING)["executes"] = [WINDOW_LAUNCH]
+    return moved
+
+
+def _gated_carrier(payload):
+    """A copy whose routed E4M3 decode cell claims the window lane at a rung
+    whose plan (rate 4) PASSES the predicate -- the shape the streamed E4M3
+    cells were on the pre-v31 table."""
+    moved = copy.deepcopy(payload)
+    _cell(moved, GATED_CARRIER)["executes"] = [WINDOW_LAUNCH]
+    return moved
 
 
 def _raw() -> tuple[dict, str]:
@@ -125,13 +154,20 @@ def _canonical(requires):
 # ---------------------------------------------------------------------------
 def test_the_installed_predicate_is_read_closed_at_tesseras_vocabulary(table, payload):
     claims = {claim.extension: claim for claim in table.lanes}
-    assert set(claims) == {WINDOW_LANE, NVFP4_LANE}
+    assert set(claims) == {WINDOW_LANE}, (
+        "since the v32 withdrawals retired the span-2 decoder's row, the "
+        "window-GEMV row is the pinned table's only lane")
     window = claims[WINDOW_LANE]
     assert window.decoder == _row(payload, WINDOW_LANE)["lane"]["decoder"]
     assert window.requires == _canonical(_row(payload, WINDOW_LANE)["lane"]["requires"])
-    assert claims[NVFP4_LANE].requires is None, (
-        "a lane that publishes no predicate is the route's own eligibility, "
-        "not an empty predicate")
+    # A lane that publishes no predicate is the route's own eligibility, not
+    # an empty predicate.  The nvfp4 row witnessed it on the pinned table
+    # until its retirement; the branch is now witnessed by moving the window
+    # row's own lane to the no-``requires`` shape.
+    bare = copy.deepcopy(payload)
+    _row(bare, WINDOW_LANE)["lane"] = {"decoder": "window_gemv"}
+    bare_claims = {claim.extension: claim for claim in _table(bare).lanes}
+    assert bare_claims[WINDOW_LANE].requires is None
     # The vocabulary this reader closes is exactly what the pinned lane
     # publishes today: a requirement the lane grows is refused by name below,
     # never skipped.
@@ -144,8 +180,13 @@ def test_a_table_is_not_readable_without_the_extension_table(payload):
     block, formats = payload["lane_eligibility"], payload["formats"]
     with pytest.raises(TypeError):
         lane._parse_table(block, formats, "", "", "x")
+    # The refusal is about launches the reader cannot DECIDE, and no pinned
+    # cell names one since the v31 withdrawals -- so the gated shape is
+    # synthesised on a copy before the table is withheld.
+    gated = _gated_carrier(payload)
     with pytest.raises(lane.LaneEligibilityError, match="native_extensions"):
-        lane._parse_table(block, formats, "", "", "x", native_extensions=None)
+        lane._parse_table(gated["lane_eligibility"], gated["formats"],
+                          "", "", "x", native_extensions=None)
 
 
 def test_a_table_whose_cells_launch_only_through_torch_needs_no_extension_table(payload):
@@ -163,9 +204,12 @@ def test_a_table_whose_cells_launch_only_through_torch_needs_no_extension_table(
     table = lane._parse_table(block, formats, "", "", "x", native_extensions=None)
     assert table.present and table.lanes == ()
     # ... and the refusal, when it fires, says WHICH launch it cannot decide.
-    block, formats = payload["lane_eligibility"], payload["formats"]
+    # The pinned table no longer carries an extension-qualified launch, so
+    # the claiming copy supplies one.
+    gated = _claiming_lane(payload)
     with pytest.raises(lane.LaneEligibilityError, match="tessera_window_gemv::gemv"):
-        lane._parse_table(block, formats, "", "", "x", native_extensions=None)
+        lane._parse_table(gated["lane_eligibility"], gated["formats"],
+                          "", "", "x", native_extensions=None)
 
 
 def _mutate(payload, **changes):
@@ -276,10 +320,18 @@ def test_the_planned_decoration_is_the_render_decoration():
 # ---------------------------------------------------------------------------
 # The gate
 # ---------------------------------------------------------------------------
-def test_every_lane_gated_cell_on_the_pinned_table_admits_this_producers_plan(table):
+def test_no_pinned_cell_is_lane_gated_and_every_plan_admits(table):
+    """Since the v31 withdrawals, no pinned cell launches through an extension.
+
+    The streamed E4M3 cells that executed the window-GEMV lane are withdrawn
+    and the dense E2M1 pair's span-2 provider retired with the CUDA decoder,
+    so the gated set is empty and the gate admits every surviving cell --
+    the machinery's honest state at this pin, and the reason the gated shapes
+    the rest of this section decides are synthesised.
+    """
     gated = {cell.id for cell in table.cells
              if lane.lane_claim_for_cell(cell, table.lanes) is not None}
-    assert gated == set(STREAMED), (
+    assert gated == set(), (
         "the cells subject to the window-GEMV predicate are exactly the ones "
         "that execute it; a decoder no lane names is the route's own path")
     for cell in table.cells:
@@ -289,77 +341,102 @@ def test_every_lane_gated_cell_on_the_pinned_table_admits_this_producers_plan(ta
             assert why == ""
 
 
+def test_every_lane_gated_cell_on_a_synthesised_table_admits_this_producers_plan(
+        payload):
+    """The gated shape the pinned table no longer carries, kept exercised.
+
+    A cell claiming the window lane at a rung whose plan passes (the routed
+    E4M3 decode cell at rate 4) is subject to the predicate and admitted.
+    This is the pre-v31 pinned behaviour, synthesised rather than lost."""
+    table = _table(_gated_carrier(payload))
+    gated = {cell.id for cell in table.cells
+             if lane.lane_claim_for_cell(cell, table.lanes) is not None}
+    assert gated == {GATED_CARRIER}
+    for cell_id in gated:
+        cell = _parsed_cell(table, cell_id)
+        for rung in cell.rungs_q256:
+            admits, why = lane.cell_lane_admits(cell, rung, table.lanes)
+            assert admits, (cell_id, why)
+            assert why == ""
+
+
 def _claiming_bf16(payload):
+    """The claiming shape on the surviving dense E2M1 pair: rung 896 plans
+    rate 7 exactly as the withdrawn BF16 rung 1792 did, so the claim refuses
+    for the same reason.  Kept under its historical name."""
     moved = copy.deepcopy(payload)
-    _cell(moved, BF16_DECODE)["executes"] = [WINDOW_LAUNCH]
+    _cell(moved, CLAIMING)["executes"] = [WINDOW_LAUNCH]
     return moved
 
 
 def test_a_cell_claiming_the_lane_for_a_rung_it_refuses_is_refused_by_name(payload):
     moved = _claiming_bf16(payload)
     table = _table(moved)
-    cell = _parsed_cell(table, BF16_DECODE)
-    admits, why = lane.cell_lane_admits(cell, BF16_RATE, table.lanes)
+    cell = _parsed_cell(table, CLAIMING)
+    admits, why = lane.cell_lane_admits(cell, CLAIMING_RATE, table.lanes)
     assert not admits
-    for name in (BF16_DECODE, WINDOW_LANE, "window_gemv", "column_rates", "[7]"):
+    for name in (CLAIMING, WINDOW_LANE, "window_gemv", "column_rates", "[7]"):
         assert name in why, (name, why)
     # Sibling cell on the same family is untouched: refusal is per launch.
-    batch = _parsed_cell(table, "tessera_bf16_k1_dense_sm121_batch")
-    assert lane.cell_lane_admits(batch, BF16_RATE, table.lanes) == (True, "")
+    batch = _parsed_cell(table, CLAIMING_BATCH)
+    assert lane.cell_lane_admits(batch, CLAIMING_RATE, table.lanes) == (True, "")
 
 
 def test_all_three_admission_legs_read_the_one_gate(payload, monkeypatch):
     moved = _claiming_bf16(payload)
     table, formats = _table(moved), _formats(moved)
-    context = _context(moved, BF16_DECODE, "resident")
+    context = _context(moved, CLAIMING, "resident")
 
     # 1. The menu.
     monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
     monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
-    assert render.tessera_attesting_cells(BF16_NAME, serving_context=context) == ()
-    admitted, reason = render.tessera_lane_admission(BF16_NAME, serving_context=context)
+    assert render.tessera_attesting_cells(CLAIMING_NAME, serving_context=context) == ()
+    admitted, reason = render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)
     assert not admitted
-    assert "column_rates" in reason and BF16_DECODE in reason and WINDOW_LANE in reason
-    assert not render.tessera_lane_attested(BF16_NAME, serving_context=context)
+    assert "column_rates" in reason and CLAIMING in reason and WINDOW_LANE in reason
+    assert not render.tessera_lane_attested(CLAIMING_NAME, serving_context=context)
 
     # 2. The per-unit export gate names the cell AND the reason.
     facts = lane.UnitStructuralFacts(
-        qname="fixture.weight", format_name=BF16_NAME, payload_family=BF16,
-        k=None, n_sub=None, rate_q256=BF16_RATE, structure="dense",
+        qname="fixture.weight", format_name=CLAIMING_NAME,
+        payload_family=CLAIMING_FAMILY,
+        k=None, n_sub=None, rate_q256=CLAIMING_RATE, structure="dense",
         role_split=False, in_features=1024, out_features=1024)
     route = lane.resolve_unit_route(
         facts, table, platform=context.platform, residency="resident",
         runtime_image=context.runtime_image, execution_mode=context.execution_mode)
     assert route.route_status == lane.ROUTE_STATUS_UNATTESTED
     decode = {r.regime: r for r in route.regimes}["decode"]
-    assert decode.cell_id == BF16_DECODE
+    assert decode.cell_id == CLAIMING
     assert "column_rates" in decode.detail
 
     # 3. The development contract.
     parsed = contract._parse(moved, commit="fixture", sha="fixture", path="fixture")
-    assert parsed.native_cells(BF16, BF16_RATE, serving_context=context) == ()
+    assert parsed.native_cells(CLAIMING_FAMILY, CLAIMING_RATE,
+                               serving_context=context) == ()
 
 
-def test_the_untouched_table_admits_the_same_bf16_rung_at_every_leg(payload, monkeypatch):
+def test_the_untouched_table_admits_the_same_rung_at_every_leg(payload, monkeypatch):
     """The control for the test above: the refusal is the launch claim, not
     the family or the rung."""
     table, formats = _table(payload), _formats(payload)
-    context = _context(payload, BF16_DECODE, "resident")
+    context = _context(payload, CLAIMING, "resident")
     monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
     monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
-    assert render.tessera_lane_admission(BF16_NAME, serving_context=context) == (True, "")
+    assert render.tessera_lane_admission(CLAIMING_NAME, serving_context=context) == (True, "")
     parsed = contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
-    assert parsed.native_cells(BF16, BF16_RATE, serving_context=context)
+    assert parsed.native_cells(CLAIMING_FAMILY, CLAIMING_RATE, serving_context=context)
 
 
-def test_a_decorated_plan_is_refused_at_every_requirement_it_breaks(table, monkeypatch):
+def test_a_decorated_plan_is_refused_at_every_requirement_it_breaks(payload, monkeypatch):
     """The predicate is the whole predicate: the loader reads all nine, so
     the gate cannot decide fewer."""
     decorated = dict(render.planned_wire_facts(E4M3, E4M3_RATE))
     decorated.update(rates=(5,), window_bits=12, release_overrides=3, diagonals=True,
                      rotation="R_IN_ONLY", start_state=True, grid_arity=2)
     monkeypatch.setattr(render, "planned_wire_facts", lambda family, rung: decorated)
-    cell = _parsed_cell(table, STREAMED[0])
+    table = _table(_gated_carrier(payload))
+    cell = _parsed_cell(table, GATED_CARRIER)
     admits, why = lane.cell_lane_admits(cell, E4M3_RATE, table.lanes)
     assert not admits
     for name in ("column_rates", "window_bits", "release_overrides", "diagonals",
@@ -367,24 +444,27 @@ def test_a_decorated_plan_is_refused_at_every_requirement_it_breaks(table, monke
         assert name in why, (name, why)
 
 
-def test_a_requirement_the_decision_core_cannot_decide_refuses_rather_than_skips(table):
+def test_a_requirement_the_decision_core_cannot_decide_refuses_rather_than_skips(
+        payload, table):
     claim = dataclasses.replace(
         [c for c in table.lanes if c.extension == WINDOW_LANE][0],
         requires={"span": (2,)})
-    cell = _parsed_cell(table, STREAMED[0])
+    cell = _parsed_cell(_table(_gated_carrier(payload)), GATED_CARRIER)
     with pytest.raises(lane.LaneEligibilityError, match="span"):
         lane.cell_lane_admits(cell, E4M3_RATE, (claim,))
 
 
-def test_a_family_this_producer_cannot_plan_is_refused_not_passed(table):
-    cell = dataclasses.replace(_parsed_cell(table, STREAMED[0]), family="TESSERA_E5M2_K1")
+def test_a_family_this_producer_cannot_plan_is_refused_not_passed(payload, table):
+    cell = dataclasses.replace(
+        _parsed_cell(_table(_gated_carrier(payload)), GATED_CARRIER),
+        family="TESSERA_E5M2_K1")
     admits, why = lane.cell_lane_admits(cell, E4M3_RATE, table.lanes)
     assert not admits
     assert "TESSERA_E5M2_K1" in why and "plan" in why
 
 
-def test_a_lane_gated_cell_without_a_rung_is_refused(table):
-    cell = _parsed_cell(table, STREAMED[0])
+def test_a_lane_gated_cell_without_a_rung_is_refused(payload, table):
+    cell = _parsed_cell(_table(_gated_carrier(payload)), GATED_CARRIER)
     admits, why = lane.cell_lane_admits(cell, None, table.lanes)
     assert not admits and "rung" in why
 
@@ -401,7 +481,10 @@ def test_the_lane_predicate_is_part_of_the_reviewed_answer(payload):
     assert rows[WINDOW_LANE]["lane"] == {
         "decoder": "window_gemv",
         "requires": _row(payload, WINDOW_LANE)["lane"]["requires"]}
-    assert rows[NVFP4_LANE]["lane"] == {"decoder": "native_span2", "requires": None}
+    # The retired nvfp4 row also carried {"decoder": "native_span2",
+    # "requires": None} until the v32 withdrawals; the answer's rows are the
+    # published ones, and there is exactly one now.
+    assert set(rows) == {WINDOW_LANE}
     moved = _mutate(payload, **{"requires.column_rates": [1, 2, 4, 8]})
     after = contract.contract_answer(
         contract._parse(moved, commit="fixture", sha="fixture", path="fixture"))

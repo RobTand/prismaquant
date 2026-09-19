@@ -30,7 +30,10 @@ def _payload():
         "tessera.lane-eligibility.v5")
     # Dense-only, decided here rather than inherited: v6 publishes routed_moe
     # cells too, and this file's scope tests ask what a routed_moe CONTEXT gets
-    # from a table that covers only dense.
+    # from a table that covers only dense.  Since the v31 withdrawals the only
+    # dense cells the installed table carries are the E2M1_K2 pair, so the
+    # asks below name that family at rung 896 -- the dense E4M3 roster they
+    # named before is withdrawn and would make every assert here vacuous.
     block = payload["lane_eligibility"]
     block["cells"] = [c for c in block["cells"] if c["structure"] == "dense"]
     block["structures"] = [s for s in block["structures"] if s == "dense"]
@@ -54,8 +57,8 @@ def test_v5_development_requires_context_and_retains_exact_cell_scope():
     parsed = _parse(_payload())
     assert parsed.lane_schema == "tessera.lane-eligibility.v5"
     assert parsed.requires_serving_context is True
-    assert parsed.native_cells("TESSERA_E4M3_K1", 1024) == ()
-    selected = parsed.native_cells("TESSERA_E4M3_K1", 1024, serving_context=_context())
+    assert parsed.native_cells("TESSERA_E2M1_K2", 896) == ()
+    selected = parsed.native_cells("TESSERA_E2M1_K2", 896, serving_context=_context())
     assert {cell.regime for cell in selected} == set(parsed.regimes)
     assert all(cell.runtime_image == DENSE_IMAGE for cell in selected)
     assert all(cell.execution_modes == ("eager",) for cell in selected)
@@ -67,7 +70,7 @@ def test_v5_development_requires_context_and_retains_exact_cell_scope():
 ])
 def test_v5_development_cannot_borrow_cells_from_another_scope(changed):
     parsed = _parse(_payload())
-    assert parsed.native_cells("TESSERA_E4M3_K1", 1024, serving_context=_context(**changed)) == ()
+    assert parsed.native_cells("TESSERA_E2M1_K2", 896, serving_context=_context(**changed)) == ()
 
 
 def test_v5_development_requires_all_regimes_on_one_runtime():
@@ -76,7 +79,7 @@ def test_v5_development_requires_all_regimes_on_one_runtime():
         if cell["regime"] == "batch":
             cell["runtime"]["image"] = MOE_IMAGE
     parsed = _parse(payload)
-    assert parsed.native_cells("TESSERA_E4M3_K1", 1024, serving_context=_context()) == ()
+    assert parsed.native_cells("TESSERA_E2M1_K2", 896, serving_context=_context()) == ()
 
 
 @pytest.mark.parametrize("field,value", [

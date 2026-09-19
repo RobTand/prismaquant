@@ -40,42 +40,64 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `4c384e6049dca3eeaf503bb2c9cd1cd2778978d1`,
-master's tip on 2026-09-15, the merge of Tessera #517. Install that revision
+The current pin is Tessera `e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf`, the
+head of Tessera #562 (D2/D2b, stacked on #560's
+`flash/506-routed-full-domain-rates-20260918`), re-pinned 2026-09-19 for the
+coordinated post-#560-lineage bump (PrismaQuant #760). Install that revision
 and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 `experiments/` and are not wheel entry points.
 
-It moves the contract from **v24** to **v29**, and the lane-eligibility schema
+It moves the contract from **v29** to **v32**, and the lane-eligibility schema
 stays at **v10**: every bump in between is additive for a v10 reader. Four
 admission facts move, and `TESSERA_DEV_PIN_ANSWER`'s diff is their review:
 
-- **v29:** every `tensor_parallel` unit's `max_world_size` goes from 1 to 2,
-  and each cites the served TP2 receipt `glm53_a4_stub_tp2_sm121`. Tessera
-  rungs now survive a TP2 allocation in the attested menu, and any larger
-  degree is still refused. The reader refuses a ceiling above 1 unless its
-  cited receipt is published, executed that unit, and served at least that
-  world.
-- **v26:** `TESSERA_E2M1_K2`'s `row` loader axis goes from `refused` to
-  `sharded`.
-- **v25:** the `sm_121` `e2m1_group16_ue4m3_static` activation-quantizer
-  table is published. `require_activation_quantizer_attested` recomputes it
-  instead of refusing for want of a table.
-- **v28:** two routed-MoE `TESSERA_E2M1_K2` cells at q896 on `sm_121`
-  (decode and batch, resident, eager). Their grade is `route_only`, and
-  `smoke.status` is `not_recorded`. `cell_evidence_admits` refuses only
-  `repetitive`, so accepting this pin admits them. That routed-MoE admission
-  is Rob's call under principle 9 (#198).
+- **withdrawn (master-side, v30/v31):** all eight non-`E2M1_K2` dense cells
+  -- the four `TESSERA_BF16_K1` rows on `sm_121` and `gfx1201` (which carried
+  `recorded` evidence and were the only cells on the AMD platform) and the
+  four `TESSERA_E4M3_K1` dense rows, resident and streamed (Tessera #538 and
+  the A4 whole-weight retirement). Accepting this pin therefore admits
+  STRICTLY LESS than v29 did on dense routes: `TESSERA_BF16_K1_R1792`
+  answers `unattested`/`no_cell` everywhere again. The routed-MoE
+  `recorded` pair (`TESSERA_E4M3_K1`, q1024) is byte-identical, so the
+  status-only evidence gate admits the same scope it did at v29.
+- **v32 (#560):** the routed `TESSERA_E2M1_K2` reader domain widens from the
+  single rung `[896, 896]` to the full trellis domain `[128, 896]` step 128,
+  and the two routed-MoE cells widen with it. The receipt is the seven-rung
+  green load (PB `a186d7bc6f1f…`). The cells stay `route_only` /
+  `not_recorded`, so that widening is Rob's call under principle 9 (#198),
+  flagged in the answer diff rather than decided by it.
+- **D2/D2b (#562):** the unreceipted DENSE half of #560's widen is reverted
+  (the dense `E2M1_K2` cells keep rung 896 only), and served KL receipts are
+  scoped to the rung they measured -- the `q256` key this reader now parses
+  and projects as `@q<rung>` in the answer's kl token.
+- **A4 retirement:** the span-2 CUDA decoder is gone, so
+  `native_extensions` (and this pin's `serving_native_extensions`
+  transcription) drops the `tessera_nvfp4_` row and keeps the one
+  window-GEMV row.
 
-The twelve v24 cells are byte-identical, so everything the previous pin
-admitted, this one still admits. The world-size receipt's own scope is one
-degenerate four-layer GLM-5.3 stub served across sparky and sparklina,
-eager only. It attests that the route executes at world size 2. It is not a
-full-model TP2 qualification.
+Nothing else moved: lane schema v10, the TP ceiling stays 2 on the same
+receipt, the quantiser table is byte-identical, and `TESSERA_E4M3_K1`'s
+family row is unchanged.
+
+**Gated landing (PrismaQuant #760).** This pin is the prerequisite half of a
+coordinated two-repo change. #563 (docs fix-forward, pin-coupled) edits only
+the contract changelog, so once #562 AND #563 have both landed, the contract
+at Tessera master's head is the three-way union of their edits --
+
+```
+union contract sha256
+712a15e4cb6015e28cb206e82aba542c8af78d8e0e4efda34f78841226e8c61c
+```
+
+-- which is NOT this pin's digest. Before the PrismaQuant side merges,
+repoint `commit` and `contract_sha256` (both files, one commit) to that
+final head and re-verify; the admission answer is already the union's,
+because #563 projects nothing the answer reads.
 
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p 4c384e6049dca3eeaf503bb2c9cd1cd2778978d1:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -170,13 +192,14 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-15:
+Verified against `RobTand/tessera` (branch head of #562, stacked on #560's
+lineage) on 2026-09-19:
 
 ```
-commit           4c384e6049dca3eeaf503bb2c9cd1cd2778978d1
-contract_sha256  db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3
+commit           e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf
+contract_sha256  14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780
 versions.tessera 0.1.0
-contract_version 29
+contract_version 32
 lane schema      tessera.lane-eligibility.v10
 ```
 

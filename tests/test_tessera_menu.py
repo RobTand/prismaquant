@@ -37,7 +37,7 @@ def _default_serve_image() -> str:
 
 
 def _dense_context():
-    """The scope the eight dense cells of the pinned (v8) table publish.
+    """The scope the dense E2M1 cells of the pinned (v10) table publish.
 
     The table is scoped: a cell attests a rung only at an exact platform,
     image, execution mode and residency, so every admission below is asked
@@ -49,6 +49,28 @@ def _dense_context():
     return ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=_default_serve_image(), execution_mode="eager")
+
+
+def _routed_context(family="TESSERA_E4M3_K1"):
+    """The scope a routed-MoE cell publishes, derived from the cell.
+
+    Since the v31 withdrawals E4M3's cells are routed-only, and the routed
+    rows carry their own serve images rather than the default.
+    """
+    import json
+    from importlib.resources import as_file
+    from prismaquant import tessera_runtime_contract as _trc
+    from prismaquant.lane_eligibility import ServingContext
+
+    with as_file(_trc.contract_path()) as path:
+        cells = json.loads(path.read_text(encoding="utf-8"))[
+            "lane_eligibility"]["cells"]
+    cell = next(c for c in cells
+                if c["family"] == family and c["structure"] == "routed_moe")
+    return ServingContext(
+        platform=cell["platform"], structure="routed_moe", residency="resident",
+        runtime_image=cell["runtime"]["image"],
+        execution_mode=cell["runtime"]["execution_modes"][0])
 
 
 def _scope():
@@ -470,7 +492,7 @@ def test_the_scoped_table_answers_nothing_without_a_scope(dev_pin):
 
 def test_a_rate_the_contract_does_not_publish_is_unattested_not_backed(dev_pin):
     """One q256 step off the published rung is absence of a claim."""
-    context = _dense_context()
+    context = _routed_context("TESSERA_E4M3_K1")
     on = tm.route_admission("TESSERA_E4M3_K1_R1024", serving_context=context)
     off = tm.route_admission("TESSERA_E4M3_K1_R1023", serving_context=context)
     assert on.route_status == tm.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
@@ -963,7 +985,9 @@ def test_tp_above_the_attested_world_size_is_refused_in_the_attested_menu(dev_pi
 
 
 @pytest.mark.parametrize("parallel_kind", [tm.PARALLEL_COLUMN, tm.PARALLEL_ROW])
-def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(dev_pin, parallel_kind):
+@pytest.mark.parametrize("context", ["dense", "routed"], ids=["dense", "routed"])
+def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(
+        dev_pin, parallel_kind, context):
     """The regression #632 names: a TP2 allocation dropped every Tessera rung.
 
     Under the v24 pin every family sat at ``max_world_size: 1``, so the
@@ -973,19 +997,31 @@ def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(dev_pin, parallel_kind
     TP=1 menu on a shape both axes shard, and each surviving rung must still
     say the ceiling it was admitted under. Derived from the contract rather
     than typed, so a family the pin stops attesting at 2 fails here by name.
+
+    Parametrised over both scopes since the v31 withdrawals: the dense scope
+    carries the E2M1 dense pair, the routed scope the E4M3 and E2M1 routed
+    pairs.  ``TESSERA_BF16_K1`` is gone from this census -- its every cell
+    is withdrawn, and a family the pin no longer attests at ANY world size
+    fails the union assert below by name, which is the fail-closed reading.
     """
     contract = trc.load_tessera_contract()
-    context = _dense_context()
+    scope = (_dense_context() if context == "dense"
+             else _routed_context("TESSERA_E4M3_K1"))
     at_one = [r.format_name for r in tm.expand_tessera_menu(
-        SHAPE, mode=tm.MENU_ATTESTED, serving_context=context)]
+        SHAPE, mode=tm.MENU_ATTESTED, serving_context=scope)]
     at_two = tm.expand_tessera_menu(
         SHAPE, mode=tm.MENU_ATTESTED, tp_degree=2,
-        parallel_kind=parallel_kind, serving_context=context)
+        parallel_kind=parallel_kind, serving_context=scope)
     assert at_one, "the pinned contract must attest something at TP=1"
     assert [r.format_name for r in at_two] == at_one
     families = {r.admission.payload_family for r in at_two}
-    assert {"TESSERA_E2M1_K2", "TESSERA_E4M3_K1",
-            "TESSERA_BF16_K1"} <= families, sorted(families)
+    if context == "dense":
+        assert families == {"TESSERA_E2M1_K2"}, sorted(families)
+    else:
+        # Each routed family serves on its OWN image, so the E4M3 scope
+        # carries exactly the E4M3 pair; the E2M1 routed pair is carried by
+        # its own scope (and the dense leg carries the dense pair).
+        assert families == {"TESSERA_E4M3_K1"}, sorted(families)
     for rung in at_two:
         assert contract.max_world_size[rung.admission.payload_family] >= 2
         legal, reason = tm.tessera_tp_legal(
@@ -1323,19 +1359,42 @@ PRICED = [
 
 def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_pin):
     """The default path allocates over the backed axis, not over nothing."""
+    # The dense scope: the E2M1 dense pair backs R896; the routed-only E4M3
+    # and the sub-cap E2M1 rates are reported, not silently narrowed.
     menu, dropped = tm.expand_menu_tokens_report(
         ["NVFP4", tm.MENU_TOKEN, "BF16"], PRICED, context_by_unit=_scope())
     assert menu == [
-        "NVFP4", "TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R1024", "BF16",
+        "NVFP4", "TESSERA_E2M1_K2_R896", "BF16",
     ], menu
-    # the narrowing is reported, not silent: an allocation over 2 rungs and one
-    # over 2423 must not look the same in a log (P12).
     assert sorted(dropped) == sorted([
-        "TESSERA_E2M1_K2_R640", "TESSERA_E4M3_K1_R512", "TESSERA_E2M1_K1_R256",
+        "TESSERA_E2M1_K2_R640", "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R512", "TESSERA_E2M1_K1_R256",
     ]), dropped
-    # and the filter is the same predicate the guard refuses on, so the token
-    # can never expand to something ``require_producer_formats`` then rejects.
     fr.require_producer_formats(menu, where="test", context_by_unit=_scope())
+    # The routed scopes back more of the priced axis since #560's widen, and
+    # the token follows the scope the operator actually declared rather than
+    # a fixed answer.  Each routed family serves on its OWN image, so each
+    # routed scope carries exactly its family's rungs.
+    e4m3 = tm.expand_menu_tokens_report(
+        ["NVFP4", tm.MENU_TOKEN, "BF16"], PRICED,
+        context_by_unit={"unit": _routed_context("TESSERA_E4M3_K1")})
+    assert e4m3[0] == [
+        "NVFP4", "TESSERA_E4M3_K1_R1024", "BF16",
+    ], e4m3[0]
+    assert sorted(e4m3[1]) == sorted([
+        "TESSERA_E2M1_K2_R896", "TESSERA_E2M1_K2_R640",
+        "TESSERA_E4M3_K1_R512", "TESSERA_E2M1_K1_R256",
+    ]), e4m3[1]
+    e2m1 = tm.expand_menu_tokens_report(
+        ["NVFP4", tm.MENU_TOKEN, "BF16"], PRICED,
+        context_by_unit={"unit": _routed_context("TESSERA_E2M1_K2")})
+    assert e2m1[0] == [
+        "NVFP4", "TESSERA_E2M1_K2_R896", "TESSERA_E2M1_K2_R640", "BF16",
+    ], e2m1[0]
+    assert sorted(e2m1[1]) == sorted([
+        "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R512",
+        "TESSERA_E2M1_K1_R256",
+    ]), e2m1[1]
 
 
 def test_an_explicitly_named_unattested_rung_still_refuses(dev_pin):

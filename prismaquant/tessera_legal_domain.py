@@ -64,10 +64,13 @@ SCHEMA = "prismaquant.tessera_legal_domain.v1"
 PRIMARY_FAMILIES = ("TESSERA_E4M3_K1", "TESSERA_BF16_K1")
 
 #: Retained as an existing, separately licensed control (section 2.1).  It is
-#: NOT part of the primary roster and never enters a primary count.  It is
-#: carried because it is the only family at this pin where ``producer_legal``
-#: and ``reader_supported`` disagree, which is the property the ledger exists
-#: to be able to express.
+#: NOT part of the primary roster and never enters a primary count.  Until
+#: the 2026-09-19 pin it was the one family whose producer domain exceeded
+#: its reader range (R128-R896 written, R896-R896 read); #560's full-domain
+#: widen closed that gap, and the ledger's ability to express such a
+#: divergence -- a fact about the READER, distinct from the writer's -- is
+#: now witnessed against a narrowed range in
+#: ``tests/test_tessera_legal_domain.py`` rather than by the live pin.
 CONTROL_FAMILIES = ("TESSERA_E2M1_K2",)
 
 #: The counts the frozen source audit derived, to compare a fresh derivation
@@ -196,10 +199,13 @@ SPEC_NAMED_STUDY_PRODUCER = "d403cc5a3199a348cc7ee6262f4adbdab8138745"
 #: :func:`tessera_source_state` hashes the bytes actually imported and names
 #: which state they are, so every derived number carries its origin.
 #:
-#: ``grammar.py`` is byte-identical at all three states: the rate-grammar
-#: refusals that set the domain endpoints have not moved at all.  ``export.py``
-#: separates them, and it is where ``_window_bits_for`` and ``wire_recipe``
-#: live.
+#: ``grammar.py`` moved at the 2026-09-19 pin (see
+#: :data:`TESSERA_GRAMMAR_DIGEST`): the three states below still carry the
+#: pre-memoisation bytes, the pin carries the memoised ones, and the two are
+#: one acceptance predicate -- the audit walk re-derives the same counts
+#: through either.  ``export.py`` is where ``_window_bits_for`` and
+#: ``wire_recipe`` live, and THAT file is byte-identical at every state
+#: including the current pin.
 #:
 #: The key ``reader-pin-387eda36`` names the state the audit was *taken*
 #: through, not today's reader pin.  The reader pin moved to ``4c384e60``
@@ -231,13 +237,19 @@ TESSERA_SOURCE_STATES = {
     },
 }
 
-#: ``grammar.py``'s digest, which all three states share.  The rate bounds and
-#: the whole-unit-quota refusal -- the two things that decide where the legal
-#: domain starts and stops -- are these bytes at every state, so the roster is
-#: not a function of which one is imported.  That is a derived fact, not an
-#: assumption: it is asserted against the importable tree by the tests.
+#: ``grammar.py``'s digest AT THE CURRENT PIN.  The rate bounds and the
+#: whole-unit-quota refusal -- the two things that decide where the legal
+#: domain starts and stops -- are these bytes at the pin, so the roster is
+#: not a function of which state is imported.  That is a derived fact, not
+#: an assumption: it is asserted against the importable tree by the tests.
+#: Since the 2026-09-19 re-pin the pin's grammar is ``9ae1f824…`` (memoised
+#: walks plus an O(1) membership fast path over the same acceptance
+#: predicate) while the three frozen states in
+#: :data:`TESSERA_SOURCE_STATES` still carry ``f2545274…``; the counts are
+#: re-derived through the new bytes by the audit-walk test, which is what
+#: makes the change a re-transcription rather than a re-measurement.
 TESSERA_GRAMMAR_DIGEST = (
-    "f2545274c8e03534d040c64fb4fd1a02085de7b5eb106f80e8fb31b05454fac8"
+    "9ae1f824afd316950e2ea224df994a9048e90a616d78300a2baf054783786da4"
 )
 
 #: The states whose ``export.py`` bytes produce the same wire for the two
@@ -291,7 +303,7 @@ def tessera_source_state() -> dict[str, object]:
         "export_path": _export.__file__,
         "export_sha256": export_digest,
         "grammar_sha256": grammar_digest,
-        "grammar_matches_every_state": grammar_digest == TESSERA_GRAMMAR_DIGEST,
+        "grammar_matches_pin": grammar_digest == TESSERA_GRAMMAR_DIGEST,
         "verdict": (
             f"deriving through {state} "
             + ("(a pin, and the two pins' wire is byte-identical for these "
@@ -389,18 +401,43 @@ def live_pins() -> DomainPins:
 #: quantiser table, a loader axis, format structure lists, two routed-MoE
 #: cells and the tensor-parallel ceiling -- is serving scope, which no number
 #: here reads.
+#:
+#: **Re-taken 2026-09-19 for the v32 pin, and for the first time the grammar
+#: moved -- as a re-transcription carried by a test, not by prose.**  The pin
+#: moved ``4c384e60`` -> ``e4a3a7d4`` (the head of Tessera #562 on #560's
+#: lineage; contract v29 -> v32), and both deciding files were again hashed
+#: at the new commit:
+#:
+#: * ``src/tessera/export.py`` is STILL ``b1b04f26…`` -- byte-identical to the
+#:   frozen study producer ``d403cc5a`` -- so :func:`tessera_source_state`
+#:   keeps naming an import at the current pin ``study-producer-d403cc5a`` and
+#:   no new :data:`TESSERA_SOURCE_STATES` entry belongs (state identity is the
+#:   ``export.py`` digest, and a second entry carrying the same one would make
+#:   the match ambiguous).
+#: * ``src/tessera/grammar.py`` is NEW bytes, ``9ae1f824…``: the inter-pin
+#:   history added caller-owned memoisation to the completion and
+#:   rate-schedule walks and an O(1) range-membership fast path whose
+#:   acceptance predicate is spelled as keeping the ORIGINAL domain semantics
+#:   exactly.  The rate-range and whole-unit-quota refusals that set this
+#:   module's endpoints are therefore claimed unchanged BYTES-ASIDE, which is
+#:   not this module's standard of proof -- so the standard is met the only
+#:   way it can be: ``test_legal_rate_count_is_the_audited_count`` re-derives
+#:   the frozen counts through the new grammar at the new pin, and its pass
+#:   IS the re-transcription.  If that walk ever disagrees with
+#:   :data:`AUDITED_RATE_COUNTS` under ``9ae1f824…``, this is a
+#:   re-measurement, not a transcription, and the counts move by review.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="4c384e6049dca3eeaf503bb2c9cd1cd2778978d1",
+    reader_dev_pin_commit="e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf",
     reader_dev_pin_contract_sha256=(
-        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
+        "14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780"
     ),
-    serving_runtime_pinned_commit="4c384e6049dca3eeaf503bb2c9cd1cd2778978d1",
+    serving_runtime_pinned_commit="e4a3a7d4516de61785e3f8738ccb64b86cf9e8cf",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
+        "14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780"
     ),
     producer_installed_contract_sha256=(
-        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
+        "14acb1f78b2da32272f077e4ae69cb3486846b03912ffa825b677568b84d1780"
     ),
 )
 
@@ -1464,8 +1501,8 @@ def format_report(inventory: Mapping[str, object]) -> str:
     lines.append(f"  {'export.py':42s} {state['export_sha256']}")
     lines.append(f"  {'export.py path':42s} {state['export_path']}")
     lines.append(
-        f"  {'grammar.py shared by all three states':42s} "
-        f"{state['grammar_matches_every_state']}"
+        f"  {'grammar.py at the current pin':42s} "
+        f"{state['grammar_matches_pin']}"
     )
     lines.append("")
     lines.append(f"Shapes (rows, columns): {inventory['shapes']}")

@@ -218,6 +218,27 @@ def _dense_context():
         runtime_image=_default_serve_image(), execution_mode="eager")
 
 
+def _routed_context(family):
+    """A serving scope derived from the installed contract's routed cell.
+
+    The routed rows publish their own serve images, so the scope comes from
+    the cell the way production admission derives it."""
+    import json
+    from importlib.resources import as_file
+    from prismaquant import tessera_runtime_contract as trc
+    from prismaquant.lane_eligibility import ServingContext
+
+    with as_file(trc.contract_path()) as path:
+        cells = json.loads(path.read_text(encoding="utf-8"))[
+            "lane_eligibility"]["cells"]
+    cell = next(c for c in cells
+                if c["family"] == family and c["structure"] == "routed_moe")
+    return ServingContext(
+        platform=cell["platform"], structure="routed_moe", residency="resident",
+        runtime_image=cell["runtime"]["image"],
+        execution_mode=cell["runtime"]["execution_modes"][0])
+
+
 def _allocate(tmp_path, monkeypatch, *, target_bits="4.5"):
     """Run the allocator's own entry point; return the parsed layer config.
 
@@ -484,7 +505,7 @@ def test_the_pin_and_the_one_read_allocate_identically(tmp_path, monkeypatch):
 #: a test that derives its expectation from the same field the code reads
 #: asserts only that one read happened twice.
 READER_RANGES = {
-    "TESSERA_E2M1_K2": (896, 896),
+    "TESSERA_E2M1_K2": (128, 896),
     "TESSERA_E4M3_K1": (256, 2048),
     "TESSERA_BF16_K1": (256, 4096),
 }
@@ -534,9 +555,10 @@ def test_the_readable_menu_is_exactly_the_published_reader_ranges(
 ):
     """The set the issue named, through the module's declared one read.
 
-    ``TESSERA_E2M1_K2`` at 896 only; ``TESSERA_E4M3_K1`` over [256, 2048];
-    ``TESSERA_BF16_K1`` over [256, 4096]; and nothing at all from
-    ``TESSERA_E2M1_K1``, which the contract does not publish.
+    ``TESSERA_E2M1_K2`` over [128, 896] since #560's full-domain widen (the
+    single rung 896 until the 2026-09-19 pin); ``TESSERA_E4M3_K1`` over
+    [256, 2048]; ``TESSERA_BF16_K1`` over [256, 4096]; and nothing at all
+    from ``TESSERA_E2M1_K1``, which the contract does not publish.
     """
     seen = _readable_by_family()
     # Not vacuous: the family the campaign wasted its time on IS on the
@@ -545,10 +567,10 @@ def test_the_readable_menu_is_exactly_the_published_reader_ranges(
         "the unpublished family is absent from the research menu, so "
         "'refuses every E2M1_K1 rung' asserts nothing")
     _assert_the_published_reader_ranges(seen)
-    # The two anchors the #275 campaign encoded outside the reader range.
-    for rate in (128, 512):
-        assert seen["TESSERA_E2M1_K2"][rate] is False
-    assert seen["TESSERA_E2M1_K2"][896] is True
+    # The two anchors the #275 campaign encoded are INSIDE the widened
+    # domain and readable at the new pin, with the terminal rung unchanged.
+    for rate in (128, 512, 896):
+        assert seen["TESSERA_E2M1_K2"][rate] is True
 
 
 def test_the_packaged_branch_agrees_with_the_dev_pin_on_readability():
@@ -617,6 +639,9 @@ def test_readability_does_not_depend_on_the_serving_scope(installed_contract):
         bare = tm.route_admission(name)
         assert scoped.readable == bare.readable, name
     # ...and the attestation is, which is what makes the above non-trivial.
+    # E4M3's cells are routed-only since the v31 withdrawals, so the scoped
+    # ask rides a cell-derived routed context.
+    routed = _routed_context("TESSERA_E4M3_K1")
     assert tm.route_admission(
-        "TESSERA_E4M3_K1_R1024", serving_context=context).attested
+        "TESSERA_E4M3_K1_R1024", serving_context=routed).attested
     assert not tm.route_admission("TESSERA_E4M3_K1_R1024").attested

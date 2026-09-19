@@ -798,6 +798,29 @@ def test_a_rung_that_renders_can_still_be_unwritable():
     clear_serialisable_cache()
 
 
+def _cell_context(family: str, structure: str):
+    """A serving scope derived from the installed contract's own cell bytes.
+
+    The routed rows publish their own serve images, so a context for them is
+    built from the cell the way production admission does.
+    """
+    import json
+    from importlib.resources import as_file
+    from prismaquant import tessera_render as tr
+    from prismaquant import tessera_runtime_contract as trc
+    from prismaquant.lane_eligibility import ServingContext
+
+    with as_file(trc.contract_path()) as path:
+        cells = json.loads(path.read_text(encoding="utf-8"))[
+            "lane_eligibility"]["cells"]
+    cell = next(c for c in cells
+                if c["family"] == family and c["structure"] == structure)
+    return ServingContext(
+        platform=cell["platform"], structure=structure, residency="resident",
+        runtime_image=cell["runtime"]["image"],
+        execution_mode=cell["runtime"]["execution_modes"][0])
+
+
 def test_an_attested_lane_cannot_admit_an_unwritable_rung(monkeypatch):
     """A real route attestation cannot admit bytes the writer cannot carry."""
     from tessera import alphabet
@@ -813,11 +836,15 @@ def test_an_attested_lane_cannot_admit_an_unwritable_rung(monkeypatch):
     context = ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=_default_serve_image(), execution_mode="eager")
+    # E4M3's cells are routed-only since the v31 withdrawals; E2M1 still
+    # ships the dense pair, so the control stays on the dense scope.
+    routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
     name = "TESSERA_E4M3_K1_R1024"
     control = "TESSERA_E2M1_K2_R896"
-    for rung in (name, control):
-        assert tr.tessera_lane_attested(rung, serving_context=context)
-        assert tr.synthesize_tessera_spec(rung, serving_context=context).producer_eligible
+    assert tr.tessera_lane_attested(name, serving_context=routed)
+    assert tr.synthesize_tessera_spec(name, serving_context=routed).producer_eligible
+    assert tr.tessera_lane_attested(control, serving_context=context)
+    assert tr.synthesize_tessera_spec(control, serving_context=context).producer_eligible
 
     without = {digest: grid for digest, grid in alphabet.SERIALISABLE_GRIDS.items()
                if grid.name != "E4M3"}
@@ -829,11 +856,11 @@ def test_an_attested_lane_cannot_admit_an_unwritable_rung(monkeypatch):
             # The runtime still attests this route; only the writer's
             # ability to serialize it changed. A False result cannot be
             # explained by absent cells, missing context, or a failed pin.
-            admission = tm.route_admission(name, serving_context=context)
+            admission = tm.route_admission(name, serving_context=routed)
             assert admission.attested
             assert not admission.serialisable
             assert not tr.synthesize_tessera_spec(
-                name, serving_context=context).producer_eligible
+                name, serving_context=routed).producer_eligible
             assert tr.synthesize_tessera_spec(
                 control, serving_context=context).producer_eligible
     finally:
@@ -878,8 +905,10 @@ def test_tessera_rungs_are_producer_eligible_by_the_pin_and_only_by_it():
     context = ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=_default_serve_image(), execution_mode="eager")
+    # E4M3 is routed-only since the v31 withdrawals.
+    routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
     assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=context) is True
+        "TESSERA_E4M3_K1_R1024", serving_context=routed) is True
     assert tr.tessera_lane_attested("TESSERA_E4M3_K1_R1024") is False
     assert not synthesize_tessera_spec("TESSERA_E4M3_K1_R1024").producer_eligible
 

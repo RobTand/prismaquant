@@ -104,15 +104,17 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v29_at_the_pinned_digest():
-    """v24 through v29 are additive for a v10 reader, so the schema string does not move.
+def test_the_packaged_contract_is_v32_at_the_pinned_digest():
+    """v24 through v32 are additive for a v10 reader, so the schema string does not move.
 
     The contract version and the lane schema are two different clocks, and
     v24 was the bump that separated them: it added cells and filled a
     ``serve_image``, both of them shapes v10 already defines, so a v10 reader
-    reads the document with the code it already has. v25-v29 did the same
+    reads the document with the code it already has. v25-v32 did the same
     (a quantiser table, a loader axis, format structures, two routed-MoE
-    cells and a TP2 receipt), and none moved the lane schema.  A bump that changed what
+    cells, a TP2 receipt, eight dense-cell WITHDRAWALS, the routed reader
+    domain widen and the KL receipts' ``q256`` scoping), and none moved the
+    lane schema.  A bump that changed what
     a field MEANS would move the schema string and fail this reader closed, as
     v10 itself did to v9 below.
     """
@@ -122,7 +124,7 @@ def test_the_packaged_contract_is_v29_at_the_pinned_digest():
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 29
+    assert payload["contract_version"] == 32
     assert (payload["lane_eligibility"]["schema"]
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10)
 
@@ -132,54 +134,64 @@ def _packaged_table():
         return lane.load_eligibility_table(contract_path=path)
 
 
-def test_the_v10_table_parses_and_publishes_the_two_amd_platforms():
+def test_the_v10_table_parses_and_publishes_the_three_platforms():
+    """Declared platforms and carried cells are two different facts.
+
+    v24 was the first contract with a cell off ``sm_121`` (two
+    ``TESSERA_BF16_K1`` dense cells on ``gfx1201``); v31 withdrew them with
+    the rest of the non-``E2M1_K2`` dense roster (Tessera #538 and the A4
+    retirement), so the table again carries cells on ``sm_121`` only -- six
+    of them -- while still DECLARING all three platforms.  A declared
+    platform with no cell is a refusal to claim, not an absence from the
+    grammar, and the test below pins what it answers.
+    """
     table = _packaged_table()
     assert table.present
     assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
     assert {"sm_121", "gfx1151", "gfx1201"} <= set(table.platforms)
-    # v24 is the first contract with a cell off ``sm_121``: two
-    # ``TESSERA_BF16_K1`` dense cells on ``gfx1201``, decode and batch.
-    assert {cell.platform for cell in table.cells} == {"sm_121", "gfx1201"}
-    # v28 adds the two routed-MoE TESSERA_E2M1_K2 cells on sm_121.
-    assert len(table.cells) == 14
-    gfx = sorted(c.id for c in table.cells if c.platform == "gfx1201")
-    assert gfx == ["tessera_bf16_k1_dense_gfx1201_batch",
-                   "tessera_bf16_k1_dense_gfx1201_decode"], gfx
-    for cell in table.cells:
-        if cell.platform != "gfx1201":
-            continue
-        assert cell.family == "TESSERA_BF16_K1"
-        assert cell.structure == "dense"
-        assert tuple(cell.rungs_q256) == (1792,)
-        assert cell.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
-        assert cell.qualification == lane.QUALIFICATION_DEVICE_QUALIFIED
-        # The scope the receipts carry, transcribed rather than widened: a
-        # top-1024 intersection lower bound, NOT a full-vocab KL. No
-        # instrument in either repository produces one, so a gate that
-        # expected ``kl_full_vocab`` here would refuse an artifact for a
-        # measurement that does not exist.
-        assert cell.evidence.grade == lane.EVIDENCE_GRADE_KL_LOWER_BOUND
-        assert cell.evidence.grade != lane.EVIDENCE_GRADE_KL_FULL_VOCAB
+    assert {cell.platform for cell in table.cells} == {"sm_121"}
+    assert len(table.cells) == 6
+    # The withdrawal is total off sm_121: both AMD platforms ship no cell.
+    assert not [c for c in table.cells if c.platform != "sm_121"]
 
 
-def test_the_gfx1201_cells_are_admitted_and_the_sm121_ten_did_not_move():
-    """What accepting v24 actually buys, and what it leaves alone.
+def test_the_withdrawn_dense_roster_is_gone_and_the_routed_pair_did_not_move():
+    """What accepting the v30-v32 withdrawals actually changes, and what they leave alone.
 
-    ``cell_evidence_admits`` is status-only; both new cells publish
-    ``smoke.status: recorded``, so they are admitted.  That is the whole
-    behavioural content of this pin move -- a route on an AMD device that this
-    side previously answered ``unattested`` for.  The second half is the
-    control: the ten ``sm_121`` cells are byte-identical, so nothing already
-    shipping moved with them.
+    ``cell_evidence_admits`` is status-only; the two routed-MoE
+    ``TESSERA_E4M3_K1`` cells publish ``smoke.status: recorded`` and the two
+    routed-MoE ``TESSERA_E2M1_K2`` cells publish ``not_recorded``, and all
+    four are admitted exactly as they were at v29 -- the recorded pair
+    byte-identical, the E2M1 pair widened to the full reader domain
+    [128..896] on the same ``route_only`` grade.  What moved is what the
+    lane LOSES: the eight dense cells that carried the only ``gfx1201``
+    route and the streamed dense residency, so those rungs answer
+    ``unattested`` again.
     """
     table = _packaged_table()
-    for cell in table.cells:
-        if cell.platform == "gfx1201":
-            admits, why = lane.cell_evidence_admits(cell)
-            assert admits, (cell.id, why)
-    sm121 = [c.id for c in table.cells if c.platform == "sm_121"]
-    # Ten at v24; v28 added the two routed-MoE E2M1_K2 q896 cells.
-    assert len(sm121) == 12, sm121
+    routed = [c for c in table.cells if c.structure == "routed_moe"]
+    assert sorted(c.id for c in routed) == [
+        "tessera_e2m1_k2_routed_moe_sm121_batch_resident",
+        "tessera_e2m1_k2_routed_moe_sm121_decode_resident",
+        "tessera_e4m3_k1_routed_moe_sm121_batch_resident",
+        "tessera_e4m3_k1_routed_moe_sm121_decode_resident",
+    ]
+    for cell in routed:
+        admits, why = lane.cell_evidence_admits(cell)
+        assert admits, (cell.id, why)
+        assert cell.qualification == lane.QUALIFICATION_DEVICE_QUALIFIED
+        assert cell.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
+    for cell in routed:
+        if cell.family == "TESSERA_E2M1_K2":
+            assert tuple(cell.rungs_q256) == (128, 256, 384, 512, 640, 768, 896)
+        else:
+            assert tuple(cell.rungs_q256) == (1024,)
+    dense = [c for c in table.cells if c.structure == "dense"]
+    assert sorted(c.id for c in dense) == [
+        "tessera_e2m1_k2_dense_sm121_batch", "tessera_e2m1_k2_dense_sm121_decode"]
+    for cell in dense:
+        # D2 kept the dense pair at the rung its receipts cover.
+        assert tuple(cell.rungs_q256) == (896,)
 
 
 def test_a_declared_platform_with_no_cell_is_still_a_refusal_to_claim():
@@ -195,7 +207,11 @@ def test_a_declared_platform_with_no_cell_is_still_a_refusal_to_claim():
     of it.  The property is unchanged and is now carried by the one platform
     that still has no receipt -- which is the point: this test says what a
     declared-but-unreceipted platform answers, and a platform that has since
-    been served is no longer one.
+    been served is no longer one.  Since the v31 withdrawals both AMD
+    platforms are examples again; the assert keeps the ``gfx1151`` spelling
+    because a table that shipped a cell there would be a NEW admission, while
+    ``gfx1201``'s return to no-cell status is already pinned by the roster
+    asserts above.
     """
     table = _packaged_table()
     amd = [c for c in table.cells if c.platform == "gfx1151"]

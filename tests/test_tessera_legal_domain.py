@@ -219,14 +219,15 @@ def test_support_facts_has_exactly_the_five_named_fields():
 
 
 def test_the_five_facts_disagree_on_a_natively_qualified_candidate():
-    """E4M3 R1024 dense: producer/reader/route/native yes, served-validation no.
+    """E4M3 R1024 routed: producer/reader/route/native yes, served-validation no.
 
     A candidate whose five facts all agreed would prove nothing.  This one is
     qualified natively by a cell and still has no complete assignment through
     export plus served validation in this artifact scope, which is the shape of
-    disagreement the ledger exists to be able to record.
+    disagreement the ledger exists to be able to record.  (Dense until the
+    v31 withdrawals; the routed pair is the family's surviving cell.)
     """
-    facts = _candidate(E4, 1024, "dense").support
+    facts = _candidate(E4, 1024, "routed_moe").support
     assert facts.disagree()
     assert facts.producer_legal.value is True
     assert facts.reader_supported.value is True
@@ -236,16 +237,30 @@ def test_the_five_facts_disagree_on_a_natively_qualified_candidate():
     assert {f.name for f in facts.facts()} == set(domain.SUPPORT_FACT_NAMES)
 
 
-def test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control():
-    """The E2M1 control is producer-legal below its reader range and refused.
+def test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control(
+        monkeypatch):
+    """The ledger can still say "the writer writes what no reader reads".
 
-    At this pin the two primary families' producer domains happen to equal
-    their reader ranges, so the E4/BF16 roster cannot witness this divergence.
-    The control can: the producer writes R128-R896 and the pinned reader
-    declares R896-R896 only, so R256 is producer-legal and reader-unsupported.
-    A ledger that collapsed the two would report this candidate as simply
-    absent.
+    Until the 2026-09-19 pin the E2M1 control witnessed this divergence for
+    real: the producer wrote R128-R896 while the pinned reader declared
+    R896-R896 only, so R256 was producer-legal and reader-unsupported --
+    exactly the gap #560's full-domain widen existed to close, and its red
+    receipts were this test's fixture.  At this pin every published reader
+    range equals its family's producer domain, so the witness is
+    CONSTRUCTED: the reader range is narrowed for the duration of the test,
+    and the two facts are asserted to move APART under it -- a ledger that
+    collapsed them into one read would report the candidate as simply
+    absent, which is the failure this test refuses.
     """
+    real = domain._reader_range
+
+    def narrowed(family):
+        span = real(family)
+        if span is None or family != E2:
+            return span
+        return (span[1], span[1])  # the pre-#560 shape: R896-R896 only
+
+    monkeypatch.setattr(domain, "_reader_range", narrowed)
     lo, hi = family_q256_bounds(E2)
     assert (lo, hi) == (128, 896)
     facts = domain.support_facts(E2, 256, "dense", shapes=domain.GLM53_LINEAR_SHAPES)
@@ -272,35 +287,36 @@ def test_every_fact_names_the_table_that_answered_it():
 # Native qualification is exact membership, and does not shrink the domain
 # ---------------------------------------------------------------------------
 
-def test_native_qualification_is_exactly_three_cells_for_the_primary_families():
-    """Exact membership at the pin: E4 R1024 dense and routed, BF R1792 dense.
+def test_native_qualification_is_exactly_one_cell_for_the_primary_families():
+    """Exact membership at the pin: E4 R1024 routed.  Nothing else.
 
-    Nothing else, and in particular no neighbouring rate: attestation does not
-    extrapolate from a singleton.
+    Until the v31 withdrawals this was three triples (E4 R1024 dense and
+    routed, BF R1792 dense); the withdrawal removed the dense E4 rows and the
+    whole BF16 roster -- the only cells that family ever had.  Nothing else,
+    and in particular no neighbouring rate: attestation does not extrapolate
+    from a singleton.
     """
     triples = domain.native_qualification_set()
     primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
     assert primary == {
-        (E4, 1024, "dense"),
         (E4, 1024, "routed_moe"),
-        (BF, 1792, "dense"),
     }
 
 
 def test_the_native_set_does_not_shrink_the_legal_domain(rates):
     """The count is computed without the attestation and is unaffected by it.
 
-    The strong form: the rates that are natively qualified are a three-element
+    The strong form: the rate that is natively qualified is a one-element
     subset of a 5,634-element domain, and the domain walk never reads the
     attestation.  A regression that let the menu's attested mode leak into the
-    domain would collapse these counts to 2.
+    domain would collapse these counts to 0.
     """
     triples = domain.native_qualification_set()
     qualified_rates = {
         (family, rate) for (family, rate, _s) in triples
         if family in domain.PRIMARY_FAMILIES
     }
-    assert len(qualified_rates) == 2
+    assert len(qualified_rates) == 1
     total = sum(len(legal) for legal, _holes in rates.values())
     assert total == 1793 + 3841
     for family, rate in qualified_rates:
@@ -693,6 +709,12 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
     file.  A roster derived through it would match the audit only by
     coincidence.  This test refuses that silently happening: it hashes the
     bytes actually imported and requires them to be one of the two pins.
+
+    State identity is the ``export.py`` digest, and ``export.py`` at the
+    2026-09-19 pin (Tessera ``e4a3a7d4``) is byte-identical to the frozen
+    study producer's, so an install at that pin resolves under the
+    ``study-producer-d403cc5a`` name: same wire bytes, different commit.
+    The grammar the pin carries is checked separately, one test down.
     """
     state = domain.tessera_source_state()
     assert state["state"] is not None, state["verdict"]
@@ -709,19 +731,26 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
             ["unpinned-working-checkout-a9eb572e"]["export.py"])
 
 
-def test_the_rate_grammar_is_the_same_bytes_at_every_state():
-    """The domain endpoints do not depend on which Tessera state is imported.
+def test_the_rate_grammar_is_the_pin_grammar_and_the_audit_survives_it():
+    """The domain endpoints do not depend on the grammar's memoisation.
 
     ``grammar.py`` carries the rate-range refusal and the whole-unit-quota
     refusal -- the two rules that decide where the legal roster starts and
-    stops.  It is byte-identical at the reader pin, at the frozen study
-    producer, and even at the unpinned working checkout, so the roster is not
-    a function of the state.  Asserted against the bytes actually imported,
-    so this stays a derived fact rather than a claim carried in a comment.
+    stops.  At the 2026-09-19 pin it is NEW bytes (``9ae1f824…``): the
+    inter-pin history added caller-owned memoisation and an O(1)
+    range-membership fast path whose predicate is spelled as keeping the
+    original domain semantics exactly, while the three frozen source states
+    still carry ``f2545274…``.  Bytes-aside claims are not this module's
+    standard of proof, so the proof is behavioural and lives one test up:
+    ``test_legal_rate_count_is_the_audited_count`` re-derives the frozen
+    counts through the importable grammar, and its pass is what makes the
+    digest move a re-transcription.  This test pins the other half -- that
+    the bytes actually imported ARE the pin's -- so a box with any third
+    grammar answers UNRECOGNISED here rather than quietly re-deriving.
     """
     state = domain.tessera_source_state()
     assert state["grammar_sha256"] == domain.TESSERA_GRAMMAR_DIGEST
-    assert state["grammar_matches_every_state"]
+    assert state["grammar_matches_pin"]
 
 
 def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
@@ -739,6 +768,10 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
 
     The test pins the claim to the plane kind actually resolved, so that a
     future family routed onto MX cannot inherit this equivalence silently.
+    (The equivalence is an ``export.py`` fact: at the 2026-09-19 pin the
+    pin's ``grammar.py`` is the memoised ``9ae1f824…``, not the frozen
+    states' ``f2545274…`` -- one acceptance predicate, re-derived equal by
+    the audit walk -- so it is ``export.py`` that carries this identity.)
     """
     assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
         "reader-pin-387eda36", "study-producer-d403cc5a",
