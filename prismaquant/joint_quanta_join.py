@@ -16,15 +16,20 @@ join. The other layers complete, the merged payload carries
 free. What fails closed is *consumption*: :func:`load_joint_cost_for_allocation`
 refuses a gapped payload, so a partial campaign can never be read as a score.
 
-Shapes owned elsewhere (fixtures here, never imports): the layer-quantum
-record (§3, ``prismaquant.joint_layer_quanta.v1``, built in parallel by the
-producer) and the per-quantum ``cost.pkl`` / ``status.json`` (§6.4, built in
-parallel by the runtime). This module checks the contract's schemas and
-digests; it does not construct producer or runtime records.
+Shapes owned elsewhere (fixtures here, never constructed): the layer-quantum
+record (§3, ``prismaquant.joint_layer_quanta.v1``, built by the producer) and
+the per-quantum ``cost.pkl`` / ``status.json`` (§6.4, built by the runtime).
+This module checks the contract's schemas and digests; it does not construct
+producer or runtime records. The *constructions* it shares with the producer
+-- the roster digest, the phase tiling, the quantum-id padding, the qname
+layer grammar -- are imported from ``joint_layer_quanta`` so the two sides of
+the wire cannot drift again (issue #787: they did, four ways, and every
+genuine record refused).
 """
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import pickle
@@ -38,10 +43,20 @@ from prismaquant.cost_stage_checkpoint import (
     canonical_json_sha256,
 )
 from prismaquant.joint_aura import validate_joint_aura_entry
+from prismaquant.joint_layer_quanta import (
+    phase_ranges,
+    qname_layer,
+    quantum_id,
+    roster_digest,
+)
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
 JOINED_RESULTS_SCHEMA = "prismaquant.joint_layer_quanta.joined_results.v1"
+
+#: The producer's quantum-id spelling (§3.1: ``f"layer-{layer:03d}"``),
+#: imported so the joiner's padding cannot drift from the sealed records.
+quantum_id_for_layer = quantum_id
 
 #: The single run seals ``joint-cost.pkl`` with this call
 #: (``tessera_joint_aura.run``); the join seals the merged payload the same
@@ -52,16 +67,41 @@ PICKLE_PROTOCOL = pickle.HIGHEST_PROTOCOL
 #: Gapped campaigns still exit 0 — a gap is a state, not an error.
 EXIT_REFUSED = 1
 
-#: Provenance keys every per-layer payload must carry (§6.4). The first four
-#: are the shared campaign binding (identical across quanta); the last two
-#: are the quantum's own identity.
-REQUIRED_PROVENANCE_KEYS = (
+#: §6.4's payload provenance grammar, pinned by issue #787 (B4). The
+#: contract names the contents -- "the campaign binding, the quantum
+#: identity, the adjoint receipt digest" -- not the keys; these are the
+#: blocks the §6 runtime (``prismaquant.joint_cost_quantum``) seals into
+#: every ``cost.pkl``, and the joiner consumes what the producer side
+#: seals. No implementation digest is promised in the payload: the
+#: implementation is bound through ``prepared_sha256``, whose completion
+#: seals ``implementation_sha256`` (the runtime re-checks that digest
+#: against the prepared completion before measuring).
+REQUIRED_PROVENANCE_BLOCKS = (
+    "campaign_binding",
+    "distributed_quantum",
+    "adjoint_receipt_sha256",
+)
+
+#: The campaign-binding block's keys (§6.4 "the campaign binding"; the
+#: runtime copies them verbatim from the record's sealed ``campaign``).
+CAMPAIGN_BINDING_KEYS = (
     "plan_sha256",
     "prepared_sha256",
+    "read_manifest_sha256",
     "campaign_scope",
-    "implementation_digest",
+    "unit_roster_sha256",
+)
+
+#: The distributed-quantum identity block's keys (§6.4 "the quantum
+#: identity"; the runtime seals them verbatim from the record).
+DISTRIBUTED_QUANTUM_KEYS = (
     "quantum_id",
     "identity_sha256",
+    "adjoint_receipt_sha256",
+    "checkpoint_boundary",
+    "chain_layers",
+    "windows",
+    "chunks",
 )
 
 
@@ -73,18 +113,24 @@ class GappedPayloadRefused(Exception):
     """The allocation stage refused a gapped joined payload."""
 
 
-def quantum_id_for_layer(layer: int) -> str:
-    return f"layer-{layer:03d}"
-
-
-def _roster_sha256(roster: list[str]) -> str:
-    return hashlib.sha256(("\n".join(roster) + "\n").encode()).hexdigest()
-
-
 def _load_json(path: Path, *, where: str) -> object:
     try:
-        return json.loads(path.read_bytes().decode("utf-8"))
-    except (OSError, ValueError) as exc:
+        blob = path.read_bytes()
+    except OSError as exc:
+        raise JoinRefused(f"{where}: unreadable file at {path}: {exc}") from exc
+    if blob[:2] == b"\x1f\x8b":
+        # The parent run manifest is sealed as one gzip member
+        # (``seal_manifest_bytes``: compact JSON + newline, mtime=0), so a
+        # sealed ``.json.gz`` is read by its member. The digest check
+        # elsewhere stays over the sealed file bytes, never the member.
+        try:
+            blob = gzip.decompress(blob)
+        except (OSError, EOFError) as exc:
+            raise JoinRefused(
+                f"{where}: unreadable gzip member at {path}: {exc}") from exc
+    try:
+        return json.loads(blob.decode("utf-8"))
+    except ValueError as exc:
         raise JoinRefused(f"{where}: unreadable JSON at {path}: {exc}") from exc
 
 
@@ -105,25 +151,45 @@ def _check_digest(path: Path, expected: str, *, where: str) -> None:
 def _scan_receipts(input_root: Path) -> list[dict]:
     """Build the receipt set from the campaign output root.
 
-    Layout (the joiner's fixture of the producer/runtime layout, §3.1/§6.4):
-    ``layer-quanta/records/layer-NNN.json`` records and
-    ``layer-quanta/layer-NNN/{cost.pkl,status.json}`` quantum spaces.
+    The records are the sealed source of every path (§3.1 ``output_space``):
+    each record names its quantum's ``cost.pkl`` and ``status.json``
+    locations -- the same paths the §6 runtime writes (§6.4) -- so the joiner
+    reads them from the record instead of guessing a layout. Record files are
+    accepted from ``layer-quanta/records/`` (the producer's §4.1 layout) or
+    flat in ``layer-quanta/`` (the sealed takeover layout the dispatcher
+    consumed); custody re-checks each record's identity before its paths are
+    trusted for content.
     """
-    records_dir = input_root / "layer-quanta" / "records"
-    if not records_dir.is_dir():
-        raise JoinRefused(f"coverage: no records directory at {records_dir}")
+    quanta_root = input_root / "layer-quanta"
+    record_paths: list[Path] = []
+    for records_dir in (quanta_root / "records", quanta_root):
+        record_paths = sorted(records_dir.glob("layer-*.json"))
+        if record_paths:
+            break
+    if not record_paths:
+        raise JoinRefused(f"coverage: no layer records under {quanta_root}")
     receipts = []
-    for record_path in sorted(records_dir.glob("layer-*.json")):
+    for record_path in record_paths:
         quantum_id = record_path.stem
-        space = input_root / "layer-quanta" / quantum_id
+        where = f"records {quantum_id}"
+        record = _load_json(record_path, where=where)
+        if not isinstance(record, dict) or record.get("schema") != RECORD_SCHEMA:
+            raise JoinRefused(
+                f"{where}: record schema is not {RECORD_SCHEMA!r}")
+        if record.get("quantum_id") != quantum_id:
+            raise JoinRefused(
+                f"{where}: record names {record.get('quantum_id')!r}, "
+                f"file names {quantum_id!r}")
+        space = record.get("output_space")
+        if not isinstance(space, dict) or not isinstance(space.get("root"), str):
+            raise JoinRefused(f"{where}: record seals no output space")
+        root = space["root"]
         receipts.append({
             "quantum_id": quantum_id,
             "record_path": str(record_path),
-            "cost_path": str(space / "cost.pkl"),
-            "status_path": str(space / "status.json"),
+            "cost_path": space.get("cost_payload", f"{root}/cost.pkl"),
+            "status_path": space.get("status", f"{root}/status.json"),
         })
-    if not receipts:
-        raise JoinRefused(f"coverage: no layer records at {records_dir}")
     return receipts
 
 
@@ -164,8 +230,25 @@ def _check_record(record: object, receipt: dict, campaign: dict) -> dict:
             f"{where}: record read-manifest digest is not this campaign's")
     if binding.get("campaign_scope") != campaign["scope"]:
         raise JoinRefused(f"{where}: record scope is not this campaign's scope")
-    if binding.get("unit_roster_sha256") != _roster_sha256(campaign["roster"]):
+    # B1 (#787): the roster digest is the producer's #768 construction
+    # (§3.1: "sha256 of the sorted qname roster, one per line") -- sorted,
+    # no trailing newline -- imported from the producer so the joiner's
+    # recomputation cannot drift from the seal.
+    if binding.get("unit_roster_sha256") != roster_digest(campaign["roster"]):
         raise JoinRefused(f"{where}: record roster digest is not this roster")
+    # §3.2's rule, mirrored from check_quantum_for_campaign: when the caller
+    # pins the stage-A receipt digest, every record must bind exactly it --
+    # an unbound (pre-A) record refuses rather than joining.
+    expected_receipt = campaign.get("adjoint_receipt_sha256")
+    if expected_receipt is not None:
+        actual_receipt = record.get("adjoint", {}).get("receipt_sha256")
+        if actual_receipt is None:
+            raise JoinRefused(
+                f"{where}: record is unbound (pre-A): re-seal against the "
+                "stage-A receipt before joining")
+        if actual_receipt != expected_receipt:
+            raise JoinRefused(
+                f"{where}: record binds another stage-A receipt")
     return record
 
 
@@ -173,25 +256,23 @@ def _check_tiling(records: dict[str, dict], campaign: dict) -> None:
     """Coverage step 1: every present record's source phase cites its parent
     phase by name and byte range. Absent phases are gaps (handled by the
     caller), never silent holes: only names the parent manifest knows are
-    admitted."""
-    parent = campaign["parent_manifest"]
-    phases = parent.get("phases")
-    if isinstance(parent, dict) and phases is None and isinstance(
-            parent.get("annotations"), dict):
-        phases = parent["annotations"].get("phases")
-    if not isinstance(phases, list) or not phases:
-        raise JoinRefused("coverage: parent manifest carries no phase table")
-    by_name = {}
-    for phase in phases:
-        if not isinstance(phase, dict):
-            raise JoinRefused("coverage: parent manifest phase is malformed")
-        by_name[phase.get("name")] = phase
+    admitted. The replay uses the producer's ``phase_ranges`` (entry-aligned,
+    start/end derived from the sealed cumulative marks) so the joiner's
+    tiling proof cannot drift from the seal-time cut (B2, #787: the sealed
+    manifest's phase rows carry ``{name, bytes, cumulative_bytes}``, not
+    start/end offsets)."""
+    try:
+        rows = {row["name"]: row
+                for row in phase_ranges(campaign["parent_manifest"])}
+    except ValueError as exc:
+        raise JoinRefused(
+            f"coverage: parent manifest phase table refuses: {exc}") from exc
     for quantum_id, record in sorted(records.items()):
         where = f"coverage {quantum_id}"
         source = record.get("read_set", {}).get("source_phase")
         if not isinstance(source, dict):
             raise JoinRefused(f"{where}: record cites no source phase")
-        parent_phase = by_name.get(source.get("name"))
+        parent_phase = rows.get(source.get("name"))
         if parent_phase is None:
             raise JoinRefused(
                 f"{where}: source phase {source.get('name')!r} is not in the "
@@ -231,8 +312,12 @@ def _read_status(receipt: dict) -> tuple[str, list]:
 
 
 def _load_cost_payload(receipt: dict, record: dict, campaign: dict) -> dict:
-    """Custody step 2: the payload's provenance block equals the campaign
-    binding; only per-layer content may differ."""
+    """Custody step 2: the payload's provenance equals the campaign binding
+    and answers for exactly this record's sealed identity and adjoint
+    binding; only per-layer content may differ. B4 (#787): the grammar is
+    the §6 runtime's wire -- a ``campaign_binding`` block, a
+    ``distributed_quantum`` identity block, and the adjoint receipt digest
+    -- pinned here before the campaign's payloads land."""
     quantum_id = receipt["quantum_id"]
     where = f"custody {quantum_id}"
     cost_path = Path(receipt["cost_path"])
@@ -247,22 +332,51 @@ def _load_cost_payload(receipt: dict, record: dict, campaign: dict) -> dict:
             payload.get("provenance"), dict):
         raise JoinRefused(f"{where}: cost payload shape is not §6.4")
     provenance = payload["provenance"]
-    for key in REQUIRED_PROVENANCE_KEYS:
-        if key not in provenance:
-            raise JoinRefused(f"{where}: provenance lacks {key!r}")
-    if provenance["quantum_id"] != quantum_id or (
-            provenance["identity_sha256"] != record["identity_sha256"]):
-        raise JoinRefused(
-            f"{where}: payload answers for another quantum's identity "
-            "(retargeted receipt)")
-    expected = {"plan_sha256": campaign["plan_sha256"],
-                "prepared_sha256": campaign["prepared_sha256"],
-                "campaign_scope": campaign["scope"],
-                "implementation_digest": campaign["implementation_digest"]}
-    for key, value in expected.items():
-        if provenance[key] != value:
+    for block in REQUIRED_PROVENANCE_BLOCKS:
+        if block not in provenance:
+            raise JoinRefused(f"{where}: provenance lacks {block!r}")
+    binding = provenance["campaign_binding"]
+    identity = provenance["distributed_quantum"]
+    if not isinstance(binding, dict) or not isinstance(identity, dict):
+        raise JoinRefused(f"{where}: provenance blocks are not §6.4 objects")
+    expected_binding = {
+        "plan_sha256": campaign["plan_sha256"],
+        "prepared_sha256": campaign["prepared_sha256"],
+        "read_manifest_sha256": campaign["manifest_sha256"],
+        "campaign_scope": campaign["scope"],
+        "unit_roster_sha256": roster_digest(campaign["roster"]),
+    }
+    for key in CAMPAIGN_BINDING_KEYS:
+        if binding.get(key) != expected_binding[key]:
             raise JoinRefused(
-                f"{where}: payload provenance {key} is foreign to this campaign")
+                f"{where}: payload campaign binding {key} is foreign to "
+                "this campaign")
+    adjoint = record.get("adjoint", {})
+    expected_identity = {
+        "quantum_id": quantum_id,
+        "identity_sha256": record["identity_sha256"],
+        "adjoint_receipt_sha256": adjoint.get("receipt_sha256"),
+        "checkpoint_boundary": adjoint.get("checkpoint_boundary"),
+        "chain_layers": adjoint.get("chain_layers"),
+        "windows": len(record.get("windows", [])),
+        "chunks": [chunk.get("name") for chunk in record.get("chunks", [])],
+    }
+    for key in DISTRIBUTED_QUANTUM_KEYS:
+        if identity.get(key) != expected_identity[key]:
+            raise JoinRefused(
+                f"{where}: payload distributed-quantum {key} does not "
+                "answer for the record (retargeted receipt)")
+    if provenance["adjoint_receipt_sha256"] != adjoint.get("receipt_sha256"):
+        raise JoinRefused(
+            f"{where}: payload adjoint receipt digest does not answer for "
+            "the record")
+    if adjoint.get("receipt_sha256") is None:
+        # The §6.4 adjoint-receipt digest the contract names: an unbound
+        # (pre-A) record never joins -- the same refusal
+        # check_quantum_for_campaign makes for a bound campaign.
+        raise JoinRefused(
+            f"{where}: record is unbound (pre-A): re-seal against the "
+            "stage-A receipt before joining")
     return payload
 
 
@@ -285,21 +399,67 @@ def _check_rows(costs: dict, quantum_id: str) -> None:
                     f"row {qname}@{fmt} ({quantum_id}): not a joint row")
 
 
-def _record_units(record: dict) -> list[str]:
-    units = []
-    for window in record.get("windows", []):
-        units.extend(window.get("names", []))
-    return sorted(units)
+def _roster_by_layer(roster: list[str]) -> dict[int, list[str]]:
+    """Partition the caller's roster by the qname layer grammar the producer
+    refuses to seal unevenly (§3.1; ``joint_layer_quanta._layer_qnames``)."""
+    by_layer: dict[int, list[str]] = {}
+    for qname in roster:
+        layer = qname_layer(qname)
+        if layer is not None:
+            by_layer.setdefault(layer, []).append(qname)
+    for units in by_layer.values():
+        units.sort()
+    return by_layer
+
+
+def _record_units(record: dict, roster_by_layer: dict[int, list[str]]) -> list[str]:
+    """The quantum's roster units, by the record's sealed layer.
+
+    B3 (#787): the producer seals windows index-only (D2, derivation v2) --
+    no per-window names exist in a record -- so a gap's units are the
+    roster's qnames for that layer, the same partition the producer refuses
+    to seal unevenly. A record whose layer names no roster unit reports no
+    units (only a foreign record can)."""
+    layer = record.get("layer")
+    if type(layer) is not int or isinstance(layer, bool):
+        return []
+    return list(roster_by_layer.get(layer, []))
 
 
 def _expected_quantum_ids(campaign: dict) -> set[str]:
     """The quantum set the parent manifest declares. The manifest is caller
-    input, so a lost record names its gap instead of shrinking the set."""
+    input, so a lost record names its gap instead of shrinking the set.
+
+    B2 (#787): ids are *constructed* through the producer's padding
+    (§3.1: ``quantum_id`` is ``f"layer-{layer:03d}"`` over the plan's source
+    layers), never read from the phase table -- the sealed run manifest's
+    phases carry unpadded names (``layer-13``) and no ``quantum_id`` field,
+    and non-layer phases (``head``) are not quanta. The declared layer set
+    is the manifest's ``annotations.layers``; a manifest without it falls
+    back to its ``layer-N`` phase names.
+    """
     parent = campaign["parent_manifest"]
+    annotations = parent.get("annotations")
+    layers = annotations.get("layers") if isinstance(annotations, dict) else None
+    if isinstance(layers, list) and layers:
+        return {quantum_id_for_layer(int(layer)) for layer in layers}
     phases = parent.get("phases")
-    if phases is None and isinstance(parent.get("annotations"), dict):
-        phases = parent["annotations"].get("phases")
-    return {phase.get("quantum_id") or phase.get("name") for phase in phases}
+    if phases is None and isinstance(annotations, dict):
+        phases = annotations.get("phases")
+    ids: set[str] = set()
+    for phase in phases if isinstance(phases, list) else []:
+        name = phase.get("name") if isinstance(phase, dict) else None
+        if not (isinstance(name, str) and name.startswith("layer-")):
+            continue
+        try:
+            ids.add(quantum_id_for_layer(int(name[len("layer-"):])))
+        except ValueError:
+            continue
+    if not ids:
+        raise JoinRefused(
+            "coverage: parent manifest declares no layer set "
+            "(no annotations.layers, no layer-N phases)")
+    return ids
 
 
 def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
@@ -310,10 +470,12 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
 
     ``receipts`` is one ``{quantum_id, record_path[, cost_path, cost_sha256,
     identity_sha256, status_path]}`` per quantum; when None the receipt set
-    is scanned from ``input_root`` (required then). ``campaign`` is the
-    caller-supplied binding — plan/prepared/manifest digests, scope,
-    implementation digest, roster, ``formats_by_qname``, and the parent
-    manifest — never derived from the surviving shards.
+    is scanned from ``input_root`` (required then) off each sealed record's
+    ``output_space``. ``campaign`` is the caller-supplied binding --
+    plan/prepared/manifest digests, scope, roster, ``formats_by_qname``, the
+    parent manifest, and optionally the stage-A receipt digest
+    (``adjoint_receipt_sha256``, checked against every record when present)
+    -- never derived from the surviving shards.
 
     Returns ``{"status": "complete"|"gapped", "gaps": [...],
     "joint_cost_path": ..., "results_path": ..., "coverage_sha256": ...}``.
@@ -329,8 +491,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
     if len(set(quantum_ids)) != len(quantum_ids):
         raise JoinRefused("coverage: duplicated quantum ids in receipt set")
     for key in ("plan_sha256", "prepared_sha256", "manifest_sha256", "scope",
-                "implementation_digest", "roster", "formats_by_qname",
-                "parent_manifest"):
+                "roster", "formats_by_qname", "parent_manifest"):
         if key not in campaign:
             raise JoinRefused(f"coverage: campaign binding lacks {key!r}")
 
@@ -342,6 +503,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
             record, receipt, campaign)
         receipt["identity_sha256"] = record["identity_sha256"]
     _check_tiling(records, campaign)
+    roster_by_layer = _roster_by_layer(campaign["roster"])
 
     merged: dict[str, dict] = {}
     gaps: list[dict] = []
@@ -351,7 +513,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
         record = records[quantum_id]
         status, units = _read_status(receipt)
         if status != "complete":
-            units_named = _record_units(record)
+            units_named = _record_units(record, roster_by_layer)
             gaps.append({"quantum_id": quantum_id,
                          "unit_count": len(units_named),
                          "units": units_named})
@@ -383,24 +545,29 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
 
     # A quantum with no record at all is still a named gap, never a shrunk
     # layer set: the expected set comes from the parent manifest, supplied by
-    # the caller, not from the surviving shards.
+    # the caller, not from the surviving shards. B2 (#787): the ids are the
+    # producer's padded spelling; a gapped layer's units are named from the
+    # roster by layer (B3), so an absent record still accounts for its units.
     absent = sorted(_expected_quantum_ids(campaign) - set(records))
     for quantum_id in absent:
-        gaps.append({"quantum_id": quantum_id, "unit_count": None,
-                     "units": [], "record_absent": True})
+        layer = int(quantum_id[len("layer-"):])
+        units_named = roster_by_layer.get(layer, [])
+        gaps.append({"quantum_id": quantum_id, "unit_count": len(units_named),
+                     "units": units_named, "record_absent": True})
         per_layer.append({"quantum_id": quantum_id, "status": "absent",
                           "units": [0, 0]})
 
     roster = list(campaign["roster"])
-    if sorted(merged) != roster and not gaps:
+    if sorted(merged) != sorted(roster) and not gaps:
         missing = [q for q in roster if q not in merged]
         raise JoinRefused(
             f"coverage: complete campaign is short {len(missing)} roster "
             f"units, first {missing[:3]!r} (a complete quantum dropped rows)")
-    if gaps and not absent:
-        # Every gap named its units from its record, yet roster units are
-        # still missing: a complete quantum dropped rows — a defect, not
-        # a gap.
+    if gaps:
+        # Every gap named its units -- from its record's layer for a present
+        # record (B3), from the roster by layer for an absent one (B2) -- so
+        # roster units still missing are a complete quantum that dropped
+        # rows: a defect, not a gap.
         named = set()
         for gap in gaps:
             named.update(gap["units"])
@@ -418,7 +585,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
         "quanta": per_layer,
         "gaps": [{"quantum_id": g["quantum_id"],
                   "unit_count": g["unit_count"]} for g in gaps],
-        "roster_sha256": _roster_sha256(roster),
+        "roster_sha256": roster_digest(roster),
     }
     coverage_sha256 = canonical_json_sha256(
         coverage_proof, where="join coverage proof")
@@ -432,7 +599,6 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
             "prepared_sha256": campaign["prepared_sha256"],
             "read_manifest_sha256": campaign["manifest_sha256"],
             "campaign_scope": campaign["scope"],
-            "implementation_digest": campaign["implementation_digest"],
             "coverage": {**coverage_proof, "coverage_sha256": coverage_sha256,
                          "status": status,
                          "gaps": gaps},
@@ -449,8 +615,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
                         "joined_unix": joined_unix,
                         "coverage_sha256": coverage_sha256},
         "campaign": {key: campaign[key] for key in
-                     ("plan_sha256", "prepared_sha256", "manifest_sha256",
-                      "implementation_digest")},
+                     ("plan_sha256", "prepared_sha256", "manifest_sha256")},
     }
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -505,7 +670,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="sorted qname roster, one per line")
     parser.add_argument("--formats-by-qname", required=True,
                         help="JSON mapping qname to its prepared format list")
-    parser.add_argument("--implementation-digest", required=True)
+    parser.add_argument("--adjoint-receipt-sha256", default=None,
+                        help="the stage-A receipt digest every record must "
+                             "bind (optional; refuses unbound records when "
+                             "given)")
     args = parser.parse_args(argv)
 
     try:
@@ -519,7 +687,7 @@ def main(argv: list[str] | None = None) -> int:
             "prepared_sha256": args.prepared_sha256,
             "manifest_sha256": args.manifest_sha256,
             "scope": _load_json(Path(args.scope), where="campaign scope"),
-            "implementation_digest": args.implementation_digest,
+            "adjoint_receipt_sha256": args.adjoint_receipt_sha256,
             "roster": _read_text_list(Path(args.roster)),
             "formats_by_qname": _load_json(Path(args.formats_by_qname),
                                            where="formats_by_qname"),

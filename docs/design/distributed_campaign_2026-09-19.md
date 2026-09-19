@@ -341,6 +341,12 @@ keeps). Pure, deterministic, testable: same inputs → byte-identical records.
 - `verify_quanta_coverage`, `check_quantum_for_campaign` (§3.2).
 - `join_layer_quanta(receipts, dest, campaign, roster)` — the joiner entry
   point (§7), colocated because it shares the custody/coverage machinery.
+  *(Resolved 2026-09-19, #787 decision D5: the joiner is NOT colocated. #783
+  merged ``prismaquant/joint_quanta_join.py`` first and that module won --
+  the producer's parallel joiner was deleted, not adapted. The joiner
+  imports this module's pure constructions -- ``roster_digest``,
+  ``phase_ranges``, ``quantum_id``, ``qname_layer`` -- so both sides of the
+  wire share one spelling of every digest and id.)*
 - `slice_layer_manifest(parent_manifest, layer)` — the slice builder (§4.3).
 
 ### 4.2 What the producer must NOT do
@@ -621,10 +627,36 @@ to a different `identity_sha256` and refuses to touch the old space.
 
 ## 7. The joiner (contract)
 
-`tools/join_joint_layer_costs.py` (thin CLI over
-`joint_layer_quanta.join_layer_quanta`). Deterministic merge of per-layer
-payloads into the campaign's results shape — the pareto input — with gaps
-reported, never hidden.
+`prismaquant/joint_quanta_join.py` (module + CLI `main`; #783, and the
+survivor of #787's two-joiner decision — the §4.1 sketch of a colocated
+`join_layer_quanta` and a `tools/join_joint_layer_costs.py` CLI is
+superseded). Deterministic merge of per-layer payloads into the campaign's
+results shape — the pareto input — with gaps reported, never hidden.
+
+Wire pins recorded by #787 (2026-09-19), each verified against the sealed
+takeover records and the §6 runtime's writer before landing:
+
+- The roster digest is #768's construction (§3.1): sha256 of the **sorted**
+  roster, one per line, **no trailing newline** — imported from the
+  producer's `roster_digest`, never recomputed.
+- Expected quantum ids are **constructed** (`layer-{layer:03d}`) from the
+  parent manifest's declared layer set (`annotations.layers`, else its
+  `layer-N` phase names); the sealed manifest's phase rows carry unpadded
+  names and no `quantum_id` field, and non-layer phases (`head`) are not
+  quanta. The tiling proof replays through the producer's `phase_ranges`
+  (cumulative marks, entry-aligned). The CLI reads the gzip-sealed run
+  manifest member; digests stay over the sealed file bytes.
+- Records seal windows index-only (D2, derivation v2); a gap's units are
+  named from the caller's roster by the record's layer (`qname_layer`), so
+  gaps carry true unit counts and an absent record still accounts for its
+  units — a complete quantum that drops rows refuses.
+- The payload provenance grammar (§6.4) is what the runtime seals:
+  `campaign_binding` (plan/prepared/read-manifest digests, scope, roster
+  digest), `distributed_quantum` (quantum id, record identity, adjoint
+  receipt digest, checkpoint boundary, chain layers, window count, chunk
+  names), and the top-level `adjoint_receipt_sha256`. The joiner checks
+  both blocks and refuses unbound (pre-A) records; no implementation digest
+  is promised in the payload — it is bound through `prepared_sha256`.
 
 ### 7.1 Inputs and checks
 
@@ -635,9 +667,9 @@ the surviving shards** — a lost quantum fails the coverage proof instead of
 shrinking the layer set to fit (the #768 rule). Checks, in order:
 
 1. **Custody:** every receipt's `identity_sha256` matches its record; every
-   payload's provenance block equals the campaign binding (one shared plan
-   digest, prepared digest, scope, implementation digest); only per-layer
-   content may differ.
+   payload's provenance equals the campaign binding and answers for its
+   record (the §7 wire pins above — including the adjoint receipt digest);
+   only per-layer content may differ.
 2. **Coverage:** replay `verify_quanta_coverage` over the receipt set against
    the parent manifest; then check the *unit* tiling — the union of payload
    `costs` keys must be exactly the roster (36,423 qnames), and each qname's
@@ -866,3 +898,41 @@ Each component lands with its gates (dev-mode stamps do not waive these):
   join pattern), #754/#763 (resumable parallel head walk), #776
   (`PRISMAQUANT_DEV_MODE`), #607 (resumed read-order sealing — the slice
   manifests inherit its rules).
+
+## 13. Addendum (2026-09-19, later that night): the stage-A prefetch override (#819)
+
+The first live stage A (PB action `74f12044f774…`) confirmed this note's
+IO diagnosis from the other side: at layer ~24/45 the capture showed a few
+GPU batches and then minutes of halt, repeatedly — the plan's sealed
+`source_prefetch` budget is `{prefetch_workers: 1, max_cache_slots: 2,
+prefetch_lookahead: 1}` (#737's single-worker pin), one worker is
+latency-bound on many-file collections over NFS-RDMA from the dl380-hosted
+tiers, and the GB10s stage no local copy. The plan is frozen for this
+campaign (the prepared binds its digest; re-sealing costs a 7+h
+re-prepare), so the §5.2 stage-A submission gains the IO-side #809 seam
+instead of a new seal:
+
+- `prismaquant.joint_adjoint_capture` accepts `--prefetch-override
+  <path>` (or `PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE` for direct
+  invocations; two explicit sources that disagree refuse). The document
+  carries a non-empty `reason` and a `source_prefetch` block that passes
+  the plan's own completeness check (`_source_prefetch`: the same six
+  fields, the same rules, prefetched residency still required).
+- Given an override, the capture's model build threads the override's
+  budget instead of the plan's, **for that run only**. Plan bytes, the
+  plan/prepared digests, and the adjoint receipt are untouched — the
+  quanta's receipt bindings do not move. No override given: the plan's
+  block verbatim, byte-identical behavior.
+- The deviation is stamped into the run's provenance, never silent:
+  `results.json` and `counters.json` carry `prefetch_override`
+  (`{plan_sealed, run_used, reason, path, sha256, source}`, or `null`),
+  and the attempt log prints the same block at startup.
+- `tools/dispatch_joint_quanta.py --stage-a-prefetch-override <path>`
+  threads the payload's `--prefetch-override` (the payload argv is the
+  channel that crosses the container boundary — the launcher forwards no
+  ambient action environment) and records the path in the campaign
+  state's `stage-a-submitted` event.
+
+This is a recorded per-run deviation, not a new default: the next plan
+seal adopts measured numbers through `recommend_source_prefetch` (#737),
+and the override retires with the campaign that needed it.

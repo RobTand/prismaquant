@@ -30,6 +30,7 @@ from dispatch_joint_quanta import (  # noqa: E402
     FakeGateway,
     main,
     quantum_argv,
+    stage_a_argv,
 )
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
@@ -178,6 +179,55 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     assert inner[inner.index("--quantum") + 1] == str(record_path)
     assert inner[inner.index("--quantum-sha256") + 1] == record["identity_sha256"]
     assert inner[inner.index("--output-root") + 1] == "/out/root"
+
+
+def test_stage_a_argv_prefetch_override_is_payload_flagged(tmp_path, campaign):
+    """The #819 seam's dispatcher half: without an override the stage-A argv
+    is unchanged (the plan's sealed budget, no flag); with one, the payload
+    carries ``--prefetch-override`` -- the channel that crosses the container
+    boundary, since the launcher forwards no ambient action environment into
+    the payload -- and nothing else in the argv moves."""
+    manifest = tmp_path / "adjoint.data-manifest.json.gz"
+    plain = stage_a_argv(manifest, campaign)
+    assert "--prefetch-override" not in plain
+    assert plain[-1] == "--resume"
+
+    override = Path("/mnt/shared/joint-panel/prefetch-override-v10.json")
+    widened = stage_a_argv(manifest, campaign, prefetch_override=override)
+    # The pbrun envelope (everything before the payload ``--``) is unchanged;
+    # the override rides inside the container payload only.
+    split = widened.index("--")
+    assert widened[:split] == plain[:plain.index("--")]
+    payload = widened[split + 1:]
+    inner = payload[payload.index("--", payload.index("--spec")) + 1:]
+    assert inner[:3] == ["python3", "-m", "prismaquant.joint_adjoint_capture"]
+    assert inner[inner.index("--prefetch-override"):][:2] == [
+        "--prefetch-override", str(override)]
+    assert inner[inner.index("--prefetch-override") + 1] == str(override)
+
+
+def test_main_threads_stage_a_prefetch_override(tmp_path, campaign, records_dir,
+                                                capsys):
+    """``--stage-a-prefetch-override`` reaches the published stage-A row and
+    is recorded in the campaign state's submission event (the deviation is
+    the dispatcher's provenance too, not only the run's)."""
+    override = tmp_path / "prefetch-override-v10.json"
+    override.write_text("{}")
+    gateway = FakeGateway()
+    out = tmp_path / "out"
+    code = main(["--records", str(records_dir), "--output-root", str(out),
+                 "--state", str(tmp_path / "state.json"),
+                 "--stage-a-prefetch-override", str(override)],
+                _gateway=gateway)
+    assert code == 0
+    stage_a_rows = [row for row in gateway.submitted if row["kind"] == "stage-a"]
+    assert len(stage_a_rows) == 1
+    argv = stage_a_rows[0]["argv"]
+    assert argv[argv.index("--prefetch-override") + 1] == str(override)
+    events = [json.loads(line) for line
+              in (tmp_path / "state.json").read_text().splitlines() if line]
+    assert events[0]["event"] == "stage-a-submitted"
+    assert events[0]["prefetch_override"] == str(override)
 
 
 def test_publication_order_is_descending_layer_id(tmp_path, campaign, records_dir):

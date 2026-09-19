@@ -12,6 +12,14 @@ publication; quanta bind it by digest and refuse a moved or mismatched one.
 
 The plan block's entry name ``prismaquant.joint_adjoint_capture`` (§5.1) is
 this module's lane alias; both spellings execute here.
+
+The plan's ``source_prefetch`` budget is the capture's IO contract, and a
+frozen plan can still be wrong about it (#819: the sealed single-worker pin
+starves the GPU). ``--prefetch-override`` / ``PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE``
+name an explicit override document validated by the plan's own field grammar;
+it replaces the budget for one run only and stamps the deviation into the
+run's provenance (``results.json``, ``counters.json``) -- the IO-side #809
+seam: explicit input beside the sealed plan, recorded, never silent.
 """
 from __future__ import annotations
 
@@ -51,6 +59,19 @@ EXIT_FAILURE = 1
 EXIT_USAGE = 2
 EXIT_IDENTITY_REFUSED = 3
 
+#: The IO-side explicit-input seam (the #809 pattern): a frozen plan's sealed
+#: ``source_prefetch`` budget stays the campaign's identity, and one run may
+#: replace it with an explicitly recorded override document -- stamped into
+#: the run's result and counter provenance, never silent, never a default.
+#: The PB channel is the CLI flag (the container launcher forwards no ambient
+#: action environment into the payload); the environment variable serves
+#: direct invocations, and two explicit sources that disagree refuse.
+PREFETCH_OVERRIDE_ENV = "PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE"
+PREFETCH_OVERRIDE_INPUT_SCHEMA = (
+    "prismaquant.joint_adjoint_capture.prefetch_override_input.v1")
+PREFETCH_OVERRIDE_STAMP_SCHEMA = (
+    "prismaquant.joint_adjoint_capture.prefetch_override.v1")
+
 
 class AdjointIdentityRefused(RuntimeError):
     """A plan/prepared digest or binding mismatch, before anything runs."""
@@ -69,6 +90,80 @@ def resolve_stride(config, cli_stride) -> tuple[int, str]:
                 f"stride {plan_stride}")
         return int(plan_stride), "plan"
     return int(cli_stride if cli_stride is not None else DEFAULT_STRIDE), "cli"
+
+
+def load_prefetch_override(path) -> dict:
+    """Load and grammar-check one prefetch-override document.
+
+    The ``source_prefetch`` block passes the plan's own completeness check
+    (:func:`prismaquant.tessera_joint_aura._source_prefetch`): the same six
+    fields, the same positivity/finite/lookahead rules, prefetched residency
+    still required. The document additionally carries a non-empty ``reason``
+    -- an override without a recorded reason is silent by construction, and
+    the deviation stamp quotes it verbatim.
+    """
+    from .tessera_joint_aura import _source_prefetch
+
+    path = Path(path)
+    try:
+        raw = path.read_bytes()
+        document = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"prefetch override {path}: unreadable JSON: {exc}") from exc
+    if (not isinstance(document, dict)
+            or set(document) != {"schema", "reason", "source_prefetch"}):
+        raise ValueError(f"prefetch override {path}: exactly schema, reason "
+                         "and source_prefetch required")
+    if document["schema"] != PREFETCH_OVERRIDE_INPUT_SCHEMA:
+        raise ValueError(f"prefetch override {path}: schema is not "
+                         f"{PREFETCH_OVERRIDE_INPUT_SCHEMA!r}")
+    reason = document["reason"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError(f"prefetch override {path}: a non-empty reason is "
+                         "required -- an unexplained override is a silent one")
+    return {"reason": reason, "source_prefetch": _source_prefetch(document),
+            "path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def resolve_prefetch_override(config, cli_path=None, environ=None) -> dict:
+    """Resolve the run's source-prefetch budget beside the sealed plan.
+
+    The plan's block is validated exactly as before and remains the
+    campaign's identity -- nothing here rewrites plan bytes or the digests
+    that bind them. An explicit override (the CLI flag, or
+    ``PREFETCH_OVERRIDE_ENV`` for a direct invocation) replaces the budget
+    **for this run only**, and the return carries the deviation stamp both
+    provenance files quote verbatim. Two explicit sources that disagree
+    refuse (the #809 rule); neither source present is the plan's budget
+    verbatim; there is no default override and no silent one.
+    """
+    from .tessera_joint_aura import _source_prefetch
+
+    environ = os.environ if environ is None else environ
+    plan_budget = _source_prefetch(config)
+    cli_path = Path(cli_path) if cli_path is not None else None
+    env_raw = str(environ.get(PREFETCH_OVERRIDE_ENV, "") or "").strip()
+    env_path = Path(env_raw) if env_raw else None
+    if cli_path is not None and env_path is not None and cli_path != env_path:
+        raise AdjointIdentityRefused(
+            f"--prefetch-override {cli_path} disagrees with "
+            f"{PREFETCH_OVERRIDE_ENV}={env_path}")
+    source, path = (("cli", cli_path) if cli_path is not None
+                    else ("env", env_path) if env_path is not None
+                    else (None, None))
+    if path is None:
+        return {"run_used": plan_budget, "override": None}
+    override = load_prefetch_override(path)
+    stamp = {
+        "schema": PREFETCH_OVERRIDE_STAMP_SCHEMA,
+        "source": source,
+        "path": override["path"],
+        "sha256": override["sha256"],
+        "reason": override["reason"],
+        "plan_sealed": plan_budget,
+        "run_used": override["source_prefetch"],
+    }
+    return {"run_used": override["source_prefetch"], "override": stamp}
 
 
 def run_adjoint_capture_core(
@@ -366,6 +461,7 @@ def _io_counters() -> dict:
 def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
+    prefetch_override=None,
 ) -> dict:
     """Load the head phase and run the adjoint capture (one PB action)."""
     from .aura_cost import _aura_source_sha256
@@ -405,6 +501,7 @@ def run_adjoint_capture(
             f"{output_root}")
     _bound(prepared, "prepared anchors")
     stride_value, stride_source = resolve_stride(config, stride)
+    prefetch = resolve_prefetch_override(config, prefetch_override)
 
     space = adjoint_space(output_root)
     space.mkdir(parents=True, exist_ok=True)
@@ -415,6 +512,7 @@ def run_adjoint_capture(
         "plan_sha256": plan_sha256,
         "prepared_sha256": prepared["sha256"],
         "stride": {"value": stride_value, "source": stride_source},
+        "prefetch_override": prefetch["override"],
         "env": {"host": socket.gethostname(), "started_epoch": time.time(),
                 "torch": str(torch.__version__), "cuda": torch.version.cuda,
                 "affinity": sorted(os.sched_getaffinity(0))},
@@ -422,6 +520,12 @@ def run_adjoint_capture(
         "phases": [], "passed": False,
     }
     result["env"]["container_content_sha256"] = executing_image()
+    if prefetch["override"] is not None:
+        stamp = prefetch["override"]
+        print("joint_cost_stage_a: prefetch override: plan sealed "
+              f"{stamp['plan_sealed']} replaced by {stamp['run_used']} "
+              f"(source {stamp['source']}, reason: {stamp['reason']})",
+              flush=True)
 
     sampler = GpuPowerSampler().start()
     kernel = KernelTimeProfiler()
@@ -467,15 +571,16 @@ def run_adjoint_capture(
         # execute()); stage A builds the same model and threads the same two
         # plan fields -- the corrected GLM runtime refuses to load unbound
         # (the d4578e5e6af4 failure), and the prefetch budget is the plan's
-        # own answer to #737's single-worker pin.
-        from .tessera_joint_aura import _source_prefetch
+        # own answer to #737's single-worker pin. An explicitly recorded
+        # override (#819) replaces the budget for this run only; the plan's
+        # block is what the deviation stamp names as sealed.
         runner = build_streamed_causal_lm(
             config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
             offload_folder=str(space / "run" / "offload"),
             profile=detect_profile(config["model"]), attn_implementation="eager",
             source_authentication=None,
             source_derivative=execution.get("source_derivative"),
-            **_source_prefetch(config))
+            **prefetch["run_used"])
         require_capture_compatibility(config.get("source_capture_compatibility"),
                                       capture=config["canonical_capture"],
                                       model=runner.model)
@@ -557,6 +662,7 @@ def run_adjoint_capture(
                     "bytes_from_stage": (residency or {}).get("bytes_from_stage"),
                     "bytes_from_pool": (residency or {}).get("bytes_from_pool")}],
         "stride": {"value": stride_value, "source": stride_source},
+        "prefetch_override": prefetch["override"],
     }
     atomic_write_bytes(space / "counters.json",
                        (json.dumps(counters, sort_keys=True, indent=2,
@@ -584,6 +690,13 @@ def main(argv=None) -> int:
     parser.add_argument("--read-manifest-sha256", default=None,
                         help="digest of the parent run's sealed data manifest")
     parser.add_argument("--data-manifest-sha256", default=None)
+    parser.add_argument("--prefetch-override", type=Path, default=None,
+                        help="explicit source_prefetch override document "
+                             "(schema %s): replaces the plan's sealed "
+                             "budget for this run only, validated by the "
+                             "same field grammar, with the deviation "
+                             "stamped into results.json and counters.json"
+                             % PREFETCH_OVERRIDE_INPUT_SCHEMA)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -596,7 +709,8 @@ def main(argv=None) -> int:
             prepared={"path": str(args.prepared), "sha256": args.prepared_sha256},
             output_root=args.output_root, stride=args.stride,
             read_manifest_sha256=args.read_manifest_sha256,
-            data_manifest_sha256=args.data_manifest_sha256, resume=args.resume)
+            data_manifest_sha256=args.data_manifest_sha256, resume=args.resume,
+            prefetch_override=args.prefetch_override)
     except AdjointIdentityRefused as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
