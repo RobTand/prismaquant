@@ -208,9 +208,11 @@ def _payload_provenance(campaign, record):
 
 
 def _write_quantum(root, campaign, probe, layer, *, status="complete",
-                   costs=None, provenance=None):
+                   costs=None, provenance=None, roster_digest=None,
+                   record=None):
     quantum_id = f"layer-{layer:03d}"
-    record = _record(campaign, layer, root)
+    record = record or _record(campaign, layer, root,
+                               roster_digest=roster_digest)
     records = root / "layer-quanta" / "records"
     records.mkdir(parents=True, exist_ok=True)
     (records / f"{quantum_id}.json").write_text(json.dumps(record))
@@ -474,7 +476,8 @@ def test_adjoint_receipt_digest_is_checked(tmp_path, campaign, probe):
     unbound["identity_sha256"] = canonical_json_sha256(
         unbound, where="unbound fixture record")
     provenance = _payload_provenance(campaign, unbound)
-    _write_quantum(root_b, campaign, probe, 0, provenance=provenance)
+    _write_quantum(root_b, campaign, probe, 0, provenance=provenance,
+                   record=unbound)
     _write_quantum(root_b, campaign, probe, 1)
     campaign_b = copy.deepcopy(campaign)
     campaign_b["adjoint_receipt_sha256"] = None
@@ -565,6 +568,7 @@ def test_producer_records_join_synthetic_runtime_outputs(tmp_path, campaign,
         parent["annotations"]["phases"][-1]["cumulative_bytes"]
     parent["entry_count"] = len(parent["entries"])
     plan = {"output_root": str(root),
+            "model": "/mnt/shared/models/TEST",
             "retained_window_budget_derivation": {
                 "windows_by_layer": {"0": 1, "1": 2}}}
     roster = sorted(q for q in campaign["roster"] if ".layers.2." not in q)
