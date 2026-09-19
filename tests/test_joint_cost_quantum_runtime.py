@@ -309,6 +309,114 @@ def test_cli_identity_refusal_is_exit_3(identity_files, monkeypatch, capsys):
     assert not identity_files["output_root"].exists()
 
 
+def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch):
+    """The model build receives the plan's derivative binding and prefetch budget.
+
+    Stage A v8 (d4578e5e6af4) refused at 363 s: the corrected GLM runtime on
+    disk requires an explicit ``source_derivative`` binding, the plan's
+    execution block carries one, and the stage-A caller passed neither it nor
+    the plan's ``source_prefetch`` budget (the single-run threads both). This
+    pins the seam: whatever the plan carries reaches the model build, and a
+    plan without them reaches it as absent.
+    """
+    import prismaquant.joint_cost_stage_a as stage_a
+    import prismaquant.tessera_joint_aura as aura
+    import prismaquant.cost_streaming as streaming
+    import prismaquant.tessera_reader as reader_mod
+    import prismaquant.gpu_guard as guard
+    import prismaquant.joint_projection_backend as backend
+    import prismaquant.aura_cost as aura_cost
+    import prismaquant.residency_map as residency
+
+    class _Done(Exception):
+        pass
+
+    captured = {}
+
+    def fake_build(model, **kwargs):
+        captured.update(kwargs)
+        raise _Done
+
+    monkeypatch.setattr(guard, "require_cuda_hot_path", lambda *a, **k: None)
+    monkeypatch.setattr(backend, "prewarm_projection_backend",
+                        lambda *a, **k: type("B", (), {"identity": None})())
+    monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
+    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura, "_preflight_run_prepared", lambda *a, **k: None)
+    draw = {"fit_ids_sha256": _hex("1"), "text_sha256": _hex("2"),
+            "nsamples": 4, "seqlen": 512, "seed": 7}
+    monkeypatch.setattr(aura, "load_measured_anchor_input",
+                        lambda inputs, **k: type("D", (), {
+                            "formats_by_qname": {}, "cells": [],
+                            "census": {"model": "/models/x",
+                                       "attention_implementation": "eager"},
+                            "payload": {"provenance": {
+                                "hessian": {"calibration_identity": draw}}}})())
+    import prismaquant.calibration_data as calib
+    monkeypatch.setattr(calib, "load_calibration_input",
+                        lambda *a, **k: ([], {"provenance": dict(draw)}))
+    monkeypatch.setattr(aura, "_seed_source_identity_cache",
+                        lambda *a, **k: None)
+    import prismaquant.model_profiles as profiles
+    monkeypatch.setattr(profiles, "detect_profile", lambda *a, **k: None)
+    monkeypatch.setattr(streaming, "build_streamed_causal_lm", fake_build)
+    monkeypatch.setattr(residency, "bind_residency_manifest", lambda *a, **k: None)
+    monkeypatch.setattr(stage_a, "GpuPowerSampler",
+                        lambda: type("S", (), {"start": lambda s: s,
+                                               "stop": lambda s: {}})())
+    monkeypatch.setattr(stage_a, "KernelTimeProfiler",
+                        lambda: type("K", (), {
+                            "__enter__": lambda s: s,
+                            "__exit__": lambda s, *a: None,
+                            "kernel_active_s": 0.0,
+                            "error": None})())
+    monkeypatch.setattr(residency, "residency_report", lambda: None)
+
+    prepared_path = tmp_path / "prepared.json"
+    derivative = {"schema": "prismaquant.glm_source_derivative.v1"}
+    prefetch = {"max_cache_slots": 4, "prefetch_workers": 3,
+                "prefetch_lookahead": 2, "cache_headroom_gb": 8,
+                "prefetch_min_available_gb": 16,
+                "require_prefetched_residency": True}
+    prepared_path.write_text(json.dumps(
+        {"plan_sha256": _hex("d"), "source_model_identity": None}))
+    prepared = {"path": str(prepared_path),
+                "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
+    config = {"execution": {"production_act_scales": "scales",
+                            "source_derivative": derivative,
+                            "n_calib_samples": 4, "calib_seqlen": 512},
+              "inputs": {}, "output_root": str(tmp_path),
+              "model": "/models/x",
+              "calibration_input": {"path": str(tmp_path / "cal.json"),
+                                    "sha256": _hex("3")},
+              "source_prefetch": prefetch}
+
+    with pytest.raises(_Done):
+        stage_a.run_adjoint_capture(
+            config, plan_sha256=_hex("d"), prepared=prepared,
+            output_root=str(tmp_path), stride=2)
+    assert captured["source_derivative"] == derivative
+    for key, value in prefetch.items():
+        assert captured[key] == value
+
+    # A plan without source_prefetch is refused fail-closed (the block is
+    # mandatory -- the same contract the single-run's _source_prefetch
+    # enforces), and a plan without source_derivative threads absence.
+    config["execution"].pop("source_derivative")
+    config.pop("source_prefetch")
+    with pytest.raises(ValueError, match="complete source_prefetch"):
+        stage_a.run_adjoint_capture(
+            config, plan_sha256=_hex("d"), prepared=prepared,
+            output_root=str(tmp_path), stride=2)
+    config["source_prefetch"] = prefetch
+    captured.clear()
+    with pytest.raises(_Done):
+        stage_a.run_adjoint_capture(
+            config, plan_sha256=_hex("d"), prepared=prepared,
+            output_root=str(tmp_path), stride=2)
+    assert captured.get("source_derivative") is None
+
+
 def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch):
     """The plan's allowlist must reach the anchor loader (the v6 lesson).
 

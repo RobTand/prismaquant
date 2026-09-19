@@ -462,11 +462,20 @@ def run_adjoint_capture(
         _same(completion.get("plan_sha256"), plan_sha256, "prepared plan")
 
         identity_cache_path = _seed_source_identity_cache(config, space / "run")
+        # The single-run path threads the plan's derivative binding and its
+        # source-prefetch budget into the model build (tessera_joint_aura's
+        # execute()); stage A builds the same model and threads the same two
+        # plan fields -- the corrected GLM runtime refuses to load unbound
+        # (the d4578e5e6af4 failure), and the prefetch budget is the plan's
+        # own answer to #737's single-worker pin.
+        from .tessera_joint_aura import _source_prefetch
         runner = build_streamed_causal_lm(
             config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
             offload_folder=str(space / "run" / "offload"),
             profile=detect_profile(config["model"]), attn_implementation="eager",
-            source_authentication=None)
+            source_authentication=None,
+            source_derivative=execution.get("source_derivative"),
+            **_source_prefetch(config))
         require_capture_compatibility(config.get("source_capture_compatibility"),
                                       capture=config["canonical_capture"],
                                       model=runner.model)
