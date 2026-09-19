@@ -40,6 +40,8 @@ import re
 import subprocess
 import weakref
 
+from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
+
 VERSION = "meta_skeleton_render_proof_v1"
 SCHEMA = "prismaquant.joint_aura.run_source_transition.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -190,7 +192,13 @@ def _bound(record, label):
 
 
 def source_proof(package_root=None):
-    """Reconstruct the sealed package's bytes; any other source change fails closed."""
+    """Reconstruct the sealed package's bytes; any other source change fails closed.
+
+    Under ``PRISMAQUANT_DEV_MODE=1`` (Rob, 2026-09-19: rapid iteration must not
+    pay provenance tax) this check is a stamp, not a wall: any executing
+    package is admitted, and the record carries the package's ACTUAL tree
+    digest -- even a dev run records what ran, a record never a gate.
+    """
     root = Path(package_root) if package_root is not None else Path(__file__).resolve().parent
     current, original = hashlib.sha256(), hashlib.sha256()
     seen = set()
@@ -202,6 +210,23 @@ def source_proof(package_root=None):
         digest.update(len(data).to_bytes(8, "big"))
         digest.update(data)
 
+    if dev_mode_enabled():
+        # The executing package is what it is; the seal returns at the
+        # artifact gate, not here. Nothing is reconstructed and nothing is
+        # compared against the contract -- only recorded: the ACTUAL tree
+        # digest, a record never a gate.
+        for path in sorted(root.rglob("*")):
+            if (not path.is_file() or "__pycache__" in path.relative_to(root).parts
+                    or path.suffix in {".pyc", ".pyo"}):
+                continue
+            update(current, path.relative_to(root).as_posix(), path.read_bytes())
+        digest = current.hexdigest()
+        dev_warning(
+            f"source_proof admits any executing package under dev mode; "
+            f"actual tree digest {digest} (contract {_CONTRACT['source_sha256']})")
+        return {"producer_source_sha256": digest, "reconstructed_source_sha256": digest,
+                "transition_module_sha256": _sha(root / "joint_aura_run_transition.py"),
+                "dev_uncertified": True}
     for path in sorted(root.rglob("*")):
         if (not path.is_file() or "__pycache__" in path.relative_to(root).parts
                 or path.suffix in {".pyc", ".pyo"}):
@@ -335,9 +360,17 @@ def _read_receipt(bound_receipt, *, execution):
     _require(receipt["schema"] == SCHEMA and receipt["version"] == VERSION and receipt["original"] == _CONTRACT,
              "unapproved transition contract")
     actual = receipt["execution"]
-    _require(isinstance(actual, dict) and re.fullmatch(_COMMIT, str(actual.get("git_commit", ""))) is not None
-             and _bytes_identity(actual) == _bytes_identity(execution),
-             "receipt execution source differs from current package")
+    if (_bytes_identity(actual) != _bytes_identity(execution) and dev_mode_enabled()):
+        # Dev mode (Rob, 2026-09-19): any executing package is admitted under
+        # the receipt; both identities are recorded, never gated.
+        dev_warning(
+            "receipt execution source differs from the executing package; "
+            f"recorded, not gated: receipt={_bytes_identity(actual)} "
+            f"current={_bytes_identity(execution)}")
+    else:
+        _require(isinstance(actual, dict) and re.fullmatch(_COMMIT, str(actual.get("git_commit", ""))) is not None
+                 and _bytes_identity(actual) == _bytes_identity(execution),
+                 "receipt execution source differs from current package")
     return receipt, raw
 
 
@@ -375,8 +408,17 @@ class VerifiedRunTransition:
     @property
     def execution_provenance(self):
         receipt = json.loads(self._receipt_bytes)
-        return {"schema": SCHEMA, "version": VERSION, "receipt": {"sha256": self._receipt_sha256},
-                "execution": receipt["execution"], "measurement_source_sha256": _CONTRACT["source_sha256"]}
+        provenance = {"schema": SCHEMA, "version": VERSION, "receipt": {"sha256": self._receipt_sha256},
+                      "execution": receipt["execution"], "measurement_source_sha256": _CONTRACT["source_sha256"]}
+        if dev_mode_enabled():
+            # Record what ran, not what the receipt sealed: the ACTUAL tree
+            # digest beside the receipt's, under an unmistakable stamp. No
+            # timestamp -- unit checkpoints compare this record across a
+            # resume, so it must be equality-stable.
+            actual = source_proof()
+            provenance["execution"] = {**receipt["execution"], **actual}
+            provenance.update(dev_stamp(actual["producer_source_sha256"], timestamped=False))
+        return provenance
 
     def measurement_identity(self, actual):
         """Rewrite the checkpoint identity's source fields to the sealed prepare's.
@@ -385,11 +427,23 @@ class VerifiedRunTransition:
         sealed checkout this run executes from; the receipt's own creation
         commit is not compared, because every PrismaBuild submission seals a
         different one over the same bytes.
+
+        Under ``PRISMAQUANT_DEV_MODE=1`` the check is a stamp: the identity is
+        returned UNREWRITTEN, carrying the executing package's actual fields,
+        because even a dev run records what ran -- and the checkpoint lineage
+        gate (``_prepare_aura_checkpoints``) archives, never silently reuses,
+        a lineage whose recorded identity differs.
         """
         receipt = json.loads(self._receipt_bytes)
-        _require(actual.get("producer_source_sha256") == receipt["execution"]["producer_source_sha256"] and
-                 actual.get("git_commit") == self._observed_git_commit,
-                 "actual checkpoint source does not match admitted execution")
+        if (actual.get("producer_source_sha256") != receipt["execution"]["producer_source_sha256"]
+                or actual.get("git_commit") != self._observed_git_commit):
+            if not dev_mode_enabled():
+                _require(False, "actual checkpoint source does not match admitted execution")
+            dev_warning(
+                "actual checkpoint source differs from the admitted receipt; "
+                f"recorded, not gated: checkpoint={actual.get('producer_source_sha256')} "
+                f"receipt={receipt['execution']['producer_source_sha256']}")
+            return dict(actual)
         identity = dict(actual)
         identity["git_commit"] = _CONTRACT["git_commit"]
         identity["producer_source_sha256"] = _CONTRACT["source_sha256"]
@@ -399,9 +453,14 @@ class VerifiedRunTransition:
         from .aura_cost import _aura_unit_checkpoint_path, _load_aura_unit_checkpoint
         root = Path(self._checkpoint_dir)
         manifest = json.loads((root / "manifest.json").read_bytes())
-        _require(manifest["identity"]["git_commit"] == _CONTRACT["git_commit"] and
-                 manifest["identity"]["producer_source_sha256"] == _CONTRACT["source_sha256"],
-                 "checkpoint manifest carries another measurement source")
+        if (manifest["identity"]["git_commit"] != _CONTRACT["git_commit"]
+                or manifest["identity"]["producer_source_sha256"] != _CONTRACT["source_sha256"]):
+            if not dev_mode_enabled():
+                _require(False, "checkpoint manifest carries another measurement source")
+            dev_warning(
+                "checkpoint manifest carries another measurement source; "
+                f"recorded, not gated: manifest={manifest['identity'].get('producer_source_sha256')} "
+                f"contract={_CONTRACT['source_sha256']}")
         provenance = self.execution_provenance
         count = 0
         for row in manifest["units"]:
@@ -425,9 +484,14 @@ def load_transition(bound_receipt, *, config, plan_sha256, prepared, checkpoint_
     manifest_path = root / "manifest.json"
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_bytes())
-        _require(manifest.get("identity", {}).get("git_commit") == _CONTRACT["git_commit"] and
-                 manifest["identity"].get("producer_source_sha256") == _CONTRACT["source_sha256"],
-                 "existing checkpoint manifest carries another measurement source")
+        if manifest.get("identity", {}).get("git_commit") != _CONTRACT["git_commit"] or \
+                manifest["identity"].get("producer_source_sha256") != _CONTRACT["source_sha256"]:
+            if not dev_mode_enabled():
+                _require(False, "existing checkpoint manifest carries another measurement source")
+            dev_warning(
+                "existing checkpoint manifest carries another measurement source; "
+                f"recorded, not gated: manifest={manifest['identity'].get('producer_source_sha256')} "
+                f"contract={_CONTRACT['source_sha256']}")
     else:
         _require(not any((root / "units").glob("*.pkl")) if (root / "units").is_dir() else True,
                  "checkpoint units exist without a manifest")
@@ -446,8 +510,14 @@ def require_verified_transition(value, *, checkpoint_dir, resume, joint_activati
     _require(_sha(value._receipt_path) == value._receipt_sha256, "admitted receipt bytes changed")
     execution = _actual_execution()
     receipt = json.loads(value._receipt_bytes)
-    _require(_bytes_identity(receipt["execution"]) == _bytes_identity(execution) and
-             execution["git_commit"] == value._observed_git_commit, "producer source changed after admission")
+    if (_bytes_identity(receipt["execution"]) != _bytes_identity(execution)
+            or execution["git_commit"] != value._observed_git_commit):
+        if not dev_mode_enabled():
+            _require(False, "producer source changed after admission")
+        dev_warning(
+            "producer source changed after admission; recorded, not gated: "
+            f"receipt={_bytes_identity(receipt['execution'])} "
+            f"current={_bytes_identity(execution)}")
     return value
 
 

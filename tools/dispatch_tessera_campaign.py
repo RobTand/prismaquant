@@ -93,6 +93,7 @@ from pathlib import Path
 
 if __package__:
     from .tessera_campaign_container import (
+        DEV_MODE_ENV,
         container_memory_budget_gb,
         validate_container,
     )
@@ -101,6 +102,7 @@ else:
     # reads the shared calibration contract from the sibling package.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
+        DEV_MODE_ENV,
         container_memory_budget_gb,
         validate_container,
     )
@@ -2413,9 +2415,20 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
     The entry point binds every input by digest, so a submission that names a
     different one fails twenty seconds into an admitted action rather than
     here. Computing it costs one read of a file the submitter already has.
+
+    Under ``PRISMAQUANT_DEV_MODE=1`` (Rob, 2026-09-19) a declared digest is a
+    RECORD, not a gate: a mismatch warns loudly and the ACTUAL digest is
+    used. The pass's own gates -- not the submitter -- decide what runs, and
+    a dev submission's argv already names the environment it ran under.
     """
     actual = _sha256_of(path)
     if declared is not None and declared != actual:
+        if os.environ.get(DEV_MODE_ENV) == "1":
+            from prismaquant.dev_mode import dev_warning
+            dev_warning(
+                f"{label}: {path} hashes to {actual}, not the declared "
+                f"{declared}; the declared digest is recorded, not gated (dev mode)")
+            return actual
         raise RuntimeError(
             f"{label}: {path} hashes to {actual}, not the declared {declared}")
     return actual
@@ -2543,6 +2556,27 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         validate_container(container_spec, bounded=True)
         container_spec = {**container_spec,
                           "env": {**BOUNDED_CAPTURE_ENV, **container_spec.get("env", {})}}
+    # Dev mode (Rob, 2026-09-19): PRISMAQUANT_DEV_MODE travels to the
+    # container exactly the way PRISMAQUANT_LAYER_READ_THREADS does -- sealed
+    # in the spec env the launcher receives -- so the pass gates inside read
+    # the same switch this submitter read. The spec FILE is never rewritten;
+    # only the in-memory copy moves. This changes the submission's argv, and
+    # therefore its action key: a dev submission is a different action from a
+    # certified one over the same plan, by design.
+    if os.environ.get(DEV_MODE_ENV) == "1":
+        from prismaquant.dev_mode import dev_warning
+        declared = (container_spec.get("env") or {}).get(DEV_MODE_ENV)
+        if declared is not None and declared != "1":
+            dev_warning(
+                f"spec env {DEV_MODE_ENV}={declared!r} contradicts the "
+                "submitting environment's '1'; the submitting environment wins")
+        container_spec = {**container_spec,
+                          "env": {**(container_spec.get("env") or {}),
+                                  DEV_MODE_ENV: "1"}}
+        dev_warning(
+            "submitting under PRISMAQUANT_DEV_MODE=1: digest arguments are "
+            "records and the pass's provenance gates stamp instead of "
+            "refusing; every artifact this produces is dev-uncertified")
     manifest_path = _manifest_path(args, plan, entry_point=entry_point,
                                    command=command)
     manifest = build()
