@@ -174,7 +174,7 @@ def test_a_ceiling_no_served_run_covers_is_refused(tmp_path, payload, match):
 
 
 def test_the_real_pinned_contract_cites_a_receipt_for_every_raised_ceiling():
-    """The installed v29 table passes the same refusal it is read through."""
+    """The installed v31 table passes the same refusal it is read through."""
     path, sha, payload = _installed_contract()
     limits = trc.published_tensor_parallel_limits(path, sha)
     assert limits == {E2M1: 2, FP8: 2, BF16: 2}

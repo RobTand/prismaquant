@@ -236,3 +236,112 @@ def test_weights_reproduce_the_campaign_total_convention(population):
         assert scaled["predicted"][rate] == pytest.approx(math.fsum(
             (2.0 + e) * plain["predicted_per_expert"][rate][e]
             for e in stack.experts))
+
+
+# --------------------------------------------------------------------------
+# PQ #495 parts 4-5: the selective encode of the allocated winners (as data)
+# and the regret gate over the campaign's own bootstrap (as a decision).
+# Neither encodes, allocates, or serves; the driver changes are next.
+# --------------------------------------------------------------------------
+from prismaquant.tessera_rate_surface import (  # noqa: E402
+    selective_encode_plan,
+    stack_transfer_regret_gate,
+)
+
+
+def _small_population(noise, stacks=4, experts=24, sampled=6, seed=20260918):
+    rng = random.Random(seed)
+    base = _base(rng, experts)
+    return {
+        f"s:layer{index}": _stack(
+            f"s:layer{index}", base=base,
+            sampled=rng.sample(range(experts), sampled),
+            noise=noise, rng=rng)
+        for index in range(stacks)
+    }
+
+
+def _bytes_for(records):
+    """One byte menu per stack: the high rung is a contested upgrade."""
+    return {name: {REFERENCE: 1000, 832: 700, 1088: 1100} for name in records}
+
+
+def test_the_regret_gate_passes_a_tight_law(population):
+    """Low intercept noise costs the decision almost nothing at p90."""
+    records = {name: population[name] for name in sorted(population)[:4]}
+    gate = stack_transfer_regret_gate(
+        records, unit_bytes=_bytes_for(records), byte_budget=4200,
+        draws=50, seed=7, max_regret_pct=0.1)
+    assert gate["draws"] == 50
+    assert gate["p90_regret_pct"] >= 0.0
+    assert gate["p90_regret_pct"] <= gate["max_regret_pct_observed"]
+    assert gate["passes"] is True
+    assert sorted(gate["sensitivity"]) == ["0.5", "0.75", "1.0", "1.25"]
+    # The 0.5 arm cannot fit the cheapest assignment and says so instead of
+    # allocating; the curve is reported, never gated on.
+    assert gate["sensitivity"]["0.5"] == {"byte_budget": 2100, "feasible": False}
+    assert gate["sensitivity"]["1.0"]["feasible"] is True
+    # Deterministic in the seed.
+    again = stack_transfer_regret_gate(
+        records, unit_bytes=_bytes_for(records), byte_budget=4200,
+        draws=50, seed=7, max_regret_pct=0.1)
+    assert again["regrets_pct"] == gate["regrets_pct"]
+
+
+def test_the_regret_gate_bites_on_a_noisy_law():
+    """Huge intercept noise misranks stacks, and the gate says so."""
+    records = _small_population(noise=2.0)
+    gate = stack_transfer_regret_gate(
+        records, unit_bytes=_bytes_for(records), byte_budget=4200,
+        draws=50, seed=7, max_regret_pct=0.1)
+    assert gate["p90_regret_pct"] > 0.1
+    assert gate["passes"] is False
+
+
+def test_the_regret_gate_refuses_fewer_than_fifty_draws():
+    records = _small_population(noise=0.05)
+    with pytest.raises(TesseraFormatError, match="at least 50"):
+        stack_transfer_regret_gate(
+            records, unit_bytes=_bytes_for(records), byte_budget=4200, draws=49)
+
+
+def test_the_regret_gate_needs_bytes_for_every_menu_rate():
+    records = _small_population(noise=0.05)
+    short = {name: {REFERENCE: 1000} for name in records}
+    with pytest.raises(TesseraFormatError, match="no byte cost"):
+        stack_transfer_regret_gate(
+            records, unit_bytes=short, byte_budget=4200, draws=50)
+
+
+def test_a_reference_winner_needs_no_selective_pass():
+    plan = selective_encode_plan(
+        {"s:layer0": REFERENCE},
+        stack_experts={"s:layer0": [0, 1, 2]},
+        measured_cells={( "s:layer0", 0, REFERENCE), ("s:layer0", 1, REFERENCE),
+                        ("s:layer0", 2, REFERENCE)})
+    assert plan["rows"] == []
+    assert plan["already_measured_cell_count"] == 3
+
+
+def test_a_target_winner_emits_only_its_unmeasured_experts():
+    plan = selective_encode_plan(
+        {"s:layer0": 1088, "s:layer1": 832},
+        stack_experts={"s:layer0": [0, 1], "s:layer1": [0, 1]},
+        measured_cells={("s:layer0", 0, 1088), ("s:layer1", 0, 832),
+                        ("s:layer1", 1, 832)})
+    assert plan["rows"] == [{"stack": "s:layer0", "expert": 1,
+                             "rate_q256": 1088, "reason": "winner_not_encoded"}]
+    assert plan["missing_cell_count"] == 1
+    assert plan["already_measured_cell_count"] == 3
+
+
+def test_the_selective_plan_fails_closed():
+    with pytest.raises(TesseraFormatError, match="at least one stack"):
+        selective_encode_plan({}, stack_experts={}, measured_cells=set())
+    with pytest.raises(TesseraFormatError, match="no expert frame"):
+        selective_encode_plan({"s:missing": 1088}, stack_experts={},
+                              measured_cells=set())
+    with pytest.raises(TesseraFormatError, match="not a \\(stack, expert, rate\\) triple"):
+        selective_encode_plan({"s:layer0": 1088},
+                              stack_experts={"s:layer0": [0]},
+                              measured_cells=[("s:layer0", 0)])

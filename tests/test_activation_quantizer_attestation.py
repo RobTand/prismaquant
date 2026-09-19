@@ -82,7 +82,7 @@ def test_an_absent_block_is_refused_not_skipped():
 def test_an_installed_table_cannot_bypass_the_reviewed_runtime_pin(monkeypatch):
     """An installed table is not an authorized pricing table merely by being installed.
 
-    The v25 fixture carries the same rows the pinned v29 contract publishes,
+    The v25 fixture carries the same rows the pinned v31 contract publishes,
     but its bytes are not the pinned contract's, so the pin refuses it: the
     table prices only through the reviewed runtime, never beside it.
     """
