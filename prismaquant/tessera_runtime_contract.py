@@ -319,14 +319,26 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: PR #441, which this pin supersedes without changing any priced byte: the
 #: producer source identity changes and existing priced bytes keep their seal.
 #: No release tag names this development commit.
-TESSERA_DEV_PIN_COMMIT = "79ddd4c6093010c65a5149eff5889f7ac8113272"
+#: Re-pinned 2026-09-19 to cc739a55c -- Tessera master's merge of #563,
+#: the head at which the #562 (D2/D2b, stacked on #560's
+#: flash/506-routed-full-domain-rates-20260918) union with #563's docs
+#: fix-forward is complete -- for the coordinated post-#560-lineage bump
+#: (PrismaQuant #760).  Contract v32, lane schema still v10.  The digest is
+#: bound by the one command against the canonical remote, never an
+#: installed copy.  THE GATED LANDING IS EXECUTED: the union digest
+#: predicted while the gate was written (`712a15e4…`) went stale because
+#: #563's rework resolved two master conflicts on its branch; the measured
+#: bytes at the union head are what this pin names.  Tessera master has
+#: since advanced to contract v33 (#568); the v33 reader migration belongs
+#: to the next bump, not this one.
+TESSERA_DEV_PIN_COMMIT = "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "80d58f1a528638339a2d74c6e5b97a9a8f0458687515db531a4685489aa05809"
+    "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -364,22 +376,16 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: ``pprint.pformat(contract_answer(c), width=79, sort_dicts=False)`` with
 #: each dict in the key order the previous literal used.
 #:
-#: Against the v31 contract (Tessera master 79ddd4c60, the merge of its #551
-#: closing PrismaQuant #699) the review is nine REMOVALS and nothing else --
-#: no reviewed line changed, no key widened, the lane schema stays v10:
-#: eight dense cells withdraw with the retired window-GEMV dispatch
-#: (Tessera #538) -- the four ``TESSERA_E4M3_K1`` dense rows, the two
-#: ``TESSERA_BF16_K1`` dense ``sm_121`` rows, and the two
-#: ``TESSERA_BF16_K1`` dense ``gfx1201`` rows -- and the
-#: ``tessera_nvfp4_`` native extension leaves ``native_extensions`` with the
-#: retired A4 whole-weight expansion.  What stays: the two
-#: ``TESSERA_E2M1_K2`` dense ``sm_121`` rows (``backed_with_serve_flag``,
-#: ``device_qualified``, decoder ``native_span2``) and the four routed-MoE
-#: rows.  Consequence, flagged for review rather than decided here: no dense
-#: BF16 or dense E4M3 route is admitted anywhere after this pin, and
-#: ``gfx1201`` carries no cell -- its platform row's ``serve_image`` returns
-#: to ``null``.  The canonical tip still carries this same v31 contract, so
-#: this merge is the smallest state that satisfies #699.
+#: Against the v32 contract the review is the four moves the comment inside
+#: the literal names -- eight dense cells WITHDRAWN (admission shrinks: the
+#: four ``recorded`` TESSERA_BF16_K1 rows among them), the routed E2M1_K2
+#: reader domain and cells widened to [128..896] on the unchanged
+#: ``not_recorded``/``route_only`` pair, the D2b ``q256`` scoping of KL
+#: receipts (this reader's widened ``@q`` projection), and the retired
+#: span-2 CUDA decoder leaving one native-extension row.  The routed-MoE
+#: ``recorded`` pair is byte-identical, so the status-only evidence gate
+#: admits the same scope it did at v29; the withdrawal and the widen are
+#: reviewed facts, not gate changes.
 #:
 #: **The ``cells`` rows are POSITIONAL tuples, and this is the column order.**
 #: They stay positional -- a per-row dict would triple the diff a reviewer
@@ -413,6 +419,27 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: A column added on either tuple is a WIDENED projection, and the rule above
 #: applies to it: it re-stales this pin even when no published value moved.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
+ # Against the v32 contract the review is exactly four moves, and the
+ # WITHDRAWALS are the headline, not the widenings.  Tessera master (its #538
+ # and the A4 retirement) withdrew all eight dense cells that were not
+ # E2M1_K2: the four TESSERA_BF16_K1 rows -- which carried ``recorded``
+ # evidence and were the only cells on gfx1201 -- and the four TESSERA_E4M3_K1
+ # dense rows, resident and streamed.  Accepting this answer therefore admits
+ # STRICTLY LESS than the v29 pin did on dense routes: TESSERA_BF16_K1_R1792
+ # answers ``unattested``/``no_cell`` on every platform again, as it did
+ # before 2026-09-13, and the lane's only cells are the six sm_121 rows below.
+ # The routed-MoE ``recorded`` pair (E4M3_K1, rung 1024) is byte-identical,
+ # so the status-only evidence gate admits the same scope it did at v29 --
+ # the routed E2M1_K2 widen ([896] -> the full trellis domain [128..896]
+ # step 128, receipted by the seven-rung green load) rides the two
+ # ``not_recorded``/``route_only`` cells as before and is Rob's #198 call,
+ # flagged here rather than decided by this literal.  D2b scopes the dense
+ # batch cell's KL receipts to the rung they measured (``@q896`` in the kl
+ # token -- the reader's widened projection, first exercised by this pin),
+ # and the retired span-2 CUDA decoder leaves ``native_extensions`` with the
+ # one window-GEMV row.  Nothing else moved: lane schema stays v10, the TP
+ # ceiling stays 2 on the same receipt, and the quantiser table is
+ # byte-identical.
  'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
  'quant_method': 'tessera',
@@ -445,12 +472,6 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                               'rotation': ['none'],
                                               'start_state': False,
                                               'grid_arities': [1]}}}],
-  # Published at v25 and read since this pin (v31): the sm_121
-  # e2m1_group16_ue4m3_static quantiser table, eleven probe groups the kernel
-  # was run on (RobTand/tessera#484/#485). require_activation_quantizer_attested
-  # now compares PrismaQuant's own reference_qdq against these rows instead of
-  # refusing every fp4 activation residual for want of a table; this block's
-  # diff is the review of that rounding rule (RobTand/prismaquant#567/#574).
  'activation_quantizers': [['sm_121',
                             'e2m1_group16_ue4m3_static',
                             'torch.ops._C.scaled_fp4_quant',
@@ -860,8 +881,14 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                   'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}},
-              'TESSERA_E2M1_K2': {'reader_rate_range_q256': [896, 896],
-                                  'attested_rungs_q256': [896],
+              'TESSERA_E2M1_K2': {'reader_rate_range_q256': [128, 896],
+                                  'attested_rungs_q256': [128,
+                                                          256,
+                                                          384,
+                                                          512,
+                                                          640,
+                                                          768,
+                                                          896],
                                   'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}},
@@ -889,7 +916,7 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             '2.13.0+cu130',
             ['kl_lower_bound',
              'not_recorded',
-             ['topk_intersection_lower_bound@1024'],
+             ['topk_intersection_lower_bound@1024@q896'],
              'unattributed',
              None,
              None,
@@ -923,7 +950,7 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_E2M1_K2',
             'routed_moe',
             'batch',
-            [896],
+            [128, 256, 384, 512, 640, 768, 896],
             'e2m1_group16_ue4m3_static',
             'backed_with_serve_flag',
             'device_qualified',
@@ -947,7 +974,7 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_E2M1_K2',
             'routed_moe',
             'decode',
-            [896],
+            [128, 256, 384, 512, 640, 768, 896],
             'e2m1_group16_ue4m3_static',
             'backed_with_serve_flag',
             'device_qualified',
@@ -1122,7 +1149,6 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                 'chat_template',
                 'recorded',
                 'recorded']]]]]]}
-
 
 #: Route statuses under which a cell says a native route EXECUTES.
 _NATIVE_ROUTE_STATUSES = frozenset(
@@ -2072,8 +2098,8 @@ class ActivationQuantizerGeneration:
     cover it.
 
     Published at the PLATFORM level, not per contract: #715's text quotes it
-    under ``contracts[...]``, but the pinned bytes (``80d58f1a…``, Tessera
-    ``79ddd4c60``) and master both publish it beside ``contracts``, one
+    under ``contracts[...]``, but the pinned bytes (``db9ca4c0…``, Tessera
+    ``4c384e6049``) and master both publish it beside ``contracts``, one
     generation for every contract the platform attests.  Each row for the
     platform carries it, which is the same fact addressed the way a consumer
     reads it.

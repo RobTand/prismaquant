@@ -62,8 +62,27 @@ NAME = "TESSERA_E4M3_K1_R1024"
 RATE = 1024
 MOE_DECODE = "tessera_e4m3_k1_routed_moe_sm121_decode_resident"
 MOE_BATCH = "tessera_e4m3_k1_routed_moe_sm121_batch_resident"
-DENSE_DECODE = "tessera_e4m3_k1_dense_sm121_decode_resident"
+#: The dense E4M3 decode cell that carried the encoder-scope artifact until
+#: the v31 withdrawals removed it with the rest of the dense E4M3 roster.
+#: No installed cell publishes an ``evidence.artifact`` any more, so the
+#: artifact-grammar tests below transplant the block -- verbatim from the
+#: contract at the 2026-09-15 pin (``4c384e604``, v29), where it was a REAL
+#: published fact -- onto the surviving dense E2M1 decode cell.
+RETIRED_DENSE_DECODE = "tessera_e4m3_k1_dense_sm121_decode_resident"
+DENSE_DECODE = "tessera_e2m1_k2_dense_sm121_decode"
 E2M1_DECODE = "tessera_e2m1_k2_dense_sm121_decode"
+V29_ARTIFACT = {
+    "id": "gbfam/qwen3-0.6b-tessera-e4m3-reach-gridbook",
+    "encoder_commit": "8070ec6c4e0448826cda3f3f8d9401a125444e3b",
+    "reencode": {
+        "encoder_commit": "331703661baaa67ed73900c3d9e99f300fdc8415",
+        "unit": "model.layers.0.mlp.down_proj",
+        "payload": "different",
+        "metric": "weight_sse",
+        "weight_error": "lower",
+        "receipt": "docs/measurements/encoder-evidence-scope-2026-09-05.md",
+    },
+}
 CONTROL_RECEIPT = "docs/measurements/moe-evidence-debt-2026-09-04.md"
 RECORDED_RECEIPT = "docs/measurements/moe-smoke-recorded-2026-09-05.md"
 REPETITIVE_RECEIPT = "docs/measurements/tessera-lfm-campaign-2026-09-04.md"
@@ -133,6 +152,23 @@ def _with_v20_control(payload, *cell_ids):
     moved = copy.deepcopy(payload)
     for cell_id in cell_ids or (MOE_DECODE, MOE_BATCH):
         _cell(moved, cell_id)["evidence"]["smoke"] = copy.deepcopy(V20_SMOKE)
+    return moved
+
+
+def _with_artifact(payload):
+    """The installed table with the retired encoder-scope artifact restored.
+
+    No cell the v32 pin carries publishes an ``evidence.artifact`` -- the
+    dense E4M3 roster that scoped its KL to an encoder is withdrawn -- so
+    the artifact-grammar tests transplant the block verbatim from the
+    2026-09-15 pin's contract onto the two surviving dense E2M1 cells.
+    The block is a REAL published fact of that pin, not an invention, and
+    the cells it rides here are carriers, not claims.
+    """
+    moved = copy.deepcopy(payload)
+    for cell_id in (DENSE_DECODE, E2M1_DECODE.replace("decode", "batch")):
+        _cell(moved, cell_id)["evidence"]["artifact"] = copy.deepcopy(
+            V29_ARTIFACT)
     return moved
 
 
@@ -267,36 +303,40 @@ def test_a_smoke_block_without_the_v7_fields_is_refused_at_v8(payload):
 
 
 def test_a_cell_without_the_v8_artifact_field_is_refused(payload):
-    broken = copy.deepcopy(payload)
+    broken = _with_artifact(payload)
     _cell(broken, DENSE_DECODE)["evidence"].pop("artifact")
     with pytest.raises(lane.LaneEligibilityError, match="missing field"):
         _table(broken)
 
 
-def test_the_e4m3_dense_cells_scope_their_kl_to_the_encoder_that_wrote_it(table):
-    """v19's correction, read off the installed table.
+def test_no_installed_cell_scopes_its_evidence_but_the_grammar_survives(payload):
+    """v19's correction, and what the v31 withdrawals did to its carrier.
 
-    The four dense E4M3 cells name the checkpoint their KL was measured on and
-    the encoder commit that wrote it; a same-source re-encode at a later commit
-    produced a DIFFERENT payload. That is a fact a shipcard has to carry: the
-    KL number attests bytes the current encoder does not reproduce.
+    The four dense E4M3 cells that named the checkpoint their KL was
+    measured on -- and the encoder commit that wrote it, because a
+    same-source re-encode at a later commit produced a DIFFERENT payload --
+    are withdrawn, so no cell the v32 pin carries scopes its evidence to an
+    encoder. The grammar itself is unchanged and still parses the retired
+    block verbatim on a surviving carrier, which is what the tests below
+    mutate; the day Tessera re-publishes an artifact the transplanted
+    fixture here is redundant, not wrong.
     """
-    scoped = {c.id: c.evidence.artifact for c in table.cells
-              if c.evidence.artifact is not None}
-    assert scoped, "no cell scopes its evidence to an encoder"
-    for cell_id, artifact in scoped.items():
-        assert cell_id.startswith("tessera_e4m3_k1_dense_"), cell_id
-        assert len(artifact.encoder_commit) == 40
-        assert len(artifact.reencode_encoder_commit) == 40
-        assert artifact.reencode_payload in lane.EVIDENCE_PAYLOAD_RELATIONS
-        assert artifact.reencode_weight_error in lane.EVIDENCE_WEIGHT_ERROR_RELATIONS
-        assert artifact.reencode_receipt.startswith(lane.EVIDENCE_RECEIPT_ROOT)
-        if artifact.reencode_payload == lane.EVIDENCE_PAYLOAD_IDENTICAL:
-            assert artifact.reencode_weight_error == lane.EVIDENCE_WEIGHT_ERROR_EQUAL
+    table = _table(payload)
+    assert all(c.evidence.artifact is None for c in table.cells)
+    transplanted = _table(_with_artifact(payload))
+    artifact = _parsed_cell(transplanted, DENSE_DECODE).evidence.artifact
+    assert artifact is not None
+    assert len(artifact.encoder_commit) == 40
+    assert len(artifact.reencode_encoder_commit) == 40
+    assert artifact.reencode_payload in lane.EVIDENCE_PAYLOAD_RELATIONS
+    assert artifact.reencode_weight_error in lane.EVIDENCE_WEIGHT_ERROR_RELATIONS
+    assert artifact.reencode_receipt.startswith(lane.EVIDENCE_RECEIPT_ROOT)
+    if artifact.reencode_payload == lane.EVIDENCE_PAYLOAD_IDENTICAL:
+        assert artifact.reencode_weight_error == lane.EVIDENCE_WEIGHT_ERROR_EQUAL
 
 
 def test_an_identical_payload_with_a_moved_weight_error_is_refused(payload):
-    broken = copy.deepcopy(payload)
+    broken = _with_artifact(payload)
     reencode = _cell(broken, DENSE_DECODE)["evidence"]["artifact"]["reencode"]
     reencode["payload"] = "identical"
     reencode["weight_error"] = "lower"
@@ -316,7 +356,7 @@ def test_an_identical_payload_with_a_moved_weight_error_is_refused(payload):
     (("reencode", "receipt"), "notes/x.md", "receipt must be a repository path"),
 ])
 def test_a_malformed_artifact_is_refused_by_name(payload, path, value, expect):
-    broken = copy.deepcopy(payload)
+    broken = _with_artifact(payload)
     node = _cell(broken, DENSE_DECODE)["evidence"]["artifact"]
     for key in path[:-1]:
         node = node[key]
@@ -326,7 +366,7 @@ def test_a_malformed_artifact_is_refused_by_name(payload, path, value, expect):
 
 
 def test_an_artifact_with_a_field_this_reader_does_not_know_is_refused(payload):
-    broken = copy.deepcopy(payload)
+    broken = _with_artifact(payload)
     _cell(broken, DENSE_DECODE)["evidence"]["artifact"]["reencode"]["kl"] = 0.01
     with pytest.raises(lane.LaneEligibilityError, match="unknown field"):
         _table(broken)
@@ -493,10 +533,23 @@ def test_the_export_gate_answers_the_routed_moe_unit_from_the_same_predicate(
         assert recorded["evidence_artifact"] is None
 
 
-def test_the_dense_route_carries_attribution_and_encoder_scope_into_provenance(table, payload):
+def test_the_dense_route_carries_attribution_and_encoder_scope_into_provenance(payload):
+    """The artifact's ride into provenance, on the transplanted carrier.
+
+    The dense E4M3 cells that carried this are withdrawn, so the artifact
+    rides the transplant fixture -- the principle-12 claim (the shipcard
+    says which encoder wrote the bytes this unit's KL was measured on) is
+    the grammar's, and it survives its carrier's withdrawal.
+    """
+    table = _table(_with_artifact(payload))
     image = _cell(payload, DENSE_DECODE)["runtime"]["image"]
+    facts = lane.UnitStructuralFacts(
+        qname="fixture.weight", format_name="TESSERA_E2M1_K2_R896",
+        payload_family="TESSERA_E2M1_K2",
+        k=None, n_sub=None, rate_q256=896, structure="dense",
+        role_split=False, in_features=1024, out_features=1024)
     route = lane.resolve_unit_route(
-        _facts("dense"), table, platform="sm_121", residency="resident",
+        facts, table, platform="sm_121", residency="resident",
         runtime_image=image, execution_mode="eager")
     assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
     for regime in route.regimes:
@@ -528,7 +581,13 @@ def test_the_attribution_and_artifact_are_part_of_the_reviewed_answer(payload):
     later = contract.contract_answer(_parse(moved_again))
     assert after != later and contract._answer_drift(after, later)
 
-    moved = copy.deepcopy(payload)
-    _cell(moved, DENSE_DECODE)["evidence"]["artifact"] = None
-    after = contract.contract_answer(_parse(moved))
-    assert before != after and contract._answer_drift(before, after)
+    # and an encoder scope that appears or vanishes re-stales it just the
+    # same: the transplant carries the block the installed table lost with
+    # the dense E4M3 withdrawal, and nulling it back moves the answer again.
+    with_block = _with_artifact(payload)
+    after_with = contract.contract_answer(_parse(with_block))
+    assert before != after_with and contract._answer_drift(before, after_with)
+    without = copy.deepcopy(with_block)
+    _cell(without, DENSE_DECODE)["evidence"]["artifact"] = None
+    after = contract.contract_answer(_parse(without))
+    assert after_with != after and contract._answer_drift(after_with, after)

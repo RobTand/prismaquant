@@ -1,15 +1,32 @@
 """A legacy family claim cannot attest a newly supplied runtime context.
 
 The v4 table here is a FIXTURE, down-converted from the installed contract by
-``conftest.legacy_v4_contract``. Until 2026-09-04 this file read the installed
+``conftest.down_convert_lane_table``. Until 2026-09-04 this file read the installed
 contract directly and asserted it was v4 -- true when it was written, false the
 day Tessera shipped ``tessera.lane-eligibility.v6``. A test about a legacy
 grammar has to own its legacy table; reading whichever grammar happens to be
 installed is how a fixture becomes a version assertion nobody meant to make.
+
+The 2026-09-19 re-pins taught the second half of the same lesson: owning the
+SCHEMA is not owning the TABLE. The contract's cell population drifts with
+the pin too, and the v31 re-pin withdrew the dense ``TESSERA_E4M3_K1`` cells
+this file's residency-only lookup exercises (Tessera #538 closing PQ #699),
+so a schema-faithful down-conversion of the newer contract silently left
+that lookup no cell to name and the v4-behavior test reading "unattested" --
+a content assertion nobody meant to make either. The fixture therefore also
+re-addresses the installed scopes onto the structure under test
+(``conftest.project_lane_cells_onto_structures``, the same projection the
+allocator and scope-endpoint fixtures use): every ``(platform, family,
+regime)`` scope keeps its own published rungs, flags and launches, so the
+v4-era dense E4M3 rung exists in the table again exactly as it did when the
+grammar was live, while every admission fact stays the pin's real one.
 """
 import json
 
 import pytest
+
+from conftest import (
+    down_convert_lane_table, project_lane_cells_onto_structures)
 
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
@@ -21,8 +38,12 @@ FAMILY = "TESSERA_E4M3_K1"
 
 
 @pytest.fixture
-def legacy(monkeypatch, legacy_v4_contract):
-    payload = legacy_v4_contract
+def legacy(monkeypatch):
+    payload = down_convert_lane_table(
+        project_lane_cells_onto_structures(
+            json.loads(contract.contract_path().read_text(encoding="utf-8")),
+            ("dense",)),
+        "tessera.lane-eligibility.v4")
     assert payload["lane_eligibility"]["schema"] == "tessera.lane-eligibility.v4"
     parsed = contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
     table = lane._parse_table(payload["lane_eligibility"], payload["formats"],
