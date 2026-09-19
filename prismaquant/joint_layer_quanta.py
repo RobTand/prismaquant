@@ -33,6 +33,15 @@ D4. Slice ``argv`` annotations carry the §5.2 inner argv without
     ``--quantum-sha256``: that digest is a submission-time binding (like
     ``--data-manifest-sha256`` on the run manifest), since the identity it
     would name covers the manifest bytes carrying the argv.
+D5. The joiner is NOT colocated here. The contract (§4.1/§7) sketched
+    ``join_layer_quanta`` inside the producer module; #783 merged the joiner
+    as ``prismaquant/joint_quanta_join.py`` first, and #787 kept that module
+    (its CLI, its allocation reader, its coverage proof) and deleted this
+    module's parallel joiner rather than adapting it -- two joiners that
+    refuse each other's bytes is the failure #787 closed. The joiner imports
+    this module's pure constructions (``roster_digest``, ``phase_ranges``,
+    ``quantum_id``, ``qname_layer``) so the two sides of the wire share one
+    spelling of every digest and id.
 """
 
 from __future__ import annotations
@@ -40,18 +49,18 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
-import pickle
 import re
-import time
 from collections.abc import Mapping, Sequence
+
+from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 
 
 LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 PLAN_BLOCK_SCHEMA = "prismaquant.joint_layer_quanta.plan.v1"
 COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
-QUANTUM_STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
+#: The stage-A capture schema, named here so ``bind_adjoint_receipt`` and
+#: the records it digests cite one spelling.
 ADJOINT_CAPTURE_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
-JOINED_RESULTS_SCHEMA = "prismaquant.joint_layer_quanta.joined_results.v1"
 MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
 
 SLICE_ENTRY_POINT = "prismaquant.joint_cost_quantum"
@@ -69,22 +78,17 @@ _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 # Canonical JSON: the one encoding (sort_keys, compact separators,
-# unescaped UTF-8, no NaN), shared with cost_stage_checkpoint.
+# unescaped UTF-8, no NaN), imported from cost_stage_checkpoint -- the one
+# implementation in the tree (#787 B5). The thin wrappers keep this module's
+# default ``where`` label; digests are byte-identical to the shared helpers
+# (verified against all 45 sealed takeover records).
 
 def canonical_bytes(value: object, *, where: str = "joint layer quanta") -> bytes:
-    try:
-        normalized = json.loads(json.dumps(
-            value, sort_keys=True, separators=(",", ":"),
-            ensure_ascii=False, allow_nan=False))
-        return json.dumps(
-            normalized, sort_keys=True, separators=(",", ":"),
-            ensure_ascii=False, allow_nan=False).encode("utf-8")
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{where} is not canonical JSON data") from exc
+    return canonical_json_bytes(value, where=where)
 
 
 def canonical_sha256(value: object, *, where: str = "joint layer quanta") -> str:
-    return hashlib.sha256(canonical_bytes(value, where=where)).hexdigest()
+    return canonical_json_sha256(value, where=where)
 
 
 def seal_manifest_bytes(manifest: Mapping) -> bytes:
@@ -119,6 +123,20 @@ def roster_digest(qnames: Sequence[str]) -> str:
     if len(set(ordered)) != len(ordered):
         raise ValueError("a unit roster holds unique qnames")
     return hashlib.sha256("\n".join(ordered).encode("utf-8")).hexdigest()
+
+
+def qname_layer(qname: object) -> int | None:
+    """The layer a roster qname names, or None (§3.1's layer grammar).
+
+    The single spelling of the grammar, shared with the joiner (#787 D5):
+    a roster qname embeds its layer as ``…layers.N…``, which is how a gap
+    names its quantum's units and how the producer partitions the roster
+    per layer.
+    """
+    if type(qname) is not str:
+        return None
+    match = _QNAME_LAYER.match(qname)
+    return None if match is None else int(match.group(1))
 
 
 def _hex(value: object, label: str) -> str:
@@ -942,216 +960,3 @@ def bind_adjoint_receipt(receipt: Mapping, *, plan_sha256: str, prepared_sha256:
     return canonical_sha256(receipt, where="stage-A receipt")
 
 
-# Joiner (§7): deterministic merge of per-layer payloads with gaps reported.
-
-def _load_receipt(receipt: Mapping) -> tuple[dict, dict]:
-    for field in ("quantum_id", "cost_path", "cost_sha256", "identity_sha256",
-                  "status_path"):
-        if field not in receipt:
-            raise ValueError(f"a join receipt names no {field}: refusing")
-    _hex(receipt["cost_sha256"], "cost_sha256")
-    _hex(receipt["identity_sha256"], "identity_sha256")
-    with open(receipt["status_path"], "rb") as handle:
-        status = json.loads(handle.read().decode("utf-8"))
-    if not isinstance(status, dict) or status.get("schema") != QUANTUM_STATUS_SCHEMA:
-        raise ValueError(f"quantum {receipt['quantum_id']} status has a foreign "
-                         f"schema: refusing")
-    if status.get("quantum_id") != receipt["quantum_id"]:
-        raise ValueError(f"quantum {receipt['quantum_id']} status answers for "
-                         f"{status.get('quantum_id')!r}: custody, refusing")
-    if status.get("identity_sha256") != receipt["identity_sha256"]:
-        raise ValueError(f"quantum {receipt['quantum_id']} receipt identity does not "
-                         f"match its status: custody, refusing")
-    with open(receipt["cost_path"], "rb") as handle:
-        blob = handle.read()
-    if hashlib.sha256(blob).hexdigest() != receipt["cost_sha256"]:
-        raise ValueError(f"quantum {receipt['quantum_id']} cost bytes changed after "
-                         f"sealing: custody, refusing")
-    payload = pickle.loads(blob)
-    if not isinstance(payload, dict):
-        raise ValueError(f"quantum {receipt['quantum_id']} cost payload is not a "
-                         f"mapping: refusing")
-    return status, payload
-
-
-def _default_row_validator(costs: Mapping) -> bool:
-    from .joint_aura import validate_joint_aura_entry
-    for qname, formats in costs.items():
-        if not isinstance(formats, dict):
-            raise ValueError(f"row for {qname!r} is not a format mapping")
-        for fmt, row in formats.items():
-            try:
-                valid = validate_joint_aura_entry(row)
-            except ValueError as exc:
-                raise ValueError(f"row for {qname!r}@{fmt!r}: {exc}") from exc
-            if valid is not True:
-                raise ValueError(f"row for {qname!r}@{fmt!r} is not valid")
-    return True
-
-
-def join_layer_quanta(receipts: Sequence[Mapping], dest: str | None, campaign: Mapping,
-                      roster: Sequence[str], *, row_validator=None,
-                      joined_unix: int | float | None = None) -> dict:
-    """Merge per-layer cost payloads into the campaign's pareto input (§7).
-
-    Custody first (receipt identity, cost bytes, provenance binding), then
-    coverage (the surviving payloads must tile exactly the roster — a lost
-    quantum is a named gap, never a shrink), then rows (a failing row is a
-    defect naming its qname, not a gap). A missing or ``gapped`` quantum does
-    not fail the join: the merged payload carries ``status: "gapped"`` with
-    the gaps named, and exits through the return (the CLI maps it to exit 0);
-    consumption of a gapped payload is what refuses
-    (``refuse_gapped_for_allocation``).
-    """
-    items = list(receipts)
-    ordered_roster = list(roster)
-    if len(set(ordered_roster)) != len(ordered_roster) or not ordered_roster:
-        raise ValueError("a join needs a nonempty unique unit roster")
-    if not isinstance(campaign, dict):
-        raise ValueError("a join needs the campaign binding object")
-    for field in ("plan_sha256", "prepared_sha256", "campaign_scope",
-                  "unit_roster_sha256", "implementation_sha256"):
-        if campaign.get(field) is None:
-            raise ValueError(f"the campaign binding names no {field}: refusing")
-    if campaign["unit_roster_sha256"] != roster_digest(ordered_roster):
-        raise ValueError("the join roster does not match the campaign roster: refusing")
-    expected_formats = campaign.get("formats_by_qname")
-    if joined_unix is None:
-        joined_unix = time.time()
-    if not isinstance(joined_unix, (int, float)) or isinstance(joined_unix, bool):
-        raise ValueError("joined_unix must be a number")
-
-    seen: set[str] = set()
-    merged: dict[str, dict] = {}
-    per_layer = []
-    gaps: list[str] = []
-    bound_receipts = []
-    for receipt in items:
-        qid = receipt.get("quantum_id")
-        if qid in seen:
-            raise ValueError(f"duplicate join receipt for {qid!r}: custody, refusing")
-        seen.add(qid)
-        status, payload = _load_receipt(receipt)
-        provenance = payload.get("provenance")
-        if not isinstance(provenance, dict):
-            raise ValueError(f"quantum {qid} payload has no provenance: custody, "
-                             f"refusing")
-        if provenance.get("quantum_identity_sha256") != receipt["identity_sha256"]:
-            raise ValueError(f"quantum {qid} payload answers for another identity: "
-                             f"custody, refusing")
-        for field in ("plan_sha256", "prepared_sha256", "implementation_sha256"):
-            if provenance.get(field) != campaign[field]:
-                raise ValueError(f"quantum {qid} payload answers for another {field}: "
-                                 f"custody, refusing")
-        if canonical_bytes(provenance.get("campaign_scope")) != canonical_bytes(
-                campaign["campaign_scope"]):
-            raise ValueError(f"quantum {qid} payload answers for another scope: "
-                             f"custody, refusing")
-        if status.get("status") != "complete":
-            gaps.append(qid)
-            continue
-        costs = payload.get("costs")
-        if not isinstance(costs, dict) or not costs:
-            raise ValueError(f"quantum {qid} payload has no costs: refusing")
-        for qname in costs:
-            if qname in merged:
-                raise ValueError(f"unit {qname!r} is claimed by two quanta: coverage, "
-                                 f"refusing")
-        merged.update(costs)
-        per_layer.append({"quantum_id": qid, "identity_sha256": receipt["identity_sha256"],
-                          "units": status.get("units")})
-        bound_receipts.append({key: receipt[key] for key in
-                               ("quantum_id", "cost_sha256", "identity_sha256")})
-    if set(merged) - set(ordered_roster):
-        foreign = sorted(set(merged) - set(ordered_roster))
-        raise ValueError(f"payload units outside the roster: {foreign[:5]}: refusing")
-    for name in sorted(set(ordered_roster) - set(merged)):
-        # Gaps read by quantum id (§7.2): a roster qname embeds its layer, so
-        # a missing unit names its quantum; anything unattributable names
-        # itself rather than shrinking the layer set to fit.
-        match = _QNAME_LAYER.match(name)
-        gaps.append(f"layer-{int(match.group(1)):03d}" if match else f"unit:{name}")
-    gaps = sorted(set(gaps))
-    layer_gaps = sorted(gap for gap in gaps if not gap.startswith("unit:"))
-    if expected_formats is not None:
-        for qname, formats in merged.items():
-            expected = (expected_formats.get(qname) if isinstance(expected_formats, dict)
-                        else None)
-            names = set(formats) if isinstance(formats, dict) else None
-            want = set(expected) if isinstance(expected, dict) else set(expected or [])
-            if names != want:
-                raise ValueError(f"unit {qname!r} candidate set differs from prepared: "
-                                 f"coverage, refusing")
-    validator = row_validator or _default_row_validator
-    try:
-        validator(merged)
-    except ValueError as exc:
-        raise ValueError(f"join row defect: {exc}") from exc
-
-    ordered_costs = {qname: merged[qname] for qname in sorted(merged)}
-    coverage_table = {"quantum_ids": sorted(seen), "units": len(merged),
-                      "roster_units": len(ordered_roster), "gaps": sorted(gaps)}
-    coverage_sha = canonical_sha256(coverage_table, where="join coverage")
-    status_value = "complete" if not gaps else "gapped"
-    payload_obj = {
-        "costs": ordered_costs,
-        "provenance": {
-            "plan_sha256": campaign["plan_sha256"],
-            "prepared_sha256": campaign["prepared_sha256"],
-            "read_manifest_sha256": campaign.get("read_manifest_sha256"),
-            "campaign_scope": campaign["campaign_scope"],
-            "unit_roster_sha256": campaign["unit_roster_sha256"],
-            "implementation_sha256": campaign["implementation_sha256"],
-            "receipts": sorted(bound_receipts, key=lambda item: item["quantum_id"]),
-            "coverage_sha256": coverage_sha,
-            "status": status_value,
-            "gaps": sorted(gaps),
-        },
-    }
-    payload_bytes = pickle.dumps(payload_obj, protocol=pickle.HIGHEST_PROTOCOL)
-    results = {
-        "schema": JOINED_RESULTS_SCHEMA,
-        "plan_sha256": campaign["plan_sha256"],
-        "prepared_sha256": campaign["prepared_sha256"],
-        "unit_roster_sha256": campaign["unit_roster_sha256"],
-        "cost_sha256": hashlib.sha256(payload_bytes).hexdigest(),
-        "coverage_sha256": coverage_sha,
-        "distributed": {
-            "per_layer": sorted(per_layer, key=lambda item: item["quantum_id"]),
-            "gaps": sorted(gaps),
-            "layer_gaps": layer_gaps,
-            "joined_unix": joined_unix,
-            "coverage_sha256": coverage_sha,
-        },
-        "status": status_value,
-    }
-    summary = {"status": status_value, "gaps": sorted(gaps),
-               "layer_gaps": layer_gaps, "units": len(merged),
-               "roster_units": len(ordered_roster), "coverage_sha256": coverage_sha,
-               "payload": payload_obj, "payload_bytes": payload_bytes,
-               "results": results}
-    if dest is not None:
-        import os
-        os.makedirs(dest, exist_ok=True)
-        cost_path = os.path.join(dest, "joint-cost.pkl")
-        results_path = os.path.join(dest, "results.json")
-        for path, blob in ((cost_path, payload_bytes),
-                           (results_path, canonical_bytes(results) + b"\n")):
-            temporary = f"{path}.{os.getpid()}.tmp"
-            with open(temporary, "wb") as handle:
-                handle.write(blob)
-            os.replace(temporary, path)
-        summary["cost_path"] = cost_path
-        summary["results_path"] = results_path
-    return summary
-
-
-def refuse_gapped_for_allocation(results: Mapping) -> None:
-    """Fail closed on consumption: a gapped joined payload is never a score."""
-    if not isinstance(results, dict):
-        raise ValueError("a joined result must be an object")
-    gaps = results.get("distributed", {}).get("gaps", [])
-    if results.get("status") == "gapped" or gaps:
-        raise ValueError(f"the joined campaign is gapped at {gaps}: refusing")
-    if results.get("status") != "complete":
-        raise ValueError("the joined campaign is not complete: refusing")

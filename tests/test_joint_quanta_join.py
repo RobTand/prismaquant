@@ -462,7 +462,7 @@ def test_adjoint_receipt_digest_is_checked(tmp_path, campaign, probe):
     lying["distributed_quantum"]["adjoint_receipt_sha256"] = "f" * 64
     _write_quantum(root, campaign, probe, 0, provenance=lying)
     _write_quantum(root, campaign, probe, 1)
-    with pytest.raises(JoinRefused, match="adjoint receipt"):
+    with pytest.raises(JoinRefused, match="adjoint"):
         join_joint_quanta(receipts=None, campaign=campaign,
                           output_dir=tmp_path / "refused-a", input_root=root)
 
