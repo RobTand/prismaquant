@@ -157,6 +157,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         argv += ["--progress-phase",
                  f"{chunk['name']}={CHUNK_PROGRESS_GRACE_S}"]
     argv += ["--priority", str(priority),
+             "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
+             "--cpus", "10",
              "--env", DEV_MODE_ENV, "--detach", "--",
              *_container_wrap(SPEC_PATH, [
                  "python3", "-m", "prismaquant.joint_cost_quantum",
@@ -176,6 +178,8 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
             "--tag", tag,
             "--data-manifest", str(adjoint_manifest),
             "--residency", "stage",
+            "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
+            "--cpus", "10",
             "--env", DEV_MODE_ENV, "--detach", "--",
             *_container_wrap(SPEC_PATH, [
                 "python3", "-m", "prismaquant.joint_adjoint_capture",
