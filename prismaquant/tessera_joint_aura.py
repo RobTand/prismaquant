@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from collections.abc import Mapping
 import functools
 from dataclasses import dataclass
 import hashlib
@@ -28,7 +29,9 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256_normalized,
     prepare_journal, unit_path, write_unit,
 )
+from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
 from .interned_json import load_json_file
+from .joint_head_walk_quanta import check_quantum_for_roster
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
@@ -421,22 +424,21 @@ def _decode_wire(blob, *, reader, device="cpu"):
     return read_unit_artifact(blob, device=device)
 
 
-def _render_mirror_path(render, mirror_root):
-    """Where a measuring run publishes a shard instead of the row cache.
-
-    The mirror keeps the render's absolute path under ``mirror_root`` so a
-    cell's two copies stay comparable by name and a measuring run can never
-    replace the campaign's own bytes.
-    """
-    render = Path(render)
-    return Path(mirror_root) / render.resolve().relative_to(Path(render.root))
-
-
 #: The phase the standalone synthesis stage declares (``--progress
 #: synthesize=<stall>``), and therefore the default a bare intake reports
 #: under. ``execute`` overrides it with the joint prepare's own ``head``:
 #: this loader spells no phase its caller has not declared.
 SYNTHESIS_PHASE = "synthesize"
+
+
+def _progress_dev_source_sha256():
+    """The executing package's actual tree digest, for the dev stamps.
+
+    Lazy so importing this module never pulls ``aura_cost``; only a dev-mode
+    progress commit pays for the hash.
+    """
+    from .aura_cost import _aura_source_sha256
+    return _aura_source_sha256()
 
 
 def _pb_commit(units, phase, unit=None):
@@ -447,6 +449,11 @@ def _pb_commit(units, phase, unit=None):
     inside a container that cannot import PrismaBuild still reports. It is a
     no-op when the action was not admitted under the progress contract, so it
     is called unconditionally rather than by testing how we were launched.
+
+    Under ``PRISMAQUANT_DEV_MODE=1`` the record carries the dev stamp in its
+    metadata: the worker's ``ProgressWatch`` reads the fields it knows and
+    ignores the rest, so the stamp rides along on every progress line a dev
+    run commits and a certified run's record stays byte-identical.
     """
     path = os.environ.get("PRISMABUILD_ACTION_PROGRESS_PATH")
     token = os.environ.get("PRISMABUILD_ACTION_PROGRESS_TOKEN")
@@ -455,6 +462,8 @@ def _pb_commit(units, phase, unit=None):
     record = {"schema": "prismabuild.action_progress.v1", "token": token,
               "phase": phase, "units_completed": units, "unit": unit,
               "reported_unix": time.time()}
+    if dev_mode_enabled():
+        record.update(dev_stamp(_progress_dev_source_sha256()))
     temporary = f"{path}.{os.getpid()}.tmp"
     with open(temporary, "w") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
@@ -660,7 +669,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                historical_encoder_reuse=None,
                                progress_phase=SYNTHESIS_PHASE,
                                head_checkpoint=None, head_resume=False,
-                               head_walk_workers=None):
+                               head_walk_workers=None, head_walk_quantum=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -767,6 +776,20 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     digesting (the GIL is released through the syscalls and by hashlib for
     the buffers that dominate), and the one thread-unsafe step left -- a
     missing render's synthesis through the bound reader -- holds a lock.
+
+    ``head_walk_quantum`` is the opt-in distributed-quantum half of #765: a
+    descriptor from ``joint_head_walk_quanta.head_walk_quanta`` naming this
+    action's ``[lo, hi)`` slice of the sorted census roster. It requires
+    ``unit_scope == (lo, hi)`` and a ``head_checkpoint`` to bank the slice
+    into, and the slice journal is bound to the FULL roster digest plus the
+    descriptor itself -- never to the slice alone -- so per-quantum journals
+    join (``joint_head_walk_quanta.join_head_walk_journals``) into the one
+    journal a resumed walk consumes unchanged. Without a descriptor a scoped
+    read still cannot bank, exactly as before. Fleet execution of quanta
+    waits on the D45 measurement gate (checksum-bound versus read-bound at
+    full-core fan-out); until then this parameter is the producer/consumer
+    contract under test, not the production prepare path, which passes
+    nothing here.
     """
     from .production_weight_cache import _cache_weight_filename
     from tools.dispatch_tessera_campaign import _require_receipts
@@ -789,10 +812,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _require(head_checkpoint is None or isinstance(head_checkpoint, (str, Path)),
              "head_checkpoint must be a directory path or None")
     _require(type(head_resume) is bool, "head_resume must be an explicit boolean")
+    _require(head_walk_quantum is None or isinstance(head_walk_quantum, Mapping),
+             "head_walk_quantum must be a quantum descriptor or None")
     # A partial roster is not the campaign's input, and a journal over part
     # of one would be name-gated reuse of the wrong thing; the standalone
-    # synthesis stage stays checkpoint-less exactly as it is.
-    _require(head_checkpoint is None or unit_scope is None,
+    # synthesis stage stays checkpoint-less exactly as it is. A distributed
+    # quantum (#765) is the one exception: its descriptor binds the slice to
+    # the full roster, and the slice journal it banks joins with its peers.
+    _require(head_checkpoint is None or unit_scope is None or head_walk_quantum is not None,
              "a scoped read cannot bank a head-walk journal")
     # Hashing only part of a roster does not verify that roster, so the two
     # options are refused together rather than quietly producing a record
@@ -874,12 +901,35 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
 
     cells, formats = {}, {}
     wire_dir = Path(provenance["wire_dir"])
+    # Resolve once, not per cell (#711): every cell of the campaign shares
+    # this one wire directory, so resolving it per cell re-walks the same ~12
+    # NFS path components ~198k times (~62 LOOKUPs/cell measured on the
+    # GLM-5.3 run). The per-cell escape check below still stats the wire
+    # itself; the recorded path is joined from the resolved root.
+    wire_dir_resolved = wire_dir.resolve()
+    # One resolved root per distinct row directory, for the same reason: the
+    # recorded render is joined from the resolved root instead of resolved
+    # per cell, and the join reaches the same file the walk verifies.
+    owner_roots = {str(directory): Path(directory).resolve()
+                   for directory in set(map(str, owners.values()))}
+    mirror_root = None if render_mirror_root is None else Path(render_mirror_root)
     roster = sorted(names)
     if unit_scope is not None:
         low, high = unit_scope
         _require(type(low) is int and type(high) is int and 0 <= low < high <= len(roster),
                  f"unit scope {unit_scope} is outside the {len(roster)}-unit census roster")
         roster = roster[low:high]
+    quantum_bounds = None
+    if head_walk_quantum is not None:
+        # The descriptor is checked against the live census roster, not
+        # against the slice: a quantum from another campaign or roster
+        # revision is refused before it banks anything. A quantum that
+        # banks nothing is a refused quantum -- the shard is its output.
+        quantum_bounds = check_quantum_for_roster(head_walk_quantum, sorted(names))
+        _require(tuple(unit_scope or ()) == tuple(quantum_bounds),
+                 "head-walk quantum descriptor does not name this scoped read")
+        _require(head_checkpoint is not None,
+                 "a head-walk quantum banks its slice journal or refuses")
     resolved, synthesized, started = 0, 0, time.time()
 
     # -- the walk banks its prefix and fans out (#754) ----------------------
@@ -904,6 +954,16 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             "encoder_source_reuse_sha256": (None if encoder_source_reuse is None else
                 canonical_json_sha256(encoder_source_reuse, where="head walk encoder reuse")),
         }
+        if head_walk_quantum is not None:
+            # The shard is bound to the full roster, never to the slice
+            # alone: the digest is the verified descriptor's (checked against
+            # the live census above), and the descriptor itself rides in the
+            # identity so the collector can match each shard to the PB action
+            # it was assigned to. The default path is untouched -- without a
+            # descriptor a scoped walk still cannot bank, so `roster` here is
+            # the whole roster there.
+            head_identity["roster_sha256"] = head_walk_quantum["roster_sha256"]
+            head_identity["quantum"] = dict(head_walk_quantum)
         head_root, head_seal, completed = _open_head_journal(
             Path(head_checkpoint), resume=head_resume, identity=head_identity, qnames=roster)
 
@@ -1016,13 +1076,20 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             filename = record["file"]
             _require(isinstance(filename, str) and Path(filename).name == filename and
                      filename not in {".", ".."}, f"{name}: escaping wire filename")
+            # The filename is a validated leaf, so the wire's lexical parent
+            # is the wire directory itself: the escape check is the symlink
+            # test on the wire, and the directory side is resolved once above
+            # instead of per cell (PrismaQuant #711).
             wire = wire_dir / filename
-            _require(not wire.is_symlink() and wire.resolve().parent == wire_dir.resolve(), f"{name}: escaping wire path")
+            _require(not wire.is_symlink(), f"{name}: escaping wire path")
             wire_stat = wire.stat()
             _same(wire_stat.st_size, record["blob_bytes"], f"{name}: wire size")
-            render = owners[name] / "cache" / _cache_weight_filename(name, fmt)
-            target = (render if render_mirror_root is None
-                      else _render_mirror_path(render, render_mirror_root))
+            render = owner_roots[str(owners[name])] / "cache" / _cache_weight_filename(name, fmt)
+            # The mirror keeps the render's absolute path under the mirror
+            # root so a cell's two copies stay comparable by name and a
+            # measuring run can never replace the campaign's own bytes.
+            target = (render if mirror_root is None
+                      else mirror_root / render.relative_to(render.root))
             present = Path(target).is_file()
             if require_existing_renders and not present:
                 raise ValueError(f"{name}@{fmt}: prepared render is missing; selected cache will not synthesize it")
@@ -1041,10 +1108,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                                     fmt=fmt, shape=census["unit_shapes"][name],
                                                     reader=reader, device=synthesis_device)
                 events.append(fmt)
-            unit_cells[fmt] = {"anchor": anchor, "record": record, "wire": str(wire.resolve()),
-                               "render": str(Path(target).resolve()), "render_origin": origin,
+            unit_cells[fmt] = {"anchor": anchor, "record": record, "wire": str(wire_dir_resolved / filename),
+                               "render": str(target), "render_origin": origin,
                                **({} if render_mirror_root is None
-                                  else {"campaign_render": str(render.resolve())})}
+                                  else {"campaign_render": str(render)})}
             # The resume fence for this cell: enough identity to prove on the
             # next load that these bytes are the bytes this row was banked
             # from, at stat-and-digest cost rather than a re-walk.
@@ -2089,6 +2156,34 @@ def _seed_source_identity_cache(config, root):
     return destination
 
 
+#: The prepared-record bindings that name DIGESTS of things a dev iteration
+#: legitimately changes: which plan the prepare ran under, and which producer
+#: package made it. Under ``PRISMAQUANT_DEV_MODE=1`` these are records -- the
+#: run continues, loudly, stamped -- while every other prepared field (the
+#: model identity, calibration, roster, backend, reader) stays a wall even in
+#: dev mode: a stale record naming a different measurement is stale whatever
+#: the mode (Rob's 2026-09-19 decision: the seal returns at the artifact gate).
+_DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256")
+
+
+def _prepared_digest_recorded(key, stored, expected):
+    """Whether a prepared-record mismatch on ``key`` is recorded instead of gated.
+
+    One reader for both prepared-equality sites (the startup preflight and the
+    post-intake loop), so dev mode cannot admit a mismatch in one place that
+    the other still refuses. Returns ``False`` in certified mode for every
+    field, which keeps the certified ``_same`` refusal byte-identical.
+    """
+    if stored == expected:
+        return False
+    if not dev_mode_enabled() or key not in _DEV_RECORDED_PREPARED_KEYS:
+        return False
+    dev_warning(
+        f"prepared {key} differs from the running pass; recorded, not gated "
+        f"(dev mode): prepared={stored!r} running={expected!r}")
+    return True
+
+
 def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
                            reader_identity, projection_backend):
     """Refuse a stale small completion before reading the campaign metadata.
@@ -2105,7 +2200,8 @@ def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
                        ("implementation_sha256", implementation_sha256),
                        ("reader_identity", reader_identity),
                        ("projection_backend", projection_backend)):
-        _same(completion.get(key), value, f"prepared {key}")
+        if not _prepared_digest_recorded(key, completion.get(key), value):
+            _same(completion.get(key), value, f"prepared {key}")
     return completion
 
 
@@ -2280,6 +2376,14 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                   "started_epoch": time.time(), "torch": str(torch.__version__),
                   "cuda": torch.version.cuda, "affinity": sorted(os.sched_getaffinity(0))},
               "phases": [], "passed": False, "device_envelope": device_envelope}
+    if dev_mode_enabled():
+        # The dev stamp is TOP LEVEL and lands on every results.json this
+        # command writes, including a refusal path's -- the finally block
+        # below publishes it whatever happened above. A dev result is
+        # identifiable at a glance and grep-able, and can never masquerade
+        # as a certified one (Rob, 2026-09-19: the seal returns at the
+        # artifact gate, not the run gate).
+        result.update(dev_stamp(_aura_source_sha256()))
     result["env"]["container_content_sha256"] = executing_image()
     profile_tool = config.get("profile_tool", "cprofile")
     profiler = cProfile.Profile() if profile_tool == "cprofile" else None
@@ -2511,7 +2615,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                                ("render_origins", render_census["render_origins"]),
                                ("render_comparisons", render_census["render_comparisons"]),
                                ("projection_backend", projection_backend.identity)):
-                _same(completion.get(key), value, f"prepared {key}")
+                if not _prepared_digest_recorded(key, completion.get(key), value):
+                    _same(completion.get(key), value, f"prepared {key}")
             _same(completion["formats_by_qname"], {n: list(v) for n, v in data.formats_by_qname.items()},
                   "prepared exact candidate roster")
             cache = pickle.loads(_bound(completion["production_cache"], "qualified PWC").read_bytes())

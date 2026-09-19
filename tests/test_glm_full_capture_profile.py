@@ -7,9 +7,17 @@ from experiments.glm_full_capture_profile import CaptureObserver
 from prismaquant.tessera_campaign import _collect_activations
 
 
-def test_observer_keeps_exact_cuda_capture_and_original_batch_order(tmp_path):
+def test_observer_keeps_exact_cuda_capture_and_original_batch_order(tmp_path, monkeypatch):
     if not torch.cuda.is_available():
         pytest.skip('native CUDA profiler qualification')
+    # RobTand/prismaquant#634: the observer used to poll live Netdata on both
+    # Sparks, so this test failed whenever a host's charts were missing
+    # (sparklina publishes no prismabuild.mount_* charts) even though the
+    # capture itself completed. The capture assertion must not depend on live
+    # host state: sample from a canned fixture instead.
+    from experiments import glm_full_capture_profile as module
+    monkeypatch.setattr(module, 'sample_netdata',
+                        lambda host: {'host': host, 'metrics': {'fixture': True}})
     torch.manual_seed(917)
     model = torch.nn.Sequential(torch.nn.Linear(4, 3)).cuda()
     batches = [torch.randn(1, 7, 4) for _ in range(34)]
@@ -20,6 +28,8 @@ def test_observer_keeps_exact_cuda_capture_and_original_batch_order(tmp_path):
         seen.append(batch.detach().cpu().clone())
         return model(batch)
     with CaptureObserver(tmp_path/'observed', profile_layers=(0,)) as observer:
+        observer.result['netdata']['interval_seconds'] = 0.05
+        observer.result['python_sampler']['interval_seconds'] = 0.05
         actual = observer.wrap_collector(_collect_activations)(
             model, ['0'], batches, 11, 'cuda', want_hessian=True,
             forward_batch=forward)

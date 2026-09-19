@@ -357,6 +357,40 @@ def decoded_rank_member(blob, shape, role, *, device, where):
     return unit_artifact.reconstruct_unit(cut, parsed.forests, parsed.code).to(torch.bfloat16)
 
 
+#: Parsed qualified quality preparations by ``(binding sha256, PWC sha256)``.
+#: ``prepare_moe_inputs`` and ``freeze_moe_panel`` each qualify the same
+#: panel, so without this the whole production cache is read, hashed and
+#: unpickled twice per panel (P3 #682). The bytes are still authenticated by
+#: :func:`tessera_joint_allocation._read_bound` on the miss path; a hit
+#: additionally requires the PWC file's stat fence to be unchanged, and a
+#: drifted fence re-reads and re-verifies. The memoized objects are read,
+#: never mutated, by the qualifier below.
+_QUALIFIED_QUALITY_MEMO = {}
+
+
+def _memoized_qualified_cache(completion, pickle, ProductionWeightCache):
+    """Return the bound preparation's ``ProductionWeightCache``, unpickled once."""
+    from pathlib import Path
+
+    from .tessera_joint_allocation import _bound_stat_fence, _read_bound
+
+    record = completion["production_cache"]
+    try:
+        fence = _bound_stat_fence(Path(record["path"]))
+    except (KeyError, TypeError, OSError):
+        fence = None
+    key = (completion.get("plan_sha256"), record.get("sha256")
+           if isinstance(record, dict) else None)
+    if fence is not None:
+        hit = _QUALIFIED_QUALITY_MEMO.get(key)
+        if hit is not None and hit[0] == fence:
+            return hit[1]
+    cache = pickle.loads(_read_bound(record, "native qualified PWC"))
+    if isinstance(cache, ProductionWeightCache) and fence is not None:
+        _QUALIFIED_QUALITY_MEMO[key] = (fence, cache)
+    return cache
+
+
 def _qualified_quality_members(binding, *, members, source_model, calibration):
     """The historical full-container render proof, read from its own bound PWC.
 
@@ -377,14 +411,15 @@ def _qualified_quality_members(binding, *, members, source_model, calibration):
     from .tessera_joint_aura import (HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA,
                                      RENDER_COMPARISON_BY_ORIGIN)
 
-    completion = json.loads(_read_bound(binding, "native full-quality preparation"))
+    completion_raw = _read_bound(binding, "native full-quality preparation")
+    completion = json.loads(completion_raw)
     _equal(completion.get("schema"), PREPARED_SCHEMA, "quality prepared schema")
     _equal(completion.get("status"), "complete", "quality prepared completion")
     _equal(completion["source_model_identity"], source_model, "quality source model")
     for field in ("calibration_sha256", "shape", "dtype"):
         _equal(completion["calibration_input"][field], calibration[field],
                f"quality calibration {field}")
-    cache = pickle.loads(_read_bound(completion["production_cache"], "native qualified PWC"))
+    cache = _memoized_qualified_cache(completion, pickle, ProductionWeightCache)
     if not isinstance(cache, ProductionWeightCache):
         raise ValueError("native quality preparation requires the actual ProductionWeightCache")
     metadata = cache.metadata or {}
