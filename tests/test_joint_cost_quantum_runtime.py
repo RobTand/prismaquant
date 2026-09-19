@@ -417,6 +417,263 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
     assert captured.get("source_derivative") is None
 
 
+def _prefetch_budget(**overrides):
+    budget = {"max_cache_slots": 2, "prefetch_workers": 1,
+              "prefetch_lookahead": 1, "cache_headroom_gb": 8,
+              "prefetch_min_available_gb": 16,
+              "require_prefetched_residency": True}
+    budget.update(overrides)
+    return budget
+
+
+def _override_document(tmp_path, budget, *, reason="v10 IO widening (#819)",
+                       schema=None):
+    from prismaquant.joint_cost_stage_a import PREFETCH_OVERRIDE_INPUT_SCHEMA
+
+    document = {"schema": schema or PREFETCH_OVERRIDE_INPUT_SCHEMA,
+                "reason": reason, "source_prefetch": budget}
+    path = tmp_path / "prefetch-override.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document))
+    return path
+
+
+def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
+    """The full fake stage-A environment: every loader/build seam stubbed so
+    ``run_adjoint_capture`` runs to its provenance writes (results.json,
+    counters.json) on CPU. Returns the model-build kwargs capture."""
+    import prismaquant.joint_cost_stage_a as stage_a
+    import prismaquant.tessera_joint_aura as aura
+    import prismaquant.cost_streaming as streaming
+    import prismaquant.tessera_reader as reader_mod
+    import prismaquant.gpu_guard as guard
+    import prismaquant.joint_projection_backend as backend
+    import prismaquant.aura_cost as aura_cost
+    import prismaquant.residency_map as residency
+    import prismaquant.glm_capture_compatibility as compatibility
+
+    captured = {}
+
+    class _Runner:
+        num_layers = 2
+        device = "cpu"
+        model = object()
+
+        def shutdown(self):
+            pass
+
+    class _Ids:
+        shape = (0, 0)
+
+        def to(self, device):
+            return self
+
+    monkeypatch.setattr(guard, "require_cuda_hot_path", lambda *a, **k: None)
+    monkeypatch.setattr(backend, "prewarm_projection_backend",
+                        lambda *a, **k: type("B", (), {"identity": None})())
+    monkeypatch.setattr(backend, "executing_image", lambda: None)
+    monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
+    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura, "_preflight_run_prepared", lambda *a, **k: None)
+    monkeypatch.setattr(compatibility, "require_capture_compatibility",
+                        lambda *a, **k: None)
+    draw = {"fit_ids_sha256": _hex("1"), "text_sha256": _hex("2"),
+            "nsamples": 4, "seqlen": 512, "seed": 7}
+    monkeypatch.setattr(aura, "load_measured_anchor_input",
+                        lambda inputs, **k: type("D", (), {
+                            "formats_by_qname": {}, "cells": [],
+                            "progress_committed": 0,
+                            "census": {"model": "/models/x",
+                                       "attention_implementation": "eager"},
+                            "payload": {"provenance": {
+                                "hessian": {"calibration_identity": draw}}}})())
+    import prismaquant.calibration_data as calib
+    monkeypatch.setattr(calib, "load_calibration_input",
+                        lambda *a, **k: (_Ids(), {"provenance": dict(draw)}))
+    monkeypatch.setattr(aura, "_seed_source_identity_cache",
+                        lambda *a, **k: None)
+    import prismaquant.model_profiles as profiles
+    monkeypatch.setattr(profiles, "detect_profile", lambda *a, **k: None)
+    monkeypatch.setattr(streaming, "build_streamed_causal_lm",
+                        lambda model, **kwargs: (
+                            captured.update(kwargs) or _Runner()))
+    monkeypatch.setattr(streaming, "build_streamed_model_identity",
+                        lambda *a, **k: {"identity": "stub"})
+    monkeypatch.setattr(residency, "bind_residency_manifest", lambda *a, **k: None)
+    monkeypatch.setattr(stage_a, "GpuPowerSampler",
+                        lambda: type("S", (), {"start": lambda s: s,
+                                               "stop": lambda s: {}})())
+    monkeypatch.setattr(stage_a, "KernelTimeProfiler",
+                        lambda: type("K", (), {
+                            "__enter__": lambda s: s,
+                            "__exit__": lambda s, *a: None,
+                            "kernel_active_s": 0.0,
+                            "error": None})())
+    monkeypatch.setattr(residency, "residency_report", lambda: None)
+    monkeypatch.setattr(stage_a, "run_adjoint_capture_core",
+                        lambda *a, **k: {
+                            "stride": {"value": 2, "source": None,
+                                       "boundaries": [], "max_chain_layers": 1},
+                            "checkpoints": []})
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda *a, **k: None)
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
+    monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda: 0)
+
+    prepared_path = tmp_path / "prepared.json"
+    prepared_path.write_text(json.dumps(
+        {"plan_sha256": _hex("d"), "source_model_identity": {"identity": "stub"}}))
+    prepared = {"path": str(prepared_path),
+                "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
+    config = {"execution": {"production_act_scales": "0",
+                            "n_calib_samples": 4, "calib_seqlen": 512},
+              "inputs": {}, "output_root": str(out_root),
+              "model": "/models/x",
+              "calibration_input": {"path": str(tmp_path / "cal.json"),
+                                    "sha256": _hex("3")},
+              "max_gpu_bytes": 1 << 50}
+
+    def run(**kwargs):
+        captured.clear()
+        result = stage_a.run_adjoint_capture(
+            dict(config, source_prefetch=kwargs.pop("plan_budget")),
+            plan_sha256=_hex("d"), prepared=prepared,
+            output_root=str(out_root), stride=2, **kwargs)
+        space = out_root / "layer-quanta" / "adjoint"
+        return result, json.loads((space / "results.json").read_text()), \
+            json.loads((space / "counters.json").read_text())
+
+    return captured, run
+
+
+def test_stage_a_prefetch_override_replaces_plan_budget_and_stamps(
+        tmp_path, monkeypatch):
+    """The #819 seam: an explicit override replaces the plan's sealed budget
+    for the run only, and the deviation is stamped -- plan sealed X, run
+    used Y, reason -- into results.json and counters.json, never silently.
+    Without an override the plan's block threads verbatim and the stamp is
+    null."""
+    plan_budget = _prefetch_budget()  # the frozen v9 pin: 1 worker, 2 slots
+    override_budget = _prefetch_budget(max_cache_slots=7, prefetch_workers=8,
+                                       prefetch_lookahead=4)
+    assert override_budget != plan_budget
+    override_path = _override_document(tmp_path, override_budget)
+
+    captured, run = _stage_a_run_stub(
+        tmp_path, monkeypatch, tmp_path / "out-override")
+    result, results_json, counters_json = run(
+        plan_budget=plan_budget, prefetch_override=override_path)
+
+    # The model build threads the override's budget, not the plan's.
+    assert {key: captured[key] for key in override_budget} == override_budget
+    stamp = result["prefetch_override"]
+    assert stamp["schema"] == "prismaquant.joint_adjoint_capture.prefetch_override.v1"
+    assert stamp["plan_sealed"] == plan_budget
+    assert stamp["run_used"] == override_budget
+    assert stamp["reason"] == "v10 IO widening (#819)"
+    assert stamp["source"] == "cli"
+    assert stamp["path"] == str(override_path)
+    assert stamp["sha256"] == hashlib.sha256(override_path.read_bytes()).hexdigest()
+    # Both provenance files carry the same honest block, verbatim.
+    assert results_json["prefetch_override"] == stamp
+    assert counters_json["prefetch_override"] == stamp
+
+    captured, run = _stage_a_run_stub(
+        tmp_path, monkeypatch, tmp_path / "out-plain")
+    result, results_json, counters_json = run(plan_budget=plan_budget)
+    assert {key: captured[key] for key in plan_budget} == plan_budget
+    assert result["prefetch_override"] is None
+    assert results_json["prefetch_override"] is None
+    assert counters_json["prefetch_override"] is None
+
+
+def test_prefetch_override_document_grammar_refuses(tmp_path):
+    """The override passes the plan's own field grammar: the same six
+    fields, the same rules, residency still required, plus a reason. A
+    document that fails any of it refuses before anything runs."""
+    from prismaquant.joint_cost_stage_a import (
+        PREFETCH_OVERRIDE_ENV, resolve_prefetch_override)
+
+    config = {"source_prefetch": _prefetch_budget()}
+    path = _override_document(tmp_path, _prefetch_budget(
+        max_cache_slots=7, prefetch_workers=8, prefetch_lookahead=4))
+    resolved = resolve_prefetch_override(
+        config, path, environ={PREFETCH_OVERRIDE_ENV: str(path)})
+    assert resolved["override"]["source"] == "env"
+    assert resolved["run_used"]["prefetch_workers"] == 8
+
+    defects = {
+        "missing field": _override_document(
+            tmp_path, {k: v for k, v in _prefetch_budget().items()
+                       if k != "max_cache_slots"}),
+        "lookahead beyond slots": _override_document(
+            tmp_path, _prefetch_budget(max_cache_slots=2, prefetch_lookahead=2)),
+        "residency not required": _override_document(
+            tmp_path, _prefetch_budget(require_prefetched_residency=False)),
+        "no reason": _override_document(tmp_path, _prefetch_budget(), reason="  "),
+        "wrong schema": _override_document(
+            tmp_path, _prefetch_budget(), schema="prismaquant.other.v1"),
+    }
+    for label, document in defects.items():
+        # Either grammar's own refusal message: the document-level checks
+        # name the override file; the budget-level ones are _source_prefetch's
+        # unchanged words.
+        with pytest.raises(ValueError, match="prefetch override|source_prefetch"):
+            resolve_prefetch_override(config, document, environ={})
+    unwritable = tmp_path / "absent.json"
+    with pytest.raises(ValueError, match="unreadable JSON"):
+        resolve_prefetch_override(config, unwritable, environ={})
+
+
+def test_prefetch_override_cli_and_env_disagreement_refuses(tmp_path):
+    """Two explicit sources that disagree refuse (#809); one source alone
+    (either channel) resolves, and neither source is the plan verbatim."""
+    from prismaquant.joint_cost_stage_a import (
+        PREFETCH_OVERRIDE_ENV, AdjointIdentityRefused, resolve_prefetch_override)
+
+    config = {"source_prefetch": _prefetch_budget()}
+    first = _override_document(tmp_path, _prefetch_budget(prefetch_workers=8))
+    second = _override_document(
+        tmp_path / "alt", _prefetch_budget(prefetch_workers=4))
+    with pytest.raises(AdjointIdentityRefused, match="disagrees"):
+        resolve_prefetch_override(
+            config, first, environ={PREFETCH_OVERRIDE_ENV: str(second)})
+    same = resolve_prefetch_override(
+        config, first, environ={PREFETCH_OVERRIDE_ENV: str(first)})
+    assert same["override"]["source"] == "cli"
+
+
+def test_stage_a_cli_threads_the_override_flag(tmp_path, monkeypatch):
+    """main() hands --prefetch-override to the capture call. Dropping the
+    kwarg would revert the run to the plan's budget with no stamp -- the
+    silent deviation this seam exists to make impossible."""
+    import prismaquant.joint_cost_stage_a as stage_a
+    import prismaquant.tessera_joint_aura as aura
+
+    captured = {}
+
+    def fake_capture(config, **kwargs):
+        captured.update(kwargs)
+        return {"command": "adjoint-capture", "passed": True,
+                "stride": {"value": 8, "source": "plan"}, "checkpoints": []}
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    monkeypatch.setattr(stage_a, "require_dev_mode", lambda *a, **k: None)
+    monkeypatch.setattr(aura, "_load_plan", lambda *a, **k: {})
+    monkeypatch.setattr(stage_a, "run_adjoint_capture", fake_capture)
+
+    override = _override_document(tmp_path, _prefetch_budget(prefetch_workers=8))
+    plan = tmp_path / "plan.json"
+    plan.write_text("{}")
+    code = stage_a.main([
+        "--plan", str(plan), "--plan-sha256", _hex("a"),
+        "--prepared", str(tmp_path / "prepared.json"),
+        "--prepared-sha256", _hex("b"),
+        "--output-root", str(tmp_path),
+        "--prefetch-override", str(override)])
+    assert code == stage_a.EXIT_OK
+    assert captured["prefetch_override"] == override
+
+
 def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch):
     """The plan's allowlist must reach the anchor loader (the v6 lesson).
 

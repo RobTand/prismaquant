@@ -179,11 +179,31 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
 
 
 def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
-                 *, tag: str = ADJOINT_TAG) -> list[str]:
+                 *, tag: str = ADJOINT_TAG,
+                 prefetch_override: Path | None = None) -> list[str]:
     """The §5.2 stage-A submission argv: the adjoint capture goes first and
     alone; quanta wait on its receipt.  The campaign binding every record
     carries names the plan and prepared inputs (with digests) the capture's
-    own CLI requires -- the records are the single source of those paths."""
+    own CLI requires -- the records are the single source of those paths.
+
+    ``prefetch_override`` (optional, #819): names the explicit prefetch-
+    override document the capture reads through its own ``--prefetch-override``
+    flag -- the IO-side #809 seam for a frozen plan whose sealed budget
+    starves the capture.  The payload flag is the channel that crosses the
+    container boundary (``tessera_campaign_container`` forwards no ambient
+    action environment into the payload), so the dispatcher threads the
+    flag, not ``--env``.  Absent: the plan's sealed budget, argv unchanged.
+    """
+    payload = [
+        "python3", "-m", "prismaquant.joint_adjoint_capture",
+        "--plan", str(campaign["plan_path"]),
+        "--plan-sha256", str(campaign["plan_sha256"]),
+        "--prepared", str(campaign["prepared_path"]),
+        "--prepared-sha256", str(campaign["prepared_sha256"]),
+        "--output-root", str(_plan_output_root(campaign)),
+        "--resume"]
+    if prefetch_override is not None:
+        payload += ["--prefetch-override", str(prefetch_override)]
     return [sys.executable, str(PBRUN),
             "--tag", tag,
             "--data-manifest", str(adjoint_manifest),
@@ -191,14 +211,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
             "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
             "--cpus", "10",
             "--env", DEV_MODE_ENV, "--detach", "--",
-            *_container_wrap(SPEC_PATH, [
-                "python3", "-m", "prismaquant.joint_adjoint_capture",
-                "--plan", str(campaign["plan_path"]),
-                "--plan-sha256", str(campaign["plan_sha256"]),
-                "--prepared", str(campaign["prepared_path"]),
-                "--prepared-sha256", str(campaign["prepared_sha256"]),
-                "--output-root", str(_plan_output_root(campaign)),
-                "--resume"])]
+            *_container_wrap(SPEC_PATH, payload)]
 
 
 def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) -> dict:
@@ -320,6 +333,11 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                         help="plan file carrying the distributed_campaign block")
     parser.add_argument("--priority", type=int, default=SUBMISSION_PRIORITY)
     parser.add_argument("--head-grace-s", type=int, default=HEAD_PROGRESS_GRACE_S)
+    parser.add_argument("--stage-a-prefetch-override", type=Path, default=None,
+                        help="explicit source_prefetch override document for "
+                             "the stage-A action (#819): threaded into the "
+                             "payload's --prefetch-override; the run stamps "
+                             "the deviation into its provenance")
     parser.add_argument("--spec", default=None,
                         help="campaign spec for the container wrapper (default: the joint-panel dev spec)")
     parser.add_argument("--state", default=None)
@@ -379,7 +397,9 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
         manifest = (Path(args.adjoint_manifest) if args.adjoint_manifest
                     else records_dir / "adjoint.data-manifest.json.gz")
         rows.append({"kind": "stage-a",
-                     "argv": stage_a_argv(manifest, records[0][1]["campaign"], tag=adjoint_tag)})
+                     "argv": stage_a_argv(manifest, records[0][1]["campaign"],
+                                          tag=adjoint_tag,
+                                          prefetch_override=args.stage_a_prefetch_override)})
     if receipt_ok:
         for record_path, record in records:
             quantum_id = record["quantum_id"]
@@ -413,7 +433,11 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
             answer = gateway.submit(row["argv"])
             if row["kind"] == "stage-a":
                 _append_state(state_path, {"event": "stage-a-submitted",
-                                           "action_key": answer["action_key"]})
+                                           "action_key": answer["action_key"],
+                                           "prefetch_override": (
+                                               str(args.stage_a_prefetch_override)
+                                               if args.stage_a_prefetch_override
+                                               else None)})
             else:
                 _append_state(state_path,
                               {"event": "quantum-submitted",

@@ -866,3 +866,41 @@ Each component lands with its gates (dev-mode stamps do not waive these):
   join pattern), #754/#763 (resumable parallel head walk), #776
   (`PRISMAQUANT_DEV_MODE`), #607 (resumed read-order sealing — the slice
   manifests inherit its rules).
+
+## 13. Addendum (2026-09-19, later that night): the stage-A prefetch override (#819)
+
+The first live stage A (PB action `74f12044f774…`) confirmed this note's
+IO diagnosis from the other side: at layer ~24/45 the capture showed a few
+GPU batches and then minutes of halt, repeatedly — the plan's sealed
+`source_prefetch` budget is `{prefetch_workers: 1, max_cache_slots: 2,
+prefetch_lookahead: 1}` (#737's single-worker pin), one worker is
+latency-bound on many-file collections over NFS-RDMA from the dl380-hosted
+tiers, and the GB10s stage no local copy. The plan is frozen for this
+campaign (the prepared binds its digest; re-sealing costs a 7+h
+re-prepare), so the §5.2 stage-A submission gains the IO-side #809 seam
+instead of a new seal:
+
+- `prismaquant.joint_adjoint_capture` accepts `--prefetch-override
+  <path>` (or `PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE` for direct
+  invocations; two explicit sources that disagree refuse). The document
+  carries a non-empty `reason` and a `source_prefetch` block that passes
+  the plan's own completeness check (`_source_prefetch`: the same six
+  fields, the same rules, prefetched residency still required).
+- Given an override, the capture's model build threads the override's
+  budget instead of the plan's, **for that run only**. Plan bytes, the
+  plan/prepared digests, and the adjoint receipt are untouched — the
+  quanta's receipt bindings do not move. No override given: the plan's
+  block verbatim, byte-identical behavior.
+- The deviation is stamped into the run's provenance, never silent:
+  `results.json` and `counters.json` carry `prefetch_override`
+  (`{plan_sealed, run_used, reason, path, sha256, source}`, or `null`),
+  and the attempt log prints the same block at startup.
+- `tools/dispatch_joint_quanta.py --stage-a-prefetch-override <path>`
+  threads the payload's `--prefetch-override` (the payload argv is the
+  channel that crosses the container boundary — the launcher forwards no
+  ambient action environment) and records the path in the campaign
+  state's `stage-a-submitted` event.
+
+This is a recorded per-run deviation, not a new default: the next plan
+seal adopts measured numbers through `recommend_source_prefetch` (#737),
+and the override retires with the campaign that needed it.
