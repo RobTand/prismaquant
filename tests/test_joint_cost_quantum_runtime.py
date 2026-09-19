@@ -53,10 +53,12 @@ def _hex(char: str) -> str:
     return char * 64
 
 
-def _boundary_policy(path, *, window=2, cap=1 << 24):
+def _boundary_policy(path, *, window=2):
+    """The retained lane's tiny layer-major policy (the budget undercharges
+    any larger resident cap, exactly as the production plan pins it)."""
     from test_streamed_boundary_artifacts import _policy
 
-    return {**_policy(path, window=window, cap=cap),
+    return {**_policy(path, window=window, cap=(2 * window + 1) * 256),
             "schema": "prismaquant.aura.boundary_storage.v2",
             "capture_order": "layer_major"}
 
@@ -266,10 +268,11 @@ def test_identity_refusals_exit_3_nothing_written(identity_files, tamper, monkey
             record_path.read_bytes()).hexdigest()
     elif tamper == "output_root":
         kwargs["output_root"] = identity_files["output_root"].parent / "elsewhere"
-    with pytest.raises(Exception) as info:
+    from prismaquant.joint_cost_quantum import QuantumIdentityRefused
+
+    with pytest.raises(QuantumIdentityRefused) as info:
         verify_quantum_identity(**kwargs)
-    assert IDENTITY_REFUSED_MARKER in str(info.value).replace(" ", "") or \
-        "quantum record" in str(info.value)
+    assert info.value.args
     assert not (identity_files["output_root"]).exists()
 
 
@@ -488,8 +491,8 @@ def test_progress_cadence_at_chunk_granularity(tmp_path, monkeypatch):
     progress_file = tmp_path / "progress.json"
     monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress_file))
     monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "token")
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES",
-                       "head,layer-001-chunk-000,layer-001-chunk-001")
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES", json.dumps(
+        ["head", "layer-001-chunk-000", "layer-001-chunk-001"]))
     frontier = ChunkFrontier(chunks=chunks, windows=windows)
     progress = QuantumProgress(frontier=frontier, base_units=3)
     progress.enter_head(3)
@@ -576,7 +579,7 @@ def test_checkpoint_roundtrip_is_digest_checked(tmp_path):
 def test_attached_storage_is_read_only(tmp_path):
     producer_policy = _boundary_policy(tmp_path / "gen")
     with StreamedBoundaryArtifacts(producer_policy) as producer:
-        producer.bind({"fixture": "producer"}, n_probes=2)
+        producer.bind({"fixture": "producer"}, n_probes=2, published=True)
         producer.write(torch.ones(2, 2), batch_index=0, boundary_index=0)
         reference = next(iter(producer._references.values()))
         generation = producer.session["generation"]
@@ -592,7 +595,21 @@ def test_attached_storage_is_read_only(tmp_path):
     assert (Path(reader_policy["directory"]) / generation / "generation.json").is_file()
     status = json.loads((Path(reader_policy["directory"]) / generation /
                          "generation.json").read_text())
-    assert status["status"] == "complete"  # the foreign status was never rewritten
+    # A published generation's entries survive its owner; the foreign status
+    # file was never rewritten by the attached reader.
+    assert status["status"] == "complete"
+    assert (Path(reader_policy["directory"]) / generation / "entries").is_dir()
+
+
+def test_unpublished_generation_still_retires_every_entry(tmp_path):
+    producer_policy = _boundary_policy(tmp_path / "work")
+    with StreamedBoundaryArtifacts(producer_policy) as producer:
+        producer.bind({"fixture": "working"}, n_probes=2)
+        producer.write(torch.ones(2, 2), batch_index=0, boundary_index=0)
+        generation = producer.session["generation"]
+        entries = Path(producer_policy["directory"]) / generation / "entries"
+        assert list(entries.glob("*.pt"))
+    assert not list(entries.glob("*.pt"))  # the single run's disposable generation
 
 
 def test_shared_state_cotangents_state_dict_roundtrip():
