@@ -74,7 +74,12 @@ def relation_fixture(tmp_path):
     image = "example.invalid/runtime@sha256:" + manifest["sha256"]
     context["serving_context"]["runtime_image"] = image
     image_id = "sha256:" + "8" * 64
-    config = evidence.put("config.json", {"runtime_image": image, "engine_args": {}, "environment": {}})
+    served_artifact = tmp_path / "served-artifact"
+    served_artifact.mkdir()
+    (served_artifact / "tessera_serving_manifest.json").write_text(json.dumps(
+        {"modules": {"synthetic-module": {"family": "TESSERA_BF16"}}}))
+    config = evidence.put("config.json", {"runtime_image": image, "engine_args": {}, "environment": {},
+        "artifact": {"path": str(served_artifact), "scope": "synthetic served artifact"}})
     package_files = {name: {"sha256": hashlib.sha256(name.encode()).hexdigest(), "bytes": len(name)}
                      for name in ("__init__.py", "cached_unit.py", "serving/runtime_contract.json")}
     source_files = {name: name.encode() for name in package_files}
@@ -687,3 +692,56 @@ def test_a_second_full_engine_run_cannot_supply_the_missing_coverage(relation_fi
     relation["full_engine_run_id"] = "engine2"
     with pytest.raises(RuntimePriceError, match="full-engine observation coverage"):
         relation_load(relation_fixture)
+
+
+def test_native_rows_refuse_a_route_family_the_served_artifact_never_exercised(native_intake):
+    """#570 leg (b) residual: byte coverage cannot see a route class that loads
+    no library. The 2026-09-13 control's bf16 rows were admitted against
+    engine-a5, which served a uniform-FP8 artifact and never ran a bf16 route;
+    the served manifest must now carry every priced route's family, and the
+    refusal names the family it is about."""
+    evidence, table, relation = native_intake
+    (evidence.root / "served-artifact" / "tessera_serving_manifest.json").write_text(json.dumps(
+        {"modules": {"synthetic-module": {"family": "TESSERA_FP8"}}}))
+    with pytest.raises(RuntimePriceError, match="TESSERA_BF16"):
+        admit_native_rows(table, relation)
+
+
+def test_native_rows_admit_a_served_manifest_spanning_every_priced_family(native_intake):
+    """The same gate admits when the manifest exercises every priced route:
+    the mixed artifact option A requires carries all three families in one
+    manifest, and a row bound to any of them is a price for that serve."""
+    evidence, table, relation = native_intake
+    (evidence.root / "served-artifact" / "tessera_serving_manifest.json").write_text(json.dumps(
+        {"modules": {name: {"family": family} for name, family in
+                      (("bf16-module", "TESSERA_BF16"), ("fp8-module", "TESSERA_FP8"),
+                       ("nvfp4-module", "TESSERA_NVFP4"))}}))
+    admit_native_rows(table, relation)
+
+
+def test_native_rows_refuse_an_unreadable_served_manifest(native_intake):
+    """A manifest that cannot be read refuses rather than passing silently:
+    an absent manifest is missing evidence, not an empty exercise roster."""
+    evidence, table, relation = native_intake
+    config = evidence.get(relation["record"]["configuration"])
+    config["artifact"]["path"] = str(evidence.root / "no-such-artifact")
+    evidence.replace(relation["record"]["configuration"], config)
+    with pytest.raises(RuntimePriceError, match="cannot read"):
+        admit_native_rows(table, relation)
+
+
+@pytest.mark.parametrize("operator_route", [
+    json.dumps({"symbol": "torch.mm"}),
+    json.dumps({"policy": ""}),
+    json.dumps({"policy": ":resident"}),
+    "not json",
+])
+def test_a_binding_naming_no_route_family_is_not_a_served_price(operator_route):
+    """The family is read off the binding's own declared route policy, never
+    derived through a second mapping: a binding that names none is refused
+    rather than assigned one."""
+    from prismaquant.runtime_provenance import _require_served_route_family
+    row = SimpleNamespace(unit="synthetic-unit",
+                          binding=SimpleNamespace(as_dict=lambda: {"operator_route": operator_route}))
+    with pytest.raises(RuntimePriceError, match="names no served route family"):
+        _require_served_route_family(row, {"TESSERA_BF16"})
