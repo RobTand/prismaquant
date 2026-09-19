@@ -23,6 +23,7 @@ import pytest
 
 from prismaquant import prefill_frontier
 from prismaquant.measured_runtime_prices import RuntimePriceError, bootstrap_sum
+from test_allocator_measured_runtime_cli import admit_synthetic_table
 from test_prefill_frontier import _curve_fixture
 
 #: Small enough to keep the suite fast, large enough that the 2.5/97.5 indices
@@ -61,7 +62,8 @@ def _retime_one_row(tmp_path, *, unit_suffix, fmt, samples_ms):
 # The interval is there, and it says what it covers
 # --------------------------------------------------------------------------- #
 
-def test_every_feasible_point_carries_an_interval_over_its_own_rows(tmp_path):
+def test_every_feasible_point_carries_an_interval_over_its_own_rows(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     _, allocator_argv = _curve_fixture(tmp_path)
     code, doc = _run(tmp_path, allocator_argv)
     assert code == 0 and doc["n_feasible"] == doc["n_points"] >= 3
@@ -88,7 +90,8 @@ def test_every_feasible_point_carries_an_interval_over_its_own_rows(tmp_path):
     assert stamp["applied_as_a_threshold"] is False
 
 
-def test_the_interval_widens_when_the_rows_own_samples_disagree(tmp_path):
+def test_the_interval_widens_when_the_rows_own_samples_disagree(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     """The check that bites: a narrow interval must be a fact, not a default.
 
     One row is re-timed so its three repeats disagree while its median -- the
@@ -124,7 +127,8 @@ def test_the_interval_widens_when_the_rows_own_samples_disagree(tmp_path):
             point["serve_constraints"]["coverage"]["priced_rows"]
 
 
-def test_the_same_rows_and_seed_give_the_same_interval_twice(tmp_path):
+def test_the_same_rows_and_seed_give_the_same_interval_twice(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     """A published interval is a number a reader can reproduce."""
     _, allocator_argv = _curve_fixture(tmp_path)
     _retime_one_row(tmp_path, unit_suffix="layers.1.self_attn.o_proj",

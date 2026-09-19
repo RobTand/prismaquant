@@ -43,6 +43,7 @@ from prismaquant.runtime_provenance import (
     routed_rank_bound,
 )
 from test_native_moe_panel import joined, receipt_fixture  # noqa: F401 - fixtures
+from test_allocator_measured_runtime_cli import admit_synthetic_table
 
 WHOLE_UNIT = "model.layers.2.feed_forward.experts"
 WIRE_BYTES = 42          # the fixture's per-member wire bytes
@@ -368,7 +369,7 @@ def test_the_context_of_a_routed_table_names_the_structure(joined):
 
 def _per_rank_table(tmp_path):
     """The dense CLI fixture's rows, re-priced in the per-rank spelling."""
-    from test_allocator_measured_runtime_cli import _main_fixture
+    from test_allocator_measured_runtime_cli import _main_fixture, admit_synthetic_table
 
     name, argv = _main_fixture(tmp_path)
     table_path = tmp_path / "runtime.json"
@@ -395,6 +396,7 @@ def _per_rank_table(tmp_path):
 
 
 def test_the_allocator_prices_a_per_rank_table_and_publishes_no_device_total(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     name, argv = _per_rank_table(tmp_path)
     monkeypatch.setattr(sys, "argv", argv)
     from prismaquant import allocator
@@ -1167,6 +1169,7 @@ def test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members(tmp_p
     assignment the CLI writes is expanded back to all 864 member Linears. No
     GPU ran: every receipt and cost row here is a synthetic CPU fixture.
     """
+    admit_synthetic_table(monkeypatch)
     argv, _partition, _panel = _glm_cli_fixture(tmp_path)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
     monkeypatch.setattr(sys, "argv", argv)

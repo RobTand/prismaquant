@@ -115,10 +115,23 @@ def test_an_admitted_fixed_charge_is_returned():
     assert admitted_fixed_resources(table) is table.fixed_resources
 
 
-def test_a_v1_table_carries_no_provenance_and_is_returned_unchanged():
-    """Recorded, not endorsed: see this module's companion finding in PQ #560."""
+def test_a_v1_table_prices_no_candidate_without_producer_admission():
+    """PQ #560 defect 3, rows half: a v1 table carries no `runtime_provenance`,
+    so no gate ever attested its rows. `build_runtime_resources` refuses it
+    rather than pricing the DP unattested."""
     table = _table(runtime_provenance=None)
-    assert admitted_fixed_resources(table) is table.fixed_resources
+    candidate = SimpleNamespace(fmt="FP8", member_formats={"layer": "FP8"}, memory_bytes=2048)
+    with pytest.raises(RuntimePriceError, match="v1 runtime prices carry no producer admission"):
+        build_runtime_resources(table, {"layer": [candidate]},
+                                expected_bindings={("layer", "FP8"): table.rows[0].binding})
+
+
+def test_a_v1_table_lends_no_fixed_charge_without_producer_admission():
+    """PQ #560 defect 3, charge half: the same table's fixed charge is returned
+    by nothing until a v2 loader admits it."""
+    table = _table(runtime_provenance=None)
+    with pytest.raises(RuntimePriceError, match="v1 fixed runtime resources carry no producer admission"):
+        admitted_fixed_resources(table)
 
 
 # --------------------------------------------------------------------------
