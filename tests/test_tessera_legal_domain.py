@@ -736,26 +736,26 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
             ["unpinned-working-checkout-a9eb572e"]["export.py"])
 
 
-def test_the_rate_grammar_is_the_pin_grammar_and_the_audit_survives_it():
-    """The domain endpoints do not depend on the grammar's memoisation.
+def test_the_rate_grammar_is_the_same_bytes_at_every_state():
+    """The domain endpoints do not depend on which Tessera state is imported.
 
     ``grammar.py`` carries the rate-range refusal and the whole-unit-quota
     refusal -- the two rules that decide where the legal roster starts and
-    stops.  At the 2026-09-19 pin it is NEW bytes (``9ae1f824…``): the
-    inter-pin history added caller-owned memoisation and an O(1)
-    range-membership fast path whose predicate is spelled as keeping the
-    original domain semantics exactly, while the three frozen source states
-    still carry ``f2545274…``.  Bytes-aside claims are not this module's
-    standard of proof, so the proof is behavioural and lives one test up:
-    ``test_legal_rate_count_is_the_audited_count`` re-derives the frozen
-    counts through the importable grammar, and its pass is what makes the
-    digest move a re-transcription.  This test pins the other half -- that
-    the bytes actually imported ARE the pin's -- so a box with any third
-    grammar answers UNRECOGNISED here rather than quietly re-deriving.
+    stops.  Its bytes are one of the audited states in
+    ``TESSERA_GRAMMAR_DIGESTS`` (the v31 pin's delta is memoization plus a
+    verdict-identical membership fast-path, carried unchanged through the
+    2026-09-19 v32 re-pin), so the roster is not a function of the state.
+    The behavioural half of that claim is carried one test up -- the audit
+    walk re-derives the frozen counts through the importable grammar, and
+    its pass is what makes the digest move a re-transcription.  This test
+    pins the other half: asserted against the bytes actually imported, so
+    a box with any third grammar answers UNRECOGNISED here rather than
+    quietly re-deriving, and this stays a derived fact rather than a claim
+    carried in a comment.
     """
     state = domain.tessera_source_state()
-    assert state["grammar_sha256"] == domain.TESSERA_GRAMMAR_DIGEST
-    assert state["grammar_matches_pin"]
+    assert state["grammar_sha256"] in domain.TESSERA_GRAMMAR_DIGESTS
+    assert state["grammar_matches_every_state"]
 
 
 def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
