@@ -224,12 +224,23 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: and ``smoke.status: not_recorded`` (v28), which ``cell_evidence_admits``
 #: does not refuse. The digest is from ``git cat-file`` on the canonical
 #: remote's object, never from an installed copy.
+#: Re-pinned 2026-09-19 to 79ddd4c60 (Tessera #551, closing PrismaQuant
+#: #699): runtime contract v31, lane schema still v10. Nine removals and no
+#: reviewed line changed: eight dense cells withdraw with the retired
+#: window-GEMV dispatch (Tessera #538) -- the four ``TESSERA_E4M3_K1`` dense
+#: rows, the two ``TESSERA_BF16_K1`` dense ``sm_121`` rows and the two
+#: ``TESSERA_BF16_K1`` dense ``gfx1201`` rows, whose platform's
+#: ``serve_image`` returns to ``null`` -- and the ``tessera_nvfp4_`` native
+#: extension leaves with the retired A4 whole-weight expansion, so the pin's
+#: extension table below drops that row.  The digest is from ``git show`` on
+#: the canonical remote's object (merge ``79ddd4c60``, PR #551), never from
+#: an installed copy; the canonical tip still carries this same v31 contract.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "4c384e6049dca3eeaf503bb2c9cd1cd2778978d1"
+    "79ddd4c6093010c65a5149eff5889f7ac8113272"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
+    "80d58f1a528638339a2d74c6e5b97a9a8f0458687515db531a4685489aa05809"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the

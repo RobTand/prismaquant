@@ -219,14 +219,16 @@ def test_support_facts_has_exactly_the_five_named_fields():
 
 
 def test_the_five_facts_disagree_on_a_natively_qualified_candidate():
-    """E4M3 R1024 dense: producer/reader/route/native yes, served-validation no.
+    """E4M3 R1024 routed: producer/reader/route/native yes, served-validation no.
 
     A candidate whose five facts all agreed would prove nothing.  This one is
     qualified natively by a cell and still has no complete assignment through
     export plus served validation in this artifact scope, which is the shape of
-    disagreement the ledger exists to be able to record.
+    disagreement the ledger exists to be able to record.  (At v29 the witness
+    was E4M3 R1024 dense; v31 withdraws the dense E4M3 cells with the retired
+    window-GEMV dispatch, so the routed cell at the same rung carries it.)
     """
-    facts = _candidate(E4, 1024, "dense").support
+    facts = _candidate(E4, 1024, "routed_moe").support
     assert facts.disagree()
     assert facts.producer_legal.value is True
     assert facts.reader_supported.value is True
@@ -272,35 +274,39 @@ def test_every_fact_names_the_table_that_answered_it():
 # Native qualification is exact membership, and does not shrink the domain
 # ---------------------------------------------------------------------------
 
-def test_native_qualification_is_exactly_three_cells_for_the_primary_families():
-    """Exact membership at the pin: E4 R1024 dense and routed, BF R1792 dense.
+def test_native_qualification_is_exact_membership_at_the_v31_pin():
+    """Exact membership at the pin: E2 R896 dense and routed, E4 R1024 routed.
 
-    Nothing else, and in particular no neighbouring rate: attestation does not
+    Nothing else, and in particular no dense BF16 or dense E4M3 anywhere and
+    no neighbouring rate: v31 withdraws the eight dense cells with the retired
+    window-GEMV dispatch (Tessera #538, PQ #699), and attestation does not
     extrapolate from a singleton.
     """
     triples = domain.native_qualification_set()
-    primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
-    assert primary == {
-        (E4, 1024, "dense"),
+    assert triples == {
+        (E2, 896, "dense"),
+        (E2, 896, "routed_moe"),
         (E4, 1024, "routed_moe"),
-        (BF, 1792, "dense"),
     }
+    primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
+    assert primary == {(E4, 1024, "routed_moe")}
 
 
 def test_the_native_set_does_not_shrink_the_legal_domain(rates):
     """The count is computed without the attestation and is unaffected by it.
 
-    The strong form: the rates that are natively qualified are a three-element
-    subset of a 5,634-element domain, and the domain walk never reads the
-    attestation.  A regression that let the menu's attested mode leak into the
-    domain would collapse these counts to 2.
+    The strong form: the natively qualified triples are a three-element
+    subset of a 5,634-element domain — one (family, rate) pair — and the
+    domain walk never reads the attestation.  A regression that let the
+    menu's attested mode leak into the domain would collapse these counts
+    to 1.
     """
     triples = domain.native_qualification_set()
     qualified_rates = {
         (family, rate) for (family, rate, _s) in triples
         if family in domain.PRIMARY_FAMILIES
     }
-    assert len(qualified_rates) == 2
+    assert len(qualified_rates) == 1
     total = sum(len(legal) for legal, _holes in rates.values())
     assert total == 1793 + 3841
     for family, rate in qualified_rates:
@@ -714,13 +720,15 @@ def test_the_rate_grammar_is_the_same_bytes_at_every_state():
 
     ``grammar.py`` carries the rate-range refusal and the whole-unit-quota
     refusal -- the two rules that decide where the legal roster starts and
-    stops.  It is byte-identical at the reader pin, at the frozen study
-    producer, and even at the unpinned working checkout, so the roster is not
-    a function of the state.  Asserted against the bytes actually imported,
-    so this stays a derived fact rather than a claim carried in a comment.
+    stops.  Its bytes are one of the audited states in
+    ``TESSERA_GRAMMAR_DIGESTS`` (the v31 pin's delta is memoization plus a
+    verdict-identical membership fast-path, reviewed as a diff in the
+    re-pin), so the roster is not a function of the state.  Asserted against
+    the bytes actually imported, so this stays a derived fact rather than a
+    claim carried in a comment.
     """
     state = domain.tessera_source_state()
-    assert state["grammar_sha256"] == domain.TESSERA_GRAMMAR_DIGEST
+    assert state["grammar_sha256"] in domain.TESSERA_GRAMMAR_DIGESTS
     assert state["grammar_matches_every_state"]
 
 
