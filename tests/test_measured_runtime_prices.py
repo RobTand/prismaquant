@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -67,8 +68,19 @@ def candidates():
                       for fmt in ("W4A16", "W4A4")]}
 
 
+def admitted(table):
+    """Mark a parsed v1 fixture as producer-admitted for pricing-mechanics tests.
+
+    Admission itself is gated in `test_runtime_admission_split.py`; these tests
+    exercise row matching, not the gate, so they carry the flag explicitly
+    rather than pricing through the v1 refusal (PQ #560 defect 3).
+    """
+    return replace(table, runtime_provenance={"path": "synthetic", "sha256": "0" * 64},
+                   native_rows_admitted=True)
+
+
 def test_same_bytes_different_activation_family_preserved(payload):
-    table = parse(payload)
+    table = admitted(parse(payload))
     bindings = {row.key: row.binding for row in table.rows}
     result = build_runtime_resources(table, candidates(), expected_bindings=bindings)
     assert list(result) == [("layer", "W4A16"), ("layer", "W4A4")]
@@ -142,7 +154,7 @@ def test_malformed_or_proxy_prices_refused(payload, mutation):
 
 
 def test_missing_binding_and_bytes_refused(payload):
-    table = parse(payload)
+    table = admitted(parse(payload))
     bindings = {row.key: row.binding for row in table.rows}
     with pytest.raises(RuntimePriceError, match="missing"):
         build_runtime_resources(table, candidates(), expected_bindings={})
@@ -158,7 +170,7 @@ def test_missing_binding_and_bytes_refused(payload):
 
 
 def test_whole_group_cannot_be_priced_by_sum_of_leaf_rows(payload):
-    table = parse(payload)
+    table = admitted(parse(payload))
     group = {"fused": [SimpleNamespace(fmt="group-option", memory_bytes=200,
                                      member_formats={"layer": "W4A4", "other": "W4A16"})]}
     with pytest.raises(RuntimePriceError, match="missing"):
@@ -173,7 +185,7 @@ def test_explicit_whole_group_row(payload):
     row["binding"]["member_shapes"]["other"] = [8, 16]
     row["resources"]["serialized_bytes"] = 200
     payload["context"]["operator_routes"]["fused"] = {"group-option": row["binding"]["operator_route"]}
-    table = parse(payload)
+    table = admitted(parse(payload))
     group = {"fused": [SimpleNamespace(fmt="group-option", memory_bytes=200,
                                      member_formats=dict(row["binding"]["member_formats"]))]}
     result = build_runtime_resources(table, group, expected_bindings={r.key: r.binding for r in table.rows})
@@ -215,7 +227,7 @@ def test_decode_samples_remain_separate_from_prefill(payload):
 
 def test_missing_row_is_not_replaced_by_another_family(payload):
     payload["rows"] = payload["rows"][:1]
-    table = parse(payload)
+    table = admitted(parse(payload))
     with pytest.raises(RuntimePriceError, match="missing measured runtime row"):
         build_runtime_resources(table, candidates(), expected_bindings={r.key: r.binding for r in table.rows})
 

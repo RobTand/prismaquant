@@ -15,9 +15,12 @@ document carries -- so this test still builds the domain from the payload and
 checks it against the grammar-derived one, and a field renamed on either side
 still fails here rather than the report going quietly stale.
 
-``source_sha256`` is the grammar digest -- the bytes the legal domain is
-actually derived from -- so the selection hash is anchored in the tree and the
-test needs no fixture file.
+``source_sha256`` is the ORIGINAL audited grammar digest -- the bytes the
+report's rows were drawn under -- so the selection hash is anchored in the
+tree and the test needs no fixture file.  Either member of
+``TESSERA_GRAMMAR_DIGESTS`` yields the same asserted counts (lengths only,
+over behaviour-identical pools), but the stamp stays the report's, and the
+membership assertion below refuses a seed no audit covers.
 """
 
 from __future__ import annotations
@@ -38,13 +41,20 @@ REPORTED = {
 REPORTED_TOTAL_ROSTER = 442
 REPORTED_TOTAL_LEGAL = 5634
 
+#: The draw seed the report's rows were computed under: the original audited
+#: grammar bytes.  A member of ``TESSERA_GRAMMAR_DIGESTS`` by the assertion in
+#: :func:`_mandatory_set`, so a future pin that retires these bytes fails here
+#: rather than silently reseeding the draw.
+_DRAW_SEED = "f2545274c8e03534d040c64fb4fd1a02085de7b5eb106f80e8fb31b05454fac8"
+
 
 def _mandatory_set(family: str):
     """A's domain, through the payload, into C's builder."""
     theirs = population.RateDomain(**domain.rate_domain_payload(family))
+    assert _DRAW_SEED in domain.TESSERA_GRAMMAR_DIGESTS
     return population.build_mandatory_rate_set(
         domain=theirs,
-        source_sha256=domain.TESSERA_GRAMMAR_DIGEST,
+        source_sha256=_DRAW_SEED,
         selection_seed=0,
     )
 

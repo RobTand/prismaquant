@@ -196,15 +196,15 @@ SPEC_NAMED_STUDY_PRODUCER = "d403cc5a3199a348cc7ee6262f4adbdab8138745"
 #: :func:`tessera_source_state` hashes the bytes actually imported and names
 #: which state they are, so every derived number carries its origin.
 #:
-#: ``grammar.py`` is byte-identical at all three states: the rate-grammar
-#: refusals that set the domain endpoints have not moved at all.  ``export.py``
-#: separates them, and it is where ``_window_bits_for`` and ``wire_recipe``
-#: live.
+#: ``grammar.py``'s refusals set the domain endpoints; its audited bytes are
+#: :data:`TESSERA_GRAMMAR_DIGESTS` (one digest through the v29 pin, a second,
+#: behaviour-preserving one at the v31 pin).  ``export.py`` separates the
+#: states, and it is where ``_window_bits_for`` and ``wire_recipe`` live.
 #:
 #: The key ``reader-pin-387eda36`` names the state the audit was *taken*
-#: through, not today's reader pin.  The reader pin moved to ``4c384e60``
-#: (contract v29 / lane schema v10, unchanged), and ``export.py`` at
-#: ``4c384e60`` is
+#: through, not today's reader pin.  The reader pin moved to ``79ddd4c60``
+#: (contract v31 / lane schema v10, unchanged), and ``export.py`` at
+#: ``79ddd4c60`` is
 #: byte-identical to the frozen study producer ``d403cc5a`` -- so
 #: :func:`tessera_source_state` resolves an import at the current pin under the
 #: name ``study-producer-d403cc5a``, which is already in
@@ -231,14 +231,25 @@ TESSERA_SOURCE_STATES = {
     },
 }
 
-#: ``grammar.py``'s digest, which all three states share.  The rate bounds and
-#: the whole-unit-quota refusal -- the two things that decide where the legal
-#: domain starts and stops -- are these bytes at every state, so the roster is
-#: not a function of which one is imported.  That is a derived fact, not an
-#: assumption: it is asserted against the importable tree by the tests.
-TESSERA_GRAMMAR_DIGEST = (
-    "f2545274c8e03534d040c64fb4fd1a02085de7b5eb106f80e8fb31b05454fac8"
-)
+#: The AUDITED ``grammar.py`` digests -- every byte-state a number here may be
+#: derived through.  ``f2545274…`` is the bytes at all three states in
+#: :data:`TESSERA_SOURCE_STATES`.  ``9ae1f824…`` is the bytes at the v31 pin
+#: (Tessera ``79ddd4c60``): the delta is behaviour-preserving, reviewed as a
+#: diff rather than re-measured -- memo plumbing on ``completion_widths`` /
+#: ``completion_limit_from_elements`` (hit-checked against the stored rates,
+#: inert when ``memo`` is ``None``), a ``_LEGAL_RANGE`` membership fast-path
+#: in the rate refusal that returns the same verdict for the same ``(rate,
+#: cap)``, and a message-variable rename that prints the same domain.  The
+#: rate-range and whole-unit-quota refusals that set the domain endpoints
+#: have not moved, so the roster is not a function of which audited state is
+#: imported.  That is a derived fact, not an assumption: it is asserted
+#: against the importable tree by the tests.  A future pin whose
+#: ``grammar.py`` digest is NOT in this set is a re-measurement, not a
+#: re-transcription.
+TESSERA_GRAMMAR_DIGESTS = frozenset({
+    "f2545274c8e03534d040c64fb4fd1a02085de7b5eb106f80e8fb31b05454fac8",
+    "9ae1f824afd316950e2ea224df994a9048e90a616d78300a2baf054783786da4",
+})
 
 #: The states whose ``export.py`` bytes produce the same wire for the two
 #: primary families.  ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap
@@ -291,7 +302,7 @@ def tessera_source_state() -> dict[str, object]:
         "export_path": _export.__file__,
         "export_sha256": export_digest,
         "grammar_sha256": grammar_digest,
-        "grammar_matches_every_state": grammar_digest == TESSERA_GRAMMAR_DIGEST,
+        "grammar_matches_every_state": grammar_digest in TESSERA_GRAMMAR_DIGESTS,
         "verdict": (
             f"deriving through {state} "
             + ("(a pin, and the two pins' wire is byte-identical for these "
@@ -389,18 +400,39 @@ def live_pins() -> DomainPins:
 #: quantiser table, a loader axis, format structure lists, two routed-MoE
 #: cells and the tensor-parallel ceiling -- is serving scope, which no number
 #: here reads.
+#: **Re-taken 2026-09-19 for the v31 pin, and it is a re-transcription with
+#: one reviewed widening.**  The pin moved ``4c384e60`` -> ``79ddd4c60``
+#: (contract v29 -> v31, Tessera #551 closing PrismaQuant #699), and both
+#: deciding files were hashed at the new commit rather than assumed:
+#:
+#: * ``src/tessera/export.py`` is still ``b1b04f26…``, byte-identical to the
+#:   frozen study producer ``d403cc5a``, so :func:`tessera_source_state`
+#:   keeps naming an import at the current pin ``study-producer-d403cc5a``
+#:   and no :data:`TESSERA_SOURCE_STATES` entry is added.
+#: * ``src/tessera/grammar.py`` is NEW (``f2545274…`` -> ``9ae1f824…``):
+#:   memo plumbing on the completion functions, a ``_LEGAL_RANGE``
+#:   membership fast-path in the rate refusal, and a message-variable
+#:   rename.  Each returns the same verdict (and the same message) for the
+#:   same inputs, so the rate-range and whole-unit-quota refusals that set
+#:   the domain endpoints have not moved; the digest joins
+#:   :data:`TESSERA_GRAMMAR_DIGESTS` on that diff review rather than on a
+#:   re-measurement.
+#:
+#: What v29-v31 changed -- eight withdrawn dense cells, a nulled
+#: ``gfx1201`` serve image, and the retired ``tessera_nvfp4_`` extension --
+#: is serving scope, which no number here reads.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="4c384e6049dca3eeaf503bb2c9cd1cd2778978d1",
+    reader_dev_pin_commit="79ddd4c6093010c65a5149eff5889f7ac8113272",
     reader_dev_pin_contract_sha256=(
-        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
+        "80d58f1a528638339a2d74c6e5b97a9a8f0458687515db531a4685489aa05809"
     ),
-    serving_runtime_pinned_commit="4c384e6049dca3eeaf503bb2c9cd1cd2778978d1",
+    serving_runtime_pinned_commit="79ddd4c6093010c65a5149eff5889f7ac8113272",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
+        "80d58f1a528638339a2d74c6e5b97a9a8f0458687515db531a4685489aa05809"
     ),
     producer_installed_contract_sha256=(
-        "db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3"
+        "80d58f1a528638339a2d74c6e5b97a9a8f0458687515db531a4685489aa05809"
     ),
 )
 
