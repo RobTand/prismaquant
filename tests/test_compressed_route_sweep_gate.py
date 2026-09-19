@@ -405,3 +405,53 @@ def test_cli_exits_3_on_a_graph_arm_sweep(tmp_path):
     path = tmp_path / "graph.json"
     path.write_text(json.dumps(sweep))
     assert _fill(card, model_dir, path) == 3
+
+
+# --------------------------------------------------------------------------
+# PQ #706: method classes that carry no scheme read through METHOD_ACTIVATION.
+# No packed-MoE artifact has been swept, so the table is empty and the gap
+# refuses by name. The mechanics below run on a synthetic test-only entry
+# that is removed again, never on a method name read from vLLM's source.
+# --------------------------------------------------------------------------
+def test_an_unobserved_moe_method_names_its_method_class():
+    sweep = _sweep()
+    row = _first_quantized(sweep)
+    row["scheme"] = None
+    row["scheme_attrs"] = {}
+    row["quant_method"] = "CompressedTensorsW4A4MoeMethod"
+    verdict = _compare(sweep)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "CompressedTensorsW4A4MoeMethod" in verdict["detail"]
+    assert "METHOD_ACTIVATION" in verdict["detail"]
+
+
+def test_a_swept_method_class_is_read_from_its_own_fields():
+    """The registry path end to end: a swept method's own fields price it."""
+    sweep = _sweep()
+    row = _first_quantized(sweep)
+    row["scheme"] = None
+    row["scheme_attrs"] = {}
+    row["quant_method"] = "TestOnlySweptMoeMethod"
+    gate.METHOD_ACTIVATION["TestOnlySweptMoeMethod"] = (
+        lambda swept: {"quantized": True, "num_bits": 4, "type": "float",
+                       "group_size": 16, "dynamic": True})
+    try:
+        verdict = _compare(sweep)
+    finally:
+        del gate.METHOD_ACTIVATION["TestOnlySweptMoeMethod"]
+    assert verdict["status"] == gate.AGREE, verdict["detail"]
+
+
+def test_a_swept_method_missing_its_numbers_is_not_verified():
+    sweep = _sweep()
+    row = _first_quantized(sweep)
+    row["scheme"] = None
+    row["scheme_attrs"] = {}
+    row["quant_method"] = "TestOnlySweptMoeMethod"
+    gate.METHOD_ACTIVATION["TestOnlySweptMoeMethod"] = lambda swept: None
+    try:
+        verdict = _compare(sweep)
+    finally:
+        del gate.METHOD_ACTIVATION["TestOnlySweptMoeMethod"]
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "do not carry the numbers" in verdict["detail"]

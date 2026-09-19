@@ -12,7 +12,7 @@ import pytest
 from prismaquant import allocator, prefill_frontier
 from prismaquant.layer_config import load_assignment
 from prismaquant.measured_runtime_prices import identity_sha256
-from test_allocator_measured_runtime_cli import _main_fixture
+from test_allocator_measured_runtime_cli import _main_fixture, admit_synthetic_table
 
 #: Three rungs per unit: the slow accurate one, a same-byte faster one with
 #: more loss, and a smaller, fastest, lossiest one.
@@ -49,7 +49,8 @@ def _run(tmp_path, own, allocator_argv):
     return code, json.loads(output.read_text())
 
 
-def test_auto_grid_produces_the_whole_curve_and_a_verified_saturation(tmp_path):
+def test_auto_grid_produces_the_whole_curve_and_a_verified_saturation(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     _, allocator_argv = _curve_fixture(tmp_path)
     code, doc = _run(tmp_path, ["--slo-grid", "auto"], allocator_argv)
     assert code == 0
@@ -97,7 +98,8 @@ def test_auto_grid_produces_the_whole_curve_and_a_verified_saturation(tmp_path):
     assert "p95_ttft_ms" not in provenance["serve_slos_other_axes"]
 
 
-def test_linear_grid_spans_lower_bound_to_saturation(tmp_path):
+def test_linear_grid_spans_lower_bound_to_saturation(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     _, allocator_argv = _curve_fixture(tmp_path)
     code, doc = _run(tmp_path, ["--slo-grid", "5"], allocator_argv)
     assert code == 0
@@ -113,7 +115,8 @@ def test_linear_grid_spans_lower_bound_to_saturation(tmp_path):
     assert losses == sorted(losses, reverse=True) and len(set(losses)) == len(losses)
 
 
-def test_explicit_grid_records_infeasible_points_and_keeps_going(tmp_path):
+def test_explicit_grid_records_infeasible_points_and_keeps_going(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     _, allocator_argv = _curve_fixture(tmp_path)
     code, doc = _run(tmp_path, ["--slo-ms", "0.5,3,30"], allocator_argv)
     assert code == 0
@@ -130,6 +133,7 @@ def test_explicit_grid_records_infeasible_points_and_keeps_going(tmp_path):
 
 
 def test_sweep_point_equals_the_single_solve_at_that_slo(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     """A grid point is what one --slo-prefill-p95-ttft-ms run would ship."""
     name, argv = _main_fixture(tmp_path, units=UNITS, menu=CURVE_MENU)
     cut = argv.index("--slo-prefill-p95-ttft-ms")
@@ -149,6 +153,7 @@ def test_sweep_point_equals_the_single_solve_at_that_slo(tmp_path, monkeypatch):
 
 
 def test_default_allocator_path_is_untouched_by_the_hook(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     name, argv = _main_fixture(tmp_path)
     monkeypatch.setattr(sys, "argv", argv)
     allocator.main()
@@ -207,7 +212,8 @@ def test_sweep_without_a_table_refuses(tmp_path, capsys):
     assert "requires --measured-runtime-table" in capsys.readouterr().err
 
 
-def test_ties_are_deterministic_and_lexical(tmp_path):
+def test_ties_are_deterministic_and_lexical(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     menu = {"FP8_E4M3": (1.0, 8.0), "FP8_E5M2": (1.0, 8.0)}   # same bytes, loss, prefill
     _, argv = _main_fixture(tmp_path, units=UNITS[:2], menu=menu)
     cut = argv.index("--slo-prefill-p95-ttft-ms")
@@ -220,7 +226,8 @@ def test_ties_are_deterministic_and_lexical(tmp_path):
     assert first["distinct_assignments"] == 1 and first["n_nondominated"] == 1
 
 
-def test_unconstrained_infeasibility_is_reported_not_hidden(tmp_path):
+def test_unconstrained_infeasibility_is_reported_not_hidden(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     """A byte budget below every rung: no saturation point, exit 2, every point says why."""
     _, argv = _main_fixture(tmp_path, units=UNITS, menu=CURVE_MENU, target_bits="1")
     cut = argv.index("--slo-prefill-p95-ttft-ms")
@@ -274,6 +281,7 @@ def test_module_help_runs_from_a_clean_interpreter():
 
 
 def test_the_document_is_published_through_the_atomic_writer(tmp_path, monkeypatch):
+    admit_synthetic_table(monkeypatch)
     """The curve is REPLACED at its own path, so an interrupted run is not a half-file.
 
     ``main`` wrote the document with ``Path.write_text``, which truncates the

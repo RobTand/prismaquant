@@ -409,6 +409,174 @@ def test_image_relation_refuses_unproved_identity_types(relation_fixture, mutati
         relation_load(relation_fixture)
 
 
+def _repoint_image(evidence, relation, context):
+    """Move every image reference the runs bind to the manifest's digest."""
+    image = "example.invalid/runtime@sha256:" + relation["image_manifest"]["sha256"]
+    context["serving_context"]["runtime_image"] = image
+    config = evidence.get(relation["configuration"])
+    config["runtime_image"] = image
+    evidence.replace(relation["configuration"], config)
+    configuration_sha256 = relation["configuration"]["sha256"]
+    for name in ("native", "engine"):
+        run = relation["runs"][name]
+        raw = evidence.get(run["runtime"])
+        base = raw["base"] if run["scope"] == "full_engine" else raw
+        base["image"] = image
+        record = base["image_declaration"]["record"]
+        for field in ("pinned", "required", "resolved_reference", "requested"):
+            record[field] = image
+        record["repo_digests"] = [image]
+        installation = evidence.get(run["installation"])
+        installation["registry_base"] = image
+        evidence.replace(run["installation"], installation)
+        installer_sha256 = run["installation"]["sha256"]
+        if run["scope"] == "full_engine":
+            raw["configuration_sha256"] = configuration_sha256
+            loaded = raw.get("loaded_package")
+            if isinstance(loaded, dict):
+                loaded["installer_evidence_sha256"] = installer_sha256
+        if "selection" in record:
+            # The shared base template stamps a launcher selection on both
+            # records; every binding to the old configuration digest moves.
+            record["selection"]["configuration_sha256"] = configuration_sha256
+        evidence.replace(run["runtime"], raw)
+        # The repointed installation has a new digest: rebind the package
+        # evidence that cites it, the way ``_set_local_id`` does below.
+        # (The native run is rebound again there onto its own file.)
+        package = evidence.get(run["post_package"])
+        package["installer_evidence_sha256"] = installer_sha256
+        evidence.replace(run["post_package"], package)
+    return image
+
+
+def _index_relation_fixture(fixture):
+    """Re-point the concrete fixture at an index pinning the same config.
+
+    The platform manifest carries the fixture's config digest; the index
+    carries the platform manifest (arm64) beside an unrelated amd64 entry.
+    Every image reference the runs bind -- configuration, base image,
+    declaration, installation -- moves to the index digest, the way a real
+    multi-arch pull names the index.
+    """
+    evidence, relation, context = fixture
+    platform = evidence.put("image-platform-manifest.json", {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "config": {"digest": "sha256:" + "8" * 64}})
+    index = {"schemaVersion": 2,
+             "mediaType": "application/vnd.oci.image.index.v1+json",
+             "manifests": [
+                 {"mediaType": "application/vnd.oci.image.manifest.v1+json",
+                  "digest": "sha256:" + platform["sha256"], "size": 512,
+                  "platform": {"architecture": "arm64", "os": "linux"}},
+                 {"mediaType": "application/vnd.oci.image.manifest.v1+json",
+                  "digest": "sha256:" + "9" * 64, "size": 513,
+                  "platform": {"architecture": "amd64", "os": "linux"}}]}
+    evidence.replace(relation["image_manifest"], index)
+    relation["image_platform_manifest"] = platform
+    _repoint_image(evidence, relation, context)
+    return evidence, relation, context
+
+
+def _set_local_id(evidence, relation, local_id):
+    """One run reporting another honest container ID, carried through."""
+    run = relation["runs"]["native"]
+    raw = evidence.get(run["runtime"])
+    raw["image_declaration"]["record"]["local_id"] = local_id
+    evidence.replace(run["runtime"], raw)
+    installation = evidence.get(run["installation"])
+    installation["launcher_declared_image_id"] = local_id
+    run["installation"] = evidence.put("native-installation.json", installation)
+    package = evidence.get(run["post_package"])
+    package["installer_evidence_sha256"] = run["installation"]["sha256"]
+    run["post_package"] = evidence.put("native-package.json", package)
+
+
+@pytest.mark.parametrize("local_id", ["config", "index", "platform"])
+def test_image_index_admits_every_honest_container_id(relation_fixture, local_id):
+    """PrismaQuant #723: the pin names what was pulled, the runs name what ran.
+
+    The attested serving image is an OCI index; the loader binds the pinned
+    index digest, resolves the platform manifest for the entry it carries,
+    and records the index digest, the platform digest and the config digest
+    together. A run may then report any of the three as its container ID.
+    """
+    evidence, relation, _ = _index_relation_fixture(relation_fixture)
+    identities = {
+        "config": "sha256:" + "8" * 64,
+        "index": "sha256:" + relation["image_manifest"]["sha256"],
+        "platform": "sha256:" + relation["image_platform_manifest"]["sha256"],
+    }
+    _set_local_id(evidence, relation, identities[local_id])
+    admitted = relation_load(relation_fixture)
+    assert admitted["runs"]["native"]["common"]["image_identity"] == {
+        "manifest_digest": identities["index"],
+        "platform_manifest_digest": identities["platform"],
+        "platform_architecture": "arm64", "platform_os": "linux",
+        "config_digest": identities["config"]}
+    assert admitted["runs"]["engine"]["common"]["image_identity"] == (
+        admitted["runs"]["native"]["common"]["image_identity"])
+
+
+@pytest.mark.parametrize("mutation", ["missing_platform", "platform_not_indexed", "entry_not_concrete",
+    "media_mismatch", "platform_beside_concrete", "unrelated_id", "unknown_media",
+    "entry_without_platform", "config_drift"])
+def test_image_index_refuses_unproved_resolution(relation_fixture, mutation):
+    evidence, relation, context = _index_relation_fixture(relation_fixture)
+    if mutation == "missing_platform":
+        del relation["image_platform_manifest"]
+    elif mutation == "platform_beside_concrete":
+        manifest = {"schemaVersion": 2,
+                    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+                    "config": {"digest": "sha256:" + "8" * 64}}
+        evidence.replace(relation["image_manifest"], manifest)
+        _repoint_image(evidence, relation, context)
+    elif mutation == "platform_not_indexed":
+        index = evidence.get(relation["image_manifest"])
+        index["manifests"] = [entry for entry in index["manifests"]
+                              if entry["digest"] != "sha256:" + relation["image_platform_manifest"]["sha256"]]
+        evidence.replace(relation["image_manifest"], index)
+        _repoint_image(evidence, relation, context)
+    elif mutation == "entry_not_concrete":
+        index = evidence.get(relation["image_manifest"])
+        index["manifests"][0]["mediaType"] = "application/vnd.oci.image.index.v1+json"
+        evidence.replace(relation["image_manifest"], index)
+        _repoint_image(evidence, relation, context)
+    elif mutation == "media_mismatch":
+        index = evidence.get(relation["image_manifest"])
+        index["manifests"][0]["mediaType"] = (
+            "application/vnd.docker.distribution.manifest.v2+json")
+        evidence.replace(relation["image_manifest"], index)
+        _repoint_image(evidence, relation, context)
+    elif mutation == "entry_without_platform":
+        index = evidence.get(relation["image_manifest"])
+        del index["manifests"][0]["platform"]
+        evidence.replace(relation["image_manifest"], index)
+        _repoint_image(evidence, relation, context)
+    elif mutation == "unknown_media":
+        index = evidence.get(relation["image_manifest"])
+        index["mediaType"] = "application/vnd.example.unknown+json"
+        evidence.replace(relation["image_manifest"], index)
+        _repoint_image(evidence, relation, context)
+    elif mutation == "config_drift":
+        platform = evidence.get(relation["image_platform_manifest"])
+        platform["config"]["digest"] = "sha256:" + "7" * 64
+        evidence.replace(relation["image_platform_manifest"], platform)
+        index = evidence.get(relation["image_manifest"])
+        for entry in index["manifests"]:
+            if entry["digest"] != "sha256:" + "9" * 64:
+                entry["digest"] = "sha256:" + relation["image_platform_manifest"]["sha256"]
+        evidence.replace(relation["image_manifest"], index)
+        _repoint_image(evidence, relation, context)
+    else:
+        run = relation["runs"]["native"]
+        raw = evidence.get(run["runtime"])
+        raw["image_declaration"]["record"]["local_id"] = "sha256:" + "7" * 64
+        evidence.replace(run["runtime"], raw)
+    with pytest.raises(RuntimePriceError):
+        relation_load(relation_fixture)
+
+
 def test_nested_boolean_arithmetic_cannot_equal_numeric_flag(relation_fixture):
     evidence, relation, _ = relation_fixture
     run = relation["runs"]["native"]

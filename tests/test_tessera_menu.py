@@ -471,11 +471,11 @@ def test_the_scoped_table_answers_nothing_without_a_scope(dev_pin):
 def test_a_rate_the_contract_does_not_publish_is_unattested_not_backed(dev_pin):
     """One q256 step off the published rung is absence of a claim."""
     context = _dense_context()
-    on = tm.route_admission("TESSERA_E4M3_K1_R1024", serving_context=context)
-    off = tm.route_admission("TESSERA_E4M3_K1_R1023", serving_context=context)
+    on = tm.route_admission("TESSERA_E2M1_K2_R896", serving_context=context)
+    off = tm.route_admission("TESSERA_E2M1_K2_R895", serving_context=context)
     assert on.route_status == tm.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
     assert off.route_status == tm.ROUTE_STATUS_UNATTESTED
-    assert "R1023" in off.detail and "[1024]" in off.detail
+    assert "R895" in off.detail and "[896]" in off.detail
 
 
 def test_a_prose_only_tessera_edit_does_not_re_stale_the_pin(dev_pin, monkeypatch, tmp_path):
@@ -969,10 +969,12 @@ def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(dev_pin, parallel_kind
     Under the v24 pin every family sat at ``max_world_size: 1``, so the
     attested menu at TP=2 was EMPTY -- ``tessera_tp_world_attested`` refused
     each rung before the shape was looked at. v29 attests all three units at
-    world size 2 on a served receipt, so the TP=2 menu must be exactly the
-    TP=1 menu on a shape both axes shard, and each surviving rung must still
-    say the ceiling it was admitted under. Derived from the contract rather
-    than typed, so a family the pin stops attesting at 2 fails here by name.
+    world size 2 on a served receipt; v31 keeps the E2M1 unit's ceiling at 2
+    while withdrawing the other dense families' cells, so the TP=2 menu must
+    be exactly the TP=1 menu on a shape both axes shard, and each surviving
+    rung must still say the ceiling it was admitted under. Derived from the
+    contract rather than typed, so a family the pin stops attesting at 2
+    fails here by name.
     """
     contract = trc.load_tessera_contract()
     context = _dense_context()
@@ -984,8 +986,11 @@ def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(dev_pin, parallel_kind
     assert at_one, "the pinned contract must attest something at TP=1"
     assert [r.format_name for r in at_two] == at_one
     families = {r.admission.payload_family for r in at_two}
-    assert {"TESSERA_E2M1_K2", "TESSERA_E4M3_K1",
-            "TESSERA_BF16_K1"} <= families, sorted(families)
+    # v31 attests one dense family: the E4M3 and BF16 dense cells withdraw
+    # with the retired window-GEMV dispatch, so only E2M1 survives to TP2.
+    # The equality above is the regression's content; this names the
+    # survivor.
+    assert families == {"TESSERA_E2M1_K2"}, sorted(families)
     for rung in at_two:
         assert contract.max_world_size[rung.admission.payload_family] >= 2
         legal, reason = tm.tessera_tp_legal(
@@ -1325,13 +1330,15 @@ def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_
     """The default path allocates over the backed axis, not over nothing."""
     menu, dropped = tm.expand_menu_tokens_report(
         ["NVFP4", tm.MENU_TOKEN, "BF16"], PRICED, context_by_unit=_scope())
+    # v31 withdraws the dense E4M3 cells, so R1024 joins the dropped set.
     assert menu == [
-        "NVFP4", "TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R1024", "BF16",
+        "NVFP4", "TESSERA_E2M1_K2_R896", "BF16",
     ], menu
-    # the narrowing is reported, not silent: an allocation over 2 rungs and one
+    # the narrowing is reported, not silent: an allocation over 1 rung and one
     # over 2423 must not look the same in a log (P12).
     assert sorted(dropped) == sorted([
         "TESSERA_E2M1_K2_R640", "TESSERA_E4M3_K1_R512", "TESSERA_E2M1_K1_R256",
+        "TESSERA_E4M3_K1_R1024",
     ]), dropped
     # and the filter is the same predicate the guard refuses on, so the token
     # can never expand to something ``require_producer_formats`` then rejects.

@@ -40,42 +40,37 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `4c384e6049dca3eeaf503bb2c9cd1cd2778978d1`,
-master's tip on 2026-09-15, the merge of Tessera #517. Install that revision
-and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
-`experiments/` and are not wheel entry points.
+The current pin is Tessera `79ddd4c6093010c65a5149eff5889f7ac8113272`,
+the merge of Tessera #551 on 2026-09-17 (re-pinned 2026-09-19, closing
+PrismaQuant #699). Install that revision and point `TESSERA_REPO` at its
+complete checkout; the producer scripts live in `experiments/` and are not
+wheel entry points.
 
-It moves the contract from **v24** to **v29**, and the lane-eligibility schema
-stays at **v10**: every bump in between is additive for a v10 reader. Four
-admission facts move, and `TESSERA_DEV_PIN_ANSWER`'s diff is their review:
+It moves the contract from **v29** to **v31**, and the lane-eligibility
+schema stays at **v10**. Nine removals and no reviewed line changed, and
+`TESSERA_DEV_PIN_ANSWER`'s drift is their review:
 
-- **v29:** every `tensor_parallel` unit's `max_world_size` goes from 1 to 2,
-  and each cites the served TP2 receipt `glm53_a4_stub_tp2_sm121`. Tessera
-  rungs now survive a TP2 allocation in the attested menu, and any larger
-  degree is still refused. The reader refuses a ceiling above 1 unless its
-  cited receipt is published, executed that unit, and served at least that
-  world.
-- **v26:** `TESSERA_E2M1_K2`'s `row` loader axis goes from `refused` to
-  `sharded`.
-- **v25:** the `sm_121` `e2m1_group16_ue4m3_static` activation-quantizer
-  table is published. `require_activation_quantizer_attested` recomputes it
-  instead of refusing for want of a table.
-- **v28:** two routed-MoE `TESSERA_E2M1_K2` cells at q896 on `sm_121`
-  (decode and batch, resident, eager). Their grade is `route_only`, and
-  `smoke.status` is `not_recorded`. `cell_evidence_admits` refuses only
-  `repetitive`, so accepting this pin admits them. That routed-MoE admission
-  is Rob's call under principle 9 (#198).
+- **v31:** eight dense cells withdraw with the retired window-GEMV dispatch
+  (Tessera #538) -- the four `TESSERA_E4M3_K1` dense rows, the two
+  `TESSERA_BF16_K1` dense `sm_121` rows, and the two `TESSERA_BF16_K1`
+  dense `gfx1201` rows, whose platform's `serve_image` returns to `null`.
+  No dense BF16 or dense E4M3 route is admitted anywhere after this pin,
+  and `gfx1201` carries no cell. What stays: the two `TESSERA_E2M1_K2`
+  dense `sm_121` rows and the four routed-MoE rows.
+- **v31:** the `tessera_nvfp4_` native extension leaves
+  `native_extensions` with the retired A4 whole-weight expansion, so the
+  pin's extension table below drops that row and carries only
+  `tessera_window_gemv`.
 
-The twelve v24 cells are byte-identical, so everything the previous pin
-admitted, this one still admits. The world-size receipt's own scope is one
-degenerate four-layer GLM-5.3 stub served across sparky and sparklina,
-eager only. It attests that the route executes at world size 2. It is not a
-full-model TP2 qualification.
+The canonical tip still carries this same v31 contract, so this merge is the
+smallest state that satisfies #699. The v31 tree also carries Tessera #546
+(the producer-harness field fix D37's re-freeze was blocked on), so a fresh
+frozen producer-source tree can now be cut from the pinned commit itself.
 
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p 4c384e6049dca3eeaf503bb2c9cd1cd2778978d1:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 79ddd4c6093010c65a5149eff5889f7ac8113272:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -108,11 +103,14 @@ whatever is installed.
 
 **`serving_native_extensions` names what the plugin LOADS, not what it
 executes — and it is DERIVED, not asserted.** Tessera's serving plugin
-JIT-builds a CUDA decoder and loads it as `tessera_nvfp4_<identity>.so`
+JIT-builds CUDA decoders and loads them as `<prefix><identity>.so`
 (`tessera/serving/ext.py`), and §7.4's reproducibility contract keys KL
 comparability on whether a lane's `.so` was resident in the serving process:
 two KLs are comparable only across serves whose native-extension residency
-matches. Since Tessera contract v7 the runtime publishes that itself, in
+matches. Through contract v29 the table carried two rows
+(`tessera_nvfp4_`, retired with the A4 whole-weight expansion at v31, and
+`tessera_window_gemv`); at this pin it carries only `tessera_window_gemv`.
+Since Tessera contract v7 the runtime publishes that itself, in
 `native_extensions`, as four values a consumer can act on — the
 `module_name_prefix` the JIT load path itself passes to `cpp_extension.load`,
 the `filename_glob` that produces (there is no exact basename: the module name
@@ -170,13 +168,13 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-15:
+Verified against `RobTand/tessera` master on 2026-09-19:
 
 ```
-commit           4c384e6049dca3eeaf503bb2c9cd1cd2778978d1
-contract_sha256  db9ca4c0c457ee7105cf6c533c3c583cc00c9344584418bd5c052bce233299b3
+commit           79ddd4c6093010c65a5149eff5889f7ac8113272
+contract_sha256  80d58f1a528638339a2d74c6e5b97a9a8f0458687515db531a4685489aa05809
 versions.tessera 0.1.0
-contract_version 29
+contract_version 31
 lane schema      tessera.lane-eligibility.v10
 ```
 
@@ -274,19 +272,28 @@ never re-pinned in place: bundle the commit into `/mnt/shared/tessera-pins/`,
 then on each box clone the bundle and `pip install --no-deps
 --no-build-isolation git+file://<clone>@<commit>`. For the `-tessera-4c384e60`
 interpreters that was one bundle plus three builds (dl380g10, sparky,
-sparklina), 72-211 s each through PrismaBuild.
+sparklina), 72-211 s each through PrismaBuild. For `-tessera-79ddd4c60` the
+bundle is `/mnt/shared/tessera-pins/tessera-79ddd4c60.bundle` (single
+`refs/heads/pin-79ddd4c60`); sparky's thin sibling
+`pq-cu130-tessera-79ddd4c60` is provisioned, the dl380g10/sparklina siblings
+are owed before this pin can merge.
+
+The fleet default `pb-cpu` does NOT satisfy the guard and never did for this
+pin: the x86 workers' `pb-cpu` carries no `tessera` distribution at all, so
+every shard refuses before pytest (PrismaQuant #752). Until shared
+interpreters are re-provisioned — which waits for an idle fleet, never for a
+submitting agent — name the pin's sibling explicitly and tag the host that
+carries it. The prismabuild-side published example still names `pb-cpu`; that
+file lives in the other repository.
 
 Use a fleet interpreter provisioned at the reviewed pin, then route CPU
 verification through PrismaBuild:
 
 ```bash
-python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd /home/rob/prismaquant --tag dl380g10 --cpus 4 --demand mem_gb=8 \
-  --priority -10 --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
-  --env OPENBLAS_NUM_THREADS=1 -- \
-  /home/rob/venvs/pq-cpu312-tessera-4c384e60/bin/python -m pytest -q -n 4 \
-  tests/test_tessera_serving_pin.py tests/test_tessera_lane_v6.py \
-  tests/test_tessera_lane_admission.py tests/test_tessera_export_lane.py
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
+  --checkout /home/rob/prismaquant --tag sparky \
+  --python /home/rob/venvs/pq-cu130-tessera-79ddd4c60/bin/python \
+  --priority -10 tests/test_tessera_serving_pin.py
 ```
 
 **A moved contract is a re-review, not a bump.** The development pin

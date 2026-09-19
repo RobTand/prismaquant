@@ -192,7 +192,9 @@ MATCH_BASENAME_FNMATCH = "basename_fnmatch"
 # plugin publishes `native_extensions`, and each row's `module_name_prefix` is
 # the very constant its JIT load path passes to `cpp_extension.load`. There is
 # no exact basename to name -- the module name carries a build-identity hash,
-# so the library on disk is `tessera_nvfp4_<identity>.so` -- which is why the
+# so the library on disk is `<prefix>_<identity>.so` (at contract v29 the
+# example was `tessera_nvfp4_<identity>.so`; v31 retired that row and the
+# table carries only `tessera_window_gemv`) -- which is why the
 # table publishes a glob plus the `match` rule to apply it with.
 #
 # The chain is contract -> pin -> here, with a refusal at each link. This
