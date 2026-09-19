@@ -1,7 +1,28 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-19 · `flash/dev-mode-provenance-at-artifact-gate-20260919`.
+As of: 2026-09-19 · `flash/773-775-docs-20260919`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-19, `flash/773-775-docs-20260919`) for **the
+current-pin interpreter roster and the panel served-quantizer decision
+record** (RobTand/prismaquant#773 closes; #775 recorded, not closed). No
+pipeline default, stage, format menu, lane, pin, plugin contract or ship
+gate changed — prose and one new design doc only. The v29-era sentence
+naming `pq-cpu312-tessera-4c384e60` / `pq-cu130-tessera-4c384e60`
+git-commit installs from `tessera-4c384e60.bundle` described the pin PR
+#764 moved past (v31 at `79ddd4c60`, closing #699): the GPU siblings at
+the pin exist on sparky and sparklina, the dl380g10 x86 sibling is still
+owed (PQ #753, PB #658), and dl380g10's older git-commit venvs
+(`-tessera-4c384e60`, `-tessera-7dbbacbd`) are behind the pin by
+construction — §9-adjacent paragraph rewritten against the measured
+`direct_url.json` state. For #775, frozen native panels still record no
+served-quantizer backend, so a `reference_qdq` cannot be re-derived
+without guessing among the three `quantize_dequantize` backends; the
+decision record and additive-only schema proposal are
+`docs/design/native_panel_served_quantizer_identity_2026-09-19.md`, and
+no sealed surface moves without GLM sign-off. Gates:
+`tests/test_docs_staleness.py`, `tests/test_architecture_doc.py`
+(prose-only change; both green through PrismaBuild).
 
 Re-stamped (2026-09-19, `flash/dev-mode-provenance-at-artifact-gate-20260919`)
 for **`PRISMAQUANT_DEV_MODE`, the owner's rapid-iteration switch: the seal
@@ -2011,10 +2032,25 @@ domain is a re-transcription, not a re-measurement: `grammar.py` and
 `export.py` are byte-identical at the new commit.
 
 Moving the pin also needs new PrismaBuild interpreters, because every lane
-checks the installed Tessera commit before pytest runs.
-`pq-cpu312-tessera-4c384e60` (dl380g10) and `pq-cu130-tessera-4c384e60` (sparky
-and sparklina) are git-commit installs from
-`/mnt/shared/tessera-pins/tessera-4c384e60.bundle`.
+checks the installed Tessera commit before pytest runs. At the v31 pin
+(`79ddd4c6093010c65a5149eff5889f7ac8113272`, contract v31; PR #764 closing
+#699) the GPU siblings exist: `pq-cu130-tessera-79ddd4c60` on sparky and on
+sparklina are git-commit installs at the pin (measured 2026-09-19 from each
+venv's `direct_url.json` `vcs_info`, and attested on every #764 shard by the
+pin gate). The x86 sibling does not: dl380g10 carries no
+`pq-cpu312-tessera-79ddd4c60`, and the fleet default `pq-cpu312` is a
+local-directory install with no recorded commit, so every guarded x86 shard
+refuses before pytest (RobTand/prismaquant#753, RobTand/prismabuild#658;
+re-provisioning via `tools/provision_tessera_pin.py` waits for an idle fleet
+and is the fleet owner's call). What dl380g10 does carry are older
+git-commit siblings — `pq-cpu312-tessera-4c384e60` at `4c384e60` (contract
+v29) and `pq-cpu312-tessera-7dbbacbd` at `7dbbacbd` (contract v24) — which
+are behind the pin by construction and refuse the gate exactly as a stale
+commit should. The v31 bundle is
+`/mnt/shared/tessera-pins/tessera-79ddd4c60.bundle` (single
+`refs/heads/pin-79ddd4c60`); the earlier sentence naming
+`-tessera-4c384e60` installs from `tessera-4c384e60.bundle` described the
+v29 pin (RobTand/prismaquant#773).
 
 Re-stamped (2026-09-14, `claude/575-tessera-route-gate`) for **the Tessera
 served route-trace gate** (§7.1, §9.4; part of #575). Principle 14's serve-side
