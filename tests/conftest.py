@@ -112,6 +112,78 @@ def down_convert_lane_table(payload: dict, schema: str) -> dict:
     return payload
 
 
+def project_lane_cells_onto_structures(payload: dict, structures) -> dict:
+    """The installed contract's cell coverage, re-addressed to ``structures``.
+
+    Contract v23 (lane schema v10) made family coverage structure-specific:
+    the packaged dense cells publish TESSERA_E2M1_K2 only, while
+    TESSERA_E4M3_K1 is published only as routed_moe. A fixture that
+    synthesizes one structure by relabelling the OTHER structure's cells --
+    how the allocator fixtures were built when the packaged contract carried
+    no routed_moe cell at all -- therefore loses every family the source
+    structure did not cover, and the admission gate (correctly) refuses the
+    rungs those tests select. This helper instead keeps each (platform,
+    family, regime) scope's own coverage and re-addresses it onto exactly
+    ``structures``:
+
+    * a cell whose structure is requested is kept as published;
+    * every published cell is cloned into each requested structure its
+      scope does not already cover, so a clone carries its family's own
+      admission facts -- rungs, activation contract, route status, plugin
+      requirement, launch set -- and only ``structure``, a pure lookup
+      discriminator (``cell_matches_serving_context``), is synthesized;
+    * cells whose structure is not requested are dropped after cloning, so
+      ``project_lane_cells_onto_structures(payload, ("dense",))`` is a
+      dense-only table whose dense coverage is still every scope's.
+
+    A clone is added only when neither a kept cell nor an earlier clone in
+    the same scope claims an overlapping residency, read off the published
+    ``TESSERA_SERVE_MODE`` flag by the same grammar
+    ``parse_v4_cell_contract`` reads. The overlap
+    key deliberately ignores the runtime image/execution axes because the
+    fixtures that call this then flatten every cell's runtime onto one
+    fixture image, which would otherwise reintroduce the overlap the reader
+    refuses. Like ``down_convert_lane_table`` this is a FIXTURE, never an
+    attestation: nothing derived from it is recorded anywhere.
+    """
+    wanted = list(dict.fromkeys(str(structure) for structure in structures))
+    payload = copy.deepcopy(payload)
+    lane = payload["lane_eligibility"]
+    head = "TESSERA_SERVE_MODE="
+
+    def _residencies(cell: dict) -> frozenset[str]:
+        for flag in cell.get("requires_serve_flags", ()):
+            if str(flag).startswith(head):
+                return frozenset(str(flag)[len(head):].split("|"))
+        return frozenset()
+
+    kept = [cell for cell in lane["cells"] if cell.get("structure") in wanted]
+    claimed: dict[tuple[str, str, str, str], set[str]] = {}
+    for cell in kept:
+        key = (cell["platform"], cell["family"], cell["regime"], cell["structure"])
+        claimed.setdefault(key, set()).update(_residencies(cell))
+    clones = []
+    # Clone from EVERY published cell, not only the kept ones: a scope whose
+    # only cell lives in a dropped structure still owns that scope's family
+    # facts, and the requested structures inherit them from it.
+    for cell in lane["cells"]:
+        for structure in wanted:
+            if structure == cell.get("structure"):
+                continue
+            key = (cell["platform"], cell["family"], cell["regime"], structure)
+            if _residencies(cell) & claimed.get(key, set()):
+                continue
+            clone = copy.deepcopy(cell)
+            clone["id"] = f"{cell['id']}_{structure}_fixture"
+            clone["structure"] = structure
+            clones.append(clone)
+            claimed.setdefault(key, set()).update(_residencies(cell))
+    lane["cells"] = kept + clones
+    published = [s for s in lane.get("structures", []) if s in wanted]
+    lane["structures"] = published + [s for s in wanted if s not in published]
+    return payload
+
+
 @pytest.fixture
 def legacy_v4_contract() -> dict:
     """The installed contract expressed as a v4 lane table."""
