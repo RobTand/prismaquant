@@ -258,8 +258,81 @@ def _instrumentation(run, raw, base, libraries, reader):
     return excluded
 
 
+#: Image manifest media types the loader accepts as the PINNED bytes.
+#: A concrete platform manifest (what the pin named through contract v29),
+#: or a multi-platform index/list (what the ``sm_121`` serve image pin has
+#: been since the attested image became one: an OCI index whose digest never
+#: equals any platform manifest's). PrismaQuant #723.
+CONCRETE_IMAGE_MANIFEST_TYPES = (
+    "application/vnd.docker.distribution.manifest.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+)
+INDEX_IMAGE_MANIFEST_TYPES = (
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+)
+
+
+def _resolve_image_index_entry(index, platform_digest, where):
+    """The index entry the resolved platform manifest must be.
+
+    The relation carries the platform manifest BYTES (content-addressed, so
+    its digest is certain); this checks those bytes are what the pinned index
+    points at for exactly one entry: the entry's digest names them, its
+    media type is a concrete platform manifest and matches the bytes' own,
+    and it carries the platform the entry was resolved for.  The executing
+    host's architecture is not re-derived here -- no run record states it --
+    so the entry's platform is RECORDED into the identity, never compared.
+    A resolvable-but-wrong-arch entry fails at serve time, not at intake;
+    an entry that is not in the index fails here.
+    """
+    entries = index.get("manifests")
+    if not isinstance(entries, list) or not entries:
+        raise RuntimePriceError(f"{where}: expected a non-empty manifests list")
+    matches = [entry for entry in entries
+               if isinstance(entry, Mapping)
+               and entry.get("digest") == platform_digest]
+    if len(matches) != 1:
+        raise RuntimePriceError(
+            f"{where}: expected exactly one entry for {platform_digest}, "
+            f"found {len(matches)}")
+    entry = matches[0]
+    media = entry.get("mediaType")
+    if media not in CONCRETE_IMAGE_MANIFEST_TYPES:
+        raise RuntimePriceError(
+            f"{where}: indexed entry {platform_digest} is not a concrete "
+            f"platform manifest (mediaType {media!r})")
+    platform = entry.get("platform")
+    if not isinstance(platform, Mapping):
+        raise RuntimePriceError(
+            f"{where}: indexed entry {platform_digest} names no platform")
+    architecture = platform.get("architecture")
+    system = platform.get("os")
+    if (not isinstance(architecture, str) or not architecture.strip()
+            or not isinstance(system, str) or not system.strip()):
+        raise RuntimePriceError(
+            f"{where}: indexed entry {platform_digest} names no "
+            "architecture/os platform")
+    return {"mediaType": media, "architecture": architecture, "os": system}
+
+
+def _image_local_ids(image_manifest):
+    """The container IDs one pinned image may honestly report.
+
+    Docker reports either the manifest it pulled or the config it runs;
+    behind an index pull that is the pinned index digest, the resolved
+    platform manifest's digest, or the config digest the platform manifest
+    names.  Anything else is unrelated evidence and refuses.
+    """
+    identities = (image_manifest["manifest_digest"], image_manifest["config_digest"])
+    if "platform_manifest_digest" in image_manifest:
+        identities = (image_manifest["manifest_digest"],
+                      image_manifest["platform_manifest_digest"],
+                      image_manifest["config_digest"])
+    return identities
+
+
 def _observe_run(run, *, reader, configuration, configuration_sha256, image_manifest, package_source, context):
-    _object(run, ("scope", "runtime", "runtime_field", "installation", "post_core", "post_package", "instrumentation"), "runtime run")
     if run["scope"] not in ("native_operator", "full_engine"):
         raise RuntimePriceError("unsupported runtime observation scope")
     _, original = reader.json(run["runtime"], "original runtime artifact")
@@ -323,8 +396,8 @@ def _observe_run(run, *, reader, configuration, configuration_sha256, image_mani
     _, installation = reader.json(run["installation"], "runtime installation")
     _equal(installation["registry_base"], image, "installed image")
     _equal(installation["launcher_declared_image_id"], declared["local_id"], "actual image ID")
-    if declared["local_id"] not in (image_manifest["manifest_digest"], image_manifest["config_digest"]):
-        raise RuntimePriceError("actual image ID is neither the pinned manifest nor its config digest")
+    if declared["local_id"] not in _image_local_ids(image_manifest):
+        raise RuntimePriceError("actual image ID is none of the pinned image, its platform manifest, or its config digest")
     core_sha = _sha(installation["core_manifest_sha256"], "stock core manifest")
     core_count = _integer(installation["core_files_unchanged"], "stock core count", 1)
     _, audit = reader.json(run["post_core"], "post-run stock core audit")
@@ -397,8 +470,11 @@ def load_runtime_relation(reference, *, context, root):
 def _load_runtime_relation(reference, *, context, root):
     path, relation = ArtifactReader(Path(root)).json(reference, "runtime provenance relation")
     reader = ArtifactReader(path.parent)
-    _object(relation, ("schema", "configuration", "image_manifest", "package_source", "runs", "full_engine_run_id",
-                      "production_dependencies", "full_engine_extra_libraries"), "runtime relation")
+    relation_fields = ("schema", "configuration", "image_manifest", "package_source", "runs", "full_engine_run_id",
+                       "production_dependencies", "full_engine_extra_libraries")
+    if "image_platform_manifest" in relation:
+        relation_fields = relation_fields + ("image_platform_manifest",)
+    _object(relation, relation_fields, "runtime relation")
     _equal(relation["schema"], SCHEMA, "runtime relation schema")
     _equal(identity_sha256(relation), context.runtime_sha256, "independent runtime derivation identity")
     _, configuration = reader.json(relation["configuration"], "selected serving configuration")
@@ -407,14 +483,35 @@ def _load_runtime_relation(reference, *, context, root):
     manifest_digest = "sha256:" + relation["image_manifest"]["sha256"]
     _equal(context.serving_context.runtime_image.rsplit("@", 1)[-1], manifest_digest, "pinned manifest bytes")
     _equal(manifest["schemaVersion"], 2, "image manifest schema")
-    if manifest["mediaType"] not in ("application/vnd.docker.distribution.manifest.v2+json",
-                                     "application/vnd.oci.image.manifest.v1+json"):
-        raise RuntimePriceError("image provenance requires a concrete platform manifest")
-    config_digest = _string(manifest["config"]["digest"], "image config digest")
-    if not config_digest.startswith("sha256:"):
+    media = _string(manifest["mediaType"], "image manifest media type")
+    if media in CONCRETE_IMAGE_MANIFEST_TYPES:
+        if "image_platform_manifest" in relation:
+            raise RuntimePriceError(
+                "image provenance carries a platform manifest beside a concrete pinned manifest")
+        config = _mapping(manifest.get("config"), "image config")
+        config_digest = _string(config["digest"], "image config digest")
+        image_manifest = {"manifest_digest": manifest_digest, "config_digest": config_digest}
+    elif media in INDEX_IMAGE_MANIFEST_TYPES:
+        if "image_platform_manifest" not in relation:
+            raise RuntimePriceError(
+                "image provenance pins an image index and names no platform manifest")
+        _, platform = reader.json(relation["image_platform_manifest"], "pinned platform manifest")
+        platform_digest = "sha256:" + relation["image_platform_manifest"]["sha256"]
+        entry = _resolve_image_index_entry(manifest, platform_digest, "pinned image index")
+        _equal(platform.get("mediaType"), entry["mediaType"], "resolved platform manifest media type")
+        config = _mapping(platform.get("config"), "platform image config")
+        config_digest = _string(config["digest"], "platform image config digest")
+        image_manifest = {"manifest_digest": manifest_digest,
+                          "platform_manifest_digest": platform_digest,
+                          "platform_architecture": entry["architecture"],
+                          "platform_os": entry["os"],
+                          "config_digest": config_digest}
+    else:
+        raise RuntimePriceError(
+            f"image provenance requires a concrete platform manifest or a multi-platform index, not {media!r}")
+    if not image_manifest["config_digest"].startswith("sha256:"):
         raise RuntimePriceError("image config requires SHA-256 identity")
-    _sha(config_digest.removeprefix("sha256:"), "image config digest")
-    image_manifest = {"manifest_digest": manifest_digest, "config_digest": config_digest}
+    _sha(image_manifest["config_digest"].removeprefix("sha256:"), "image config digest")
     package_source = _package_source(relation["package_source"], reader)
     runs = _mapping(relation["runs"], "runtime runs")
     full_id = _string(relation["full_engine_run_id"], "full-engine run ID")
