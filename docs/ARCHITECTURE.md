@@ -8861,8 +8861,9 @@ the FP8-CB fused mid-M backed set is untouched (the `rungs_by_runtime_version`
 table already carried `0.8.11`). Previously re-stamped (2026-08-21,
 `merge/proven-rescues`) for the
 **producer half of campaign rule R1** (§"The learned-codebook selector"): the
-routed book burn and selector (`tools/dsv4_onlaw_book_burn.py`,
-`tools/dsv4_onlaw_book_select.py`) take `--keying stack|role`, defaulting to
+routed book burn and selector (both retired with the Gridbook lane's
+codebook lane and archived under `archive/gridbook_lane_2026-09-02/`;
+the selector joined the archive 2026-09-19, #811) took `--keying stack|role`, defaulting to
 `stack` like the bundle builder, and a stack cell is the bundle's own fused
 population — every expert's gate rows then its up rows in the profile's
 declared order, weighted by the packed target's imatrix entry through the
