@@ -51,6 +51,47 @@ certified half passed before the implementation existed). PrismaBuild's
 sealed actions, the CAS and the v1/v2 proof machinery are untouched — dev
 mode bypasses AT THE GATE, it never weakens a proof. No pipeline default,
 stage, format, lane, pin or ship gate changed.
+
+Re-stamped (2026-09-19, `flash/joint-cost-quantum-runtime-20260919`) for
+**the distributed joint-AURA cost campaign's per-box runtime** (PQ #778,
+contract `docs/design/distributed_campaign_2026-09-19.md`). Two new
+dev-mode-only execution entry points shard the complete-512 cost run across
+both Sparks as PrismaBuild quanta, without touching the single-consumer
+campaign of record: `python3 -m prismaquant.joint_cost_stage_a` (lane alias
+`prismaquant.joint_adjoint_capture`, the plan block's sealed entry name) runs
+the sequential adjoint capture — the single run's forward boundary capture and
+tail cotangents, then a render-free cotangent chain that publishes a strided
+checkpoint every S layers (S=8 derived, §3.4 of the contract) and seals
+`layer-quanta/adjoint/adjoint-capture.json` atomically, first writer wins —
+and `python3 -m prismaquant.joint_cost_quantum` runs one layer quantum:
+four digest-checked inputs (`--quantum/--plan/--prepared/--adjoint` plus
+sha256s; any mismatch is exit 3 `quantum_identity_refused` with nothing
+written), head inputs via the same verified loaders, the incoming cotangent
+rebuilt by chaining ≤ S−1 render-free source backwards from the nearest
+strided checkpoint through
+`joint_adjoint_checkpoints.render_free_layer_roll` (the completed-layer leg
+of `compute_aura_cost_streamed`'s reverse walk, reused rather than
+reimplemented), then the layer's sealed retained windows replayed in sealed
+index order through `joint_statistics_replay.observe_and_project_retained_windows`
+and PWC verified loads — the same kernels and call order as the single run,
+which the §9.3 cutover gate judges bitwise
+(`tools/compare_joint_layer_gate.py`). A quantum writes only under
+`<output_root>/layer-quanta/layer-NNN/` (cost.pkl, results.json,
+counters.json, checkpoints/, status.json), reports accepted progress at chunk
+granularity through the declared phase names, and carries §8.1 counters
+(bytes_from_ram/stage/pool per chunk and per window from the residency map,
+GPU joules and watts from a 1 Hz power sampler, kernel_active_s/wall_s —
+utilization percentages are never recorded, they are non-diagnostic on
+GB10). Boundary entries are read back through the existing
+`StreamedBoundaryArtifacts` reader via a new read-only `attach()` (an
+attached owner cannot write, retire or re-publish); shared-state cotangents
+cross the checkpoint boundary through new
+`SharedStateCotangents.state_dict()/load_state_dict()`. Both entry points
+require `PRISMAQUANT_DEV_MODE=1` and stamp `dev_uncertified` (the certified
+N-consumer grammar is deliberately deferred, contract §10). No pipeline
+default, stage order, format, lane, plugin contract or ship gate changes.
+Gates: `tests/test_joint_cost_quantum_runtime.py`.
+
 Re-stamped (2026-09-19, `flash/backlog-709-705-687-560-20260919`) for
 **the v1 measured-runtime table pricing and budgeting nothing**
 (RobTand/prismaquant#560 defect 3, the last of its three). Defects 1 and 2
