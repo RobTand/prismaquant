@@ -34,6 +34,67 @@ pin's sibling interpreter plus its host tag. Gates:
 `tests/test_quality_prefill_dry_run.py`,
 `tests/test_tessera_tp_loader_axes.py`.
 
+Re-stamped (2026-09-18, `flash/731-706-581-495-admission-20260918`) for
+**the admission/pricing quad's CPU-closable slice** (RobTand/prismaquant#731,
+#706, #581, #495). No pipeline default, stage, format menu, lane, pin,
+plugin contract or ship gate changes; all four tracks are opt-in or
+refusal-preserving, and no GPU, served, quality or timing claim is made.
+
+- **#731 (closes): the PACT consumer recomputes `derived.admission`.**
+  `full_engine_resource_report.py` used to pin the report's observation key
+  set and the v2 derived blocks by exact equality, so the real two-capture
+  v2 reports refused structurally
+  (`report derived timing_terms: expected an object` -- `timing_terms` is
+  null while the timing partition is unobserved). Observation keys, the
+  partition schema and the v2 derived blocks are now admitted by NAME
+  (`OBSERVATION_KEY_REGISTRY`, `PARTITION_SCHEMAS`,
+  `DERIVED_BLOCK_NAMES_V2`); unknown keys refuse by name. The consumer
+  recomputes the admission from the observations
+  (`recompute_derived_admission`: per-domain closed-ness on the four
+  checkable domains, the unclassified/uncharged counts, the expressible bit)
+  and compares it with the producer's `derived.admission`, refusing on
+  disagreement; the producer verdict is a witness, never the value (verdict
+  string, lists and prose are carried, never compared). A domain the
+  producer closes that this consumer defines no closing condition for, and
+  counts that ride the known `owner_views` classification gap, are recorded
+  as that gap rather than as a second contradiction. Measured on the four
+  real 2026-09-18 two-capture reports: all read structurally with zero
+  admission disagreements; the remaining refusals are the already-named
+  `owner_views` gap. Gate:
+  `tests/test_full_engine_resource_report.py` (v2 admission agree/disagree,
+  prose-ignored, registry refusals).
+- **#706 (progress, not closed): the MoE method registry exists and is
+  empty.** `compressed_route_sweep_gate.METHOD_ACTIVATION` is the sibling of
+  `SCHEME_ACTIVATION` for `quant_method` classes that resolve with no
+  `scheme`; an unobserved method still reads NOT VERIFIED by name. No entry
+  is added without a sweep: closing the issue takes one
+  `validate_native_export --route-sweep-out` observation on a packed-MoE
+  compressed-tensors artifact in the pinned image, and no weights-bearing
+  packed-MoE artifact exists on this box. Gate:
+  `tests/test_compressed_route_sweep_gate.py` (NOT VERIFIED naming, registry
+  mechanics on a synthetic test-only entry).
+- **#581 (opt-in): the model-wide full-domain ledger.**
+  `prismaquant/tessera_full_domain_ledger.py` derives the complete legal
+  roster per `(unit, family)` through `tessera_legal_domain`, classifies each
+  rate from the cost rows' own `cost_source` spelling (measured /
+  interpolated-or-transfer-law strictly inside the measured envelope /
+  missing), binds currency, refuses unknown spellings, foreign currencies,
+  out-of-domain prices and duplicate prices, and never extrapolates: a
+  predicted row outside its envelope is listed missing. `require_full_domain`
+  refuses incomplete coverage by name; `missing_acquisition_work` emits the
+  missing endpoint/boundary/interior work as data. Gate:
+  `tests/test_tessera_full_domain_ledger.py`.
+- **#495 (opt-in instruments; driver changes next): the regret gate and the
+  selective-encode plan as data.** `tessera_rate_surface.py` gains
+  `stack_transfer_regret_gate` (hold-out laws, per-stack intercept bootstrap
+  with at least 50 draws at the run's byte budget through the same greedy
+  allocator both arms, p90 against `max_regret_pct`, budget sensitivity
+  reported never gated) and `selective_encode_plan` (missing
+  `(stack, expert, rate)` winner cells after allocation). The per-class
+  round-one schedule, the encode pass itself, the repair loop and the joint
+  AURA wiring are unchanged and remain owed. Gate:
+  `tests/test_tessera_stack_transfer_law.py`.
+
 Re-stamped (2026-09-19, `flash/754-resumable-parallel-head-walk-20260919`) for
 **the joint head walk banking its verified units and fanning out over
 PrismaBuild's placement** (§3.2 joint AURA; RobTand/prismaquant#754). The head
