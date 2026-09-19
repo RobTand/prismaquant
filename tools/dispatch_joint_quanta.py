@@ -154,7 +154,8 @@ def stage_a_argv(adjoint_manifest: Path, *, tag: str = ADJOINT_TAG) -> list[str]
     return [sys.executable, str(PBRUN),
             "--tag", tag,
             "--data-manifest", str(adjoint_manifest),
-            "--residency", "stage", "--detach", "--",
+            "--residency", "stage",
+            "--env", DEV_MODE_ENV, "--detach", "--",
             "python3", "-m", "prismaquant.joint_adjoint_capture",
             "--output-root", str(adjoint_manifest.parent.parent)]
 
