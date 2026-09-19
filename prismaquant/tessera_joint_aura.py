@@ -422,17 +422,6 @@ def _decode_wire(blob, *, reader, device="cpu"):
     return read_unit_artifact(blob, device=device)
 
 
-def _render_mirror_path(render, mirror_root):
-    """Where a measuring run publishes a shard instead of the row cache.
-
-    The mirror keeps the render's absolute path under ``mirror_root`` so a
-    cell's two copies stay comparable by name and a measuring run can never
-    replace the campaign's own bytes.
-    """
-    render = Path(render)
-    return Path(mirror_root) / render.resolve().relative_to(Path(render.root))
-
-
 #: The phase the standalone synthesis stage declares (``--progress
 #: synthesize=<stall>``), and therefore the default a bare intake reports
 #: under. ``execute`` overrides it with the joint prepare's own ``head``:
@@ -892,6 +881,18 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
 
     cells, formats = {}, {}
     wire_dir = Path(provenance["wire_dir"])
+    # Resolve once, not per cell (#711): every cell of the campaign shares
+    # this one wire directory, so resolving it per cell re-walks the same ~12
+    # NFS path components ~198k times (~62 LOOKUPs/cell measured on the
+    # GLM-5.3 run). The per-cell escape check below still stats the wire
+    # itself; the recorded path is joined from the resolved root.
+    wire_dir_resolved = wire_dir.resolve()
+    # One resolved root per distinct row directory, for the same reason: the
+    # recorded render is joined from the resolved root instead of resolved
+    # per cell, and the join reaches the same file the walk verifies.
+    owner_roots = {str(directory): Path(directory).resolve()
+                   for directory in set(map(str, owners.values()))}
+    mirror_root = None if render_mirror_root is None else Path(render_mirror_root)
     roster = sorted(names)
     if unit_scope is not None:
         low, high = unit_scope
@@ -1034,13 +1035,20 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             filename = record["file"]
             _require(isinstance(filename, str) and Path(filename).name == filename and
                      filename not in {".", ".."}, f"{name}: escaping wire filename")
+            # The filename is a validated leaf, so the wire's lexical parent
+            # is the wire directory itself: the escape check is the symlink
+            # test on the wire, and the directory side is resolved once above
+            # instead of per cell (PrismaQuant #711).
             wire = wire_dir / filename
-            _require(not wire.is_symlink() and wire.resolve().parent == wire_dir.resolve(), f"{name}: escaping wire path")
+            _require(not wire.is_symlink(), f"{name}: escaping wire path")
             wire_stat = wire.stat()
             _same(wire_stat.st_size, record["blob_bytes"], f"{name}: wire size")
-            render = owners[name] / "cache" / _cache_weight_filename(name, fmt)
-            target = (render if render_mirror_root is None
-                      else _render_mirror_path(render, render_mirror_root))
+            render = owner_roots[str(owners[name])] / "cache" / _cache_weight_filename(name, fmt)
+            # The mirror keeps the render's absolute path under the mirror
+            # root so a cell's two copies stay comparable by name and a
+            # measuring run can never replace the campaign's own bytes.
+            target = (render if mirror_root is None
+                      else mirror_root / render.relative_to(render.root))
             present = Path(target).is_file()
             if require_existing_renders and not present:
                 raise ValueError(f"{name}@{fmt}: prepared render is missing; selected cache will not synthesize it")
@@ -1059,10 +1067,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                                     fmt=fmt, shape=census["unit_shapes"][name],
                                                     reader=reader, device=synthesis_device)
                 events.append(fmt)
-            unit_cells[fmt] = {"anchor": anchor, "record": record, "wire": str(wire.resolve()),
-                               "render": str(Path(target).resolve()), "render_origin": origin,
+            unit_cells[fmt] = {"anchor": anchor, "record": record, "wire": str(wire_dir_resolved / filename),
+                               "render": str(target), "render_origin": origin,
                                **({} if render_mirror_root is None
-                                  else {"campaign_render": str(render.resolve())})}
+                                  else {"campaign_render": str(render)})}
             # The resume fence for this cell: enough identity to prove on the
             # next load that these bytes are the bytes this row was banked
             # from, at stat-and-digest cost rather than a re-walk.

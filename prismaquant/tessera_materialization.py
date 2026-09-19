@@ -11,6 +11,7 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import pickle
 from pathlib import Path
 from types import SimpleNamespace
@@ -297,8 +298,12 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
             if record is not None:
                 tc._link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'])
         if record is not None:
-            tep.verify_expert_wire_record(record, name=name, unit=units[name], q256=rung,
-                grid=family.payload_grid().name, wire_dir=wire_dir)
+            # The receipt checks and the blob's presence and size here; the
+            # content check is the one read below, at the point the bytes are
+            # handed to the producer (PrismaQuant #643).
+            tep.check_expert_wire_receipt(record, name=name, unit=units[name], q256=rung,
+                grid=family.payload_grid().name)
+            tep.locate_expert_wire(record, name=name, wire_dir=wire_dir)
             api.verify_cached_unit(wire_path.read_bytes(), record, expected)
             if record['file'] != wire_path.name:
                 raise RuntimeError(f'{name}: wire filename differs from selected rung')
@@ -454,11 +459,20 @@ def finalize(plan_path):
         weight = tep.source_unit_weight(provenance['model'], source, units[name])
         expected = api.unit_input_identity(weight, units[name], family.payload_grid(), rung,
                                            activation=active)
-        checked = tep.verify_expert_wire_record(record, name=name, unit=units[name], q256=rung,
-            grid=family.payload_grid().name, wire_dir=source_dir)
-        api.verify_cached_unit((source_dir / checked['file']).read_bytes(), checked, expected)
+        checked = tep.check_expert_wire_receipt(record, name=name, unit=units[name], q256=rung,
+            grid=family.payload_grid().name)
+        source_path = source_dir / checked['file']
+        tep.locate_expert_wire(checked, name=name, wire_dir=source_dir)
+        # One content check per blob: the verified bytes are the ones the hard
+        # link below carries into the published wire directory (#643).
+        api.verify_cached_unit(source_path.read_bytes(), checked, expected)
         tc._link_seed_wire(source_dir, wire_dir, checked['file'])
-        api.verify_cached_unit((wire_dir / checked['file']).read_bytes(), checked, expected)
+        linked_path = wire_dir / checked['file']
+        if not os.path.samefile(source_path, linked_path):
+            # ``_link_seed_wire`` falls back to a copy where a hard link cannot
+            # be made (another filesystem), and a copy is a second file whose
+            # bytes have to be read rather than assumed from the source's.
+            api.verify_cached_unit(linked_path.read_bytes(), checked, expected)
         completed_names.add(name)
     scales = provenance['activation_static_scales']
     capture, scale_path, digest = tc.write_export_inputs(root,
