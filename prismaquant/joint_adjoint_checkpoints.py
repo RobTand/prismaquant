@@ -394,41 +394,43 @@ def render_free_layer_roll(
     for probe_index in range(int(n_probes)):
         entries = (None if incoming_entries is None
                    else incoming_entries[probe_index])
-        for batch_index, batch, boundary_cpu, incoming_cpu in prefetched_boundary_batches(
-                storage, batches, int(layer), incoming=entries):
-            owner = cotangents[probe_index][batch_index]
-            try:
-                if _free_gib() < min_free_gib:
-                    raise RuntimeError(
-                        f"free UMA {_free_gib():.1f} < floor {min_free_gib:.1f}; "
-                        f"render-free chain layer {layer} probe {probe_index}")
-                cpu_rng = torch.get_rng_state()
-                cuda_rng = (torch.cuda.get_rng_state(device)
-                            if torch.device(device).type == "cuda" else None)
-                if entries is None:
-                    incoming_cpu = incoming_tensor(probe_index, batch_index)
-                incoming_grad = incoming_cpu.to(device)
-                x_in = boundary_cpu.to(device=device, dtype=dtype).detach().requires_grad_(True)
-                isolated = profile.isolated_layer_pass_state(
-                    batch.shared_pass_state, runner.layers[layer])
-                isolated = owner.graft(isolated)
-                out = runner.isolated_layer(batch, layer, x_in, pass_state=isolated)
-                roots, root_grads = owner.produced_roots()
-                torch.autograd.backward([out, *roots], [incoming_grad, *root_grads])
-                owner.harvest()
-                if not torch.equal(cpu_rng, torch.get_rng_state()) or (
-                        cuda_rng is not None
-                        and not torch.equal(cuda_rng, torch.cuda.get_rng_state(device))):
-                    raise RuntimeError(
-                        "render-free chain source consumed Torch RNG")
-                if x_in.grad is None:
-                    raise RuntimeError(
-                        f"render-free chain layer {layer} produced no input cotangent")
-                roll(x_in.grad.detach().to("cpu"), batch_index, probe_index)
-                backwards += 1
-            finally:
-                boundary_cpu = incoming_cpu = None
-                out = x_in = incoming_grad = isolated = roots = root_grads = None
+        with prefetched_boundary_batches(
+                storage, batches, int(layer), incoming=entries) as windows:
+            for batch_index, batch, boundary_cpu, incoming_cpu in windows:
+                owner = cotangents[probe_index][batch_index]
+                try:
+                    if _free_gib() < min_free_gib:
+                        raise RuntimeError(
+                            f"free UMA {_free_gib():.1f} < floor {min_free_gib:.1f}; "
+                            f"render-free chain layer {layer} probe {probe_index}")
+                    cpu_rng = torch.get_rng_state()
+                    cuda_rng = (torch.cuda.get_rng_state(device)
+                                if torch.device(device).type == "cuda" else None)
+                    if entries is None:
+                        incoming_cpu = incoming_tensor(probe_index, batch_index)
+                    incoming_grad = incoming_cpu.to(device)
+                    x_in = boundary_cpu.to(
+                        device=device, dtype=dtype).detach().requires_grad_(True)
+                    isolated = profile.isolated_layer_pass_state(
+                        batch.shared_pass_state, runner.layers[layer])
+                    isolated = owner.graft(isolated)
+                    out = runner.isolated_layer(batch, layer, x_in, pass_state=isolated)
+                    roots, root_grads = owner.produced_roots()
+                    torch.autograd.backward([out, *roots], [incoming_grad, *root_grads])
+                    owner.harvest()
+                    if not torch.equal(cpu_rng, torch.get_rng_state()) or (
+                            cuda_rng is not None
+                            and not torch.equal(cuda_rng, torch.cuda.get_rng_state(device))):
+                        raise RuntimeError(
+                            "render-free chain source consumed Torch RNG")
+                    if x_in.grad is None:
+                        raise RuntimeError(
+                            f"render-free chain layer {layer} produced no input cotangent")
+                    roll(x_in.grad.detach().to("cpu"), batch_index, probe_index)
+                    backwards += 1
+                finally:
+                    boundary_cpu = incoming_cpu = None
+                    out = x_in = incoming_grad = isolated = roots = root_grads = None
     return backwards
 
 

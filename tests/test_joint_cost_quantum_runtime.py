@@ -495,7 +495,7 @@ def test_progress_cadence_at_chunk_granularity(tmp_path, monkeypatch):
         ["head", "layer-001-chunk-000", "layer-001-chunk-001"]))
     frontier = ChunkFrontier(chunks=chunks, windows=windows)
     progress = QuantumProgress(frontier=frontier, base_units=3)
-    progress.enter_head(3)
+    progress.enter_head(0)
     assert progress_file.is_file()
     first = json.loads(progress_file.read_text())
     assert first["phase"] == "head" and first["units_completed"] == 3

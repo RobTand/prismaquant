@@ -1233,6 +1233,51 @@ def _io_counters() -> dict:
     return values
 
 
+def publish_quantum_outputs(record, *, payload, result, counters) -> dict:
+    """Write the quantum's outputs (§6.4), only under its output space.
+
+    ``cost.pkl`` only when every row passed ``validate_joint_aura_entry``
+    (checked by the core before returning); ``status.json`` is the last act.
+    Every path comes from the record's ``output_space``; nothing is written
+    anywhere else by this stage.
+    """
+    units_total = sum(len(window["names"]) for window in record["windows"])
+    units_done = len(payload["costs"]) if payload is not None else 0
+    status = "complete" if payload is not None and units_done == units_total else "gapped"
+    if payload is not None:
+        cost_path = Path(record["output_space"]["cost_payload"])
+        atomic_write_bytes(
+            cost_path, pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
+        result["cost"] = {
+            "path": str(cost_path),
+            "sha256": hashlib.sha256(cost_path.read_bytes()).hexdigest(),
+        }
+    result["status"] = status
+    result["units_done"] = units_done
+    result["units_total"] = units_total
+    result["passed"] = status == "complete"
+    atomic_write_bytes(
+        Path(record["output_space"]["counters"]),
+        (json.dumps(counters, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
+    atomic_write_bytes(
+        Path(record["output_space"]["results"]),
+        (json.dumps(result, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
+    status_record = {
+        "schema": QUANTUM_STATUS_SCHEMA,
+        "quantum_id": record["quantum_id"],
+        "identity_sha256": record["identity_sha256"],
+        "status": status,
+        "units": [units_done, units_total],
+        "unix": time.time(),
+    }
+    root = Path(record["output_space"]["root"])
+    status_path = Path(record["output_space"].get("status", str(root / "status.json")))
+    atomic_write_bytes(
+        status_path,
+        (json.dumps(status_record, sort_keys=True, allow_nan=False) + "\n").encode())
+    return status_record
+
+
 def run_layer_quantum(
     config, *, record, receipt, plan_sha256, prepared, output_root,
     data_manifest_sha256=None, resume=False,
@@ -1400,37 +1445,12 @@ def run_layer_quantum(
             result["residency"] = residency
 
     # ---- writes: only under layer-quanta/layer-NNN/ (§6.4) ---------------
-    units_total = sum(len(window["names"]) for window in record["windows"])
-    units_done = len(payload["costs"]) if payload else 0
-    status = "complete" if payload and units_done == units_total else "gapped"
-    if payload is not None:
-        cost_path = Path(record["output_space"]["cost_payload"])
-        atomic_write_bytes(cost_path,
-                           pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
-        result["cost"] = {"path": str(cost_path),
-                          "sha256": hashlib.sha256(cost_path.read_bytes()).hexdigest()}
-    counters_done = counters.finish(units_done=units_done, units_total=units_total)
-    atomic_write_bytes(Path(record["output_space"]["counters"]),
-                       (json.dumps(counters_done, sort_keys=True, indent=2,
-                                   allow_nan=False) + "\n").encode())
-    atomic_write_bytes(Path(record["output_space"]["results"]),
-                       (json.dumps(result, sort_keys=True, indent=2,
-                                   allow_nan=False) + "\n").encode())
-    status_record = {
-        "schema": QUANTUM_STATUS_SCHEMA,
-        "quantum_id": record["quantum_id"],
-        "identity_sha256": record["identity_sha256"],
-        "status": status,
-        "units": [units_done, units_total],
-        "unix": time.time(),
-    }
-    atomic_write_bytes(Path(record["output_space"].get(
-        "status", str(Path(record["output_space"]["root"]) / "status.json"))),
-        (json.dumps(status_record, sort_keys=True, allow_nan=False) + "\n").encode())
-    result["passed"] = status == "complete"
-    result["status"] = status
-    result["units_done"] = units_done
-    result["units_total"] = units_total
+    counters_done = counters.finish(
+        units_done=len(payload["costs"]) if payload else 0,
+        units_total=sum(len(window["names"]) for window in record["windows"]))
+    status_record = publish_quantum_outputs(
+        record, payload=payload, result=result, counters=counters_done)
+    result["passed"] = status_record["status"] == "complete"
     return result
 
 

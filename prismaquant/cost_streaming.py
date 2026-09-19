@@ -336,6 +336,9 @@ class StreamedBoundaryArtifacts:
         self.telemetry["retired_entries"] += 1
 
     def retire(self, reference):
+        if self._readonly:
+            raise RuntimeError(
+                "an attached read-only generation cannot retire entries")
         identity = self._entry_identity(reference)
         del self._slots[identity["slot"]]
         self._retire(reference)
