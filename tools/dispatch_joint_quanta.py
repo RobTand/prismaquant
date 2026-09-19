@@ -148,16 +148,24 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     return argv
 
 
-def stage_a_argv(adjoint_manifest: Path, *, tag: str = ADJOINT_TAG) -> list[str]:
+def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
+                 *, tag: str = ADJOINT_TAG) -> list[str]:
     """The §5.2 stage-A submission argv: the adjoint capture goes first and
-    alone; quanta wait on its receipt."""
+    alone; quanta wait on its receipt.  The campaign binding every record
+    carries names the plan and prepared inputs (with digests) the capture's
+    own CLI requires -- the records are the single source of those paths."""
     return [sys.executable, str(PBRUN),
             "--tag", tag,
             "--data-manifest", str(adjoint_manifest),
             "--residency", "stage",
             "--env", DEV_MODE_ENV, "--detach", "--",
             "python3", "-m", "prismaquant.joint_adjoint_capture",
-            "--output-root", str(adjoint_manifest.parent.parent)]
+            "--plan", str(campaign["plan_path"]),
+            "--plan-sha256", str(campaign["plan_sha256"]),
+            "--prepared", str(campaign["prepared_path"]),
+            "--prepared-sha256", str(campaign["prepared_sha256"]),
+            "--output-root", str(adjoint_manifest.parent.parent),
+            "--resume"]
 
 
 def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) -> dict:
@@ -326,7 +334,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
         manifest = (Path(args.adjoint_manifest) if args.adjoint_manifest
                     else records_dir / "adjoint.data-manifest.json.gz")
         rows.append({"kind": "stage-a",
-                     "argv": stage_a_argv(manifest, tag=adjoint_tag)})
+                     "argv": stage_a_argv(manifest, records[0][1]["campaign"], tag=adjoint_tag)})
     if receipt_ok:
         for record_path, record in records:
             quantum_id = record["quantum_id"]
