@@ -330,7 +330,12 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
             receipt_ok = False
 
     rows: list[dict] = []
-    if not stage_a_keys and not receipt_ok:
+    # A stage A that was submitted but did not terminally execute (failed,
+    # withdrawn, lost) is republished: the state file records the attempt,
+    # never the outcome, and retry is free (#5 contract).  Only a terminally
+    # executed capture, or a validated receipt, stops republication.
+    stage_a_done = bool(stage_a_keys) and gateway.is_terminal_executed(stage_a_keys[-1])
+    if not stage_a_done and not receipt_ok:
         manifest = (Path(args.adjoint_manifest) if args.adjoint_manifest
                     else records_dir / "adjoint.data-manifest.json.gz")
         rows.append({"kind": "stage-a",
