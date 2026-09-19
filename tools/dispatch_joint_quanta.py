@@ -57,6 +57,8 @@ HEAD_PROGRESS_GRACE_S = 1800
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 ADJOINT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
+SPEC_PATH = Path("/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913"
+                "/allocation/joint-panel/spec-hostcap32-ram-dev.json")
 STATE_FILENAME = "campaign-state.json"
 
 #: Refusal exits: 3 = the stage-A precondition (or the campaign binding)
@@ -122,6 +124,21 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
     return ordered
 
 
+
+def _container_wrap(spec_path: Path, payload: list[str]) -> list[str]:
+    """Run a payload inside the qualified campaign container.
+
+    The projection backend's runtime identity check (and the workload's own
+    torch/CUDA requirement) qualify one image; a bare ``python3 -m ...``
+    executes unidentified and refuses.  The single-run path wraps every
+    command in ``tools.tessera_campaign_container`` with the campaign spec;
+    the distributed rows are the same workload and take the same wrapper.
+    """
+    spec = json.loads(Path(spec_path).read_text())
+    return ["python3", "-m", "tools.tessera_campaign_container",
+            "--spec", json.dumps(spec, sort_keys=True),
+            "--", *payload]
+
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S) -> list[str]:
@@ -141,10 +158,11 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  f"{chunk['name']}={CHUNK_PROGRESS_GRACE_S}"]
     argv += ["--priority", str(priority),
              "--env", DEV_MODE_ENV, "--detach", "--",
-             "python3", "-m", "prismaquant.joint_cost_quantum",
-             "--quantum", str(record_path),
-             "--quantum-sha256", record["identity_sha256"],
-             "--output-root", str(output_root)]
+             *_container_wrap(SPEC_PATH, [
+                 "python3", "-m", "prismaquant.joint_cost_quantum",
+                 "--quantum", str(record_path),
+                 "--quantum-sha256", record["identity_sha256"],
+                 "--output-root", str(output_root)])]
     return argv
 
 
@@ -159,13 +177,14 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
             "--data-manifest", str(adjoint_manifest),
             "--residency", "stage",
             "--env", DEV_MODE_ENV, "--detach", "--",
-            "python3", "-m", "prismaquant.joint_adjoint_capture",
-            "--plan", str(campaign["plan_path"]),
-            "--plan-sha256", str(campaign["plan_sha256"]),
-            "--prepared", str(campaign["prepared_path"]),
-            "--prepared-sha256", str(campaign["prepared_sha256"]),
-            "--output-root", str(adjoint_manifest.parent.parent),
-            "--resume"]
+            *_container_wrap(SPEC_PATH, [
+                "python3", "-m", "prismaquant.joint_adjoint_capture",
+                "--plan", str(campaign["plan_path"]),
+                "--plan-sha256", str(campaign["plan_sha256"]),
+                "--prepared", str(campaign["prepared_path"]),
+                "--prepared-sha256", str(campaign["prepared_sha256"]),
+                "--output-root", str(adjoint_manifest.parent.parent),
+                "--resume"])]
 
 
 def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) -> dict:
@@ -287,11 +306,16 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                         help="plan file carrying the distributed_campaign block")
     parser.add_argument("--priority", type=int, default=SUBMISSION_PRIORITY)
     parser.add_argument("--head-grace-s", type=int, default=HEAD_PROGRESS_GRACE_S)
+    parser.add_argument("--spec", default=None,
+                        help="campaign spec for the container wrapper (default: the joint-panel dev spec)")
     parser.add_argument("--state", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
     gateway = _gateway if _gateway is not None else Gateway()
+    if args.spec:
+        global SPEC_PATH
+        SPEC_PATH = Path(args.spec)
     records_dir = Path(args.records)
     output_root = Path(args.output_root)
     state_path = (Path(args.state) if args.state is not None
