@@ -3,8 +3,6 @@ from __future__ import annotations
 from prismaquant.pipeline import (
     ArtifactSpec,
     MetricGateSpec,
-    PipelineComponentSpec,
-    compose_pipeline_spec,
     PipelineSpec,
     PipelineStageSpec,
     ResourceContract,
@@ -219,79 +217,6 @@ def test_pipeline_cli_writes_validated_default_spec(tmp_path):
     assert path.exists()
     assert loaded.validate().ok is True
     assert loaded.metadata["render_mechanisms"] == ["gptq"]
-
-
-def _synthetic_component(insert_after: str = "cache.prefetch_assignment"):
-    return PipelineComponentSpec(
-        id="synthetic_research",
-        artifacts=(ArtifactSpec(
-            "synthetic_layer_assignment",
-            "layer_config",
-            version="synthetic.v1",
-        ),),
-        gates=(MetricGateSpec(
-            name="gate.synthetic.kl",
-            metric="last_token_kl",
-            direction="lower_is_better",
-        ),),
-        stages=(PipelineStageSpec(
-            name="research.synthetic.validate",
-            component="synthetic:validate",
-            inputs=("resident_production_weight_cache",),
-            outputs=("synthetic_layer_assignment",),
-            gates=("gate.synthetic.kl",),
-            resources=(ResourceContract(
-                resource="rendered_weights",
-                owner="ProductionWeightCache",
-                residency="required",
-            ),),
-        ),),
-        insert_after=insert_after,
-        status="research",
-        default_enabled=False,
-    )
-
-
-def test_opt_in_component_composes_after_production_cache_prefetch():
-    component = _synthetic_component()
-    spec = production_pipeline_spec_from_config(
-        render_mechanisms="gptq",
-        components=(component,),
-    )
-
-    assert spec.validate().ok is True
-    stage_names = [stage.name for stage in spec.stages]
-    prefetch_idx = stage_names.index("cache.prefetch_assignment")
-    synthetic_idx = stage_names.index("research.synthetic.validate")
-    validate_idx = stage_names.index("validate.kl")
-
-    assert prefetch_idx < synthetic_idx < validate_idx
-    assert "synthetic_layer_assignment" in spec.artifact_map()
-    assert spec.metadata["components"] == [{
-        "id": "synthetic_research",
-        "status": "research",
-        "default_enabled": False,
-    }]
-
-
-def test_pipeline_cli_lists_no_shelved_research_components(capsys):
-    list_rc = main(["--list-components"])
-    listed = capsys.readouterr().out
-
-    assert list_rc == 0
-    assert listed == ""
-
-
-def test_compose_pipeline_spec_rejects_missing_component_insert_point():
-    base = default_production_pipeline_spec(render_mechanisms=())
-    bad_component = _synthetic_component(insert_after="missing.stage")
-
-    try:
-        compose_pipeline_spec(base, (bad_component,))
-    except ValueError as exc:
-        assert "insert_after stage 'missing.stage' was not found" in str(exc)
-    else:
-        raise AssertionError("expected missing insert point to fail")
 
 
 def test_pipeline_validation_rejects_parallel_rendered_weight_cache():

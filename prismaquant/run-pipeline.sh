@@ -1123,7 +1123,7 @@ esac
 # Skip-if-exists stages must refuse to reuse artifacts built under different
 # quality-affecting settings — silent reuse is the rendering-confound class
 # that has invalidated A/Bs before. WHICH settings key each artifact is
-# `pipeline.py`'s single real job (STAGE_SETTINGS_KEYS): the shell supplies
+# `pipeline.py`'s settings-hash authority (STAGE_SETTINGS_KEYS): the shell supplies
 # every value below, pipeline.py projects them onto each artifact's declared
 # key set and emits STAGE_SETTINGS_PATH; `require_stage_settings <artifact>
 # <stage> [LATE=value ...]` then reads the projection instead of re-deciding

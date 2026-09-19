@@ -244,27 +244,6 @@ def _assignment_bpp_details(
     }
 
 
-def _assignment_bpp(
-    stats: Mapping,
-    assignment: Mapping[str, str],
-    specs_by_name: Mapping[str, fr.FormatSpec],
-    *,
-    profile=None,
-    cb_serialization_context: CBSerializationContext | None = None,
-    cb_serialization_stamps: Mapping[str, object] | None = None,
-) -> float:
-    return float(
-        _assignment_bpp_details(
-            stats,
-            assignment,
-            specs_by_name,
-            profile=profile,
-            cb_serialization_context=cb_serialization_context,
-            cb_serialization_stamps=cb_serialization_stamps,
-        )["bpp"]
-    )
-
-
 def _lookup_cost_entry(costs: Mapping, name: str, fmt: str) -> Mapping | None:
     per_name = costs.get(name)
     if not isinstance(per_name, Mapping):

@@ -11,6 +11,7 @@ union with #563's docs fix-forward is complete; contract digest
 `3cb67d98…4df34`, lane schema still v10). The pin crosses v30-v32 and the
 answer moves by four facts, each an admission change (§9.4, §10):
 
+
 - **v30/v31 (master-side, already landed when the pin moved): the eight
   non-`E2M1_K2` dense cells are WITHDRAWN** — the four `TESSERA_BF16_K1` rows
   on `sm_121` and `gfx1201` (the only `recorded`-evidence dense cells, and
@@ -35,6 +36,19 @@ answer moves by four facts, each an admission change (§9.4, §10):
   pin's `serving_native_extensions` transcription) with the one window-GEMV
   row; no pinned cell is lane-gated any more, and §7.4 fingerprints a mapped
   nvfp4 `.so` as not resident, which is the honest post-retirement reading.
+
+Re-stamped (2026-09-19, `astra/simplify-redundant-machinery-20260919`)
+for **the empty pipeline-registry deletion**. No default, stage, format,
+lane, pin or ship-gate verdict changes. **The empty stage/component registry
+and `PipelineComponentSpec` composition are deleted from `pipeline.py`** — no
+live component existed, the two archived cross-layer components stay shelved
+whole, and every caller was a synthetic test (§3.6).
+
+Re-stamped (2026-09-19, `flash/717-578-634-681-753-correctness-20260919`)
+for **the correctness/env pentad** (RobTand/prismaquant#717, #578, #634,
+#681, #753). No default, stage, format, lane, pin or ship-gate verdict
+changes; the gates refuse exactly what they refused before, and say more
+about what they saw:
 
 **The gated two-repo landing (#760) is executed.** The pin is repointed to
 Tessera master's merge of #563 and the digest is the MEASURED hash of that
@@ -9346,7 +9360,7 @@ commit: (1) a `prismaquant/run-pipeline.sh` default, gate, or stage order (§3);
 menu, a scale rule, or a render lever (§5); (3) an export codec, a `config_groups` emission
 rule, or a serving invariant (§6); (4) a ship-gate threshold or what the pipeline runs versus
 echoes (§7); (5) the plugin contract — profile accessors, registry order, serving-profile
-schema, gridbook per-arch wiring (§8); (6) a serving-lane default or a promoted/reverted kernel
+schema, the pinned Tessera serving-runtime contract (§8); (6) a serving-lane default or a promoted/reverted kernel
 lever (§9). If topology changed, the affected mermaid diagram changes with it. The provenance
 block at the top must be re-stamped (date, commit, branch) on every substantive edit.
 
@@ -10360,14 +10374,22 @@ env var no pipeline stage ever set.
 
 ### 3.6 `pipeline.py` — what the contract layer actually is
 
-**It has exactly one load-bearing job, and §3.4 is it.** `pipeline.py` owns
-`STAGE_SETTINGS_KEYS` — the per-artifact declaration of which settings each build artifact's
-identity is keyed on — and the `--check-stage-settings` guard the orchestrator calls at every
-skip-if-exists site. That is the one thing the shell provably got wrong (ten artifacts with no
-guard at all, six more each holding their own opinion of their key set), and it is the one
-thing `pipeline.py` was already positioned to fix: it receives the settings and it is the only
-place where "what does this artifact depend on?" can be reviewed as a table rather than
-rediscovered per call site. Re-vet **R5**, adjudicated in favour of Lens 2's narrow promotion.
+**Its primary load-bearing job is the settings-hash authority, and §3.4 is it.**
+`pipeline.py` owns `STAGE_SETTINGS_KEYS` — the per-artifact declaration of which settings each
+build artifact's identity is keyed on — and the `--check-stage-settings` guard the orchestrator
+calls at every skip-if-exists site. That is the one thing the shell provably got wrong (ten
+artifacts with no guard at all, six more each holding their own opinion of their key set), and
+it is the one thing `pipeline.py` was already positioned to fix: it receives the settings and
+it is the only place where "what does this artifact depend on?" can be reviewed as a table
+rather than rediscovered per call site. Re-vet **R5**, adjudicated in favour of Lens 2's narrow
+promotion.
+
+It is not the *only* load-bearing part. `check_frontier_materialization` is a real fail-closed
+guard — the orchestrator calls it before `hooks` materialization on a MoE, on a checkpoint at
+or above `FRONTIER_HOOKS_MAX_PARAMETERS` (35B), or on a model whose header-only classification
+cannot be proven (`run-pipeline.sh --check-frontier-materialization`) — and `MetricGateSpec` is
+the gate type `artifact_registry.py` uses for metric comparisons. Both are code paths, not
+prose.
 
 `_HEAD_SETTINGS = (LM_HEAD_FORMAT, LM_HEAD_RENDER_ACTIVE, LM_HEAD_DP_UNPINNED)` is part of that
 load-bearing table, not descriptive spec metadata. Those axes cover every persisted cost,
@@ -10381,9 +10403,20 @@ from `render_score.resolve_render_mechanism_order`. Nothing downstream reads tha
 and its `validate()` is tautological in the production path — the spec it validates is the one
 `default_production_pipeline_spec()` just generated from its own hardcoded `ResourceContract`s,
 and `run-pipeline.sh` never passes `--input`. Treat the *spec* half as documentation with a
-linter. Coverage stays partial in both directions by choice (re-vet: modelling the ten
-executed-but-unmodelled stages would be fiction-surface without teeth): `validate.vllm_smoke` is
-always stripped and `validate.kl` is stripped whenever `SELECTION_MODE=surrogate`.
+linter: `--validate` can reject an invalid *declaration*, but nothing about the declaration
+constrains what a stage does at run time. Coverage stays partial in both directions by choice
+(re-vet: modelling the ten executed-but-unmodelled stages would be fiction-surface without
+teeth): `validate.vllm_smoke` is always stripped and `validate.kl` is stripped whenever
+`SELECTION_MODE=surrogate`.
+
+The empty stage/component registry, `PipelineComponentSpec`, `compose_pipeline_spec` and their
+CLI surface were deleted on 2026-09-19 (`astra/simplify-redundant-machinery-20260919`): no live
+component existed, the two cross-layer components stay shelved whole in
+`archive/cross_layer_2026-05-09/`, and every caller was a synthetic test. Reviving one is a new
+research effort, not a registry opt-in. Five compared production configs (default,
+render-mechanism, configured surrogate, validated surrogate, surrogate-no-render) emit
+byte-identical `PipelineSpec` JSON before and after (PB action
+`e6617cc1985d78c798ed7a017e2294f35b6a0fc3a1c0eedee2f3098d1cb2b403`).
 
 `APPROVED_RESOURCE_OWNERS` is now honest (D10): `rendered_weights → ProductionWeightCache`,
 `perturbed_activations → PerturbedActivationCache`, `streaming_model_weights → LayerCache`
