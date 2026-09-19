@@ -663,15 +663,24 @@ class CellKlEvidence:
     regime: str
     execution_modes: tuple[str, ...]
     receipt: str
+    #: The rung the receipt was scored at, published since Tessera contract
+    #: v32 (#560's D2b): a cell whose family covers several rungs must say
+    #: WHICH one each KL measured, or a receipt taken at one rate stands in
+    #: for every rate the cell attests.  ``None`` on every entry published
+    #: before that grammar, which is every entry the previous pin carried.
+    q256: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "kind": self.kind,
             "top_k": self.top_k,
             "regime": self.regime,
             "execution_modes": list(self.execution_modes),
             "receipt": self.receipt,
         }
+        if self.q256 is not None:
+            out["q256"] = self.q256
+        return out
 
 
 @dataclass(frozen=True)
@@ -864,6 +873,7 @@ class CellEvidence:
         """
         return [self.grade, self.smoke_status,
                 sorted(entry.as_dict()["kind"] + f"@{entry.top_k}"
+                       + (f"@q{entry.q256}" if entry.q256 is not None else "")
                        for entry in self.kl),
                 self.smoke_attribution,
                 self.smoke_control.outcome if self.smoke_control else None,
@@ -1061,6 +1071,7 @@ def _parse_evidence_artifact(payload: Any, where: str) -> EvidenceArtifact | Non
 
 def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
                         execution_modes: Sequence[str] = (),
+                        cell_rungs: Sequence[int] | None = None,
                         schema: str = LANE_ELIGIBILITY_SCHEMA_TESSERA) -> CellEvidence:
     """The ``evidence`` grammar, closed at every level, at the table's schema.
 
@@ -1069,7 +1080,11 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
     ones a stale or hand-edited table would break: an entry's regime must be
     the CELL's regime (a prefill bound written into a decode cell is the
     confusion this field exists to refuse), and the written grade must equal
-    the derived one.
+    the derived one.  Since the v32 grammar the same is true of an entry's
+    ``q256``: a bound scored at a rate the cell does not cover is another
+    cell's evidence, and ``cell_rungs`` is the covering list to check it
+    against (``None`` when the caller has not resolved the rung axis, which
+    leaves the check off rather than guessing a vocabulary).
 
     ``schema`` selects the member set: v6 is ``{grade, kl, smoke{status,
     receipt}}``; v7 adds ``smoke.attribution`` and ``smoke.control``; v8 adds
@@ -1102,7 +1117,7 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
         _require_keys(entry, spot,
                       required={"kind", "top_k", "regime", "execution_modes",
                                 "receipt"},
-                      optional=set())
+                      optional={"q256"})
         kind = entry["kind"]
         if kind not in EVIDENCE_KL_KINDS:
             raise LaneEligibilityError(
@@ -1137,11 +1152,28 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
                 f"{spot} claims execution_modes {outside} the cell does not "
                 f"cover ({sorted(execution_modes)}); a KL under a mode the "
                 "census never joined attests a runtime this cell does not scope")
+        # v32 grammar: the rung the receipt was scored at.  Positive integer
+        # when published, absent before -- and a rung this cell does not
+        # COVER is another cell's evidence exactly as a mismatched regime is.
+        q256 = entry.get("q256")
+        if q256 is not None:
+            if (not isinstance(q256, int) or isinstance(q256, bool)
+                    or q256 <= 0):
+                raise LaneEligibilityError(
+                    f"{spot}.q256 must be a positive integer rung, got "
+                    f"{q256!r}")
+            covered = tuple(cell_rungs) if cell_rungs is not None else ()
+            if covered and q256 not in covered:
+                raise LaneEligibilityError(
+                    f"{spot}.q256 {q256} is not a rung this cell covers "
+                    f"({list(covered)}); a bound scored at another rate is "
+                    "another cell's evidence")
         entries.append(CellKlEvidence(
             kind=kind, top_k=top_k, regime=str(regime),
             execution_modes=tuple(modes),
-            receipt=_require_receipt(entry["receipt"], spot)))
-    keys = [(e.kind, e.top_k, e.regime, e.execution_modes, e.receipt) for e in entries]
+            receipt=_require_receipt(entry["receipt"], spot), q256=q256))
+    keys = [(e.kind, e.top_k, e.regime, e.execution_modes, e.receipt, e.q256)
+            for e in entries]
     if len(set(keys)) != len(keys):
         raise LaneEligibilityError(
             f"{where}.kl repeats an entry; the field is a set of receipts")
@@ -1749,7 +1781,8 @@ class EligibilityCell:
             evidence = parse_cell_evidence(
                 payload["evidence"], where + ".evidence",
                 cell_regime=str(payload["regime"]),
-                execution_modes=execution_modes, schema=schema)
+                execution_modes=execution_modes,
+                cell_rungs=rungs, schema=schema)
         flags = tuple(str(v) for v in payload["requires_serve_flags"])
         if flags and status != ROUTE_STATUS_BACKED_WITH_SERVE_FLAG:
             raise LaneEligibilityError(
