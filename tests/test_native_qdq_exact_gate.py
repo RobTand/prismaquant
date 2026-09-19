@@ -127,3 +127,24 @@ def test_a_dynamic_scale_quantizer_records_that_it_is_unattested():
 def test_a_format_that_does_not_quantize_attests_nothing():
     assert require_attested_activation_oracle(
         {"quantizes_input": False}, platform="sm_121") is None
+
+
+def test_the_september_18_qkv_refusals_are_one_code_flips_that_stay_refused():
+    """RobTand/prismaquant#717: 3 of 7 TESSERA_E2M1_K2 cells refuse.
+
+    Re-measured 2026-09-18 under the attested image
+    (vllm/vllm-openai@sha256:61fc8a89, receipts
+    frontier-qwen3-0.6b-20260918-panels/consume-native-receipts.json: 53
+    admitted, 3 refused): q/k/v_proj prefill disagree by exactly 0.015625 --
+    one E2M1 code at the block scale -- while o/gate/up/down_proj are
+    bit-exact. The executing image is refuted as the variable, so the gate
+    must keep refusing the flip rather than absorb it into a tolerance.
+    """
+    numerics = {"atol": 0.25, "rtol": 0.0}
+    for unit in ("q_proj", "k_proj", "v_proj"):
+        with pytest.raises(ValueError, match="E2M1 code flipped"):
+            validate_native_numerics(_error(0.015625, numerics), numerics,
+                                     phase="prefill", kind="qdq_numerics", exact=True)
+    for unit in ("o_proj", "gate_proj", "up_proj", "down_proj"):
+        validate_native_numerics(_error(0.0, numerics), numerics,
+                                 phase="prefill", kind="qdq_numerics", exact=True)

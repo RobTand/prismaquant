@@ -133,7 +133,8 @@ def _cost_payload(tmp_path, *, formats=(FMT,)) -> dict:
 def _v5_contract(monkeypatch):
     from prismaquant import tessera_menu as menu
     from prismaquant import tessera_runtime_contract as contract
-    from conftest import down_convert_lane_table
+    from conftest import (
+        down_convert_lane_table, project_lane_cells_onto_structures)
     from prismaquant.lane_eligibility import LANE_ELIGIBILITY_SCHEMAS
     payload = json.loads(contract.contract_path().read_text())
     block = payload["lane_eligibility"]
@@ -145,32 +146,23 @@ def _v5_contract(monkeypatch):
         # below carry the refusals on every checkout.
         pytest.skip(f"packaged lane table {block.get('schema')!r} is not readable by this "
                     "checkout's lane_eligibility (PrismaQuant #192)")
-    # This fixture builds its OWN routed-MoE population by relabelling the
-    # dense cells, which was unambiguous when the packaged contract carried
-    # no routed_moe cell at all. Since Tessera's contract v17 it carries two,
-    # at the same (platform, family, regime, residency) scope the relabelled
-    # copies would claim -- and two cells covering one scope is refused,
-    # because route resolution would depend on cell order. So the packaged
-    # routed-MoE cells are dropped first and the synthesized population is
-    # the only one: a controlled fixture, not a mix of two sources.
-    block["cells"] = [cell for cell in block["cells"]
-                      if cell["structure"] != "routed_moe"]
-    extra = copy.deepcopy(block["cells"])
-    for cell in extra:
-        cell["id"] += "_expert_fixture"
-        cell["structure"] = "routed_moe"
-    block["cells"].extend(extra)
-    if "routed_moe" not in block["structures"]:
-        # The packaged contract has DECLARED routed_moe since Tessera's
-        # contract v17; appending unconditionally made a duplicate id, which
-        # the reader refuses ("structures must be a non-empty list of unique
-        # ids").  This fixture never noticed because it skipped on every
-        # checkout whose reader could not parse the packaged table -- the
-        # skip above names PrismaQuant #192, and this branch is that re-pin,
-        # so the guard now passes and the body runs for the first time.
-        block["structures"].append("routed_moe")
+    # This fixture builds its OWN routed-MoE population from the packaged
+    # cells. It used to relabel the dense cells, which was unambiguous when
+    # the packaged contract carried no routed_moe cell at all; since
+    # Tessera's contract v23 (lane schema v10) family coverage is
+    # structure-specific -- the dense cells publish TESSERA_E2M1_K2 only and
+    # TESSERA_E4M3_K1, the rung this module prices, only as routed_moe --
+    # so the relabel left the population with no E4M3 cell in either
+    # structure and admission (correctly) refused the selected rung. The
+    # population is now the packaged scopes re-addressed onto both
+    # structures (``project_lane_cells_onto_structures``): each (platform,
+    # family, regime) scope keeps its own cell per structure, cloned from
+    # that scope's cell so the rung/activation facts are the family's, and
+    # only the structure key -- a lookup discriminator, never an admission
+    # input -- is synthesized.
+    payload = project_lane_cells_onto_structures(payload, ("dense", "routed_moe"))
     # Down-convert through the one helper that owns this, rather than by
-    # rewriting the schema string in place: the packaged table is v9 now, and
+    # rewriting the schema string in place: the packaged table is v10 now, and
     # setting the string to v5 while leaving v6+'s `evidence` block behind
     # builds a table the reader refuses ("unknown field(s) ['evidence']").
     # The helper drops what each older grammar did not publish; the image is

@@ -274,9 +274,13 @@ then on each box clone the bundle and `pip install --no-deps
 interpreters that was one bundle plus three builds (dl380g10, sparky,
 sparklina), 72-211 s each through PrismaBuild. For `-tessera-79ddd4c60` the
 bundle is `/mnt/shared/tessera-pins/tessera-79ddd4c60.bundle` (single
-`refs/heads/pin-79ddd4c60`); sparky's thin sibling
-`pq-cu130-tessera-79ddd4c60` is provisioned, the dl380g10/sparklina siblings
-are owed before this pin can merge.
+`refs/heads/pin-79ddd4c60`); the GPU siblings `pq-cu130-tessera-79ddd4c60`
+are provisioned on sparky and on sparklina (each venv's `direct_url.json`
+`vcs_info` names the pin; measured 2026-09-19), while the dl380g10 x86
+sibling is owed (RobTand/prismaquant#753, RobTand/prismabuild#658;
+re-provisioning waits for an idle fleet and is the fleet owner's call).
+dl380g10's older git-commit siblings (`-tessera-4c384e60`,
+`-tessera-7dbbacbd`) are behind the pin by construction.
 
 The fleet default `pb-cpu` does NOT satisfy the guard and never did for this
 pin: the x86 workers' `pb-cpu` carries no `tessera` distribution at all, so

@@ -1,6 +1,10 @@
 """CPU contract checks for the experimental four-unit screen preparation."""
 import copy
 import importlib.util
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -188,20 +192,52 @@ def _environment():
         PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE='0')
 
 
-def test_cpu_preflight_checks_actual_integrated_api_and_frozen_environment():
-    import torch
+def test_cpu_preflight_checks_actual_integrated_api_and_frozen_environment(tmp_path):
+    # RobTand/prismaquant#634: integrated_cpu_preflight refuses once CUDA is
+    # initialized, so running it in-process makes the verdict depend on which
+    # tests shared the worker before it. Run the whole check -- the passing
+    # case plus every missing/changed environment refusal -- in one fresh
+    # interpreter whose CUDA state no earlier test can have touched.
     from experiments.glm_native_wire_screen import integrated_cpu_preflight
     activation, environment = _environment()
-    result = integrated_cpu_preflight(environment, activation, environ=environment)
-    assert result['passed'] and not result['gpu_initialized']
-    assert not torch.cuda.is_initialized()
-    for name in environment:
-        missing = dict(environment); missing.pop(name)
-        with pytest.raises(ValueError, match='omits a required'):
-            integrated_cpu_preflight(missing, activation, environ=environment)
-        changed = dict(environment, **{name: 'different'})
-        with pytest.raises(ValueError, match='environment differs'):
-            integrated_cpu_preflight(environment, activation, environ=changed)
+    assert integrated_cpu_preflight.__module__ == 'experiments.glm_native_wire_screen'
+    driver = tmp_path/'cpu_preflight_driver.py'
+    repo_root = str(Path(__file__).parents[1].resolve())
+    driver.write_text(
+        'import json, sys\n'
+        f'sys.path.insert(0, {repo_root!r})\n'
+        'import torch\n'
+        'from pathlib import Path\n'
+        'from experiments.glm_native_wire_screen import integrated_cpu_preflight\n'
+        'payload = json.loads(Path(sys.argv[1]).read_text())\n'
+        'activation, environment = payload["activation"], payload["environment"]\n'
+        'result = integrated_cpu_preflight(environment, activation, environ=payload["environ"])\n'
+        'assert result["passed"] and not result["gpu_initialized"]\n'
+        'assert not torch.cuda.is_initialized()\n'
+        'for name in environment:\n'
+        '    missing = dict(environment); missing.pop(name)\n'
+        '    try:\n'
+        '        integrated_cpu_preflight(missing, activation, environ=payload["environ"])\n'
+        '    except ValueError as error:\n'
+        '        assert "omits a required" in str(error), (name, str(error))\n'
+        '    else:\n'
+        '        raise AssertionError(f"missing {name} passed")\n'
+        '    changed = dict(environment, **{name: "different"})\n'
+        '    try:\n'
+        '        integrated_cpu_preflight(environment, activation, environ=changed)\n'
+        '    except ValueError as error:\n'
+        '        assert "environment differs" in str(error), (name, str(error))\n'
+        '    else:\n'
+        '        raise AssertionError(f"changed {name} passed")\n'
+        'print(json.dumps({"status": "preflight_clean", "names": len(environment)}))\n')
+    payload = tmp_path/'cpu_preflight_payload.json'
+    payload.write_text(json.dumps(dict(activation=activation, environment=environment,
+                                       environ=dict(environment))))
+    completed = subprocess.run(
+        [sys.executable, str(driver), str(payload)], cwd=Path(__file__).parents[1],
+        env=dict(os.environ, OMP_NUM_THREADS='1'), capture_output=True, text=True, timeout=600)
+    assert completed.returncode == 0, completed.stderr[-4000:]
+    assert json.loads(completed.stdout.strip())['status'] == 'preflight_clean'
 
 
 def test_actual_integrated_authenticator_refuses_partial_capture_before_source_read(tmp_path):

@@ -82,6 +82,84 @@ def normalize_boundary_storage(config):
     return {**config, "directory": str(Path(config["directory"]).resolve())}
 
 
+BOUNDARY_PARTITION_RANGE_SCHEMA = "prismaquant.boundary_partition_range.v1"
+
+
+def plan_boundary_partition_ranges(*, n_partitions, n_ranges):
+    """Split P calibration partitions into N contiguous disjoint ranges.
+
+    A joint AURA boundary capture is data-parallel over calibration
+    partitions: each entry is written under its own exact ``(batch,
+    boundary)`` coordinates as an independent file, and no range reads
+    another's (PQ #738). This function only *names* the quanta -- it
+    schedules nothing, owns no bytes and builds no dispatcher. Execution,
+    placement and balancing stay PrismaBuild's: one campaign row per range
+    produces that range's entries, and :func:`verify_boundary_partition_coverage`
+    checks the union before anything downstream reads it as one capture.
+    """
+    if type(n_partitions) is not int or n_partitions <= 0:
+        raise ValueError("boundary partition ranges require a positive partition count")
+    if type(n_ranges) is not int or not 1 <= n_ranges <= n_partitions:
+        raise ValueError("boundary partition ranges require 1 <= n_ranges <= n_partitions")
+    base, extra = divmod(n_partitions, n_ranges)
+    ranges, start = [], 0
+    for index in range(n_ranges):
+        width = base + (1 if index < extra else 0)
+        ranges.append({
+            "schema": BOUNDARY_PARTITION_RANGE_SCHEMA,
+            "range_index": index,
+            "n_ranges": n_ranges,
+            "n_partitions": n_partitions,
+            "partition_start": start,
+            "partition_end": start + width,
+            "partitions": width,
+        })
+        start += width
+    return ranges
+
+
+def verify_boundary_partition_coverage(ranges, *, n_partitions):
+    """Refuse a range set whose union is not exactly ``[0, n_partitions)``.
+
+    Gaps would silently drop calibration partitions from the merged capture;
+    overlaps would let two rows publish one entry. Both refuse here, before
+    the merge, rather than inside it.
+    """
+    if type(n_partitions) is not int or n_partitions <= 0:
+        raise ValueError("boundary partition coverage requires a positive partition count")
+    items = list(ranges)
+    if not items:
+        raise ValueError("boundary partition coverage requires at least one range")
+    seen = set()
+    for entry in items:
+        if not isinstance(entry, dict) or entry.get("schema") != BOUNDARY_PARTITION_RANGE_SCHEMA:
+            raise ValueError("boundary partition range has an unknown schema")
+        for key in ("range_index", "n_ranges", "n_partitions",
+                    "partition_start", "partition_end", "partitions"):
+            if key not in entry:
+                raise ValueError(f"boundary partition range is missing {key}")
+        if entry["n_partitions"] != n_partitions or entry["n_ranges"] != len(items):
+            raise ValueError("boundary partition range disagrees with its coverage set")
+        start, end = entry["partition_start"], entry["partition_end"]
+        if (type(start) is not int or type(end) is not int
+                or not 0 <= start < end <= n_partitions):
+            raise ValueError("boundary partition range has out-of-scope coordinates")
+        if end - start != entry["partitions"]:
+            raise ValueError("boundary partition range width disagrees with its coordinates")
+        if entry["range_index"] in seen:
+            raise ValueError("boundary partition range index repeats")
+        seen.add(entry["range_index"])
+    covered = sorted((entry["partition_start"], entry["partition_end"]) for entry in items)
+    cursor = 0
+    for start, end in covered:
+        if start != cursor:
+            raise ValueError("boundary partition ranges leave a gap or overlap")
+        cursor = end
+    if cursor != n_partitions:
+        raise ValueError("boundary partition ranges under-cover the partitions")
+    return sorted(items, key=lambda entry: entry["range_index"])
+
+
 def _state_tensors(value):
     """Closed source-metadata grammar: opaque tensor owners must refuse."""
     from collections.abc import Mapping

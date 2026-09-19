@@ -97,15 +97,39 @@ def test_sampled_research_bundle_keeps_same_source_hessian_encoder_and_wire_gate
 
 
 @pytest.mark.parametrize('kind', ['dense', 'expert'])
-def test_selected_bundle_refuses_same_size_wire_change_after_cost(tmp_path, kind):
-    _, names, records, handoff, metadata, data = fixture(tmp_path)
+def test_same_size_wire_change_passes_the_bundle_and_refuses_at_export_intake(tmp_path, kind):
+    # The builder publishes the receipts and locates and sizes each blob; the
+    # exporter hashes the bytes it reads.  A same-size content change therefore
+    # builds and refuses where the blob is consumed (PrismaQuant #641, #643).
+    from tessera.cached_unit import CachedUnitBundle, verify_cached_unit
+    source, names, records, handoff, metadata, data = fixture(tmp_path)
     name = DENSE if kind == 'dense' else next(name for name in names if name != DENSE)
     path = tmp_path / records[name]['file']
     raw = path.read_bytes()
     path.write_bytes(bytes([raw[0] ^ 1]) + raw[1:])
-    with pytest.raises(TesseraExportLaneError, match='wire|sha256'):
-        selected_cached_units_manifest({name: FMT for name in names}, metadata, handoff,
-                                       data, schema='tessera.cached_units.v1')
+    manifest = selected_cached_units_manifest(
+        {name: FMT for name in names}, metadata, handoff, data,
+        schema='tessera.cached_units.v1')
+    bundle = CachedUnitBundle(manifest, tmp_path, set(names), source)
+    blob, record = bundle.read(name)
+    with pytest.raises(ValueError, match='blob size/sha256 mismatch'):
+        verify_cached_unit(blob, record, record['identity'])
+
+
+def test_manifest_builder_reads_no_wire_bytes(tmp_path, monkeypatch):
+    """The builder locates and sizes each blob; hashing stays at intake (#643)."""
+    _, names, records, handoff, metadata, data = fixture(tmp_path)
+    reads = []
+    real_read_bytes = Path.read_bytes
+
+    def counting(self, *args, **kwargs):
+        reads.append(str(self))
+        return real_read_bytes(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", counting)
+    selected_cached_units_manifest({name: FMT for name in names}, metadata, handoff,
+                                   data, schema='tessera.cached_units.v1')
+    assert reads == [], "the manifest build must not read any blob bytes"
 
 
 @pytest.mark.parametrize("change,match", [
@@ -113,7 +137,7 @@ def test_selected_bundle_refuses_same_size_wire_change_after_cost(tmp_path, kind
     ("source", "source differs from checkpoint seal"),
     ("hessian", "Hessian differs from checkpoint seal"),
     ("encoder", "encoder differs from checkpoint seal"),
-    ("wire", "dense wire differs from measured receipt"),
+    ("wire", "does not match its receipt|escapes the campaign directory"),
     ("coverage", "does not cover the full source roster"),
 ])
 def test_missing_or_changed_selected_evidence_refuses(tmp_path, change, match):
