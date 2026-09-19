@@ -107,9 +107,12 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
                 f"{path}: campaign block differs (mixed campaign)")
     receipts = {record.get("adjoint", {}).get("receipt_sha256")
                 for _, record in loaded}
-    if len(receipts) != 1 or None in receipts:
+    if len(receipts) != 1:
         raise DispatchRefused(
             "layer records do not share one stage-A receipt digest")
+    # Before stage A publishes, the sealed records bind a null receipt
+    # digest (§5.2 seals records first); after, they uniformly bind the
+    # receipt file's digest. Mixed bindings are a mixed campaign.
     ordered = sorted(loaded,
                      key=lambda item: item[1].get("layer", -1),
                      reverse=True)
@@ -171,7 +174,7 @@ def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) 
                 "(stale receipt)")
     digest = _sha_bytes(receipt_path.read_bytes())
     expected = records[0][1]["adjoint"]["receipt_sha256"]
-    if digest != expected:
+    if expected is not None and digest != expected:
         raise DispatchRefused(
             f"{receipt_path}: digest {digest} does not match the sealed "
             f"receipt digest {expected} (moved or mismatched receipt)")
