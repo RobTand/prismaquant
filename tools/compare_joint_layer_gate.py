@@ -54,8 +54,34 @@ def _load_unit(checkpoint_dir: Path, qname: str, identity_sha256: str) -> dict:
 
 #: State fields that bind the journal's identity, not the measurement: the
 #: envelopes compared are the measured rows themselves (§9.3: "identity
-#: extras aside").
-IDENTITY_STATE_FIELDS = frozenset()
+#: extras aside" -- the journals are identity-bound, so provenance the two
+#: sides cannot share is excluded before hashing).
+IDENTITY_STATE_FIELDS = frozenset({
+    # The single run stamps the source-transition execution provenance per
+    # unit; a quantum carries the campaign binding in its payload instead.
+    "execution_provenance",
+    # Prepared/installed render-tensor proofs and eval observation tallies
+    # are owner-side bookkeeping, not measured cost.
+    "source_weight_identity",
+    "joint_eval_observations",
+})
+
+
+def diff_paths(left: Mapping, right: Mapping, *, prefix: str = "") -> list[str]:
+    """Recursive key paths where two envelopes disagree (gate debugging)."""
+    paths: list[str] = []
+    for key in sorted(set(left) | set(right)):
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if key not in left or key not in right:
+            paths.append(f"{path} (present on "
+                         f"{'single' if key in left else 'quantum'} side only)")
+            continue
+        lvalue, rvalue = left[key], right[key]
+        if isinstance(lvalue, Mapping) and isinstance(rvalue, Mapping):
+            paths.extend(diff_paths(lvalue, rvalue, prefix=path))
+        elif lvalue != rvalue:
+            paths.append(path)
+    return paths
 
 
 def measurement_envelope(state: Mapping) -> dict:
@@ -96,6 +122,7 @@ def compare_layer(single_dir: Path, quantum_dir: Path, *, layer: int | None,
         "pending": sorted(single_names ^ quantum_names),
         "matched": 0,
         "differed": [],
+        "differed_paths": {},
     }
     for name in shared:
         left = _load_unit(single_dir, name, single["identity_sha256"])
@@ -104,6 +131,8 @@ def compare_layer(single_dir: Path, quantum_dir: Path, *, layer: int | None,
             verdict["matched"] += 1
         else:
             verdict["differed"].append(name)
+            verdict["differed_paths"][name] = diff_paths(
+                measurement_envelope(left), measurement_envelope(right))[:32]
     verdict["verdict"] = ("match" if shared and not verdict["differed"]
                           and not verdict["pending"]
                           else ("differ" if verdict["differed"] else "pending"))
@@ -159,6 +188,9 @@ def main(argv=None) -> int:
             line += f" pending {len(verdict['pending'])}"
         if verdict["differed"]:
             line += f" differed {verdict['differed'][:8]}"
+            for name in verdict["differed"][:4]:
+                for path in verdict.get("differed_paths", {}).get(name, [])[:8]:
+                    line += f"\n      {name}: {path}"
         print(line)
     record = {"schema": "prismaquant.joint_layer_gate_comparison.v1",
               "single_run": str(args.single_run),
