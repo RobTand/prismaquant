@@ -558,7 +558,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
                           "units": [0, 0]})
 
     roster = list(campaign["roster"])
-    if sorted(merged) != roster and not gaps:
+    if sorted(merged) != sorted(roster) and not gaps:
         missing = [q for q in roster if q not in merged]
         raise JoinRefused(
             f"coverage: complete campaign is short {len(missing)} roster "
