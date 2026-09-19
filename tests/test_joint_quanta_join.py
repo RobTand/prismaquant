@@ -108,9 +108,14 @@ def campaign(probe):
     phases = [{"name": "head", "bytes": 512, "cumulative_bytes": 512}]
     for layer in range(N_LAYERS):
         size = 1024 * (layer + 1)
-        for half in (size // 2, size - size // 2):
-            entries.append({"path": f"/mnt/shared/layer-{layer}.bin",
-                            "offset": 0, "bytes": half, "sha256": None})
+        halves = (size // 2, size - size // 2)
+        # The first entry of each layer phase is a source extent under the
+        # plan's model dir (the stage-A adjoint manifest requires one per
+        # layer); the rest are render-cache paths outside it.
+        entries.append({"path": f"/mnt/shared/models/TEST/shard-{layer}.safetensors",
+                        "offset": 0, "bytes": halves[0], "sha256": None})
+        entries.append({"path": f"/mnt/shared/rows/row-{layer}/cache/w0.pt",
+                        "offset": 0, "bytes": halves[1], "sha256": None})
         phases.append({"name": f"layer-{layer}", "bytes": size,
                        "cumulative_bytes": phases[-1]["cumulative_bytes"] + size})
     parent_manifest = {
@@ -474,7 +479,8 @@ def test_adjoint_receipt_digest_is_checked(tmp_path, campaign, probe):
     unbound = _record(campaign, 0, root_b)
     unbound["adjoint"]["receipt_sha256"] = None
     unbound["identity_sha256"] = canonical_json_sha256(
-        unbound, where="unbound fixture record")
+        {k: v for k, v in unbound.items() if k != "identity_sha256"},
+        where="unbound fixture record")
     provenance = _payload_provenance(campaign, unbound)
     _write_quantum(root_b, campaign, probe, 0, provenance=provenance,
                    record=unbound)
