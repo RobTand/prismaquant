@@ -13,7 +13,6 @@ import gzip
 import hashlib
 import json
 import os
-import pickle
 
 import pytest
 
@@ -533,158 +532,37 @@ def test_canonical_identity_matches_cost_stage_checkpoint():
             headless, where="quantum record") == record["identity_sha256"]
 
 
-def _join_fixtures(tmp_path):
-    from pathlib import Path
-    tmp_path = Path(tmp_path)
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    roster = ["q.a", "q.b", "q.c"]
-    campaign = {
-        "plan_sha256": "0" * 64, "prepared_sha256": "1" * 64,
-        "read_manifest_sha256": "2" * 64,
-        "campaign_scope": {"schema": "s", "kind": "fixture"},
-        "unit_roster_sha256": jl.roster_digest(roster),
-        "implementation_sha256": "4" * 64,
-        "formats_by_qname": {"q.a": ["F"], "q.b": ["F"], "q.c": ["F", "G"]},
-    }
-    payloads = {
-        "layer-000": {"costs": {"q.a": {"F": [1]}, "q.b": {"F": [2]}},
-                      "provenance": {"plan_sha256": "0" * 64,
-                                     "prepared_sha256": "1" * 64,
-                                     "campaign_scope": {"schema": "s", "kind": "fixture"},
-                                     "implementation_sha256": "4" * 64,
-                                     "quantum_identity_sha256": "a0" * 32}},
-        "layer-001": {"costs": {"q.c": {"F": [3], "G": [4]}},
-                      "provenance": {"plan_sha256": "0" * 64,
-                                     "prepared_sha256": "1" * 64,
-                                     "campaign_scope": {"schema": "s", "kind": "fixture"},
-                                     "implementation_sha256": "4" * 64,
-                                     "quantum_identity_sha256": "a1" * 32}},
-    }
-    receipts = []
-    for quantum_id, payload in payloads.items():
-        cost_path = tmp_path / f"{quantum_id}.pkl"
-        cost_path.write_bytes(pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
-        status = {"schema": "prismaquant.joint_layer_quantum.status.v1",
-                  "quantum_id": quantum_id,
-                  "identity_sha256": payload["provenance"]["quantum_identity_sha256"],
-                  "status": "complete", "units": [len(payload["costs"]), 99],
-                  "unix": 1700000000}
-        status_path = tmp_path / f"{quantum_id}.status.json"
-        status_path.write_text(json.dumps(status), encoding="utf-8")
-        receipts.append({
-            "quantum_id": quantum_id, "cost_path": str(cost_path),
-            "cost_sha256": hashlib.sha256(cost_path.read_bytes()).hexdigest(),
-            "identity_sha256": payload["provenance"]["quantum_identity_sha256"],
-            "status_path": str(status_path)})
-    return receipts, campaign, roster
+def test_canonical_helpers_delegate_to_the_shared_implementation():
+    """#787 B5: the producer no longer carries a second canonical-JSON
+    spelling; the wrappers are the shared cost_stage_checkpoint bytes."""
+    from prismaquant import cost_stage_checkpoint
+    value = {"b": [1, 2.5, None], "a": "ü", "nested": {"k": [True]}}
+    assert jl.canonical_bytes(value) == cost_stage_checkpoint.canonical_json_bytes(
+        value, where="delegation check")
+    assert jl.canonical_sha256(value) == \
+        cost_stage_checkpoint.canonical_json_sha256(value, where="delegation")
+    with pytest.raises(ValueError):
+        jl.canonical_bytes({"bad": float("nan")})
 
 
-def _rows_ok(costs):
-    for qname, formats in costs.items():
-        for fmt, row in formats.items():
-            assert isinstance(row, list)
-    return True
+def test_qname_layer_reads_the_layer_grammar():
+    """#787 D5: one spelling of the roster's layer grammar, shared with the
+    joiner (gap unit naming)."""
+    assert jl.qname_layer(
+        "model.language_model.layers.13.mlp.gate_proj") == 13
+    assert jl.qname_layer("model.layers.0.self_attn.q_proj") == 0
+    assert jl.qname_layer("model.layers.notanumber.q_proj") is None
+    assert jl.qname_layer("no.layers.here") is None
+    assert jl.qname_layer(None) is None
 
 
-def test_joiner_complete_is_deterministic_under_permutation(tmp_path):
-    receipts, campaign, roster = _join_fixtures(tmp_path)
-    first = jl.join_layer_quanta(receipts, None, campaign, roster,
-                                 row_validator=_rows_ok, joined_unix=1700000001)
-    flipped = jl.join_layer_quanta(list(reversed(receipts)), None, campaign, roster,
-                                   row_validator=_rows_ok, joined_unix=1700000001)
-    assert first["status"] == "complete" and first["gaps"] == []
-    assert set(first["payload"]["costs"]) == set(roster)
-    assert first["payload_bytes"] == flipped["payload_bytes"]
-    assert first["coverage_sha256"] == flipped["coverage_sha256"]
+def test_the_joiner_is_not_colocated():
+    """#787 survival decision (D5): one joiner -- joint_quanta_join. The
+    producer module is the data plane only; the parallel joiner that refused
+    the merged joiner's bytes is gone, not adapted."""
+    import prismaquant.joint_quanta_join
 
-
-def test_joiner_gap_is_named_and_refused_downstream(tmp_path):
-    receipts, campaign, roster = _join_fixtures(tmp_path)
-    gapped = []
-    for receipt in receipts:
-        if receipt["quantum_id"] != "layer-001":
-            gapped.append(receipt)
-            continue
-        status = json.loads(open(receipt["status_path"], encoding="utf-8").read())
-        status["status"] = "gapped"
-        with open(receipt["status_path"], "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(status))
-        gapped.append(receipt)
-    joined = jl.join_layer_quanta(gapped, None, campaign, roster,
-                                  row_validator=_rows_ok, joined_unix=1700000001)
-    assert joined["status"] == "gapped"
-    # The gapped quantum's rows do not merge: the gap names the quantum and
-    # the unit its absence leaves uncovered.
-    assert joined["gaps"] == ["layer-001", "unit:q.c"]
-    assert set(joined["payload"]["costs"]) == {"q.a", "q.b"}
-    with pytest.raises(ValueError, match="layer-001"):
-        jl.refuse_gapped_for_allocation(joined["results"])
-    whole, _, _ = _join_fixtures(tmp_path / "whole")
-    complete = jl.join_layer_quanta(whole, None, campaign, roster,
-                                    row_validator=_rows_ok, joined_unix=1700000001)
-    assert complete["status"] == "complete"
-    jl.refuse_gapped_for_allocation(complete["results"])
-
-
-def test_joiner_missing_unit_names_its_quantum(tmp_path):
-    receipts, campaign, roster = _join_fixtures(tmp_path)
-    layered_roster = ["model.language_model.layers.0.mlp.gate_proj",
-                      "model.language_model.layers.1.mlp.gate_proj"]
-    layered_campaign = dict(campaign,
-                            unit_roster_sha256=jl.roster_digest(layered_roster),
-                            formats_by_qname={name: ["F"] for name in layered_roster})
-    payload = {"costs": {"model.language_model.layers.0.mlp.gate_proj": {"F": [1]}},
-               "provenance": {"plan_sha256": "0" * 64, "prepared_sha256": "1" * 64,
-                              "campaign_scope": {"schema": "s", "kind": "fixture"},
-                              "implementation_sha256": "4" * 64,
-                              "quantum_identity_sha256": "c0" * 32}}
-    cost_path = tmp_path / "layer-000b.pkl"
-    cost_path.write_bytes(pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
-    status = {"schema": "prismaquant.joint_layer_quantum.status.v1",
-              "quantum_id": "layer-000", "identity_sha256": "c0" * 32,
-              "status": "complete", "units": [1, 2], "unix": 1700000000}
-    status_path = tmp_path / "layer-000b.status.json"
-    status_path.write_text(json.dumps(status), encoding="utf-8")
-    receipt = {"quantum_id": "layer-000", "cost_path": str(cost_path),
-               "cost_sha256": hashlib.sha256(cost_path.read_bytes()).hexdigest(),
-               "identity_sha256": "c0" * 32, "status_path": str(status_path)}
-    joined = jl.join_layer_quanta([receipt], None, layered_campaign, layered_roster,
-                                  row_validator=_rows_ok, joined_unix=7)
-    assert joined["status"] == "gapped"
-    assert joined["gaps"] == ["layer-001"]
-
-
-def test_joiner_custody_refusals(tmp_path):
-    receipts, campaign, roster = _join_fixtures(tmp_path)
-    retargeted = copy.deepcopy(receipts)
-    retargeted[0]["identity_sha256"] = "b" * 64
-    with pytest.raises(ValueError, match="[Cc]ustody|identity"):
-        jl.join_layer_quanta(retargeted, None, campaign, roster,
-                             row_validator=_rows_ok, joined_unix=1)
-    foreign = copy.deepcopy(campaign)
-    foreign["plan_sha256"] = "9" * 64
-    with pytest.raises(ValueError, match="[Cc]ustody|provenance|[Cc]ampaign"):
-        jl.join_layer_quanta(receipts, None, foreign, roster,
-                             row_validator=_rows_ok, joined_unix=1)
-
-
-def test_joiner_row_defect_names_qname(tmp_path):
-    receipts, campaign, roster = _join_fixtures(tmp_path)
-    def refuse_b(costs):
-        if "q.b" in costs:
-            raise ValueError("bad row q.b")
-        return True
-    with pytest.raises(ValueError, match="q\\.b"):
-        jl.join_layer_quanta(receipts, None, campaign, roster,
-                             row_validator=refuse_b, joined_unix=1)
-
-
-def test_joiner_writes_deterministic_files(tmp_path):
-    receipts, campaign, roster = _join_fixtures(tmp_path)
-    dest = tmp_path / "joined"
-    first = jl.join_layer_quanta(receipts, str(dest), campaign, roster,
-                                 row_validator=_rows_ok, joined_unix=1700000001)
-    assert (dest / "joint-cost.pkl").read_bytes() == first["payload_bytes"]
-    results = json.loads((dest / "results.json").read_text(encoding="utf-8"))
-    assert results["distributed"]["gaps"] == []
-    assert results["distributed"]["coverage_sha256"] == first["coverage_sha256"]
+    assert not hasattr(jl, "join_layer_quanta")
+    assert not hasattr(jl, "refuse_gapped_for_allocation")
+    assert hasattr(prismaquant.joint_quanta_join, "join_joint_quanta")
+    assert hasattr(prismaquant.joint_quanta_join, "load_joint_cost_for_allocation")
