@@ -13,7 +13,7 @@ declarative contract layer, not the executor.
 | Stage | Modules |
 |---|---|
 | Probe | `incremental_probe` |
-| Cost | `incremental_measure_quant_cost`, `production_render_cost`, `aura_cost` (`COST_MODE=aura`), `expert_empirical_cost` (MoE hybrid), `aura_additivity_gate` (trust-region check) |
+| Cost | `incremental_measure_quant_cost`, `production_render_cost`, `aura_cost` (`COST_MODE=aura`), `expert_empirical_cost` (MoE hybrid), `aura_additivity_gate` (trust-region check), `joint_cost_stage_a` (distributed campaign stage A: adjoint capture, lane alias `joint_adjoint_capture`), `joint_cost_quantum` (stage B: one layer quantum; dev mode) |
 | Allocate | `allocator` |
 | Walk gate | `model_walk` (R5 discovery walker: intake walk + fail-closed export gate, `python3 -m prismaquant.model_walk --model <dir>`) |
 | Cache | `build_production_cache`, `production_recache` |

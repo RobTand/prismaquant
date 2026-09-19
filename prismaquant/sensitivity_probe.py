@@ -1833,6 +1833,53 @@ class SharedStateCotangents:
                 if isinstance(item, torch.Tensor):
                     yield pos, item
 
+    # -- serialization ----------------------------------------------------
+    def state_dict(self) -> dict:
+        """The completed shared-pass adjoint state, CPU-pinned and picklable.
+
+        The distributed cost campaign's strided adjoint checkpoints serialize
+        this beside the activation cotangent (contract
+        ``distributed_campaign_2026-09-19.md`` §2.2 stage A): only the
+        completed accumulator crosses a serialization boundary -- a live
+        graft belongs to the current autograd graph, so serializing mid-layer
+        refuses exactly like ``resident_tensors`` does.
+        """
+        if self._live or self._containers or self._live_ids:
+            raise RuntimeError("shared cotangent serialization requires a quiescent owner")
+        return {
+            "enabled": bool(self.enabled),
+            "accumulators": [
+                {
+                    "slot": [slot[0], slot[1], slot[2]],
+                    "tensor": tensor.detach().to(
+                        device="cpu", copy=True, memory_format=torch.contiguous_format),
+                }
+                for slot, tensor in self._acc.items()
+            ],
+            "counters": {name: int(getattr(self, name))
+                         for name in ("n_grafted", "n_harvested", "n_seeded", "n_no_grad")},
+            "nondifferentiable": list(self.nondifferentiable),
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        """Restore ``state_dict`` output into this (fresh) owner."""
+        if self._live or self._containers or self._live_ids or self._acc:
+            raise RuntimeError("shared cotangent restore requires an empty owner")
+        if not isinstance(state, dict) or not {"enabled", "accumulators", "counters"} <= set(state):
+            raise ValueError("shared cotangent state dict is not one")
+        self.enabled = bool(state["enabled"])
+        for row in state["accumulators"]:
+            slot = (row["slot"][0], row["slot"][1], row["slot"][2])
+            if slot in self._acc:
+                raise ValueError("shared cotangent state dict repeats a slot")
+            tensor = row["tensor"]
+            if not isinstance(tensor, torch.Tensor):
+                raise ValueError("shared cotangent state dict slot is not a tensor")
+            self._acc[slot] = tensor.detach().clone(memory_format=torch.contiguous_format)
+        for name, value in state["counters"].items():
+            setattr(self, name, int(value))
+        self.nondifferentiable = [str(item) for item in state.get("nondifferentiable", [])]
+
     # -- diagnostics ------------------------------------------------------
     def fork_for_replay(self, *, max_resident_bytes: int) -> "SharedStateCotangents":
         """Fork completed adjoints for one disposable target replay.

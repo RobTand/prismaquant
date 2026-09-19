@@ -418,10 +418,21 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
         scratch = None
         if complete:
             scratch = native_operator_scratch(bound, phase=phase)
+        # #578: the observed schedule rides the observation where a gate can
+        # read it instead of living in prose. A price measured on an
+        # older-architecture schedule is not a native-hardware price, so the
+        # observation says so in its own unknown list; promoting that to a
+        # refusal is a measured-delta decision for Rob, not this gate.
+        schedule = observed_kernel_schedule(route)
+        arch = kernel_arch_status(schedule, platform=route.get("platform"))
+        unknowns = ["fixed_and_full_model_resources"] + ([] if complete else ["native_operator_scratch"])
+        if arch == "older_arch":
+            unknowns.append("native_kernel_schedule")
         observations[phase] = {"measurement": measurement.as_dict(), "median_ms": measurement.median_ms,
                                "peak_scratch_bytes": scratch, "resource_bound": bound,
                                "input_bytes": expected["input"]["logical_bytes"],
-                               "output_bytes": expected["reference_output"]["logical_bytes"]}
+                               "output_bytes": expected["reference_output"]["logical_bytes"],
+                               "kernel_schedule": schedule, "kernel_arch": arch}
     return {"schema": "prismaquant.native_dense_observation.v1", "status": "operator_evidence",
             "panel_sha256": identity_sha256(expected_panel), "receipt_sha256": expected_sha256,
             "unit": expected_panel["unit"], "format": expected_panel["format"],
@@ -430,7 +441,7 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
             "serialized_unit_bytes": expected_panel["wire"]["blob_bytes"],
             "resident_bytes": _bytes(resources["resident_bytes"], "resident"),
             "full_model_resources": None, "runtime_table_admissible": False,
-            "unknown": ["fixed_and_full_model_resources"] + ([] if complete else ["native_operator_scratch"])}
+            "unknown": unknowns}
 
 
 def require_panel_activation_attestation(panel, quantizes_input):
@@ -583,6 +594,47 @@ def require_panel_execution_scope(panel, *, executing_image):
                     "never invalidates an attestation -- drivers move all "
                     "the time and nothing is revalidated for one -- so both "
                     "sides are recorded for the card and never compared"}}
+
+
+_KERNEL_ARCH = re.compile(r"(?:sm_?|cutlass_?|cutlass3x_sm)(\d{2,3})", re.IGNORECASE)
+
+
+def observed_kernel_schedule(route):
+    """The executed kernel schedule a native route observation names, if any.
+
+    RobTand/prismaquant#578: the BF16 route's sm80 CUTLASS schedule on sm_121
+    lived only in a measurement doc, read by no gate, because the receipt
+    route carries no schedule key and the consumer had no vocabulary for one.
+    This is the vocabulary: the producer's ``kernel_schedule`` string when the
+    observation names one, else ``None``. A present-but-empty schedule is a
+    defect, not an absence.
+    """
+    schedule = (route or {}).get("kernel_schedule")
+    if schedule is None:
+        return None
+    if not isinstance(schedule, str) or not schedule.strip():
+        raise ValueError("native route kernel_schedule must be a nonempty string when present")
+    return schedule
+
+
+def kernel_arch_status(schedule, *, platform):
+    """Whether an observed schedule is native to the platform it ran on.
+
+    ``unknown`` is the honest default: no schedule observed, no platform
+    declared, or a schedule that names no ``sm`` generation. ``older_arch`` is
+    a schedule from an older generation than the platform (an sm80 schedule on
+    sm_121); generations share their tens digit's family, so an sm_120-family
+    schedule on sm_121 is ``native``, exactly as the fp4 sweep measured.
+    """
+    if schedule is None or not isinstance(platform, str):
+        return "unknown"
+    match = _KERNEL_ARCH.search(schedule)
+    here = _KERNEL_ARCH.search(platform)
+    if match is None or here is None:
+        return "unknown"
+    if int(match.group(1)) // 10 < int(here.group(1)) // 10:
+        return "older_arch"
+    return "native"
 
 
 def validate_native_numerics(error, numerics, *, phase, kind, exact=False):

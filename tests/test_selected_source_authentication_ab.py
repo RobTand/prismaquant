@@ -1,6 +1,9 @@
 """CPU-only harness checks; execute through PrismaBuild."""
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -203,18 +206,47 @@ def frozen_fixture(f,tmp_path,monkeypatch):
 
 
 def test_preflight_exact_tokens_complete_capture_no_payload_or_cuda(pair_source,tmp_path,monkeypatch):
-    from prismaquant import tessera_calibration_cache as cc
+    # RobTand/prismaquant#634: ab.preflight refuses once CUDA is initialized,
+    # so asserting a clean global CUDA state in-process makes the verdict
+    # depend on which tests shared the worker before it. Run the whole
+    # preflight -- payload guard, CUDA-init guard and the capture/token
+    # assertions -- in one fresh interpreter no earlier test can have touched.
     plan,repository,_=frozen_fixture(pair_source,tmp_path,monkeypatch)
-    old=cc.sha256
-    def guard(path,**kwargs):
-        assert not str(path).endswith('.safetensors'), 'preflight read source payload'
-        return old(path,**kwargs)
-    monkeypatch.setattr(cc,'sha256',guard)
-    monkeypatch.setattr(torch.cuda,'init',lambda:pytest.fail('preflight initialized CUDA'))
-    resources,census,capture,tokens=ab.preflight(plan,repository=repository)
-    assert capture['identity']['units']==census['unit_shapes']
-    assert tokens['shape']==[512,512]
-    assert not torch.cuda.is_initialized()
+    driver = tmp_path/'ab_preflight_driver.py'
+    repo_root = str(Path(repository).resolve())
+    driver.write_text(
+        'import json, os, sys\n'
+        f'sys.path.insert(0, {repo_root!r})\n'
+        'from pathlib import Path\n'
+        'import torch\n'
+        'payload = json.loads(Path(sys.argv[1]).read_text())\n'
+        'os.environ.update(payload["environ"])\n'
+        'from experiments import selected_source_authentication_ab as ab\n'
+        'from prismaquant import tessera_calibration_cache as cc\n'
+        'ab.SELECTED_UNITS = tuple(payload["selected_units"])\n'
+        'old = cc.sha256\n'
+        'def guard(path, **kwargs):\n'
+        '    assert not str(path).endswith(".safetensors"), "preflight read source payload"\n'
+        '    return old(path, **kwargs)\n'
+        'cc.sha256 = guard\n'
+        'def fail():\n'
+        '    raise AssertionError("preflight initialized CUDA")\n'
+        'torch.cuda.init = fail\n'
+        'resources, census, capture, tokens = ab.preflight(payload["plan"], repository=payload["repository"])\n'
+        'assert capture["identity"]["units"] == census["unit_shapes"]\n'
+        'assert tokens["shape"] == [512, 512]\n'
+        'assert not torch.cuda.is_initialized()\n'
+        'print(json.dumps({"status": "preflight_clean"}))\n')
+    payload = tmp_path/'ab_preflight_payload.json'
+    payload.write_text(json.dumps(dict(plan=plan, repository=repo_root,
+                                       environ=dict(ab.ENVIRONMENT),
+                                       selected_units=list(ab.SELECTED_UNITS))))
+    completed = subprocess.run(
+        [sys.executable, str(driver), str(payload)], cwd=repo_root,
+        env=dict(os.environ, **ab.ENVIRONMENT),
+        capture_output=True, text=True, timeout=600)
+    assert completed.returncode == 0, completed.stderr[-4000:]
+    assert json.loads(completed.stdout.strip())['status'] == 'preflight_clean'
 
 
 @pytest.mark.parametrize('mutation',['missing_capture','partial_capture','token_bytes','calibration_seed'])
