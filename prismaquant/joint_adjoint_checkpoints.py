@@ -48,17 +48,23 @@ DEFAULT_STRIDE = 8
 def derive_checkpoint_boundaries(num_layers: int, stride: int) -> tuple[int, ...]:
     """The strided cotangent checkpoint boundaries, tail first (§3.4).
 
-    ``num_layers`` (the tail cotangent boundary) then every ``stride`` below
-    it, stopping above zero: 45 layers at S=8 retains {45, 37, 29, 21, 13, 5}
-    = ceil(45/8) = 6 checkpoints, and every layer L chains at most S-1 = 7
-    render-free backwards from the nearest checkpoint at or above L+1.
+    Multiples of ``stride`` below the tail, plus the tail boundary itself:
+    45 layers at S=8 retains {45, 40, 32, 24, 16, 8} = ceil(45/8) = 6
+    checkpoints, and every layer L chains at most S-1 = 7 render-free
+    backwards from the nearest checkpoint at or above L+1. This is the same
+    set the producer's ``derive_stride`` seals (``joint_layer_quanta`` D3/D4
+    handshake notes, PR #785): stage A must publish exactly these boundaries
+    or ``bind_adjoint_receipt`` refuses the receipt. Order here is tail-first
+    (stage A serializes the tail checkpoint first); the binding compares
+    sorted sets, so order carries no identity.
     """
     num_layers, stride = int(num_layers), int(stride)
     if num_layers < 1:
         raise ValueError("checkpoint stride derivation needs a positive layer count")
     if stride < 1:
         raise ValueError("checkpoint stride must be a positive integer")
-    return tuple(range(num_layers, 0, -stride))
+    return (num_layers, *[mark for mark in range(stride, num_layers, stride)
+                          if mark != num_layers][::-1])
 
 
 def chain_layers_for(checkpoint_boundary: int, layer: int) -> tuple[int, ...]:

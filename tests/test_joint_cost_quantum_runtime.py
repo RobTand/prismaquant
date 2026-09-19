@@ -32,6 +32,11 @@ from prismaquant.joint_cost_quantum import (
     QuantumCounters,
     QuantumProgress,
     ChunkFrontier,
+    QuantumIdentityRefused,
+    quantum_layer_roster,
+    quantum_retained_state,
+    record_window_indices,
+    resolve_quantum_windows,
     run_layer_quantum_core,
     verify_quantum_identity,
 )
@@ -163,6 +168,12 @@ def _stage_a(tmp_path, monkeypatch, runner_seed=85):
 
 def _quantum_record(*, output_root, layer, checkpoint_boundary, chain, windows,
                     total_bytes, plan_sha, prepared_sha, adjoint_sha):
+    """A producer-shaped record: ``windows`` seals ordered indices only (D2).
+
+    Pass ``windows`` as a list of ``{"window_index": i}`` dicts (what the
+    producer seals); advisory ``names`` may be attached per window to
+    exercise the runtime's cross-check, but the replay never trusts them.
+    """
     root = Path(output_root) / "layer-quanta" / f"layer-{layer:03d}"
     record = {
         "schema": QUANTUM_SCHEMA,
@@ -222,9 +233,7 @@ def identity_files(tmp_path):
 
 def _valid_record(identity_files, *, layer=1, checkpoint_boundary=2, chain=(),
                   windows=None, total_bytes=100):
-    windows = windows or [{"window_index": 0, "names": ["model.layers.1.proj"],
-                           "statistics_bytes": 8, "render_file_upper_bound_bytes": 100,
-                           "candidate_count": 1}]
+    windows = windows or [{"window_index": 0}]
     return _quantum_record(
         output_root=identity_files["output_root"], layer=layer,
         checkpoint_boundary=checkpoint_boundary, chain=chain, windows=windows,
@@ -301,12 +310,24 @@ def test_cli_identity_refusal_is_exit_3(identity_files, monkeypatch, capsys):
 
 
 def test_stride_derivation_is_pinned():
-    assert derive_checkpoint_boundaries(45, 8) == (45, 37, 29, 21, 13, 5)
+    # The producer's set (PR #785, verified numbers): multiples of S below
+    # the tail plus the tail itself; stage A must publish exactly this set
+    # or bind_adjoint_receipt refuses. Order here is tail-first (stage A
+    # serializes the tail checkpoint first); the binding compares sorted sets.
+    assert derive_checkpoint_boundaries(45, 8) == (45, 40, 32, 24, 16, 8)
+    assert sorted(derive_checkpoint_boundaries(45, 8)) == [8, 16, 24, 32, 40, 45]
     assert len(derive_checkpoint_boundaries(45, 8)) == 6
     assert max(len(chain_layers_for(b, b - 8))
-               for b in derive_checkpoint_boundaries(45, 8)[:-1]) + 1 == 8 - 1 + 1
-    assert chain_layers_for(21, 13) == (20, 19, 18, 17, 16, 15, 14)
+               for b in derive_checkpoint_boundaries(45, 8)[1:]) == 7
+    assert chain_layers_for(16, 13) == (15, 14)
     assert chain_layers_for(45, 44) == ()
+    try:
+        from prismaquant.joint_layer_quanta import derive_stride
+    except ImportError:
+        pass
+    else:  # the producer's derivation, when it has landed, seals this set
+        assert sorted(derive_stride(45, 8)["checkpoints"]) == sorted(
+            derive_checkpoint_boundaries(45, 8))
 
 
 def test_stride_resolution_refuses_disagreeing_cli():
@@ -371,7 +392,10 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
             b for b in [c["boundary"] for c in receipt["checkpoints"]]
             if b >= layer + 1),
         chain=[],
-        windows=windows, total_bytes=total, plan_sha=plan_sha,
+        # Producer-shaped: indices only (D2). Membership and footprints are
+        # recomputed below, never read from the record.
+        windows=[{"window_index": index} for index in range(len(windows))],
+        total_bytes=total, plan_sha=plan_sha,
         prepared_sha=prepared_sha, adjoint_sha=adjoint_sha)
     # chain_layers must match the record's checkpoint boundary exactly
     boundary = record["adjoint"]["checkpoint_boundary"]
@@ -380,21 +404,39 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
         {k: v for k, v in record.items() if k != "identity_sha256"},
         where="record")
 
-    frontier = ChunkFrontier(chunks=record["chunks"], windows=record["windows"])
+    execution = _execution(tmp_path)
+    retained = quantum_retained_state(execution)
+    roster = quantum_layer_roster(
+        runner, {name: list(FORMATS) for name in
+                 [f"model.layers.{i}.proj" for i in range(runner.num_layers)]},
+        layer)
+    resolved = resolve_quantum_windows(
+        record, layer=layer, names=roster.names, linears=roster.linears,
+        render_formats=roster.render_formats, production_cache=fresh_cache,
+        operator_windows=retained.operator_windows,
+        retained_budget=retained.retained_budget,
+        source_bytes=retained.source_bytes)
+    # The handshake recomputes what the fixture preflight admitted.
+    assert [w["names"] for w in resolved] == [w["names"] for w in windows]
+    assert [w["render_file_upper_bound_bytes"] for w in resolved] == [
+        w["render_file_upper_bound_bytes"] for w in windows]
+
+    frontier = ChunkFrontier(chunks=record["chunks"], windows=resolved)
     counters = QuantumCounters(quantum_id=record["quantum_id"],
                                identity_sha256=record["identity_sha256"],
                                chunks=record["chunks"], frontier=frontier)
     progress = QuantumProgress(frontier=frontier, base_units=0)
-    execution = _execution(tmp_path)
     payload = run_layer_quantum_core(
         runner, fresh_cache, draw(),
         {name: list(FORMATS) for name in
          [f"model.layers.{i}.proj" for i in range(runner.num_layers)]},
         record=record, receipt=receipt, execution=execution,
         output_root=output_root, projection_backend=None, resume=False,
+        resolved_windows=resolved,
         counters=counters, progress=progress)
+    resolved_names = [name for window in resolved for name in window["names"]]
     return payload, record, counters.finish(
-        units_done=len(payload["costs"]), units_total=len(record_window_names(record)))
+        units_done=len(payload["costs"]), units_total=len(resolved_names))
 
 
 def test_quantum_matches_single_run_bitwise(tmp_path, monkeypatch):
@@ -700,5 +742,140 @@ def test_quantum_requires_dev_mode(identity_files, monkeypatch):
               "--output-root", str(identity_files["output_root"])])
 
 
-def record_window_names(record):
-    return [name for window in record["windows"] for name in window["names"]]
+def test_publish_quantum_outputs_writes_exactly_the_contract_shapes(tmp_path):
+    from prismaquant.joint_cost_quantum import publish_quantum_outputs
+
+    output_root = tmp_path / "campaign"
+    # Producer-shaped: indices only (D2) -- the unit count arrives with the
+    # resolved windows' names, not the record.
+    record = _quantum_record(
+        output_root=output_root, layer=0, checkpoint_boundary=2, chain=[1],
+        windows=[{"window_index": 0}],
+        total_bytes=100, plan_sha=_hex("d"), prepared_sha=_hex("e"),
+        adjoint_sha=_hex("f"))
+
+    def tree(root):
+        return {str(p.relative_to(root)) for p in Path(root).rglob("*")}
+
+    space = Path(record["output_space"]["root"])
+    space.mkdir(parents=True)
+    before = tree(output_root)
+    status = publish_quantum_outputs(
+        record, payload={"costs": {"model.layers.0.proj": {}}},
+        result={"schema": "prismaquant.joint_cost_quantum.execution.v1"},
+        counters={"schema": "prismaquant.joint_layer_quantum.counters.v1"},
+        units_total=1)
+    written = tree(output_root) - before
+    assert written == {"layer-quanta/layer-000/cost.pkl",
+                       "layer-quanta/layer-000/results.json",
+                       "layer-quanta/layer-000/counters.json",
+                       "layer-quanta/layer-000/status.json"}
+    assert status["status"] == "complete"
+    assert status["units"] == [1, 1]
+    assert status["schema"] == "prismaquant.joint_layer_quantum.status.v1"
+    # The fallback counts the payload when the caller omits the total.
+    fallback = publish_quantum_outputs(
+        record, payload={"costs": {"a": {}, "b": {}}},
+        result={"schema": "prismaquant.joint_cost_quantum.execution.v1"},
+        counters={"schema": "prismaquant.joint_layer_quantum.counters.v1"})
+    assert fallback["units"] == [2, 2]
+    gapped = publish_quantum_outputs(
+        record, payload=None,
+        result={"schema": "prismaquant.joint_cost_quantum.execution.v1"},
+        counters={"schema": "prismaquant.joint_layer_quantum.counters.v1"},
+        units_total=1)
+    assert gapped["status"] == "gapped"
+    assert gapped["units"] == [0, 1]
+
+
+def test_window_index_order_is_the_handshake(identity_files):
+    """D2: the record seals ordered indices; anything else refuses (exit 3)."""
+    record = _valid_record(
+        identity_files, windows=[{"window_index": 0}, {"window_index": 1}])
+    assert record_window_indices(record) == [0, 1]
+    for bad in ([{"window_index": 1}, {"window_index": 0}],
+                [{"window_index": 0}, {"window_index": 0}],
+                [{"window_index": 0}, {"window_index": 2}],
+                [{"names": ["model.layers.1.proj"]}]):
+        broken = dict(record)
+        broken["windows"] = bad
+        with pytest.raises(QuantumIdentityRefused):
+            record_window_indices(broken)
+
+
+def test_unbound_record_names_the_reseal(identity_files):
+    """D3: a pre-stage-A record (receipt_sha256 None) refuses with the fix."""
+    record = _valid_record(identity_files)
+    record["adjoint"] = dict(record["adjoint"], receipt_sha256=None)
+    record["identity_sha256"] = canonical_json_sha256(
+        {k: v for k, v in record.items() if k != "identity_sha256"},
+        where="record")
+    record_path = identity_files["output_root"].parent / "unbound.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text(json.dumps(record))
+    with pytest.raises(QuantumIdentityRefused, match="bind_adjoint_receipt"):
+        verify_quantum_identity(
+            quantum_path=record_path,
+            quantum_sha256=hashlib.sha256(record_path.read_bytes()).hexdigest(),
+            plan_path=identity_files["plan"][0],
+            plan_sha256=identity_files["plan"][1],
+            prepared_path=identity_files["prepared"][0],
+            prepared_sha256=identity_files["prepared"][1],
+            adjoint_path=identity_files["adjoint"][0],
+            adjoint_sha256=identity_files["adjoint"][1],
+            output_root=identity_files["output_root"])
+
+
+def test_resolve_handshake_refuses_stale_records(tmp_path, monkeypatch):
+    """The D2 handshake: wrong count or advisory-names mismatch refuses."""
+    torch.manual_seed(85)
+    model, context, runner, cache = fixture()
+    context.settle_prefetched_layers = lambda layers: None
+    context.source_residency_snapshot = lambda layers, include_head=False: {
+        "owners": [], "unique_storage_bytes": sum(
+            p.numel() * p.element_size() for p in model.parameters())}
+    cache, _proofs = _prepared_cache(model, context, runner, cache,
+                                     tmp_path / "shared")
+    execution = _execution(tmp_path)
+    retained = quantum_retained_state(execution)
+    roster = quantum_layer_roster(
+        runner, {f"model.layers.{i}.proj": list(FORMATS)
+                 for i in range(runner.num_layers)}, 1)
+    output_root = tmp_path / "campaign"
+    admitted = _preflight_windows(runner, cache, None)[1]
+    assert len(admitted) >= 1
+    good = _quantum_record(
+        output_root=output_root, layer=1, checkpoint_boundary=2, chain=[],
+        windows=[{"window_index": index} for index in range(len(admitted))],
+        total_bytes=100, plan_sha=_hex("d"), prepared_sha=_hex("e"),
+        adjoint_sha=_hex("f"))
+    resolved = resolve_quantum_windows(
+        good, layer=1, names=roster.names, linears=roster.linears,
+        render_formats=roster.render_formats, production_cache=cache,
+        operator_windows=retained.operator_windows,
+        retained_budget=retained.retained_budget,
+        source_bytes=retained.source_bytes)
+    assert [w["names"] for w in resolved] == [
+        list(w.original_full_target_names) for w in admitted]
+    # One window too many: the record is stale, re-seal it.
+    stale = dict(good)
+    stale["windows"] = list(good["windows"]) + [
+        {"window_index": len(admitted)}]
+    with pytest.raises(QuantumIdentityRefused, match="re-seal"):
+        resolve_quantum_windows(
+            stale, layer=1, names=roster.names, linears=roster.linears,
+            render_formats=roster.render_formats, production_cache=cache,
+            operator_windows=retained.operator_windows,
+            retained_budget=retained.retained_budget,
+            source_bytes=retained.source_bytes)
+    # Advisory names that disagree with the sealed budget: refused, not trusted.
+    lying = dict(good)
+    lying["windows"] = [dict(good["windows"][0], names=["model.layers.0.proj"])] + \
+        list(good["windows"][1:])
+    with pytest.raises(QuantumIdentityRefused, match="disagree"):
+        resolve_quantum_windows(
+            lying, layer=1, names=roster.names, linears=roster.linears,
+            render_formats=roster.render_formats, production_cache=cache,
+            operator_windows=retained.operator_windows,
+            retained_budget=retained.retained_budget,
+            source_bytes=retained.source_bytes)

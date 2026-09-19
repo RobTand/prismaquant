@@ -135,6 +135,11 @@ def verify_quantum_identity(
         _require_hex(campaign.get("read_manifest_sha256"),
                      "record read_manifest_sha256")
         adjoint = record["adjoint"]
+        if adjoint.get("receipt_sha256") is None:
+            raise QuantumIdentityRefused(
+                "quantum record is unbound (pre-stage-A): re-seal it against "
+                "the stage-A receipt with bind_adjoint_receipt -- a new "
+                "identity, never an edit (producer D3) -- before publishing")
         _require_hex(adjoint.get("receipt_sha256"), "record adjoint receipt_sha256")
         _require_hex(adjoint_sha256, "--adjoint-sha256")
         if _digest_of(adjoint_path) != adjoint_sha256:
@@ -166,8 +171,22 @@ def verify_quantum_identity(
                 "quantum chain_layers do not match its checkpoint boundary: "
                 f"{adjoint['chain_layers']!r} vs {expected_chain!r}")
         seen: set[str] = set()
-        for window in record["windows"]:
-            for name in window["names"]:
+        for position, window in enumerate(record["windows"]):
+            # D2 (producer PR #785): the record seals ordered window indices
+            # only -- per-window names and byte sizes are recomputed at
+            # runtime from the sealed budget (resolve_quantum_windows) because
+            # statistics bytes need module geometry the producer cannot see.
+            # What is checked here is the index order itself: 0..n-1, sealed
+            # order, no gaps, no repeats. Extra keys (e.g. advisory names in
+            # dispatcher/joiner fixtures) are ignored here and cross-checked
+            # at resolution, never trusted.
+            if (not isinstance(window, Mapping)
+                    or window.get("window_index") != position):
+                raise QuantumIdentityRefused(
+                    f"quantum windows do not seal the ordered index slice "
+                    f"0..{len(record['windows']) - 1}: {window!r} at position "
+                    f"{position}")
+            for name in window.get("names", ()):
                 if name in seen:
                     raise QuantumIdentityRefused(
                         f"quantum windows repeat unit {name!r}")
@@ -182,11 +201,18 @@ def verify_quantum_identity(
         except ImportError:
             pass
         else:  # pragma: no cover - producer-owned check once it lands
-            check_quantum_for_campaign(record, {
-                "plan_sha256": plan_sha256,
-                "prepared_sha256": prepared_sha256,
-                "read_manifest_sha256": campaign["read_manifest_sha256"],
-            })
+            try:
+                check_quantum_for_campaign(record, {
+                    "plan_sha256": plan_sha256,
+                    "prepared_sha256": prepared_sha256,
+                    "read_manifest_sha256": campaign["read_manifest_sha256"],
+                    "unit_roster_sha256": campaign["unit_roster_sha256"],
+                    "campaign_scope": campaign["campaign_scope"],
+                    "adjoint_receipt_sha256": adjoint_sha256,
+                })
+            except ValueError as exc:
+                raise QuantumIdentityRefused(
+                    f"producer campaign check refuses: {exc}") from exc
     except QuantumIdentityRefused:
         raise
     except (KeyError, TypeError, ValueError, OSError) as exc:
@@ -517,8 +543,151 @@ def _boundary_entry_record(receipt: dict, batch_index: int, boundary: int) -> di
         f"boundary {boundary}")
 
 
-def record_window_names(record: dict) -> list[str]:
-    return [name for window in record["windows"] for name in window["names"]]
+def record_window_indices(record: dict) -> list[int]:
+    """The record's sealed window-index slice, validated (D2 handshake).
+
+    Returns ``[0..n-1]``; raises :class:`QuantumIdentityRefused` when the
+    record does not seal the ordered index slice. Per-window names and byte
+    sizes are never read from the record -- see :func:`resolve_quantum_windows`.
+    """
+    windows = record["windows"]
+    indices = [window["window_index"] if isinstance(window, Mapping) else None
+               for window in windows]
+    if indices != list(range(len(windows))):
+        raise QuantumIdentityRefused(
+            f"quantum {record.get('quantum_id')!r} windows do not seal the "
+            f"ordered index slice 0..{len(windows) - 1}: {indices!r}")
+    return indices
+
+
+def resolve_quantum_windows(
+    record: dict, *, layer: int, names, linears, render_formats,
+    production_cache, operator_windows, retained_budget, source_bytes,
+) -> list[dict]:
+    """Recompute this layer's sealed retained windows and handshake the record.
+
+    Producer D2 (PR #785): the record seals ordered window *indices* only.
+    Membership and footprints are recomputed here with the same preflight the
+    single run falls back to (``preflight_joint_operator_admission`` --
+    deterministic from the sealed budget, the installed source geometry and
+    the PWC candidate files), then handshook: the record's index slice must
+    be exactly ``0..n-1`` for the ``n`` recomputed windows, and advisory
+    ``names`` carried beside an index must equal the recomputed membership.
+    Returns the resolved windows (index, names, statistics/render bytes,
+    candidate count) -- the only window facts the replay, the chunk frontier
+    and the counters may use. Refuses (exit 3) on any mismatch: a stale or
+    retargeted record is a new identity, never a silent repack.
+    """
+    from .joint_statistics_replay import preflight_joint_operator_admission
+
+    indices = record_window_indices(record)
+    windows_by_layer = preflight_joint_operator_admission(
+        {int(layer): list(names)}, linears,
+        {name: list(render_formats[name]) for name in names},
+        production_cache, policy=operator_windows,
+        retained_budget=retained_budget, source_bytes=int(source_bytes))
+    admitted = list((windows_by_layer or {}).get(int(layer), ()))
+    if len(admitted) != len(indices):
+        raise QuantumIdentityRefused(
+            f"quantum {record.get('quantum_id')!r} seals {len(indices)} "
+            f"windows but the sealed budget admits {len(admitted)} for layer "
+            f"{layer}: re-seal the record, refusing")
+    resolved = []
+    for position, window in zip(indices, admitted):
+        entry = record["windows"][position]
+        if "names" in entry and list(entry["names"]) != list(
+                window.original_full_target_names):
+            raise QuantumIdentityRefused(
+                f"quantum {record.get('quantum_id')!r} window {position} "
+                f"names disagree with the sealed budget: "
+                f"{list(entry['names'])!r} vs "
+                f"{list(window.original_full_target_names)!r}")
+        resolved.append({
+            "window_index": int(position),
+            "names": list(window.original_full_target_names),
+            "statistics_bytes": int(window.statistics_bytes),
+            "render_file_upper_bound_bytes": int(window.render_file_upper_bound_bytes),
+            "candidate_count": int(window.candidate_count),
+        })
+    return resolved
+
+
+# --------------------------------------------------------------------------
+# Shared seams: the roster and the retained budget, in one place
+# --------------------------------------------------------------------------
+
+
+def quantum_retained_state(execution):
+    """The sealed retained budget, operator policy and source cap (§6).
+
+    One normalization shared by window resolution (before any GPU work) and
+    the replay core, so both derive the same windows from the same bytes.
+    """
+    from .cost_streaming import normalize_boundary_storage
+    from .joint_retained_window_plan import (
+        RetainedWindowBudget,
+        normalize_retained_execution,
+    )
+    from .joint_statistics_replay import normalize_operator_windows
+
+    operator_windows = normalize_operator_windows(execution.get("operator_windows"))
+    retained_operator_windows = execution.get("retained_operator_windows")
+    if retained_operator_windows is None:
+        raise RuntimeError(
+            "layer quantum requires the plan's retained operator windows "
+            "(the campaign of record replays sealed retained windows)")
+    retained_operator_windows = normalize_retained_execution(
+        retained_operator_windows,
+        operator_windows=operator_windows,
+        boundary_storage=(None if execution.get("boundary_storage") is None else
+                          normalize_boundary_storage(
+                              execution["boundary_storage"]).config),
+    )
+    return SimpleNamespace(
+        operator_windows=operator_windows,
+        retained_operator_windows=retained_operator_windows,
+        retained_budget=RetainedWindowBudget.from_dict(
+            retained_operator_windows["budget"]),
+        source_bytes=int(retained_operator_windows["source_reserve_bytes"]),
+    )
+
+
+def quantum_layer_roster(runner, formats_by_qname, layer):
+    """This layer's units, formats and live linears (the unit_filter seam, §6).
+
+    One roster shared by window resolution and the replay core: resolution
+    hands these modules to the preflight, the core replays them.
+    """
+    from .aura_cost import _ZERO_COST_FORMATS, _target_linears
+    from .routed_experts import profile_declared_packed_expert_projections
+
+    layer = int(layer)
+    profile = runner.profile
+    linears = _target_linears(runner.model, include_lm_head=False,
+                              include_routed_experts=True, profile=profile)
+    packed_members = profile_declared_packed_expert_projections(runner.model, profile)
+    linears.update({member.qname: member for member in packed_members})
+    layer_names = [name for name in formats_by_qname
+                   if runner.layer_index_for_qname(name) == layer]
+    if not layer_names:
+        raise RuntimeError(f"the prepared roster has no units in layer {layer}")
+    names = sorted(layer_names)
+    unit_formats = {name: tuple(formats_by_qname[name]) for name in names}
+    for name in names:
+        if name not in linears:
+            raise RuntimeError(f"quantum unit {name} is not an eligible live Linear")
+    fmts = list(dict.fromkeys(fmt for name in names for fmt in unit_formats[name]))
+    render_formats = {
+        name: tuple(fmt for fmt in unit_formats[name]
+                    if fmt not in _ZERO_COST_FORMATS)
+        for name in names
+    }
+    if any(not render_formats[name] for name in names):
+        raise RuntimeError("layer quantum requires a measured candidate per unit")
+    return SimpleNamespace(
+        layer=layer, profile=profile, linears=linears, names=names,
+        unit_formats=unit_formats, fmts=fmts, render_formats=render_formats,
+        packed_members=packed_members)
 
 
 # --------------------------------------------------------------------------
@@ -529,7 +698,8 @@ def record_window_names(record: dict) -> list[str]:
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, receipt, execution, output_root,
-    projection_backend=None, resume=False, progress_base=0,
+    projection_backend=None, resume=False,
+    resolved_windows,
     counters: QuantumCounters, progress: QuantumProgress,
 ) -> dict:
     """Execute one layer quantum and return its payload (§6.4 ``cost.pkl``)."""
@@ -543,7 +713,6 @@ def run_layer_quantum_core(
         _free_gib,
         _prepare_aura_checkpoints,
         _restore_aura_unit_state,
-        _target_linears,
         _write_aura_unit_checkpoint,
         _ZERO_COST_FORMATS,
     )
@@ -570,19 +739,14 @@ def run_layer_quantum_core(
     )
     from .joint_statistics_replay import (
         check_operator_allocation,
-        normalize_operator_windows,
         observe_and_project_retained_windows,
         operator_window_guard,
         statistics_arithmetic_identity,
     )
-    from .joint_retained_window_plan import RetainedWindowBudget, normalize_retained_execution
     from .kl_fisher import ROW_PROBE_LAYOUT
     from .perturbed_x_cache import _cb_cache_tensor_identity
     from .production_weight_cache import production_cache_cb_render_provenance
-    from .routed_experts import (
-        profile_declared_packed_expert_projections,
-        refresh_packed_expert_projections,
-    )
+    from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
     layer = int(record["layer"])
@@ -595,49 +759,27 @@ def run_layer_quantum_core(
     probe_microbatch = int(execution.get("probe_microbatch", 0))
     min_free_gib = float(execution.get("min_free_gib", 0.0))
 
-    operator_windows = normalize_operator_windows(execution.get("operator_windows"))
-    retained_operator_windows = execution.get("retained_operator_windows")
-    if retained_operator_windows is None:
-        raise RuntimeError(
-            "layer quantum requires the plan's retained operator windows "
-            "(the campaign of record replays sealed retained windows)")
-    retained_operator_windows = normalize_retained_execution(
-        retained_operator_windows,
-        operator_windows=operator_windows,
-        boundary_storage=(None if execution.get("boundary_storage") is None else
-                          normalize_boundary_storage(
-                              execution["boundary_storage"]).config),
-    )
-    retained_budget = RetainedWindowBudget.from_dict(
-        retained_operator_windows["budget"])
+    retained = quantum_retained_state(execution)
+    operator_windows = retained.operator_windows
+    retained_operator_windows = retained.retained_operator_windows
+    retained_budget = retained.retained_budget
 
     # ---- roster: this layer's units only (the unit_filter seam, §6) -------
-    profile = runner.profile
-    linears = _target_linears(runner.model, include_lm_head=False,
-                              include_routed_experts=True, profile=profile)
-    packed_members = profile_declared_packed_expert_projections(runner.model, profile)
-    linears.update({member.qname: member for member in packed_members})
-    layer_names = [name for name in formats_by_qname
-                   if runner.layer_index_for_qname(name) == layer]
-    if not layer_names:
-        raise RuntimeError(f"the prepared roster has no units in layer {layer}")
-    names = sorted(layer_names)
-    foreign = sorted(set(record_window_names(record)) - set(names))
-    if foreign:
+    roster = quantum_layer_roster(runner, formats_by_qname, layer)
+    profile, linears, names = roster.profile, roster.linears, roster.names
+    unit_formats, fmts, render_formats = (
+        roster.unit_formats, roster.fmts, roster.render_formats)
+    packed_members = roster.packed_members
+    # The record seals window indices only (D2); membership comes from the
+    # resolved handshake the caller ran, which refuses stale records. What is
+    # checked here is coverage: the sealed budget must admit exactly this
+    # layer's roster -- no foreign units, none missing.
+    resolved_names = sorted(
+        name for window in resolved_windows for name in window["names"])
+    if resolved_names != names:
         raise RuntimeError(
-            f"quantum record names units outside layer {layer}: {foreign[:8]}")
-    unit_formats = {name: tuple(formats_by_qname[name]) for name in names}
-    for name in names:
-        if name not in linears:
-            raise RuntimeError(f"quantum unit {name} is not an eligible live Linear")
-    fmts = list(dict.fromkeys(fmt for name in names for fmt in unit_formats[name]))
-    render_formats = {
-        name: tuple(fmt for fmt in unit_formats[name]
-                    if fmt not in _ZERO_COST_FORMATS)
-        for name in names
-    }
-    if any(not render_formats[name] for name in names):
-        raise RuntimeError("layer quantum requires a measured candidate per unit")
+            f"resolved windows cover {resolved_names!r}, not layer {layer}'s "
+            f"roster {names!r}")
 
     # ---- identity blocks (mirrors compute_aura_cost_streamed's) -----------
     batch_rows = min(probe_microbatch or len(calib_ids), len(calib_ids))
@@ -1114,7 +1256,7 @@ def run_layer_quantum_core(
                     window["render_file_upper_bound_bytes"]),
                 candidate_count=int(window["candidate_count"]),
             )
-            for window in record["windows"]
+            for window in resolved_windows
         ]
 
         window_kernel: KernelTimeProfiler | None = None
@@ -1128,7 +1270,7 @@ def run_layer_quantum_core(
             window_started = time.time()
             counters.enter_phase()
             counters.open_window(window_index,
-                                 record["windows"][window_index])
+                                 resolved_windows[window_index])
 
         def after_window(window_index, window_names):
             nonlocal window_kernel
@@ -1145,7 +1287,7 @@ def run_layer_quantum_core(
                                   kernel_active_s=kernel_active_s,
                                   wall_s=time.time() - window_started)
             commit_streamed_units(window_names)
-            progress.window_done(record["windows"][window_index])
+            progress.window_done(resolved_windows[window_index])
             counters.enter_phase()
             counters.mark_phase_units(len(completed_units))
             progress.commit()
@@ -1233,15 +1375,21 @@ def _io_counters() -> dict:
     return values
 
 
-def publish_quantum_outputs(record, *, payload, result, counters) -> dict:
+def publish_quantum_outputs(record, *, payload, result, counters,
+                            units_total=None) -> dict:
     """Write the quantum's outputs (§6.4), only under its output space.
 
     ``cost.pkl`` only when every row passed ``validate_joint_aura_entry``
     (checked by the core before returning); ``status.json`` is the last act.
     Every path comes from the record's ``output_space``; nothing is written
-    anywhere else by this stage.
+    anywhere else by this stage. ``units_total`` is the layer's unit count
+    (the caller counts the resolved windows' names -- the record seals
+    indices only, D2); when omitted it falls back to the payload's own unit
+    count, or 0 for a gapped quantum that never resolved.
     """
-    units_total = sum(len(window["names"]) for window in record["windows"])
+    if units_total is None:
+        units_total = len(payload["costs"]) if payload is not None else 0
+    units_total = int(units_total)
     units_done = len(payload["costs"]) if payload is not None else 0
     status = "complete" if payload is not None and units_done == units_total else "gapped"
     if payload is not None:
@@ -1340,13 +1488,10 @@ def run_layer_quantum(
     result["env"]["container_content_sha256"] = executing_image()
 
     started, before_io = time.time(), _io_counters()
-    counters = QuantumCounters(
-        quantum_id=record["quantum_id"], identity_sha256=record["identity_sha256"],
-        chunks=record["chunks"],
-        frontier=ChunkFrontier(chunks=record["chunks"], windows=record["windows"]))
-    progress = QuantumProgress(frontier=counters._frontier, base_units=0)
     runner = None
     payload = None
+    counters = None
+    resolved_windows: list[dict] | None = None
     try:
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
@@ -1421,11 +1566,34 @@ def run_layer_quantum(
 
         execution_runtime = dict(execution)
         execution_runtime.setdefault("device_envelope_bytes", config.get("max_gpu_bytes"))
+        # D2 handshake, before any GPU work or progress: the record seals
+        # window indices only, so membership and footprints are recomputed
+        # from the sealed budget and handshook here. The chunk frontier,
+        # counters and progress all size from the resolved windows -- never
+        # from the record's index entries.
+        retained = quantum_retained_state(execution_runtime)
+        roster = quantum_layer_roster(runner, data.formats_by_qname, layer)
+        resolved_windows = resolve_quantum_windows(
+            record, layer=layer, names=roster.names, linears=roster.linears,
+            render_formats=roster.render_formats, production_cache=cache,
+            operator_windows=retained.operator_windows,
+            retained_budget=retained.retained_budget,
+            source_bytes=retained.source_bytes)
+        result["resolved_windows"] = len(resolved_windows)
+        counters = QuantumCounters(
+            quantum_id=record["quantum_id"], identity_sha256=record["identity_sha256"],
+            chunks=record["chunks"],
+            frontier=ChunkFrontier(chunks=record["chunks"],
+                                   windows=resolved_windows))
+        # Head-phase currency continues from the head-committed base (§6.2
+        # step 5): the same cumulative units the single run reports.
+        progress = QuantumProgress(frontier=counters._frontier,
+                                   base_units=data.progress_committed)
         payload = run_layer_quantum_core(
             runner, cache, ids.to(runner.device), data.formats_by_qname,
             record=record, receipt=receipt, execution=execution_runtime,
             output_root=output_root, projection_backend=projection_backend,
-            resume=resume, progress_base=data.progress_committed,
+            resume=resume, resolved_windows=resolved_windows,
             counters=counters, progress=progress)
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
@@ -1445,11 +1613,14 @@ def run_layer_quantum(
             result["residency"] = residency
 
     # ---- writes: only under layer-quanta/layer-NNN/ (§6.4) ---------------
+    units_total = (sum(len(window["names"]) for window in resolved_windows)
+                   if resolved_windows is not None else 0)
     counters_done = counters.finish(
         units_done=len(payload["costs"]) if payload else 0,
-        units_total=sum(len(window["names"]) for window in record["windows"]))
+        units_total=units_total)
     status_record = publish_quantum_outputs(
-        record, payload=payload, result=result, counters=counters_done)
+        record, payload=payload, result=result, counters=counters_done,
+        units_total=units_total)
     result["passed"] = status_record["status"] == "complete"
     return result
 
@@ -1510,6 +1681,12 @@ def main(argv=None) -> int:
             prepared={"path": str(args.prepared), "sha256": args.prepared_sha256},
             output_root=args.output_root,
             data_manifest_sha256=args.data_manifest_sha256, resume=args.resume)
+    except QuantumIdentityRefused as exc:
+        # The D2 window handshake or the producer campaign check refused a
+        # stale record after the digest gate passed: same exit 3, nothing
+        # committed (resolution runs before any journal or payload write).
+        print(f"{IDENTITY_REFUSED_MARKER}: {exc}", flush=True)
+        return EXIT_IDENTITY_REFUSED
     finally:
         if profiler is not None:
             profiler.disable()
@@ -1544,8 +1721,9 @@ __all__ = [
     "EXIT_GAPPED", "EXIT_IDENTITY_REFUSED", "EXIT_FAILURE", "EXIT_OK",
     "EXIT_USAGE", "IDENTITY_REFUSED_MARKER", "ChunkFrontier",
     "QuantumCounters", "QuantumIdentityRefused", "QuantumProgress",
-    "adjusted_space", "record_window_names", "run_layer_quantum",
-    "run_layer_quantum_core", "verify_quantum_identity",
+    "adjusted_space", "quantum_layer_roster", "quantum_retained_state",
+    "record_window_indices", "resolve_quantum_windows",
+    "run_layer_quantum", "run_layer_quantum_core", "verify_quantum_identity",
 ]
 
 
