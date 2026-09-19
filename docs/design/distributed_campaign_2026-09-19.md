@@ -38,7 +38,8 @@ manifest (`sha256 4100221caa…`, 46 phases, 234,591 entries) decomposes as:
 coalesced ranges, head inputs 7.4 GiB, resume journals 0.36 GiB. Per-layer
 phases: layer-3 133.72 GiB, layer-4 122.25 GiB, layers 5–44 81.74 GiB each,
 layers 0–2 3.07 GiB each. A layer's phase is that layer's work and nobody
-else's — the per-Linear candidate set (36,423 units; 867 per dense layer, 3
+else's — the per-Linear candidate set (36,423 units; 867 per layer for
+layers 3–44 — the layer's projections across its routed experts — and 3
 each for layers 0–2; 132 campaign groups; 360 retained windows at the sealed
 `hostcap32` plan) partitions exactly along the same boundaries.
 
@@ -810,9 +811,9 @@ match the single run's numbers for those layers **exactly**:
   grammar extended to N consumers — designed only if the cutover gate passes
   and Rob retires the single consumer.
 - **MoE/other models.** This design is for the GLM-5.3-Flash complete-512
-  joint panel's shape (45 dense target layers, one shared prepared
-  completion). Generalizing is a later note, not an assumption smuggled into
-  this one.
+  joint panel's shape (45 decoder target layers whose 36,423 units include
+  routed experts, one shared prepared completion). Generalizing is a later
+  note, not an assumption smuggled into this one.
 
 ## 11. Test obligations for the builders
 
