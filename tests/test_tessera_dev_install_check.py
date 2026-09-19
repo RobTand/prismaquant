@@ -75,9 +75,6 @@ def test_non_git_provenance_refuses_with_the_idle_window_repair(tmp_path, case):
     repair the filer may not run unilaterally (idle pool, fleet owner)."""
     mod = _load()
     direct_url, detail = _cases(mod.reviewed_commit())[case]
-    """#753: every provenance the gate refuses, refused here first, with the
-    repair the filer may not run unilaterally (idle pool, fleet owner)."""
-    mod = _load()
     payload = json.dumps({"distribution": "tessera-quant", "direct_url": direct_url})
     fake = _fake_python(tmp_path, payload)
     completed = subprocess.run(
@@ -94,7 +91,6 @@ def test_non_git_provenance_refuses_with_the_idle_window_repair(tmp_path, case):
 
 def test_the_reviewed_commit_passes(tmp_path):
     mod = _load()
-    _ = mod
     payload = json.dumps({"distribution": "tessera-quant", "direct_url": {
         "vcs_info": {"vcs": "git", "commit_id": mod.reviewed_commit()}}})
     fake = _fake_python(tmp_path, payload)
