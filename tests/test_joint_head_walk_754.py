@@ -73,6 +73,11 @@ def test_a_walk_interrupted_midway_resumes_and_matches_a_fresh_walk(tmp_path, mo
                                           head_checkpoint=journal)
     assert unit_path(journal, first).is_file(), "the committed prefix is banked"
     assert not unit_path(journal, second).exists()
+    # The interrupted run committed and reported exactly its prefix before
+    # dying; the resume below owns a new channel and a zero count.
+    assert [count for count, _, _ in seen] == [1]
+    assert [unit for _, _, unit in seen] == [first]
+    seen.clear()
 
     monkeypatch.setattr(bridge, "_load_unit", real_load)
     resumed = bridge.load_measured_anchor_input(config, verify_payloads=False,
