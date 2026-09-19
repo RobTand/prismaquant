@@ -103,14 +103,31 @@ def _read_verified_wire_blob(cell):
     staged = (None if resolver is None
               else resolver.staged_read(wire, expected_sha256=expected))
     if staged is not None:
-        try:
-            blob, digest = _read_wire_bytes(Path(staged["stage_path"]), size,
-                                            expected=expected, staged=True)
-        except _StagedWireRefused as refusal:
-            resolver.record_fallback(wire, str(refusal))
-        else:
-            resolver.record_stage_read(wire, len(blob))
-            return blob, digest
+        # The ram copy first, the stage copy second, the declared path last.
+        # PrismaBuild's ram tier (#640) promotes a staged range onto a tmpfs
+        # and the resolver offers the copy only while the epoch the map dates
+        # it with is the one the pool's tier record announces, so a dead tmpfs
+        # never reaches this loop. A ram read that refuses -- released between
+        # the stat and the open, or bytes that do not hash to the receipt --
+        # is a miss on the ram half alone: the stage copy the map vouches for
+        # serves next, and only its refusal reads the declared path.
+        copies = ([("ram", staged["ram_path"])] if "ram_path" in staged else []) \
+            + [("stage", staged["stage_path"])]
+        for half, copy in copies:
+            try:
+                blob, digest = _read_wire_bytes(Path(copy), size,
+                                                expected=expected, staged=True)
+            except _StagedWireRefused as refusal:
+                if half == "ram":
+                    resolver.record_ram_fallback(wire, str(refusal))
+                    continue
+                resolver.record_fallback(wire, str(refusal))
+            else:
+                if half == "ram":
+                    resolver.record_ram_read(wire, len(blob))
+                else:
+                    resolver.record_stage_read(wire, len(blob))
+                return blob, digest
     blob, digest = _read_wire_bytes(wire, size, expected=expected, staged=False)
     if resolver is not None:
         resolver.record_pool_read(wire, len(blob))
@@ -1935,6 +1952,20 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         reader_identity = None if reader is None else reader.identity
         implementation = (_aura_source_sha256() if source_transition is None
                           else source_transition.measurement_source_sha256)
+        # THE PLAN DIGEST THE PREPARED RECORD MUST CARRY. Normally the running
+        # plan's: a prepared record made against another plan is a stale record.
+        # An admitted transition may state another one, and exactly one kind
+        # does -- the retained-budget transition, whose own proof holds the two
+        # plans byte-identical outside the budget keys its contract enumerates,
+        # which is what makes every other prepared field the checks below
+        # re-derive from the plan still the same field. The dispatcher answers
+        # per capability type from a literal table, so a transition that was
+        # never taught this refuses rather than silently reusing the run's.
+        prepared_plan_sha256 = plan_sha256
+        if source_transition is not None:
+            from .joint_aura_transitions import transition_prepared_plan_sha256
+            prepared_plan_sha256 = transition_prepared_plan_sha256(
+                source_transition, plan_sha256=plan_sha256)
         # THE DEVICE ENVELOPE IS APPLIED HERE, after the refusals that need no
         # device -- the envelope's own config and the declared reader -- and
         # before the first thing that allocates on the device (the projection
@@ -1951,20 +1982,28 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         projection_backend = prewarm_projection_backend(execution.get("projection_backend"), device="cuda")
         result["projection_backend"] = projection_backend.identity
         if command == "run":
-            _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
+            _preflight_run_prepared(prepared, plan_sha256=prepared_plan_sha256,
                 implementation_sha256=implementation, reader_identity=reader_identity,
                 projection_backend=projection_backend.identity)
         # The command holds a CUDA reservation (``require_cuda_hot_path``
         # above), so any shard it still has to synthesize decodes on that
         # device rather than on one CPU core beside an idle GPU. The standalone
         # ``synthesize`` stage normally leaves nothing to do here.
-        # The head walk reports under the one phase every joint prepare
-        # manifest declares. A COST run's counter belongs to its own read
-        # schedule, so intake there reports nothing rather than under a name
-        # that schedule did not declare.
+        # The head walk reports under the one phase every joint pass manifest
+        # declares -- prepare and run both open on ``head``. A run whose read
+        # schedule is sealed separately (the V2 cost read plan) declares
+        # ``cost_setup``/``cost_head`` instead and no ``head``, so intake there
+        # reports nothing rather than under a name that schedule did not
+        # declare and the worker would refuse.
+        #
+        # Why this is not cosmetic: on ``ad8803aa`` the run's head resolved its
+        # 512-entry anchor roster between the 12:10:14 claim and the 16:24:17
+        # capture line -- 4 h 14 min in which the loop knew its own count at
+        # every step and committed none of it, so the residency window had
+        # nothing to advance on before the capture had even started.
         data = load_measured_anchor_input(config["inputs"], reader=reader,
             synthesis_device="cuda",
-            progress_phase=(HEAD_PHASE if command == "prepare" else None),
+            progress_phase=(None if cost_read_manifest is not None else HEAD_PHASE),
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
             **({} if config.get("historical_encoder_reuse") is None else
                {"historical_encoder_reuse": config["historical_encoder_reuse"]}),
@@ -2091,7 +2130,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             _same(completion.get("schema"), PREPARED_SCHEMA,
                   "prepared v3 schema required; legacy preparation requires fresh prepare and recompute")
             _same(completion.get("status"), "complete", "prepared completion")
-            for key, value in (("plan_sha256", plan_sha256), ("implementation_sha256", implementation),
+            for key, value in (("plan_sha256", prepared_plan_sha256), ("implementation_sha256", implementation),
                                ("source_model_identity", source), ("source_execution", source_execution),
                                ("calibration_input", calibration), ("measured_cells", len(data.cells)),
                                ("reader_identity", reader_identity),
@@ -2132,6 +2171,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 seed_base=execution["seed_base"], token_scope="all", temperature=1.0,
                 production_cache=cache, require_production_cache=True, joint_activation=True,
                 cost_read_schedule=cost_schedule,
+                # The count PrismaBuild accepts is cumulative across phases, so
+                # the capture continues from what the head already committed
+                # rather than restarting at zero, which is a regression and
+                # buys no time.
+                progress_base=data.progress_committed,
                 prepared_render_identities={pair: cache.metadata["verified_cells"][pair]["rendered_weight"]
                                             for pair in data.cells},
                 joint_projection_backend=projection_backend,
@@ -2193,12 +2237,13 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         result["phases"].append({"phase": command, "kind": "profile", "start_epoch": started,
                                  "end_epoch": result["env"]["finished_epoch"]})
         result["io_before"], result["io_after"] = before_io, _io_counters()
-        # What PrismaBuild's stage tier actually served, beside the process's
-        # own read counters. A stage with no reader is a copy nobody reads, so
-        # this block is the closed loop: hits and bytes when the redirect
-        # worked, a named reason for every entry it refused. The key is absent
-        # when no map was named, which keeps an unset run's record identical to
-        # today's.
+        # What PrismaBuild's tiers actually served, beside the process's own
+        # read counters: the stage's bytes and, on a map of the ram-overlay
+        # generation, the tmpfs's own. A stage with no reader is a copy nobody
+        # reads, so this block is the closed loop: hits and bytes per tier when
+        # the redirect worked, a named reason for every entry it refused. The
+        # key is absent when no map was named, which keeps an unset run's
+        # record identical to today's.
         residency = residency_report()
         if residency is not None:
             result["residency"] = residency
