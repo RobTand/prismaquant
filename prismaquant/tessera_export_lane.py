@@ -752,11 +752,19 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
     ``CachedUnitBundle`` and ``verify_cached_unit`` recheck current checkpoint,
     H, settings, encoder and wire bytes at export intake. A selected interpolated
     rate has no original wire and is refused here, not silently re-encoded.
+
+    Every receipt, identity and geometry check stays here, and each selected
+    blob is located inside the wire directory and sized against its receipt.
+    The bytes themselves are not read here: the exporter hashes every blob as
+    it reads it (``verify_cached_unit``), with the identity recomputed from
+    source and Hessian, so a build-time pass would read the whole selected wire
+    set only to refuse earlier (PrismaQuant #641, #643).
     """
     from .tessera_expert_projection import (
         EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY, WIRE_DIR_KEY,
         ExpertProjectionError, cached_units_manifest, carried_units,
-        expand_stack_decision_assignment, verify_expert_wire_record,
+        expand_stack_decision_assignment, check_expert_wire_receipt,
+        locate_expert_wire,
     )
     from .tessera_formats import parse_tessera_format_name
     from tessera.cached_unit import ENCODING_INPUT_SCHEMA, INPUT_SCHEMA
@@ -835,9 +843,10 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             if selected_expert_receipts.get(name) != record:
                 raise TesseraExportLaneError(f"{name}@{fmt}: selected expert receipt differs from measured wire")
             try:
-                record = verify_expert_wire_record(
+                record = check_expert_wire_receipt(
                     record, name=name, unit=units[name], q256=int(q256),
-                    grid=family.payload_grid().name, wire_dir=wire_dir)
+                    grid=family.payload_grid().name)
+                locate_expert_wire(record, name=name, wire_dir=wire_dir)
             except ExpertProjectionError as exc:
                 raise TesseraExportLaneError(f"{name}@{fmt}: {exc}") from exc
         else:
@@ -846,12 +855,10 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
                     recipe.get("grid") != family.payload_grid().name or
                     recipe.get("q256") != int(q256)):
                 raise TesseraExportLaneError(f"{name}@{fmt}: dense wire identity differs from selected rung")
-            path = wire_dir / record["file"]
-            if path.is_symlink() or path.resolve().parent != wire_dir or not path.is_file():
-                raise TesseraExportLaneError(f"{name}@{fmt}: dense wire escapes the campaign directory")
-            blob = path.read_bytes()
-            if len(blob) != record["blob_bytes"] or hashlib.sha256(blob).hexdigest() != record["blob_sha256"]:
-                raise TesseraExportLaneError(f"{name}@{fmt}: dense wire differs from measured receipt")
+            try:
+                locate_expert_wire(record, name=name, wire_dir=wire_dir)
+            except ExpertProjectionError as exc:
+                raise TesseraExportLaneError(f"{name}@{fmt}: {exc}") from exc
         records[name] = record
     if not records:
         raise TesseraExportLaneError("selected cache has no selected Tessera wires")

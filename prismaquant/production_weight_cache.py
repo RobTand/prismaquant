@@ -3797,14 +3797,31 @@ def _validate_cb_cache_pair_resume(
     return sidecar if (shard_exists or allow_missing_shard) else None
 
 
+#: Feed width for host-tensor digests. ``hashlib`` releases the GIL for
+#: buffers this size, so one memoryview fed in wide slices hashes at the
+#: same single-core rate as one contiguous feed, without the ``tobytes()``
+#: copy that used to double resident bytes per tensored identity (PQ #725).
+_TENSOR_DIGEST_CHUNK_BYTES = 8 << 20
+
+
 def _cb_cache_tensor_identity(tensor: torch.Tensor) -> dict[str, object]:
     stored = tensor.detach().to(device="cpu").contiguous()
-    raw = stored.view(torch.uint8).numpy().tobytes()
+    # ``cast("B")`` flattens the dimensions without copying, so slices below
+    # are byte windows, never copies. (A multi-dimensional memoryview's bare
+    # ``len`` would be the first axis, not the byte count.) An empty tensor
+    # has zeros in its shape, which ``cast`` refuses, so it takes the empty
+    # feed directly -- the same sha256 of zero bytes ``tobytes()`` produced.
+    nbytes = stored.nbytes
+    digest = hashlib.sha256()
+    if nbytes:
+        view = memoryview(stored.view(torch.uint8).numpy()).cast("B")
+        for offset in range(0, len(view), _TENSOR_DIGEST_CHUNK_BYTES):
+            digest.update(view[offset:offset + _TENSOR_DIGEST_CHUNK_BYTES])
     return {
         "shape": [int(dim) for dim in stored.shape],
         "dtype": str(stored.dtype),
-        "logical_bytes": len(raw),
-        "content_sha256": hashlib.sha256(raw).hexdigest(),
+        "logical_bytes": nbytes,
+        "content_sha256": digest.hexdigest(),
     }
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from collections.abc import Mapping
 import functools
 from dataclasses import dataclass
 import hashlib
@@ -19,6 +20,7 @@ import pickle
 import os
 import socket
 import stat
+import threading
 import time
 from types import SimpleNamespace
 
@@ -27,7 +29,9 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256_normalized,
     prepare_journal, unit_path, write_unit,
 )
+from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
 from .interned_json import load_json_file
+from .joint_head_walk_quanta import check_quantum_for_roster
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
@@ -65,6 +69,31 @@ HISTORICAL_ENCODER_REUSE_ENTRY_FIELDS = frozenset(
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
 STAGE = "Tessera campaign"
+# The head walk's own durable journal (#754). Every restart re-paid the whole
+# roster walk -- the withdrawn campaign night paid it three times -- so the
+# walk banks each verified unit under the checkpoint machinery every other
+# stage of this campaign already uses (``prepare_journal``/``write_unit``),
+# and a resume re-verifies the banked prefix against the bytes it was banked
+# from before trusting one row of it.
+HEAD_WALK_STAGE = "joint head walk"
+HEAD_WALK_STATE_SCHEMA = "prismaquant.tessera_joint_aura.head_walk_unit.v1"
+HEAD_WALK_JOURNAL_SCHEMA = "prismaquant.tessera_joint_aura.head_walk.v1"
+# The walk's worker pool is the CPU set PrismaBuild assigned this container
+# (``os.sched_getaffinity``: PB applies its allocation with taskset before
+# exec and the container inherits it) -- never a guessed core. The cap keeps
+# a whole-box reservation from minting a thread per unit; the env knob
+# lowers it or forces the serial path for an A/B measurement.
+HEAD_WALK_WORKERS_ENV = "PRISMAQUANT_HEAD_WALK_WORKERS"
+HEAD_WALK_MAX_WORKERS = 16
+# Units are banked on a time cadence rather than one fsynced envelope per
+# unit: a crash loses at most one interval of verified work, and the cadence
+# matches the progress contract's own clock (#741).
+HEAD_WALK_BANK_INTERVAL_S = 60.0
+# Synthesis decodes through the bound Tessera reader on the reserved device,
+# and that reader is proven single-threaded (the qualification walk's own
+# wire pool is max_workers=1), so the rare missing render is synthesized
+# under one lock while the common pure-read verification overlaps freely.
+_HEAD_WALK_SYNTHESIS_LOCK = threading.Lock()
 
 
 def _require(condition, message):
@@ -340,6 +369,11 @@ class MeasuredAnchorInput:
     # both observed digests. ``verify_anchor_render`` refuses to swap the seal
     # without it, so no cell can be qualified under a seal nothing observed.
     encoder_source_reuse: "dict | None" = None
+    # The worker count this walk fanned out over (the PB-assigned affinity by
+    # default) and how many units a resume re-verified from the head journal
+    # instead of re-walking (#754). Zero when no journal was given.
+    head_walk_workers: "int | None" = None
+    head_walk_resumed_units: int = 0
 
     @property
     def total_render_bytes(self):
@@ -390,22 +424,21 @@ def _decode_wire(blob, *, reader, device="cpu"):
     return read_unit_artifact(blob, device=device)
 
 
-def _render_mirror_path(render, mirror_root):
-    """Where a measuring run publishes a shard instead of the row cache.
-
-    The mirror keeps the render's absolute path under ``mirror_root`` so a
-    cell's two copies stay comparable by name and a measuring run can never
-    replace the campaign's own bytes.
-    """
-    render = Path(render)
-    return Path(mirror_root) / render.resolve().relative_to(Path(render.root))
-
-
 #: The phase the standalone synthesis stage declares (``--progress
 #: synthesize=<stall>``), and therefore the default a bare intake reports
 #: under. ``execute`` overrides it with the joint prepare's own ``head``:
 #: this loader spells no phase its caller has not declared.
 SYNTHESIS_PHASE = "synthesize"
+
+
+def _progress_dev_source_sha256():
+    """The executing package's actual tree digest, for the dev stamps.
+
+    Lazy so importing this module never pulls ``aura_cost``; only a dev-mode
+    progress commit pays for the hash.
+    """
+    from .aura_cost import _aura_source_sha256
+    return _aura_source_sha256()
 
 
 def _pb_commit(units, phase, unit=None):
@@ -416,6 +449,11 @@ def _pb_commit(units, phase, unit=None):
     inside a container that cannot import PrismaBuild still reports. It is a
     no-op when the action was not admitted under the progress contract, so it
     is called unconditionally rather than by testing how we were launched.
+
+    Under ``PRISMAQUANT_DEV_MODE=1`` the record carries the dev stamp in its
+    metadata: the worker's ``ProgressWatch`` reads the fields it knows and
+    ignores the rest, so the stamp rides along on every progress line a dev
+    run commits and a certified run's record stays byte-identical.
     """
     path = os.environ.get("PRISMABUILD_ACTION_PROGRESS_PATH")
     token = os.environ.get("PRISMABUILD_ACTION_PROGRESS_TOKEN")
@@ -424,11 +462,113 @@ def _pb_commit(units, phase, unit=None):
     record = {"schema": "prismabuild.action_progress.v1", "token": token,
               "phase": phase, "units_completed": units, "unit": unit,
               "reported_unix": time.time()}
+    if dev_mode_enabled():
+        record.update(dev_stamp(_progress_dev_source_sha256()))
     temporary = f"{path}.{os.getpid()}.tmp"
     with open(temporary, "w") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
     os.replace(temporary, path)
     return True
+
+
+def _head_walk_worker_count(requested=None, environ=None):
+    """Resolve the head walk's worker count from PrismaBuild's own placement.
+
+    The default is the CPU set PB assigned this container, capped so a
+    whole-box reservation cannot mint a thread per unit. An explicit request
+    wins, the env knob is the operator's A/B lever, and neither may exceed
+    the assignment: cores PB did not assign are never guessed
+    (``file_hash_workers`` refuses the same way one screen up).
+    """
+    environ = os.environ if environ is None else environ
+    try:
+        assigned = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        assigned = 1
+    ceiling = max(1, assigned)
+    if requested is not None:
+        _require(type(requested) is int and 0 < requested <= ceiling,
+                 f"head walk workers {requested} exceed the PB-assigned CPU affinity ({ceiling})")
+        return requested
+    raw = environ.get(HEAD_WALK_WORKERS_ENV)
+    if raw is None or raw == "":
+        return min(ceiling, HEAD_WALK_MAX_WORKERS)
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{HEAD_WALK_WORKERS_ENV}={raw!r} is not a worker count") from exc
+    _require(0 < value <= ceiling,
+             f"{HEAD_WALK_WORKERS_ENV}={raw!r} is not a worker count within "
+             f"the PB-assigned CPU affinity ({ceiling})")
+    return value
+
+
+def _drive_ordered_walk(roster, walk, commit, *, workers):
+    """Walk units, committing strictly in the roster's one deterministic order.
+
+    ``workers <= 1`` is the serial path: today's loop, no pool. Above it the
+    per-unit walks overlap while the committer still banks and reports each
+    unit only after every unit before it has committed, so the durable state
+    is always a roster prefix -- the prefix a resume can re-verify -- and the
+    progress sequence means exactly what it meant serially. A failing unit
+    stops the walk with its prefix committed, precisely where the serial
+    loop would have stopped.
+    """
+    if workers <= 1:
+        for name in roster:
+            commit(name, walk(name))
+        return
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    # A bounded window: the pool is never starved, and results for units the
+    # committer has not reached cannot pile up ahead of it.
+    window = 2 * workers
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="joint-head-walk") as pool:
+        inflight = deque()
+        try:
+            for name in roster:
+                while len(inflight) >= window:
+                    done_name, done = inflight.popleft()
+                    commit(done_name, done.result())
+                inflight.append((name, pool.submit(walk, name)))
+            while inflight:
+                done_name, done = inflight.popleft()
+                commit(done_name, done.result())
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
+
+
+def _open_head_journal(root, *, resume, identity, qnames):
+    """Open the head walk's journal, setting aside state that cannot be trusted.
+
+    The machinery is the campaign's own (``prepare_journal``: identity-bound
+    manifest, sha256-checked envelopes, ``--resume`` to reuse what a prior
+    attempt banked). A journal that fails its own checks -- a key from
+    another input set, a corrupt envelope -- is moved aside rather than
+    refused, because the walk it describes is a pure function of inputs that
+    are digest-bound on every load: the safe recovery is to redo the walk,
+    and the honest one is to say so in the log. A journal this run was not
+    told to resume is a refusal, exactly as for every other checkpoint.
+    """
+    root = Path(root)
+    try:
+        return prepare_journal(root, stage=HEAD_WALK_STAGE, resume=resume,
+                               identity=identity, qnames=qnames)
+    except RuntimeError as exc:
+        if not resume:
+            raise
+        import shutil
+        stale = root.with_name(root.name + ".stale")
+        if stale.is_dir():
+            shutil.rmtree(stale)
+        elif stale.exists():
+            stale.unlink()
+        root.rename(stale)
+        print(f"tessera_joint_aura: discarding head-walk checkpoint ({exc}); "
+              "restarting the walk from the roster's start", flush=True)
+        return prepare_journal(root, stage=HEAD_WALK_STAGE, resume=True,
+                               identity=identity, qnames=qnames)
 
 
 def parse_unit_scope(spec, count=None):
@@ -527,7 +667,9 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                render_mirror_root=None, log_every=100,
                                require_existing_renders=False,
                                historical_encoder_reuse=None,
-                               progress_phase=SYNTHESIS_PHASE):
+                               progress_phase=SYNTHESIS_PHASE,
+                               head_checkpoint=None, head_resume=False,
+                               head_walk_workers=None, head_walk_quantum=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -603,6 +745,51 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     an unlisted digest is refused in the intake rather than after the
     per-cell origin walk. An admitted reuse is carried on the returned input
     so ``prepare_cache`` hands the same record to every cell.
+
+    ``head_checkpoint`` banks the walk itself, unit by unit, under the
+    campaign's existing checkpoint machinery (``prepare_journal``/
+    ``write_unit``, identity-bound manifest and sha256-checked envelopes), so
+    a restarted action resumes mid-roster instead of re-paying the whole
+    walk (#754). The journal's identity is the exact input set -- plan,
+    census, receipts, merged cost and checkpoint digests, the checkpoint
+    seal and the roster order -- plus the options that change banked rows;
+    a journal keyed to anything else is moved aside and the walk starts
+    fresh, never reused. ``head_resume`` is the same ``--resume`` every other
+    checkpoint of this campaign requires: without it an existing journal is
+    a refusal, not an overwrite. A resume re-verifies each banked unit
+    against the bytes it was banked from -- the campaign journal shard's
+    file digest, and each render/marker/wire stat fence -- before trusting
+    it, truncating the cursor at the first drift and re-walking from there:
+    unverified state is discarded, never trusted. Banked units are re-walked
+    never, re-reported always, so the resumed run's counter and final state
+    are identical to a fresh walk's. Units are banked on a time cadence, so
+    an interruption loses at most one interval of verified work.
+
+    ``head_walk_workers`` is the walk's worker count. The default is the CPU
+    set PrismaBuild assigned this container (``os.sched_getaffinity``), the
+    env knob ``PRISMAQUANT_HEAD_WALK_WORKERS`` lowers it or forces the
+    serial path with ``1``, and no value may exceed the assignment. However
+    many workers run, commitment -- banking, reporting, cell insertion --
+    stays in the roster's one deterministic order, so parallel and serial
+    walks produce identical downstream state and identical durable
+    sequences. The fan-out is threads: the per-unit work is file I/O and
+    digesting (the GIL is released through the syscalls and by hashlib for
+    the buffers that dominate), and the one thread-unsafe step left -- a
+    missing render's synthesis through the bound reader -- holds a lock.
+
+    ``head_walk_quantum`` is the opt-in distributed-quantum half of #765: a
+    descriptor from ``joint_head_walk_quanta.head_walk_quanta`` naming this
+    action's ``[lo, hi)`` slice of the sorted census roster. It requires
+    ``unit_scope == (lo, hi)`` and a ``head_checkpoint`` to bank the slice
+    into, and the slice journal is bound to the FULL roster digest plus the
+    descriptor itself -- never to the slice alone -- so per-quantum journals
+    join (``joint_head_walk_quanta.join_head_walk_journals``) into the one
+    journal a resumed walk consumes unchanged. Without a descriptor a scoped
+    read still cannot bank, exactly as before. Fleet execution of quanta
+    waits on the D45 measurement gate (checksum-bound versus read-bound at
+    full-core fan-out); until then this parameter is the producer/consumer
+    contract under test, not the production prepare path, which passes
+    nothing here.
     """
     from .production_weight_cache import _cache_weight_filename
     from tools.dispatch_tessera_campaign import _require_receipts
@@ -622,6 +809,18 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _require(progress_phase is None or (type(progress_phase) is str and progress_phase),
              "progress_phase must be a declared phase name or None")
     _require(type(require_existing_renders) is bool, "require_existing_renders must be boolean")
+    _require(head_checkpoint is None or isinstance(head_checkpoint, (str, Path)),
+             "head_checkpoint must be a directory path or None")
+    _require(type(head_resume) is bool, "head_resume must be an explicit boolean")
+    _require(head_walk_quantum is None or isinstance(head_walk_quantum, Mapping),
+             "head_walk_quantum must be a quantum descriptor or None")
+    # A partial roster is not the campaign's input, and a journal over part
+    # of one would be name-gated reuse of the wrong thing; the standalone
+    # synthesis stage stays checkpoint-less exactly as it is. A distributed
+    # quantum (#765) is the one exception: its descriptor binds the slice to
+    # the full roster, and the slice journal it banks joins with its peers.
+    _require(head_checkpoint is None or unit_scope is None or head_walk_quantum is not None,
+             "a scoped read cannot bank a head-walk journal")
     # Hashing only part of a roster does not verify that roster, so the two
     # options are refused together rather than quietly producing a record
     # that reads as a verified campaign input.
@@ -702,14 +901,136 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
 
     cells, formats = {}, {}
     wire_dir = Path(provenance["wire_dir"])
+    # Resolve once, not per cell (#711): every cell of the campaign shares
+    # this one wire directory, so resolving it per cell re-walks the same ~12
+    # NFS path components ~198k times (~62 LOOKUPs/cell measured on the
+    # GLM-5.3 run). The per-cell escape check below still stats the wire
+    # itself; the recorded path is joined from the resolved root.
+    wire_dir_resolved = wire_dir.resolve()
+    # One resolved root per distinct row directory, for the same reason: the
+    # recorded render is joined from the resolved root instead of resolved
+    # per cell, and the join reaches the same file the walk verifies.
+    owner_roots = {str(directory): Path(directory).resolve()
+                   for directory in set(map(str, owners.values()))}
+    mirror_root = None if render_mirror_root is None else Path(render_mirror_root)
     roster = sorted(names)
     if unit_scope is not None:
         low, high = unit_scope
         _require(type(low) is int and type(high) is int and 0 <= low < high <= len(roster),
                  f"unit scope {unit_scope} is outside the {len(roster)}-unit census roster")
         roster = roster[low:high]
+    quantum_bounds = None
+    if head_walk_quantum is not None:
+        # The descriptor is checked against the live census roster, not
+        # against the slice: a quantum from another campaign or roster
+        # revision is refused before it banks anything. A quantum that
+        # banks nothing is a refused quantum -- the shard is its output.
+        quantum_bounds = check_quantum_for_roster(head_walk_quantum, sorted(names))
+        _require(tuple(unit_scope or ()) == tuple(quantum_bounds),
+                 "head-walk quantum descriptor does not name this scoped read")
+        _require(head_checkpoint is not None,
+                 "a head-walk quantum banks its slice journal or refuses")
     resolved, synthesized, started = 0, 0, time.time()
-    for name in roster:
+
+    # -- the walk banks its prefix and fans out (#754) ----------------------
+    # Every action restart used to re-pay this whole loop. Now each verified
+    # unit is journalled under the campaign's own checkpoint machinery, and
+    # a resume re-verifies the banked prefix against the bytes it was banked
+    # from before trusting a single row of it. The journal is opt-in: every
+    # other caller of this loader sees exactly the walk that ran before.
+    head_root = head_seal = None
+    banked = []
+    if head_checkpoint is not None:
+        head_identity = {
+            "schema": HEAD_WALK_JOURNAL_SCHEMA,
+            "inputs": {key: inputs[key]["sha256"] for key in (
+                "campaign_plan", "census", "campaign_receipts",
+                "merged_cost", "merged_checkpoint")},
+            "required_source_units": inputs["required_source_units"],
+            "required_campaign_groups": inputs["required_campaign_groups"],
+            "checkpoint_seal": seal,
+            "roster_sha256": hashlib.sha256("\n".join(roster).encode("utf-8")).hexdigest(),
+            "render_mirror_root": render_mirror_root,
+            "encoder_source_reuse_sha256": (None if encoder_source_reuse is None else
+                canonical_json_sha256(encoder_source_reuse, where="head walk encoder reuse")),
+        }
+        if head_walk_quantum is not None:
+            # The shard is bound to the full roster, never to the slice
+            # alone: the digest is the verified descriptor's (checked against
+            # the live census above), and the descriptor itself rides in the
+            # identity so the collector can match each shard to the PB action
+            # it was assigned to. The default path is untouched -- without a
+            # descriptor a scoped walk still cannot bank, so `roster` here is
+            # the whole roster there.
+            head_identity["roster_sha256"] = head_walk_quantum["roster_sha256"]
+            head_identity["quantum"] = dict(head_walk_quantum)
+        head_root, head_seal, completed = _open_head_journal(
+            Path(head_checkpoint), resume=head_resume, identity=head_identity, qnames=roster)
+
+        def _banked_unit_still_binds(name, state):
+            """Re-verify one banked unit against the very bytes it names.
+
+            Nothing is trusted because it is journalled: the campaign shard's
+            file digest, and every render, marker and wire fence, must still
+            answer for the rows the walk banked before the cursor advances
+            over this unit. The global gates above already re-bound the
+            whole input set on this load, so the per-unit fences are the
+            only bytes that can have moved since.
+            """
+            try:
+                if not isinstance(state, dict) or state.get("schema") != HEAD_WALK_STATE_SCHEMA:
+                    return False
+                rows, files = state.get("cells"), state.get("unit_files")
+                if (not isinstance(rows, dict) or not isinstance(files, dict)
+                        or set(rows) != set(files)
+                        or not isinstance(state.get("formats"), list)
+                        or not isinstance(state.get("journal_file_sha256"), str)):
+                    return False
+                if _sha(unit_path(parts, name)) != state["journal_file_sha256"]:
+                    return False
+                for fmt, fence in files.items():
+                    row = rows[fmt]
+                    if not isinstance(row, dict) or not isinstance(fence, dict):
+                        return False
+                    if Path(row["wire"]).stat().st_size != fence.get("wire_size"):
+                        return False
+                    if _stat_signature(Path(row["render"]).stat()) != tuple(
+                            fence.get("render_signature") or ()):
+                        return False
+                    marker = _render_origin_marker_path(row["render"])
+                    digest = (None if not marker.is_file()
+                              else hashlib.sha256(marker.read_bytes()).hexdigest())
+                    if digest != fence.get("marker_sha256"):
+                        return False
+                return True
+            except (OSError, ValueError, TypeError, KeyError):
+                return False
+
+        # The cursor is a roster prefix: re-verify in the walk's own order and
+        # truncate at the first unit that no longer answers for itself. The
+        # stale suffix is discarded -- its units are re-walked, never reused.
+        for name in roster:
+            state = completed.get(name)
+            if state is None or not _banked_unit_still_binds(name, state):
+                break
+            banked.append((name, state))
+        for name in roster[len(banked):]:
+            if name in completed:
+                unit_path(head_root, name).unlink(missing_ok=True)
+        # A resumed unit is re-verified, so it is resolved work this run did:
+        # reported in roster order like every other unit, never a count the
+        # walk cannot answer for (#678). Nothing it synthesized counts as
+        # written now -- a resume writes nothing.
+        for name, state in banked:
+            for fmt, row in state["cells"].items():
+                cells[name, fmt] = row
+            formats[name] = tuple(state["formats"])
+            resolved += 1
+            if progress_phase is not None:
+                _pb_commit(resolved, progress_phase, unit=name)
+
+    def walk_one(name):
+        """Verify one unit end to end; the rows, the fences, the events."""
         state = _load_unit(unit_path(parts, name), stage=STAGE, qname=name, identity_sha256=seal)
         _require(isinstance(state, dict) and set(state) - {"unservable"} == {"anchors", "wire_records"},
                  f"{name}: incomplete measured anchor journal")
@@ -721,6 +1042,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         _same(set(anchors), measured, f"{name}: measured payload/journal coverage")
         unit = identity["units"][name]
         _same(unit["weight"]["shape"], census["unit_shapes"][name], f"{name}: census source shape")
+        unit_cells, fences, events = {}, {}, []
         for fmt, anchor in sorted(anchors.items()):
             row = payload["costs"][name][fmt]
             _require(fmt in unit["menu"] and anchor["qname"] == name, f"{name}: anchor outside exact menu")
@@ -754,42 +1076,110 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             filename = record["file"]
             _require(isinstance(filename, str) and Path(filename).name == filename and
                      filename not in {".", ".."}, f"{name}: escaping wire filename")
+            # The filename is a validated leaf, so the wire's lexical parent
+            # is the wire directory itself: the escape check is the symlink
+            # test on the wire, and the directory side is resolved once above
+            # instead of per cell (PrismaQuant #711).
             wire = wire_dir / filename
-            _require(not wire.is_symlink() and wire.resolve().parent == wire_dir.resolve(), f"{name}: escaping wire path")
-            _same(wire.stat().st_size, record["blob_bytes"], f"{name}: wire size")
-            render = owners[name] / "cache" / _cache_weight_filename(name, fmt)
-            target = (render if render_mirror_root is None
-                      else _render_mirror_path(render, render_mirror_root))
+            _require(not wire.is_symlink(), f"{name}: escaping wire path")
+            wire_stat = wire.stat()
+            _same(wire_stat.st_size, record["blob_bytes"], f"{name}: wire size")
+            render = owner_roots[str(owners[name])] / "cache" / _cache_weight_filename(name, fmt)
+            # The mirror keeps the render's absolute path under the mirror
+            # root so a cell's two copies stay comparable by name and a
+            # measuring run can never replace the campaign's own bytes.
+            target = (render if mirror_root is None
+                      else mirror_root / render.relative_to(render.root))
             present = Path(target).is_file()
             if require_existing_renders and not present:
                 raise ValueError(f"{name}@{fmt}: prepared render is missing; selected cache will not synthesize it")
-            origin = _resolve_render_origin(target, wire=wire, record=record, name=name,
-                                            fmt=fmt, shape=census["unit_shapes"][name],
-                                            reader=reader, device=synthesis_device)
-            cells[name, fmt] = {"anchor": anchor, "record": record, "wire": str(wire.resolve()),
-                               "render": str(Path(target).resolve()), "render_origin": origin,
+            if present:
+                origin = _resolve_render_origin(target, wire=wire, record=record, name=name,
+                                                fmt=fmt, shape=census["unit_shapes"][name],
+                                                reader=reader, device=synthesis_device)
+            else:
+                # The one thread-unsafe step in the walk: synthesis decodes
+                # through the bound reader, which is proven single-threaded
+                # (the qualification walk's wire pool is max_workers=1), so
+                # the rare missing render waits on one lock while pure-read
+                # verification overlaps freely around it.
+                with _HEAD_WALK_SYNTHESIS_LOCK:
+                    origin = _resolve_render_origin(target, wire=wire, record=record, name=name,
+                                                    fmt=fmt, shape=census["unit_shapes"][name],
+                                                    reader=reader, device=synthesis_device)
+                events.append(fmt)
+            unit_cells[fmt] = {"anchor": anchor, "record": record, "wire": str(wire_dir_resolved / filename),
+                               "render": str(target), "render_origin": origin,
                                **({} if render_mirror_root is None
-                                  else {"campaign_render": str(render.resolve())})}
-            if not present:
-                synthesized += 1
-                if log_every and synthesized % log_every == 0:
-                    elapsed = max(time.time() - started, 1e-9)
-                    print(f"tessera_joint_aura: synthesized {synthesized} renders "
-                          f"in {elapsed:.0f}s ({synthesized / elapsed:.2f} cells/s), "
-                          f"at {name}@{fmt}", flush=True)
-        formats[name] = (*sorted(anchors), "BF16")
+                                  else {"campaign_render": str(render)})}
+            # The resume fence for this cell: enough identity to prove on the
+            # next load that these bytes are the bytes this row was banked
+            # from, at stat-and-digest cost rather than a re-walk.
+            marker = _render_origin_marker_path(target)
+            fences[fmt] = {"wire_size": wire_stat.st_size,
+                           "render_signature": list(_stat_signature(Path(target).stat())),
+                           "marker_sha256": (None if not marker.is_file()
+                                             else hashlib.sha256(marker.read_bytes()).hexdigest())}
+        formats_row = (*sorted(anchors), "BF16")
+        return {"formats": formats_row, "cells": unit_cells, "synthesized_events": events,
+                "bank": {"schema": HEAD_WALK_STATE_SCHEMA,
+                         "journal_file_sha256": _sha(unit_path(parts, name)),
+                         "formats": list(formats_row), "cells": unit_cells,
+                         "unit_files": fences}}
+
+    pending_bank = []
+    last_bank = time.monotonic()
+
+    def _flush_bank():
+        for banked_name, bank in pending_bank:
+            write_unit(head_root, stage=HEAD_WALK_STAGE, qname=banked_name,
+                       identity_sha256=head_seal, state=bank)
+        pending_bank.clear()
+
+    def commit_one(name, result):
+        nonlocal resolved, synthesized, last_bank
+        for fmt, row in result["cells"].items():
+            cells[name, fmt] = row
+        formats[name] = tuple(result["formats"])
+        for fmt in result["synthesized_events"]:
+            synthesized += 1
+            if log_every and synthesized % log_every == 0:
+                elapsed = max(time.time() - started, 1e-9)
+                print(f"tessera_joint_aura: synthesized {synthesized} renders "
+                      f"in {elapsed:.0f}s ({synthesized / elapsed:.2f} cells/s), "
+                      f"at {name}@{fmt}", flush=True)
         resolved += 1
         # After the unit's shards are durable and its origins proven, never on
         # entering the loop.
         if progress_phase is not None:
             _pb_commit(resolved, progress_phase, unit=name)
+        if head_root is not None:
+            pending_bank.append((name, result["bank"]))
+            if time.monotonic() - last_bank >= HEAD_WALK_BANK_INTERVAL_S:
+                _flush_bank()
+                last_bank = time.monotonic()
+
+    walk_workers = _head_walk_worker_count(head_walk_workers)
+    try:
+        # However many workers fan the verification out, commitment -- cell
+        # insertion, reporting, banking -- stays in the roster's one order,
+        # so the journal holds a prefix and the durable sequence means what
+        # it meant serially.
+        _drive_ordered_walk(roster[len(banked):], walk_one, commit_one, workers=walk_workers)
+    finally:
+        # The interruption window: units that committed inside the last
+        # cadence interval are banked before the failure leaves this
+        # function, so a restart resumes from the walk's true frontier.
+        if head_root is not None and pending_bank:
+            _flush_bank()
     if log_every and synthesized:
         elapsed = max(time.time() - started, 1e-9)
         print(f"tessera_joint_aura: synthesized {synthesized} renders in {elapsed:.0f}s "
               f"({synthesized / elapsed:.2f} cells/s) on {synthesis_device}", flush=True)
     scoped = dict(unit_scope=unit_scope, synthesized_now=synthesized,
                   progress_committed=(0 if progress_phase is None else resolved),
-                  render_mirror_root=None if render_mirror_root is None else str(render_mirror_root))
+                  render_mirror_root=None if render_mirror_root is None else str(render_mirror_root),
+                  head_walk_workers=walk_workers, head_walk_resumed_units=len(banked))
     if not verify_payloads:
         return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
                                    formats, encoder_source_reuse=encoder_source_reuse, **scoped)
@@ -910,10 +1300,16 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         _same(len(wire_blob), cell["record"].get("blob_bytes"),
               f"{name}@{fmt}: read-ahead wire size differs from receipt")
         blob = wire_blob
-        actual_wire_sha256 = hashlib.sha256(blob).hexdigest()
-        if wire_sha256 is not None:
-            _same(wire_sha256, actual_wire_sha256,
-                  f"{name}@{fmt}: read-ahead wire digest changed")
+        if wire_sha256 is None:
+            actual_wire_sha256 = hashlib.sha256(blob).hexdigest()
+        else:
+            # The read-ahead reader already fenced this exact buffer -- size,
+            # stat signatures and the receipt digest -- and the handoff is one
+            # process reference the reader thread no longer touches, so a
+            # third hash here is a second full pass over the same bytes
+            # (PQ #725). Bind the reader's digest to the receipt instead.
+            actual_wire_sha256 = _require_sha256(
+                wire_sha256, f"{name}@{fmt} read-ahead wire digest")
         _same(actual_wire_sha256, cell["record"].get("blob_sha256"),
               f"{name}@{fmt}: read-ahead wire checksum")
     verifier = tc._checkpoint_identity_api() if reader is None else reader
@@ -1571,6 +1967,40 @@ def _source_prefetch(config):
     return dict(prefetch)
 
 
+def recommend_source_prefetch(*, cache_bytes, layer_bytes, cpu_count,
+                              cache_headroom_gb, prefetch_min_available_gb):
+    """Derive explicit ``source_prefetch`` numbers from measured budgets.
+
+    The sealed plan still carries the explicit six fields -- nothing here
+    changes what ``execute`` admits, and a seal over these numbers keeps the
+    exact bytes it has today (PQ #737). What changes is where the numbers
+    come from: instead of a pinned ``max_cache_slots: 2 /
+    prefetch_workers: 1`` carried across seals, the operator seals the depth
+    the measured budget admits -- ``cache_bytes // layer_bytes`` slots and
+    up to four readers bounded by CPUs and slots, with the lookahead the
+    slot count fits. The headroom and minimum-available floors stay operator
+    policy: they are passed through, not derived. The result is validated
+    through :func:`_source_prefetch`, so a recommendation that cannot run
+    refuses here instead of inside the action.
+    """
+    for label, value in (("cache_bytes", cache_bytes), ("layer_bytes", layer_bytes),
+                         ("cpu_count", cpu_count)):
+        _require(type(value) is int and value > 0,
+                 f"recommended source_prefetch requires positive {label}")
+    slots = max(2, int(cache_bytes // layer_bytes))
+    workers = max(1, min(4, slots, int(cpu_count)))
+    lookahead = max(1, min(workers, slots - 1))
+    recommendation = {
+        "max_cache_slots": slots,
+        "prefetch_workers": workers,
+        "prefetch_lookahead": lookahead,
+        "cache_headroom_gb": cache_headroom_gb,
+        "prefetch_min_available_gb": prefetch_min_available_gb,
+        "require_prefetched_residency": True,
+    }
+    return _source_prefetch({"source_prefetch": recommendation})
+
+
 def _operator_window_policy(config):
     from .joint_statistics_replay import normalize_operator_windows
     policy = normalize_operator_windows(config['execution'].get('operator_windows'))
@@ -1726,6 +2156,34 @@ def _seed_source_identity_cache(config, root):
     return destination
 
 
+#: The prepared-record bindings that name DIGESTS of things a dev iteration
+#: legitimately changes: which plan the prepare ran under, and which producer
+#: package made it. Under ``PRISMAQUANT_DEV_MODE=1`` these are records -- the
+#: run continues, loudly, stamped -- while every other prepared field (the
+#: model identity, calibration, roster, backend, reader) stays a wall even in
+#: dev mode: a stale record naming a different measurement is stale whatever
+#: the mode (Rob's 2026-09-19 decision: the seal returns at the artifact gate).
+_DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256")
+
+
+def _prepared_digest_recorded(key, stored, expected):
+    """Whether a prepared-record mismatch on ``key`` is recorded instead of gated.
+
+    One reader for both prepared-equality sites (the startup preflight and the
+    post-intake loop), so dev mode cannot admit a mismatch in one place that
+    the other still refuses. Returns ``False`` in certified mode for every
+    field, which keeps the certified ``_same`` refusal byte-identical.
+    """
+    if stored == expected:
+        return False
+    if not dev_mode_enabled() or key not in _DEV_RECORDED_PREPARED_KEYS:
+        return False
+    dev_warning(
+        f"prepared {key} differs from the running pass; recorded, not gated "
+        f"(dev mode): prepared={stored!r} running={expected!r}")
+    return True
+
+
 def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
                            reader_identity, projection_backend):
     """Refuse a stale small completion before reading the campaign metadata.
@@ -1742,7 +2200,8 @@ def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
                        ("implementation_sha256", implementation_sha256),
                        ("reader_identity", reader_identity),
                        ("projection_backend", projection_backend)):
-        _same(completion.get(key), value, f"prepared {key}")
+        if not _prepared_digest_recorded(key, completion.get(key), value):
+            _same(completion.get(key), value, f"prepared {key}")
     return completion
 
 
@@ -1917,6 +2376,14 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                   "started_epoch": time.time(), "torch": str(torch.__version__),
                   "cuda": torch.version.cuda, "affinity": sorted(os.sched_getaffinity(0))},
               "phases": [], "passed": False, "device_envelope": device_envelope}
+    if dev_mode_enabled():
+        # The dev stamp is TOP LEVEL and lands on every results.json this
+        # command writes, including a refusal path's -- the finally block
+        # below publishes it whatever happened above. A dev result is
+        # identifiable at a glance and grep-able, and can never masquerade
+        # as a certified one (Rob, 2026-09-19: the seal returns at the
+        # artifact gate, not the run gate).
+        result.update(dev_stamp(_aura_source_sha256()))
     result["env"]["container_content_sha256"] = executing_image()
     profile_tool = config.get("profile_tool", "cprofile")
     profiler = cProfile.Profile() if profile_tool == "cprofile" else None
@@ -2004,6 +2471,14 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         data = load_measured_anchor_input(config["inputs"], reader=reader,
             synthesis_device="cuda",
             progress_phase=(None if cost_read_manifest is not None else HEAD_PHASE),
+            # The head walk banks its verified units under the command's own
+            # root, so a restarted action resumes mid-roster instead of
+            # re-paying the whole walk (#754). Per-command because prepare
+            # and run must never read each other's journal even under one
+            # output root: the stage name binds the manifest, and so does
+            # the directory.
+            head_checkpoint=root / "head-walk",
+            head_resume=resume,
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
             **({} if config.get("historical_encoder_reuse") is None else
                {"historical_encoder_reuse": config["historical_encoder_reuse"]}),
@@ -2012,6 +2487,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         _require(data.unit_scope is None and data.render_mirror_root is None,
                  "joint execution requires the complete campaign roster in its own caches")
         result["file_hash_workers"] = file_hash_workers
+        result["head_walk_workers"] = data.head_walk_workers
+        result["head_walk_resumed_units"] = data.head_walk_resumed_units
         result["reader_identity"] = reader_identity
         result["encoder_source_reuse"] = data.encoder_source_reuse
         # Per-run, not per-origin: the census says what is on disk, this says
@@ -2138,7 +2615,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                                ("render_origins", render_census["render_origins"]),
                                ("render_comparisons", render_census["render_comparisons"]),
                                ("projection_backend", projection_backend.identity)):
-                _same(completion.get(key), value, f"prepared {key}")
+                if not _prepared_digest_recorded(key, completion.get(key), value):
+                    _same(completion.get(key), value, f"prepared {key}")
             _same(completion["formats_by_qname"], {n: list(v) for n, v in data.formats_by_qname.items()},
                   "prepared exact candidate roster")
             cache = pickle.loads(_bound(completion["production_cache"], "qualified PWC").read_bytes())

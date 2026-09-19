@@ -46,6 +46,11 @@ head of Tessera #562 (D2/D2b, stacked on #560's
 coordinated post-#560-lineage bump (PrismaQuant #760). Install that revision
 and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 `experiments/` and are not wheel entry points.
+Provision the pin venv from a git URL so the install records the commit
+(`git+file://<checkout>@<pin>`); the GPU sibling `pq-cu130-tessera-cc739a55`
+is provisioned on sparky (its `direct_url.json` `vcs_info` names the pin;
+measured 2026-09-19), the sparklina sibling is owed, and the dl380g10 x86
+sibling is owed (RobTand/prismaquant#753, RobTand/prismabuild#658).
 
 It moves the contract from **v29** to **v32**, and the lane-eligibility schema
 stays at **v10**: every bump in between is additive for a v10 reader. Four

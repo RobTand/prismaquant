@@ -292,6 +292,37 @@ _PARTITION_FIELDS_V2 = _PARTITION_FIELDS + ("observer_allocations",)
 _SCOPE_FIELDS_V2 = _SCOPE_FIELDS + ("observer_allocation_count",)
 _DERIVED_FIELDS_V2 = _DERIVED_FIELDS + ("admission", "fixed_resources", "timing_terms")
 
+#: Observation keys admitted by NAME, not by exact-set equality (PQ #731).
+#: Every key in :data:`_OBSERVATION_FIELDS` is required on the wire; every key
+#: in :data:`OPTIONAL_OBSERVATION_FIELDS` may be present or absent.  A key in
+#: neither is refused by name.  A producer half-bump that adds a registered
+#: observation therefore reads instead of refusing; registering a new key
+#: means defining its shape check in :func:`_observations` at the same time,
+#: because a carried record nobody validates is evidence of nothing.
+OPTIONAL_OBSERVATION_FIELDS = (RESERVATION_SLACK_FIELD,)
+OBSERVATION_KEY_REGISTRY = frozenset(_OBSERVATION_FIELDS + OPTIONAL_OBSERVATION_FIELDS)
+
+#: Partition schemas admitted by NAME (PQ #731).  One member today; a second
+#: producer partition schema is a new entry here plus its own reader, never a
+#: silent widening of the equality below.
+PARTITION_SCHEMAS = (PARTITION_SCHEMA,)
+
+#: The v2 derived blocks admitted by NAME (PQ #731).  ``admission`` is
+#: recomputed and compared (:func:`recompute_derived_admission`);
+#: ``fixed_resources`` and ``timing_terms`` are carried and read by nothing
+#: here.  ``timing_terms`` is null while the timing partition is unobserved,
+#: which is a producer state rather than a malformed block.
+DERIVED_BLOCK_NAMES_V2 = ("admission", "fixed_resources", "timing_terms")
+
+#: The producer's ``derived.admission`` coordinates this consumer compares.
+#: ``reason`` and ``scope`` are prose no check reads; ``verdict``,
+#: ``closed``, ``open`` and ``refused`` restate the ``domains`` mapping under
+#: a verdict rule this consumer does not assert, so they are validated as
+#: carried and never compared.
+_ADMISSION_FIELDS = ("closed", "domains", "expressible", "open", "reason",
+                     "refused", "scope", "uncharged_allocation_count",
+                     "unclassified_allocation_count", "verdict")
+
 
 # --------------------------------------------------------------------------
 # Reader. Structural faults raise before any arithmetic runs, exactly as the
@@ -600,13 +631,195 @@ def _reservation_slack(value: Any, where: str) -> Mapping:
     return record
 
 
+def _require_partition_schema(name: Any, where: str) -> str:
+    """The ledger schema admitted by NAME (PQ #731).
+
+    One member today.  A second producer partition schema arrives as a new
+    entry in :data:`PARTITION_SCHEMAS` with its own reader -- which is also
+    what :func:`transient_charge_boundary.require_boundary` compares against
+    -- never as a silent widening of this equality.
+    """
+    if name not in PARTITION_SCHEMAS:
+        raise RuntimePriceError(
+            f"{where}: unsupported partition schema {name!r}; this consumer "
+            f"reads only {', '.join(PARTITION_SCHEMAS)}")
+    return name
+
+
+def _derived_admission(value: Any, where: str) -> Mapping:
+    """The producer's ``derived.admission`` verdict, as CARRIED (PQ #731).
+
+    Shape-validated so the comparison in
+    :func:`consume_full_engine_resource_report` meets the coordinates it
+    recomputes rather than whatever the producer happened to write.  The
+    ``closed``/``open``/``refused`` lists, the ``verdict`` and the prose
+    ``reason``/``scope`` restate the ``domains`` mapping under a verdict rule
+    this consumer does not assert, so they are validated as carried and never
+    compared: the comparison is per-domain closed-ness on the four checkable
+    domains, the two allocation counts, and the expressible bit, each of which
+    this consumer recomputes from the observations itself.
+    """
+    claimed = _object(value, _ADMISSION_FIELDS, where)
+    domains = _object(claimed["domains"], DOMAINS, where + " domains")
+    for name, state in domains.items():
+        _enum(state, DOMAIN_STATES, f"{where} domains {name}")
+    for key in ("closed", "open", "refused"):
+        names = _string_list(claimed[key], f"{where} {key}", unique=True)
+        for name in names:
+            if name not in DOMAINS:
+                raise RuntimePriceError(
+                    f"{where} {key}: unknown domain {name!r}")
+    if type(claimed["expressible"]) is not bool:
+        raise RuntimePriceError(f"{where}: expressible is not a boolean")
+    _index(claimed["unclassified_allocation_count"],
+           where + " unclassified allocation count")
+    _index(claimed["uncharged_allocation_count"],
+           where + " uncharged allocation count")
+    _string(claimed["verdict"], where + " verdict")
+    return claimed
+
+
+def recompute_derived_admission(observations: Mapping, identity: Mapping) -> dict[str, Any]:
+    """The admission verdict this consumer recomputes, from observations.
+
+    PQ #731: the producer's ``derived.admission`` is a witness, never the
+    value.  This is the value: per-domain closed-ness from
+    :func:`_recompute_domains`, the unclassified/uncharged allocation counts
+    from :func:`_recompute_membership`, and the expressible bit -- every
+    domain closed and every term priced, which is the producer scope's own
+    rule ("admitted only when every domain is closed and every term is
+    priced"), evaluated on this consumer's recomputation rather than read
+    from the producer's.
+
+    ``provenance_admission`` and ``timing_partition`` have no consumer-side
+    closing condition, so they recompute as not closed here regardless of the
+    state the report declares; a producer that closes one of them is the
+    consumer's gap, recorded as blocking by the caller, never a disagreement
+    and never an admission.
+    """
+    closed = _recompute_domains(observations, identity)
+    membership, unclassified, non_step = _recompute_membership(observations)
+    uncharged = [row for row in membership if not _charged(row)]
+    terms = _recompute_terms(membership, closed=closed,
+                             unclassified=len(unclassified),
+                             uncharged=len(uncharged))
+    return {
+        "schema": "prismaquant.recomputed_derived_admission.v1",
+        "domains_closed": {name: bool(closed[name]) for name in DOMAINS},
+        "unclassified_allocation_count": len(unclassified),
+        "uncharged_allocation_count": len(uncharged),
+        "expressible": bool(all(closed.values())
+                            and all(terms[name] is not None for name in TERMS)),
+    }
+
+
+def _admission_disagreements(claimed: Mapping, recomputed: Mapping, *, schema: str,
+                             owner_views_gap: bool = False,
+                             ) -> tuple[list[str], list[str]]:
+    """``(disagreements, gaps)`` of the producer admission against the recompute.
+
+    A disagreement is a place the producer's ``derived.admission`` contradicts
+    what this consumer recomputes from the observations: a checkable domain
+    the two call differently closed, an allocation count that differs, or a
+    different expressible bit.  A gap is a domain the producer closes that
+    this consumer defines no closing condition for (``provenance_admission``,
+    ``timing_partition``): not the producer contradicting itself but a
+    closure this side cannot verify, so it stays not closed here -- the same
+    standing as a domain closed on a carried observation the consumer reads
+    nothing from.  The verdict string, the closed/open/refused lists and the
+    prose reason/scope restate the domains mapping under a rule this consumer
+    does not assert and are never compared.
+
+    The two allocation counts ride the partition's classification, so while
+    the ``owner_views`` membership gap stands they are recorded as that same
+    gap rather than as a second contradiction: the admission agrees with the
+    partition it derives from, and the quarrel is with the classification,
+    already named by the caller.
+    """
+    disagreements: list[str] = []
+    gaps: list[str] = []
+    claimed_domains = claimed["domains"]
+    for name in DOMAINS:
+        state = claimed_domains[name]
+        closed = recomputed["domains_closed"][name]
+        if name in CHECKABLE_DOMAINS:
+            if closed and state != "closed":
+                disagreements.append(
+                    f"derived admission calls domain {name} {state!r} where "
+                    "this consumer recomputes it closed")
+            elif not closed and state == "closed":
+                disagreements.append(
+                    f"derived admission calls domain {name} closed where this "
+                    "consumer recomputes it not closed")
+        elif state == "closed":
+            gaps.append(
+                f"domain {name} is closed by the producer, which this consumer "
+                f"recomputes nothing from at {schema}, so it stays not closed "
+                "here")
+    for key in ("unclassified_allocation_count", "uncharged_allocation_count"):
+        if claimed[key] == recomputed[key]:
+            continue
+        message = (f"derived admission claims {key} {claimed[key]!r} where this "
+                   f"consumer recomputes {recomputed[key]!r}")
+        if owner_views_gap:
+            gaps.append(message + "; the admission counts ride the owner_views "
+                        "classification, so this is the same consumer gap as "
+                        "the membership disagreements, not a second "
+                        "contradiction")
+        else:
+            disagreements.append(message)
+    if claimed["expressible"] is not recomputed["expressible"]:
+        disagreements.append(
+            f"derived admission claims expressible {claimed['expressible']!r} "
+            f"where this consumer recomputes {recomputed['expressible']!r}")
+    return disagreements, gaps
+
+
+def _derived(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
+    """The ``derived`` claim, admitted by NAME at v2 (PQ #731).
+
+    v1 keeps its exact field set.  At v2 every block in
+    :data:`_DERIVED_FIELDS_V2` is required, and any further key must name a
+    block in :data:`DERIVED_BLOCK_NAMES_V2` -- a producer half-bump that adds
+    a registered block reads instead of refusing, while an unregistered one
+    refuses by name rather than arriving as a claim no check knows.
+    """
+    if schema != REPORT_SCHEMA_V2:
+        return _object(value, _DERIVED_FIELDS, where)
+    if not isinstance(value, Mapping):
+        raise RuntimePriceError(f"{where}: expected an object")
+    for key in _DERIVED_FIELDS_V2:
+        if key not in value:
+            raise RuntimePriceError(f"{where}: missing derived block {key!r}")
+    for key in sorted(set(value) - set(_DERIVED_FIELDS_V2)):
+        if key not in DERIVED_BLOCK_NAMES_V2:
+            raise RuntimePriceError(
+                f"{where}: derived block {key!r} is not a registered v2 block "
+                f"({sorted(DERIVED_BLOCK_NAMES_V2)}); a producer that adds a "
+                "block registers its name and its reader here first")
+    return value
+
+
 def _observations(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
+    # Observation keys are admitted by NAME (:data:`OBSERVATION_KEY_REGISTRY`),
+    # never by exact-set equality of the whole report (PQ #731): a producer
+    # half-bump that adds a registered observation reads instead of refusing,
+    # and a report emitted before an optional observation existed still reads.
     # `reservation_slack` is optional on the wire for the same reason the
-    # reference boundary is: a report emitted before it existed still reads,
-    # and a boundary that requires it refuses its absence by name.
-    fields = _OBSERVATION_FIELDS + (
-        (RESERVATION_SLACK_FIELD,) if isinstance(value, Mapping) and RESERVATION_SLACK_FIELD in value else ())
-    observations = _object(value, fields, where)
+    # reference boundary is: a boundary that requires it refuses its absence
+    # by name.
+    if not isinstance(value, Mapping):
+        raise RuntimePriceError(f"{where}: expected an object")
+    for key in sorted(set(value) - set(OBSERVATION_KEY_REGISTRY)):
+        raise RuntimePriceError(
+            f"{where}: observation {key!r} is not a registered observation "
+            f"({sorted(OBSERVATION_KEY_REGISTRY)}); a producer that adds an "
+            "observation registers its name and its shape check here first")
+    for key in _OBSERVATION_FIELDS:
+        if key not in value:
+            raise RuntimePriceError(
+                f"{where}: missing required observation {key!r}")
+    observations = value
     if RESERVATION_SLACK_FIELD in observations and observations[RESERVATION_SLACK_FIELD] is not None:
         _reservation_slack(observations[RESERVATION_SLACK_FIELD], where + " reservation slack")
     _sha(observations["capture_sha256"], where + " capture digest")
@@ -723,7 +936,7 @@ def _partition(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mappin
             raise RuntimePriceError(
                 f"{where}: scope claims another observer allocation count than the partition "
                 "carries")
-    _equal(partition["schema"], PARTITION_SCHEMA, where + " schema")
+    _require_partition_schema(partition["schema"], where + " schema")
     _sha(partition["capture_sha256"], where + " capture digest")
     _run_identity(partition["identity"], where + " identity")
     _domains(partition["domains"], where + " domains")
@@ -845,16 +1058,22 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
     observations = _observations(report["observations"], "report observations", schema=schema)
     partition = _partition(report["partition"], "report partition", schema=schema)
     _resolved_evidence(partition["domains"], observations, "report partition domain")
-    derived = _object(report["derived"],
-                      _DERIVED_FIELDS_V2 if schema == REPORT_SCHEMA_V2 else _DERIVED_FIELDS,
-                      "report derived")
+    derived = _derived(report["derived"], "report derived", schema=schema)
     if schema == REPORT_SCHEMA_V2:
         # The producer's own admission verdict, fixed-resource composition and
-        # timing terms. Carried, and read by nothing here: every number this
-        # consumer admits is its own recomputation.
-        for name in ("admission", "fixed_resources", "timing_terms"):
-            if not isinstance(derived[name], Mapping):
-                raise RuntimePriceError(f"report derived {name}: expected an object")
+        # timing terms (PQ #731).  Each is admitted by NAME with its own shape
+        # and read by nothing here, except that the admission verdict is
+        # recomputed from the observations and compared in
+        # ``consume_full_engine_resource_report``: a witness, never the value.
+        # ``timing_terms`` is null while the timing partition is unobserved,
+        # which is why the two-capture v2 reports refused here with
+        # "expected an object" before this change.
+        _derived_admission(derived["admission"], "report derived admission")
+        if not isinstance(derived["fixed_resources"], Mapping):
+            raise RuntimePriceError("report derived fixed_resources: expected an object")
+        if derived["timing_terms"] is not None and not isinstance(
+                derived["timing_terms"], Mapping):
+            raise RuntimePriceError("report derived timing_terms: expected an object or null")
     _terms(derived["terms"], "report derived terms")
     _scope(derived["scope"], "report derived scope", schema=schema)
     _optional_index(derived["scalar_budget_bytes"], "report derived scalar budget bytes")
@@ -1442,11 +1661,13 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
         claimed = claimed_membership.get(allocation_id)
         if claimed is not None and any(claimed[key] != row[key] for key in _MEMBERSHIP_FIELDS):
             disagree(f"allocation {allocation_id} is partitioned differently than it recomputes")
-    if (report["schema"] == REPORT_SCHEMA_V2 and observations["owner_views"] is not None
-            and (set(by_id) != set(claimed_membership)
-                 or any(claimed_membership[key][field] != by_id[key][field]
-                        for key in set(by_id) & set(claimed_membership)
-                        for field in _MEMBERSHIP_FIELDS))):
+    owner_views_gap = (
+        report["schema"] == REPORT_SCHEMA_V2 and observations["owner_views"] is not None
+        and (set(by_id) != set(claimed_membership)
+             or any(claimed_membership[key][field] != by_id[key][field]
+                    for key in set(by_id) & set(claimed_membership)
+                    for field in _MEMBERSHIP_FIELDS)))
+    if owner_views_gap:
         # A v2 producer classifies on its ownership observation (site and
         # history rules over `owner_views`); this consumer recomputes
         # membership from `observed_categories` and `lifetime_scope` alone.
@@ -1556,6 +1777,19 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
     if derived["placement_obligation"] != PLACEMENT_OBLIGATION:
         disagree(f"derived placement_obligation is {derived['placement_obligation']!r} where this "
                  f"consumer applies {PLACEMENT_OBLIGATION!r}")
+
+    # The producer's admission verdict, recomputed (PQ #731).  The producer
+    # verdict is a witness, never the value: nothing below admits on it, and
+    # a claim that contradicts this consumer's own recomputation is a
+    # disagreement.  v1 carries no admission block and skips this entirely.
+    if report["schema"] == REPORT_SCHEMA_V2:
+        admission_disagreements, admission_gaps = _admission_disagreements(
+            derived["admission"],
+            recompute_derived_admission(observations, identity),
+            schema=report["schema"], owner_views_gap=owner_views_gap)
+        for message in admission_disagreements:
+            disagree(message)
+        blocking.extend(admission_gaps)
 
     unavailable = tuple(sorted(name for name in TERMS if terms[name] is None))
     coverage_state = observations["step_coverage"]["state"]

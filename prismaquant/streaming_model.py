@@ -1784,6 +1784,15 @@ def _build_streaming_context(model_path: str, *,
           f"est_layer={estimated_layer_bytes/(1024**3):.1f} GB, "
           f"min_avail={min_available_bytes/(1024**3):.1f} GB "
           f"({min_available_src})", flush=True)
+    if (max_cache_slots is not None and estimated_layer_bytes > 0
+            and cache_slots > max_cache_slots):
+        # Observability only (PQ #737): the sealed plan caps the window below
+        # what the measured budget admits, so the run's settle waits are a
+        # plan choice, not a machine limit. Nothing here overrides the seal.
+        print(f"{log_prefix} prefetch note: sealed max_cache_slots={max_cache_slots} "
+              f"underuses the measured budget (cache_slots={cache_slots}, "
+              f"memory_slots={memory_slots}); re-seal with "
+              f"recommend_source_prefetch numbers to widen the window", flush=True)
 
     prefetch_pool = ThreadPoolExecutor(
         max_workers=worker_count, thread_name_prefix="prefetch")

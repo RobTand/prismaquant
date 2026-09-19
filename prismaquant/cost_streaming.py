@@ -82,6 +82,84 @@ def normalize_boundary_storage(config):
     return {**config, "directory": str(Path(config["directory"]).resolve())}
 
 
+BOUNDARY_PARTITION_RANGE_SCHEMA = "prismaquant.boundary_partition_range.v1"
+
+
+def plan_boundary_partition_ranges(*, n_partitions, n_ranges):
+    """Split P calibration partitions into N contiguous disjoint ranges.
+
+    A joint AURA boundary capture is data-parallel over calibration
+    partitions: each entry is written under its own exact ``(batch,
+    boundary)`` coordinates as an independent file, and no range reads
+    another's (PQ #738). This function only *names* the quanta -- it
+    schedules nothing, owns no bytes and builds no dispatcher. Execution,
+    placement and balancing stay PrismaBuild's: one campaign row per range
+    produces that range's entries, and :func:`verify_boundary_partition_coverage`
+    checks the union before anything downstream reads it as one capture.
+    """
+    if type(n_partitions) is not int or n_partitions <= 0:
+        raise ValueError("boundary partition ranges require a positive partition count")
+    if type(n_ranges) is not int or not 1 <= n_ranges <= n_partitions:
+        raise ValueError("boundary partition ranges require 1 <= n_ranges <= n_partitions")
+    base, extra = divmod(n_partitions, n_ranges)
+    ranges, start = [], 0
+    for index in range(n_ranges):
+        width = base + (1 if index < extra else 0)
+        ranges.append({
+            "schema": BOUNDARY_PARTITION_RANGE_SCHEMA,
+            "range_index": index,
+            "n_ranges": n_ranges,
+            "n_partitions": n_partitions,
+            "partition_start": start,
+            "partition_end": start + width,
+            "partitions": width,
+        })
+        start += width
+    return ranges
+
+
+def verify_boundary_partition_coverage(ranges, *, n_partitions):
+    """Refuse a range set whose union is not exactly ``[0, n_partitions)``.
+
+    Gaps would silently drop calibration partitions from the merged capture;
+    overlaps would let two rows publish one entry. Both refuse here, before
+    the merge, rather than inside it.
+    """
+    if type(n_partitions) is not int or n_partitions <= 0:
+        raise ValueError("boundary partition coverage requires a positive partition count")
+    items = list(ranges)
+    if not items:
+        raise ValueError("boundary partition coverage requires at least one range")
+    seen = set()
+    for entry in items:
+        if not isinstance(entry, dict) or entry.get("schema") != BOUNDARY_PARTITION_RANGE_SCHEMA:
+            raise ValueError("boundary partition range has an unknown schema")
+        for key in ("range_index", "n_ranges", "n_partitions",
+                    "partition_start", "partition_end", "partitions"):
+            if key not in entry:
+                raise ValueError(f"boundary partition range is missing {key}")
+        if entry["n_partitions"] != n_partitions or entry["n_ranges"] != len(items):
+            raise ValueError("boundary partition range disagrees with its coverage set")
+        start, end = entry["partition_start"], entry["partition_end"]
+        if (type(start) is not int or type(end) is not int
+                or not 0 <= start < end <= n_partitions):
+            raise ValueError("boundary partition range has out-of-scope coordinates")
+        if end - start != entry["partitions"]:
+            raise ValueError("boundary partition range width disagrees with its coordinates")
+        if entry["range_index"] in seen:
+            raise ValueError("boundary partition range index repeats")
+        seen.add(entry["range_index"])
+    covered = sorted((entry["partition_start"], entry["partition_end"]) for entry in items)
+    cursor = 0
+    for start, end in covered:
+        if start != cursor:
+            raise ValueError("boundary partition ranges leave a gap or overlap")
+        cursor = end
+    if cursor != n_partitions:
+        raise ValueError("boundary partition ranges under-cover the partitions")
+    return sorted(items, key=lambda entry: entry["range_index"])
+
+
 def _state_tensors(value):
     """Closed source-metadata grammar: opaque tensor owners must refuse."""
     from collections.abc import Mapping
@@ -124,6 +202,8 @@ class StreamedBoundaryArtifacts:
         self.identity = {key: value for key, value in self.config.items() if key != "directory"}
         self.session = None
         self.directory = None
+        self._readonly = False
+        self._published = False
         self._references = {}
         self._slots = {}
         self._active_window = None
@@ -144,13 +224,24 @@ class StreamedBoundaryArtifacts:
     def __enter__(self):
         return self
 
-    def bind(self, identity, *, n_probes, check_memory=None):
+    def bind(self, identity, *, n_probes, check_memory=None, published=False):
+        """Start one generation; ``published`` keeps its entries on exit.
+
+        A working generation (the single run's) is deliberately disposable:
+        closing it retires every entry, because only completed cost shards
+        are resumable state. A **published** generation (the distributed
+        campaign's adjoint capture, contract §3.3) hands its entries to a
+        sealed receipt instead: they outlive this owner for the layer quanta
+        to read back, so closing it must not unlink them. The caller owns
+        deliberate retirements either way.
+        """
         import uuid
         from .cost_stage_checkpoint import canonical_json_sha256
         if self.session is not None:
             raise RuntimeError("exact boundary generation is already bound")
         self._n_probes = n_probes
         self._check_memory = check_memory
+        self._published = bool(published)
         self.session = {"generation": uuid.uuid4().hex,
             "run_identity_sha256": canonical_json_sha256(identity, where="exact boundary source")}
         self.directory = Path(self.config["directory"]) / self.session["generation"]
@@ -158,8 +249,32 @@ class StreamedBoundaryArtifacts:
         self._status = "running"
         self._publish_status()
 
+    def attach(self, session, *, n_probes):
+        """Read-only bind to a published generation's exact entries.
+
+        The distributed campaign's layer quanta read the adjoint capture's
+        boundary entries through the same verified windows the producing run
+        wrote them with, without owning or extending that generation: no
+        entry may be written, retired or re-published through an attached
+        owner, and the foreign generation's status file is never rewritten.
+        ``session`` is the receipt's ``boundary_storage.session`` block.
+        """
+        if self.session is not None:
+            raise RuntimeError("exact boundary generation is already bound")
+        generation = str(session["generation"])
+        directory = Path(self.config["directory"]) / generation
+        if not (directory / "entries").is_dir():
+            raise RuntimeError(
+                f"attached exact boundary generation has no entries at {directory}")
+        self._n_probes = int(n_probes)
+        self.session = {"generation": generation,
+            "run_identity_sha256": str(session["run_identity_sha256"])}
+        self.directory = directory
+        self._readonly = True
+        self._status = "attached"
+
     def _publish_status(self):
-        if self.directory is None:
+        if self.directory is None or self._readonly:
             return
         from .cost_stage_checkpoint import atomic_write_bytes
         data = {"schema": self.config["schema"], "session": self.session,
@@ -232,11 +347,13 @@ class StreamedBoundaryArtifacts:
 
     def _entry_identity(self, reference):
         from .perturbed_x_cache import ExactActivationReference
-        if (not isinstance(reference, ExactActivationReference)
-                or self._references.get(reference.name) != reference):
+        if not isinstance(reference, ExactActivationReference) or (
+                not self._readonly
+                and self._references.get(reference.name) != reference):
             raise RuntimeError("exact boundary reference is stale or belongs to another generation")
         identity = json.loads(reference.metadata_json)["identity"]
-        if identity["session"] != self.session or self._slots.get(identity["slot"]) != reference:
+        if identity["session"] != self.session or (
+                not self._readonly and self._slots.get(identity["slot"]) != reference):
             raise RuntimeError("exact boundary reference has a stale generation")
         return identity
 
@@ -297,6 +414,9 @@ class StreamedBoundaryArtifacts:
         self.telemetry["retired_entries"] += 1
 
     def retire(self, reference):
+        if self._readonly:
+            raise RuntimeError(
+                "an attached read-only generation cannot retire entries")
         identity = self._entry_identity(reference)
         del self._slots[identity["slot"]]
         self._retire(reference)
@@ -339,13 +459,22 @@ class StreamedBoundaryArtifacts:
     def __exit__(self, exc_type, exc, traceback):
         # No working tensor reference is resumable. Cost checkpoint shards own
         # successful measurements; a new attempt always uses a new generation.
-        self._status = "failed" if exc_type is not None else ("complete" if self.session else "unused")
+        self._status = "failed" if exc_type is not None else (
+            "attached" if self._readonly else ("complete" if self.session else "unused"))
         try:
-            if self._active_window is not None or self.telemetry["resident_tensor_bytes"]:
+            if not self._readonly and (
+                    self._active_window is not None or self.telemetry["resident_tensor_bytes"]):
                 raise RuntimeError("exact boundary generation closed with a live window")
-            for reference in list(self._references.values()):
-                self._retire(reference, missing_ok=True)
-            self._slots.clear()
+            if self._published:
+                # A published generation's entries belong to its receipt; the
+                # quanta read them back, so closing the owner must not unlink
+                # them. Deliberate retirements already happened above.
+                self._references.clear()
+                self._slots.clear()
+            else:
+                for reference in list(self._references.values()):
+                    self._retire(reference, missing_ok=True)
+                self._slots.clear()
         except BaseException:
             self._status = "failed"
             raise

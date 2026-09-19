@@ -84,6 +84,37 @@ def test_measured_cli_refuses_ambiguous_configuration(monkeypatch, capsys, optio
 DEFAULT_MENU = {"FP8_E4M3": (1.0, 8.0), "FP8_E5M2": (2.0, 2.0)}
 
 
+def admit_synthetic_table(monkeypatch):
+    """Stub ONLY the producer attestation for synthetic CLI fixtures.
+
+    PQ #560 defect 3 refuses v1 tables at the pricing/budget consumers, so a
+    synthetic v1 fixture reaches no downstream allocator mechanics on its own.
+    The CLI tests in this file exercise mechanics *past* admission (selection,
+    fixed charge, promotion, device constraint) — the gate itself is covered
+    in `tests/test_runtime_admission_split.py`. The stub wraps the real
+    loader, so parse, receipt-hash, cost-sha and context checks still run; it
+    marks the parsed table admitted exactly as a passing v2 admission would.
+    """
+    from dataclasses import replace
+
+    import prismaquant.measured_runtime_prices as mrp
+    real_load = mrp.load_measured_runtime_table
+
+    def admitted_load(*args, **kwargs):
+        table = real_load(*args, **kwargs)
+        return replace(table,
+                       runtime_provenance={"path": "synthetic", "sha256": "0" * 64},
+                       native_rows_admitted=True, fixed_resources_admitted=True,
+                       fixed_resources_refusal=None)
+
+    monkeypatch.setattr(mrp, "load_measured_runtime_table", admitted_load)
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_producer_admitted(monkeypatch):
+    admit_synthetic_table(monkeypatch)
+
+
 def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_proj",),
                   menu=DEFAULT_MENU, target_bits="9"):
     """Synthetic probe/cost/table/context files plus the allocator argv.
