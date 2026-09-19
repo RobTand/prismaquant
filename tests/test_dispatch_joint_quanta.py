@@ -37,11 +37,16 @@ N_LAYERS = 3
 
 
 @pytest.fixture
-def campaign():
+def campaign(tmp_path):
     scope = {"campaign": "dispatch-fixture", "layers": list(range(N_LAYERS))}
+    # The plan file must exist: stage A's payload --output-root and the
+    # receipt default are both read from the plan's sealed output_root.
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(
+        {"output_root": str(tmp_path / "campaign-root")}))
     return {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
             "manifest_sha256": "c" * 64, "scope": scope,
-            "plan_path": "/fixture/plan.json",
+            "plan_path": str(plan_path),
             "prepared_path": "/fixture/prepare/prepared.json",
             "roster_sha256": hashlib.sha256(b"roster\n").hexdigest()}
 
