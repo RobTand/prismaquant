@@ -16,9 +16,9 @@ import pytest
 from prismaquant.measured_runtime_prices import RuntimePriceError
 from prismaquant import full_engine_resource_report as consumer
 from prismaquant.full_engine_resource_report import (
-    DOMAINS, ENVELOPE_MEMBERS, PLACEMENT_OBLIGATION, REPORT_SCHEMA, TERMS,
+    DOMAINS, ENVELOPE_MEMBERS, PLACEMENT_OBLIGATION, REPORT_SCHEMA, REPORT_SCHEMA_V2, TERMS,
     _placement_obligation, consume_full_engine_resource_report,
-    read_full_engine_resource_report,
+    read_full_engine_resource_report, recompute_derived_admission,
 )
 
 MODULE = Path(consumer.__file__)
@@ -442,7 +442,7 @@ def test_the_owed_observations_are_named_and_null_rather_than_absent(tmp_path):
     for name in consumer.OWED_OBSERVATIONS:
         def mutate(report, name=name):
             del report["observations"][name]
-        with pytest.raises(RuntimePriceError, match="expected exactly fields"):
+        with pytest.raises(RuntimePriceError, match="missing required observation"):
             consume(tmp_path, mutated(mutate))
 
 
@@ -1661,4 +1661,181 @@ def test_a_rank_scope_is_all_or_nothing_and_inside_its_world(tmp_path, scope, di
     report = fixed_terms_report()
     report["identity"]["run"].update(scope)
     with pytest.raises(RuntimePriceError, match=diagnostic):
+        consume(tmp_path, report)
+
+
+# --------------------------------------------------------------------------
+# PQ #731: the consumer recomputes derived.admission from the v2 report's
+# observations; the producer verdict is a witness, never the value.
+# --------------------------------------------------------------------------
+
+def _v2ified(report):
+    """The synthetic v1 capture re-enveloped as a v2 report.
+
+    Apart from the envelope the bytes are the producer-emitted synthetic
+    capture, so this exercises the v2 reader shapes without inventing a
+    measurement.  The fixture provenance still marks it synthetic.
+    """
+    report = copy.deepcopy(report)
+    report["schema"] = REPORT_SCHEMA_V2
+    report["partition"]["observer_allocations"] = []
+    report["partition"]["scope"]["observer_allocation_count"] = 0
+    report["derived"]["scope"]["observer_allocation_count"] = 0
+    return report
+
+
+def _producer_admission(report):
+    """An admission block in the producer's shape matching this recomputation.
+
+    The closed/open split of the not-closed domains, the verdict string and
+    the prose are the producer's own to choose -- the consumer never compares
+    them -- so they take fixed plausible values while the compared
+    coordinates (per-domain closed-ness, the two counts, the expressible bit)
+    come from :func:`recompute_derived_admission`.
+    """
+    projection = recompute_derived_admission(report["observations"], report["identity"])
+    return {
+        "closed": sorted(name for name, shut in projection["domains_closed"].items() if shut),
+        "open": sorted(name for name, shut in projection["domains_closed"].items() if not shut),
+        "refused": [],
+        "domains": {name: ("closed" if shut else "open")
+                    for name, shut in projection["domains_closed"].items()},
+        "expressible": projection["expressible"],
+        "unclassified_allocation_count": projection["unclassified_allocation_count"],
+        "uncharged_allocation_count": projection["uncharged_allocation_count"],
+        "verdict": "open",
+        "reason": "synthetic test block in the producer's shape",
+        "scope": "derived from partition.domains and partition.scope",
+    }
+
+
+def _v2_with_admission(report):
+    report = _v2ified(report)
+    report["derived"]["admission"] = _producer_admission(report)
+    report["derived"]["fixed_resources"] = {"state": "inexpressible"}
+    report["derived"]["timing_terms"] = None
+    return report
+
+
+def test_recompute_derived_admission_is_a_checkable_projection_of_the_observations():
+    report = supplied()
+    projection = recompute_derived_admission(report["observations"], report["identity"])
+    assert projection["domains_closed"] == {
+        "worker_startup": False, "history_join": True, "external_closure": False,
+        "provenance_admission": False, "cache_capacity": False, "timing_partition": False}
+    assert projection["unclassified_allocation_count"] == 1
+    assert projection["uncharged_allocation_count"] == 0
+    assert projection["expressible"] is False
+
+
+def test_a_v2_report_with_a_matching_admission_agrees(tmp_path):
+    """The comparison accepts a producer verdict that matches the recompute."""
+    assert consume(tmp_path, _v2_with_admission(supplied())).disagreements == ()
+
+
+def test_a_v2_report_with_null_timing_terms_reads(tmp_path):
+    """`timing_terms` is null while the timing partition is unobserved (#731).
+
+    This is the structural refusal the real two-capture v2 reports hit:
+    "report derived timing_terms: expected an object".
+    """
+    report = _v2_with_admission(supplied())
+    assert report["derived"]["timing_terms"] is None
+    read_full_engine_resource_report(written(tmp_path, report), root=tmp_path)
+
+
+@pytest.mark.parametrize("domain", ["history_join", "worker_startup", "cache_capacity"])
+def test_a_contradicted_checkable_domain_is_a_disagreement(tmp_path, domain):
+    report = _v2_with_admission(supplied())
+    claimed = report["derived"]["admission"]["domains"][domain]
+    report["derived"]["admission"]["domains"][domain] = (
+        "open" if claimed == "closed" else "closed")
+    verdict = consume(tmp_path, report)
+    assert any(f"derived admission calls domain {domain}" in reason
+               for reason in verdict.disagreements)
+
+
+def test_contradicted_admission_counts_are_disagreements(tmp_path):
+    report = _v2_with_admission(supplied())
+    report["derived"]["admission"]["unclassified_allocation_count"] += 1
+    verdict = consume(tmp_path, report)
+    assert any("unclassified_allocation_count" in reason
+               for reason in verdict.disagreements)
+
+
+def test_a_contradicted_expressible_bit_is_a_disagreement(tmp_path):
+    report = _v2_with_admission(supplied())
+    report["derived"]["admission"]["expressible"] = True
+    verdict = consume(tmp_path, report)
+    assert any("expressible" in reason for reason in verdict.disagreements)
+
+
+def test_admission_prose_and_verdict_are_carried_never_compared(tmp_path):
+    """Verdict, lists and prose restate the domains under an unasserted rule."""
+    report = _v2_with_admission(supplied())
+    report["derived"]["admission"]["verdict"] = "admitted"
+    report["derived"]["admission"]["reason"] = "a different sentence"
+    report["derived"]["admission"]["closed"] = []
+    report["derived"]["admission"]["refused"] = list(DOMAINS)
+    assert consume(tmp_path, report).disagreements == ()
+
+
+def test_a_producer_closed_noncheckable_domain_is_a_gap_never_a_pass(tmp_path):
+    report = _v2_with_admission(supplied())
+    report["derived"]["admission"]["domains"]["provenance_admission"] = "closed"
+    verdict = consume(tmp_path, report)
+    assert not any("derived admission calls domain provenance_admission" in reason
+                   for reason in verdict.disagreements)
+    assert any("provenance_admission" in reason and "recomputes nothing from" in reason
+               for reason in verdict.blocking)
+
+
+def test_admission_counts_ride_the_owner_views_gap(tmp_path):
+    """While the owner_views classification gap stands, count differences are
+    that same gap, not a second contradiction."""
+    disagreements, gaps = consumer._admission_disagreements(
+        {"domains": {name: "open" for name in DOMAINS},
+         "expressible": False,
+         "unclassified_allocation_count": 0,
+         "uncharged_allocation_count": 0},
+        {"domains_closed": {name: False for name in DOMAINS},
+         "expressible": False,
+         "unclassified_allocation_count": 3,
+         "uncharged_allocation_count": 1},
+        schema=REPORT_SCHEMA_V2, owner_views_gap=True)
+    assert disagreements == []
+    assert len(gaps) == 2 and all("owner_views" in reason for reason in gaps)
+
+
+def test_an_unknown_observation_key_refuses_by_name(tmp_path):
+    def mutate(report):
+        report["observations"]["next_capture_probe"] = {"claimed": 1}
+    with pytest.raises(RuntimePriceError, match="not a registered observation"):
+        consume(tmp_path, mutated(mutate))
+
+
+def test_a_registered_optional_observation_reads(tmp_path):
+    def mutate(report):
+        report["observations"]["reservation_slack"] = None
+    assert consume(tmp_path, mutated(mutate)).disagreements == ()
+
+
+def test_an_unknown_partition_schema_refuses_by_name(tmp_path):
+    def mutate(report):
+        report["partition"]["schema"] = "tessera.full_engine_resource_partition.v2"
+    with pytest.raises(RuntimePriceError, match="unsupported partition schema"):
+        consume(tmp_path, mutated(mutate))
+
+
+def test_an_unregistered_derived_block_refuses_by_name(tmp_path):
+    report = _v2_with_admission(supplied())
+    report["derived"]["next_verdict"] = {}
+    with pytest.raises(RuntimePriceError, match="not a registered v2 block"):
+        consume(tmp_path, report)
+
+
+def test_a_malformed_admission_block_refuses_structurally(tmp_path):
+    report = _v2_with_admission(supplied())
+    del report["derived"]["admission"]["domains"]["history_join"]
+    with pytest.raises(RuntimePriceError, match="expected exactly fields"):
         consume(tmp_path, report)
