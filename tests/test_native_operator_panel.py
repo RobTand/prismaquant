@@ -12,7 +12,8 @@ import torch
 
 from prismaquant.joint_aura import arithmetic_identity, identity_sha256, make_joint_aura_entry
 from prismaquant.native_operator_panel import (EXECUTION, INPUT_SCHEMA, consume_native_receipt,
-                                               freeze_native_panel, operator_route_identity)
+                                               freeze_native_panel, kernel_arch_status,
+                                               observed_kernel_schedule, operator_route_identity)
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 from test_streamed_cost_checkpoints import _model_identity
 
@@ -199,3 +200,62 @@ def test_receipt_rejects_altered_binding_or_unproved_resource_claim(joined, tmp_
     with pytest.raises(ValueError):
         consume_native_receipt(path, expected_sha256="0" * 64 if mutation == "receipt_hash" else digest,
                                expected_panel=panel, memory_trace_path=trace_path)
+
+
+def test_an_older_arch_schedule_is_named_in_the_observation_not_in_prose(joined, tmp_path):
+    """RobTand/prismaquant#578: the BF16 sm80 schedule on sm_121.
+
+    The observed schedule rides the observation where a gate reads it, and a
+    price measured on it disclaims the native-hardware price in the
+    observation's own unknown list.
+    """
+    panel, receipt, _ = receipt_fixture(joined)
+    for phase in ("prefill", "decode"):
+        receipt["phases"][phase]["route"]["platform"] = "sm_121"
+        receipt["phases"][phase]["route"]["kernel_schedule"] = \
+            "cutlass_80_tensorop_s16816gemm_bf16_256x128"
+    panel["phases"]["prefill"]["expected_route"] = dict(receipt["phases"]["prefill"]["route"])
+    panel["phases"]["decode"]["expected_route"] = dict(receipt["phases"]["decode"]["route"])
+    receipt["panel"], receipt["panel_sha256"] = panel, identity_sha256(panel)
+    path = tmp_path / "receipt.json"
+    digest = write(path, receipt)
+    observation = consume_native_receipt(path, expected_sha256=digest, expected_panel=panel)
+    assert observation["phases"]["prefill"]["kernel_schedule"].startswith("cutlass_80_")
+    assert observation["phases"]["prefill"]["kernel_arch"] == "older_arch"
+    assert "native_kernel_schedule" in observation["unknown"]
+
+
+def test_a_native_family_schedule_keeps_the_native_price_claim(joined, tmp_path):
+    panel, receipt, _ = receipt_fixture(joined)
+    for phase in ("prefill", "decode"):
+        receipt["phases"][phase]["route"]["platform"] = "sm_121"
+        receipt["phases"][phase]["route"]["kernel_schedule"] = \
+            "cutlass3x_sm120_bstensorop_s16864gemm_block_scaled_ue4m3xe2m1"
+    panel["phases"]["prefill"]["expected_route"] = dict(receipt["phases"]["prefill"]["route"])
+    panel["phases"]["decode"]["expected_route"] = dict(receipt["phases"]["decode"]["route"])
+    receipt["panel"], receipt["panel_sha256"] = panel, identity_sha256(panel)
+    path = tmp_path / "receipt.json"
+    digest = write(path, receipt)
+    observation = consume_native_receipt(path, expected_sha256=digest, expected_panel=panel)
+    assert observation["phases"]["decode"]["kernel_arch"] == "native"
+    assert "native_kernel_schedule" not in observation["unknown"]
+
+
+def test_an_unobserved_schedule_stays_unknown_without_tainting_the_price(joined, tmp_path):
+    panel, receipt, _ = receipt_fixture(joined)
+    path = tmp_path / "receipt.json"
+    digest = write(path, receipt)
+    observation = consume_native_receipt(path, expected_sha256=digest, expected_panel=panel)
+    assert observation["phases"]["prefill"]["kernel_schedule"] is None
+    assert observation["phases"]["prefill"]["kernel_arch"] == "unknown"
+    assert "native_kernel_schedule" not in observation["unknown"]
+
+
+def test_a_present_but_empty_schedule_is_a_defect():
+    with pytest.raises(ValueError, match="kernel_schedule"):
+        observed_kernel_schedule({"kernel_schedule": " "})
+    assert observed_kernel_schedule({}) is None
+    assert kernel_arch_status(None, platform="sm_121") == "unknown"
+    assert kernel_arch_status("cutlass_80_x", platform=None) == "unknown"
+    assert kernel_arch_status("nvjet_sm121_tss_mma_x", platform="sm_121") == "native"
+    assert kernel_arch_status("cutlass_80_x", platform="sm_121") == "older_arch"
