@@ -50,25 +50,29 @@ def test_a_walk_interrupted_midway_resumes_and_matches_a_fresh_walk(tmp_path, mo
     from prismaquant import tessera_joint_aura as bridge
 
     config, names, _fmt, _payload, _states = fixture(tmp_path)
+    # The walk visits the census roster in its one deterministic order --
+    # ``sorted(names)`` -- not the fixture's list order, so every position
+    # below is a roster position.
+    first, second = sorted(names)
     journal = tmp_path / "head-walk"
     seen = _reports(monkeypatch, bridge)
     fresh = bridge.load_measured_anchor_input(config, verify_payloads=False,
                                               head_checkpoint=tmp_path / "fresh-walk")
     seen.clear()
 
-    # An interruption on the second unit: the first is committed, and the
-    # crash-window flush banks exactly the completed prefix.
+    # An interruption on the second roster unit: the first is committed, and
+    # the crash-window flush banks exactly the completed prefix.
     real_load = bridge._load_unit
     def break_on_second(path, *, qname, **kwargs):
-        if qname == names[1]:
+        if qname == second:
             raise RuntimeError("interrupted mid-walk")
         return real_load(path, qname=qname, **kwargs)
     monkeypatch.setattr(bridge, "_load_unit", break_on_second)
     with pytest.raises(RuntimeError, match="interrupted mid-walk"):
         bridge.load_measured_anchor_input(config, verify_payloads=False,
                                           head_checkpoint=journal)
-    assert unit_path(journal, names[0]).is_file(), "the committed prefix is banked"
-    assert not unit_path(journal, names[1]).exists()
+    assert unit_path(journal, first).is_file(), "the committed prefix is banked"
+    assert not unit_path(journal, second).exists()
 
     monkeypatch.setattr(bridge, "_load_unit", real_load)
     resumed = bridge.load_measured_anchor_input(config, verify_payloads=False,
@@ -106,9 +110,12 @@ def test_a_banked_unit_whose_inputs_drifted_is_rewalked_not_trusted(tmp_path):
     from prismaquant.production_weight_cache import _cache_weight_filename
 
     config, names, fmt, _payload, _states = fixture(tmp_path)
+    # Roster positions, not fixture list positions: the walk visits
+    # ``sorted(names)``.
+    first, second = sorted(names)
     journal = tmp_path / "head-walk"
     bridge.load_measured_anchor_input(config, verify_payloads=False, head_checkpoint=journal)
-    render = tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(names[1], fmt)
+    render = tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(second, fmt)
     render.write_bytes(render.read_bytes() + b"drifted")
 
     data = bridge.load_measured_anchor_input(config, verify_payloads=False,
@@ -175,10 +182,14 @@ def test_the_parallel_walk_commits_and_banks_exactly_what_the_serial_walk_does(
     config, names, _fmt, _payload, _states = fixture(tmp_path)
     seen = _reports(monkeypatch, bridge)
     # The FIRST roster unit finishes last; the driver must still commit it
-    # first, or the banked prefix and the reported counts would reorder.
+    # first, or the banked prefix and the reported counts would reorder. The
+    # roster's first unit is ``sorted(names)[0]`` -- not the fixture list's
+    # first -- or the delay would sit on the last unit walked and reorder
+    # nothing.
+    first = sorted(names)[0]
     real_load = bridge._load_unit
     def slow_first(path, *, qname, **kwargs):
-        if qname == names[0]:
+        if qname == first:
             time.sleep(0.05)
         return real_load(path, qname=qname, **kwargs)
     monkeypatch.setattr(bridge, "_load_unit", slow_first)
