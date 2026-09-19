@@ -72,7 +72,11 @@ def probe_direct_url(python: str) -> dict:
         out = json.loads(done.stdout.strip() or "{}")
     except ValueError:
         out = {}
-    if isinstance(out.get("direct_url"), dict):
+    if not isinstance(out, dict):
+        out = {}
+    if "direct_url" in out:
+        # Shape is the verdict's job (a non-object direct_url is its own
+        # refusal); absence here means the probe itself failed, named below.
         return out
     reason = out.get("reason") or (done.stderr.strip().splitlines() or
                                    ["the probe printed nothing"])[-1]
@@ -92,7 +96,12 @@ def verdict(provenance: dict, expected: str, python: str) -> tuple[bool, str]:
         return False, (
             f"{python}: no {DIST_NAME} provenance ({reason}); expected a "
             f"non-editable Git install at {expected}. {remediation(python)}")
-    direct = provenance.get("direct_url") or {}
+    direct = provenance.get("direct_url")
+    if not isinstance(direct, dict):
+        return False, (
+            f"{python}: {DIST_NAME} direct_url.json is not an object "
+            f"({direct!r}); pbtest refuses before pytest "
+            f"({PQ_ISSUE}). {remediation(python)}")
     vcs = direct.get("vcs_info") or {}
     observed = vcs.get("commit_id")
     editable = bool(direct.get("dir_info", {}).get("editable"))

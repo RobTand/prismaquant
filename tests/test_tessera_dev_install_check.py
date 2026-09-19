@@ -62,6 +62,7 @@ def _fake_python(tmp_path, payload):
 def _cases(expected):
     return {
         "local_dir": ({}, "local-directory install"),
+        "malformed": (["not", "an", "object"], "is not an object"),
         "wrong_commit": ({"vcs_info": {"vcs": "git", "commit_id": "0" * 40}},
                          "expected " + expected),
         "editable": ({"vcs_info": {"vcs": "git", "commit_id": expected},
@@ -69,7 +70,7 @@ def _cases(expected):
     }
 
 
-@pytest.mark.parametrize("case", ["local_dir", "wrong_commit", "editable"])
+@pytest.mark.parametrize("case", ["local_dir", "malformed", "wrong_commit", "editable"])
 def test_non_git_provenance_refuses_with_the_idle_window_repair(tmp_path, case):
     """#753: every provenance the gate refuses, refused here first, with the
     repair the filer may not run unilaterally (idle pool, fleet owner)."""
