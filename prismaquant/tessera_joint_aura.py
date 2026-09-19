@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from collections.abc import Mapping
 import functools
 from dataclasses import dataclass
 import hashlib
@@ -30,6 +31,7 @@ from .cost_stage_checkpoint import (
 )
 from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
 from .interned_json import load_json_file
+from .joint_head_walk_quanta import check_quantum_for_roster
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
@@ -667,7 +669,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                historical_encoder_reuse=None,
                                progress_phase=SYNTHESIS_PHASE,
                                head_checkpoint=None, head_resume=False,
-                               head_walk_workers=None):
+                               head_walk_workers=None, head_walk_quantum=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -774,6 +776,20 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     digesting (the GIL is released through the syscalls and by hashlib for
     the buffers that dominate), and the one thread-unsafe step left -- a
     missing render's synthesis through the bound reader -- holds a lock.
+
+    ``head_walk_quantum`` is the opt-in distributed-quantum half of #765: a
+    descriptor from ``joint_head_walk_quanta.head_walk_quanta`` naming this
+    action's ``[lo, hi)`` slice of the sorted census roster. It requires
+    ``unit_scope == (lo, hi)`` and a ``head_checkpoint`` to bank the slice
+    into, and the slice journal is bound to the FULL roster digest plus the
+    descriptor itself -- never to the slice alone -- so per-quantum journals
+    join (``joint_head_walk_quanta.join_head_walk_journals``) into the one
+    journal a resumed walk consumes unchanged. Without a descriptor a scoped
+    read still cannot bank, exactly as before. Fleet execution of quanta
+    waits on the D45 measurement gate (checksum-bound versus read-bound at
+    full-core fan-out); until then this parameter is the producer/consumer
+    contract under test, not the production prepare path, which passes
+    nothing here.
     """
     from .production_weight_cache import _cache_weight_filename
     from tools.dispatch_tessera_campaign import _require_receipts
@@ -796,10 +812,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _require(head_checkpoint is None or isinstance(head_checkpoint, (str, Path)),
              "head_checkpoint must be a directory path or None")
     _require(type(head_resume) is bool, "head_resume must be an explicit boolean")
+    _require(head_walk_quantum is None or isinstance(head_walk_quantum, Mapping),
+             "head_walk_quantum must be a quantum descriptor or None")
     # A partial roster is not the campaign's input, and a journal over part
     # of one would be name-gated reuse of the wrong thing; the standalone
-    # synthesis stage stays checkpoint-less exactly as it is.
-    _require(head_checkpoint is None or unit_scope is None,
+    # synthesis stage stays checkpoint-less exactly as it is. A distributed
+    # quantum (#765) is the one exception: its descriptor binds the slice to
+    # the full roster, and the slice journal it banks joins with its peers.
+    _require(head_checkpoint is None or unit_scope is None or head_walk_quantum is not None,
              "a scoped read cannot bank a head-walk journal")
     # Hashing only part of a roster does not verify that roster, so the two
     # options are refused together rather than quietly producing a record
@@ -899,6 +919,17 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         _require(type(low) is int and type(high) is int and 0 <= low < high <= len(roster),
                  f"unit scope {unit_scope} is outside the {len(roster)}-unit census roster")
         roster = roster[low:high]
+    quantum_bounds = None
+    if head_walk_quantum is not None:
+        # The descriptor is checked against the live census roster, not
+        # against the slice: a quantum from another campaign or roster
+        # revision is refused before it banks anything. A quantum that
+        # banks nothing is a refused quantum -- the shard is its output.
+        quantum_bounds = check_quantum_for_roster(head_walk_quantum, sorted(names))
+        _require(tuple(unit_scope or ()) == tuple(quantum_bounds),
+                 "head-walk quantum descriptor does not name this scoped read")
+        _require(head_checkpoint is not None,
+                 "a head-walk quantum banks its slice journal or refuses")
     resolved, synthesized, started = 0, 0, time.time()
 
     # -- the walk banks its prefix and fans out (#754) ----------------------
@@ -923,6 +954,16 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             "encoder_source_reuse_sha256": (None if encoder_source_reuse is None else
                 canonical_json_sha256(encoder_source_reuse, where="head walk encoder reuse")),
         }
+        if head_walk_quantum is not None:
+            # The shard is bound to the full roster, never to the slice
+            # alone: the digest is the verified descriptor's (checked against
+            # the live census above), and the descriptor itself rides in the
+            # identity so the collector can match each shard to the PB action
+            # it was assigned to. The default path is untouched -- without a
+            # descriptor a scoped walk still cannot bank, so `roster` here is
+            # the whole roster there.
+            head_identity["roster_sha256"] = head_walk_quantum["roster_sha256"]
+            head_identity["quantum"] = dict(head_walk_quantum)
         head_root, head_seal, completed = _open_head_journal(
             Path(head_checkpoint), resume=head_resume, identity=head_identity, qnames=roster)
 
