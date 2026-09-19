@@ -187,6 +187,7 @@ def test_the_loader_admits_a_changed_package_under_dev_mode(sealed, monkeypatch,
     assert "receipt execution source" in out
     # The hot-path re-check refuses a post-admission change certified, records it dev.
     (sealed["package"] / "dependency.py").write_bytes(b"unchanged\n  ")
+    monkeypatch.delenv(DEV_ENV, raising=False)
     with pytest.raises(ValueError, match="package"):
         transition.require_verified_transition(
             cap, checkpoint_dir=sealed["checkpoints"], resume=True, joint_activation=True)
@@ -432,14 +433,15 @@ def test_dev_mode_env_reaches_the_container_and_the_spec_file_stays_sealed(
     assert docker_env[dev_mode.DEV_MODE_ENV] == "1"  # PRISMAQUANT_LAYER_READ_THREADS's road
 
 
-def test_a_hand_sealed_spec_carries_dev_mode_to_the_container(scratch, monkeypatch):
+def test_a_hand_sealed_spec_carries_dev_mode_to_the_container(monkeypatch):
     # The LAYER_READ_THREADS mirror: an env the spec itself declares travels
-    # to the container without any dispatch-side merge.
+    # to the container without any dispatch-side merge. The launcher takes
+    # the spec as an inline JSON document, exactly as the submitter seals it.
     from tools import tessera_campaign_container as launcher
-    spec = scratch / "spec.dev.json"
-    spec.write_text(json.dumps({"container": {"image": "x"},
-                                "env": {dev_mode.DEV_MODE_ENV: "1"}}))
-    docker_env = _launch_container(monkeypatch, ["--spec", str(spec), "--", "python", "-c", "pass"])
+    spec = json.dumps({"container": {"image": "x"},
+                       "env": {dev_mode.DEV_MODE_ENV: "1"}})
+    docker_env = _launch_container(
+        monkeypatch, ["--spec", spec, "--", "python", "-c", "pass"])
     assert docker_env[dev_mode.DEV_MODE_ENV] == "1"
 
 
