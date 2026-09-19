@@ -41,6 +41,8 @@ def campaign():
     scope = {"campaign": "dispatch-fixture", "layers": list(range(N_LAYERS))}
     return {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
             "manifest_sha256": "c" * 64, "scope": scope,
+            "plan_path": "/fixture/plan.json",
+            "prepared_path": "/fixture/prepare/prepared.json",
             "roster_sha256": hashlib.sha256(b"roster\n").hexdigest()}
 
 
@@ -52,6 +54,8 @@ def _record(campaign, layer, receipts_root="adjoint-receipt.json"):
         "campaign": {
             "plan_sha256": campaign["plan_sha256"],
             "prepared_sha256": campaign["prepared_sha256"],
+            "plan_path": campaign["plan_path"],
+            "prepared_path": campaign["prepared_path"],
             "read_manifest_sha256": campaign["manifest_sha256"],
             "campaign_scope": campaign["scope"],
             "unit_roster_sha256": campaign["roster_sha256"],
