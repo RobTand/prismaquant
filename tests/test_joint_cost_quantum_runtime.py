@@ -377,9 +377,12 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
         fresh[key] = torch.load(path)
     from prismaquant.production_weight_cache import ProductionWeightCache
 
+    # The same prepared cache scales the single run read: activation
+    # identities (and their sha) are inputs both sides bind, so the quantum
+    # reuses them instead of inventing its own.
     fresh_cache = ProductionWeightCache(
         weights=fresh, levers={},
-        activation_max_abs={name: 1.0 for name in fresh})
+        activation_max_abs=dict(cache.activation_max_abs or {}))
     fresh_cache, _ = _prepared_cache(model, context, runner, fresh_cache,
                                      tmp_path / "shared")
 
