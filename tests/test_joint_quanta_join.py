@@ -214,7 +214,14 @@ def test_permuted_arrival_yields_canonical_bytes(tmp_path, campaign, probe):
     second = tmp_path / "joined-second"
     assert main(_argv(root, second, campaign)) == 0
     assert (second / "joint-cost.pkl").read_bytes() == first_cost
-    assert (second / "results.json").read_bytes() == first_results
+    first_doc = json.loads(first_results.decode())
+    second_doc = json.loads((second / "results.json").read_bytes().decode())
+    # The wall-clock seal moves; everything else is canonical.
+    assert isinstance(first_doc.pop("joined_unix"), float)
+    assert isinstance(second_doc.pop("joined_unix"), float)
+    assert first_doc.pop("distributed").pop("joined_unix") is not None
+    assert second_doc.pop("distributed").pop("joined_unix") is not None
+    assert second_doc == first_doc
 
     payload = pickle.loads(first_cost)
     assert sorted(payload["costs"]) == campaign["roster"]
