@@ -442,7 +442,8 @@ def run_adjoint_capture(
             config["inputs"], reader=reader, synthesis_device="cuda",
             progress_phase="head",
             head_checkpoint=space / "head-walk", head_resume=resume,
-            require_existing_renders=True, verify_payloads=False)
+            require_existing_renders=True, verify_payloads=False,
+            historical_encoder_reuse=config.get("historical_encoder_reuse"))
         _same(config["model"], data.census["model"], "requested source model")
         _same(data.census["attention_implementation"], "eager",
               "qualified source attention")

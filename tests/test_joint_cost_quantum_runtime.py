@@ -309,6 +309,81 @@ def test_cli_identity_refusal_is_exit_3(identity_files, monkeypatch, capsys):
     assert not identity_files["output_root"].exists()
 
 
+def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch):
+    """The plan's allowlist must reach the anchor loader (the v6 lesson).
+
+    Stage A v6 (89d3a0eb012a) refused at 85 s: the anchor checkpoint's
+    recorded encoder source was historically allowlisted in the plan, but the
+    stage-A caller never passed ``historical_encoder_reuse`` through, so the
+    loader saw no policy and refused a reuse the plan explicitly names. The
+    single-run path threads it (tessera_joint_aura.py:2777); stage A must
+    too. This pins the seam: whatever the plan carries reaches the loader's
+    kwarg verbatim, and a plan without the block reaches it as None.
+    """
+    import prismaquant.joint_cost_stage_a as stage_a
+    import prismaquant.tessera_joint_aura as aura
+    import prismaquant.tessera_reader as reader_mod
+    import prismaquant.gpu_guard as guard
+    import prismaquant.joint_projection_backend as backend
+    import prismaquant.aura_cost as aura_cost
+    import prismaquant.residency_map as residency
+
+    class _Done(Exception):
+        pass
+
+    captured = {}
+
+    def fake_loader(inputs, **kwargs):
+        captured.update(kwargs)
+        raise _Done
+
+    monkeypatch.setattr(guard, "require_cuda_hot_path", lambda *a, **k: None)
+    monkeypatch.setattr(backend, "prewarm_projection_backend",
+                        lambda *a, **k: type("B", (), {"identity": None})())
+    monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
+    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura, "_preflight_run_prepared", lambda *a, **k: None)
+    monkeypatch.setattr(aura, "load_measured_anchor_input", fake_loader)
+    monkeypatch.setattr(residency, "bind_residency_manifest", lambda *a, **k: None)
+    monkeypatch.setattr(stage_a, "GpuPowerSampler",
+                        lambda: type("S", (), {"start": lambda s: s,
+                                               "stop": lambda s: {}})())
+    monkeypatch.setattr(stage_a, "KernelTimeProfiler",
+                        lambda: type("K", (), {
+                            "__enter__": lambda s: s,
+                            "__exit__": lambda s, *a: None,
+                            "kernel_active_s": 0.0,
+                            "error": None})())
+    monkeypatch.setattr(residency, "residency_report", lambda: None)
+
+    prepared_path = tmp_path / "prepared.json"
+    prepared_path.write_text("{}")
+    prepared = {"path": str(prepared_path),
+                "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
+    entry = {"encoder_source_sha256": _hex("1"), "reason": "pin test",
+             "evidence": "/pin/test.md", "recorded_by": "test",
+             "recorded_unix": 1789625518.0}
+    reuse_block = {"schema": aura.HISTORICAL_ENCODER_REUSE_SCHEMA,
+                   "allowlist": [entry]}
+    config = {"execution": {"production_act_scales": "scales"},
+              "inputs": {}, "output_root": str(tmp_path),
+              "historical_encoder_reuse": reuse_block}
+
+    with pytest.raises(_Done):
+        stage_a.run_adjoint_capture(
+            config, plan_sha256=_hex("d"), prepared=prepared,
+            output_root=str(tmp_path), stride=2)
+    assert captured["historical_encoder_reuse"] == reuse_block
+
+    captured.clear()
+    config.pop("historical_encoder_reuse")
+    with pytest.raises(_Done):
+        stage_a.run_adjoint_capture(
+            config, plan_sha256=_hex("d"), prepared=prepared,
+            output_root=str(tmp_path), stride=2)
+    assert captured["historical_encoder_reuse"] is None
+
+
 def test_stride_derivation_is_pinned():
     # The producer's set (PR #785, verified numbers): multiples of S below
     # the tail plus the tail itself; stage A must publish exactly this set
