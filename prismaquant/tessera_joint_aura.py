@@ -421,17 +421,6 @@ def _decode_wire(blob, *, reader, device="cpu"):
     return read_unit_artifact(blob, device=device)
 
 
-def _render_mirror_path(render, mirror_root):
-    """Where a measuring run publishes a shard instead of the row cache.
-
-    The mirror keeps the render's absolute path under ``mirror_root`` so a
-    cell's two copies stay comparable by name and a measuring run can never
-    replace the campaign's own bytes.
-    """
-    render = Path(render)
-    return Path(mirror_root) / render.resolve().relative_to(Path(render.root))
-
-
 #: The phase the standalone synthesis stage declares (``--progress
 #: synthesize=<stall>``), and therefore the default a bare intake reports
 #: under. ``execute`` overrides it with the joint prepare's own ``head``:
@@ -1037,6 +1026,9 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             wire_stat = wire.stat()
             _same(wire_stat.st_size, record["blob_bytes"], f"{name}: wire size")
             render = owner_roots[str(owners[name])] / "cache" / _cache_weight_filename(name, fmt)
+            # The mirror keeps the render's absolute path under the mirror
+            # root so a cell's two copies stay comparable by name and a
+            # measuring run can never replace the campaign's own bytes.
             target = (render if mirror_root is None
                       else mirror_root / render.relative_to(render.root))
             present = Path(target).is_file()
