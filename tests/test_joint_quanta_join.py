@@ -226,7 +226,7 @@ def test_permuted_arrival_yields_canonical_bytes(tmp_path, campaign, probe):
     payload = pickle.loads(first_cost)
     assert sorted(payload["costs"]) == campaign["roster"]
     assert payload["provenance"]["coverage"]["gaps"] == []
-    results = json.loads(first_results.read_text())
+    results = json.loads(first_results.decode())
     assert results["schema"] == JOINED_RESULTS_SCHEMA
     assert results["status"] == "complete"
 
