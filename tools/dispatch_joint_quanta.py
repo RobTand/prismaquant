@@ -223,7 +223,8 @@ class FakeGateway(Gateway):
     def submit(self, argv: list[str]) -> dict:
         self._counter += 1
         key = f"fake-action-key-{self._counter:04d}"
-        kind = "stage-a" if "joint_adjoint_capture" in argv else "quantum"
+        kind = ("stage-a" if any("joint_adjoint_capture" in word for word in argv)
+                else "quantum")
         entry: dict = {"kind": kind, "argv": argv, "action_key": key}
         if kind == "quantum":
             entry["quantum_id"] = argv[argv.index("--quantum") + 1].split("/")[-1].replace(".json", "")
