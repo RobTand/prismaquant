@@ -163,6 +163,7 @@ def _write_quantum(root, campaign, probe, layer, *, status="complete"):
 def _seal_inputs(root, campaign):
     """Write the CLI input files and bind their real digests into the
     campaign, so records and argv digest-check against actual bytes."""
+    root.mkdir(parents=True, exist_ok=True)
     (root / "plan.json").write_text(json.dumps({"plan": "fixture"}))
     (root / "prepared.json").write_text(json.dumps({"prepared": "fixture"}))
     (root / "manifest.json").write_text(
