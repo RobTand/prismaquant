@@ -9624,7 +9624,7 @@ commit: (1) a `prismaquant/run-pipeline.sh` default, gate, or stage order (§3);
 menu, a scale rule, or a render lever (§5); (3) an export codec, a `config_groups` emission
 rule, or a serving invariant (§6); (4) a ship-gate threshold or what the pipeline runs versus
 echoes (§7); (5) the plugin contract — profile accessors, registry order, serving-profile
-schema, gridbook per-arch wiring (§8); (6) a serving-lane default or a promoted/reverted kernel
+schema, the pinned Tessera serving-runtime contract (§8); (6) a serving-lane default or a promoted/reverted kernel
 lever (§9). If topology changed, the affected mermaid diagram changes with it. The provenance
 block at the top must be re-stamped (date, commit, branch) on every substantive edit.
 
