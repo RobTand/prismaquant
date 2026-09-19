@@ -1300,10 +1300,16 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         _same(len(wire_blob), cell["record"].get("blob_bytes"),
               f"{name}@{fmt}: read-ahead wire size differs from receipt")
         blob = wire_blob
-        actual_wire_sha256 = hashlib.sha256(blob).hexdigest()
-        if wire_sha256 is not None:
-            _same(wire_sha256, actual_wire_sha256,
-                  f"{name}@{fmt}: read-ahead wire digest changed")
+        if wire_sha256 is None:
+            actual_wire_sha256 = hashlib.sha256(blob).hexdigest()
+        else:
+            # The read-ahead reader already fenced this exact buffer -- size,
+            # stat signatures and the receipt digest -- and the handoff is one
+            # process reference the reader thread no longer touches, so a
+            # third hash here is a second full pass over the same bytes
+            # (PQ #725). Bind the reader's digest to the receipt instead.
+            actual_wire_sha256 = _require_sha256(
+                wire_sha256, f"{name}@{fmt} read-ahead wire digest")
         _same(actual_wire_sha256, cell["record"].get("blob_sha256"),
               f"{name}@{fmt}: read-ahead wire checksum")
     verifier = tc._checkpoint_identity_api() if reader is None else reader
@@ -1959,6 +1965,40 @@ def _source_prefetch(config):
                  math.isfinite(prefetch[name]) and prefetch[name] > 0,
                  f"source_prefetch requires positive finite {name}")
     return dict(prefetch)
+
+
+def recommend_source_prefetch(*, cache_bytes, layer_bytes, cpu_count,
+                              cache_headroom_gb, prefetch_min_available_gb):
+    """Derive explicit ``source_prefetch`` numbers from measured budgets.
+
+    The sealed plan still carries the explicit six fields -- nothing here
+    changes what ``execute`` admits, and a seal over these numbers keeps the
+    exact bytes it has today (PQ #737). What changes is where the numbers
+    come from: instead of a pinned ``max_cache_slots: 2 /
+    prefetch_workers: 1`` carried across seals, the operator seals the depth
+    the measured budget admits -- ``cache_bytes // layer_bytes`` slots and
+    up to four readers bounded by CPUs and slots, with the lookahead the
+    slot count fits. The headroom and minimum-available floors stay operator
+    policy: they are passed through, not derived. The result is validated
+    through :func:`_source_prefetch`, so a recommendation that cannot run
+    refuses here instead of inside the action.
+    """
+    for label, value in (("cache_bytes", cache_bytes), ("layer_bytes", layer_bytes),
+                         ("cpu_count", cpu_count)):
+        _require(type(value) is int and value > 0,
+                 f"recommended source_prefetch requires positive {label}")
+    slots = max(2, int(cache_bytes // layer_bytes))
+    workers = max(1, min(4, slots, int(cpu_count)))
+    lookahead = max(1, min(workers, slots - 1))
+    recommendation = {
+        "max_cache_slots": slots,
+        "prefetch_workers": workers,
+        "prefetch_lookahead": lookahead,
+        "cache_headroom_gb": cache_headroom_gb,
+        "prefetch_min_available_gb": prefetch_min_available_gb,
+        "require_prefetched_residency": True,
+    }
+    return _source_prefetch({"source_prefetch": recommendation})
 
 
 def _operator_window_policy(config):
