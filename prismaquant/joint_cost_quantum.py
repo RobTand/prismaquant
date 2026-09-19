@@ -744,7 +744,7 @@ def run_layer_quantum_core(
         statistics_arithmetic_identity,
     )
     from .kl_fisher import ROW_PROBE_LAYOUT
-    from .perturbed_x_cache import _cb_cache_tensor_identity
+    from .production_weight_cache import _cb_cache_tensor_identity
     from .production_weight_cache import production_cache_cb_render_provenance
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled

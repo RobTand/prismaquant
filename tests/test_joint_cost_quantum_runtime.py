@@ -546,13 +546,15 @@ def test_progress_cadence_at_chunk_granularity(tmp_path, monkeypatch):
     progress.commit()
     second = json.loads(progress_file.read_text())
     assert second["phase"] == "layer-001-chunk-000"
-    assert second["units_completed"] == 4
+    # Cumulative across phases, continuing from the head-committed base:
+    # 3 head units + 4 quantum-local units.
+    assert second["units_completed"] == 7
     progress.priced(5)
     progress.window_done(windows[1])
     progress.commit()
     third = json.loads(progress_file.read_text())
     assert third["phase"] == "layer-001-chunk-001"
-    assert third["units_completed"] == 5
+    assert third["units_completed"] == 8
 
 
 def test_counters_shapes_per_contract(tmp_path):
