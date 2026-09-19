@@ -28,6 +28,7 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256_normalized,
     prepare_journal, unit_path, write_unit,
 )
+from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
 from .interned_json import load_json_file
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
@@ -439,6 +440,16 @@ def _render_mirror_path(render, mirror_root):
 SYNTHESIS_PHASE = "synthesize"
 
 
+def _progress_dev_source_sha256():
+    """The executing package's actual tree digest, for the dev stamps.
+
+    Lazy so importing this module never pulls ``aura_cost``; only a dev-mode
+    progress commit pays for the hash.
+    """
+    from .aura_cost import _aura_source_sha256
+    return _aura_source_sha256()
+
+
 def _pb_commit(units, phase, unit=None):
     """Report cumulative durable units to PrismaBuild; a no-op elsewhere.
 
@@ -447,6 +458,11 @@ def _pb_commit(units, phase, unit=None):
     inside a container that cannot import PrismaBuild still reports. It is a
     no-op when the action was not admitted under the progress contract, so it
     is called unconditionally rather than by testing how we were launched.
+
+    Under ``PRISMAQUANT_DEV_MODE=1`` the record carries the dev stamp in its
+    metadata: the worker's ``ProgressWatch`` reads the fields it knows and
+    ignores the rest, so the stamp rides along on every progress line a dev
+    run commits and a certified run's record stays byte-identical.
     """
     path = os.environ.get("PRISMABUILD_ACTION_PROGRESS_PATH")
     token = os.environ.get("PRISMABUILD_ACTION_PROGRESS_TOKEN")
@@ -455,6 +471,8 @@ def _pb_commit(units, phase, unit=None):
     record = {"schema": "prismabuild.action_progress.v1", "token": token,
               "phase": phase, "units_completed": units, "unit": unit,
               "reported_unix": time.time()}
+    if dev_mode_enabled():
+        record.update(dev_stamp(_progress_dev_source_sha256()))
     temporary = f"{path}.{os.getpid()}.tmp"
     with open(temporary, "w") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
@@ -2049,6 +2067,34 @@ def _seed_source_identity_cache(config, root):
     return destination
 
 
+#: The prepared-record bindings that name DIGESTS of things a dev iteration
+#: legitimately changes: which plan the prepare ran under, and which producer
+#: package made it. Under ``PRISMAQUANT_DEV_MODE=1`` these are records -- the
+#: run continues, loudly, stamped -- while every other prepared field (the
+#: model identity, calibration, roster, backend, reader) stays a wall even in
+#: dev mode: a stale record naming a different measurement is stale whatever
+#: the mode (Rob's 2026-09-19 decision: the seal returns at the artifact gate).
+_DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256")
+
+
+def _prepared_digest_recorded(key, stored, expected):
+    """Whether a prepared-record mismatch on ``key`` is recorded instead of gated.
+
+    One reader for both prepared-equality sites (the startup preflight and the
+    post-intake loop), so dev mode cannot admit a mismatch in one place that
+    the other still refuses. Returns ``False`` in certified mode for every
+    field, which keeps the certified ``_same`` refusal byte-identical.
+    """
+    if stored == expected:
+        return False
+    if not dev_mode_enabled() or key not in _DEV_RECORDED_PREPARED_KEYS:
+        return False
+    dev_warning(
+        f"prepared {key} differs from the running pass; recorded, not gated "
+        f"(dev mode): prepared={stored!r} running={expected!r}")
+    return True
+
+
 def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
                            reader_identity, projection_backend):
     """Refuse a stale small completion before reading the campaign metadata.
@@ -2065,7 +2111,8 @@ def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
                        ("implementation_sha256", implementation_sha256),
                        ("reader_identity", reader_identity),
                        ("projection_backend", projection_backend)):
-        _same(completion.get(key), value, f"prepared {key}")
+        if not _prepared_digest_recorded(key, completion.get(key), value):
+            _same(completion.get(key), value, f"prepared {key}")
     return completion
 
 
@@ -2240,6 +2287,14 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                   "started_epoch": time.time(), "torch": str(torch.__version__),
                   "cuda": torch.version.cuda, "affinity": sorted(os.sched_getaffinity(0))},
               "phases": [], "passed": False, "device_envelope": device_envelope}
+    if dev_mode_enabled():
+        # The dev stamp is TOP LEVEL and lands on every results.json this
+        # command writes, including a refusal path's -- the finally block
+        # below publishes it whatever happened above. A dev result is
+        # identifiable at a glance and grep-able, and can never masquerade
+        # as a certified one (Rob, 2026-09-19: the seal returns at the
+        # artifact gate, not the run gate).
+        result.update(dev_stamp(_aura_source_sha256()))
     result["env"]["container_content_sha256"] = executing_image()
     profile_tool = config.get("profile_tool", "cprofile")
     profiler = cProfile.Profile() if profile_tool == "cprofile" else None
@@ -2471,7 +2526,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                                ("render_origins", render_census["render_origins"]),
                                ("render_comparisons", render_census["render_comparisons"]),
                                ("projection_backend", projection_backend.identity)):
-                _same(completion.get(key), value, f"prepared {key}")
+                if not _prepared_digest_recorded(key, completion.get(key), value):
+                    _same(completion.get(key), value, f"prepared {key}")
             _same(completion["formats_by_qname"], {n: list(v) for n, v in data.formats_by_qname.items()},
                   "prepared exact candidate roster")
             cache = pickle.loads(_bound(completion["production_cache"], "qualified PWC").read_bytes())
