@@ -160,7 +160,9 @@ def _write_quantum(root, campaign, probe, layer, *, status="complete"):
     return record, hashlib.sha256(cost_bytes).hexdigest()
 
 
-def _write_inputs(root, campaign):
+def _seal_inputs(root, campaign):
+    """Write the CLI input files and bind their real digests into the
+    campaign, so records and argv digest-check against actual bytes."""
     (root / "plan.json").write_text(json.dumps({"plan": "fixture"}))
     (root / "prepared.json").write_text(json.dumps({"prepared": "fixture"}))
     (root / "manifest.json").write_text(
@@ -169,24 +171,29 @@ def _write_inputs(root, campaign):
     (root / "roster.txt").write_text("\n".join(campaign["roster"]) + "\n")
     (root / "formats.json").write_text(
         json.dumps(campaign["formats_by_qname"]))
+    for key, name in (("plan_sha256", "plan.json"),
+                      ("prepared_sha256", "prepared.json"),
+                      ("manifest_sha256", "manifest.json")):
+        campaign[key] = hashlib.sha256(
+            (root / name).read_bytes()).hexdigest()
 
 
-def _argv(root, out):
+def _argv(root, out, campaign):
     return ["--input-root", str(root), "--output-dir", str(out),
             "--plan", str(root / "plan.json"),
-            "--plan-sha256", "a" * 64,
+            "--plan-sha256", campaign["plan_sha256"],
             "--prepared", str(root / "prepared.json"),
-            "--prepared-sha256", "b" * 64,
+            "--prepared-sha256", campaign["prepared_sha256"],
             "--manifest", str(root / "manifest.json"),
-            "--manifest-sha256", "c" * 64,
+            "--manifest-sha256", campaign["manifest_sha256"],
             "--scope", str(root / "scope.json"),
             "--roster", str(root / "roster.txt"),
             "--formats-by-qname", str(root / "formats.json"),
-            "--implementation-digest", "d" * 64]
+            "--implementation-digest", campaign["implementation_digest"]]
 
 
-def _run_cli(root, out):
-    assert main(_argv(root, out)) == 0
+def _run_cli(root, out, campaign):
+    assert main(_argv(root, out, campaign)) == 0
     return out / "joint-cost.pkl", out / "results.json"
 
 
@@ -196,15 +203,15 @@ def _run_cli(root, out):
 def test_permuted_arrival_yields_canonical_bytes(tmp_path, campaign, probe):
     """The join is a disjoint union: arrival order cannot change the bytes."""
     root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer)
-    _write_inputs(root, campaign)
     first = tmp_path / "joined-first"
-    cost_path, results_path = _run_cli(root, first)
+    cost_path, results_path = _run_cli(root, first, campaign)
     first_cost, first_results = cost_path.read_bytes(), results_path.read_bytes()
 
     second = tmp_path / "joined-second"
-    assert main(_argv(root, second)) == 0
+    assert main(_argv(root, second, campaign)) == 0
     assert (second / "joint-cost.pkl").read_bytes() == first_cost
     assert (second / "results.json").read_bytes() == first_results
 
@@ -221,12 +228,12 @@ def test_permuted_arrival_yields_canonical_bytes(tmp_path, campaign, probe):
 
 def test_gapped_quantum_exits_zero_and_names_the_gap(tmp_path, campaign, probe):
     root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer,
                        status="complete" if layer else "gapped")
-    _write_inputs(root, campaign)
     out = tmp_path / "joined"
-    assert main(_argv(root, out)) == 0
+    assert main(_argv(root, out, campaign)) == 0
     payload = pickle.loads((out / "joint-cost.pkl").read_bytes())
     gaps = payload["provenance"]["coverage"]["gaps"]
     assert [g["quantum_id"] for g in gaps] == ["layer-000"]
@@ -240,12 +247,12 @@ def test_gapped_quantum_exits_zero_and_names_the_gap(tmp_path, campaign, probe):
 
 def test_missing_status_is_a_gap_not_an_error(tmp_path, campaign, probe):
     root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer)
     (root / "layer-quanta" / "layer-001" / "status.json").unlink()
-    _write_inputs(root, campaign)
     out = tmp_path / "joined"
-    assert main(_argv(root, out)) == 0
+    assert main(_argv(root, out, campaign)) == 0
     results = json.loads((out / "results.json").read_text())
     assert results["status"] == "gapped"
     assert [g["quantum_id"] for g in results["distributed"]["gaps"]] == ["layer-001"]
@@ -253,21 +260,21 @@ def test_missing_status_is_a_gap_not_an_error(tmp_path, campaign, probe):
 
 def test_allocation_reader_refuses_a_gapped_payload(tmp_path, campaign, probe):
     root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer,
                        status="complete" if layer else "gapped")
-    _write_inputs(root, campaign)
-    cost_path, _ = _run_cli(root, tmp_path / "joined")
+    cost_path, _ = _run_cli(root, tmp_path / "joined", campaign)
     with pytest.raises(Exception, match="gapped"):
         load_joint_cost_for_allocation(cost_path)
 
 
 def test_allocation_reader_accepts_a_complete_payload(tmp_path, campaign, probe):
     root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer)
-    _write_inputs(root, campaign)
-    cost_path, _ = _run_cli(root, tmp_path / "joined")
+    cost_path, _ = _run_cli(root, tmp_path / "joined", campaign)
     payload = load_joint_cost_for_allocation(cost_path)
     assert sorted(payload["costs"]) == campaign["roster"]
 
@@ -278,11 +285,11 @@ def test_allocation_reader_accepts_a_complete_payload(tmp_path, campaign, probe)
 def test_retargeted_receipt_refuses(tmp_path, campaign, probe):
     """A cost payload answering for another quantum's identity fails closed."""
     root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
     records = {}
     for layer in range(N_LAYERS):
         record, _ = _write_quantum(root, campaign, probe, layer)
         records[layer] = record
-    _write_inputs(root, campaign)
     (root / "layer-quanta" / "layer-001" / "cost.pkl").write_bytes(
         (root / "layer-quanta" / "layer-002" / "cost.pkl").read_bytes())
     with pytest.raises(JoinRefused, match="custody"):
@@ -293,9 +300,9 @@ def test_retargeted_receipt_refuses(tmp_path, campaign, probe):
 
 def test_foreign_provenance_refuses(tmp_path, campaign, probe):
     root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer)
-    _write_inputs(root, campaign)
     other = copy.deepcopy(campaign)
     other["plan_sha256"] = "f" * 64
     with pytest.raises(JoinRefused, match="custody|provenance|campaign"):
@@ -308,9 +315,9 @@ def test_foreign_provenance_refuses(tmp_path, campaign, probe):
 
 def test_defective_row_fails_the_join_and_names_the_qname(tmp_path, campaign, probe):
     root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer)
-    _write_inputs(root, campaign)
     victim = next(q for q in campaign["roster"] if ".layers.1." in q)
     space = root / "layer-quanta" / "layer-001"
     payload = pickle.loads((space / "cost.pkl").read_bytes())
@@ -322,5 +329,5 @@ def test_defective_row_fails_the_join_and_names_the_qname(tmp_path, campaign, pr
         join_joint_quanta(receipts=None, campaign=campaign,
                           output_dir=tmp_path / "joined", input_root=root)
     out = tmp_path / "joined-cli"
-    assert main(_argv(root, out)) == 1
+    assert main(_argv(root, out, campaign)) == 1
     assert not (out / "joint-cost.pkl").exists()
