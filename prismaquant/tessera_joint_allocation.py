@@ -192,10 +192,37 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
     return result
 
 
+def _bound_stat_fence(path):
+    """The stat identity a memoized bound read trusts a hit on (P3 #682)."""
+    value = path.stat()
+    return (value.st_mode, value.st_dev, value.st_ino, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns)
+
+
+#: Process-scoped bound bytes by ``(path, sha256)`` with the stat fence the
+#: bytes were verified under. The digest check is what authenticates the
+#: bytes; the fence only admits reusing them without re-reading and
+#: re-hashing. A fence drift re-reads and re-verifies, and a digest mismatch
+#: still refuses -- a memo hit never authenticates anything.
+_BOUND_BYTES = {}
+
+
 def _read_bound(record, label):
     _require(isinstance(record, dict) and set(record) == {'path', 'sha256'}, f'{label}: bound path and SHA256 required')
-    raw = Path(record['path']).read_bytes()
+    path = Path(record['path'])
+    key = (str(path), record['sha256'])
+    try:
+        fence = _bound_stat_fence(path)
+    except OSError:
+        fence = None
+    if fence is not None:
+        hit = _BOUND_BYTES.get(key)
+        if hit is not None and hit[0] == fence:
+            return hit[1]
+    raw = path.read_bytes()
     _same(hashlib.sha256(raw).hexdigest(), record['sha256'], f'{label}: owned bytes')
+    if fence is not None and len(raw) == fence[3]:
+        _BOUND_BYTES[key] = (fence, raw)
     return raw
 
 
