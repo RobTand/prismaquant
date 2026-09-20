@@ -574,7 +574,6 @@ def test_join_duplicate_and_mismatched_payloads_refuse(
     _write_payloads(root, binding, produced, probe, FORMATS)
     out = tmp_path / "join-out"
     receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
-    from tests.test_joint_quanta_join import _write_quantum  # noqa: E402
     dup_space = Path(produced["records"][0]["output_space"]["root"])
     dup_space.joinpath("cost.pkl").write_bytes(
         pickle.dumps({"costs": {}, "provenance": {}}, protocol=2))
