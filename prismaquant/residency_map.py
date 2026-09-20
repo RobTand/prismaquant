@@ -870,7 +870,8 @@ class ResidencyResolver:
                     "leads": list(self._leads),
                     "manifest_sha256": self._manifest_sha256,
                     "ram_tier_id": self._ram_tier_id,
-                    "ram_epoch": self._ram_epoch}
+                    "ram_epoch": self._ram_epoch,
+                    "residency_root": str(Path(self._map_path).parent)}
 
     def report(self) -> dict:
         """What each tier served this run, for ``results.json``."""

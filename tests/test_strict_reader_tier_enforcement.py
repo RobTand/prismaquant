@@ -49,10 +49,10 @@ EPOCH = '1789771929-aba6e46e41fb03ef'
 STALE_EPOCH = '1789788888-9c1d2e3f4a5b'
 STAGE_TIER = 'prismabuild-stage:dl380g10'
 
-PB_PIN_ROOT = Path("/home/rob/tmp/pb-reader-lease-pin-20260920")
+PB_PIN_ROOT = Path("/home/rob/tmp/pb-reader-lease-pin2-20260920")
 PB_SRC = PB_PIN_ROOT / "src"
 PINNED_READER_LEASE_SHA256 = (
-    "fd0fec37aa41c9d88da9bafd658992fe9ca089bee676213212457b8fb0faddd5")
+    "b4428c5b898a0225a0b9dca5822ff9aab72538db6e80722c0b0c9e9326050d14")
 
 
 @pytest.fixture(autouse=True)
@@ -84,7 +84,7 @@ def _pb():
     assert hashlib.sha256(blob).hexdigest() == PINNED_READER_LEASE_SHA256, (
         "PB pin drifted: refusing instead of integrating against a "
         "different SDK")
-    assert PINNED_SDK_COMMIT.startswith("a6e6b310a1")
+    assert PINNED_SDK_COMMIT.startswith("d079ad33")
     if str(PB_SRC) not in sys.path:
         sys.path.insert(0, str(PB_SRC))
     import prismabuild.reader_lease as rl
@@ -136,6 +136,35 @@ def _pb_publish(rl, map_mod, root, stage, consumer, mover, manifest, entries):
         root, consumer_action_key=consumer, mover_action_key=mover,
         tier_id=STAGE_TIER, stage_root=str(stage), manifest_sha256=manifest,
         generation=generation, entries=mat_entries)
+    return generation
+
+
+def _pb_publish_ram(rl, map_mod, root, ram_root, consumer, mover, manifest,
+                    entries, epoch):
+    """Publish one RAM mover's window: ram-tier fragment + sidecar at the
+    announced epoch, entries naming the tmpfs copies. Returns generation."""
+    frag_entries, mat_entries = {}, {}
+    for key, (declared, ram_file) in entries.items():
+        blob = ram_file.read_bytes()
+        digest = hashlib.sha256(blob).hexdigest()
+        frag_entries[key] = {"stage_path": str(ram_file), "bytes": len(blob),
+                             "sha256": digest,
+                             "offset": int(key.split(":", 1)[0])}
+        mat_entries[key] = {"stage_path": str(ram_file), "bytes": len(blob),
+                            "sha256": digest,
+                            "file_id": rl.stat_identity(str(ram_file))}
+    map_mod.write_fragment(root, {
+        "schema": map_mod.RESIDENCY_MAP_FRAGMENT_SCHEMA_V1,
+        "consumer_action_key": consumer, "mover_action_key": mover,
+        "tier_id": RAM_TIER, "stage_root": str(ram_root),
+        "manifest_sha256": manifest, "epoch": epoch,
+        "entries": frag_entries})
+    generation = rl.mint_generation()
+    rl.write_material(
+        root, consumer_action_key=consumer, mover_action_key=mover,
+        tier_id=RAM_TIER, stage_root=str(ram_root),
+        manifest_sha256=manifest, generation=generation,
+        entries=mat_entries, epoch=epoch)
     return generation
 
 
@@ -406,9 +435,9 @@ def test_strict_source_stage_serves_pinned_with_exact_release(tmp_path, monkeypa
     assert _pins_live(tmp_path, consumer) == []
 
 
-def test_strict_source_ram_leg_refused_ssd_reacquires_honestly(tmp_path, monkeypatch):
-    """No RAM-mover covers exist: the RAM leg refuses fast and the SSD copy
-    acquires with its own material and lifetime — never a pretended identity."""
+def test_strict_source_ram_serves_first_pinned(tmp_path, monkeypatch):
+    """RAM-first completion: a live tmpfs copy with real RAM-mover covers
+    pins at the announced epoch and serves; the SSD copy is never opened."""
     path, tensors = _shard(tmp_path)
     spans = _header_spans(path)
     root = _stage_root(tmp_path)
@@ -418,13 +447,16 @@ def test_strict_source_ram_leg_refused_ssd_reacquires_honestly(tmp_path, monkeyp
     rows = {'s': (path, staged, ram['s'])}
     rl, pool_mod, map_mod = _pb()
     consumer = _hex64(f"consumer-{tmp_path}")
-    mover = _hex64(f"mover-{tmp_path}")
+    mover_ssd = _hex64(f"mover-ssd-{tmp_path}")
+    mover_ram = _hex64(f"mover-ram-{tmp_path}")
     _pb_queue(tmp_path, pool_mod, consumer)
     root_dir = tmp_path / 'residency'
     key = residency_map_key(str(path), 0)
-    _pb_publish(rl, map_mod, root_dir, root, consumer, mover, MANIFEST,
+    _pb_publish(rl, map_mod, root_dir, root, consumer, mover_ssd, MANIFEST,
                 {key: (path, staged)})
-    map_path = _write_map(tmp_path, rows, ram_root=ram_root, leads=[mover])
+    _pb_publish_ram(rl, map_mod, root_dir, ram_root, consumer, mover_ram,
+                    MANIFEST, {key: (path, ram['s'])}, EPOCH)
+    map_path = _write_map(tmp_path, rows, ram_root=ram_root, leads=[mover_ssd])
     monkeypatch.setenv(ENV_VAR, str(map_path))
     monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
     reset_residency_resolver_for_tests()
@@ -439,11 +471,13 @@ def test_strict_source_ram_leg_refused_ssd_reacquires_honestly(tmp_path, monkeyp
             assert torch.equal(got.view(torch.uint8),
                                reference.get_tensor('f32').view(torch.uint8))
     report = resolver.report()
-    assert any('ram-covers-unresolved' in row['reason']
-               for row in report['ram_fallbacks'])
-    assert report['bytes_from_ram'] == 0
-    assert report['bytes_from_stage'] == spans['f32'][1] - spans['f32'][0]
+    assert report['ram_fallbacks'] == []
+    span = spans['f32'][1] - spans['f32'][0]
+    assert report['bytes_from_ram'] == span
+    assert report['bytes_from_stage'] == 0
     assert report['bytes_from_pool'] == 0
+    row = report['serving_tiers'][-1]
+    assert row['serving_tier'] == 'ram' and row['pin_id'] and row['range_ref']
     assert _pins_live(tmp_path, consumer) == []
 
 
@@ -703,6 +737,47 @@ def test_strict_wire_corrupt_content_fails_clear(tmp_path, monkeypatch):
     assert _pins_live(tmp_path, consumer) == []
 
 
+def test_strict_ram_corrupt_fails_clear_without_stage_adoption(tmp_path, monkeypatch):
+    """A corrupt tmpfs copy with published RAM material is an integrity
+    failure: the RAM acquire fails clear and the healthy SSD copy is NOT
+    adopted as an unchecked alternate — zero stage bytes, zero pool."""
+    from prismaquant.tessera_joint_aura import _read_verified_wire_blob
+    cell, wire, blob = _wire(tmp_path)
+    root = _stage_root(tmp_path)
+    staged = _stage_whole(root, wire)
+    ram_root, ram = _promote_ram(tmp_path, {'w': staged})
+    _announce(tmp_path)
+    rows = {'w': (wire, staged, ram['w'])}
+    rl, pool_mod, map_mod = _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    mover_ssd = _hex64(f"mover-ssd-{tmp_path}")
+    mover_ram = _hex64(f"mover-ram-{tmp_path}")
+    _pb_queue(tmp_path, pool_mod, consumer)
+    root_dir = tmp_path / 'residency'
+    key = residency_map_key(str(wire), 0)
+    _pb_publish(rl, map_mod, root_dir, root, consumer, mover_ssd, MANIFEST,
+                {key: (wire, staged)})
+    _pb_publish_ram(rl, map_mod, root_dir, ram_root, consumer, mover_ram,
+                    MANIFEST, {key: (wire, ram['w'])}, EPOCH)
+    ram['w'].write_bytes(blob[:-1] + bytes([blob[-1] ^ 0xFF]))
+    map_path = _write_map(tmp_path, rows, ram_root=ram_root, leads=[mover_ssd])
+    monkeypatch.setenv(ENV_VAR, str(map_path))
+    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    reset_residency_resolver_for_tests()
+    bind_residency_manifest(MANIFEST)
+    set_lease_helper_root(PB_PIN_ROOT)
+    activate_staged_tier_policy("ram,ssd")
+    resolver = residency_resolver()
+    with pytest.raises(LeaseRefused) as excinfo:
+        _read_verified_wire_blob(cell)
+    assert excinfo.value.kind == "integrity"
+    report = resolver.report()
+    assert report['bytes_from_pool'] == 0
+    assert report['bytes_from_stage'] == 0
+    assert report['bytes_from_ram'] == 0
+    assert _pins_live(tmp_path, consumer) == []
+
+
 def test_strict_wire_ram_corrupt_serves_checked_stage(tmp_path, monkeypatch):
     """A corrupt RAM copy never poisons the read: the RAM leg refuses for
     want of covers and the healthy stage copy serves pinned and
@@ -890,9 +965,10 @@ def test_duplicate_acquire_token_adopts_one_ref(tmp_path, monkeypatch):
     assert _pins_live(tmp_path, consumer) == []
 
 
-def test_forked_child_never_releases_the_parent_ref(tmp_path, monkeypatch):
-    """A different pid exiting a window skips the release; the orphan
-    retains safely and the parent's exact release still unlinks."""
+def test_forked_child_window_use_refused_loudly(tmp_path, monkeypatch):
+    """Every window operation in a forked child raises: open (would outlive
+    the parent's release), close, and exit. The pin stays intact and the
+    parent's exact release still unlinks it."""
     from prismaquant.staged_lease import LeaseWindow, covers_for_leads
     _pb()
     consumer = _hex64(f"consumer-{tmp_path}")
@@ -924,10 +1000,38 @@ def test_forked_child_never_releases_the_parent_ref(tmp_path, monkeypatch):
         assert len(_pins_live(tmp_path, consumer)) == 1
         real_getpid = os.getpid
         monkeypatch.setattr(os, "getpid", lambda: real_getpid() + 100000)
-        window.__exit__(None, None, None)  # forked child: must not release
+        with pytest.raises(RuntimeError, match="forked child"):
+            window.open(key)
+        with pytest.raises(RuntimeError, match="forked child"):
+            window.__exit__(None, None, None)
         assert len(_pins_live(tmp_path, consumer)) == 1
         monkeypatch.setattr(os, "getpid", real_getpid)
-        window._released = False
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_forked_child_reader_payload_refused(tmp_path, monkeypatch):
+    """A forked child cannot read through inherited bound descriptors;
+    header-only metadata stays available, payload refuses loudly."""
+    path, tensors = _shard(tmp_path)
+    root = _stage_root(tmp_path)
+    staged = _stage_whole(root, path)
+    resolver, consumer, _mover = _leased_fixture(
+        tmp_path, monkeypatch, {'s': (path, staged, None)})
+    real_getpid = os.getpid
+    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
+        from safetensors import safe_open
+        with safe_open(str(path), framework='pt') as reference:
+            assert torch.equal(
+                reader.get_tensor('f32').view(torch.uint8),
+                reference.get_tensor('f32').view(torch.uint8))
+        monkeypatch.setattr(os, "getpid", lambda: real_getpid() + 100000)
+        assert sorted(reader.keys()) == sorted(tensors)
+        with pytest.raises(RuntimeError, match="forked child"):
+            reader.get_tensor('bf16')
+        with pytest.raises(RuntimeError, match="forked child"):
+            reader.get_slice('f32')
+        monkeypatch.setattr(os, "getpid", real_getpid)
+    assert resolver.report()['bytes_from_pool'] == 0
     assert _pins_live(tmp_path, consumer) == []
 
 
@@ -1022,7 +1126,7 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
 
 def test_lease_pin_module_reports_approved_commit():
     from prismaquant.staged_lease import PINNED_SDK_COMMIT
-    assert PINNED_SDK_COMMIT.startswith("a6e6b310a1")
+    assert PINNED_SDK_COMMIT.startswith("d079ad33")
 
 
 # -- strict checkpoint shared-state payloads, pinned -------------------------

@@ -378,6 +378,14 @@ class StagedShardReader:
     constructed at all — no pool mmap merely for header. Keys, metadata,
     shapes and dtypes come from the existing bounded header reader
     (``_read_shard_header``); payload comes from staged ranges or refuses.
+
+    Concurrency is threads, never fork: payload and lifecycle operations
+    (``get_tensor``, ``get_slice``, ``__enter__``, ``__exit__``) refuse
+    loudly in a forked child, so inherited bound descriptors can never be
+    read past the parent's release. ``keys``/``metadata`` stay available:
+    stateless bounded-header metadata with no retained descriptor. A
+    forked child must not perform I/O on any inherited descriptor or
+    mapping and should ``_exit`` without it.
     """
 
     def __init__(self, pool_open, path, declared, resolver, kwargs):
@@ -385,6 +393,7 @@ class StagedShardReader:
         self._path = os.fspath(path)
         self._resolver = resolver
         self._device = kwargs.get("device")
+        self._owner_pid = os.getpid()
         # Captured at construction (opener time): the entrypoints activate
         # the process-global policy before any read, so every reader built
         # afterwards — on any thread — sees the same verdict.
@@ -405,14 +414,24 @@ class StagedShardReader:
         self._shape: tuple[int, int] | None = None
         self._bound: list[tuple] = []
 
+    def _require_owner(self, operation: str) -> None:
+        if os.getpid() != self._owner_pid:
+            raise RuntimeError(
+                f"StagedShardReader.{operation} from a forked child is "
+                "unsupported: inherited bound descriptors must not be read "
+                "past the parent's release. Use threads, which share the "
+                "holder pid, or fork with no live reader.")
+
     # -- the handle interface --------------------------------------------
 
     def __enter__(self):
+        self._require_owner("__enter__")
         if self._handle is not None:
             self._handle.__enter__()
         return self
 
     def __exit__(self, *args):
+        self._require_owner("__exit__")
         # The window owns every bound descriptor: close each through it,
         # then release its exact ref. Release-before-close is forbidden,
         # and a forked child never releases (the window's pid guard makes
@@ -480,6 +499,7 @@ class StagedShardReader:
         """
         if not self._strict:
             return self._handle.get_slice(name)
+        self._require_owner("get_slice")
         span = self._span(name)
         if span is None:
             raise refuse_pool_bulk_read(self._declared, "span-not-bound")
@@ -500,6 +520,8 @@ class StagedShardReader:
         raises ``TierPolicyRefused`` before a pool payload byte is read.
         Zero-size tensors carry no payload bytes and are built locally.
         """
+        if self._strict:
+            self._require_owner("get_tensor")
         served = self._staged_tensor(name)
         if served is not None:
             return served
