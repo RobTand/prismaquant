@@ -194,6 +194,8 @@ def record_snapshots(*, checkout: Path) -> dict:
             detail={"dirty": tracked.splitlines()[:10]})
     ignored_prefixes = ("__pycache__/", ".pytest_cache/")
     ignored_suffixes = (".pyc",)
+    # Fleet-written receipts (pbrun_result.*.txt) are data the admission
+    # layer drops beside the run; pytest never imports them.
     ignored_names = (".coverage", "coverage.xml")
     stray = []
     for line in _run("status", "--porcelain",
@@ -203,7 +205,8 @@ def record_snapshots(*, checkout: Path) -> dict:
         name = line[3:]
         if ("/__pycache__/" in f"/{name}" or name.startswith(ignored_prefixes)
                 or name.endswith(ignored_suffixes)
-                or Path(name).name in ignored_names):
+                or Path(name).name in ignored_names
+                or Path(name).name.startswith("pbrun_result.")):
             continue
         stray.append(name)
     if stray:
