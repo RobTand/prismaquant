@@ -746,8 +746,9 @@ def test_sdk_recovery_reaper_retains_then_settles(tmp_path, candidate_work):
     assert ev["reaped"] == []
     assert ev["terminal"].endswith(f"done/{'e' * 64}.json"), ev["terminal"]
     assert ev["charge_released"] is True
-    assert ev["done_export"]["released"] is True
+    assert ev["done_export"]["retired"] is True
     assert ev["done_export"]["settled"] is True
+    assert ev["done_export"]["tickets_pending"] is False
     assert ev["proven_proof"] == {
         "scope_empty": True, "settled": True, "retired": True}
     assert len(ev["auto_reclaimed"][0]) == 1

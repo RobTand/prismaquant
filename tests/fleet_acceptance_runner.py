@@ -865,8 +865,12 @@ def scenario_sdk_recovery_reaper(world: World, snapshots: dict) -> dict:
         done = json.loads(terminal.read_text())
         cleanup = done.get("resource_scope_cleanup") or {}
         export = cleanup.get("export") or {}
-        assert export.get("released") is True, cleanup
+        # Retired-settled path: release retires (no released flag on the
+        # tombstone), settlement proves, tickets clear.
+        assert export.get("retired") is True, cleanup
         assert export.get("settled") is True, cleanup
+        assert export.get("empty") is True, cleanup
+        assert export.get("tickets_pending") is False, cleanup
         assert export.get("scope_id") == unit, cleanup
         evidence["done_export"] = {k: export.get(k) for k in
                                    ("scope_id", "stopped", "empty",
