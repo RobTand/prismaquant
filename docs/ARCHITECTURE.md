@@ -1,7 +1,42 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/dev-anchor-seal-bypass-20260920`.
+As of: 2026-09-20 · `fix/pb714-container-image-declaration-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `fix/pb714-container-image-declaration-20260920`) for
+**the campaign container image declared to PrismaBuild before claim
+admission** (RobTand/prismaquant#825; RobTand/prismabuild#714). A GB10-class
+campaign action was claimed by the Spark that did not hold its pinned image
+and died inside `tools/tessera_campaign_container` after the attempt was
+spent, because the image lived only inside the `--spec` JSON. The dispatch
+callers now declare it through PB's admission contract:
+
+- `tools/dispatch_joint_quanta.py` (stage A and quanta) adds
+  `pbrun --container-image REF` before the payload separator, read from the
+  same parsed spec that is serialized into `--spec`. It composes with the
+  §5.1 placement policy: every effective `consumer_tags` entry is emitted as
+  its own `--tag` and the image declaration is a separate envelope option.
+- `tools/dispatch_tessera_campaign.py` adds `container_images: [REF]` to every
+  generated manifest row from the row's resolved container class (a class
+  override declares its own image) and the same flag to its direct
+  submit-joint/submit-aqua commands.
+- `tools/tessera_campaign_container.admission_image_reference` is the one
+  reader: it validates the spec with the launcher's `validate_container` and
+  returns the image, or `None` for a spec that runs no container or binds a
+  validated `container.archive` — the archive's digest-verifying
+  `inspect_or_load` establishes the image inside the action, so no
+  local-presence prerequisite may gate placement.
+- **Required PB runtime:** a published client carrying `--container-image` and
+  the `container_images` row field, with the `container-image-v1` worker
+  capability. The paired PB release has since landed (RobTand/prismabuild#714)
+  and the published client now carries both; before it, new image-declaring
+  submissions failed closed on the unrecognized flag or unknown row field.
+  Image-declaring submissions are new action identities because the reference
+  is sealed; no existing sealed request is touched. Full contract:
+  `docs/design/distributed_campaign_2026-09-19.md` §14. No pipeline default,
+  stage order, format menu, plugin contract, serving-lane default or ship
+  gate changes. Gate: `tests/test_container_image_admission.py` plus the
+  dispatcher, launcher and image-content suites.
 
 Re-stamped (2026-09-20, `flash/dev-anchor-seal-bypass-20260920`) for **the
 dev-mode merged-checkpoint seal skip** (#833). No default, stage, format, lane,

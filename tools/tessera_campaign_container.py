@@ -257,6 +257,54 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
                 "with the wrong value is refused by the pass before metadata intake")
 
 
+#: The PrismaBuild option that declares the container image a submission
+#: requires present on its claiming box before it runs (RobTand/prismabuild#714).
+#: PrismaBuild does not pull, load or transfer an image: the declaration is a
+#: placement requirement over the box's own Docker, so the reference has to be
+#: an immutable identity the receipt can be held against (``sha256:<64 hex>``
+#: for a local image ID or ``repository@sha256:<64 hex>`` for a manifest
+#: digest).  The spelling lives here because the launcher owns the spec's image
+#: contract and both PB submitters must agree on the flag.
+CONTAINER_IMAGE_FLAG = "--container-image"
+
+
+def admission_image_reference(spec: dict) -> str | None:
+    """The image reference PrismaBuild must admit this spec against, or ``None``.
+
+    One reader for every submission path (the joint dispatcher's stage-A and
+    quantum rows, the campaign dispatcher's direct commands and its generated
+    manifest rows), so the image a submission declares is the image its own
+    launcher spec will inspect, and it comes from the same parsed document
+    that is serialized into ``--spec``.
+
+    ``None`` -- declare nothing -- in exactly two cases:
+
+    * the spec runs no container at all; and
+    * the spec binds a validated ``container.archive``.  The launcher's
+      ``inspect_or_load`` verifies the archive's bytes against its declared
+      digest, loads it and then checks the inspected content against
+      ``container.content_sha256``; that path establishes the image *inside*
+      the action, on whichever worker claims it, so a local-presence
+      prerequisite would refuse the claim before the loader ever ran and
+      strand the load-from-archive route (PrismaBuild #714).  The loader
+      remains the responsible party for that spec.
+
+    The spec is validated with the launcher's own :func:`validate_container`
+    before anything is read from it, so a malformed archive or container
+    refuses here rather than silently skipping the declaration.  A mutable
+    tag is returned as declared -- exactly the reference the launcher will
+    resolve -- and PrismaBuild's admission refuses it, because a tag is not an
+    identity that can be sealed into an action key.
+    """
+    if not isinstance(spec, dict) or spec.get("container") is None:
+        return None
+    validate_container(spec)
+    container = spec["container"]
+    if "archive" in container:
+        return None
+    return container["image"]
+
+
 def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
     """Whether to attach the GPU, and the declaration that decided it.
 

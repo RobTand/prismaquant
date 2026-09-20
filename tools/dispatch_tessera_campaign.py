@@ -93,7 +93,9 @@ from pathlib import Path
 
 if __package__:
     from .tessera_campaign_container import (
+        CONTAINER_IMAGE_FLAG,
         DEV_MODE_ENV,
+        admission_image_reference,
         container_memory_budget_gb,
         validate_container,
     )
@@ -102,7 +104,9 @@ else:
     # reads the shared calibration contract from the sibling package.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
+        CONTAINER_IMAGE_FLAG,
         DEV_MODE_ENV,
+        admission_image_reference,
         container_memory_budget_gb,
         validate_container,
     )
@@ -1572,11 +1576,18 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
         env = {**BOUNDED_CAPTURE_ENV, **env}
         require_bounded_capture_environment(env)
     command = [resolved["python"], "-u", "-m", module, *argv]
+    container_image = None
     if "container" in resolved:
         container_spec = {"container": resolved["container"], "env": env}
         validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
                    json.dumps(container_spec, sort_keys=True), "--", *command]
+        # The class owns the image: whatever container this row resolved runs
+        # is what PrismaBuild must find on the claiming box before the claim
+        # (RobTand/prismabuild#714).  ``None`` for an archive-backed class --
+        # its loader establishes the image inside the action, so no
+        # local-presence prerequisite may gate placement.
+        container_image = admission_image_reference(container_spec)
     row = {
         "argv": command,
         "cwd": spec["cwd"],
@@ -1589,6 +1600,8 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
         # pbcampaign submits every row detached and cannot retry one itself.
         "retry_safe": True,
     }
+    if container_image is not None:
+        row["container_images"] = [container_image]
     if progress_phases:
         # What bounds this row is whether it is still committing anchors, not
         # how long it has been running.  ``tessera_campaign`` reports each
@@ -2444,9 +2457,21 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     the manifest, ingests it as a second content-addressed input and seals its
     summary into the action, which is also why ``produced_by`` carries nothing
     run-specific: the manifest's digest is part of the action key.
+
+    The container image the spec resolves is declared the same way
+    (``--container-image``, also before the separator): it is derived from the
+    SAME parsed document that is serialized into ``--spec``, so the row cannot
+    seal one image and be admitted against another, and an archive-backed spec
+    declares nothing because its launcher loads and verifies the image inside
+    the action (RobTand/prismabuild#714).
     """
-    spec = (Path(args.spec).read_text() if container_spec is None
-            else json.dumps(container_spec, sort_keys=True))
+    if container_spec is None:
+        spec = Path(args.spec).read_text()
+        parsed_spec = json.loads(spec)
+    else:
+        parsed_spec = container_spec
+        spec = json.dumps(container_spec, sort_keys=True)
+    container_image = admission_image_reference(parsed_spec)
     argv = ["python3", str(args.pbrun), "--demand", args.demand]
     if gpu_memory_gb is not None:
         # The device envelope is a *subset* of the unified reservation on
@@ -2483,6 +2508,8 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
         # sized from one run.
         argv += ["--progress-phase",
                  f"{name}={head_grace if name == 'head' else 900}"]
+    if container_image is not None:
+        argv += [CONTAINER_IMAGE_FLAG, container_image]
     argv += ["--data-manifest", str(manifest), "--detach", "--",
              "python3", "-m", "tools.tessera_campaign_container"]
     argv += list(args.container_arg or [])
