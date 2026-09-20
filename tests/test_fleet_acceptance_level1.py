@@ -89,26 +89,34 @@ def campaign(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("accept")
     files = tmp / "pool" / "model"
     files.mkdir(parents=True)
+    head = files / "head.bin"
+    head_raw = hashlib.sha256(b"fleet-acceptance-head").digest() * 8
+    head.write_bytes(head_raw)
     _write_shard(files / "shard-0.safetensors", _tensors())
     _write_shard(files / "shard-1.safetensors", _tensors())
+    l0_raw = (files / "shard-0.safetensors").read_bytes()
     l1_raw = (files / "shard-1.safetensors").read_bytes()
     half = len(l1_raw) // 2
     entries = [
-        _entry(files / "shard-0.safetensors", 0,
-               (files / "shard-0.safetensors").read_bytes()),
+        _entry(head, 0, head_raw),
+        _entry(files / "shard-0.safetensors", 0, l0_raw),
         _entry(files / "shard-1.safetensors", 0, l1_raw[:half]),
         _entry(files / "shard-1.safetensors", half, l1_raw[half:]),
     ]
     total = sum(e["bytes"] for e in entries)
-    phases = [{"name": "whole", "bytes": entries[0]["bytes"],
-               "cumulative_bytes": entries[0]["bytes"]},
-              {"name": "split", "bytes": entries[1]["bytes"] + entries[2]["bytes"],
-               "cumulative_bytes": total}]
+    running, phases = 0, []
+    for name, size in (("head", entries[0]["bytes"]),
+                       ("layer-0", entries[1]["bytes"]),
+                       ("layer-1", entries[2]["bytes"] + entries[3]["bytes"])):
+        running += size
+        phases.append({"name": name, "bytes": size,
+                       "cumulative_bytes": running})
+    assert running == total
     parent = {
         "schema": "prismaquant.prismabuild.data_manifest.v1",
         "produced_by": {"tool": "fleet-acceptance-harness"},
         "mount_prefix": str(files),
-        "entries": entries, "entry_count": 3, "total_bytes": total,
+        "entries": entries, "entry_count": 4, "total_bytes": total,
         "annotations": {
             "campaign_scope": {"campaign": "fleet-acceptance", "layers": [0, 1]},
             "layers": [0, 1], "phases": phases,
