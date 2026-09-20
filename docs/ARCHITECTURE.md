@@ -70,6 +70,16 @@ TIER-03 producer readset coverage, and TIER-04 legacy authorization stay
 named gaps. Gate: `tests/test_strict_reader_tier_enforcement.py` (plus
 `tests/test_joint_cost_quantum_runtime.py` offline isolation).
 
+Lease follow-on (PQ #850, same branch, unmerged): strict reads now pin
+through the exact PB family (`injected_context`/`acquire_for`/
+`open_pinned`/`release` against pin `a6e6b310a1`) — one window per
+entry, SDK serving records (with pin IDs) at open, exact release on all
+paths, fork pid guard, corruption failing clear; RAM legs refuse for
+want of RAM-mover covers and re-acquire SSD honestly. Serving records
+now carry pin IDs where pinned; `lease_id: null` remains only where no
+lease was required. Capability/tag advertisement, containment, and
+campaign launch stay unclaimed.
+
 Re-stamped (2026-09-20, `flash/source-identity-portable-dev-20260920`) for
 **dev-portable source-identity reuse across hosts** (PQ #843). The six-field
 shard fingerprint still keys cached digests, but one shared predicate now
