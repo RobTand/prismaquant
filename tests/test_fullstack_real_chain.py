@@ -401,14 +401,15 @@ def test_real_reader_serves_staged_tensors_bit_identical(
     assert report["fallback_count"] == 0
 
 
-def test_uncovered_span_fallback_is_recorded_gap_not_conformance(
-        pb, staged, campaign, monkeypatch, capsys) -> None:
-    """An uncovered span reads the pool with a recorded fallback: the gap."""
+def test_uncovered_span_reads_pool_silently_gap_not_conformance(
+        pb, staged, campaign, monkeypatch) -> None:
+    """Unmapped span reads the pool with no stage service: the demonstrated gap."""
     from prismaquant import layer_streaming  # noqa: E402
     from prismaquant.residency_map import (  # noqa: E402
         ENV_VAR, bind_residency_manifest, residency_resolver,
         reset_residency_resolver_for_tests,
     )
+    from safetensors import safe_open  # noqa: E402
     tmp = campaign["tmp"]
     map_path = _write_pq_map(pb, staged, campaign, tmp)
     monkeypatch.setenv(ENV_VAR, str(map_path))
@@ -417,18 +418,22 @@ def test_uncovered_span_fallback_is_recorded_gap_not_conformance(
     resolver = residency_resolver()
     missing = tmp / "pool" / "model" / "never-staged.safetensors"
     _write_shard(missing, _tensors())
+    assert resolver.stages(str(missing)) is False
     with layer_streaming._source_safe_open(
             str(missing), framework="pt") as reader:
-        assert reader.get_tensor("w0").numel() == 64
+        with safe_open(str(missing), framework="pt") as reference:
+            assert torch.equal(reader.get_tensor("w0"),
+                               reference.get_tensor("w0"))
     report = resolver.report()
-    assert report["fallback_count"] >= 1
-    assert "[residency] fallback" in capsys.readouterr().out
+    assert report["fallback_count"] == 0
+    assert report["hits"] == 0
 
 
 @pytest.mark.xfail(strict=True, reason=(
     "strict-reader enforcement pending owning worker: uncovered spans "
     "must refuse instead of pool fallback"))
-def test_strict_reader_refuses_uncovered_span(staged, campaign, monkeypatch) -> None:
+def test_strict_reader_refuses_uncovered_span(
+        pb, staged, campaign, monkeypatch) -> None:
     """Future strict behavior: uncovered span refuses before payload bytes."""
     from prismaquant import layer_streaming  # noqa: E402
     from prismaquant.residency_map import (  # noqa: E402
@@ -539,25 +544,25 @@ def test_join_accepts_producer_records_with_coverage(
 
 def test_join_missing_quantum_is_named_gap(
         produced, campaign, probe, tmp_path) -> None:
-    """Dropping a layer quantum gaps the join instead of shrinking the set."""
+    """Dropping a layer record gaps the join instead of shrinking the set."""
     from tests.test_joint_quanta_join import FORMATS  # noqa: E402
     root = tmp_path / "join-in"
     binding = _seal_join_inputs(root, campaign)
-    spaces = _write_payloads(root, binding, produced, probe, FORMATS)
-    spaces["layer-001"].joinpath("cost.pkl").unlink()
+    _write_payloads(root, binding, produced, probe, FORMATS)
+    (root / "layer-quanta" / "records" / "layer-001.json").unlink()
     out = tmp_path / "join-out"
     receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
     assert join_main(_join_argv(root, out, binding, receipt_sha)) == 0
     results = json.loads((out / "results.json").read_text())
     assert results["distributed"]["status"] == "gapped"
+    assert [g["quantum_id"] for g in
+            results["distributed"]["gaps"]] == ["layer-001"]
 
 
 def test_join_duplicate_and_mismatched_payloads_refuse(
         produced, campaign, probe, tmp_path) -> None:
-    """Two payloads for one quantum, and tampered bytes, both refuse."""
-    from prismaquant.joint_quanta_join import JoinRefused  # noqa: E402
-    from tests.test_joint_quanta_join import FORMATS  # noqa: E402
-    import pytest as _pytest  # noqa: E402
+    """Tampered bytes refuse (exit 1); a qname answered twice refuses."""
+    from tests.test_joint_quanta_join import FORMATS, _row  # noqa: E402
     root = tmp_path / "join-in"
     binding = _seal_join_inputs(root, campaign)
     _write_payloads(root, binding, produced, probe, FORMATS)
@@ -566,5 +571,16 @@ def test_join_duplicate_and_mismatched_payloads_refuse(
     dup_space = Path(produced["records"][0]["output_space"]["root"])
     dup_space.joinpath("cost.pkl").write_bytes(
         pickle.dumps({"costs": {}, "provenance": {}}, protocol=2))
-    with _pytest.raises(Exception):
-        join_main(_join_argv(root, out, binding, receipt_sha))
+    assert join_main(_join_argv(root, out, binding, receipt_sha)) == 1
+    assert not (out / "joint-cost.pkl").exists()
+    _write_payloads(root, binding, produced, probe, FORMATS)
+    other = [q for q in binding["roster"] if ".layers.0." in q][0]
+    victim = Path(produced["records"][1]["output_space"]["root"])
+    payload = pickle.loads(victim.joinpath("cost.pkl").read_bytes())
+    payload["costs"][other] = {fmt: _row(other, fmt, probe)
+                               for fmt in FORMATS}
+    victim.joinpath("cost.pkl").write_bytes(
+        pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
+    out2 = tmp_path / "join-out-2"
+    assert join_main(_join_argv(root, out2, binding, receipt_sha)) == 1
+    assert not (out2 / "joint-cost.pkl").exists()
