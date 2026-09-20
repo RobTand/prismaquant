@@ -212,7 +212,11 @@ def _publish_claim(world: World, *, key: str, owner: str = OWNER) -> dict:
                         worker_script=worker,
                         resources={"cpu": 1, "mem_gb": 1},
                         max_attempts=1, retry_safe=True)
-    record = world.queue.claim(owner=owner, capacity={"cpu": 1, "mem_gb": 1})
+    # One box serves every scenario consumer below (namespace holds two
+    # live claims at once), so it offers real box-sized headroom; demand
+    # stays tiny per row. Growing-only ledger headroom is production
+    # behavior, and over-offering fails closed at admission, never silently.
+    record = world.queue.claim(owner=owner, capacity={"cpu": 4, "mem_gb": 4})
     assert record is not None, "real claim refused a published cpu row"
     assert record["action_key"] == key
     return record
