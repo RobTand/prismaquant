@@ -173,7 +173,7 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
 
 def _git_blob_sha(data: bytes) -> str:
     """The git blob id bytes hash to (change detection primitive)."""
-    return hashlib.sha256(b"blob %d\0" % len(data) + data).hexdigest()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
 
 def record_snapshots(*, checkout: Path) -> dict:
