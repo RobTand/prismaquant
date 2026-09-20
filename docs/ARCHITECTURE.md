@@ -1,7 +1,22 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/stage-a-dispatch-manifest-binding`.
+As of: 2026-09-20 · `flash/quantum-launch-contract-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/quantum-launch-contract-20260920`) for **the
+quantum launch contract** (#838). The quanta rows the dispatcher published
+could not survive the consumer's gates: the payload missed the required
+plan/prepared/adjoint bindings (argparse before compute), `--quantum-sha256`
+carried the canonical body digest the consumer checks raw bytes against, the
+record's canonical receipt digest was compared to the writer's pretty wire
+bytes, and the live records rooted outputs at the binder's directory instead
+of the plan root. `quantum_argv` now threads every consumer binding from
+sealed sources (record wire digest, receipt wire digest read where read,
+verified slice digest, `--resume`); both receipt checks compare canonical
+against canonical while the CLI binds wire; `tools/regenerate_joint_quanta.py`
+replays the producer with the authoritative output root and re-seals against
+the receipt without touching old files. No producer, budget, plan or
+`--residency` changes. Gates: `tests/test_quantum_launch_contract_838.py`.
 
 Re-stamped (2026-09-20, `flash/stage-a-dispatch-manifest-binding`) for **the
 Stage A/quanta submission binding its data manifest** (#835). The dispatcher

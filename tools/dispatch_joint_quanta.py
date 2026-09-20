@@ -45,11 +45,17 @@ if __package__:
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
     )
+    from prismaquant.joint_layer_quanta import (
+        canonical_sha256 as _canonical_receipt_sha256,
+    )
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
+    )
+    from prismaquant.joint_layer_quanta import (
+        canonical_sha256 as _canonical_receipt_sha256,
     )
 
 PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
@@ -363,21 +369,58 @@ def _container_wrap(spec_path: Path,
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
-                 consumer_tags: Sequence[str] = CONSUMER_TAGS) -> list[str]:
+                 consumer_tags: Sequence[str] = CONSUMER_TAGS,
+                 adjoint_path: Path) -> list[str]:
     """The exact §5.2 submission argv for one quantum. Pinned by tests: a
     drift here breaks placement.  ``consumer_tags`` is the effective §5.1
     placement policy, a conjunction PB matches against a worker's offered
-    tags; PB alone decides which matching box claims the row."""
+    tags; PB alone decides which matching box claims the row.
+
+    Every binding the consumer CLI requires is threaded from sealed sources:
+    plan/prepared paths+digests from the record's campaign block, the record
+    file's own wire digest as ``--quantum-sha256`` (the consumer checks raw
+    bytes first; the canonical body check inside stays), the receipt file's
+    wire digest as ``--adjoint-sha256``, the verified slice digest, and
+    ``--resume``. Files are read where the row reads them; an unreadable or
+    drifting file refuses before anything publishes (#838)."""
     quantum_id = record["quantum_id"]
     manifest = Path(record["read_set"]["manifest_path"])
     if not manifest.is_absolute():
         manifest = output_root / manifest
     slice_sha256 = _slice_manifest_digest(record, output_root=output_root)
+    campaign = record.get("campaign")
+    if not isinstance(campaign, dict):
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} carries no campaign block")
+    for key in ("plan_path", "plan_sha256", "prepared_path", "prepared_sha256"):
+        value = campaign.get(key)
+        if not isinstance(value, str) or not value:
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} seals no campaign {key}")
+    try:
+        record_sha256 = _sha_bytes(Path(record_path).read_bytes())
+    except OSError as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} record unreadable at {record_path}: "
+            f"{exc}") from exc
+    try:
+        receipt_sha256 = _sha_bytes(Path(adjoint_path).read_bytes())
+    except OSError as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} adjoint receipt unreadable at "
+            f"{adjoint_path}: {exc}") from exc
     wrapped, container_image = _container_wrap(SPEC_PATH, [
         "python3", "-m", "prismaquant.joint_cost_quantum",
         "--quantum", str(record_path),
-        "--quantum-sha256", record["identity_sha256"],
+        "--quantum-sha256", record_sha256,
+        "--plan", str(campaign["plan_path"]),
+        "--plan-sha256", str(campaign["plan_sha256"]),
+        "--prepared", str(campaign["prepared_path"]),
+        "--prepared-sha256", str(campaign["prepared_sha256"]),
+        "--adjoint", str(adjoint_path),
+        "--adjoint-sha256", receipt_sha256,
         "--data-manifest-sha256", slice_sha256,
+        "--resume",
         "--output-root", str(output_root)])
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
@@ -463,7 +506,14 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
 
 def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) -> dict:
     """Validate the stage-A receipt against the sealed records: schema, the
-    shared campaign digests, and the receipt digest every record binds."""
+    shared campaign digests, and the receipt digest every record binds.
+
+    Wire and document identity are compared as matching representations:
+    the records bind the canonical digest the producer sealed
+    (``bind_adjoint_receipt``), so the file's decoded bytes are canonicalized
+    with the same function before comparing -- never raw file bytes against
+    the canonical seal, which valid writer output (pretty JSON + newline)
+    would fail."""
     receipt = _load_json(receipt_path, where="stage-A receipt")
     if receipt.get("schema") != ADJOINT_SCHEMA:
         raise DispatchRefused(
@@ -474,12 +524,12 @@ def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) 
             raise DispatchRefused(
                 f"{receipt_path}: receipt {key} is not this campaign's "
                 "(stale receipt)")
-    digest = _sha_bytes(receipt_path.read_bytes())
+    digest = _canonical_receipt_sha256(receipt, where="stage-A receipt")
     expected = records[0][1]["adjoint"]["receipt_sha256"]
     if expected is not None and digest != expected:
         raise DispatchRefused(
-            f"{receipt_path}: digest {digest} does not match the sealed "
-            f"receipt digest {expected} (moved or mismatched receipt)")
+            f"{receipt_path}: canonical digest {digest} does not match the "
+            f"sealed receipt digest {expected} (moved or mismatched receipt)")
     return receipt
 
 
@@ -687,7 +737,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                                  record, record_path=record_path,
                                  output_root=output_root, priority=priority,
                                  head_grace_s=args.head_grace_s,
-                                 consumer_tags=tags)})
+                                 consumer_tags=tags,
+                                 adjoint_path=receipt_path)})
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION_REFUSED

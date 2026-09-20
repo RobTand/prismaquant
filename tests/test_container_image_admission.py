@@ -142,8 +142,11 @@ def test_stage_a_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec)
 def test_quantum_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
     record_path = _quantum_record(tmp_path)
     record = json.loads(record_path.read_text())
+    adjoint_path = tmp_path / "adjoint-capture.json"
+    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     argv = joint.quantum_argv(record, record_path=record_path,
-                              output_root=tmp_path / "out")
+                              output_root=tmp_path / "out",
+                              adjoint_path=adjoint_path)
     embedded = _embedded_spec(argv)
     assert _pbrun_option(argv, IMAGE_FLAG) == embedded["container"]["image"]
 

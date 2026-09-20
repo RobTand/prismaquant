@@ -165,8 +165,11 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     record = _record(campaign, 1, slice_dir=slices)
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
+    adjoint_path = tmp_path / "adjoint-capture.json"
+    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     argv = quantum_argv(record, record_path=record_path,
-                        output_root=Path("/out/root"))
+                        output_root=Path("/out/root"),
+                        adjoint_path=adjoint_path)
     tags = [argv[i + 1] for i, word in enumerate(argv[:-1]) if word == "--tag"]
     assert tags == ["gb10"]
     assert CONSUMER_TAGS == ("gb10",)
@@ -201,7 +204,16 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     inner = tail[tail.index("--", tail.index("--spec")) + 1:]
     assert inner[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
     assert inner[inner.index("--quantum") + 1] == str(record_path)
-    assert inner[inner.index("--quantum-sha256") + 1] == record["identity_sha256"]
+    assert inner[inner.index("--quantum-sha256") + 1] == hashlib.sha256(
+        record_path.read_bytes()).hexdigest()
+    assert inner[inner.index("--plan") + 1] == campaign["plan_path"]
+    assert inner[inner.index("--plan-sha256") + 1] == campaign["plan_sha256"]
+    assert inner[inner.index("--prepared") + 1] == campaign["prepared_path"]
+    assert inner[inner.index("--prepared-sha256") + 1] == campaign["prepared_sha256"]
+    assert inner[inner.index("--adjoint") + 1] == str(adjoint_path)
+    assert inner[inner.index("--adjoint-sha256") + 1] == hashlib.sha256(
+        adjoint_path.read_bytes()).hexdigest()
+    assert "--resume" in inner
     assert inner[inner.index("--data-manifest-sha256") + 1] == record["read_set"]["manifest_sha256"]
     assert inner[inner.index("--output-root") + 1] == "/out/root"
 

@@ -318,3 +318,69 @@ def test_here_rooted_records_refuse_against_the_plan_root(tmp_path):
             prepared_sha256=campaign["prepared_sha"],
             adjoint_path=receipt_path, adjoint_sha256=_sha(receipt_path),
             output_root=campaign["root"])
+
+
+def _regen_argv(tmp_path: Path, campaign: dict) -> list[str]:
+    derivation = tmp_path / "derivation.json"
+    derivation.write_text(json.dumps({
+        "chunk_target_bytes": 400, "stride": 1,
+        "ram_window_gib": 160, "max_resident_consumers": 2}))
+    partition = tmp_path / "window-partition.json"
+    partition.write_text(json.dumps({"windows_by_layer": {"0": 1, "1": 1}}))
+    return ["--plan", str(campaign["plan_path"]),
+            "--plan-sha256", campaign["plan_sha"],
+            "--prepared", str(campaign["prepared_path"]),
+            "--prepared-sha256", campaign["prepared_sha"],
+            "--parent-manifest", str(tmp_path / "parent.json"),
+            "--parent-manifest-sha256", campaign["parent_sha"],
+            "--derivation", str(derivation),
+            "--partition", str(partition)]
+
+
+def test_regenerate_writes_new_roots_and_binds_receipt(tmp_path):
+    """Defect 4 path: the repo CLI regenerates records/slices/manifests
+    with the authoritative output root (never its own directory) and
+    re-seals against the receipt -- old files untouched, nothing copied."""
+    import regenerate_joint_quanta as regen
+    campaign = _campaign(tmp_path)
+    base = _regen_argv(tmp_path, campaign)
+    out = tmp_path / "reviewed"
+    assert regen.main(base + ["--output-root", str(campaign["root"]),
+                              "--records-out", str(out)]) == 0
+    records = [json.loads(path.read_text())
+               for path in sorted(out.glob("layer-*.json"))]
+    assert len(records) == 2
+    for record in records:
+        assert record["output_space"]["root"].startswith(str(campaign["root"]))
+        assert record["adjoint"]["receipt_sha256"] is None
+    assert (out / "records.json").is_file()
+    assert (out / "adjoint-manifest.json").is_file()
+    assert sorted((out / "manifests").glob("*.json.gz"))
+    # Gate 1: the same inputs reproduce the fresh files exactly.
+    assert regen.main(base + ["--output-root", str(campaign["root"]),
+                              "--records-out", str(out),
+                              "--expect-existing", str(out),
+                              "--check-only"]) == 0
+    # Gate 2: binding re-seals every record against the receipt.
+    space = tmp_path / "adjoint-space"
+    space.mkdir()
+    first = _produce(campaign)
+    receipt = _receipt(campaign, first["derivation"]["checkpoints"])
+    write_adjoint_receipt(space, receipt)
+    bound_out = tmp_path / "bound"
+    assert regen.main(base + ["--output-root", str(campaign["root"]),
+                              "--records-out", str(bound_out),
+                              "--adjoint-receipt",
+                              str(space / "adjoint-capture.json")]) == 0
+    bound = [json.loads(path.read_text())
+             for path in sorted(bound_out.glob("layer-*.json"))]
+    assert all(r["adjoint"]["receipt_sha256"] == canonical_sha256(receipt)
+               for r in bound)
+    assert any(r["identity_sha256"] != f["identity_sha256"]
+               for r, f in zip(bound, records))
+    # Refusal, not overwrite: differing bytes at the destination fail closed.
+    (bound_out / "layer-000.json").write_text("{}")
+    assert regen.main(base + ["--output-root", str(campaign["root"]),
+                              "--records-out", str(bound_out),
+                              "--adjoint-receipt",
+                              str(space / "adjoint-capture.json")]) == 3

@@ -454,14 +454,40 @@ pbrun --tag gb10 \
       python3 -m tools.tessera_campaign_container --spec <spec> -- \
       python3 -m prismaquant.joint_cost_quantum \
         --quantum …/layer-quanta/records/layer-013.json \
-        --quantum-sha256 <identity_sha256> \
+        --quantum-sha256 <record file wire digest> \
+        --plan <plan> --plan-sha256 <plan digest> \
+        --prepared <prepared> --prepared-sha256 <prepared digest> \
+        --adjoint <adjoint-capture.json> --adjoint-sha256 <receipt wire digest> \
         --data-manifest-sha256 <slice manifest bytes digest> \
+        --resume \
         --output-root …/complete-512-seed237….encoder-reuse-02
 ```
 
 The slice digest is the row's own read-set digest (`read_set.manifest_sha256`),
 verified against the slice file at dispatch: the quantum binds the bytes pbrun
-stages for it, never the campaign parent it also carries (PQ #835).
+stages for it, never the campaign parent it also carries (PQ #835). The
+record digest is the record file's wire bytes (the consumer checks raw bytes
+first; its canonical body check inside stays), and the receipt digest is the
+receipt file's wire bytes (PQ #838: earlier rows bound the canonical digests
+and died in argparse or at the first gate).
+
+Wire and document identity stay distinct end to end. The producer seals the
+canonical digest of the decoded receipt (`bind_adjoint_receipt`); the writer
+persists pretty JSON plus a newline (`write_adjoint_receipt`). The dispatcher
+receipt gate and the consumer's record-vs-argv check therefore compare the
+record's canonical digest against the canonical digest of the decoded file --
+never raw bytes against the seal, which valid writer output fails. The CLI
+flags bind wire on both files, and the wire checks stay where they were.
+
+Quantum records are produced, never edited (producer D3). The reviewed
+regeneration path is `tools/regenerate_joint_quanta.py`: it replays the
+`layer_quanta()` producer call from digest-verified plan/prepared/parent
+inputs with the authoritative output root (never the tool's own directory),
+writes records, slice manifests and the adjoint manifest into a reviewed
+directory (absent-or-identical, refused if different), reproduces receipt-less
+against on-disk records under `--expect-existing`/`--check-only` (Gate 1),
+and re-seals against `--adjoint-receipt` (Gate 2). Old records and history
+stay where they are; boundary payloads are never copied.
 
 - `PRISMAQUANT_DEV_MODE=1` (PR #776) is the interim lane: submissions run
   from any checkout with no campaign branch, no transition receipts, and the

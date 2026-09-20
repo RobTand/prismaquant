@@ -145,11 +145,17 @@ def verify_quantum_identity(
         if _digest_of(adjoint_path) != adjoint_sha256:
             raise QuantumIdentityRefused(
                 f"adjoint receipt digest mismatch at {adjoint_path}")
-        if adjoint["receipt_sha256"] != adjoint_sha256:
+        receipt = load_adjoint_receipt(adjoint_path, adjoint_sha256)
+        # Wire and document identity are different bindings: the CLI carries
+        # the wire bytes the writer wrote (checked above and inside the
+        # loader), while the record carries the canonical digest the
+        # producer sealed. Each is compared against its matching
+        # representation -- never wire against canonical.
+        if (adjoint["receipt_sha256"] != canonical_json_sha256(
+                receipt, where="adjoint receipt identity")):
             raise QuantumIdentityRefused(
                 "quantum record binds another adjoint receipt: "
-                f"record={adjoint['receipt_sha256']!r} argv={adjoint_sha256}")
-        receipt = load_adjoint_receipt(adjoint_path, adjoint_sha256)
+                f"record={adjoint['receipt_sha256']!r}")
         if receipt.get("status") != "complete":
             raise QuantumIdentityRefused(
                 f"adjoint receipt status is {receipt.get('status')!r}, not complete")
@@ -208,7 +214,8 @@ def verify_quantum_identity(
                     "read_manifest_sha256": campaign["read_manifest_sha256"],
                     "unit_roster_sha256": campaign["unit_roster_sha256"],
                     "campaign_scope": campaign["campaign_scope"],
-                    "adjoint_receipt_sha256": adjoint_sha256,
+                    "adjoint_receipt_sha256": canonical_json_sha256(
+                        receipt, where="adjoint receipt identity"),
                 })
             except ValueError as exc:
                 raise QuantumIdentityRefused(
