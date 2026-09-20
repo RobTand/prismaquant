@@ -24,10 +24,9 @@ nothing here re-implements, shadows, or diverges from it:
   adoption; availability refuses the leg (a RAM leg may then acquire
   SSD covers honestly, with its own material and lifetime).
 - Covers come from actual PB identity: the composed map's leads plus its
-  manifest for the stage tier. RAM movers are not in the composed map,
-  so a RAM leg refuses ``ram-covers-unresolved`` until the PB owner
-  provides mover resolution (requested via root) — SSD leads are never
-  pretended to identify a RAM mover.
+  manifest for the stage tier, and the PB `covers_for_keys` lookup for
+  RAM tiers (resolved per key, cross-checked against the sealed entry,
+  never equated). SSD leads are never consulted for RAM identity.
 - Fork safety: supported PQ readers use threads and owned pread
   buffers, and every window operation (open, close, exit) plus every
   reader payload/lifecycle operation rejects inherited handle
@@ -289,11 +288,11 @@ def _select_ram_window(resolver, declared, entry):
 
 
 def ram_covers(map_entry: dict) -> list[dict[str, str]]:
-    """RAM-tier covers: refused until the PB owner resolves RAM movers.
+    """RAM-tier covers without a lookup: always refused.
 
-    Retained for the pre-lookup SDK pin only; current code resolves via
-    :func:`resolve_ram_covers` instead. Direct callers get the honest
-    refusal: SSD leads never identify a RAM mover.
+    Retained for SDK pins predating `covers_for_keys`; current code
+    resolves via :func:`resolve_ram_covers` instead. Direct callers get
+    the honest refusal: SSD leads never identify a RAM mover.
     """
     raise _refuse("ram-covers-unresolved", kind="availability")
 
