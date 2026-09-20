@@ -1491,7 +1491,7 @@ def _advise_consumed_safetensors_pages(shard: str, keys: list[str],
         os.close(fd)
 
 
-def _await_layer_readset(by_shard, open_kwargs, *, source_authentication=None):
+def _await_layer_readset(by_shard, *, source_authentication=None):
     """Let PrismaBuild's movers land this layer's ranges before the fan-out.
 
     Readiness is decided HERE, in the thread that is about to submit the
@@ -1559,9 +1559,16 @@ def _await_layer_readset(by_shard, open_kwargs, *, source_authentication=None):
     wanted = []
     for shard, pairs in by_shard.items():
         try:
+            # ``framework="pt"`` and nothing else: this only ever reads the
+            # header, so it must not depend on the direct-to-device open
+            # the gather may use. That open can raise TypeError/RuntimeError
+            # on a safetensors that rejects ``device`` -- which the gather
+            # handles by retrying -- and a pre-flight that fell over there
+            # would silently stop waiting on exactly the CUDA reads the fix
+            # is for.
             with _source_safe_open(
-                    shard, source_authentication=source_authentication,
-                    **open_kwargs) as reader:
+                    shard, framework="pt",
+                    source_authentication=source_authentication) as reader:
                 span_of = getattr(reader, "_span", None)
                 if span_of is None:
                     # Not a staged reader, so this thread cannot enumerate
@@ -1691,8 +1698,7 @@ def _read_layer_to_device(prefix: str,
                 [key for _, key in pairs], source_stats[shard])
         return local
 
-    _await_layer_readset(by_shard, open_kwargs,
-                         source_authentication=source_authentication)
+    _await_layer_readset(by_shard, source_authentication=source_authentication)
     total_tensors = sum(len(pairs) for pairs in by_shard.values())
     threads = layer_read_threads()
     if threads > 1 and total_tensors >= _LAYER_READ_MIN_TENSORS:

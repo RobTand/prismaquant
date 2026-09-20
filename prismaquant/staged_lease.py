@@ -416,13 +416,17 @@ def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int,
     2. That row's digest must equal ``bound_manifest_sha256`` -- the digest
        this run was submitted with. A readset for another submission is
        not this run's readset.
-    3. The CAS blob is read, bounded by the row's own ``manifest_bytes``,
-       and hashed. Content addressing is what makes the manifest
-       self-attesting, so the bytes prove themselves or nothing is adopted.
-       (This is the SMALL metadata -- ``residency.manifest_bytes``, 1.5 MB
-       on the GLM-5.3-Flash campaign. It is not
-       ``detail.prewarm.manifest_bytes``, the 1.2 TB payload those entries
-       *describe*, which is never hashed here.)
+    3. Both the row's stated size and the blob's actual size are checked
+       against ``core.DATA_MANIFEST_MAX_BYTES`` -- PB's own fixed bound --
+       **before the blob is opened**, and only then is it read and hashed.
+       The row's ``manifest_bytes`` is an input, not an established size:
+       the same record carries ``detail.prewarm.manifest_bytes``, which is
+       1,244,988,662,830 on the GLM-5.3-Flash campaign because it measures
+       the payload those entries *describe*. What is hashed here is the
+       small metadata -- ``residency.manifest_bytes``, 1.5 MB on that same
+       campaign -- and the fixed ceiling is what keeps it that way.
+       Content addressing is then what makes the manifest self-attesting:
+       the bytes prove themselves or nothing is adopted.
     4. ``prismabuild.core.read_data_manifest`` decodes and validates it --
        gzip detected by header rather than suffix, stored and decoded bytes
        bounded independently before JSON parsing, trailing bytes and
@@ -444,7 +448,33 @@ def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int,
         raise ReadsetUnbound(
             f"the claim row names manifest {digest[:12]}, this run reads "
             f"{str(bound_manifest_sha256)[:12]}")
+    try:
+        from prismabuild.core import DATA_MANIFEST_MAX_BYTES, read_data_manifest
+    except ImportError as error:
+        raise ReadsetUnbound(f"PB manifest reader unavailable: {error}") from None
+    # The ceiling is PB's own fixed bound, applied BEFORE anything is opened.
+    # ``size`` came off the claim row: it is an input, not an established
+    # fact, and the same record carries ``detail.prewarm.manifest_bytes`` --
+    # 1,244,988,662,830 on the live campaign, the payload those entries
+    # describe. A wrong field or a wrong value must not be able to spend a
+    # read and a hash on a terabyte. Small metadata is what is hashed here,
+    # and this is what keeps it small. (One bound, PB's: a second constant
+    # here would be a second contract, free to drift from the reader that
+    # enforces it.)
+    if size > DATA_MANIFEST_MAX_BYTES:
+        raise ReadsetUnbound(
+            f"the claim row says the sealed manifest is {size} bytes, past "
+            f"PrismaBuild's own {DATA_MANIFEST_MAX_BYTES}-byte manifest bound")
     blob = Path(cas_root) / "blobs" / digest[:2] / digest
+    try:
+        actual = os.lstat(blob).st_size
+    except OSError as error:
+        raise ReadsetUnbound(
+            f"sealed manifest is unstatable: {error.strerror}") from None
+    if actual > DATA_MANIFEST_MAX_BYTES:
+        raise ReadsetUnbound(
+            f"sealed manifest is {actual} bytes, past PrismaBuild's own "
+            f"{DATA_MANIFEST_MAX_BYTES}-byte manifest bound")
     try:
         with open(blob, "rb") as handle:
             raw = handle.read(size + 1)
@@ -456,10 +486,6 @@ def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int,
             f"sealed manifest is {len(raw)} bytes, the claim row says {size}")
     if hashlib.sha256(raw).hexdigest() != digest:
         raise ReadsetUnbound("sealed manifest does not hash to its digest")
-    try:
-        from prismabuild.core import read_data_manifest
-    except ImportError as error:
-        raise ReadsetUnbound(f"PB manifest reader unavailable: {error}") from None
     try:
         payload, _encoding = read_data_manifest(blob)
     except Exception as error:

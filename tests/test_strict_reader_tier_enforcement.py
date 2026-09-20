@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from concurrent.futures import ThreadPoolExecutor
 from safetensors.torch import save_file
 
 from prismaquant import layer_streaming
@@ -2040,57 +2041,144 @@ def test_one_deadline_covers_a_layer_that_spans_several_cold_shards(
     assert resolver.report()['range_waits_refused'] == 1
 
 
+def _wide_shard(tmp_path, name):
+    """A shard with enough tensors to take the intra-layer fanout branch.
+
+    ``_read_layer_to_device`` only uses ``_LAYER_READ_POOL`` when
+    ``threads > 1 and total_tensors >= _LAYER_READ_MIN_TENSORS``. A test that
+    misses either condition runs the serial path, never touches the pool, and
+    would pass identically under an implementation that blocks inside a pool
+    worker -- which is the property it exists to check.
+    """
+    pool = tmp_path / 'pool'
+    pool.mkdir(parents=True, exist_ok=True)
+    count = layer_streaming._LAYER_READ_MIN_TENSORS + 4
+    tensors = {f't{index:02d}': torch.linspace(-1, 1, 64, dtype=torch.float32)
+               .reshape(8, 8) + index for index in range(count)}
+    path = pool / name
+    save_file(tensors, str(path))
+    return path, sorted(tensors)
+
+
+def _read_wide_layer(path, names):
+    model_to_shard = {f'layer.{n}': str(path) for n in names}
+    model_to_ckpt = {f'layer.{n}': n for n in names}
+    return layer_streaming._read_layer_to_device(
+        'layer.', model_to_shard, model_to_ckpt, torch.float32,
+        torch.device('cpu'))
+
+
 def test_a_waiting_layer_read_holds_no_gather_worker(tmp_path, monkeypatch):
     """A cold layer read must not occupy the shared gather pool.
 
-    ``_LAYER_READ_POOL`` is module-global and bounded and shared by every
+    ``_LAYER_READ_POOL`` is module-global, bounded and shared by every
     streamed layer read, so a worker sleeping on a cold future range is a
     worker the current layer's already-staged reads queue behind. Readiness
     is therefore decided in the submitting thread, before any slot is taken.
 
-    Sized to ONE worker on purpose: with the wait inside a gather worker this
-    assertion cannot hold at all, and with it in the submitting thread the
-    single slot stays free for the ready read throughout.
+    Built so it can actually fail: both shards carry enough tensors to take
+    the fanout branch, the pool is sized to exactly the number of chunks one
+    cold layer splits into, and the executor is wrapped so the test can
+    assert the submissions really happened. Under an implementation that
+    waits inside a gather worker, every worker is asleep for the whole bound
+    and the ready read cannot finish first.
     """
-    path, _ = _shard(tmp_path)
-    other = path.with_name('model-00002-of-00002.safetensors')
-    other.write_bytes(path.read_bytes())
-    staged_other = _stage_whole(_stage_root(tmp_path), other)
+    cold, cold_names = _wide_shard(tmp_path, 'model-00001-of-00002.safetensors')
+    ready, ready_names = _wide_shard(tmp_path, 'model-00002-of-00002.safetensors')
+    staged_ready = _stage_whole(_stage_root(tmp_path), ready)
     resolver, _consumer, _digest, publish = _mid_flight_fixture(
         tmp_path, monkeypatch,
-        declared=_whole_file(path) + _whole_file(other))
-    publish({'o': (other, staged_other)})
-    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "20")
-    monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '1')
-    monkeypatch.setattr(layer_streaming, '_LAYER_READ_POOL', None, raising=False)
-    monkeypatch.setattr(layer_streaming, '_LAYER_READ_POOL_THREADS', 0,
-                        raising=False)
+        declared=_whole_file(cold) + _whole_file(ready))
+    publish({'r': (ready, staged_ready)})
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "30")
+    monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '2')
 
-    def cold():
-        with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
-            _read_layer(path)
-        return True
+    submissions = []
+    real_pool = ThreadPoolExecutor(max_workers=2,
+                                   thread_name_prefix='gather-under-test')
 
-    waiter = threading.Thread(target=lambda: results.append(cold()),
-                              name='cold-layer')
+    class _Counting:
+        def submit(self, fn, *args, **kwargs):
+            submissions.append(getattr(fn, '__name__', str(fn)))
+            return real_pool.submit(fn, *args, **kwargs)
+
+    monkeypatch.setattr(layer_streaming, '_layer_read_pool',
+                        lambda threads: _Counting())
+
     results = []
+
+    def cold_reader():
+        with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+            _read_wide_layer(cold, cold_names)
+        results.append(True)
+
+    waiter = threading.Thread(target=cold_reader, name='cold-layer')
     waiter.start()
     try:
-        time.sleep(1.5)
+        time.sleep(2.0)
         began = time.monotonic()
-        served = _read_layer(other)
+        served = _read_wide_layer(ready, ready_names)
         elapsed = time.monotonic() - began
     finally:
         waiter.join(timeout=120)
+        real_pool.shutdown(wait=False)
+
     assert results == [True]
+    # The fanout branch really ran: without this a serial-path regression
+    # would leave the assertion below passing for the wrong reason.
+    assert len(submissions) >= 2, submissions
     assert elapsed < 10.0, (
-        f"a staged layer read took {elapsed:.1f}s while a cold one waited: "
-        "the wait is holding a gather worker")
+        f"a staged layer read took {elapsed:.1f}s while a cold one waited "
+        "its 30s bound: the wait is holding a gather worker")
+
     from safetensors import safe_open
-    with safe_open(str(other), framework='pt') as reference:
-        assert torch.equal(served['layer.0.f32'].view(torch.uint8),
-                           reference.get_tensor('f32').view(torch.uint8))
+    with safe_open(str(ready), framework='pt') as reference:
+        for name in ready_names:
+            assert torch.equal(served[f'layer.{name}'].view(torch.uint8),
+                               reference.get_tensor(name).view(torch.uint8))
     assert resolver.report()['bytes_from_pool'] == 0
+
+
+def test_the_sealed_readset_refuses_an_oversize_manifest_without_reading_it(
+        tmp_path, monkeypatch):
+    """A claim row may state any size; the ceiling is PrismaBuild's own.
+
+    The row's ``manifest_bytes`` is an input. The same pool record carries
+    ``detail.prewarm.manifest_bytes`` -- 1,244,988,662,830 on the live
+    campaign, because it measures the payload the entries describe -- so a
+    wrong field must not be able to spend a read and a hash on a terabyte.
+    The blob here is tiny and is never opened: the refusal happens on the
+    stated size, before any read.
+    """
+    from prismabuild.core import DATA_MANIFEST_MAX_BYTES
+
+    path, _ = _shard(tmp_path)
+    resolver, consumer, digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    assert resolver.declared_readset()['state'] == 'bound'
+
+    opened = []
+    real_open = open
+
+    def watched(target, *args, **kwargs):
+        opened.append(str(target))
+        return real_open(target, *args, **kwargs)
+
+    _publish_readset_on_the_claim(
+        tmp_path, consumer, tmp_path / 'cas', digest,
+        DATA_MANIFEST_MAX_BYTES + 1)
+    bind_residency_manifest('0' * 63 + '1')      # drop the cached answer
+    bind_residency_manifest(digest)
+    import builtins
+    builtins.open = watched                  # restored in the finally below
+    try:
+        state = resolver.declared_readset()
+    finally:
+        builtins.open = real_open
+
+    assert state['state'] == 'unbound'
+    assert str(DATA_MANIFEST_MAX_BYTES) in str(state['reason'])
+    assert not [row for row in opened if digest in row], opened
 
 
 def test_the_staged_range_wait_bound_must_be_finite(monkeypatch):
