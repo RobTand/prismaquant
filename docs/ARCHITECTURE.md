@@ -1,6 +1,26 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/quantum-launch-contract-20260920`.
+As of: 2026-09-20 · `flash/source-identity-portable-dev-20260920`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/source-identity-portable-dev-20260920`) for
+**dev-portable source-identity reuse across hosts** (PQ #843). The six-field
+shard fingerprint still keys cached digests, but one shared predicate now
+owns every seed/validate/build comparison: certified mode keeps exact
+six-field equality (cross-host reuse still refused, rehash as today); dev
+mode additionally accepts fingerprints that agree on path/inode/size/mtime/
+ctime and differ only in the client-local `st_dev` (both Sparks NFS-mount
+one export, so identical shards stat 64 vs 75). Both sides must carry the
+exact six-field shape first -- missing or extra fields never match, in
+either mode. Portable acceptance emits the `[DEV-MODE]` trust line and rides
+the existing uncertified stamp; the returned identity bytes are unchanged so
+the prepared `_same` wall still holds. In dev only, there is no automatic
+hidden giant hash in either entry point: a missing, unrecognized, mutated,
+or contract-less top-up cache each refuses fast with the byte count, and so
+does a call with no cache path at all (initialize explicitly with a
+certified run, which remains the existing explicit preparation path);
+certified rehash behavior is unchanged. Gate:
+`tests/test_source_identity_portable_device.py`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-20, `flash/stagea-forward-read-plan-20260920`) for **the
@@ -2434,10 +2454,17 @@ because the loader reads tensors after authenticating their shard.
 An optional plan binding `source_identity_cache: {path, sha256}` seeds the
 existing per-pass `source-identity.json` slot in a new output root, with an
 exact checksum and conflict refusal; it does not create a weight or activation
-cache. A cache proven on another host's NFS mount is not portable merely
-because the paths and SHA rows match: the current six-field fingerprint includes
-the host-local `st_dev`. Manifest construction and owner adoption therefore
-refuse it on a different mount device. A reuse request has a real host-local
+cache. A cache proven on another host's NFS mount is portable in dev mode
+only, and only when every mutation-sensitive field matches and the sole
+difference is the client-local `st_dev` (same export, two mounts): certified
+mode still refuses it, and dev records the `[DEV-MODE]` trust line on every
+portable acceptance. A dev run with no cache path at all, a path with no
+file, a cache that recognizes nothing, mutated rows, or new rows without
+an initialization contract refuses fast with the byte count instead of
+sealing silently -- initialize explicitly with a certified run, which
+remains the existing explicit preparation path.
+Manifest construction and owner adoption otherwise refuse a cross-device
+cache as before. A reuse request has a real host-local
 dependency until a separately qualified cross-host source proof exists; the
 manifest names its proof host, and `submit-joint` refuses a broader placement
 tag before publication.

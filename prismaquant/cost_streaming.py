@@ -19,6 +19,7 @@ from typing import Any, Iterator
 import torch
 
 from prismaquant.memory_management import reserve_allocation
+from prismaquant.dev_mode import dev_mode_enabled, dev_warning
 from prismaquant.layer_streaming import (
     _call_layer,
     _compute_attention_mask,
@@ -1277,8 +1278,10 @@ def _read_source_checkpoint_digest_cache(
 ) -> dict[str, dict[str, object]]:
     """Digests keyed by the six-field stat fingerprint of the file they cover.
 
-    A corrupt or foreign cache is not an error: it simply reuses nothing, and
-    every shard is hashed. The cache can only ever make the identity CHEAPER,
+    A corrupt or foreign cache is not an error: it simply reuses nothing.
+    Certified mode then hashes every shard; dev mode refuses the
+    unannounced seal fast with the byte count instead (see the portable
+    reuse policy). The cache can only ever make the identity CHEAPER,
     never different -- the fingerprint it keys on includes ``ctime_ns``, which
     ``utime`` cannot restore after an in-place same-size rewrite.
     """
@@ -1314,6 +1317,59 @@ def _read_source_checkpoint_digest_cache(
 
 def canonical_fingerprint_key(fingerprint: dict[str, object]) -> str:
     return json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
+
+
+#: The stat fields that prove the bytes did not change. ``device`` is
+#: deliberately absent: it names the client's mount of a shared export, not
+#: the file, and differs across hosts for identical shards (sparky/sparklina
+#: NFS mounts of one export). Certified comparisons use the full six-field
+#: fingerprint; dev-portable reuse compares on these five.
+_REUSE_FINGERPRINT_FIELDS = ("path", "inode", "size", "mtime_ns", "ctime_ns")
+_FINGERPRINT_FIELDS = _REUSE_FINGERPRINT_FIELDS + ("device",)
+
+
+def _well_formed_fingerprint(value: object) -> bool:
+    """The exact six-field stat shape with typed values, nothing else.
+
+    Both-missing and extra fields refuse: a missing field is not a match,
+    and an extra field could carry mutation signal no comparison reads.
+    """
+    return (
+        isinstance(value, dict)
+        and set(value) == set(_FINGERPRINT_FIELDS)
+        and isinstance(value.get("path"), str)
+        and all(type(value.get(key)) is int
+                for key in ("device", "inode", "size", "mtime_ns", "ctime_ns"))
+    )
+
+
+def stat_fingerprint_reusable(live: object, cached: object) -> bool:
+    """Whether a recorded shard digest may be reused without rereading.
+
+    Both sides must carry the exact six-field shape first; malformed rows
+    never match, in either mode. Certified mode then requires full
+    equality. Dev mode additionally accepts two fingerprints that agree on
+    every mutation-sensitive field and differ only in the client-local
+    ``device`` number. Anything else -- a moved, resized, retouched or
+    replaced file -- refuses in both modes. One predicate for every
+    seed/validate/build comparison so the three cannot disagree about what
+    reuse means.
+    """
+    if not (_well_formed_fingerprint(live) and _well_formed_fingerprint(cached)):
+        return False
+    if live == cached:
+        return True
+    if not dev_mode_enabled():
+        return False
+    assert isinstance(live, dict) and isinstance(cached, dict)
+    return all(live[key] == cached[key] for key in _REUSE_FINGERPRINT_FIELDS)
+
+
+def portable_fingerprint_key(fingerprint: dict[str, object]) -> str:
+    """The digest-cache lookup key ignoring the client device number."""
+    return canonical_fingerprint_key(
+        {key: value for key, value in fingerprint.items()
+         if key != "device"})
 
 
 def source_identity_hash_threads() -> int:
@@ -1455,11 +1511,52 @@ def build_source_checkpoint_identity(
     )
 
     fingerprints = [_streamed_identity_stat_fingerprint(path) for path in ordered]
+    portable_index: dict[str, dict[str, object]] | None = None
+    if dev_mode_enabled():
+        # A digest cache written on another mount of the same export keys
+        # every entry under that host's device number. Re-index by the
+        # portable key without touching the file format; two entries that
+        # agree on everything but bytes taint the key instead of reusing.
+        # Malformed stored rows are skipped outright: without the exact
+        # six-field shape a row must never match, or a cache missing
+        # `device` would reuse against every host.
+        portable_index = {}
+        tainted: set[str] = set()
+        for entry in reusable.values():
+            stored = entry.get("fingerprint") if isinstance(entry, dict) else None
+            if not _well_formed_fingerprint(stored):
+                continue
+            try:
+                key = portable_fingerprint_key(stored)
+            except (TypeError, ValueError):
+                continue
+            if key in tainted:
+                continue
+            prior = portable_index.get(key)
+            if prior is None:
+                portable_index[key] = entry
+            elif prior.get("sha256") != entry.get("sha256"):
+                tainted.add(key)
+                portable_index.pop(key, None)
     digests: list[str | None] = []
     for fingerprint in fingerprints:
         cached = reusable.get(canonical_fingerprint_key(fingerprint))
+        if (cached is None and portable_index is not None
+                and _well_formed_fingerprint(fingerprint)):
+            cached = portable_index.get(portable_fingerprint_key(fingerprint))
         digests.append(str(cached["sha256"]) if cached is not None else None)
     misses = [index for index, digest in enumerate(digests) if digest is None]
+    if misses and dev_mode_enabled():
+        total = sum(int(fingerprints[index]["size"]) for index in misses)
+        where = (f"the declared digest cache {digest_cache_path} does not "
+                 "cover them" if digest_cache_path is not None
+                 else "no digest cache is declared")
+        raise RuntimeError(
+            "dev mode refuses an unannounced source rehash of "
+            f"{total} bytes across {len(misses)} shard(s): {where}; "
+            "initialize it with an explicit certified run instead "
+            "(certified mode would hash them here)"
+        )
     for index, digest in zip(
         misses,
         _hash_source_shards(
@@ -1640,7 +1737,24 @@ def build_streamed_model_identity(
         cached, cached_identity = _read_streamed_model_identity_cache(
             cache_path, source_model=str(source_model)
         )
-        if cached.get("fingerprints") == fingerprints:
+        stored = cached.get("fingerprints")
+        reusable = (
+            isinstance(stored, list)
+            and len(stored) == len(fingerprints)
+            and all(stat_fingerprint_reusable(live, old)
+                    for live, old in zip(stored, fingerprints, strict=True))
+        )
+        portable = reusable and not (
+            isinstance(stored, list)
+            and stored == fingerprints
+        )
+        if portable:
+            dev_warning(
+                "source identity reuses "
+                f"{len(fingerprints)} recorded shard digests across a "
+                "client device-number difference (dev-only portable reuse; "
+                "certified mode would rehash): uncertified")
+        if reusable:
             if (
                 cached_identity.get("config") == canonical_json(
                     config_dict, where="streamed model config"
@@ -1656,6 +1770,8 @@ def build_streamed_model_identity(
     # hash only newly covered files (for DSv4 this upgrades 45 cached body
     # shards by reading the three MTP shards, rather than rereading 156 GB).
     reusable_sha: dict[str, str] = {}
+    mutated_paths: list[str] = []
+    portable_paths: list[str] = []
     if cached is not None and cached_identity is not None:
         cached_fingerprints = cached.get("fingerprints")
         cached_shards = cached_identity.get("shards")
@@ -1676,9 +1792,13 @@ def build_streamed_model_identity(
                 path_key = str(fingerprint["path"])
                 prior_fp = cached_fp_by_path.get(path_key)
                 prior_shard = cached_shard_by_path.get(path_key)
+                if prior_fp is None or prior_shard is None:
+                    continue
+                if not stat_fingerprint_reusable(fingerprint, prior_fp):
+                    mutated_paths.append(path_key)
+                    continue
                 if (
-                    prior_fp == fingerprint
-                    and isinstance(prior_shard, dict)
+                    isinstance(prior_shard, dict)
                     and prior_shard.get("size") == fingerprint["size"]
                     and re.fullmatch(
                         r"[0-9a-f]{64}",
@@ -1688,6 +1808,42 @@ def build_streamed_model_identity(
                     reusable_sha[path_key] = str(
                         prior_shard["sha256"]
                     ).lower()
+                    if prior_fp != fingerprint:
+                        portable_paths.append(path_key)
+    if portable_paths:
+        dev_warning(
+            "source identity reuses "
+            f"{len(portable_paths)} recorded shard digests across a "
+            "client device-number difference (dev-only portable reuse; "
+            "certified mode would rehash): uncertified")
+    if dev_mode_enabled():
+        if cache_path is None or not cache_path.is_file():
+            total_live = sum(
+                int(fingerprint["size"]) for fingerprint in fingerprints)
+            where = (f"at the declared {cache_path}" if cache_path is not None
+                     else "with none declared")
+            raise RuntimeError(
+                "dev mode refuses an unannounced source rehash of "
+                f"{total_live} bytes: no usable identity cache {where}; "
+                "initialize one with an explicit certified run instead"
+            )
+        uncovered = [
+            (str(fingerprint["path"]), int(fingerprint["size"]))
+            for fingerprint in fingerprints
+            if str(fingerprint["path"]) not in reusable_sha
+        ]
+        if uncovered:
+            total = sum(size for _, size in uncovered)
+            new_paths = [path for path, _ in uncovered
+                         if path not in mutated_paths]
+            raise RuntimeError(
+                "dev mode refuses an unannounced source rehash of "
+                f"{total} bytes across {len(uncovered)} shard(s) "
+                f"({len(mutated_paths)} mutated, {len(new_paths)} new; "
+                f"first: {uncovered[0][0]}); refresh the declared cache "
+                f"{cache_path} from the current source instead "
+                "(certified mode would hash them here)"
+            )
 
     shards: list[dict[str, object]] = []
     for path, fingerprint in zip(shard_paths, fingerprints, strict=True):
@@ -2088,6 +2244,7 @@ def validate_cached_streamed_model_identity(
             f"content identity: changed={changed[:12]}"
         )
 
+    portable = 0
     for path_key, expected in fingerprint_by_path.items():
         path = Path(path_key)
         if not path.is_file():
@@ -2095,14 +2252,22 @@ def validate_cached_streamed_model_identity(
                 f"streamed model identity source shard is missing: {path}"
             )
         observed = _streamed_identity_stat_fingerprint(path)
-        if observed != expected:
+        if not stat_fingerprint_reusable(observed, expected):
             raise RuntimeError(
                 "streamed model identity source shard stat drifted; refusing "
                 f"cached content SHA for {path}"
             )
+        if observed != expected:
+            portable += 1
         shard = shard_by_path[path_key]
         if shard.get("size") != observed["size"]:
             raise RuntimeError(
                 f"streamed model identity shard size disagrees for {path}"
             )
+    if portable:
+        dev_warning(
+            f"streamed model identity reuses {portable} recorded shard "
+            "digests across a client device-number difference (dev-only "
+            "portable reuse; certified mode would rehash): uncertified"
+        )
     return identity
