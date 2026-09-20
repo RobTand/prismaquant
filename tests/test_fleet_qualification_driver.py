@@ -1,4 +1,4 @@
-"""Driver tests: real client flags, detach/terminal parsing, coverage."""
+"""Driver tests: per-host plans, strict verification, plain statuses."""
 from __future__ import annotations
 
 import importlib.util
@@ -7,6 +7,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DRIVER = HERE.parent / "tools" / "fleet_qualification_driver.py"
+KEY = "a" * 64
 
 
 def _driver():
@@ -27,22 +28,35 @@ def _plan(driver, out_dir="/tmp/driver-out"):
                              python="/tmp/python", out_dir=out_dir)
 
 
-def _detach_line(key="a" * 64, status="submitted"):
-    return json.dumps({
-        "schema": "prismaquant.prismabuild.pbrun_detach.v1",
-        "action_key": key,
-        "done": f"/mnt/shared/pb-queue/done/{key}.json",
-        "failed": f"/mnt/shared/pb-queue/failed/{key}.json",
-        "status": status})
+def _declared(driver=None):
+    return {"pq_head": "d" * 40, "pb_rev": "c" * 40,
+            "generation": "0467e9e2316c-1789881139-d2055704fb70"}
 
 
-def _terminal(host="sparky", rc=0, summary="2 passed in 1s",
-              payload="/mnt/shared/cas/blobs/aa/x"):
-    return {"status": "executed",
+def _blob(key=KEY, payload="/mnt/shared/cas/blobs/aa/x"):
+    return json.dumps({"payload_path": payload,
+                       "receipt": {"action_key": key},
+                       "receipt_sha256": "e" * 64, "status": "published"})
+
+
+def _shard(summary="2 passed in 1s", key=KEY, files=None):
+    return {"files": files or ["tests/test_x.py"],
+            "output": f"pbrun: queued {key[:8]}\n{summary}\n{_blob(key)}\n",
+            "returncode": 0, "shard": 0, "summary": summary}
+
+
+def _terminal(host="sparky", rc=0, key=KEY, parent="d" * 40,
+              generation="0467e9e2316c-1789881139-d2055704fb70",
+              side="executed"):
+    return {"action_key": key, "status": side,
             "finished_host": host, "claimed_host": host,
             "detail": {"returncode": rc,
-                       "stdout": f"collected stuff\n{summary}\n"
-                                 + json.dumps({"payload_path": payload})}}
+                       "stdout": "2 passed in 1s",
+                       "argv": ["/usr/bin/python3",
+                                "/mnt/shared/prismabuild-fleet/"
+                                "runtime-generations/" + generation
+                                + "/tools/resource_exec.py"]},
+            "checkout_snapshot": {"commit": "f" * 40, "parent": parent}}
 
 
 def test_plan_is_deterministic_for_declared_inputs():
@@ -56,29 +70,23 @@ def test_plan_is_deterministic_for_declared_inputs():
     assert first["schema"] == driver.PLAN_SCHEMA
 
 
-def test_runnable_rows_carry_real_client_flags():
-    """Rows invoke pbrun with concrete bounds; placement stays fleet-owned."""
+def test_runs_cover_both_hosts_with_real_client_flags():
+    """One tagged pbtest row per required host; placement stays fleet-owned."""
     driver = _driver()
     plan = _plan(driver)
     assert plan["required_hosts"] == ["sparky", "sparklina"]
-    assert driver.HOSTS == ("sparky", "sparklina")
-    for case in plan["cases"]:
-        assert case["client"] == driver.SUPPORTED_CLIENT
-        argv = case["argv"]
-        assert argv[0].endswith("tools/pbrun.py"), argv
+    assert [run["host"] for run in plan["runs"]] == ["sparky", "sparklina"]
+    for run in plan["runs"]:
+        assert run["client"] == driver.SUPPORTED_CLIENT
+        argv = run["argv"]
+        assert argv[0].endswith("tools/pbtest.py"), argv
         assert "run" not in argv
-        assert argv[argv.index("--tag") + 1] == "gb10"
+        assert argv[argv.index("--tag") + 1] == run["host"]
         assert int(argv[argv.index("--priority") + 1]) == -10
-        assert "--cwd" in argv and "--demand" in argv
-        assert "--cpus" in argv and "--detach" in argv
-        assert "--wait-s" in argv and "--env" in argv
-        dash = argv.index("--")
-        rest = argv[dash + 1:]
-        assert rest[0] == "/tmp/python"
-        assert rest[1:3] == ["-m", "pytest"]
-        assert rest[3:] and all(f.endswith(".py") for f in rest[3:])
+        assert argv[argv.index("--json") + 1].startswith("/tmp/driver-out/")
         assert not any("{" in arg or "}" in arg for arg in argv), argv
-        assert "host" not in [a.lstrip("-") for a in argv], argv
+        assert "host" not in [a.lstrip("-") for a in argv
+                              if a.startswith("--")], argv
 
 
 def test_unimplemented_legs_are_records_without_invocations():
@@ -93,7 +101,8 @@ def test_unimplemented_legs_are_records_without_invocations():
         assert "argv" not in record
     lines = driver.format_invocations(plan)
     runnable = [line for line in lines
-                if not line.startswith("# unimplemented")]
+                if not line.startswith("# unimplemented")
+                and not line.startswith("# host")]
     assert not any("--help" in line for line in runnable)
     for record in plan["unimplemented"]:
         assert any(line.startswith("# unimplemented")
@@ -101,58 +110,103 @@ def test_unimplemented_legs_are_records_without_invocations():
                    for line in lines)
 
 
-def test_detach_and_terminal_parse_to_attributable_facts():
-    """Action key, paths, host, counts come from the artifacts themselves."""
+def test_full_chain_qualifies_with_plain_statuses(tmp_path, monkeypatch):
+    """Matching action/source/generation/host qualifies; statuses stay plain."""
     driver = _driver()
-    detach = driver.parse_detach(
-        "pbrun: queued aaaa1111 tags=['gb10']\n" + _detach_line())
-    assert detach["action_key"] == "a" * 64
-    assert detach["done"].endswith(".json")
-    assert detach["status"] == "submitted"
-    term = driver.parse_terminal(_terminal(host="sparklina"), side="done")
-    assert term["host"] == "sparklina"
-    assert term["returncode"] == 0
-    assert term["counts"]["passed"] == 2
-    assert term["payload_paths"] == ["/mnt/shared/cas/blobs/aa/x"]
+    terminal = _terminal()
+    payload = {"receipt": {"action_key": KEY}, "status": "published"}
+    (tmp_path / "payload.json").write_text(json.dumps(payload))
+    shard = _shard()
+    monkeypatch.setattr(driver, "_read_json_file",
+                        lambda path: payload if "payload" in path
+                        or "cas" in path else terminal)
+    verdict = driver.verify_shard(shard=shard, host="sparky",
+                                  declared=_declared())
+    assert verdict["status"] == "qualified"
+    assert verdict["action_key"] == KEY
+    assert set(verdict) >= {"host", "status", "reason", "passed", "failed",
+                            "skipped", "action_key", "terminal",
+                            "snapshot_commit", "snapshot_parent",
+                            "generation"}
 
 
-def test_host_coverage_marks_the_missing_box():
-    """Only terminal-attested hosts count; uncovered hosts stay gaps."""
+def test_wrong_action_source_generation_or_host_never_qualifies(
+        tmp_path, monkeypatch):
+    """Every attribution break fails closed with its own reason."""
+    driver = _driver()
+    payload = {"receipt": {"action_key": KEY}, "status": "published"}
+    terminal = _terminal()
+    paths = {"payload": payload, "terminal": terminal}
+
+    def fake_read(path):
+        if "cas" in path or "payload" in path:
+            return paths["payload"]
+        return paths["terminal"]
+
+    monkeypatch.setattr(driver, "_read_json_file", fake_read)
+    base = {"shard": _shard(), "host": "sparky",
+            "declared": _declared()}
+    assert driver.verify_shard(**base)["status"] == "qualified"
+    terminal["action_key"] = "b" * 64
+    assert driver.verify_shard(**base)["status"] == "failed"
+    terminal["action_key"] = KEY
+    terminal["finished_host"] = "sparklina"
+    assert "host" in driver.verify_shard(**base)["reason"]
+    terminal["finished_host"] = "sparky"
+    terminal["checkout_snapshot"]["parent"] = "0" * 40
+    assert "source" in driver.verify_shard(**base)["reason"]
+    terminal["checkout_snapshot"]["parent"] = "d" * 40
+    terminal["detail"]["argv"][1] = "/elsewhere/x.py"
+    assert "generation" in driver.verify_shard(**base)["reason"]
+
+
+def test_empty_collection_and_replays_never_qualify(monkeypatch):
+    """Zero passing tests and unattributable replays stay unqualified."""
+    driver = _driver()
+    monkeypatch.setattr(driver, "_read_json_file", lambda path: None)
+    empty = driver.verify_shard(
+        shard=_shard(summary="1 skipped in 1s"), host="sparky",
+        declared=_declared())
+    assert empty["status"] == "nonqualified"
+    replay = driver.verify_shard(
+        shard={"files": ["tests/test_x.py"], "output": "2 passed in 1s",
+               "returncode": 0, "shard": 0, "summary": "2 passed in 1s"},
+        host="sparky", declared=_declared())
+    assert replay["status"] == "nonqualified"
+    malformed = driver.verify_shard(
+        shard={"files": "nope", "output": None, "returncode": "0",
+               "summary": None},
+        host="sparky", declared=_declared())
+    assert malformed["status"] == "failed"
+
+
+def test_case_by_host_matrix_and_exit_codes():
+    """Covered hosts need every file qualified; failures exit nonzero."""
     driver = _driver()
     plan = _plan(driver)
-    detach = driver.parse_detach(_detach_line())
-    cases = [driver._case_from_terminal(
-        "pins", detach,
-        driver.parse_terminal(_terminal(host="sparky"), side="done"))]
-    report = driver.assemble_report(plan=plan, cases=cases,
+    both = []
+    for host in ("sparky", "sparklina"):
+        for name, files in driver.COMPONENT_CASES:
+            both.append({"host": host, "file": files[0],
+                         "status": "qualified", "reason": "",
+                         "passed": 2, "failed": 0, "skipped": 0,
+                         "action_key": KEY, "terminal": "/tmp/t.json",
+                         "snapshot_commit": "f" * 40,
+                         "snapshot_parent": "d" * 40,
+                         "generation": "g"})
+    report = driver.assemble_report(plan=plan, verdicts=both,
                                     started_unix=0.0)
-    assert report["covered_hosts"] == ["sparky"]
-    assert report["missing_hosts"] == ["sparklina"]
-    assert any("sparklina" in reason
-               for reason in report["incomplete_reasons"])
+    assert report["covered_hosts"] == ["sparky", "sparklina"]
+    assert report["missing_hosts"] == []
+    assert any("unimplemented leg" in r
+               for r in report["incomplete_reasons"])
     assert report["complete"] is False
-
-
-def test_failed_terminals_fail_the_case_and_the_exit():
-    """A failed terminal is a failed case; clean runs exit zero, never complete."""
-    driver = _driver()
-    plan = _plan(driver)
-    detach = driver.parse_detach(_detach_line())
-    bad_term = driver.parse_terminal(
-        _terminal(rc=1, summary="1 failed in 1s"), side="failed")
-    bad = driver.assemble_report(
-        plan=plan,
-        cases=[driver._case_from_terminal("pins", detach, bad_term)],
-        started_unix=0.0)
-    assert bad["cases"][0]["status"] == "failed"
-    assert driver.exit_code_for(bad) == 1
-    good_term = driver.parse_terminal(_terminal(), side="done")
-    good = driver.assemble_report(
-        plan=plan,
-        cases=[driver._case_from_terminal(c["name"], detach, good_term)
-               for c in plan["cases"]],
-        started_unix=0.0)
-    assert all(c["status"] == "qualified" for c in good["cases"])
-    assert good["complete"] is False
-    assert good["unimplemented"]
-    assert driver.exit_code_for(good) == 0
+    assert driver.exit_code_for(report) == 0
+    assert [c["name"] for c in report["cases"]][:2] == [
+        "tests/test_fleet_acceptance_pins.py@sparky",
+        "tests/test_fleet_acceptance_runner.py@sparky"]
+    failed = [dict(both[0], status="failed", reason="rc=1")]
+    report = driver.assemble_report(plan=plan, verdicts=failed,
+                                    started_unix=0.0)
+    assert report["missing_hosts"] == ["sparky", "sparklina"]
+    assert driver.exit_code_for(report) == 1
