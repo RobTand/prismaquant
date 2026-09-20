@@ -587,9 +587,13 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
         json.loads(json.dumps(attestation, sort_keys=True, default=str)))
     scope_id = control["scope_id"]
     evidence["scope_id"] = scope_id
-    proves, _ = lease.attestation_proves_empty(
+    proves, proof_or_reason = lease.attestation_proves_empty(
         world.queue, KEY, NONCE, scope_id)
     evidence["proves_empty_pre_evict"] = bool(proves)
+    if not proves:
+        evidence["proves_empty_reason"] = str(proof_or_reason)
+    _note(world, proves_empty_pre_evict=bool(proves),
+          proves_empty_reason=None if proves else str(proof_or_reason))
     pin_path = (lease.leases_root(world.queue) / KEY
                 / f"{acquired['pin_id']}.lease.json")
     assert not pin_path.exists(), "reclaimed pin file must unlink"
