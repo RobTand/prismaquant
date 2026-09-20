@@ -20,7 +20,8 @@ The contract, in one paragraph:
   RECORDED instead -- a loud, grep-able warning line and a
   ``dev_uncertified`` stamp carrying the actual digests of what executed.
   A dev result can therefore never masquerade as a certified one: the stamp
-  is top-level in results.json and in every progress record.
+  is top-level in results.json, and in progress records only under the
+  ``PRISMAQUANT_DEV_PROGRESS_STAMP=1`` opt-in (PR #828).
 * Recording is not optional in dev mode. Even a dev run records what ran:
   the executing package's actual tree digest is computed and stamped. A
   record, never a gate.
@@ -38,8 +39,9 @@ import os
 #: subprocess or a container inherits it through the environment alone.
 DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE"
 
-#: The stamp's fixed top-level marker. Present in results.json and in every
-#: progress record written under dev mode, absent in certified mode.
+#: The stamp's fixed top-level marker. Always present in results.json under
+#: dev mode; progress records carry it only when PRISMAQUANT_DEV_PROGRESS_STAMP
+#: is exactly "1" (PR #828). Absent in certified mode.
 DEV_UNCERTIFIED_KEY = "dev_uncertified"
 DEV_MODE_KEY = "dev_mode"
 
