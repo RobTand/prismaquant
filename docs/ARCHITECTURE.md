@@ -10,8 +10,9 @@ questions: whether the family can be CONSTRUCTED text-only -- a property of the
 pinned transformers, declared by `ModelProfile.requires_multimodal_skeleton()`
 -- and whether THIS run drives visual inputs, which only the caller knows. A
 forced skeleton therefore also materialized the visual tower, so a
-token-ID-only joint-AURA stage-A cost run read the checkpoint's entire vision
-namespace and its text-only staged readset refused the shard
+token-ID-only joint-AURA stage-A cost run asked the loader for the checkpoint's
+`model.visual.*` namespace and its text-only staged readset refused the first
+range's shard
 (`TierPolicyRefused: staged-tier-forbidden: readset-not-staged:
 GLM-5.3-Flash-BF16/model-00120-of-00120.safetensors`; PB action
 `dae1474a406e`, 2026-09-20). The refusal was correct and the read was not:
