@@ -50,14 +50,15 @@ from .staged_tier_policy import TierPolicyRefused
 
 #: PB source pin for the PB reader lease (this branch: the prepaid
 #: produced-output CANDIDATE, feat/prepaid-output-pool-api-20260920 @
-#: 02d2dea9d45cc84ec04e9b5403df9467954d2879 — it carries the produced-
-#: render writer/reader API this branch integrates; the candidate is not
-#: a published runtime generation yet, and root's qualified pin replaces
-#: this literal when it lands). Deployment qualification is separate;
-#: this pin advertises no capability. The owning literal the test
-#: resolver reads — see tools/resolve_prismabuild_dev_pin.py. No
-#: capability assertion rides it.
-PB_READER_LEASE_PIN_COMMIT = "02d2dea9d45cc84ec04e9b5403df9467954d2879"
+#: 1c9fb1bbea4311c7f51c505ea85ebee8e31631d2 — it carries the produced-
+#: render writer/reader API this branch integrates, including the DEV
+#: null-digest descriptor path; the candidate is not a published runtime
+#: generation yet, and root's final reviewed API commit replaces this
+#: literal when provisioning the scoped test environment. Deployment
+#: qualification is separate; this pin advertises no capability. The
+#: owning literal the test resolver reads — see
+#: tools/resolve_prismabuild_dev_pin.py. No capability assertion rides it.
+PB_READER_LEASE_PIN_COMMIT = "1c9fb1bbea4311c7f51c505ea85ebee8e31631d2"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
 #: Names PQ actually calls. Anything else is not our protocol.
