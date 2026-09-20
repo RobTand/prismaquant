@@ -74,6 +74,21 @@ HEAD_PROGRESS_GRACE_S = 1800
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 ADJOINT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
+#: The schema of the stage-A data manifest the dispatcher binds
+#: (``prismabuild.core.DATA_MANIFEST_SCHEMA_V1``, restated: this module
+#: stays free of the fleet runtime import).
+DATA_MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
+#: The read-plan schema (``prismabuild.core.DATA_MANIFEST_SCHEMA_V2``):
+#: same entries plus ``read_plan.phases`` with ``entry_indices`` for
+#: repeated read order. v2 forbids ``annotations.phases``; both schemas
+#: keep ``annotations`` carrying the parent read-set digest and the sealed
+#: plan/prepared digests this dispatcher checks.
+DATA_MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
+#: gzip magic, for the transparent manifest read below: detection is by
+#: header, never by suffix. The bound digest always covers the wire bytes
+#: pbrun ingests (compressed when compressed); parsing decompresses.
+_GZIP_MAGIC = b"\x1f\x8b"
+_HEX64 = frozenset("0123456789abcdef")
 SPEC_PATH = Path("/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913"
                 "/allocation/joint-panel/spec-hostcap32-ram-dev.json")
 STATE_FILENAME = "campaign-state.json"
@@ -143,6 +158,176 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
 
 
 
+def _is_hex64(value: object) -> bool:
+    return (type(value) is str and len(value) == 64
+            and all(char in _HEX64 for char in value))
+
+
+def _stage_manifest_binding(adjoint_manifest: Path, campaign: Mapping) -> dict:
+    """Validate the stage-A data manifest and derive its submission binding.
+
+    The payload's tier redirect and progress window both hang off this
+    document, so both are derived here, from its validated annotations --
+    never from a hardcoded list:
+
+    * ``data_manifest_sha256``: sha256 of the submitted manifest wire bytes
+      (compressed when compressed), the digest the residency map will carry
+      and ``bind_residency_manifest`` must equal for any redirect;
+    * ``read_manifest_sha256``: the annotated parent read-set digest
+      (``annotations.parent_manifest_sha256``), the run's read-parent
+      identity, 64-hex checked;
+    * ``phases``: the read-phase names in manifest order -- v1 from
+      ``annotations.phases``, v2 from ``read_plan.phases`` (v2 forbids
+      ``annotations.phases``; ``prismabuild.core`` holds that rule, this
+      reader mirrors it). pbrun's linear rule requires every read name
+      declared, in order; the caller declares exactly this list.
+
+    Anything else -- an unreadable file, a non-manifest, a phase table that
+    is empty, unnamed, or duplicated, a malformed parent digest, a manifest
+    built against another plan/prepared pair, an entry count that drifted
+    from the entries -- is a mixed or corrupt campaign and refuses before
+    anything publishes.
+
+    This reader is deliberately scoped rather than shared with
+    ``prismaquant.joint_layer_quanta.phase_ranges``: that helper covers the
+    v1 annotation table only, demands non-empty positive-byte entries, and
+    raises ``ValueError`` -- it cannot validate v2 read plans, empty fixture
+    manifests, or the campaign cross-checks, and importing it would drag the
+    producer package into the submitter.
+    """
+    path = Path(adjoint_manifest)
+    try:
+        wire = path.read_bytes()
+    except OSError as exc:
+        raise DispatchRefused(
+            f"stage-A data manifest unreadable at {path}: {exc}") from exc
+    data_sha256 = _sha_bytes(wire)
+    raw = wire
+    if raw[:2] == _GZIP_MAGIC:
+        import gzip
+        try:
+            raw = gzip.decompress(raw)
+        except (OSError, EOFError) as exc:
+            raise DispatchRefused(
+                f"stage-A data manifest is not valid gzip at {path}: "
+                f"{exc}") from exc
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeError) as exc:
+        raise DispatchRefused(
+            f"stage-A data manifest is not JSON at {path}: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise DispatchRefused(
+            f"stage-A data manifest is not a JSON object at {path}")
+    schema = manifest.get("schema")
+    if schema not in (DATA_MANIFEST_SCHEMA_V1, DATA_MANIFEST_SCHEMA_V2):
+        raise DispatchRefused(
+            f"stage-A data manifest schema is not a data manifest at {path}: "
+            f"{schema!r}")
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        raise DispatchRefused(
+            f"stage-A data manifest has no entries at {path}")
+    count = manifest.get("entry_count")
+    if count is not None and count != len(entries):
+        raise DispatchRefused(
+            f"stage-A data manifest entry_count {count!r} names "
+            f"{len(entries)} entries at {path}")
+    annotations = manifest.get("annotations")
+    if not isinstance(annotations, dict):
+        raise DispatchRefused(
+            f"stage-A data manifest has no annotations at {path}")
+    if schema == DATA_MANIFEST_SCHEMA_V2:
+        if "phases" in annotations:
+            raise DispatchRefused(
+                f"stage-A data manifest v2 uses read_plan, not "
+                f"annotations.phases, at {path}")
+        read_plan = manifest.get("read_plan")
+        if not isinstance(read_plan, dict):
+            raise DispatchRefused(
+                f"stage-A data manifest v2 has no read_plan at {path}")
+        raw_phases = read_plan.get("phases")
+        table = "read_plan.phases"
+    else:
+        raw_phases = annotations.get("phases")
+        table = "annotations.phases"
+    if not isinstance(raw_phases, list) or not raw_phases:
+        raise DispatchRefused(
+            f"stage-A data manifest {table} is empty at {path}")
+    phases: list[str] = []
+    for entry in raw_phases:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not name:
+            raise DispatchRefused(
+                f"stage-A data manifest {table} names an unnamed phase "
+                f"at {path}")
+        if name in phases:
+            raise DispatchRefused(
+                f"stage-A data manifest {table} repeats phase {name!r} "
+                f"at {path}")
+        phases.append(name)
+    parent = annotations.get("parent_manifest_sha256")
+    if not _is_hex64(parent):
+        raise DispatchRefused(
+            f"stage-A data manifest parent_manifest_sha256 is not a digest "
+            f"at {path}")
+    sealed_parent = campaign.get("read_manifest_sha256")
+    if parent != sealed_parent:
+        # A manifest from another lineage would otherwise launch: the run's
+        # receipt binds this read parent, so an incompatible one is a mixed
+        # campaign, refused here rather than at the receipt.
+        raise DispatchRefused(
+            f"stage-A data manifest parent {parent[:12]}... is not the "
+            f"sealed campaign read parent {sealed_parent!r} at {path}: "
+            f"mixed campaign")
+    for key in ("plan_sha256", "prepared_sha256"):
+        sealed = annotations.get(key)
+        if sealed != campaign.get(key):
+            raise DispatchRefused(
+                f"stage-A data manifest {key} {sealed!r} is not the sealed "
+                f"campaign {campaign.get(key)!r} at {path}: mixed campaign")
+    return {"data_manifest_sha256": data_sha256,
+            "read_manifest_sha256": parent, "phases": phases}
+
+
+def _slice_manifest_digest(record: dict, *, output_root: Path) -> str:
+    """The sealed slice digest a quantum row actually binds.
+
+    The row's ``read_set.manifest_sha256`` names the slice manifest pbrun
+    stages for this row -- not the campaign parent the record also carries.
+    The file is read where the row reads it (relative manifests resolve
+    against the output root, as the row builder does) and its wire bytes
+    must hash to the sealed digest; a drifted or absent slice refuses
+    before anything publishes.
+    """
+    read_set = record.get("read_set")
+    if not isinstance(read_set, dict):
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} carries no read_set")
+    manifest = read_set.get("manifest_path")
+    if not isinstance(manifest, str) or not manifest:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} names no slice manifest")
+    path = Path(manifest)
+    if not path.is_absolute():
+        path = Path(output_root) / path
+    declared = read_set.get("manifest_sha256")
+    if not _is_hex64(declared):
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} seals no slice digest")
+    try:
+        actual = _sha_bytes(path.read_bytes())
+    except OSError as exc:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} slice manifest unreadable "
+            f"at {path}: {exc}") from exc
+    if actual != declared:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} slice manifest bytes "
+            f"do not hash to the sealed {declared[:12]} at {path}")
+    return declared
+
+
 def _plan_output_root(campaign: Mapping) -> Path:
     """The plan's sealed output_root: the only root the stage-A capture will
     write into (its identity guard refuses any other --output-root), and the
@@ -187,10 +372,12 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     manifest = Path(record["read_set"]["manifest_path"])
     if not manifest.is_absolute():
         manifest = output_root / manifest
+    slice_sha256 = _slice_manifest_digest(record, output_root=output_root)
     wrapped, container_image = _container_wrap(SPEC_PATH, [
         "python3", "-m", "prismaquant.joint_cost_quantum",
         "--quantum", str(record_path),
         "--quantum-sha256", record["identity_sha256"],
+        "--data-manifest-sha256", slice_sha256,
         "--output-root", str(output_root)])
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
@@ -215,7 +402,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
 
 def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  *, tag: str = ADJOINT_TAG,
-                 prefetch_override: Path | None = None) -> list[str]:
+                 prefetch_override: Path | None = None,
+                 binding: dict | None = None) -> list[str]:
     """The §5.2 stage-A submission argv: the adjoint capture goes first and
     alone; quanta wait on its receipt.  The campaign binding every record
     carries names the plan and prepared inputs (with digests) the capture's
@@ -228,13 +416,28 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     container boundary (``tessera_campaign_container`` forwards no ambient
     action environment into the payload), so the dispatcher threads the
     flag, not ``--env``.  Absent: the plan's sealed budget, argv unchanged.
+
+    The manifest binding is derived the same way: ``--data-manifest-sha256``
+    and ``--read-manifest-sha256`` ride the payload (a run that bound no
+    manifest digest gets no tier redirect), and the manifest's read phases
+    become the row's ``--progress-phase`` declarations in manifest order --
+    the worker refuses undeclared names, so the list is derived, never
+    hardcoded (#835).
+
+    ``binding`` (optional) is a precomputed :func:`_stage_manifest_binding`
+    for this manifest and campaign, so a caller that also records the
+    digests does not read the manifest twice.
     """
+    if binding is None:
+        binding = _stage_manifest_binding(adjoint_manifest, campaign)
     payload = [
         "python3", "-m", "prismaquant.joint_adjoint_capture",
         "--plan", str(campaign["plan_path"]),
         "--plan-sha256", str(campaign["plan_sha256"]),
         "--prepared", str(campaign["prepared_path"]),
         "--prepared-sha256", str(campaign["prepared_sha256"]),
+        "--data-manifest-sha256", binding["data_manifest_sha256"],
+        "--read-manifest-sha256", binding["read_manifest_sha256"],
         "--output-root", str(_plan_output_root(campaign)),
         "--resume"]
     if prefetch_override is not None:
@@ -243,9 +446,13 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     argv = [sys.executable, str(PBRUN),
             "--tag", tag,
             "--data-manifest", str(adjoint_manifest),
-            "--residency", "stage",
-            "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
-            "--cpus", "10"]
+            "--residency", "stage"]
+    for phase in binding["phases"]:
+        grace = (HEAD_PROGRESS_GRACE_S if phase == "head"
+                 else CHUNK_PROGRESS_GRACE_S)
+        argv += ["--progress-phase", f"{phase}={grace}"]
+    argv += ["--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
+             "--cpus", "10"]
     if container_image is not None:
         # Before the separator, like every other pbrun option; see the
         # quantum row above and RobTand/prismabuild#714.
@@ -455,27 +662,35 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
     # never the outcome, and retry is free (#5 contract).  Only a terminally
     # executed capture, or a validated receipt, stops republication.
     stage_a_done = bool(stage_a_keys) and gateway.is_terminal_executed(stage_a_keys[-1])
-    if not stage_a_done and not receipt_ok:
-        manifest = (Path(args.adjoint_manifest) if args.adjoint_manifest
-                    else records_dir / "adjoint.data-manifest.json.gz")
-        rows.append({"kind": "stage-a",
-                     "argv": stage_a_argv(manifest, records[0][1]["campaign"],
-                                          tag=adjoint_tag,
-                                          prefetch_override=args.stage_a_prefetch_override)})
-    if receipt_ok:
-        for record_path, record in records:
-            quantum_id = record["quantum_id"]
-            key = submitted_keys.get(quantum_id)
-            if key is not None and gateway.is_terminal_executed(key):
-                continue
-            rows.append({"kind": "quantum", "quantum_id": quantum_id,
-                         "identity_sha256": record["identity_sha256"],
-                         "manifest_sha256": record["read_set"]["manifest_sha256"],
-                         "argv": quantum_argv(
-                             record, record_path=record_path,
-                             output_root=output_root, priority=priority,
-                             head_grace_s=args.head_grace_s,
-                             consumer_tags=tags)})
+    stage_a_binding: dict | None = None
+    try:
+        if not stage_a_done and not receipt_ok:
+            manifest = (Path(args.adjoint_manifest) if args.adjoint_manifest
+                        else records_dir / "adjoint.data-manifest.json.gz")
+            stage_a_binding = _stage_manifest_binding(
+                manifest, records[0][1]["campaign"])
+            rows.append({"kind": "stage-a",
+                         "argv": stage_a_argv(manifest, records[0][1]["campaign"],
+                                              tag=adjoint_tag,
+                                              prefetch_override=args.stage_a_prefetch_override,
+                                              binding=stage_a_binding)})
+        if receipt_ok:
+            for record_path, record in records:
+                quantum_id = record["quantum_id"]
+                key = submitted_keys.get(quantum_id)
+                if key is not None and gateway.is_terminal_executed(key):
+                    continue
+                rows.append({"kind": "quantum", "quantum_id": quantum_id,
+                             "identity_sha256": record["identity_sha256"],
+                             "manifest_sha256": record["read_set"]["manifest_sha256"],
+                             "argv": quantum_argv(
+                                 record, record_path=record_path,
+                                 output_root=output_root, priority=priority,
+                                 head_grace_s=args.head_grace_s,
+                                 consumer_tags=tags)})
+    except DispatchRefused as exc:
+        print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
+        return EXIT_PRECONDITION_REFUSED
 
     if args.dry_run:
         print(json.dumps({"consumer_tags": list(tags), "priority": priority,
@@ -497,6 +712,12 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
             if row["kind"] == "stage-a":
                 _append_state(state_path, {"event": "stage-a-submitted",
                                            "action_key": answer["action_key"],
+                                           "data_manifest_sha256": (
+                                               stage_a_binding or {}
+                                           ).get("data_manifest_sha256"),
+                                           "read_manifest_sha256": (
+                                               stage_a_binding or {}
+                                           ).get("read_manifest_sha256"),
                                            "prefetch_override": (
                                                str(args.stage_a_prefetch_override)
                                                if args.stage_a_prefetch_override
@@ -506,6 +727,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                               {"event": "quantum-submitted",
                                "quantum_id": row["quantum_id"],
                                "identity_sha256": row["identity_sha256"],
+                               "data_manifest_sha256": row.get("manifest_sha256"),
                                "action_key": answer["action_key"]})
             print(json.dumps({"published": row.get("quantum_id", "stage-a"),
                               "action_key": answer["action_key"],

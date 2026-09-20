@@ -1,7 +1,24 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `fix/pb714-container-image-declaration-20260920`.
+As of: 2026-09-20 · `flash/stage-a-dispatch-manifest-binding`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/stage-a-dispatch-manifest-binding`) for **the
+Stage A/quanta submission binding its data manifest** (#835). The dispatcher
+built the Stage A row with PB-level `--data-manifest` but never forwarded the
+manifest identity into the payload, and declared no progress phases — so the
+capture bound nothing and got no tier redirect, and its reports could advance
+no PB window; quantum rows bound the campaign parent instead of their staged
+slice. `tools/dispatch_joint_quanta.py` now derives the binding from the
+validated manifest: the Stage A payload carries `--data-manifest-sha256`
+(wire bytes) and `--read-manifest-sha256` (annotated parent, equality-checked
+against the sealed campaign read parent), the envelope declares one
+`--progress-phase` per manifest read phase in manifest order (v1
+`annotations.phases` or v2 `read_plan.phases`), and each quantum payload
+carries its slice digest after the dispatcher verifies the slice file hashes
+to it. Malformed manifests, plan/prepared/parent mismatch and drifted slices
+refuse before anything publishes. No payload, plan, prepared, budget or
+`--residency stage` changes. Gate: `tests/test_dispatch_joint_quanta.py`.
 
 Re-stamped (2026-09-20, `fix/pb714-container-image-declaration-20260920`) for
 **the campaign container image declared to PrismaBuild before claim
@@ -471,6 +488,21 @@ says exactly that.
   `--residency stage`, so a submission that asks for no stage keeps the argv,
   and therefore the action key, it has today. A pass told nothing binds
   nothing and gets no redirect.
+- **Stage A and the quanta are told by `tools/dispatch_joint_quanta.py`.**
+  The Stage A row's payload carries `--data-manifest-sha256` — the sha256 of
+  the submitted adjoint-manifest wire bytes (compressed when compressed) —
+  and `--read-manifest-sha256` — the annotated parent read-set digest,
+  equality-checked against the sealed campaign read parent before anything
+  publishes — and its envelope declares one `--progress-phase` per manifest
+  read phase in manifest order, v1 (`annotations.phases`) or v2
+  (`read_plan.phases`), so the capture's durable head/forward/chain reports
+  name phases the worker accepts. Each quantum payload carries its slice
+  digest (`read_set.manifest_sha256`), verified against the slice file at
+  dispatch: the row binds the bytes pbrun stages for it, never the campaign
+  parent it also carries. Full contract: `docs/design/
+  distributed_campaign_2026-09-19.md` §5.2. PB-side validity of a submitted
+  row — map composition, mover delivery, window advancement — is established
+  by that row's own receipt, never by these submission-shape tests.
   A map that is missing, unreadable, of another schema, or carrying a field
   this reader does not know is refused **whole**, with a reason, and every read
   falls back to the pool. The variable arrives at claim time while movers are
