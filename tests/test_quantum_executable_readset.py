@@ -692,7 +692,18 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
         return True
 
     monkeypatch.setattr(pbprog, "report", _report)
-    orig_install = runner.context.install
+    # Stacking-safe seams: first drive stores the true originals on setup;
+    # later drives delegate to those, never to a previous wrapper.
+    seams = setup.setdefault("_orig_seams", {})
+    if "install" not in seams:
+        seams["install"] = runner.context.install
+        seams["load"] = qc.load_adjoint_checkpoint
+        seams["prefetch"] = pxc.prefetch_exact_activation_cache_entries
+        seams["rw_unbound"] = type(cache).retained_window
+    orig_install = seams["install"]
+    orig_load = seams["load"]
+    orig_prefetch = seams["prefetch"]
+    orig_rw_unbound = seams["rw_unbound"]
 
     def install_logged(layer, *, require_prefetched=False,
                        prefetch_following=True):
@@ -701,15 +712,13 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
             layer, require_prefetched=require_prefetched,
             prefetch_following=prefetch_following)
 
-    runner.context.install = install_logged
-    orig_load = qc.load_adjoint_checkpoint
+    monkeypatch.setattr(runner.context, "install", install_logged)
 
     def load_logged(space, checkpoint_record):
         events.append(("checkpoint-open",))
         return orig_load(space, checkpoint_record)
 
     monkeypatch.setattr(qc, "load_adjoint_checkpoint", load_logged)
-    orig_prefetch = pxc.prefetch_exact_activation_cache_entries
 
     def prefetch_logged(references, **kwargs):
         bounds = set()
@@ -731,15 +740,15 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
     monkeypatch.setattr(
         pxc, "prefetch_exact_activation_cache_entries", prefetch_logged)
-    orig_rw = type(cache).retained_window
+    # Instance-level seam delegates to the stored class original.
 
     @contextlib.contextmanager
-    def rw_logged(self, *args, **kwargs):
+    def rw_logged(*args, **kwargs):
         events.append(("window-open",))
-        with orig_rw(self, *args, **kwargs) as receipt_obj:
+        with orig_rw_unbound(cache, *args, **kwargs) as receipt_obj:
             yield receipt_obj
 
-    monkeypatch.setattr(type(cache), "retained_window", rw_logged)
+    monkeypatch.setattr(cache, "retained_window", rw_logged)
 
     execution = rt._execution(tmp_path / f"qexec-{layer}-{int(resume)}")
     retained = quantum_retained_state(execution)
