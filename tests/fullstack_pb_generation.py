@@ -55,7 +55,7 @@ def require_paths() -> dict[str, str]:
     import stage_move  # noqa: E402
     for module in (core, stage_move):
         location = Path(getattr(module, "__file__", "")).resolve()
-        assert str(location).startswith(str(root)), (
+        assert location.is_relative_to(root), (
             f"{module.__name__} loaded from {location}, not the "
             f"resolved root {root}")
     info = {"generation": root.name, "root": str(root),

@@ -36,8 +36,9 @@ What passed — one connected slice path, no substitute manifest:
   returns the real ranges for both slices (names match, tile exact).
 - Real `stage_move`: each slice in two entry-aligned legs under distinct
   keys (4 stage movers), and real `ram_promote` with epoch (wire span on
-  layer-000, range span on layer-001). Each slice's PQ map is the real PB
-  `compose` of its own fragments (selected by wire digest) overlaid with
+  layer-000, range span on layer-001). Each quantum has its own consumer
+  namespace; every fragment must match that slice's wire digest. Its PQ map
+  is the real PB `compose` of all its fragments overlaid with
   its real RAM fragment plus the current epoch, with the ram tier record
   filed beside it.
 - Real readers over those maps: whole-file source shards bit-identical
@@ -86,6 +87,13 @@ What passed — one connected slice path, no substitute manifest:
 - PB PR #730 (`fix/pb-reader-lifetime-20260920`, head `a6e6b310a1`):
   NOT merged, NOT integrated here.
 - This lane pins only the published generation `0467e9e2316c`.
+
+Root review tightened the immutable-root path check to a path-component
+comparison, separated each quantum's consumer namespace (no filtering away
+foreign-manifest fragments), and checked actual staged fragment bytes.
+The root validation receipt is recorded separately in the campaign acceptance
+record. This is CPU storage/reader/join plumbing: the numeric costs are
+deterministic fixture values, not measured model quantization results.
 
 ## PB726 note
 

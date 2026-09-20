@@ -74,7 +74,6 @@ from tests.test_joint_quanta_join import (  # noqa: E402
 )
 
 
-CONSUMER = "cc" * 32
 STAGE_TIER = "prismabuild-stage:dl380g10"
 RAM_TIER = "ram:dl380g10"
 
@@ -94,7 +93,7 @@ def pb():
     for module in (core, tiers, plans, pool, pb_map, stage_move,
                    ram_promote):
         location = Path(getattr(module, "__file__", "")).resolve()
-        assert str(location).startswith(root), (
+        assert location.is_relative_to(Path(root)), (
             f"{module.__name__} loaded from {location}, not {root}")
     assert info["generation"], "generation recorded once per admitted action"
     return {"generation": info["generation"], "root": root, "core": core,
@@ -308,13 +307,13 @@ def _slice_spans(slice_manifest) -> list[tuple[int, int]]:
     return spans
 
 
-def _run_mover(stage_move, queue, pool, tmp, stage, *, mover, digest,
+def _run_mover(stage_move, queue, pool, tmp, stage, *, consumer, mover, digest,
                manifest_file, start, end, receipts) -> None:
     args = stage_move.build_parser().parse_args([
         "--pool-root", str(tmp / "pb-queue"),
         "--cas-root", str(tmp / "pb-queue" / "cas"),
         "--action-key", mover,
-        "--consumer-action-key", CONSUMER,
+        "--consumer-action-key", consumer,
         "--tier-id", STAGE_TIER,
         "--stage-root", str(stage),
         "--manifest-sha256", digest,
@@ -332,12 +331,12 @@ def _run_mover(stage_move, queue, pool, tmp, stage, *, mover, digest,
     receipts[mover] = receipt
 
 
-def _run_promotion(ram_promote, queue, pool, tmp, stage, ram, *, mover,
+def _run_promotion(ram_promote, queue, pool, tmp, stage, ram, *, consumer, mover,
                    digest, manifest_file, start, end, promotions) -> None:
     args = ram_promote.build_parser().parse_args([
         "--pool-root", str(tmp / "pb-queue"),
         "--action-key", mover,
-        "--consumer-action-key", CONSUMER,
+        "--consumer-action-key", consumer,
         "--tier-id", RAM_TIER,
         "--ram-root", str(ram),
         "--source-stage-root", str(stage),
@@ -381,13 +380,16 @@ def staged(pb, produced, campaign):
         quantum_id = record["quantum_id"]
         manifest_file, slice_manifest = _slice_file(campaign, record)
         digest = record["read_set"]["manifest_sha256"]
+        # Separate quantum actions must have separate material namespaces.
+        # Reuse the fixture record's sealed identity as its stable key.
+        consumer = record["identity_sha256"]
         spans = _slice_spans(slice_manifest)
         total = slice_manifest["total_bytes"]
         first, second = next(stage_keys), next(stage_keys)
-        _run_mover(stage_move, queue, pool, tmp, stage, mover=first,
+        _run_mover(stage_move, queue, pool, tmp, stage, consumer=consumer, mover=first,
                    digest=digest, manifest_file=manifest_file,
                    start=0, end=spans[0][1], receipts=ran)
-        _run_mover(stage_move, queue, pool, tmp, stage, mover=second,
+        _run_mover(stage_move, queue, pool, tmp, stage, consumer=consumer, mover=second,
                    digest=digest, manifest_file=manifest_file,
                    start=spans[0][1], end=total, receipts=ran)
         if quantum_id == "layer-000":
@@ -398,14 +400,17 @@ def staged(pb, produced, campaign):
                          if e["path"].endswith("shard-range.safetensors"))
         index = slice_manifest["entries"].index(entry)
         _run_promotion(ram_promote, queue, pool, tmp, stage, ram,
+                       consumer=consumer,
                        mover=next(ram_keys), digest=digest,
                        manifest_file=manifest_file,
                        start=spans[index][0], end=spans[index][1],
                        promotions=promotions)
-        slices[quantum_id] = {"manifest_file": manifest_file,
+        slices[quantum_id] = {"consumer": consumer,
+                              "manifest_file": manifest_file,
                               "manifest_sha256": digest,
                               "manifest": slice_manifest, "spans": spans}
     assert set(slices) == {"layer-000", "layer-001"}
+    assert len({view["consumer"] for view in slices.values()}) == 2
     return {"queue": queue, "stage": stage, "ram": ram,
             "epoch": str(epoch["epoch"]), "receipts": ran,
             "promotions": promotions, "slices": slices}
@@ -422,8 +427,14 @@ def test_movers_stage_both_slices_byte_identical(staged, campaign) -> None:
         assert promotion["complete"] is True
         assert promotion.get("refusal") is None
     queue = staged["queue"]
-    frags = _pq_read_fragments(queue)
+    frags = [fragment for view in staged["slices"].values()
+             for fragment in _pq_read_fragments(queue, view["consumer"])]
     assert len(frags) == 6, "four stage movers plus two ram promotions filed"
+    for fragment in frags:
+        for key, entry in fragment["entries"].items():
+            data = Path(entry["stage_path"]).read_bytes()
+            assert len(data) == entry["bytes"], key
+            assert hashlib.sha256(data).hexdigest() == entry["sha256"], key
     for quantum_id, view in staged["slices"].items():
         for entry in view["manifest"]["entries"]:
             data = Path(entry["path"]).read_bytes()[
@@ -432,8 +443,8 @@ def test_movers_stage_both_slices_byte_identical(staged, campaign) -> None:
                 quantum_id, entry["path"], entry["offset"])
 
 
-def _pq_read_fragments(queue):
-    root = Path(queue.root) / "residency" / CONSUMER
+def _pq_read_fragments(queue, consumer):
+    root = Path(queue.root) / "residency" / consumer
     return [json.loads(p.read_text()) for p in sorted(root.glob("*.json"))]
 
 
@@ -452,10 +463,11 @@ def _slice_fragments(pb, staged, quantum_id) -> tuple[list, list]:
     """A slice's own stage + RAM fragments, selected by its wire digest."""
     pool, pb_map = pb["pool"], pb["pb_map"]
     queue = staged["queue"]
-    digest = staged["slices"][quantum_id]["manifest_sha256"]
+    view = staged["slices"][quantum_id]
+    digest = view["manifest_sha256"]
     frags = [pb_map.validate_fragment(f) for f in
-             pb_map.read_fragments(queue.root / pool.RESIDENCY, CONSUMER)
-             if f.get("manifest_sha256") == digest]
+             pb_map.read_fragments(queue.root / pool.RESIDENCY, view["consumer"])]
+    assert all(f["manifest_sha256"] == digest for f in frags)
     stage_frags = [f for f in frags if f["tier_id"] == STAGE_TIER]
     ram_frags = [f for f in frags if f["tier_id"] == RAM_TIER]
     assert len(stage_frags) == 2, (quantum_id, "both legs filed")
