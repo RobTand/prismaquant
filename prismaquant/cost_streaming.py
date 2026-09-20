@@ -2119,7 +2119,7 @@ def compact_streamed_model_identity(
 def live_streaming_runner_config(source_model: str | Path) -> dict[str, object]:
     """Derive the live checkpoint config exactly as the streaming runner does.
 
-    Profile-gated staging, plain ``AutoConfig`` load, then the real meta
+    Profile-gated staging, offline ``AutoConfig`` load, then the real meta
     skeleton: the same three calls ``_build_streaming_context`` makes before
     materializing weights (``prismaquant/streaming_model.py``).  Sharing that
     derivation -- rather than normalizing after the fact -- is what keeps
@@ -2150,7 +2150,9 @@ def live_streaming_runner_config(source_model: str | Path) -> dict[str, object]:
     else:
         staged = stage_text_only(source)
         multimodal = False
-    config = AutoConfig.from_pretrained(staged, trust_remote_code=True)
+    config = AutoConfig.from_pretrained(
+        staged, trust_remote_code=True, local_files_only=True
+    )
     skeleton = build_streaming_skeleton(config, multimodal=multimodal)
     config_dict = skeleton.config.to_dict()
     if not isinstance(config_dict, dict):
