@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 
@@ -33,15 +34,31 @@ def _declared(driver=None):
             "generation": "0467e9e2316c-1789881139-d2055704fb70"}
 
 
-def _blob(key=KEY, payload="/mnt/shared/cas/blobs/aa/x"):
-    return json.dumps({"payload_path": payload,
+def _payload_path(text: str) -> tuple[str, bytes]:
+    """Content-addressed CAS path for result text (existing protocol)."""
+    data = text.encode()
+    digest = hashlib.sha256(data).hexdigest()
+    return f"/mnt/shared/cas/blobs/{digest[:2]}/{digest}", data
+
+
+_STORE: dict[str, bytes] = {}
+
+
+def _blob(key=KEY, payload_text="2 passed in 1s"):
+    content = (f"header\n{payload_text}\n"
+               + json.dumps({"receipt": {"action_key": key}}) + "\n")
+    path, data = _payload_path(content)
+    _STORE[path] = data
+    return json.dumps({"payload_path": path,
                        "receipt": {"action_key": key},
                        "receipt_sha256": "e" * 64, "status": "published"})
 
 
-def _shard(summary="2 passed in 1s", key=KEY, files=None):
+def _shard(summary="2 passed in 1s", key=KEY, files=None,
+           payload_text="2 passed in 1s"):
     return {"files": files or ["tests/test_x.py"],
-            "output": f"pbrun: queued {key[:8]}\n{summary}\n{_blob(key)}\n",
+            "output": f"pbrun: queued {key[:8]}\n{summary}\n"
+                      f"{_blob(key, payload_text)}\n",
             "returncode": 0, "shard": 0, "summary": summary}
 
 
@@ -114,13 +131,10 @@ def test_full_chain_qualifies_with_plain_statuses(tmp_path, monkeypatch):
     """Matching action/source/generation/host qualifies; statuses stay plain."""
     driver = _driver()
     terminal = _terminal()
-    payload = {"receipt": {"action_key": KEY}, "status": "published"}
-    (tmp_path / "payload.json").write_text(json.dumps(payload))
-    shard = _shard()
+    monkeypatch.setattr(driver, "_read_bytes", _STORE.get)
     monkeypatch.setattr(driver, "_read_json_file",
-                        lambda path: payload if "payload" in path
-                        or "cas" in path else terminal)
-    verdict = driver.verify_shard(shard=shard, host="sparky",
+                        lambda path: terminal)
+    verdict = driver.verify_shard(shard=_shard(), host="sparky",
                                   declared=_declared())
     assert verdict["status"] == "qualified"
     assert verdict["action_key"] == KEY
@@ -134,15 +148,12 @@ def test_wrong_action_source_generation_or_host_never_qualifies(
         tmp_path, monkeypatch):
     """Every attribution break fails closed with its own reason."""
     driver = _driver()
-    payload = {"receipt": {"action_key": KEY}, "status": "published"}
     terminal = _terminal()
-    paths = {"payload": payload, "terminal": terminal}
 
     def fake_read(path):
-        if "cas" in path or "payload" in path:
-            return paths["payload"]
-        return paths["terminal"]
+        return terminal
 
+    monkeypatch.setattr(driver, "_read_bytes", _STORE.get)
     monkeypatch.setattr(driver, "_read_json_file", fake_read)
     base = {"shard": _shard(), "host": "sparky",
             "declared": _declared()}
@@ -163,10 +174,12 @@ def test_wrong_action_source_generation_or_host_never_qualifies(
 def test_empty_collection_and_replays_never_qualify(monkeypatch):
     """Zero passing tests and unattributable replays stay unqualified."""
     driver = _driver()
+    monkeypatch.setattr(driver, "_read_bytes", _STORE.get)
     monkeypatch.setattr(driver, "_read_json_file", lambda path: None)
     empty = driver.verify_shard(
-        shard=_shard(summary="1 skipped in 1s"), host="sparky",
-        declared=_declared())
+        shard=_shard(summary="1 skipped in 1s",
+                     payload_text="1 skipped in 1s"),
+        host="sparky", declared=_declared())
     assert empty["status"] == "nonqualified"
     replay = driver.verify_shard(
         shard={"files": ["tests/test_x.py"], "output": "2 passed in 1s",

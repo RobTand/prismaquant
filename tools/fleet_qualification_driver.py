@@ -41,6 +41,7 @@ never green conformance. Do NOT run live membership/deploy here.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shlex
@@ -221,6 +222,33 @@ def _read_json_file(path: str) -> dict | list | None:
         return None
 
 
+def _read_bytes(path: str) -> bytes | None:
+    try:
+        with open(path, "rb") as stream:
+            return stream.read()
+    except OSError:
+        return None
+
+
+def _cas_text(payload_path: object, key: str) -> tuple[str | None, str]:
+    """The CAS-stored shard result, validated by the existing protocol.
+
+    Content-address integrity (sha256(content) == basename), non-empty,
+    decodable text. Returns ``(text, "")`` or ``(None, reason)``.
+    """
+    if not isinstance(payload_path, str) or not payload_path:
+        return None, "CAS payload unreadable"
+    data = _read_bytes(payload_path)
+    if not data:
+        return None, "CAS payload unreadable"
+    if hashlib.sha256(data).hexdigest() != Path(payload_path).name:
+        return None, "CAS integrity mismatch"
+    try:
+        return data.decode("utf-8"), ""
+    except ValueError:
+        return None, "CAS payload unreadable"
+
+
 def _generation_of_terminal(doc: dict) -> str | None:
     """Deployed generation id from the terminal's runtime paths."""
     detail = doc.get("detail")
@@ -264,35 +292,35 @@ def verify_shard(*, shard: object, host: str, declared: dict) -> dict:
     counts = _counts(shard.get("summary"))
     if counts is None:
         return nope("failed", "malformed shard record: summary")
-    if returncode != 0 or counts["failed"] or counts["error"]:
-        return nope("failed",
-                    f"returncode={returncode} failed={counts['failed']} "
-                    f"errors={counts['error']}",
-                    passed=counts["passed"], failed=counts["failed"],
-                    skipped=counts["skipped"])
-    if not counts["passed"]:
-        return nope("nonqualified", "no passing tests collected",
-                    skipped=counts["skipped"])
+    # The submission record's returncode gates first; verdict counts come
+    # from the CAS-stored result text below, never console rendering.
+    if returncode != 0:
+        return nope("failed", f"returncode={returncode}")
     blob = _cas_blob(output)
     if blob is None:
         return nope("nonqualified",
                     "unattributed cached replay: no CAS blob with action "
                     "key; resubmission at a new snapshot required for "
-                    "fresh terminals",
-                    passed=counts["passed"], skipped=counts["skipped"])
+                    "fresh terminals")
     key = blob["action_key"]
-    payload = _read_json_file(blob["payload_path"])
-    if not isinstance(payload, dict):
-        return nope("failed", "CAS payload unreadable",
-                    action_key=key, passed=counts["passed"],
+    if blob.get("status") != "published":
+        return nope("failed", "CAS receipt not published",
+                    action_key=key)
+    text, problem = _cas_text(blob.get("payload_path"), key)
+    if problem:
+        return nope("failed", problem, action_key=key)
+    counts = _counts(text)
+    if counts is None:
+        return nope("failed", "CAS payload unreadable", action_key=key)
+    if counts["failed"] or counts["error"]:
+        return nope("failed",
+                    f"failed={counts['failed']} errors={counts['error']}",
+                    action_key=key,
+                    passed=counts["passed"], failed=counts["failed"],
                     skipped=counts["skipped"])
-    receipt = payload.get("receipt")
-    if (not isinstance(receipt, dict)
-            or receipt.get("action_key") != key
-            or payload.get("status") != "published"):
-        return nope("failed", "CAS receipt mismatch",
-                    action_key=key, passed=counts["passed"],
-                    skipped=counts["skipped"])
+    if not counts["passed"]:
+        return nope("nonqualified", "no passing tests collected",
+                    action_key=key, skipped=counts["skipped"])
     term = _read_json_file(
         f"/mnt/shared/prismabuild-fleet/pb-queue/done/{key}.json")
     side = "done"
