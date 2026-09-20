@@ -227,8 +227,13 @@ class World:
             dict(request), socket_path=self.socket_path)
 
 
-def _publish_claim(world: World, *, key: str, owner: str = OWNER) -> dict:
-    """A real ready row claimed through real queue machinery (cpu-only)."""
+def _publish_claim(world: World, *, key: str, owner: str = OWNER,
+                   container_owner: str | None = None) -> dict:
+    """A real ready row claimed through real queue machinery (cpu-only).
+
+    ``container_owner`` files a real Docker-shim owner (marker + daemon
+    census decide settlement); ``None`` is the ordinary ownerless claim.
+    """
     (world.work / "cas").mkdir(parents=True, exist_ok=True)
     (world.work / "co").mkdir(parents=True, exist_ok=True)
     worker = world.work / "worker.py"
@@ -237,7 +242,8 @@ def _publish_claim(world: World, *, key: str, owner: str = OWNER) -> dict:
                         checkout_root=world.work / "co",
                         worker_script=worker,
                         resources={"cpu": 1, "mem_gb": 1},
-                        max_attempts=1, retry_safe=True)
+                        max_attempts=1, retry_safe=True,
+                        container_owner=container_owner)
     # One box serves every scenario consumer below (namespace holds two
     # live claims at once), so it offers real box-sized headroom; demand
     # stays tiny per row. Growing-only ledger headroom is production
@@ -290,38 +296,44 @@ def _record_scope(world: World, key: str, control: dict,
     return block
 
 
-def _open_scope(world: World, *, key: str, nonce: str):
-    """A real broker scope via the real client; returns (scope, control)."""
+def _open_scope(world: World, *, key: str, nonce: str,
+                docker_owner: str | None = None):
+    """A real broker scope via the real client; returns (scope, control).
+
+    ``docker_owner`` binds the owner leg (production R10 threads it into
+    scope creation); ``None`` is the ordinary ownerless scope.
+    """
     scope_mod = world.mod["scope_mod"]
     scope = scope_mod.ResourceScope(
         key, nonce, 64 << 20, world.work / "telemetry.json",
-        socket_path=world.socket_path)
+        socket_path=world.socket_path, docker_owner=docker_owner)
     control = scope.create()
     assert control.get("scope_id") and control.get("token"), control
     return scope, control
 
 
 def _tiny_manifest(world: World) -> tuple[Path, dict, str]:
-    """A two-entry manifest over real tmp bytes (whole + nonzero range)."""
-    import torch
-    from safetensors.torch import save_file
+    """A two-entry manifest over real tmp bytes (whole + nonzero range).
+
+    Built with the accepted PQ849 helpers (``test_fullstack_real_chain``:
+    ``_tensors``/``_write_shard``/``_entry``) instead of harness-local
+    scaffolding; every digest is SHA-256 over the exact staged span.
+    """
+    from test_fullstack_real_chain import (  # noqa: E402
+        _entry, _tensors, _write_shard,
+    )
     files = world.work / "pool" / "model"
     files.mkdir(parents=True, exist_ok=True)
-    tensors = {"w0": torch.arange(16, dtype=torch.float32).reshape(4, 4)}
     whole = files / "shard.safetensors"
-    save_file(tensors, str(whole))
+    _write_shard(whole, _tensors())
     whole_raw = whole.read_bytes()
     split = files / "split.safetensors"
-    save_file({"w0": torch.arange(32, dtype=torch.float32).reshape(8, 4),
-               "w1": torch.arange(32, dtype=torch.float32).reshape(8, 4)},
-              str(split))
+    _write_shard(split, _tensors())
     split_raw = split.read_bytes()
     half = len(split_raw) // 2
     entries = [
-        {"path": str(whole), "offset": 0, "bytes": len(whole_raw),
-         "sha256": hashlib.sha256(whole_raw).hexdigest()},
-        {"path": str(split), "offset": half, "bytes": len(split_raw) - half,
-         "sha256": hashlib.sha256(split_raw[half:]).hexdigest()},
+        _entry(whole, 0, whole_raw),
+        _entry(split, half, split_raw[half:]),
     ]
     total = sum(e["bytes"] for e in entries)
     manifest = {
@@ -430,7 +442,8 @@ def _compose_map(world: World, *, manifest_sha: str) -> Path:
 
 
 def _sdk_context(world: World, *, key: str, nonce: str, map_path: Path,
-                 helper_root: str):
+                 helper_root: str, container_owner: str | None = None,
+                 docker_owner: str | None = None):
     """Real injected context over a real claim + real scope block.
 
     Returns ``(ctx, claim, control, scope)`` where ``scope`` is the very
@@ -438,8 +451,9 @@ def _sdk_context(world: World, *, key: str, nonce: str, map_path: Path,
     the live attempt token.
     """
     lease = world.mod["lease"]
-    record = _publish_claim(world, key=key)
-    scope, control = _open_scope(world, key=key, nonce=nonce)
+    record = _publish_claim(world, key=key, container_owner=container_owner)
+    scope, control = _open_scope(world, key=key, nonce=nonce,
+                                 docker_owner=docker_owner)
     _record_scope(world, key, control, claim=record)
     claim = world.mod["pool"]._read_json(
         world.queue.item_path(world.mod["pool"].CLAIMED, key))
@@ -453,10 +467,8 @@ def _sdk_context(world: World, *, key: str, nonce: str, map_path: Path,
     return ctx["ctx"], claim, control, scope
 
 
-def _acquire_window(world: World, ctx: dict, staged: dict,
-                    *, token: str) -> dict:
-    """Real acquire_for over the staged window with full-coverage proof."""
-    lease = world.mod["lease"]
+def _window_cover(world: World, staged: dict) -> tuple[list, dict, int]:
+    """Real cover proof over the staged window: covers + expected + total."""
     pmap = world.mod["pmap"]
     pool = world.mod["pool"]
     frags = [pmap.validate_fragment(f) for f in
@@ -471,12 +483,46 @@ def _acquire_window(world: World, ctx: dict, staged: dict,
     expected = {key: {"bytes": entry["bytes"], "sha256": entry["sha256"]}
                 for key, entry in entries.items()}
     total = staged["manifest"]["total_bytes"]
+    covers = [{"mover_action_key": m, "manifest_sha256": staged["digest"]}
+              for m in ("aa" * 32, "ab" * 32)]
+    return covers, expected, total
+
+
+def _acquire_window(world: World, ctx: dict, staged: dict,
+                    *, token: str) -> dict:
+    """Real acquire_for over the staged window with full-coverage proof."""
+    lease = world.mod["lease"]
+    covers, expected, total = _window_cover(world, staged)
     acquired = lease.acquire_for(
         ctx, tier_id=STAGE_TIER, epoch="",
-        covers=[{"mover_action_key": m, "manifest_sha256": staged["digest"]}
-                for m in ("aa" * 32, "ab" * 32)],
+        covers=covers,
         expected=expected, span={"start_bytes": 0, "end_bytes": total},
         acquire_token=token, material_namespace=CONSUMER)
+    assert acquired.get("ok") is True, acquired
+    return acquired
+
+
+def _acquire_attempt(world: World, staged: dict, *, owner: str, nonce: str,
+                     scope_id: str, holder: dict, token: str) -> dict:
+    """Real low-level acquire under an explicit attempt (successor legs).
+
+    Same staged window and full-coverage proof as :func:`_acquire_window`,
+    but the attempt identity is stated exactly (a fresh real scope's
+    nonce/unit) instead of coming from an injected context. Used where
+    the point is attempt isolation: the old proof must not free this ref.
+    """
+    lease = world.mod["lease"]
+    pool = world.mod["pool"]
+    covers, expected, total = _window_cover(world, staged)
+    acquired = lease.acquire(
+        world.queue, consumer_action_key=CONSUMER,
+        attempt={"nonce": nonce, "scope_id": scope_id},
+        tier_id=STAGE_TIER, epoch="",
+        span={"start_bytes": 0, "end_bytes": total},
+        holder=holder, acquire_token=token, covers=covers,
+        expected=expected,
+        residency_root=world.queue.root / pool.RESIDENCY,
+        owner_action_key=owner)
     assert acquired.get("ok") is True, acquired
     return acquired
 
@@ -674,6 +720,234 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
                                  snapshots=snapshots, evidence=evidence)
 
 
+def scenario_sdk_recovery_reaper(world: World, snapshots: dict) -> dict:
+    """R9 recovery: unsettled finish retains CLAIMED; the reaper reaches DONE.
+
+    Production order (PB741
+    ``test_unsettled_ticket_retains_then_settles_through_reaper``):
+    create/claim/scope with a real container owner -> staging+acquire
+    with the ref HELD -> finish while the daemon census still lists an
+    unresolved container and the broker mirror holds its ticket. The
+    settlement is really submitted through the socket and refused,
+    release retires, the export stays unproven, and live refs hold the
+    claim: finish files ``finish_pending`` and retains CLAIMED plus its
+    real charge, and egress retains. The daemon observation then clears
+    to actually empty and the existing ``reap_stale`` worker path
+    retries the saved finish through the full production path to DONE;
+    egress reclaims exactly once. A successor attempt's refs prove
+    isolated from the old proof.
+
+    No authored settlement/terminal/proof: the only stub is the label
+    census itself, exactly as in the production test.
+    """
+    lease = world.mod["lease"]
+    pool = world.mod["pool"]
+    host = socket.gethostname()
+    cowner = "a" * 64
+    staged = _stage_all(world, consumer=CONSUMER)
+    map_path = _compose_map(world, manifest_sha=staged["digest"])
+    ctx, claim, control, scope = _sdk_context(
+        world, key=KEY, nonce=NONCE, map_path=map_path,
+        helper_root=str(world.tree),
+        container_owner=cowner, docker_owner=cowner)
+    unit = control["scope_id"]
+    acquired = _acquire_window(world, ctx, staged,
+                               token=secrets.token_hex(16))
+    pin, ref_id = acquired["pin"], acquired["ref_id"]
+    keys = sorted(entry["key"] for entry in pin["entries"])
+    assert keys, "pin covers no keys"
+    key0 = keys[0]
+    fd, serving = lease.open_pinned(world.queue, pin, ref_id, key0)
+    try:
+        entry = next(e for e in pin["entries"] if e["key"] == key0)
+        observed = os.pread(fd, entry["bytes"], 0)
+    finally:
+        os.close(fd)
+    assert serving["tier_id"] == STAGE_TIER, serving
+    assert hashlib.sha256(observed).hexdigest() == entry["sha256"], entry
+    assert observed == Path(entry["stage_path"]).read_bytes()
+    evidence: dict = {
+        "serving": serving,
+        "read_bytes": len(observed),
+        "read_sha256": hashlib.sha256(observed).hexdigest(),
+        "read_matches_stage": True,
+        "scope_id": unit,
+    }
+    # External daemon state: no marker (the owner leg is already closed),
+    # but the scope leg still lists one unresolved container; the broker
+    # mirror holds its ticket. The only stub is the label census itself.
+    daemon = {"scope": ["c1"]}
+    real_census = pool._docker_containers_with_label
+    pool._docker_containers_with_label = (
+        lambda label, value: list(daemon["scope"])
+        if label == pool.CONTAINER_SCOPE_LABEL else [])
+    try:
+        records = world.authority.records
+        assert unit in records, sorted(records)[:5]
+        records[unit]["container_tickets"] = ["ticket-1"]
+        assert world.queue.ledger(host).held().get("cpu") == 1, (
+            world.queue.ledger(host).held())
+        assert world.queue.claim_reservation_hosts(KEY) == [host]
+        pending_path = world.queue.finish(
+            KEY, status="executed",
+            detail={"acceptance": "sdk-recovery-reaper"},
+            claim_snapshot=claim)
+        expected_claimed = world.queue.item_path(pool.CLAIMED, KEY)
+        assert pending_path == expected_claimed, (
+            pending_path, expected_claimed)
+        assert not world.queue.item_path(pool.DONE, KEY).exists()
+        retained = pool._read_json(expected_claimed)
+        assert isinstance(retained.get("finish_pending"), dict), (
+            retained.get("finish_pending"))
+        evidence["pending_observed"] = True
+        _note(world, finish_pending=retained.get("finish_pending"))
+        # The pool filed the unproven verdict, not nothing.
+        proof = lease.read_scope_attestation(world.queue, KEY, NONCE)
+        assert isinstance(proof, dict), proof
+        assert proof["scope_empty"] is False, proof
+        assert proof["retired"] is True, proof
+        assert proof["settled"] is False, proof
+        evidence["retained_proof"] = {
+            "scope_empty": False, "retired": True, "settled": False}
+        _note(world, retained_proof=proof)
+        assert lease.attempt_refs_live(
+            world.queue, KEY, NONCE, unit) == (
+            True, "attempt-ref-live")
+        evidence["refs_live"] = "attempt-ref-live"
+        # A real held reservation: capacity survives uncertainty.
+        assert world.queue.ledger(host).held().get("cpu") == 1
+        evidence["charge_cpu"] = 1
+        try:
+            world.queue.reclaim_terminal_reservation(KEY)
+        except pool.PoolContractError:
+            evidence["reclaim_refused"] = True
+        else:
+            raise AssertionError(
+                "terminal reclaim must refuse a retained claim")
+        # Egress retains while the attempt is unproven.
+        pmap = world.mod["pmap"]
+        staged_paths = []
+        for frag in pmap.read_fragments(
+                world.queue.root / pool.RESIDENCY, CONSUMER):
+            frag = pmap.validate_fragment(frag)
+            if frag["tier_id"] != STAGE_TIER:
+                continue
+            staged_paths.extend(entry["stage_path"]
+                                for entry in frag["entries"].values())
+        assert staged_paths, "no staged objects to egress"
+        registered = world.mod["stage_release"].register_stage_root(
+            world.queue, tier_id=STAGE_TIER,
+            stage_root=str(staged["stage"]))
+        assert registered == "registered", registered
+        residency_root = str(world.queue.root / pool.RESIDENCY)
+        kept = world.mod["stage_release"].evict(
+            world.queue, "aa" * 32, consumer_action_key=CONSUMER,
+            stage_root=str(staged["stage"]), residency_root=residency_root)
+        assert list(kept["auto_reclaimed"]) == [], kept
+        assert kept["auto_retained"] == {
+            ref_id: "scope-not-empty-retain"}, kept
+        evidence["egress_retained"] = {
+            "auto_reclaimed": [],
+            "auto_retained": dict(kept["auto_retained"])}
+        for staged_path in staged_paths:
+            assert Path(staged_path).exists(), staged_path
+        # The daemon observation clears to actually empty; the existing
+        # worker reaper retries the saved finish to DONE.
+        daemon["scope"] = []
+        reaped = world.queue.reap_stale()
+        assert reaped == [], reaped
+        evidence["reaped"] = reaped
+        terminal = world.queue.item_path(pool.DONE, KEY)
+        assert terminal.exists(), terminal
+        evidence["terminal"] = str(terminal)
+        assert world.queue.ledger(host).held().get("cpu", 0) == 0
+        evidence["charge_released"] = True
+        done = json.loads(terminal.read_text())
+        cleanup = done.get("resource_scope_cleanup") or {}
+        export = cleanup.get("export") or {}
+        assert export.get("released") is True, cleanup
+        assert export.get("settled") is True, cleanup
+        assert export.get("scope_id") == unit, cleanup
+        evidence["done_export"] = {k: export.get(k) for k in
+                                   ("scope_id", "stopped", "empty",
+                                    "released", "retired", "settled",
+                                    "tickets_pending")}
+        proof2 = lease.read_scope_attestation(world.queue, KEY, NONCE)
+        assert isinstance(proof2, dict), proof2
+        assert proof2["scope_empty"] is True, proof2
+        assert proof2["settled"] is True, proof2
+        assert proof2["retired"] is True, proof2
+        assert proof2["scope_id"] == unit, proof2
+        evidence["proven_proof"] = {
+            "scope_empty": True, "settled": True, "retired": True}
+        # The ordinary egress path reclaims exactly once after DONE.
+        mover_a, mover_b = "aa" * 32, "ab" * 32
+        receipt_a = world.mod["stage_release"].evict(
+            world.queue, mover_a, consumer_action_key=CONSUMER,
+            stage_root=str(staged["stage"]), residency_root=residency_root)
+        assert list(receipt_a["auto_reclaimed"]) == [ref_id], receipt_a
+        repeat_a = world.mod["stage_release"].evict(
+            world.queue, mover_a, consumer_action_key=CONSUMER,
+            stage_root=str(staged["stage"]), residency_root=residency_root)
+        assert list(repeat_a["auto_reclaimed"]) == [], repeat_a
+        receipt_b = world.mod["stage_release"].evict(
+            world.queue, mover_b, consumer_action_key=CONSUMER,
+            stage_root=str(staged["stage"]), residency_root=residency_root)
+        assert list(receipt_b["auto_reclaimed"]) == [], receipt_b
+        evidence["auto_reclaimed"] = [
+            list(receipt_a["auto_reclaimed"]),
+            list(repeat_a["auto_reclaimed"]),
+            list(receipt_b["auto_reclaimed"])]
+        assert lease.attempt_refs_live(
+            world.queue, KEY, NONCE, unit) == (
+            False, "attempt-refs-released")
+        evidence["refs_released"] = "attempt-refs-released"
+        for staged_path in staged_paths:
+            assert not Path(staged_path).exists(), staged_path
+        # Successor isolation: fresh real scope + restaged window under
+        # the same owner; the old certificate mismatches the new attempt
+        # and the new ref stays retained.
+        restaged = _stage_all(world, consumer=CONSUMER)
+        assert restaged["digest"] == staged["digest"], restaged["digest"]
+        map_path2 = _compose_map(world, manifest_sha=restaged["digest"])
+        _ = map_path2
+        succ_nonce = "d" * 32
+        _, _, succ_control, _ = _open_scope(
+            world, key="d" * 64, nonce=succ_nonce)
+        holder = {"host": host, "worker": f"{host}:4242:9d001122",
+                  "pid": 4242}
+        second = _acquire_attempt(
+            world, restaged, owner=KEY, nonce=succ_nonce,
+            scope_id=succ_control["scope_id"], holder=holder,
+            token=secrets.token_hex(16))
+        pinfile = json.loads((
+            lease.leases_root(world.queue) / KEY
+            / f"{second['pin_id']}.lease.json").read_text())
+        holder2 = pinfile["refs"][second["ref_id"]]["holder"]
+        old_cert = {"action_key": KEY, "nonce": NONCE, "scope_id": unit,
+                    "worker": holder2["worker"], "host": holder2["host"]}
+        refused = lease.release_refs(
+            world.queue,
+            [{"consumer_action_key": KEY, "pin_id": second["pin_id"],
+              "ref_id": second["ref_id"]}], dict(old_cert))
+        assert refused["ok"] is False, refused
+        assert refused["skipped"] == [
+            f"{second['ref_id']}: attempt mismatch"], refused
+        evidence["successor_old_cert_skipped"] = list(refused["skipped"])
+        latched = world.mod["stage_release"].evict(
+            world.queue, mover_a, consumer_action_key=CONSUMER,
+            stage_root=str(restaged["stage"]), residency_root=residency_root)
+        assert second["ref_id"] in latched["auto_retained"], latched
+        evidence["successor_retained"] = True
+        _note(world, successor_refused=list(refused["skipped"]),
+              successor_retained=dict(latched["auto_retained"]))
+    finally:
+        pool._docker_containers_with_label = real_census
+    return pins.result_document(status="qualified",
+                                 scenario="sdk-recovery-reaper",
+                                 snapshots=snapshots, evidence=evidence)
+
+
 def scenario_sdk_pending_ticket(world: World, snapshots: dict) -> dict:
     """Ticket issuance needs cgroup membership; the full settle flow follows.
 
@@ -847,6 +1121,7 @@ def _enter_tree(resolved: dict):
 SCENARIOS = {
     "broker-roundtrip": scenario_broker_roundtrip,
     "sdk-first-release": scenario_sdk_first_release,
+    "sdk-recovery-reaper": scenario_sdk_recovery_reaper,
     "sdk-pending-ticket": scenario_sdk_pending_ticket,
     "sdk-namespace-separation": scenario_sdk_namespace_separation,
     "sdk-failure-unwind": scenario_sdk_failure_unwind,

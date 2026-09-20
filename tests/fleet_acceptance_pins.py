@@ -31,12 +31,17 @@ from pathlib import Path
 PB_PINNED_CHECKOUT = Path("/home/rob/tmp/pb-reader-lease-pin-20260920")
 PB_CANDIDATE_REPO = "https://github.com/RobTand/prismabuild.git"
 PB_CANDIDATE_BRANCH = "fix/pb-reader-lifetime-20260920"
-#: PB730 R8 ("typed export proof, terminal replay on egress tick").
-#: The connected first-release scenario fails on R7 (a9bb83e9, recorded
-#: in pqfleet-r7red-20260920.json) and must pass here -- that RED-then-
-#: GREEN is the point. R9's incomplete-proof-on-finish hole stays open
-#: separately; ordinary completion does not wait on it.
-PB_CANDIDATE_REV = "0bf6fc812eb4fdab20e8149d5b4583f58b508d33"
+#: PB741 merge ("refs_for_holder signals unknown census", corrected SDK
+#: 461728e4, root census 7+179 qualified). Full immutable pin for the final
+#: harness: supersedes R8 0bf6fc81 (typed export proof, terminal replay),
+#: R9 ee944cd8 (hold unproven claims with live refs for the worker
+#: reaper), and R10 c50a7759 (production settlement path in connected
+#: tests). The connected first-release scenario fails on R7 (a9bb83e9,
+#: recorded in pqfleet-r7red-20260920.json) and passes here; the recovery
+#: scenario needs the R9+ hold-and-reaper path in this tree. Deployed
+#: runtime 0467e9e2316c claims no reader capability; this pin names
+#: component behavior only until root accepts/deploys.
+PB_CANDIDATE_REV = "c5012fbfc6986c551af5606ff9d6f0d874768116"
 
 #: Tree paths this harness reuses (imports or executes). Every byte under
 #: these prefixes is hash-verified against the pinned revision.

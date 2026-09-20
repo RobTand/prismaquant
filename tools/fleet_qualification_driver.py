@@ -56,12 +56,13 @@ def build_plan(*, pins: dict, hosts: tuple = HOSTS,
              host=host, entrypoint="tools/pbrun.py",
              argv=["run", "--tag", "cpu",
                    "--", "python3", "tests/fleet_acceptance_runner.py",
-                   "sdk-first-release", "--work", "{work}", "--result",
+                   scenario, "--work", "{work}", "--result",
                    "{result}"],
              demand={"cpu": 2, "mem_gb": 8, "gpu": 0},
              evidence=["result JSON (qualified)", "action receipt",
                        "CAS result", "broker replies", "pin/terminal records"])
-             for host in hosts]},
+             for host in hosts
+             for scenario in ("sdk-first-release", "sdk-recovery-reaper")]},
         {"name": "native-container-readers-both-sparks",
          "rows": [_row(
              host=host, entrypoint="tools/pbrun.py",

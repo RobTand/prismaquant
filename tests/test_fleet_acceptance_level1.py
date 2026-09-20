@@ -730,6 +730,35 @@ def test_sdk_first_release_reclaims_once(tmp_path, candidate_work):
     assert ev["proves_empty"] is True
 
 
+def test_sdk_recovery_reaper_retains_then_settles(tmp_path, candidate_work):
+    """R9 recovery: CLAIMED/finish_pending retained, reaper to DONE, successor isolated."""
+    doc = _run_scenario("sdk-recovery-reaper", tmp_path, "recovery", candidate_work)
+    ev = doc["evidence"]
+    assert ev["read_matches_stage"] is True
+    assert ev["pending_observed"] is True
+    assert ev["retained_proof"] == {
+        "scope_empty": False, "retired": True, "settled": False}
+    assert ev["refs_live"] == "attempt-ref-live"
+    assert ev["charge_cpu"] == 1
+    assert ev["reclaim_refused"] is True
+    assert ev["egress_retained"]["auto_reclaimed"] == []
+    assert len(ev["egress_retained"]["auto_retained"]) == 1
+    assert ev["reaped"] == []
+    assert ev["terminal"].endswith(f"done/{'e' * 64}.json"), ev["terminal"]
+    assert ev["charge_released"] is True
+    assert ev["done_export"]["released"] is True
+    assert ev["done_export"]["settled"] is True
+    assert ev["proven_proof"] == {
+        "scope_empty": True, "settled": True, "retired": True}
+    assert len(ev["auto_reclaimed"][0]) == 1
+    assert ev["auto_reclaimed"][1] == []
+    assert ev["auto_reclaimed"][2] == []
+    assert ev["refs_released"] == "attempt-refs-released"
+    assert len(ev["successor_old_cert_skipped"]) == 1
+    assert "attempt mismatch" in ev["successor_old_cert_skipped"][0]
+    assert ev["successor_retained"] is True
+
+
 def test_sdk_pending_ticket_flows_or_names_its_gate(tmp_path, candidate_work):
     """Ticket settle flow; cgroup-gated begin is a named nonqualification."""
     doc = _run_scenario("sdk-pending-ticket", tmp_path, "pending-ticket", candidate_work)

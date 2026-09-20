@@ -3,10 +3,12 @@
  "contract": "docs/staged_read_contract_2026-09-20.md (PB worktree, read-only)",
  "ledger": "docs/staged_read_requirements_2026-09-20.json schema pb.staged_read_requirements.v3",
  "pins": {
-  "pb_candidate_rev": "0bf6fc812eb4fdab20e8149d5b4583f58b508d33",
+  "pb_candidate_rev": "c5012fbfc6986c551af5606ff9d6f0d874768116",
   "pq_base": "origin/main 61ec9fcb8a37c4a171771f7574e147bc5f0593e2",
   "pb_r7_red_rev": "a9bb83e9abd2aeffe22af7d0b51238158954a909",
-  "pb_r7_red_evidence": "/home/rob/tmp/pqfleet-r7red-20260920.json"
+  "pb_r7_red_evidence": "/home/rob/tmp/pqfleet-r7red-20260920.json",
+  "pb_r8_green_rev": "0bf6fc812eb4fdab20e8149d5b4583f58b508d33",
+  "pb_r8_green_evidence": "/home/rob/tmp/pqfleet-r8green-final-20260920.json"
  },
  "requirements": [
   {
@@ -74,10 +76,10 @@
   },
   {
    "id": "ID-07",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-sdk-descriptor-only",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
-   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: serving-tier record present at SDK open_pinned before payload trust; payload bit-identical to stage + fixture sources MISSING: real-reader chain (source/render/activation) with forbidden-open negatives (planned ACC-03); counters-never-authorize unproven"
   },
   {
    "id": "ID-08",
@@ -124,9 +126,9 @@
   {
    "id": "SM-01",
    "status": "nonqualified:lifecycle-partial",
-   "scenario": "test_fleet_acceptance_level1.py::test_publish_claim_finish_lifecycle",
+   "scenario": "test_fleet_acceptance_level1.py::test_publish_claim_finish_lifecycle+runner:sdk-recovery-reaper",
    "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": "publish/claim/finish + terminal green; withdrawal-only-by-policy, containment-before-release, and retry legs pending"
+   "note": "publish/claim/finish + terminal green; retry-to-DONE via the existing reaper green in the recovery scenario; withdrawal-only-by-policy, containment-before-release, and lease-crash legs pending"
   },
   {
    "id": "SM-02",
@@ -137,17 +139,17 @@
   },
   {
    "id": "SM-03",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-ordinary-completion-only",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
-   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: lease acquire/use/open with full-coverage proof; release via egress auto-reclaim once + same-mover idempotent repeat; pins/fragments mapped MISSING: bounded wait-or-fail on unpublished ranges (planned ACC-02/ACC-04)"
   },
   {
    "id": "INV-01",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-release-only",
    "scenario": "test_fleet_acceptance_level1.py::test_tier_ledger_concludes_both_sides_once",
-   "evidence": "mint/acquire/holder/release/available on real ledger",
-   "note": ""
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: one release helper concludes both ledgers (mint/acquire/holder/release/available on the real ledger) MISSING: aggregate-lifetime fit (claim fits box+tier ledgers simultaneously) needs live admission"
   },
   {
    "id": "INV-02",
@@ -165,10 +167,10 @@
   },
   {
    "id": "INV-04",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-sdk-descriptor-only",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
-   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: serving-tier record present at SDK open_pinned before payload trust; payload bit-identical to stage + fixture sources MISSING: real-reader chain (source/render/activation) with forbidden-open negatives (planned ACC-03); counters-never-authorize unproven"
   },
   {
    "id": "INV-05",
@@ -186,10 +188,10 @@
   },
   {
    "id": "INV-07",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-ordinary-completion-only",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
-   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: ordinary completion serializes copy/publish/lease/egress-reclaim exactly once MISSING: simultaneous-egress exactly-once; last-reader incl. pending handoff blocks eviction; retiring charge ordering (planned ACC-02)"
   },
   {
    "id": "INV-08",
@@ -256,10 +258,10 @@
   },
   {
    "id": "PRG-01",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-reclaim-path-only",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
-   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: eviction auto-reclaim consults lease/proof state (unproven retains, proven reclaims) MISSING: releasable safe frontier separated from durable compute progress (no progress counter in fixture; planned ACC-04)"
   },
   {
    "id": "PRG-02",
@@ -333,10 +335,10 @@
   },
   {
    "id": "SAFE-01",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-post-finish-egress-only",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
-   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: post-finish egress reclaims the contained ref; same-mover repeat idempotent; no live bytes deleted MISSING: live-lease eviction blocked pre-finish across prefetch/two-consumer/epoch cases (planned ACC-02/ACC-04)"
   },
   {
    "id": "SAFE-02",
@@ -368,17 +370,17 @@
   },
   {
    "id": "ACC-03",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-sdk-descriptor-only",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
-   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: SDK serving-tier record at open + bit-identical payload vs stage and fixture manifest sources MISSING: real PQ source/render/activation reader chain with zero forbidden opens + forbidden-open negatives; no manual-RAM fixtures"
   },
   {
    "id": "ACC-04",
-   "status": "nonqualified:restart/retry incl. lease-crash needs live attempts",
-   "scenario": "",
-   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": ""
+   "status": "nonqualified:partial-reaper-leg-only",
+   "scenario": "runner:sdk-recovery-reaper",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: unsettled finish retains CLAIMED/finish_pending + charge; existing reap_stale retries the saved finish to DONE; egress reclaims once; successor refs isolated MISSING: lease-crash restart/retry; bounded wait-or-fail on unpublished ranges; full ACC-02/ACC-04 matrix"
   },
   {
    "id": "ACC-05",
@@ -396,10 +398,10 @@
   },
   {
    "id": "VER-01",
-   "status": "qualified-now",
+   "status": "nonqualified:partial-matrix-discipline-only",
    "scenario": "test_fleet_acceptance_matrix.py::test_every_requirement_names_evidence",
-   "evidence": "bounded-evidence discipline enforced mechanically",
-   "note": "authoritative indexes (ledger JSON) read first; no counts-as-proof"
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified: partial leg)",
+   "note": "PROVEN: every ledger ID names evidence under a closed vocabulary MISSING: bounded status-search completeness (state index, filters, window, truncation before declaring missing; authoritative indexes first)"
   }
  ],
  "explicit_gates": [
