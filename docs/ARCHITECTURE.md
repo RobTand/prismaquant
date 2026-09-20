@@ -1,7 +1,29 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/stagea-adjoint-manifest-20260920`.
+As of: 2026-09-20 · `flash/executable-quantum-readplan-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/executable-quantum-readplan-20260920`)
+for **one executable quantum read plan** (PQ #862).
+`build_quantum_executable_manifest` seals a single v2 manifest per
+quantum row covering the true consumption corpus in order: calibration
+head, the checkpoint plane once, per chain layer its source extents then
+its boundary entries, the own source extents, then per retained window
+and probe the replay boundary reads (own-boundary corpus repeats across
+windows; resume reads a subset). Entries deduplicate exact
+path/offset/bytes/sha triples and refuse contradictions; rendered-weight
+bytes are not staged here but bound through the named PB732
+produced-output prerequisite. `bind_quantum_executable` attaches the
+rebuild-anchored digest/path to a new record generation with recomputed
+identity; `--executable-readsets` wires the regen path. The dispatcher
+submits that one manifest and declares exactly its phases (startup class
+keeps the head grace, read phases the chunk grace); tier flags, tags,
+demand and environment are identical in both lanes, and rows without the
+block keep the legacy slice contract. The runtime reports each staged
+phase through the existing semantic reporter as its bytes are consumed
+(read transitions change phase with unchanged units; chunk names are not
+staging phases, so durable units commit under the read phase in effect).
+Gate: `tests/test_quantum_executable_readset.py`.
 
 Re-stamped (2026-09-20, `flash/stagea-adjoint-manifest-20260920`) for
 **quantum boundary readset binding** (PQ #848).

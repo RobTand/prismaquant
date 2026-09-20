@@ -25,7 +25,7 @@ for _entry in (ROOT, ROOT / "tools"):
 
 from prismaquant.joint_adjoint_checkpoints import exact_entry_record  # noqa: E402
 from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
-    write_adjoint_checkpoint)
+    write_adjoint_checkpoint, write_adjoint_receipt)
 from prismaquant.joint_layer_quanta import (  # noqa: E402
     ADJOINT_CAPTURE_SCHEMA,
     CHECKPOINT_LOAD_PHASE,
@@ -537,3 +537,221 @@ def test_acceptance_sequence_opens_only_admitted_entries(tmp_path):
         assert plans.accepted(plan_view, name)
         remaining = [p["name"] for p in plans.remaining(plan_view, name)]
         assert remaining == names[position:]
+
+
+def _exec_campaign(tmp_path):
+    """Tiny campaign files with a calibration input for the regen CLI."""
+    import regenerate_joint_quanta as _regen  # noqa: F401
+    root = tmp_path / "campaign"
+    calib_path = tmp_path / "calib.pt"
+    calib_path.write_bytes(b"\x00" * 512)
+    plan = {"output_root": str(root), "model": "/fixture/model",
+            "distributed_campaign": {},
+            "execution": {"n_probes": N_PROBES},
+            "calibration_input": {
+                "path": str(calib_path), "sha256": "a" * 64}}
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(plan, sort_keys=True))
+    prepared = {"formats_by_qname": {
+        "model.layers.0.mlp.gate_proj": {},
+        "model.layers.1.mlp.gate_proj": {},
+        "model.layers.2.mlp.gate_proj": {},
+        "model.layers.3.mlp.gate_proj": {}},
+        "production_cache": {"path": str(tmp_path / "production.pkl"),
+                             "sha256": "b" * 64}}
+    prepared_path = tmp_path / "prepared.json"
+    prepared_path.write_text(json.dumps(prepared, sort_keys=True))
+    entries = [{"path": "/fixture/model/shard-h.pt", "offset": 0,
+                "bytes": 100, "sha256": None}]
+    phases = [{"name": "head", "bytes": 100, "cumulative_bytes": 100}]
+    total = 100
+    for layer in (0, 1, 2, 3):
+        entries.append({"path": f"/fixture/model/shard-l{layer}.pt",
+                        "offset": 0, "bytes": 200, "sha256": None})
+        total += 200
+        phases.append({"name": f"layer-{layer}", "bytes": 200,
+                       "cumulative_bytes": total})
+    parent = {
+        "schema": "prismaquant.prismabuild.data_manifest.v1",
+        "produced_by": {"plan": str(plan_path)},
+        "mount_prefix": "/mnt/shared",
+        "entries": entries, "entry_count": len(entries),
+        "total_bytes": total,
+        "annotations": {
+            "campaign_scope": {"fixture": "exec-cli"},
+            "argv": ["python3", "-m", "prismaquant.joint_adjoint_capture",
+                     "--prepared", str(prepared_path),
+                     "--prepared-sha256", hashlib.sha256(
+                         prepared_path.read_bytes()).hexdigest()],
+            "layers": [0, 1, 2, 3],
+            "phases": phases}}
+    parent_path = tmp_path / "parent.json"
+    parent_path.write_text(json.dumps(parent, sort_keys=True))
+
+    def _sha(path):
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    derivation = tmp_path / "derivation.json"
+    derivation.write_text(json.dumps(
+        {"chunk_target_bytes": 200, "stride": 2, "ram_window_gib": 160,
+         "max_resident_consumers": 2}, sort_keys=True))
+    partition = tmp_path / "partition.json"
+    partition.write_text(json.dumps(
+        {"windows_by_layer": {str(n): 2 for n in (0, 1, 2, 3)}},
+        sort_keys=True))
+    return {"root": root, "plan_path": plan_path, "plan_sha": _sha(plan_path),
+            "prepared_path": prepared_path, "prepared_sha": _sha(
+                prepared_path),
+            "parent_path": parent_path, "parent_sha": _sha(parent_path),
+            "derivation": derivation, "partition": partition}
+
+
+def _exec_argv(tmp_path, campaign):
+    return ["--plan", str(campaign["plan_path"]),
+            "--plan-sha256", campaign["plan_sha"],
+            "--prepared", str(campaign["prepared_path"]),
+            "--prepared-sha256", campaign["prepared_sha"],
+            "--parent-manifest", str(campaign["parent_path"]),
+            "--parent-manifest-sha256", campaign["parent_sha"],
+            "--derivation", str(campaign["derivation"]),
+            "--partition", str(campaign["partition"])]
+
+
+def _exec_receipt(tmp_path, campaign):
+    from prismaquant.joint_layer_quanta import bind_adjoint_receipt
+    space = tmp_path / "adjoint-space"
+    space.mkdir(exist_ok=True)
+    (space / "entries").mkdir(parents=True, exist_ok=True)
+    scope = {"fixture": "exec-cli"}
+    boundary_entries = {}
+    for boundary in (2, 3):
+        rows = []
+        for batch in range(N_BATCHES):
+            ref = write_exact_activation_cache_entry(
+                space / "entries",
+                f"boundary-{batch}-{boundary}-at-{boundary}",
+                torch.zeros(2, 4),
+                identity={"session": dict(SESSION),
+                          "slot": f"boundary-{batch}-{boundary}",
+                          "kind": "boundary",
+                          "coordinates": {"batch": batch,
+                                          "boundary": boundary,
+                                          "probe": None}},
+                max_tensor_bytes=1 << 20, max_file_bytes=1 << 20)
+            rows.append(exact_entry_record(ref))
+        boundary_entries[str(boundary)] = rows
+    checkpoints = []
+    for boundary in (2, 4):
+        checkpoints.append(write_adjoint_checkpoint(
+            space, boundary=boundary,
+            session={"generation": SESSION["generation"],
+                     "kind": "adjoint_checkpoint",
+                     "run_identity_sha256": SESSION["run_identity_sha256"]},
+            cotangents={(p, b): torch.zeros(2, 4) for p in range(N_PROBES)
+                        for b in range(N_BATCHES)},
+            shared_adjoint={(p, b): {"scale": 1.0} for p in range(N_PROBES)
+                            for b in range(N_BATCHES)},
+            shared_pass={b: {"mask": [0, 1]} for b in range(N_BATCHES)}))
+    receipt = {
+        "schema": ADJOINT_CAPTURE_SCHEMA,
+        "run_identity": {"plan_sha256": campaign["plan_sha"],
+                         "prepared_sha256": campaign["prepared_sha"],
+                         "campaign_scope": scope},
+        "boundary_storage": {
+            "session": dict(SESSION),
+            "policy": {"prefetch_batches": PREFETCH_BATCHES}},
+        "boundary_entries": boundary_entries,
+        "checkpoints": checkpoints,
+        "status": "complete",
+    }
+    # The campaign scope lives in the parent annotations; the receipt
+    # must answer for it, so seal the parent scope into the campaign.
+    receipt["run_identity"]["campaign_scope"] = scope
+    return receipt, space
+
+
+def test_cli_executable_readsets_end_to_end(tmp_path):
+    import regenerate_joint_quanta as regen
+    from prismaquant import joint_cost_quantum as quantum
+    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    campaign = _exec_campaign(tmp_path)
+    receipt, space = _exec_receipt(tmp_path, campaign)
+    receipt_path = space / "adjoint-capture.json"
+    write_adjoint_receipt(space, receipt)
+    # Seal the parent scope the receipt answers for.
+    parent = json.loads(campaign["parent_path"].read_text())
+    parent["annotations"]["campaign_scope"] = {"fixture": "exec-cli"}
+    campaign["parent_path"].write_text(json.dumps(parent, sort_keys=True))
+    campaign["parent_sha"] = hashlib.sha256(
+        campaign["parent_path"].read_bytes()).hexdigest()
+    out = tmp_path / "reviewed"
+    assert regen.main(
+        _exec_argv(tmp_path, campaign)
+        + ["--output-root", str(campaign["root"]),
+           "--records-out", str(out),
+           "--adjoint-receipt", str(receipt_path),
+           "--executable-readsets"]) == 0
+    canonical = bind_adjoint_receipt(
+        receipt, plan_sha256=campaign["plan_sha"],
+        prepared_sha256=campaign["prepared_sha"],
+        scope={"fixture": "exec-cli"}, checkpoints=[2, 4])
+    records = [json.loads(path.read_text())
+               for path in sorted(out.glob("layer-*.json"))]
+    assert len(records) == 4
+    assert (out / "records.json").is_file()
+    for record in records:
+        bound = record["executable_readset"]
+        manifest_path = Path(bound["manifest_path"])
+        assert manifest_path.is_file()
+        assert manifest_path.parent.name == "bound-readsets"
+        assert manifest_path.name.endswith(".executable.json.gz")
+        assert hashlib.sha256(
+            manifest_path.read_bytes()).hexdigest() == bound[
+            "manifest_sha256"]
+        assert bound["receipt_sha256"] == canonical
+        campaign_binding = {
+            "plan_sha256": campaign["plan_sha"],
+            "prepared_sha256": campaign["prepared_sha"],
+            "read_manifest_sha256": campaign["parent_sha"],
+            "unit_roster_sha256": record["campaign"][
+                "unit_roster_sha256"],
+            "campaign_scope": {"fixture": "exec-cli"},
+            "adjoint_receipt_sha256": canonical,
+        }
+        check_quantum_for_campaign(record, campaign_binding)
+        quantum_path = out / f"{record['quantum_id']}.json"
+        quantum.verify_quantum_identity(
+            quantum_path=quantum_path,
+            quantum_sha256=hashlib.sha256(
+                quantum_path.read_bytes()).hexdigest(),
+            plan_path=campaign["plan_path"],
+            plan_sha256=campaign["plan_sha"],
+            prepared_path=campaign["prepared_path"],
+            prepared_sha256=campaign["prepared_sha"],
+            adjoint_path=receipt_path,
+            adjoint_sha256=hashlib.sha256(
+                receipt_path.read_bytes()).hexdigest(),
+            output_root=Path(str(campaign["root"])))
+
+
+def test_cli_executable_refusal_writes_nothing(tmp_path):
+    import regenerate_joint_quanta as regen
+    campaign = _exec_campaign(tmp_path)
+    receipt, space = _exec_receipt(tmp_path, campaign)
+    del receipt["boundary_entries"]["3"]
+    bad = space / "bad-receipt.json"
+    bad.write_text(json.dumps(receipt, sort_keys=True))
+    parent = json.loads(campaign["parent_path"].read_text())
+    parent["annotations"]["campaign_scope"] = {"fixture": "exec-cli"}
+    campaign["parent_path"].write_text(json.dumps(parent, sort_keys=True))
+    campaign["parent_sha"] = hashlib.sha256(
+        campaign["parent_path"].read_bytes()).hexdigest()
+    out = tmp_path / "reviewed"
+    assert regen.main(
+        _exec_argv(tmp_path, campaign)
+        + ["--output-root", str(campaign["root"]),
+           "--records-out", str(out),
+           "--adjoint-receipt", str(bad),
+           "--executable-readsets"]) == 3
+    assert not out.exists()
+    assert not (Path(str(campaign["root"])) / "layer-quanta" / "adjoint" /
+                "bound-readsets").exists()
