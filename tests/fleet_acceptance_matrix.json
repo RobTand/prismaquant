@@ -72,10 +72,10 @@
   },
   {
    "id": "ID-07",
-   "status": "nonqualified:serving record asserted only in runner first-release flow",
+   "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": ""
+   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
+   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "ID-08",
@@ -135,10 +135,10 @@
   },
   {
    "id": "SM-03",
-   "status": "nonqualified:lease states need SDK pins",
+   "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": ""
+   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
+   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "INV-01",
@@ -163,10 +163,10 @@
   },
   {
    "id": "INV-04",
-   "status": "nonqualified:strict-reader lane PQ846 owns open-time serving records",
-   "scenario": "",
-   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": "SDK serving record asserted in runner flow once qualified"
+   "status": "failing:R7-proof-bug",
+   "scenario": "runner:sdk-first-release",
+   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
+   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "INV-05",
@@ -184,10 +184,10 @@
   },
   {
    "id": "INV-07",
-   "status": "nonqualified:eviction serialization needs live tier loop",
-   "scenario": "",
-   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": ""
+   "status": "failing:R7-proof-bug",
+   "scenario": "runner:sdk-first-release",
+   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
+   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "INV-08",
@@ -254,10 +254,10 @@
   },
   {
    "id": "PRG-01",
-   "status": "nonqualified:safe-frontier accounting needs lease-state queries",
-   "scenario": "",
-   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": ""
+   "status": "failing:R7-proof-bug",
+   "scenario": "runner:sdk-first-release",
+   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
+   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "PRG-02",
@@ -331,10 +331,10 @@
   },
   {
    "id": "SAFE-01",
-   "status": "nonqualified:live-lease eviction needs live leases + tier loop",
-   "scenario": "",
-   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": ""
+   "status": "failing:R7-proof-bug",
+   "scenario": "runner:sdk-first-release",
+   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
+   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "SAFE-02",
@@ -366,10 +366,10 @@
   },
   {
    "id": "ACC-03",
-   "status": "nonqualified:source/render/activation chain with forbidden-open negatives needs strict readers",
+   "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
-   "note": "published-path reads green in level-1; negatives pending"
+   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
+   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "ACC-04",

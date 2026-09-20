@@ -49,10 +49,14 @@ def test_every_requirement_names_evidence():
     assert set(rows) == LEDGER_IDS, set(rows) ^ LEDGER_IDS
     for rid, row in rows.items():
         assert row["status"].split(":")[0] in (
-            "qualified-now", "nonqualified", "out-of-scope"), (rid, row)
+            "qualified-now", "nonqualified", "out-of-scope",
+            "failing"), (rid, row)
         assert row["evidence"], rid
         if row["status"].startswith("nonqualified"):
             assert len(row["status"]) > len("nonqualified:"), rid
+        if row["status"].startswith("failing"):
+            assert len(row["status"]) > len("failing:"), rid
+            assert "R8" in row["note"], rid
         if row["status"].startswith("out-of-scope"):
             assert len(row["status"]) > len("out-of-scope:"), rid
 
