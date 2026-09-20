@@ -22,6 +22,20 @@ storage lease -- the readset is the bindable object a PB output-scope
 staging contract admits. Gate:
 `tests/test_quantum_boundary_readset.py`.
 
+Re-stamped (2026-09-20, `flash/validate-profile-gated-staging-854`) for
+**runner-equivalent validator config derivation** (PQ #854).
+`validate_cached_streamed_model_identity` derived its live config from a
+hardcoded text-only `AutoConfig` load, which can never agree with an
+umbrella cache on a multimodal-skeleton family (`glm5_next` runs
+`Glm5NextForConditionalGeneration`) and misses constructor defaults the
+skeleton applies. The validator now derives live config through
+`live_streaming_runner_config`: the same profile-gated staging, offline
+load, and real meta skeleton `_build_streaming_context` uses, reusing the
+existing profile/staging/skeleton functions with no new normalizer.
+Semantic comparison, refusal messages, and fail-closed behavior are
+unchanged; no cache migration or re-prepare. Gate:
+`tests/test_source_identity_validate_derivation.py`.
+
 Re-stamped (2026-09-20, `flash/slice-zero-head-20260920`) for
 **stageable quantum slice phases** (PQ #851). Both slice producers seal
 only the nonempty chunk phases in `annotations.phases`. A zero-byte
