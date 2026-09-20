@@ -1,7 +1,25 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/slice-zero-head-20260920`.
+As of: 2026-09-20 · `container/reader-context-transport-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `container/reader-context-transport-20260920`) for
+**the campaign container forwarding PB's injected reader identity** (PQ
+#856; § container launch). `tools/tessera_campaign_container.py` forwards
+`PRISMABUILD_ACTION_KEY/NONCE/SCOPE/READER_HELPER_ROOT` from the launcher
+environment only -- the exact pair the reader SDK checks the live claim
+against, plus the sealed helper generation root it imports from (the SDK
+appends `/src`; the value names the generation directory, never the `src`
+tree). A spec naming any of the four is refused as forged; a partial
+bundle, a malformed key, a non-canonical or symlinked root, a root with no
+`src/prismabuild` tree, or a declared mount at or beneath the helper root
+is refused rather than downgraded. The generation binds read-only at its
+canonical path, independently of ancestor mount permissions or source-path
+remapping. Key-only launcher env is
+the legacy published-PB shape and keeps a byte-identical `docker run`;
+no broker token or socket crosses. Gates:
+`tests/test_container_reader_context.py` (with
+`tests/test_tessera_campaign_container.py` regression-green).
 
 Re-stamped (2026-09-20, `flash/checkpoint-artifact-budget-858`) for
 **checkpoint artifact budget enforcement** (PQ #858).

@@ -51,6 +51,24 @@ RESIDENCY_MAP_ENV = "PRISMABUILD_RESIDENCY_MAP"
 STAGE_ROOT_KEY = "stage_root"
 
 
+#: PB's protected reader identity (RobTand/prismabuild#730): the resource_exec
+#: proxy injects these from the exact launch identity -- the 64-hex action key
+#: it already ran under, the launch-bound nonce/scope pair the reader SDK
+#: checks against the live claim row, and the sealed helper generation root
+#: readers import from. The container-side SDK (PQ #846) appends ``/src`` to
+#: the helper root itself, so this names the generation directory, never the
+#: ``src`` tree beneath it. The literals are repeated here for the same
+#: host-side reason as the progress names above: importing ``prismabuild``
+#: to read them would run production initialisation before Docker starts.
+ACTION_KEY_ENV = "PRISMABUILD_ACTION_KEY"
+ACTION_NONCE_ENV = "PRISMABUILD_ACTION_NONCE"
+ACTION_SCOPE_ENV = "PRISMABUILD_ACTION_SCOPE"
+READER_HELPER_ROOT_ENV = "PRISMABUILD_READER_HELPER_ROOT"
+#: Every name the launcher -- never the spec -- may supply for reader context.
+READER_CONTEXT_ENV = (ACTION_KEY_ENV, ACTION_NONCE_ENV, ACTION_SCOPE_ENV,
+                      READER_HELPER_ROOT_ENV)
+
+
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
 #: ``python -m`` sets to the working directory.  The container's working
 #: directory is the PB sealed checkout, which carries its own ``prismaquant``
@@ -245,6 +263,14 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
         raise RuntimeError('the import guard is supplied by the launcher, not by a spec')
     if CHECKOUT_COMMIT_ENV in env:
         raise RuntimeError('the checkout commit is supplied by the inspected launcher, not by a spec')
+    for name in READER_CONTEXT_ENV:
+        # Sealed reader identity is the launcher's to forward from the exact
+        # launch environment, exactly like PB's own core refuses a sealed
+        # variable of any of these names rather than overwriting it: a spec
+        # that names one is forged or conflicting, never a default.
+        if name in env:
+            raise RuntimeError(
+                f'the {name} is supplied by the launcher, not by a spec')
     for name, expected in BOUNDED_CAPTURE_ENV.items():
         # Declaring it is optional -- the launcher supplies it -- but a spec may
         # not weaken it, and the refusal names the field so a reader of the spec
@@ -466,6 +492,110 @@ def residency_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
     return {RESIDENCY_MAP_ENV: str(inside)}, extra
 
 
+def _canonical_absolute(value: object) -> "str | None":
+    """The value when it is a canonical absolute POSIX path, else ``None``.
+
+    Same spelling rule as container mount sources and targets: absolute,
+    normalized, no parent references, no NUL byte.
+    """
+
+    if (not isinstance(value, str) or not value.startswith("/")
+            or "\x00" in value or ".." in PurePosixPath(value).parts
+            or str(PurePosixPath(value)) != value):
+        return None
+    return value
+
+
+def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
+    """The reader identity this container's SDK binds pins with, if launched.
+
+    Returns the environment to forward and the helper-generation mount to
+    add.  Values come only from the launcher's own environment -- the exact
+    identity the resource_exec proxy injected -- never from the declared
+    spec and never resolved through the mutable ``/repo`` link: a spec that
+    names any of these variables is refused, and so is a partial bundle or
+    a malformed value, because a strict context bound from half an identity
+    is a guessed identity.  The broker token and socket capability travel
+    nowhere here; only the public nonce/scope pair the SDK checks the live
+    claim against crosses the boundary.
+
+    Both are empty on the legacy path: no strict signal in the launcher
+    environment means an action outside the reader contract (or predating
+    it), which keeps a byte-identical ``docker run`` -- documented absence,
+    never a claim of strict support.  The public action key alone is not a
+    strict signal: published PrismaBuild has long set it on every action
+    environment, so key-only is the legacy shape, not a partial bundle.
+    """
+
+    declared = spec.get("env", {}) if isinstance(spec, dict) else {}
+    for name in READER_CONTEXT_ENV:
+        if name in declared:
+            raise RuntimeError(
+                f'spec env {name} is forged or conflicting: reader identity '
+                'is supplied by the launcher, not by a spec')
+    present = {name: environ.get(name) for name in READER_CONTEXT_ENV}
+    if not any(present[name] for name in
+               (ACTION_NONCE_ENV, ACTION_SCOPE_ENV, READER_HELPER_ROOT_ENV)):
+        return {}, []
+    missing = sorted(name for name, value in present.items() if not value)
+    if missing:
+        raise RuntimeError(
+            f"the launcher holds a partial reader-context bundle (missing "
+            f"{', '.join(missing)}); refusing rather than binding a strict "
+            "identity from half of one")
+    key = present[ACTION_KEY_ENV]
+    if re.fullmatch(r"[0-9a-f]{64}", key) is None:
+        raise RuntimeError(
+            "the launcher's PRISMABUILD_ACTION_KEY is not a 64-character "
+            "lowercase action key; refusing rather than forwarding no identity")
+    for name in (ACTION_NONCE_ENV, ACTION_SCOPE_ENV):
+        if not isinstance(present[name], str) or not present[name]:
+            raise RuntimeError(
+                f"the launcher's {name} is empty; the SDK checks the live "
+                "claim against this exact pair, so an empty half is a refusal")
+    root = _canonical_absolute(present[READER_HELPER_ROOT_ENV])
+    if root is None:
+        raise RuntimeError(
+            "the launcher's PRISMABUILD_READER_HELPER_ROOT is not a canonical "
+            "absolute path; refusing rather than binding a helper tree by a "
+            "relative or escaping spelling")
+    if os.path.realpath(root) != root:
+        raise RuntimeError(
+            f"the launcher's PRISMABUILD_READER_HELPER_ROOT {root} resolves "
+            "through a symlink (such as the mutable /repo link): bind the "
+            "exact immutable helper generation at its canonical path instead")
+    if not (Path(root) / "src" / "prismabuild").is_dir():
+        raise RuntimeError(
+            f"the launcher's PRISMABUILD_READER_HELPER_ROOT {root} holds no "
+            "src/prismabuild tree: it must name the immutable generation "
+            "directory itself (the SDK appends /src), not the src tree, "
+            "a file, or an empty directory")
+    helper = PurePosixPath(root)
+    mounts = spec.get("container", {}).get("mounts", []) if isinstance(spec, dict) else []
+    extra: list[dict] = []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        target = PurePosixPath(mount.get("target", "/"))
+        if target == helper:
+            raise RuntimeError(
+                f"container mount target {target} conflicts with the "
+                "launcher's read-only helper-generation bind; the spec must "
+                "not name the helper path")
+        if target != helper and helper in target.parents:
+            raise RuntimeError(
+                f"container mount target {target} nests inside the helper "
+                "generation and would shadow its sealed bytes; the spec must "
+                "not name paths beneath the helper root")
+    # A parent mount can expose a different host directory, or another
+    # nested ancestor can make this subtree writable. Always bind the exact
+    # inspected generation at its own path, after declared parent mounts.
+    # This proves both the source bytes and read-only access independently
+    # of the spec's ancestor mappings.
+    extra.append({"source": root, "target": root, "readonly": True})
+    return ({name: present[name] for name in READER_CONTEXT_ENV}, extra)
+
+
 def host_path(container_path: str, *, cwd: str, mounts: list) -> "Path | None":
     """The host path Docker binds behind one absolute container path.
 
@@ -660,7 +790,10 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
         argv += ["--memory", f"{budget_gb:g}g", "--memory-swap", f"{budget_gb:g}g"]
     residency_env, residency_mounts = residency_environment(
         spec, environ if environ is not None else {})
-    for mount in [*spec["container"].get("mounts", []), *residency_mounts]:
+    reader_env, reader_mounts = reader_context_environment(
+        spec, environ if environ is not None else {})
+    for mount in [*spec["container"].get("mounts", []), *residency_mounts,
+                  *reader_mounts]:
         value = f"type=bind,src={mount['source']},dst={mount['target']}"
         if mount.get("readonly", False):
             value += ",readonly"
@@ -674,7 +807,7 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
     forwarded = {SAFE_PATH_ENV: "1", **spec.get("env", {}),
                  **bounded_defaults,
                  **progress_environment(spec, environ if environ is not None else {}),
-                 **residency_env}
+                 **residency_env, **reader_env}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:
