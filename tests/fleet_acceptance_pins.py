@@ -29,6 +29,8 @@ from pathlib import Path
 
 
 PB_PINNED_CHECKOUT = Path("/home/rob/tmp/pb-reader-lease-pin-20260920")
+PB_CANDIDATE_REPO = "https://github.com/RobTand/prismabuild.git"
+PB_CANDIDATE_BRANCH = "fix/pb-reader-lifetime-20260920"
 #: PB730 R7 (root R8 scope). R8's first-release correction is expected
 #: next; the connected first-release scenario must fail on this revision
 #: and pass on the fix -- that RED-then-GREEN is the point.
@@ -91,6 +93,32 @@ def _git_bytes(git_dir: Path, *args: str, timeout_s: int = 300) -> bytes:
     return done.stdout
 
 
+def _resolve_via_network(dest: Path, *, timeout_s: int) -> Path:
+    """Clone the candidate branch metadata; the pin must be in its history.
+
+    Fallback when the pinned checkout is not visible from this worker.
+    Branch deletion (retirement on merge) fails closed here: the pin then
+    needs re-pointing at the merged home, never a silent substitution.
+    """
+    mirror = dest / "mirror.git"
+    if not (mirror / "objects").is_dir():
+        done = _run_git_no_dir(
+            ["clone", "--bare", "--filter=blob:none", "--single-branch",
+             "--branch", PB_CANDIDATE_BRANCH, PB_CANDIDATE_REPO,
+             str(mirror)], timeout_s=timeout_s)
+        if done.returncode != 0:
+            raise NonQualified(
+                "PB candidate unreachable",
+                detail={"rev": PB_CANDIDATE_REV,
+                        "stderr": done.stderr.strip()[-500:]})
+    return mirror
+
+
+def _run_git_no_dir(args: list[str], *, timeout_s: int) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], capture_output=True, text=True,
+                          timeout=timeout_s)
+
+
 def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
     """Extract the pinned commit beside nothing mutable; verify the tree.
 
@@ -102,8 +130,19 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
     - the extracted file set equals ``ls-tree -r`` exactly;
     - every file under the reused prefixes hash-matches its blob.
     """
-    git_dir = _git_dir_of(PB_PINNED_CHECKOUT)
-    done = _git(git_dir, "cat-file", "-t", PB_CANDIDATE_REV,
+    try:
+        git_dir = _git_dir_of(PB_PINNED_CHECKOUT)
+        network = False
+    except NonQualified:
+        git_dir = None
+        network = True
+    if network:
+        mirror = _resolve_via_network(dest, timeout_s=timeout_s)
+        src_git_dir = mirror
+    else:
+        src_git_dir = git_dir
+        mirror = None
+    done = _git(src_git_dir, "cat-file", "-t", PB_CANDIDATE_REV,
                 timeout_s=timeout_s)
     if done.returncode != 0 or done.stdout.strip() != "commit":
         raise NonQualified(
@@ -115,7 +154,7 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
     if not (tree / "src" / "prismabuild" / "reader_lease.py").is_file():
         import io
         import tarfile
-        raw = _git_bytes(git_dir, "archive", PB_CANDIDATE_REV,
+        raw = _git_bytes(src_git_dir, "archive", PB_CANDIDATE_REV,
                          timeout_s=timeout_s)
         if not raw:
             raise NonQualified(
@@ -128,7 +167,7 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
         (dest / "tree.sha256").write_text(tree_sha256 + "\n")
     else:
         tree_sha256 = (dest / "tree.sha256").read_text().strip()
-    listed = _git(git_dir, "ls-tree", "-r", "--name-only", PB_CANDIDATE_REV,
+    listed = _git(src_git_dir, "ls-tree", "-r", "--name-only", PB_CANDIDATE_REV,
                   timeout_s=timeout_s)
     if listed.returncode != 0:
         raise NonQualified(
@@ -142,7 +181,7 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
             detail={"rev": PB_CANDIDATE_REV,
                     "missing": sorted(expected - actual)[:10],
                     "extra": sorted(actual - expected)[:10]})
-    blobs = _git(git_dir, "ls-tree", "-r", PB_CANDIDATE_REV,
+    blobs = _git(src_git_dir, "ls-tree", "-r", PB_CANDIDATE_REV,
                  timeout_s=timeout_s)
     if blobs.returncode != 0:
         raise NonQualified(
