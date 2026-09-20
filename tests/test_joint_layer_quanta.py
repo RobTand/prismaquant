@@ -23,13 +23,20 @@ JOINT_PANEL = "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/a
 OUTPUT_ROOT = os.path.join(
     JOINT_PANEL, "complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02")
 PLAN_PATH = os.path.join(
-    JOINT_PANEL, "complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.hostcap32.plan.json")
+    JOINT_PANEL, "complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.plan.json")
 PREPARED_PATH = os.path.join(OUTPUT_ROOT, "prepare", "prepared.json")
 MANIFEST_PATH = os.path.join(
     OUTPUT_ROOT, "data-manifests", "prismaquant.tessera_joint_aura.run.json.gz")
 
-PLAN_SHA256 = "eff2f7fb421aeadf8cde591b515ef6db4b68b1d4d9062c5f3a3a0c0a2c048cc5"
+# The plan pin tracks the accepted takeover (manifest produced_by.plan_sha256,
+# issue #839). The retired hostcap32 plan below carries only the sealed
+# 360-window partition, read explicitly as producer input -- never as the
+# plan under test.
+PLAN_SHA256 = "0b2cc0066bb612e32af6d0c8c809912d325b2975583297eedeee97851ee545da"
 PREPARED_SHA256 = "962207a3385e9531adaf951b823871a2fb7ff4684320e7a8e19a1d0aa85d8f16"
+
+PARTITION_SOURCE_PATH = os.path.join(
+    JOINT_PANEL, "complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.hostcap32.plan.json")
 
 
 def _live_manifest_sha256():
@@ -75,7 +82,21 @@ def _load_manifest():
 def _build_real():
     return jl.layer_quanta(
         _load_plan(), _load_prepared(), _load_manifest(),
-        parent_manifest_sha256=_live_manifest_sha256())
+        parent_manifest_sha256=_live_manifest_sha256(),
+        window_partition=_sealed_window_partition())
+
+
+def _sealed_window_partition():
+    """The sealed 360-window partition as an explicit producer input.
+
+    The accepted takeover plan carries no window derivation (it is the raw
+    single-run plan under test), so the producer takes the partition
+    explicitly. The bytes are the retired hostcap32 plan's sealed derivation
+    block -- the same tiling the accepted banked output reflects -- read here
+    as data (issue #839).
+    """
+    with open(PARTITION_SOURCE_PATH, "r", encoding="utf-8") as handle:
+        return json.load(handle)["retained_window_budget_derivation"]
 
 
 def _synthetic_inputs():
@@ -201,14 +222,16 @@ def test_real_plan_45_quanta_shape():
     assert record["campaign"]["prepared_path"] == PREPARED_PATH
     # The sealed window partition: per-layer counts and the 360 total.
     plan = _load_plan()
-    counts = plan["retained_window_budget_derivation"]["windows_by_layer"]
+    counts = _sealed_window_partition()["windows_by_layer"]
     assert sum(counts.values()) == 360
     assert sum(len(r["windows"]) for r in records) == 360
     for r in records:
         assert len(r["windows"]) == counts[str(r["layer"])]
         assert [w["window_index"] for w in r["windows"]] == list(range(len(r["windows"])))
     # Coverage proof is green on the real plan.
-    coverage = jl.verify_quanta_coverage(records, manifest, plan=plan)
+    coverage = jl.verify_quanta_coverage(
+        records, manifest, plan=plan,
+        window_partition=_sealed_window_partition())
     assert coverage["layers"] == list(range(45))
     assert coverage["window_total"] == 360
     assert built["coverage"]["coverage_sha256"] == coverage["coverage_sha256"]
