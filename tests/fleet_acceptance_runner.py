@@ -279,7 +279,7 @@ def _tiny_manifest(world: World) -> tuple[Path, dict, str]:
     ]
     total = sum(e["bytes"] for e in entries)
     manifest = {
-        "schema": "prismabuild.data_manifest.v1",
+        "schema": "prismaquant.prismabuild.data_manifest.v1",
         "mount_prefix": str(files),
         "entries": entries, "entry_count": 2, "total_bytes": total,
         "annotations": {"phases": [
